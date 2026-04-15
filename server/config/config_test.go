@@ -327,25 +327,6 @@ disable-make-up-replica = false
 	re.Error(err)
 }
 
-func TestKeyspaceConfigJSONBoolEncoding(t *testing.T) {
-	re := require.New(t)
-	cfg := NewConfig()
-	cfg.Keyspace.DisableRawKVRegionSplit = true
-	cfg.Keyspace.WaitRegionSplit = true
-
-	data, err := json.Marshal(cfg)
-	re.NoError(err)
-
-	var payload map[string]any
-	re.NoError(json.Unmarshal(data, &payload))
-
-	keyspaceCfg, ok := payload["keyspace"].(map[string]any)
-	re.True(ok)
-	re.IsType(true, keyspaceCfg["disable-raw-kv-region-split"])
-	re.Equal(true, keyspaceCfg["disable-raw-kv-region-split"])
-	re.IsType(true, keyspaceCfg["wait-region-split"])
-}
-
 func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {

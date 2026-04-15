@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -112,6 +113,21 @@ type RegionBound struct {
 	TxnRightBound []byte
 }
 
+type regionBoundType int
+
+const (
+	allRegionBound regionBoundType = iota
+	rawRegionBound
+	txnRegionBound
+)
+
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
+	if keyType == coreconstant.Table {
+		return txnRegionBound
+	}
+	return rawRegionBound
+}
+
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
 	keyspaceIDBytes := make([]byte, 4)
@@ -128,16 +144,24 @@ func MakeRegionBound(id uint32) *RegionBound {
 
 // MakeKeyRanges encodes keyspace ID to the correct LabelRule data.
 func MakeKeyRanges(id uint32) []any {
-	return buildKeyRanges(id, false)
+	return buildKeyRanges(id, allRegionBound)
 }
 
-func buildKeyRanges(id uint32, skipRaw bool) []any {
+func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
-	if skipRaw {
+	switch boundType {
+	case txnRegionBound:
 		return []any{
 			map[string]any{
 				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
 				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
+			},
+		}
+	case rawRegionBound:
+		return []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(regionBound.RawLeftBound),
+				"end_key":   hex.EncodeToString(regionBound.RawRightBound),
 			},
 		}
 	}
@@ -160,10 +184,10 @@ func getRegionLabelID(id uint32) string {
 
 // MakeLabelRule makes the label rule for the given keyspace id.
 func MakeLabelRule(id uint32) *labeler.LabelRule {
-	return buildLabelRule(id, false)
+	return buildLabelRule(id, allRegionBound)
 }
 
-func buildLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
+func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -174,7 +198,7 @@ func buildLabelRule(id uint32, skipRaw bool) *labeler.LabelRule {
 			},
 		},
 		RuleType: labeler.KeyRange,
-		Data:     buildKeyRanges(id, skipRaw),
+		Data:     buildKeyRanges(id, boundType),
 	}
 }
 

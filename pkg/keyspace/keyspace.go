@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -73,7 +74,6 @@ const (
 type Config interface {
 	GetPreAlloc() []string
 	ToWaitRegionSplit() bool
-	GetDisableRawKVRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
 }
@@ -506,8 +506,8 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	})
 
 	start := time.Now()
-	skipRaw := manager.config.GetDisableRawKVRegionSplit()
-	keyspaceRule := buildLabelRule(id, skipRaw)
+	boundType := manager.getRegionBoundType()
+	keyspaceRule := buildLabelRule(id, boundType)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
 		return errors.New("cluster does not support region label")
@@ -538,7 +538,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}()
 
 	if waitRegionSplit {
-		err = manager.waitKeyspaceRegionSplit(id, skipRaw)
+		err = manager.waitKeyspaceRegionSplit(id, boundType)
 		if err != nil {
 			log.Warn("[keyspace] wait region split meets error",
 				zap.Uint32("keyspace-id", id),
@@ -550,7 +550,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	return nil
 }
 
-func (manager *Manager) waitKeyspaceRegionSplit(id uint32, skipRaw bool) error {
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBoundType) error {
 	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
 	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
 	defer func() {
@@ -562,7 +562,7 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, skipRaw bool) error {
 		case <-manager.ctx.Done():
 			return errors.New("[keyspace] wait region split canceled")
 		case <-ticker.C:
-			if manager.hasKeyspaceRegionBound(id, skipRaw) {
+			if manager.hasKeyspaceRegionBound(id, boundType) {
 				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
 				return nil
 			}
@@ -577,19 +577,31 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, skipRaw bool) error {
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
-	return manager.hasKeyspaceRegionBound(id, manager.config.GetDisableRawKVRegionSplit())
+	return manager.hasKeyspaceRegionBound(id, manager.getRegionBoundType())
 }
 
-func (manager *Manager) hasKeyspaceRegionBound(id uint32, skipRaw bool) bool {
+func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
 	regionBound := MakeRegionBound(id)
-	if skipRaw {
+	switch boundType {
+	case txnRegionBound:
 		return manager.checkBound(regionBound.TxnLeftBound) &&
 			manager.checkBound(regionBound.TxnRightBound)
+	case rawRegionBound:
+		return manager.checkBound(regionBound.RawLeftBound) &&
+			manager.checkBound(regionBound.RawRightBound)
+	default:
+		return manager.checkBound(regionBound.RawLeftBound) &&
+			manager.checkBound(regionBound.RawRightBound) &&
+			manager.checkBound(regionBound.TxnLeftBound) &&
+			manager.checkBound(regionBound.TxnRightBound)
 	}
-	return manager.checkBound(regionBound.RawLeftBound) &&
-		manager.checkBound(regionBound.RawRightBound) &&
-		manager.checkBound(regionBound.TxnLeftBound) &&
-		manager.checkBound(regionBound.TxnRightBound)
+}
+
+func (manager *Manager) getRegionBoundType() regionBoundType {
+	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
+		return keyTypeToRegionBoundType(coreconstant.Table)
+	}
+	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }
 
 func (manager *Manager) checkBound(key []byte) bool {
