@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
-	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -599,7 +598,7 @@ func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundT
 
 func (manager *Manager) getRegionBoundType() regionBoundType {
 	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
-		return keyTypeToRegionBoundType(coreconstant.Table)
+		return allRegionBound
 	}
 	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }
