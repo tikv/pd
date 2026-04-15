@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -54,6 +55,7 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 type Service struct {
 	*Server
 	advertiseListenHost string
+	hostOnce            sync.Once
 }
 
 // NewService creates a new TSO service.
@@ -63,14 +65,16 @@ func NewService(svr bs.Server) registry.RegistrableService {
 		log.Fatal("create tso server failed")
 	}
 	return &Service{
-		Server:              server,
-		advertiseListenHost: getAdvertiseListenHost(server.GetAdvertiseListenAddr()),
+		Server: server,
 	}
 }
 
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	tsopb.RegisterTSOServer(g, s)
+	s.hostOnce.Do(func() {
+		s.advertiseListenHost = getAdvertiseListenHost(s.GetAdvertiseListenAddr())
+	})
 }
 
 // RegisterRESTHandler registers the service to REST server.
