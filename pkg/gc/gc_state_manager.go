@@ -379,6 +379,8 @@ func cloneGCStateForListener(gcState GCState, flags gcStateListenerFlags) GCStat
 	}
 
 	if len(gcState.GCBarriers) == 0 {
+		// Always use nil to represent no GC barrier to simplify assertions in tests.
+		cloned.GCBarriers = nil
 		return cloned
 	}
 
@@ -907,16 +909,20 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 	if len(m.gcStateListeners) != 0 {
 		// Construct the new complete GCState using the new GCBarrier info.
 		replaced := false
+		unchanged := false
 		for i, barrier := range gcState.GCBarriers {
 			if barrier.BarrierID == newBarrier.BarrierID {
 				gcState.GCBarriers[i] = newBarrier
 				replaced = true
+				unchanged = gcBarrierEqual(barrier, newBarrier)
 			}
 		}
 		if !replaced {
 			gcState.GCBarriers = append(gcState.GCBarriers, newBarrier)
 		}
-		m.triggerGCStateListenersLocked(gcState, true)
+		if !unchanged {
+			m.triggerGCStateListenersLocked(gcState, true)
+		}
 	}
 
 	return newBarrier, nil
@@ -984,6 +990,9 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 		log.Info("GC barrier deleted",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
+		gcState.GCBarriers = slices.DeleteFunc(gcState.GCBarriers, func(barrier *endpoint.GCBarrier) bool {
+			return barrier.BarrierID == barrierID
+		})
 		m.triggerGCStateListenersLocked(gcState, true)
 	}
 

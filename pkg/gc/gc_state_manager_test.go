@@ -2171,25 +2171,6 @@ func assertNextWatchedGCStateEqualsExpected(re *require.Assertions, ch <-chan GC
 	return gcState
 }
 
-func collectWatchedGCStatesUntilClosed(re *require.Assertions, ch <-chan GCState) map[uint32]GCState {
-	deadline := time.Now().Add(time.Second)
-	received := make(map[uint32]GCState)
-	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			re.FailNow("timed out waiting for watched GC state channel to close")
-		}
-		gcState, ok, got := recvGCStateFromChannelWithTimeout(ch, remaining)
-		if !got {
-			re.FailNow("timed out waiting for watched GC state channel to close")
-		}
-		if !ok {
-			return received
-		}
-		received[gcState.KeyspaceID] = gcState
-	}
-}
-
 type watchedGCStateCollector struct {
 	mu       sync.Mutex
 	received map[uint32]GCState
