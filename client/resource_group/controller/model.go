@@ -52,6 +52,35 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+	// PagingSizeBytes returns the byte budget per page for RC paging.
+	// 0 means no byte-based pre-charge estimation is applied.
+	PagingSizeBytes() uint64
+}
+
+// predictedReadBytesProvider is an optional interface that a RequestInfo
+// implementation may satisfy to supply a learned estimate (e.g., from a
+// per-logical-scan EMA maintained in TiDB) of how many bytes the request
+// will read. When present and > 0, it overrides PagingSizeBytes as the
+// byte basis for RC paging pre-charge.
+//
+// Defined as an optional interface (not a method on RequestInfo) so older
+// RequestInfo implementations that have not been updated still compile and
+// behave as before (falling back to PagingSizeBytes).
+type predictedReadBytesProvider interface {
+	PredictedReadBytes() uint64
+}
+
+// estimatedReadBytes returns the byte basis used for RC paging pre-charge.
+// It prefers a learned PredictedReadBytes hint when the RequestInfo
+// implements the optional provider and returns a non-zero value; otherwise
+// it falls back to PagingSizeBytes (the paging byte budget / worst-case cap).
+func estimatedReadBytes(req RequestInfo) uint64 {
+	if p, ok := req.(predictedReadBytesProvider); ok {
+		if hint := p.PredictedReadBytes(); hint > 0 {
+			return hint
+		}
+	}
+	return req.PagingSizeBytes()
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -101,9 +130,15 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		kc.calculateWriteCost(consumption, req)
 	} else {
 		consumption.KvReadRpcCount += 1
-		// Read bytes could not be known before the request is executed,
-		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+		// RC Paging pre-charge: if the request has a byte budget, pre-charge
+		// the estimated read bytes RU so that concurrent workers are throttled
+		// at Phase 1 instead of all hitting Phase 2 at once. Prefer a learned
+		// PredictedReadBytes hint when the caller supplies one; otherwise fall
+		// back to PagingSizeBytes (the paging byte budget / worst-case cap).
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU += float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	}
 	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
@@ -138,6 +173,13 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	if !req.IsWrite() {
 		// For now, we can only collect the KV CPU cost for a read request.
 		kc.calculateCPUCost(consumption, res)
+		// RC Paging settlement: subtract the pre-charged bytes RU added in
+		// BeforeKVRequest so the net total (Phase 1 + Phase 2) equals
+		// baseCost + actualCost. Use the same basis (hint or PagingSizeBytes)
+		// that BeforeKVRequest used.
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU -= float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	} else if !res.Succeed() {
 		// If the write request is not successfully returned, we need to pay back the WRU cost.
 		kc.payBackWriteCost(consumption, req)
