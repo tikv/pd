@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -308,9 +309,10 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 		"config2": "200",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
+	base := uint64(time.Now().UnixNano())
 	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
-			Name:   fmt.Sprintf("test_keyspace_%d", i),
+			Name:   fmt.Sprintf("ks_%x_%02d", base&0xffffffff, i),
 			Config: testConfig,
 		}
 		resultMeta[i] = MustCreateKeyspace(re, server, createRequest)
