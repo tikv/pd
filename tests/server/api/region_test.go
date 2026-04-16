@@ -435,6 +435,11 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
 	r = r.Clone(core.SetApproximateKeys(0))
+	// Keep the removing store observable long enough for the offline-peer API.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 	s := &metapb.Store{
 		Id:        2,
 		State:     metapb.StoreState_Offline,
@@ -442,6 +447,17 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	}
 	tests.MustPutStore(re, cluster, s)
 	tests.MustPutRegionInfo(re, cluster, r)
+	testutil.Eventually(re, func() bool {
+		store := leader.GetRaftCluster().GetStore(s.GetId())
+		if store == nil || store.GetState() != metapb.StoreState_Offline || store.GetNodeState() != metapb.NodeState_Removing {
+			return false
+		}
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			store = sche.GetCluster().GetStore(s.GetId())
+			return store != nil && store.GetState() == metapb.StoreState_Offline && store.GetNodeState() == metapb.NodeState_Removing
+		}
+		return true
+	})
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "offline-peer")
 	r8 := &response.RegionsInfo{}
 	testutil.Eventually(re, func() bool {
