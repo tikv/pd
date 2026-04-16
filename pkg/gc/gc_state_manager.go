@@ -15,7 +15,6 @@
 package gc
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -325,15 +324,6 @@ func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener, err
 	m.removeGCStateListenerLocked(listener, err)
 }
 
-func (m *GCStateManager) hasGCStateListenerLocked(listener gcStateListener) bool {
-	for _, current := range m.gcStateListeners {
-		if current.watcher == listener.watcher {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener, err error) {
 	for i, current := range m.gcStateListeners {
 		if current.watcher != listener.watcher {
@@ -430,40 +420,6 @@ func gcBarrierEqual(lhs, rhs *endpoint.GCBarrier) bool {
 		return lhs.ExpirationTime == rhs.ExpirationTime
 	}
 	return lhs.ExpirationTime.Equal(*rhs.ExpirationTime)
-}
-
-func sortGCBarriersInPlace(barriers []*endpoint.GCBarrier) {
-	slices.SortFunc(barriers, func(lhs, rhs *endpoint.GCBarrier) int {
-		if lhs == nil || rhs == nil {
-			switch {
-			case lhs == nil && rhs == nil:
-				return 0
-			case lhs == nil:
-				return -1
-			default:
-				return 1
-			}
-		}
-		return cmp.Compare(lhs.BarrierID, rhs.BarrierID)
-	})
-}
-
-func gcBarriersEqualInPlace(lhs, rhs []*endpoint.GCBarrier) bool {
-	if len(lhs) != len(rhs) {
-		return false
-	}
-	if len(lhs) == 0 {
-		return true
-	}
-
-	sortGCBarriersInPlace(lhs)
-	sortGCBarriersInPlace(rhs)
-	for i := range lhs {
-		if !gcBarrierEqual(lhs[i], rhs[i]) {
-			return false
-		}
-	}
-	return true
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.

@@ -123,28 +123,25 @@ func collectWatchGCStatesInitial(
 	re *require.Assertions,
 	stream pdpb.PD_WatchGCStatesClient,
 	expectedCount int,
-) (map[uint32]*pdpb.GCState, int) {
+) map[uint32]*pdpb.GCState {
 	received := make(map[uint32]*pdpb.GCState, expectedCount)
-	maxBatchSize := 0
 	for len(received) < expectedCount {
 		resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
 		re.NoError(err)
 		re.NotNil(resp.GetHeader())
 		re.Nil(resp.GetHeader().GetError())
-		maxBatchSize = max(maxBatchSize, len(resp.GetGcStates()))
 		for _, gcState := range resp.GetGcStates() {
 			received[gcState.GetKeyspaceScope().GetKeyspaceId()] = gcState
 		}
 	}
-	return received, maxBatchSize
+	return received
 }
 
 func collectWatchGCStatesUntilError(
 	re *require.Assertions,
 	stream pdpb.PD_WatchGCStatesClient,
-	timeout time.Duration,
 ) error {
-	deadline := time.Now().Add(timeout)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
@@ -632,7 +629,7 @@ func TestWatchGCStatesInitialLoadIncludesNullKeyspace(t *testing.T) {
 	})
 	re.NoError(err)
 
-	received, _ := collectWatchGCStatesInitial(re, stream, len(expectedKeyspaceIDs))
+	received := collectWatchGCStatesInitial(re, stream, len(expectedKeyspaceIDs))
 	receivedKeyspaceIDs := make([]uint32, 0, len(received))
 	for keyspaceID := range received {
 		receivedKeyspaceIDs = append(receivedKeyspaceIDs, keyspaceID)
@@ -672,12 +669,14 @@ func TestWatchGCSafePointV2SkipsInitialLoadAndSkipsNullKeyspace(t *testing.T) {
 	})
 	re.NoError(err)
 
+	const nullKeyspaceGCSafePoint uint64 = 6
+	const watchedKeyspaceGCSafePoint uint64 = 8
 	mustAdvanceTxnSafePoint(ctx, re, grpcPDClient, header, constant.NullKeyspaceID, 10)
-	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, constant.NullKeyspaceID, 8)
+	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, constant.NullKeyspaceID, nullKeyspaceGCSafePoint)
 	mustAdvanceTxnSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, 10)
-	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, 8)
+	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, watchedKeyspaceGCSafePoint)
 
-	waitForWatchGCSafePointV2SafePoint(re, longStream, targetKeyspaceID, 8, 5*time.Second)
+	waitForWatchGCSafePointV2SafePoint(re, longStream, targetKeyspaceID, watchedKeyspaceGCSafePoint, 5*time.Second)
 }
 
 func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
@@ -860,9 +859,10 @@ func TestWatchGCSafePointV2IgnoresBarrierOnlyChanges(t *testing.T) {
 	})
 	re.NoError(err)
 
+	const targetGCSafePoint uint64 = 9
 	mustAdvanceTxnSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, 10)
-	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, 8)
-	waitForWatchGCSafePointV2SafePoint(re, longStream, targetKeyspaceID, 8, 5*time.Second)
+	mustAdvanceGCSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, targetGCSafePoint)
+	waitForWatchGCSafePointV2SafePoint(re, longStream, targetKeyspaceID, targetGCSafePoint, 5*time.Second)
 }
 
 func TestWatchGCStreamsCloseOnLeaderTransfer(t *testing.T) {
@@ -897,7 +897,7 @@ func TestWatchGCStreamsCloseOnLeaderTransfer(t *testing.T) {
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
 
-	err = collectWatchGCStatesUntilError(re, gcStatesStream, 5*time.Second)
+	err = collectWatchGCStatesUntilError(re, gcStatesStream)
 	re.Error(err)
 	re.Equal(codes.Unavailable, status.Code(err))
 	re.ErrorContains(err, errs.ErrNotLeader.Error())
@@ -926,7 +926,7 @@ func TestWatchGCStreamsCloseOnClientCancel(t *testing.T) {
 		ExcludeGcBarriers:  false,
 	})
 	re.NoError(err)
-	_, _ = collectWatchGCStatesInitial(re, gcStatesStream, len(expectedGCStateKeyspaceIDs))
+	_ = collectWatchGCStatesInitial(re, gcStatesStream, len(expectedGCStateKeyspaceIDs))
 
 	gcSafePointWatchCtx, cancelGCSafePointWatch := context.WithCancel(ctx)
 	defer cancelGCSafePointWatch()
@@ -939,7 +939,7 @@ func TestWatchGCStreamsCloseOnClientCancel(t *testing.T) {
 	cancelGCStatesWatch()
 	cancelGCSafePointWatch()
 
-	err = collectWatchGCStatesUntilError(re, gcStatesStream, 5*time.Second)
+	err = collectWatchGCStatesUntilError(re, gcStatesStream)
 	re.Error(err)
 	re.Equal(codes.Canceled, status.Code(err))
 
@@ -970,12 +970,12 @@ func TestWatchGCStatesInitialLoadInterruptedByClientCancel(t *testing.T) {
 
 	resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
-	re.Greater(len(resp.GetGcStates()), 0)
+	re.NotEmpty(resp.GetGcStates())
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	cancelWatch()
 
-	err = collectWatchGCStatesUntilError(re, stream, 5*time.Second)
+	err = collectWatchGCStatesUntilError(re, stream)
 	re.Error(err)
 	re.Equal(codes.Canceled, status.Code(err))
 }
@@ -1002,7 +1002,7 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 
 	resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
-	re.Greater(len(resp.GetGcStates()), 0)
+	re.NotEmpty(resp.GetGcStates())
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	oldLeaderName := cluster.WaitLeader()
@@ -1011,7 +1011,7 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
 
-	err = collectWatchGCStatesUntilError(re, stream, 5*time.Second)
+	err = collectWatchGCStatesUntilError(re, stream)
 	re.Error(err)
 	re.Equal(codes.Unavailable, status.Code(err))
 	re.ErrorContains(err, errs.ErrNotLeader.Error())
