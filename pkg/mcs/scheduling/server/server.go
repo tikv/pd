@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -117,6 +118,7 @@ type Server struct {
 	ruleWatcher     *rule.Watcher
 	metaWatcher     *meta.Watcher
 	affinityWatcher *affinity.Watcher
+	keyspaceWatcher *keyspace_meta.Watcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -532,6 +534,11 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.keyspaceWatcher, err = keyspace_meta.NewWatcher(s.Context(), s.GetClient(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetKeyspaceCache())
+	if err != nil {
+		return err
+	}
 	cluster.StartBackgroundJobs()
 	return nil
 }
@@ -569,6 +576,9 @@ func (s *Server) stopWatcher() {
 	}
 	if s.configWatcher != nil {
 		s.configWatcher.Close()
+	}
+	if s.keyspaceWatcher != nil {
+		s.keyspaceWatcher.Close()
 	}
 }
 
