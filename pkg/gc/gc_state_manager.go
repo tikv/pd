@@ -120,6 +120,7 @@ type GCStateManager struct {
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 	gcStateListeners                 []gcStateListener
+	nextListenerID                   atomic.Uint64
 	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
 	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
 	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
@@ -200,6 +201,7 @@ func (w *GCStateWatcher) Err() error {
 }
 
 type gcStateListener struct {
+	id      uint64
 	watcher *GCStateWatcher
 	flags   gcStateListenerFlags
 }
@@ -208,7 +210,7 @@ type keyspaceNameKeyType struct{}
 
 var keyspaceNameKey = keyspaceNameKeyType{}
 
-func newGCStateListener(ctx context.Context, excludeGCBarriers bool) gcStateListener {
+func (m *GCStateManager) newGCStateListener(ctx context.Context, excludeGCBarriers bool) gcStateListener {
 	watchCtx, cancel := context.WithCancel(ctx)
 	watcher := &GCStateWatcher{
 		ctx:    watchCtx,
@@ -216,6 +218,7 @@ func newGCStateListener(ctx context.Context, excludeGCBarriers bool) gcStateList
 		ch:     make(chan GCState, gcStateListenerChannelSize),
 	}
 	listener := gcStateListener{
+		id:      m.nextListenerID.Add(1),
 		watcher: watcher,
 	}
 	if excludeGCBarriers {
@@ -249,6 +252,8 @@ func (m *GCStateManager) OnNodeBecomesLeader() {
 // OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
 func (m *GCStateManager) OnNodeBecomesFollower() {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	m.nodeLeadership.Add(-1)
 	listeners := m.gcStateListeners
 	m.gcStateListeners = nil
@@ -256,9 +261,13 @@ func (m *GCStateManager) OnNodeBecomesFollower() {
 	// The listeners must be closed within the mutex to avoid concurrent callback invocations. Otherwise the concurrent
 	// invocation has the risk of panicking due to trying to send to the closed channel.
 	for _, listener := range listeners {
+		log.Info("GC state watcher stopped",
+			zap.Uint64("listener-id", listener.id),
+			zap.Error(errs.ErrNotLeader),
+			zap.Int("listener-count", 0),
+		)
 		listener.watcher.internalClose(errs.ErrNotLeader)
 	}
-	m.mu.Unlock()
 }
 
 func (m *GCStateManager) nodeIsLeader() bool {
@@ -278,29 +287,54 @@ func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial b
 		return nil, errs.ErrNotLeader
 	}
 
-	listener := newGCStateListener(ctx, excludeGCBarriers)
+	listener := m.newGCStateListener(ctx, excludeGCBarriers)
 	m.gcStateListeners = append(m.gcStateListeners, listener)
+	log.Info("GC state watcher registered",
+		zap.Uint64("listener-id", listener.id),
+		zap.Bool("skip-loading-initial", skipLoadingInitial),
+		zap.Bool("exclude-gc-barriers", excludeGCBarriers),
+		zap.Int("listener-count", len(m.gcStateListeners)),
+	)
 	go m.holdGCStateWatcher(listener, skipLoadingInitial)
 
 	return listener.watcher, nil
 }
 
 func (m *GCStateManager) holdGCStateWatcher(listener gcStateListener, skipLoadingInitial bool) {
-	// Deregister the listener if the watcher is closed by the caller.
-	// Note that deregisterGCStateListener is a noop if the listener is closed internally, in which case the listener
-	// is already closed when entering deregisterGCStateListener.
-	defer m.deregisterGCStateListener(listener, listener.watcher.Err())
+	var stopErr error
+	defer func() {
+		// Deregister the listener if the watcher is closed by the caller.
+		// Note that deregisterGCStateListener is a noop if the listener is closed internally, in which case the listener
+		// is already closed when entering deregisterGCStateListener.
+		err := listener.watcher.Err()
+		if err == nil {
+			err = stopErr
+		}
+		m.deregisterGCStateListener(listener, err)
+	}()
 
 	if !skipLoadingInitial {
-		m.sendInitialGCStates(listener)
+		stopErr = m.sendInitialGCStates(listener)
+		if stopErr != nil {
+			if listener.watcher.Err() == nil &&
+				!errors.Is(stopErr, context.Canceled) &&
+				!errors.Is(stopErr, context.DeadlineExceeded) {
+				log.Warn("failed to load initial GC states for GC state watcher, watcher will be stopped",
+					zap.Uint64("listener-id", listener.id),
+					zap.Error(stopErr),
+				)
+			}
+			return
+		}
 	}
 
-	// The goroutine is responsible to call `deregisterGCStateListener` after the watcher is closed.
+	// The goroutine is responsible to call `deregisterGCStateListener` after the watcher is closed. Note the `defer`
+	// block in the function.
 	<-listener.watcher.Done()
 }
 
-func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) {
-	err := m.iterateAllKeyspacesGCStates(listener.watcher.ctx, listener.flags&gcStateListenerExcludeGCBarriers != 0, func(gcState GCState) {
+func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) error {
+	return m.iterateAllKeyspacesGCStates(listener.watcher.ctx, listener.flags&gcStateListenerExcludeGCBarriers != 0, func(gcState GCState) {
 		// iterateAllKeyspacesGCStates guarantees that this callback is executed within the mutex.
 		// Check whether the listener is closed during the time gap that the mutex is not hold.
 		select {
@@ -312,9 +346,6 @@ func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) {
 		}
 		m.sendGCStateToListenerLocked(listener, gcState, false)
 	})
-	if err != nil {
-		log.Warn("failed to load initial GC states for GC state watcher", zap.Error(err))
-	}
 }
 
 func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener, err error) {
@@ -326,11 +357,16 @@ func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener, err
 
 func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener, err error) {
 	for i, current := range m.gcStateListeners {
-		if current.watcher != listener.watcher {
+		if current.id != listener.id {
 			continue
 		}
 		current.watcher.internalClose(err)
 		m.gcStateListeners = slices.Delete(m.gcStateListeners, i, i+1)
+		log.Info("GC state watcher stopped",
+			zap.Uint64("listener-id", current.id),
+			zap.Error(err),
+			zap.Int("listener-count", len(m.gcStateListeners)),
+		)
 		return
 	}
 }
@@ -392,8 +428,13 @@ func (m *GCStateManager) sendGCStateToListenerLocked(listener gcStateListener, g
 	select {
 	case listener.watcher.ch <- cloneGCStateForListener(gcState, listener.flags):
 		return true
+	case <-listener.watcher.Done():
+		m.removeGCStateListenerLocked(listener, listener.watcher.Err())
+		return false
 	case <-timer.C:
-		log.Warn("GC state watcher is too slow and will be closed")
+		log.Warn("GC state watcher is too slow and will be closed",
+			zap.Uint64("listener-id", listener.id),
+		)
 		m.removeGCStateListenerLocked(listener, errGCStateWatchClosed())
 		return false
 	}
@@ -1051,6 +1092,12 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint3
 // It's guaranteed that `cb` is always called within the mutex.
 func (m *GCStateManager) iterateAllKeyspacesGCStates(ctx context.Context, excludeGCBarriers bool, cb func(GCState)) error {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
+	failpoint.Inject("iterateAllKeyspacesGCStatesError", func(val failpoint.Value) {
+		if errMsg, ok := val.(string); ok {
+			failpoint.Return(errors.New(errMsg))
+		}
+		failpoint.Return(errors.New("mock iterate all keyspaces gc states error"))
+	})
 
 	mutexLocked := false
 	lock := func() {

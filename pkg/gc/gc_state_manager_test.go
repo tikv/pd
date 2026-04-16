@@ -2334,6 +2334,38 @@ func TestWatchGCStates(t *testing.T) {
 	}
 }
 
+func TestWatchGCStatesCloseInterruptsBlockedSend(t *testing.T) {
+	re := require.New(t)
+
+	manager := &GCStateManager{}
+	ctx, cancel := context.WithCancel(context.Background())
+	listener := gcStateListener{
+		id: 1,
+		watcher: &GCStateWatcher{
+			ctx:    ctx,
+			cancel: cancel,
+			ch:     make(chan GCState),
+		},
+	}
+	manager.gcStateListeners = []gcStateListener{listener}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		listener.watcher.Close()
+	}()
+
+	start := time.Now()
+	manager.mu.Lock()
+	ok := manager.sendGCStateToListenerLocked(listener, GCState{KeyspaceID: 1}, false)
+	manager.mu.Unlock()
+
+	re.False(ok)
+	re.Less(time.Since(start), time.Second)
+	waitGCStateListenerCount(re, manager, 0)
+	assertGCStateChannelClosed(re, listener.watcher.Chan())
+	re.ErrorIs(listener.watcher.Err(), context.Canceled)
+}
+
 func TestWatchGCStatesWhenUnchanged(t *testing.T) {
 	re := require.New(t)
 	manager, clean := newWatchGCStateManagerForTest(t, 1)
@@ -2563,6 +2595,25 @@ func TestWatchGCStatesLoadingInitialInterrupted(t *testing.T) {
 		re.Less(len(received), len(expected))
 		re.ErrorIs(watch.Err(), errs.ErrNotLeader)
 	})
+}
+
+func TestWatchGCStatesLoadingInitialFailureStopsWatcher(t *testing.T) {
+	re := require.New(t)
+	manager, clean := newWatchGCStateManagerForTest(t, 1)
+	defer clean()
+	manager.OnNodeBecomesLeader()
+
+	const errMsg = "mock iterate all keyspaces gc states error"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError", fmt.Sprintf("return(%q)", errMsg)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/iterateAllKeyspacesGCStatesError"))
+	}()
+
+	watch, err := manager.WatchGCStates(context.Background(), false, false)
+	re.NoError(err)
+	assertGCStateChannelClosed(re, watch.Chan())
+	waitGCStateListenerCount(re, manager, 0)
+	re.EqualError(watch.Err(), errMsg)
 }
 
 func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
