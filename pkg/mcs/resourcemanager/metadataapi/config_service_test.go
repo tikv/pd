@@ -98,17 +98,36 @@ func TestConfigServiceControllerAllOrNothing(t *testing.T) {
 	handler := newTestHTTPHandler(store)
 
 	resp := doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{
-		"enable-controller-trace-log": true,
-		"unknown":                     1,
+		"write-base-cost": 2.0,
+		"unknown":         1,
 	})
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Empty(store.updatedControllerConfigItems)
+	re.Zero(store.updateControllerConfigItemsCalls)
+	re.Zero(store.updateControllerConfigItemCalls)
 
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{
-		"enable-controller-trace-log": true,
+		"write-base-cost": 2.0,
 	})
 	re.Equal(http.StatusOK, resp.Code)
 	re.Len(store.updatedControllerConfigItems, 1)
+	re.Equal([]string{"request-unit.write-base-cost"}, store.updatedControllerConfigItems)
+	re.Equal(1, store.updateControllerConfigItemsCalls)
+	re.Zero(store.updateControllerConfigItemCalls)
+}
+
+func TestConfigServiceControllerStoreFailuresReturn500(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	store := newTestStore()
+	store.updateControllerConfigItemsErr = errors.New("save controller config failed")
+	handler := newTestHTTPHandler(store)
+
+	resp := doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{
+		"write-base-cost": 2.0,
+	})
+	re.Equal(http.StatusInternalServerError, resp.Code)
 }
 
 func TestConfigServiceKeyspaceServiceLimitAndErrors(t *testing.T) {
@@ -178,9 +197,12 @@ func TestConfigServiceMetadataWriteDisabledReturns403(t *testing.T) {
 	re.Equal(http.StatusForbidden, resp.Code)
 
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{
-		"enable-controller-trace-log": true,
+		"write-base-cost": 1.0,
 	})
 	re.Equal(http.StatusForbidden, resp.Code)
+
+	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/controller", map[string]any{})
+	re.Equal(http.StatusOK, resp.Code)
 }
 
 func newTestHTTPHandler(configStore ConfigStore) http.Handler {
@@ -209,13 +231,16 @@ func (*tokenOnlyManagerProvider) AddStartCallback(...func()) {}
 func (*tokenOnlyManagerProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
 type testStore struct {
-	keyspaceIDs                  map[string]uint32
-	validKeyspaceIDs             map[uint32]struct{}
-	groups                       map[string]*rmserver.ResourceGroup
-	serviceLimits                map[uint32]float64
-	addErr                       error
-	setServiceLimitErr           error
-	updatedControllerConfigItems []string
+	keyspaceIDs                      map[string]uint32
+	validKeyspaceIDs                 map[uint32]struct{}
+	groups                           map[string]*rmserver.ResourceGroup
+	serviceLimits                    map[uint32]float64
+	addErr                           error
+	setServiceLimitErr               error
+	updateControllerConfigItemsErr   error
+	updatedControllerConfigItems     []string
+	updateControllerConfigItemsCalls int
+	updateControllerConfigItemCalls  int
 }
 
 func newTestStore() *testStore {
@@ -287,7 +312,19 @@ func (*testStore) GetControllerConfig() *rmserver.ControllerConfig {
 	return &rmserver.ControllerConfig{}
 }
 
+func (s *testStore) UpdateControllerConfigItems(items map[string]any) error {
+	s.updateControllerConfigItemsCalls++
+	if s.updateControllerConfigItemsErr != nil {
+		return s.updateControllerConfigItemsErr
+	}
+	for key := range items {
+		s.updatedControllerConfigItems = append(s.updatedControllerConfigItems, key)
+	}
+	return nil
+}
+
 func (s *testStore) UpdateControllerConfigItem(key string, _ any) error {
+	s.updateControllerConfigItemCalls++
 	s.updatedControllerConfigItems = append(s.updatedControllerConfigItems, key)
 	return nil
 }

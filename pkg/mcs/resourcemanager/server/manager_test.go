@@ -599,6 +599,40 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	re.Equal(DefaultResourceGroupName, krgm.getMutableResourceGroup(DefaultResourceGroupName).Name)
 }
 
+func TestUpdateControllerConfigItemsAtomic(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+
+	before := *m.GetControllerConfig()
+	err := m.UpdateControllerConfigItems(map[string]any{
+		"request-unit.write-base-cost": 2.0,
+		"ltb-max-wait-duration":        "not-a-duration",
+	})
+	re.Error(err)
+
+	after := m.GetControllerConfig()
+	re.Equal(before.RequestUnit.WriteBaseCost, after.RequestUnit.WriteBaseCost)
+	re.Equal(before.LTBMaxWaitDuration, after.LTBMaxWaitDuration)
+	re.Equal(before.EnableControllerTraceLog, after.EnableControllerTraceLog)
+}
+
+func TestUpdateControllerConfigValidationError(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(m.Init(ctx))
+
+	err := m.UpdateControllerConfigItem("ltb-max-wait-duration", "not-a-duration")
+	re.Error(err)
+	re.True(IsControllerConfigValidationError(err))
+}
+
 func TestKeyspaceNameLookup(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
