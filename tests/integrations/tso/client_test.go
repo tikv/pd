@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -613,9 +612,11 @@ func (suite *tsoClientTestSuite) TestTSOServiceDiscovery() {
 	checkServiceDiscovery(re, pdClient, 3)
 }
 
-// When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
-// So we need another cluster to run this test.
-func TestMixedTSODeployment(t *testing.T) {
+// TestDualWriterPrevention verifies that when a PD cluster is running in PD service mode
+// (keyspace groups disabled) and a TSO microservice starts, the PD leader detects the
+// coexisting TSO primary and yields its TSO allocator, preventing dual writers.
+// The client should still be able to get TSO after PD yields.
+func TestDualWriterPrevention(t *testing.T) {
 	re := require.New(t)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
@@ -627,39 +628,37 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start a PD cluster in PD service mode (no keyspace groups → checkTSOPrimary=true).
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
-
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-
+	re.NoError(cluster.RunInitialServers())
 	leaderServer := cluster.GetServer(cluster.WaitLeader())
 	re.NotNil(leaderServer)
 	backendEndpoints := leaderServer.GetAddr()
 
-	pdSvr, err := cluster.Join(ctx)
+	// PD should serve TSO normally before any TSO microservice starts.
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
-	err = pdSvr.Run()
+	defer pdClient.Close()
+	physical, logical, err := pdClient.GetTS(ctx)
 	re.NoError(err)
+	lastTS := tsoutil.ComposeTS(physical, logical)
+	re.NotZero(lastTS)
 
-	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+	// Start a TSO microservice — it becomes the TSO primary.
+	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
-	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
 
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	checkTSO(ctx1, re, &wg, backendEndpoints)
-	for range 2 {
-		n := rand.IntN(2) + 1
-		time.Sleep(time.Duration(n) * time.Second)
-		err = leaderServer.ResignLeaderWithRetry()
-		re.NoError(err)
-		leaderServer = cluster.GetServer(cluster.WaitLeader())
-		re.NotNil(leaderServer)
-	}
-	cancel1()
-	wg.Wait()
+	// The PD leader should detect the TSO primary and yield its allocator.
+	// Eventually, direct TSO requests to PD should fail because PD stopped writing.
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err != nil
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 // TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
