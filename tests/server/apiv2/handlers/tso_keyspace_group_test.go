@@ -362,7 +362,7 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 
 	// Test 4: Try to remove from non-existent group
 	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, 999,
-		[]uint32{keyspaceID1}, http.StatusInternalServerError)
+		[]uint32{keyspaceID1}, http.StatusNotFound)
 
 	// Test 5: Try to remove with empty keyspace list (should fail - empty list)
 	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, kgconstant.DefaultKeyspaceGroupID,
@@ -380,4 +380,11 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 		[]uint32{keyspaceID4}) // ENABLED state, will be skipped
 	// Verify keyspace4 is still there
 	re.Contains(kg.Keyspaces, keyspaceID4)
+}
+
+func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromMissingGroupReturnsNotFound() {
+	re := suite.Require()
+
+	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, 999,
+		[]uint32{99999}, http.StatusNotFound)
 }

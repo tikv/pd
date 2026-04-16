@@ -630,7 +630,7 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 			return
 		}
 		if kg == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID).Error())
+			c.AbortWithStatusJSON(http.StatusNotFound, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID).Error())
 			return
 		}
 		c.IndentedJSON(http.StatusOK, kg)
