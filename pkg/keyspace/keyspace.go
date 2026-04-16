@@ -529,10 +529,11 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 			}
 			return
 		}
-		log.Info("[keyspace] added region label for keyspace",
+		log.Info("added region label for keyspace",
 			zap.Uint32("keyspace-id", id),
 			zap.Any("label-rule", keyspaceRule),
 			zap.Duration("takes", time.Since(start)),
+			zap.Stringer("key-type", boundType),
 		)
 	}()
 

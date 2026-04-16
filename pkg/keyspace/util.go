@@ -121,6 +121,20 @@ const (
 	txnRegionBound
 )
 
+// String returns the string representation of the regionBoundType.
+func (t regionBoundType) String() string {
+	switch t {
+	case allRegionBound:
+		return "all"
+	case rawRegionBound:
+		return "raw"
+	case txnRegionBound:
+		return "txn"
+	default:
+		return "unknown"
+	}
+}
+
 func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
 	if keyType == coreconstant.Table {
 		return txnRegionBound
