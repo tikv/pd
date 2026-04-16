@@ -91,14 +91,23 @@ type Server struct {
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
+
+	// advertiseListenHost is the host part of the advertise listen address,
+	advertiseListenHost atomic.Pointer[string]
 }
 
-func getAdvertiseListenHost(advertiseListenAddr string) string {
-	parsed, err := url.Parse(advertiseListenAddr)
-	if err != nil || parsed.Host == "" {
-		return ""
+func (s *Server) getAdvertiseListenHost() string {
+	host := s.advertiseListenHost.Load()
+	if host == nil {
+		addr := s.GetConfig().GetAdvertiseListenAddr()
+		parsed, err := url.Parse(addr)
+		if err != nil || parsed.Host == "" {
+			return ""
+		}
+		s.advertiseListenHost.CompareAndSwap(nil, &parsed.Host)
+		host = s.advertiseListenHost.Load()
 	}
-	return parsed.Host
+	return *host
 }
 
 // Implement the following methods defined in bs.Server

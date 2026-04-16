@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -54,8 +53,6 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 // Service is the TSO grpc service.
 type Service struct {
 	*Server
-	advertiseListenHost string
-	hostOnce            sync.Once
 }
 
 // NewService creates a new TSO service.
@@ -72,9 +69,6 @@ func NewService(svr bs.Server) registry.RegistrableService {
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	tsopb.RegisterTSOServer(g, s)
-	s.hostOnce.Do(func() {
-		s.advertiseListenHost = getAdvertiseListenHost(s.GetAdvertiseListenAddr())
-	})
 }
 
 // RegisterRESTHandler registers the service to REST server.
@@ -107,8 +101,9 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
-		if calleeID := header.GetCalleeId(); calleeID != "" && s.advertiseListenHost != "" {
-			if calleeID != s.advertiseListenHost {
+		host := s.getAdvertiseListenHost()
+		if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+			if calleeID != host {
 				return status.Errorf(
 					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
 					s.GetAdvertiseListenAddr(), calleeID,
