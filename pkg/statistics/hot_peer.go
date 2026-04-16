@@ -108,7 +108,7 @@ type HotPeerStat struct {
 	// actionType is the action type of the region, add, update or remove.
 	actionType utils.ActionType
 	// isLeader is true means that the region has a leader on this store.
-	isLeader bool
+	isLeader isLeader
 	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
 	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
@@ -134,7 +134,7 @@ func (stat *HotPeerStat) Log(str string) {
 	if log.GetLevel() <= zap.DebugLevel {
 		log.Debug(str,
 			zap.Uint64("region-id", stat.RegionID),
-			zap.Bool("is-leader", stat.isLeader),
+			zap.Bool("is-leader", stat.IsLeader()),
 			zap.Float64s("loads", stat.GetLoads()),
 			zap.Float64s("loads-instant", stat.Loads),
 			zap.Int("hot-degree", stat.HotDegree),
@@ -153,7 +153,7 @@ func (stat *HotPeerStat) IsNeedCoolDownTransferLeader(minHotDegree int, rwTy uti
 
 // IsLeader indicates the item belong to the leader.
 func (stat *HotPeerStat) IsLeader() bool {
-	return stat.isLeader
+	return bool(stat.isLeader)
 }
 
 // GetActionType returns the item action type.
