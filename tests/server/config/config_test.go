@@ -219,6 +219,27 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 }
 
+func (suite *configTestSuite) TestConfigOnlineWarning() {
+	suite.env.RunTest(suite.checkConfigOnlineWarning)
+}
+
+func (suite *configTestSuite) checkConfigOnlineWarning(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	urlPrefix := leaderServer.GetAddr()
+
+	addr := fmt.Sprintf("%s/pd/api/v1/config", urlPrefix)
+	postData, err := json.Marshal(map[string]any{
+		"use-region-storage": "false",
+	})
+	re.NoError(err)
+
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
+		testutil.StatusOK(re),
+		testutil.StringContain(re, "The config is updated. Please restart PD"))
+	re.NoError(err)
+}
+
 func (suite *configTestSuite) TestConfigSchedule() {
 	suite.env.RunTest(suite.checkConfigSchedule)
 }
