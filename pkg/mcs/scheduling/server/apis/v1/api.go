@@ -360,6 +360,7 @@ func getConfig(c *gin.Context) {
 	mergedCfg := localCfg
 	mergedCfg.Schedule = primaryCfg.Schedule
 	mergedCfg.Replication = primaryCfg.Replication
+	mergedCfg.Server = primaryCfg.Server
 	c.IndentedJSON(http.StatusOK, &mergedCfg)
 }
 
