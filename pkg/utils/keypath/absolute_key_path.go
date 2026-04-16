@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 const (
@@ -138,6 +139,32 @@ const (
 type MsParam struct {
 	ServiceName string
 	GroupID     uint32 // only used for tso keyspace group
+}
+
+// MsTimestampPrefix returns the prefix for all TSO timestamps in microservice.
+func MsTimestampPrefix() string {
+	return fmt.Sprintf("/ms/%d/tso/", ClusterID())
+}
+
+// MsTimestampPrefixRangeEnd returns the range end for TSO timestamps in microservice.
+func MsTimestampPrefixRangeEnd() string {
+	return fmt.Sprintf("/ms/%d/tso_%05d", ClusterID(), mcsconstant.MaxKeyspaceGroupCount)
+}
+
+// ExtractKeyspaceGroupIDFromMsTimestamp extracts the keyspace group ID from microservice TSO timestamp path.
+// Expected path format: /ms/{cluster_id}/tso/{group_id}/gta/timestamp
+func ExtractKeyspaceGroupIDFromMsTimestamp(path string) uint32 {
+	parts := strings.Split(path, "/")
+	if len(parts) < 5 {
+		return 0
+	}
+	// parts should be: ["", "ms", "{cluster_id}", "tso", "{group_id}", "gta", "timestamp"]
+	groupIDStr := parts[4]
+	groupID, err := strconv.ParseUint(groupIDStr, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint32(groupID)
 }
 
 // Prefix returns the parent directory of the given path.

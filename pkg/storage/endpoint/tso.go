@@ -33,6 +33,8 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(groupID uint32) (time.Time, error)
+	// LoadMaxTimestampAllGroups retrieves the maximum TSO timestamp from all keyspace groups
+	LoadMaxTimestampAllGroups() (time.Time, error)
 	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
 	DeleteTimestamp(ctx context.Context, groupID uint32) error
 }
@@ -118,4 +120,54 @@ func (se *StorageEndpoint) DeleteTimestamp(ctx context.Context, groupID uint32) 
 	return se.RunInTxn(ctx, func(txn kv.Txn) error {
 		return txn.Remove(keypath.TimestampPath(groupID))
 	})
+}
+
+// LoadMaxTimestampAllGroups retrieves the maximum TSO timestamp from all keyspace groups.
+// It reads all timestamp keys and returns the maximum value.
+// This is used for non-default keyspace groups to ensure TSO monotonicity.
+func (se *StorageEndpoint) LoadMaxTimestampAllGroups() (time.Time, error) {
+	prefixStart := keypath.MsTimestampPrefix()
+	prefixEnd := keypath.MsTimestampPrefixRangeEnd()
+	keys, values, err := se.LoadRange(prefixStart, prefixEnd, 0)
+	if err != nil {
+		return typeutil.ZeroTime, err
+	}
+	if len(keys) == 0 {
+		log.Info("no timestamp keys found in tso nodes")
+		return typeutil.ZeroTime, nil
+	}
+	tsByKeyspaceGroup := make(map[uint32]time.Time)
+	for i, key := range keys {
+		value := values[i]
+		if len(value) == 0 {
+			continue
+		}
+		tsWindow, err := typeutil.ParseTimestamp([]byte(value))
+		if err != nil {
+			log.Warn("parse timestamp window failed",
+				zap.String("ts-window-key", key),
+				zap.Error(err))
+			continue
+		}
+		groupID := keypath.ExtractKeyspaceGroupIDFromMsTimestamp(key)
+		if groupID == 0 {
+			log.Warn("failed to extract keyspace group id from timestamp key",
+				zap.String("ts-window-key", key))
+			continue
+		}
+		tsByKeyspaceGroup[groupID] = tsWindow
+	}
+	if len(tsByKeyspaceGroup) == 0 {
+		return typeutil.ZeroTime, nil
+	}
+	var maxTS time.Time
+	for _, ts := range tsByKeyspaceGroup {
+		if ts.After(maxTS) {
+			maxTS = ts
+		}
+	}
+	log.Info("loaded max timestamp from all keyspace groups",
+		zap.Uint32("keyspace-group-count", uint32(len(tsByKeyspaceGroup))),
+		zap.Time("max-timestamp", maxTS))
+	return maxTS, nil
 }

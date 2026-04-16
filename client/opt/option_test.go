@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
@@ -148,4 +149,81 @@ func ensureNoNotification(t *testing.T, ch chan struct{}) {
 	case <-time.After(100 * time.Millisecond):
 		// No notification received as expected.
 	}
+}
+
+func TestGetTSOTimeout(t *testing.T) {
+	re := require.New(t)
+
+	tests := []struct {
+		name           string
+		option         *Option
+		expectedResult time.Duration
+	}{
+		{
+			name:           "default timeout",
+			option:         NewOption(),
+			expectedResult: defaultTSOTimeout,
+		},
+		{
+			name: "custom TSO timeout",
+			option: &Option{
+				Timeout:    defaultPDTimeout,
+				TSOTimeout:  30 * time.Second,
+			},
+			expectedResult: 30 * time.Second,
+		},
+		{
+			name: "backoffer with shorter total time",
+			option: &Option{
+				Timeout:    defaultPDTimeout,
+				TSOTimeout: 15 * time.Second,
+				Backoffer:  retry.InitialBackoffer(100*time.Millisecond, 1*time.Second, 5*time.Second),
+			},
+			expectedResult: 5 * time.Second,
+		},
+		{
+			name: "backoffer with longer total time",
+			option: &Option{
+				Timeout:    defaultPDTimeout,
+				TSOTimeout: 10 * time.Second,
+				Backoffer:  retry.InitialBackoffer(100*time.Millisecond, 1*time.Second, 30*time.Second),
+			},
+			expectedResult: 10 * time.Second,
+		},
+		{
+			name: "backoffer with infinite retry",
+			option: &Option{
+				Timeout:    defaultPDTimeout,
+				TSOTimeout: 15 * time.Second,
+				Backoffer:  retry.InitialBackoffer(100*time.Millisecond, 1*time.Second, 0),
+			},
+			expectedResult: 15 * time.Second,
+		},
+		{
+			name: "fallback to Timeout when TSOTimeout is zero",
+			option: &Option{
+				Timeout:    5 * time.Second,
+				TSOTimeout: 0,
+			},
+			expectedResult: 5 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.option.GetTSOTimeout()
+			re.Equal(tt.expectedResult, result)
+		})
+	}
+}
+
+func TestWithCustomTSOTimeoutOption(t *testing.T) {
+	re := require.New(t)
+
+	option := NewOption()
+	re.Equal(defaultTSOTimeout, option.TSOTimeout)
+
+	customTimeout := 20 * time.Second
+	WithCustomTSOTimeoutOption(customTimeout)(option)
+	re.Equal(customTimeout, option.TSOTimeout)
 }
