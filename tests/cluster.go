@@ -116,6 +116,7 @@ type TestServer struct {
 	syncutil.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
+	cancel     context.CancelFunc
 	state      int32
 }
 
@@ -123,10 +124,12 @@ var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (*TestServer, error) {
+	serverCtx, cancel := context.WithCancel(ctx)
 	// use temp dir to ensure test isolation.
 	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
 		tempDir, err := os.MkdirTemp("", "pd_tests")
 		if err != nil {
+			cancel()
 			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
 		}
 		cfg.DataDir = tempDir
@@ -135,6 +138,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	zapLogOnce.Do(func() {
@@ -142,6 +146,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 	})
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 
@@ -159,13 +164,15 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 		}
 	}
 
-	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
+	svr, err := server.CreateServer(serverCtx, cfg, services, serviceBuilders...)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	return &TestServer{
 		server:     svr,
 		grpcServer: &server.GrpcServer{Server: svr},
+		cancel:     cancel,
 		state:      Initial,
 	}, nil
 }
@@ -198,6 +205,7 @@ func (s *TestServer) Stop() error {
 
 // Destroy is used to destroy a TestServer.
 func (s *TestServer) Destroy() error {
+	s.cancel()
 	s.Lock()
 	defer s.Unlock()
 	if s.state == Running {
@@ -679,7 +687,7 @@ func restartTestCluster(
 
 // RunServer starts to run TestServer.
 func RunServer(server *TestServer) <-chan error {
-	resC := make(chan error)
+	resC := make(chan error, 1)
 	go func() { resC <- server.Run() }()
 	return resC
 }
@@ -696,6 +704,41 @@ func RunServers(servers []*TestServer) error {
 		}
 	}
 	return nil
+}
+
+func runTasksFastError(tasks []func() error, onError func()) error {
+	res := make(chan error, len(tasks))
+	for _, task := range tasks {
+		go func(task func() error) {
+			res <- task()
+		}(task)
+	}
+	var (
+		firstErr  error
+		cleanedUp bool
+	)
+	for range tasks {
+		if err := <-res; err != nil && firstErr == nil {
+			firstErr = errors.WithStack(err)
+			if onError != nil && !cleanedUp {
+				onError()
+				cleanedUp = true
+			}
+		}
+	}
+	return firstErr
+}
+
+func runServersFastError(servers []*TestServer) error {
+	tasks := make([]func() error, 0, len(servers))
+	for _, server := range servers {
+		tasks = append(tasks, server.Run)
+	}
+	return runTasksFastError(tasks, func() {
+		for _, server := range servers {
+			server.cancel()
+		}
+	})
 }
 
 // RunInitialServers starts to run servers in InitialServers.
@@ -715,7 +758,7 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 			servers = append(servers, c.GetServer(conf.Name))
 		}
 
-		lastErr = RunServers(servers)
+		lastErr = runServersFastError(servers)
 		if lastErr == nil {
 			return nil
 		}
@@ -730,12 +773,10 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				zap.Int("maxRetries", maxRetries),
 				zap.Error(lastErr))
 
-			// Stop and destroy all servers
 			for _, s := range servers {
-				if s.State() == Running {
-					_ = s.Stop()
+				if err := s.Destroy(); err != nil {
+					return err
 				}
-				_ = s.Destroy()
 			}
 
 			// Recreate servers with new ports
@@ -771,9 +812,21 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 		case startServersRetryCurrent:
 			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
 			for _, s := range servers {
-				if s.State() == Running {
-					_ = s.Stop()
+				if err := s.Destroy(); err != nil {
+					return err
 				}
+			}
+			for _, conf := range c.config.InitialServers {
+				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
+				serverConf, err := conf.Generate(allOpts...)
+				if err != nil {
+					return err
+				}
+				s, err := NewTestServer(c.ctx, serverConf, c.services)
+				if err != nil {
+					return err
+				}
+				c.servers[conf.Name] = s
 			}
 			time.Sleep(100 * time.Millisecond)
 			continue
