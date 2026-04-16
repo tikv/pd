@@ -291,6 +291,9 @@ func schedulersRegister() {
 				return nil, err
 			}
 		}
+		if err := conf.validateLocked(); err != nil {
+			return nil, err
+		}
 		sche := newHotScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
@@ -592,6 +595,9 @@ func schedulersRegister() {
 			duration, err := time.ParseDuration(timeout)
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
+			}
+			if duration <= 0 {
+				return errs.ErrURLParse.FastGenByArgs("timeout must be greater than 0")
 			}
 			alias, err := url.QueryUnescape(args[3])
 			if err != nil {

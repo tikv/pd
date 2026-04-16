@@ -926,7 +926,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
@@ -945,23 +947,34 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	resp.Body.Close()
 	re.NoError(err)
-	time.Sleep(2 * time.Second)
-	re.NoError(leader.Destroy())
-	time.Sleep(2 * time.Second)
-	leader = cluster.GetServer(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		return options != nil &&
+			options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled()
+	})
+	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(leaderName, newLeaderName)
+	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
-	options := leader.GetPersistOptions()
-	re.NotNil(options)
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		if options == nil {
+			return false
+		}
+		return options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled() &&
+			options.GetMaxMergeRegionSize() == 999 &&
+			options.GetMaxMergeRegionKeys() == 999 &&
+			options.GetSchedulerMaxWaitingOperator() == 999 &&
+			options.GetLeaderScheduleLimit() == 999 &&
+			options.GetRegionScheduleLimit() == 999 &&
+			options.GetHotRegionScheduleLimit() == 999 &&
+			options.GetReplicaScheduleLimit() == 999 &&
+			options.GetMergeScheduleLimit() == 999
+	})
 }
 
 func TestCloseClient(t *testing.T) {
@@ -2705,8 +2718,9 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.Len(res.GlobalGCBarriers, 2)
 	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
 	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
-	re.Greater(res.GlobalGCBarriers[1].TTL, time.Second)
-	re.LessOrEqual(2*time.Second, res.GlobalGCBarriers[1].TTL)
+	// Returned TTL is rounded to seconds, so it can be exactly 1s here.
+	re.GreaterOrEqual(res.GlobalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(res.GlobalGCBarriers[1].TTL, 2*time.Second)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2728,8 +2742,9 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.True(ok)
 	re.Equal("b4", state.GCBarriers[0].BarrierID)
 	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
-	re.Greater(state.GCBarriers[0].TTL, 2*time.Second)
-	re.LessOrEqual(3*time.Second, state.GCBarriers[0].TTL)
+	// Returned TTL is rounded to seconds, so it can be exactly 2s here.
+	re.GreaterOrEqual(state.GCBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(state.GCBarriers[0].TTL, 3*time.Second)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {

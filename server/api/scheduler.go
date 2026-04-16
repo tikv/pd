@@ -125,15 +125,19 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 				handler.ServeHTTP(w, r)
 				return
 			}
-			h.r.JSON(w, http.StatusNotAcceptable, err.Error())
+			if err != nil {
+				h.r.JSON(w, http.StatusNotAcceptable, err.Error())
+				return
+			}
+			h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
 			return
 		}
 		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if err := apiutil.CollectStringOption("engine", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -142,13 +146,13 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
 				collector(defaultTimeout)
 			} else {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				h.r.JSON(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
 
 		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
@@ -245,7 +249,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -298,7 +302,11 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 	}
 	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), deleteURL)
 	if err != nil {
-		h.r.JSON(w, resp.StatusCode, err.Error())
+		status := http.StatusInternalServerError
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		h.r.JSON(w, status, err.Error())
 		return
 	}
 	defer resp.Body.Close()
@@ -373,5 +381,9 @@ func (h *schedulerConfigHandler) handleSchedulerConfig(w http.ResponseWriter, r 
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
+	if err != nil {
+		h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
 }

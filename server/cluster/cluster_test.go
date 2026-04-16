@@ -384,6 +384,90 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	re.NoError(cluster.RemoveStore(3, false))
 }
 
+func TestRemoveTiFlashStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	// Put 3 TiKV stores (minimum for max-replicas=3)
+	for i := uint64(1); i <= 3; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Serving,
+		}
+		re.NoError(cluster.PutMetaStore(store))
+	}
+
+	// Add 2 TiFlash write stores and 1 TiFlash compute store
+	tiflashStores := []*metapb.Store{
+		{
+			Id:            100,
+			Address:       "mock://tiflash-1:3930",
+			StatusAddress: "mock://tiflash-1:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash"},
+			},
+		},
+		{
+			Id:            101,
+			Address:       "mock://tiflash-2:3930",
+			StatusAddress: "mock://tiflash-2:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash"},
+			},
+		},
+		{
+			Id:            102,
+			Address:       "mock://tiflash-compute-1:3930",
+			StatusAddress: "mock://tiflash-compute-1:20292",
+			State:         metapb.StoreState_Up,
+			Version:       "5.0.0",
+			DeployPath:    "/tiflash_compute",
+			NodeState:     metapb.NodeState_Serving,
+			Labels: []*metapb.StoreLabel{
+				{Key: "engine", Value: "tiflash_compute"},
+			},
+		},
+	}
+
+	for _, store := range tiflashStores {
+		re.NoError(cluster.PutMetaStore(store))
+	}
+
+	// Should be able to remove TiFlash write store 100 even with only 3 TiKV stores
+	// (which equals max-replicas=3)
+	err = cluster.RemoveStore(100, false)
+	re.NoError(err, "should be able to remove TiFlash write store with 3 TiKV stores")
+
+	store := cluster.GetStore(100)
+	re.True(store.IsRemoving(), "TiFlash write store should be in removing state")
+
+	// Should also be able to remove TiFlash compute store 102
+	err = cluster.RemoveStore(102, false)
+	re.NoError(err, "should be able to remove TiFlash compute store with 3 TiKV stores")
+
+	store = cluster.GetStore(102)
+	re.True(store.IsRemoving(), "TiFlash compute store should be in removing state")
+}
+
 func TestForceBuryStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -658,6 +742,24 @@ func TestBucketCompatibility(t *testing.T) {
 	region3 := region2.Clone(core.WithIncVersion())
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region3))
 	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
+
+	// tikv upgrade, send region heartbeat with bucket meta and report bucket stream enabled
+	bucket3 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  4,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	region4 := region3.Clone(core.WithIncVersion(), core.SetBuckets(bucket3))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	bucket4 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  5,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	re.NoError(cluster.processRegionBuckets(bucket4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	re.Equal(bucket4, cluster.GetRegion(1).GetReportBuckets())
 }
 
 func TestStaleBucketMeta(t *testing.T) {
@@ -693,7 +795,7 @@ func TestStaleBucketMeta(t *testing.T) {
 	bucket2 := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
-		Keys:     [][]byte{{'a'}, {'d'}},
+		Keys:     [][]byte{{'c'}, {'d'}},
 	}
 	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
@@ -1173,14 +1275,14 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processRegionBuckets(bucket2))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
@@ -1500,7 +1602,7 @@ func TestStoreConfigUpdate(t *testing.T) {
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
 	}
-	re.Len(tc.getUpStores(), 5)
+	re.Len(tc.getUpTikvStores(), 5)
 	// Case1: big region.
 	{
 		body := `{ "coprocessor": {
@@ -1617,7 +1719,7 @@ func TestStoreConfigSync(t *testing.T) {
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
 	}
-	re.Len(tc.getUpStores(), 5)
+	re.Len(tc.getUpTikvStores(), 5)
 
 	re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/mockFetchStoreConfigFromTiKV", `return("10MiB")`))
@@ -2670,7 +2772,7 @@ func TestCollectMetrics(t *testing.T) {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
-				Loads:     []float64{10, 20, 30},
+				Loads:     []float64{10, 20, 30, 0},
 				HotDegree: 10,
 				AntiCount: utils.HotRegionAntiCount, // for write
 			}
@@ -4023,7 +4125,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 	// If we check store state first, the store state will be changed to state serving and then removing.
 	wg := sync.WaitGroup{}
 	for i := range storeCount {
-		if len(cluster.getUpStores()) == int(replica) {
+		if len(cluster.getUpTikvStores()) == int(replica) {
 			// it means we can't remove store anymore
 			break
 		}

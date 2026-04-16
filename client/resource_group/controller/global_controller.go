@@ -78,6 +78,8 @@ type ResourceGroupKVInterceptor interface {
 	OnResponseWait(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, time.Duration, error)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
+	// GetRUVersion returns the current RU calculation version for this keyspace.
+	GetRUVersion() RUVersion
 }
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
@@ -176,6 +178,10 @@ type ResourceGroupsController struct {
 
 	degradedRUSettings *rmpb.GroupRequestUnitSettings
 
+	// ruVersion stores the current RU calculation version for this keyspace.
+	// 0 means not loaded or not configured (treated as v1).
+	ruVersion atomic.Int32
+
 	wg sync.WaitGroup
 }
 
@@ -214,6 +220,8 @@ func NewResourceGroupController(
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
+	// Extract initial ruVersion from the controller config's RUVersionPolicy.
+	controller.updateRUVersionFromConfig(config)
 	return controller, nil
 }
 
@@ -239,6 +247,45 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 // GetConfig returns the config of controller.
 func (c *ResourceGroupsController) GetConfig() *RUConfig {
 	return c.safeRuConfig.Load()
+}
+
+// GetRUVersion returns the current RU calculation version for this keyspace.
+// Returns DefaultRUVersion (v1) if not configured or not loaded yet.
+// This is a pure memory read (atomic load), no network call.
+func (c *ResourceGroupsController) GetRUVersion() RUVersion {
+	v := c.ruVersion.Load()
+	if v <= 0 {
+		return DefaultRUVersion
+	}
+	return v
+}
+
+// updateRUVersionFromConfig extracts the RU version for this keyspace from the controller config.
+func (c *ResourceGroupsController) updateRUVersionFromConfig(config *Config) {
+	if config.RUVersionPolicy != nil {
+		if v, ok := config.RUVersionPolicy.Overrides[c.keyspaceID]; ok {
+			old := c.ruVersion.Swap(v)
+			if old != v {
+				log.Info("ru version updated from controller config",
+					zap.Int32("old", old), zap.Int32("new", v),
+					zap.Uint32("keyspace-id", c.keyspaceID))
+			}
+		} else if config.RUVersionPolicy.Default > 0 {
+			old := c.ruVersion.Swap(config.RUVersionPolicy.Default)
+			if old != config.RUVersionPolicy.Default {
+				log.Info("ru version updated to default from controller config",
+					zap.Int32("old", old), zap.Int32("new", config.RUVersionPolicy.Default),
+					zap.Uint32("keyspace-id", c.keyspaceID))
+			}
+		} else {
+			c.ruVersion.Store(0)
+		}
+	} else {
+		// No policy in the config means no RU version override is active.
+		// Reset the stored value to 0; GetRUVersion() will return DefaultRUVersion
+		// so callers always see a valid version even when no policy exists.
+		c.ruVersion.Store(0)
+	}
 }
 
 // Source List
@@ -275,10 +322,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
@@ -288,7 +331,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -316,7 +359,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -370,7 +413,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					continue
 				}
 				for _, item := range resp {
-					metaRevision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -438,6 +480,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if enableControllerTraceLog.Load() != config.EnableControllerTraceLog {
 						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 					}
+					// Update ru version from the controller config RUVersionPolicy.
+					c.updateRUVersionFromConfig(config)
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 			case gc := <-c.tokenBucketUpdateChan:
@@ -764,6 +808,19 @@ func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, c
 	}
 
 	gc.addRUConsumption(consumption)
+}
+
+// ReportRUV2Consumption is used to report the experimental v2 RU consumption
+// split by engine (TiKV, TiDB, TiFlash).
+// RUv2 is only recorded for observation purposes without actual token deduction.
+func (c *ResourceGroupsController) ReportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok {
+		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
+		return
+	}
+
+	gc.addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2)
 }
 
 // IsDegraded returns whether the controller is in degraded mode.

@@ -51,11 +51,20 @@
 - Clean test artifacts: `make clean-test` (clears `/tmp/pd_tests*`, go test cache, UT bins, playground log).
 
 ## Failpoints Discipline
+- PD uses `github.com/pingcap/failpoint` to inject test-only branches, returns, and pauses into specific code paths.
 - Keep failpoints enabled only for tests; disable immediately after (`make failpoint-disable` or `make clean-test`) to avoid polluting the codebase.
 - Prefer make targets that auto-enable/disable failpoints (recommended: `make gotest ...`, `make test`, `make basic-test`).
 - If you must run `go test` manually, use this rule:
   - Target uses failpoints (for example imports `github.com/pingcap/failpoint`): `make failpoint-enable` -> `go test ...` -> `make failpoint-disable`.
   - Target does not use failpoints: run `go test ...` directly.
+- Runtime model:
+  - `failpoint.Enable` / `failpoint.Disable` only change runtime evaluation state.
+  - A failpoint takes effect only when execution reaches the injected site again.
+  - Enabling a failpoint does not replay startup or initialization logic that has already finished.
+- If failpoint semantics are unclear, inspect the injected code path and nearby tests before changing test flow or assertions.
+- Useful lookup pattern: `rg -n "failpoint.Inject|failpoint.InjectCall|failpoint.Enable" pkg tests server`.
+- If that is still not enough, read the upstream `README.md` in `github.com/pingcap/failpoint` before changing the test design.
+- When tests need controllable fault injection, compare `failpoint` and `mock` first; prefer the simpler and more maintainable option instead of defaulting to `mock`.
 - Never edit code or run non-test commands while failpoints are enabled. If unsure about state, run `make failpoint-disable` before continuing.
 - Never commit generated failpoint files or leave failpoints enabled; verify `git status` is clean before pushing.
 - If failpoint-related tests misbehave, rerun after `make failpoint-disable && make failpoint-enable` to ensure a clean state.
@@ -143,6 +152,8 @@ Reusable agent skills live under `.agents/skills/`. Each skill has a `SKILL.md` 
 
 | Skill | Purpose | Prerequisites | Docs |
 |---|---|---|---|
+| `create-issue` | Draft and open a new issue on tikv/pd. Searches for duplicates, chooses the matching issue template, drafts the issue content, and creates it through `gh issue create` after user approval. | `gh` CLI authenticated with tikv/pd repo access; local tikv/pd checkout available so current issue templates can be read before creation. | [`.agents/skills/create-issue/SKILL.md`](.agents/skills/create-issue/SKILL.md) |
+| `fix-cherry-pick-pr` | Repair cherry-pick PRs by comparing source and cherry-pick diffs, resolving committed conflict markers, preserving release-branch-only code, and running failpoint-aware verification. | `gh` CLI authenticated with tikv/pd repo access; git remotes for the source repo and cherry-pick branch; PD test environment able to run failpoint-aware verification. | [`.agents/skills/fix-cherry-pick-pr/SKILL.md`](.agents/skills/fix-cherry-pick-pr/SKILL.md) |
 | `create-pr` | Push the current branch and open a well-formatted PR on tikv/pd. Analyzes commits, generates PR title/body following the repository template, and submits via `gh pr create`. | `gh` CLI authenticated with tikv/pd repo access; local commits on a non-master branch. | [`.agents/skills/create-pr/SKILL.md`](.agents/skills/create-pr/SKILL.md) |
 
 ## Microservices / NextGen

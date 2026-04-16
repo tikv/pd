@@ -532,6 +532,9 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.A
 			re.Contains(err.Error(), "cannot delete reserved group")
 			continue
 		}
+		if err != nil && strings.Contains(err.Error(), "resource group does not exist") {
+			continue
+		}
 		re.NoError(err)
 		re.Contains(deleteResp, "Success!")
 	}
@@ -576,12 +579,16 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.NoError(err)
 		re.Contains(resp, "Success!")
 
-		// Make sure the resource group active
-		meta, err = controller.GetResourceGroup(group.Name)
-		re.NotNil(meta)
-		re.NoError(err)
-		meta = controller.GetActiveResourceGroup(group.Name)
-		re.NotNil(meta)
+		// Under standalone RM discovery, metadata writes are applied on PD first and
+		// become visible to the RM controller after the watcher catches up.
+		testutil.Eventually(re, func() bool {
+			meta, err = controller.GetResourceGroup(group.Name)
+			if err != nil || meta == nil {
+				return false
+			}
+			meta = controller.GetActiveResourceGroup(group.Name)
+			return meta != nil
+		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 	// Mock modify resource groups
 	modifySettings := func(gs *rmpb.ResourceGroup, fillRate uint64) {
@@ -1520,6 +1527,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		SqlLayerCpuTimeMs: 40.0,
 		KvReadRpcCount:    5,
 		KvWriteRpcCount:   6,
+		TikvRUV2:          1.5,
+		TidbRUV2:          2.5,
+		TiflashRUV2:       3.5,
 	}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, &rmpb.TokenBucketsRequest{
 		Requests: []*rmpb.TokenBucketRequest{
