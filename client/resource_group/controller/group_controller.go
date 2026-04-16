@@ -605,6 +605,8 @@ func (gc *groupCostController) onResponseImpl(
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
+		} else if v < 0 {
+			counter.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
 
@@ -634,19 +636,24 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
-		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-		d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-		if err != nil {
-			if errs.ErrClientResourceGroupThrottled.Equal(err) {
-				gc.metrics.failedRequestCounterWithThrottled.Inc()
-				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-			} else {
-				gc.metrics.failedRequestCounterWithOthers.Inc()
+		v := getRUValueFromConsumption(delta)
+		if v > 0 {
+			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+			if err != nil {
+				if errs.ErrClientResourceGroupThrottled.Equal(err) {
+					gc.metrics.failedRequestCounterWithThrottled.Inc()
+					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+				} else {
+					gc.metrics.failedRequestCounterWithOthers.Inc()
+				}
+				return nil, waitDuration, err
 			}
-			return nil, waitDuration, err
+			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+			waitDuration += d
+		} else if v < 0 {
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
 		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
 	}
 
 	gc.mu.Lock()
