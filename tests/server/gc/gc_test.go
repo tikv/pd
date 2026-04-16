@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -43,11 +42,6 @@ import (
 
 // In tests in this file, we only verify that the parameters and results are properly passed. The detailed behavior
 // of these APIs are covered elsewhere.
-
-const (
-	gcWatchTestInitialKeyspaceCount = 10
-	gcWatchTestReceiveBatchSize     = 3
-)
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -132,13 +126,6 @@ func mustCallWithTimeout[T any](re *require.Assertions, recv func() (*T, error),
 	case <-time.After(timeout):
 		re.FailNow("timed out waiting for watch response")
 		return nil, nil
-	}
-}
-
-func useGCStateWatchReceiveBatchSizeFailpoint(re *require.Assertions, batchSize int) func() {
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize", fmt.Sprintf("return(%d)", batchSize)))
-	return func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize"))
 	}
 }
 
@@ -638,11 +625,14 @@ func TestWatchGCStatesInitialLoadIncludesNullKeyspace(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
-	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize", "return(3)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize"))
+	}()
 
-	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
+	createGCWatchTestKeyspaces(re, leaderServer, 10)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
+	re.Len(expectedKeyspaceIDs, 12)
 
 	watchCtx, cancelWatch := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelWatch()
@@ -978,11 +968,14 @@ func TestWatchGCStatesInitialLoadInterruptedByClientCancel(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
-	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize", "return(3)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize"))
+	}()
 
-	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
+	createGCWatchTestKeyspaces(re, leaderServer, 10)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
+	re.Len(expectedKeyspaceIDs, 12)
 
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	defer cancelWatch()
@@ -996,7 +989,7 @@ func TestWatchGCStatesInitialLoadInterruptedByClientCancel(t *testing.T) {
 	resp, err := mustCallWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.NotEmpty(resp.GetGcStates())
-	re.LessOrEqual(len(resp.GetGcStates()), gcWatchTestReceiveBatchSize)
+	re.LessOrEqual(len(resp.GetGcStates()), 3)
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	cancelWatch()
@@ -1012,11 +1005,14 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
-	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize", "return(3)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize"))
+	}()
 
-	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
+	createGCWatchTestKeyspaces(re, leaderServer, 10)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
+	re.Len(expectedKeyspaceIDs, 12)
 
 	watchCtx, cancelWatch := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelWatch()
@@ -1030,7 +1026,7 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 	resp, err := mustCallWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.NotEmpty(resp.GetGcStates())
-	re.LessOrEqual(len(resp.GetGcStates()), gcWatchTestReceiveBatchSize)
+	re.LessOrEqual(len(resp.GetGcStates()), 3)
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	oldLeaderName := cluster.WaitLeader()
