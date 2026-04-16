@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -602,6 +603,11 @@ func (*GrpcServer) consumeGCStateWatch(
 }
 
 func recvGCStateBatch(watcher *gc.GCStateWatcher) ([]gc.GCState, error) {
+	batchSize := gcStateWatchReceiveBatchSize
+	failpoint.Inject("gcStateWatchReceiveBatchSize", func(val failpoint.Value) {
+		batchSize = val.(int)
+	})
+
 	if err := watcher.Err(); err != nil {
 		return nil, err
 	}
@@ -612,9 +618,9 @@ func recvGCStateBatch(watcher *gc.GCStateWatcher) ([]gc.GCState, error) {
 			return nil, gcStateWatchClosedErr(watcher)
 		}
 
-		gcStates := make([]gc.GCState, 1, gcStateWatchReceiveBatchSize)
+		gcStates := make([]gc.GCState, 1, batchSize)
 		gcStates[0] = gcState
-		for len(gcStates) < gcStateWatchReceiveBatchSize {
+		for len(gcStates) < batchSize {
 			if watcher.Err() != nil {
 				return gcStates, nil
 			}

@@ -28,6 +28,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -41,6 +43,11 @@ import (
 
 // In tests in this file, we only verify that the parameters and results are properly passed. The detailed behavior
 // of these APIs are covered elsewhere.
+
+const (
+	gcWatchTestInitialKeyspaceCount = 10
+	gcWatchTestReceiveBatchSize     = 3
+)
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -68,6 +75,11 @@ func setupGCWatchTestCluster(
 	return ctx, cancel, cluster, leaderServer, grpcPDClient, conn, header
 }
 
+// createGCWatchTestKeyspaces creates keyspace-level-GC keyspaces for watch tests
+// and returns only the IDs allocated for those newly created keyspaces.
+// It does not include the bootstrap keyspace that already exists before the
+// test starts: in Classic that keyspace is DefaultKeyspaceID (0), while in
+// NextGen it is SystemKeyspaceID.
 func createGCWatchTestKeyspaces(re *require.Assertions, leaderServer *tests.TestServer, count int) []uint32 {
 	createTime := time.Now().Unix()
 	keyspaceIDs := make([]uint32, 0, count)
@@ -83,6 +95,10 @@ func createGCWatchTestKeyspaces(re *require.Assertions, leaderServer *tests.Test
 	return keyspaceIDs
 }
 
+// getAllKeyspaceGCStateIDs returns the keyspace IDs observed from the full-load
+// GetAllKeyspacesGCStates API. Unlike createGCWatchTestKeyspaces, this includes
+// pre-existing keyspaces such as the bootstrap/default keyspace and the null
+// keyspace when they are returned by the API.
 func getAllKeyspaceGCStateIDs(ctx context.Context, re *require.Assertions, grpcPDClient pdpb.PDClient, header *pdpb.RequestHeader) []uint32 {
 	resp, err := grpcPDClient.GetAllKeyspacesGCStates(ctx, &pdpb.GetAllKeyspacesGCStatesRequest{
 		Header: header,
@@ -99,7 +115,7 @@ func getAllKeyspaceGCStateIDs(ctx context.Context, re *require.Assertions, grpcP
 	return keyspaceIDs
 }
 
-func recvGCStateWithTimeout[T any](re *require.Assertions, recv func() (*T, error), timeout time.Duration) (*T, error) {
+func mustCallWithTimeout[T any](re *require.Assertions, recv func() (*T, error), timeout time.Duration) (*T, error) {
 	type recvResult struct {
 		msg *T
 		err error
@@ -119,6 +135,13 @@ func recvGCStateWithTimeout[T any](re *require.Assertions, recv func() (*T, erro
 	}
 }
 
+func useGCStateWatchReceiveBatchSizeFailpoint(re *require.Assertions, batchSize int) func() {
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize", fmt.Sprintf("return(%d)", batchSize)))
+	return func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/gcStateWatchReceiveBatchSize"))
+	}
+}
+
 func collectWatchGCStatesInitial(
 	re *require.Assertions,
 	stream pdpb.PD_WatchGCStatesClient,
@@ -126,7 +149,7 @@ func collectWatchGCStatesInitial(
 ) map[uint32]*pdpb.GCState {
 	received := make(map[uint32]*pdpb.GCState, expectedCount)
 	for len(received) < expectedCount {
-		resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
+		resp, err := mustCallWithTimeout(re, stream.Recv, 5*time.Second)
 		re.NoError(err)
 		re.NotNil(resp.GetHeader())
 		re.Nil(resp.GetHeader().GetError())
@@ -147,7 +170,7 @@ func collectWatchGCStatesUntilError(
 		if remaining <= 0 {
 			re.FailNow("timed out waiting for WatchGCStates stream to terminate")
 		}
-		resp, err := recvGCStateWithTimeout(re, stream.Recv, remaining)
+		resp, err := mustCallWithTimeout(re, stream.Recv, remaining)
 		if err != nil {
 			return err
 		}
@@ -167,7 +190,7 @@ func collectWatchGCSafePointV2UntilError(
 		if remaining <= 0 {
 			re.FailNow("timed out waiting for WatchGCSafePointV2 stream to terminate")
 		}
-		resp, err := recvGCStateWithTimeout(re, stream.Recv, remaining)
+		resp, err := mustCallWithTimeout(re, stream.Recv, remaining)
 		if err != nil {
 			return err
 		}
@@ -190,7 +213,7 @@ func waitForWatchGCSafePointV2SafePoint(
 			re.FailNow("timed out waiting for WatchGCSafePointV2 event")
 		}
 
-		resp, err := recvGCStateWithTimeout(re, stream.Recv, remaining)
+		resp, err := mustCallWithTimeout(re, stream.Recv, remaining)
 		re.NoError(err)
 		re.NotNil(resp.GetHeader())
 		re.Nil(resp.GetHeader().GetError())
@@ -615,10 +638,11 @@ func TestWatchGCStatesInitialLoadIncludesNullKeyspace(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
+	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
 
-	createGCWatchTestKeyspaces(re, leaderServer, 1100)
+	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Greater(len(expectedKeyspaceIDs), 1024)
+	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
 
 	watchCtx, cancelWatch := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelWatch()
@@ -713,7 +737,7 @@ func TestWatchGCStatesExcludeGCBarriers(t *testing.T) {
 	re.NoError(err)
 
 	mustAdvanceTxnSafePoint(ctx, re, grpcPDClient, header, targetKeyspaceID, 10)
-	resp, err := recvGCStateWithTimeout(re, longStream.Recv, 5*time.Second)
+	resp, err := mustCallWithTimeout(re, longStream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.Len(resp.GetGcStates(), 1)
 	re.Equal(targetKeyspaceID, resp.GetGcStates()[0].GetKeyspaceScope().GetKeyspaceId())
@@ -816,7 +840,7 @@ func TestWatchGCStatesExcludeGCBarriersIgnoresLazyDeleteOnlyChanges(t *testing.T
 	re.Equal(uint64(40), advanceResp.GetOldTxnSafePoint())
 	re.Equal(uint64(40), advanceResp.GetNewTxnSafePoint())
 
-	watchResp, err := recvGCStateWithTimeout(re, includeStream.Recv, 5*time.Second)
+	watchResp, err := mustCallWithTimeout(re, includeStream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.Len(watchResp.GetGcStates(), 1)
 	re.Equal(targetKeyspaceID, watchResp.GetGcStates()[0].GetKeyspaceScope().GetKeyspaceId())
@@ -954,10 +978,11 @@ func TestWatchGCStatesInitialLoadInterruptedByClientCancel(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
+	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
 
-	createGCWatchTestKeyspaces(re, leaderServer, 1100)
+	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Greater(len(expectedKeyspaceIDs), 1024)
+	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
 
 	watchCtx, cancelWatch := context.WithCancel(ctx)
 	defer cancelWatch()
@@ -968,9 +993,10 @@ func TestWatchGCStatesInitialLoadInterruptedByClientCancel(t *testing.T) {
 	})
 	re.NoError(err)
 
-	resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
+	resp, err := mustCallWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.NotEmpty(resp.GetGcStates())
+	re.LessOrEqual(len(resp.GetGcStates()), gcWatchTestReceiveBatchSize)
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	cancelWatch()
@@ -986,10 +1012,11 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 	defer cancel()
 	defer cluster.Destroy()
 	defer conn.Close()
+	defer useGCStateWatchReceiveBatchSizeFailpoint(re, gcWatchTestReceiveBatchSize)()
 
-	createGCWatchTestKeyspaces(re, leaderServer, 1100)
+	createGCWatchTestKeyspaces(re, leaderServer, gcWatchTestInitialKeyspaceCount)
 	expectedKeyspaceIDs := getAllKeyspaceGCStateIDs(ctx, re, grpcPDClient, header)
-	re.Greater(len(expectedKeyspaceIDs), 1024)
+	re.Len(expectedKeyspaceIDs, gcWatchTestInitialKeyspaceCount+2)
 
 	watchCtx, cancelWatch := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelWatch()
@@ -1000,9 +1027,10 @@ func TestWatchGCStatesInitialLoadInterruptedByLeaderTransfer(t *testing.T) {
 	})
 	re.NoError(err)
 
-	resp, err := recvGCStateWithTimeout(re, stream.Recv, 5*time.Second)
+	resp, err := mustCallWithTimeout(re, stream.Recv, 5*time.Second)
 	re.NoError(err)
 	re.NotEmpty(resp.GetGcStates())
+	re.LessOrEqual(len(resp.GetGcStates()), gcWatchTestReceiveBatchSize)
 	re.Less(len(resp.GetGcStates()), len(expectedKeyspaceIDs))
 
 	oldLeaderName := cluster.WaitLeader()
