@@ -378,6 +378,8 @@ type KeyspaceGroupManager struct {
 
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
+	// finishSplitInFlight tracks split targets that already have an in-flight finish request.
+	finishSplitInFlight sync.Map // GroupID -> struct{}
 
 	primaryPriorityCheckInterval time.Duration
 
@@ -1232,24 +1234,33 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
 	kgm.Lock()
-	defer kgm.Unlock()
 	// Check if the keyspace group is in split state.
 	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
+	if splitGroup == nil || !splitGroup.IsSplitTarget() {
+		kgm.Unlock()
 		return nil
 	}
 	// Check if the HTTP client is initialized.
 	if kgm.httpClient == nil {
+		kgm.Unlock()
 		return nil
 	}
+	// Avoid sending duplicate finish requests while the current one is still in flight.
+	if _, loaded := kgm.finishSplitInFlight.LoadOrStore(id, struct{}{}); loaded {
+		kgm.Unlock()
+		return nil
+	}
+	deleteURL := kgm.cfg.GetBackendEndpoints() + keyspaceGroupsAPIPrefix + fmt.Sprintf("/%d/split", id)
+	kgm.Unlock()
+	defer kgm.finishSplitInFlight.Delete(id)
+
 	startRequest := time.Now()
 	resp, err := apiutil.DoDelete(
 		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+		deleteURL)
 	if err != nil {
 		return err
 	}
@@ -1261,10 +1272,17 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
+
+	kgm.Lock()
+	defer kgm.Unlock()
 	// Pre-update the split keyspace group's split state in memory.
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
 	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
+	splitGroup = kgm.kgs[id]
+	if splitGroup == nil || !splitGroup.IsSplitTarget() {
+		return nil
+	}
 	newSplitGroup := *splitGroup
 	newSplitGroup.SplitState = nil
 	kgm.kgs[id] = &newSplitGroup
