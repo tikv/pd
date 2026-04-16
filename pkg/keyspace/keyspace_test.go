@@ -127,6 +127,41 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	return requests
 }
 
+func (suite *keyspaceTestSuite) TestInitTwice() {
+	re := suite.Require()
+	manager := suite.manager
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
+}
+
+func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
+	re := suite.Require()
+	manager := suite.manager
+	requests := makeCreateKeyspaceRequests(2)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed", `return(true)`))
+
+	// Create a keyspace with existing name must return error.
+	_, err := manager.CreateKeyspace(requests[0])
+	re.Error(err)
+	_, err = manager.LoadKeyspace(requests[0].Name)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	ks, err := manager.CreateKeyspace(requests[0])
+	re.NoError(err)
+	km, err := manager.LoadKeyspace(ks.Name)
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, km.State)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+	ks, err = manager.CreateKeyspace(requests[1])
+	re.NoError(err)
+	km, err = manager.LoadKeyspace(ks.Name)
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, km.State)
+}
+
 func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re := suite.Require()
 	manager := suite.manager
@@ -202,8 +237,6 @@ func expectedCreateKeyspaceSteps() []string {
 		StepGetConfig,
 		StepSaveKeyspaceMeta,
 		StepSplitRegion,
-		StepEnableKeyspace,
-		StepUpdateKeyspaceGroup,
 		StepTotal,
 	}
 }
@@ -212,7 +245,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceMetrics() {
 	re := suite.Require()
 	manager := suite.manager
 	expectedSteps := expectedCreateKeyspaceSteps()
-	re.Len(expectedSteps, 7, "expected 7 steps in create keyspace")
+	re.Len(expectedSteps, 5, "expected 5 steps in create keyspace")
 
 	before := getCreateKeyspaceStepCounts(re)
 
@@ -827,18 +860,26 @@ func updateKeyspaceConfig(re *require.Assertions, manager *Manager, name string,
 	}
 }
 
+func saveNewKeyspaceForTest(re *require.Assertions, manager *Manager, keyspace *keyspacepb.KeyspaceMeta) {
+	op, cb := manager.saveNewKeyspaceTxnOp(keyspace)
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		return op(txn)
+	})
+	cb(err)
+	re.NoError(err)
+}
+
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	re := suite.Require()
 	// Create a keyspace without any keyspace group.
 	now := time.Now().Unix()
-	err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+	saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 		Id:             111,
 		Name:           "111",
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
 	})
-	re.NoError(err)
 	// Check if the keyspace is not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
@@ -859,14 +900,13 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
@@ -892,14 +932,13 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
@@ -1052,14 +1091,13 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	// Create some keyspaces without any keyspace group.
 	for i := 1; i <= n; i++ {
 		now := time.Now().Unix()
-		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
+		saveNewKeyspaceForTest(re, suite.manager, &keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
 			StateChangedAt: now,
 		})
-		re.NoError(err)
 	}
 	// Benchmark the keyspace assignment patrol.
 	b.ResetTimer()

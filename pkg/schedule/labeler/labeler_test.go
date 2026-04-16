@@ -51,7 +51,7 @@ func TestAdjustRule(t *testing.T) {
 		RuleType: "key-range",
 		Data:     MakeKeyRanges("12abcd", "34cdef", "56abcd", "78cdef"),
 	}
-	err := rule.checkAndAdjust()
+	err := rule.CheckAndAdjust()
 	re.NoError(err)
 	re.Len(rule.Data.([]*KeyRangeRule), 2)
 	re.Equal([]byte{0x12, 0xab, 0xcd}, rule.Data.([]*KeyRangeRule)[0].StartKey)
@@ -66,7 +66,7 @@ func TestAdjustRule2(t *testing.T) {
 	var rule LabelRule
 	err := json.Unmarshal([]byte(ruleData), &rule)
 	re.NoError(err)
-	err = rule.checkAndAdjust()
+	err = rule.CheckAndAdjust()
 	re.NoError(err)
 
 	badRuleData := []string{
@@ -94,7 +94,7 @@ func TestAdjustRule2(t *testing.T) {
 		var rule LabelRule
 		err := json.Unmarshal([]byte(str), &rule)
 		re.NoError(err)
-		err = rule.checkAndAdjust()
+		err = rule.CheckAndAdjust()
 		re.Error(err)
 	}
 }
