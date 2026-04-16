@@ -716,7 +716,10 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
 		}
 		logControllerTrace("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
-		c.tokenResponseChan <- resp
+		select {
+		case c.tokenResponseChan <- resp:
+		case <-ctx.Done():
+		}
 	}()
 }
 

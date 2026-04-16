@@ -238,6 +238,45 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	}
 }
 
+func TestStopDoesNotLeakPendingTokenResponses(t *testing.T) {
+	defer goleak.VerifyNone(t, testutil.LeakOptions...)
+
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).
+		Run(func(_ mock.Arguments) {
+			started <- struct{}{}
+			<-release
+		}).
+		Return([]*rmpb.TokenBucketResponse(nil), nil).
+		Twice()
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	controller.Start(ctx)
+
+	requests := []*rmpb.TokenBucketRequest{{ResourceGroupName: defaultResourceGroupName}}
+	controller.sendTokenBucketRequests(controller.loopCtx, requests, FromPeriodReport, notifyMsg{})
+	controller.sendTokenBucketRequests(controller.loopCtx, requests, FromLowRU, notifyMsg{})
+
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timeout waiting for token requests to start")
+		}
+	}
+
+	re.NoError(controller.Stop())
+	close(release)
+	time.Sleep(100 * time.Millisecond)
+}
+
 func TestTryGetController(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
