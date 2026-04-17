@@ -65,9 +65,9 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 		return
 	}
 
-	ssps := make([]*endpoint.ServiceSafePoint, 0, len(gcState.GCBarriers))
+	ssps := make([]*endpoint.ServiceSafePoint, 0, len(gcState.MustGetGCBarriers()))
 	var gcWorkerSsp *endpoint.ServiceSafePoint
-	for _, barrier := range gcState.GCBarriers {
+	for _, barrier := range gcState.MustGetGCBarriers() {
 		equivalentSsp := barrier.ToServiceSafePoint(constant.NullKeyspaceID)
 		ssps = append(ssps, equivalentSsp)
 		if equivalentSsp.ServiceID == keypath.GCWorkerServiceSafePointID {

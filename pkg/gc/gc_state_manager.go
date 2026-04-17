@@ -20,9 +20,12 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -38,7 +41,7 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// This file defines the type GCStateManager is the core for managing states of TiKV's GC for MVCC data. The
+// This file defines the type GCStateManager which is the core for managing states of TiKV's GC for MVCC data. The
 // implementation is based on the endpoint.GCStateProvider interface (and should be the only user of
 // endpoint.GCStateProvider) for reading and storing persistent data, and provides a set of primitives (APIs) for
 // reading and operating GC states, directly handling a set of corresponding gRPC APIs.
@@ -102,9 +105,6 @@ import (
 //  4. (weakened) For each GC barrier `b`, each advancement of the txn safe point should not push it to a new value
 //     that is larger than `b.BarrierTS` (`t' <= max{t, min(b.BarrierTS for b in B)}` where `B` is the set of GC
 //     barriers).
-//
-// TODO: Explicitly state the versions that GCStateManager starts to be functional and the old APIs/concepts/terms is
-//       deprecated when these work are all done.
 
 // GCStateManager is the manager for all kinds of states of TiKV's GC for MVCC data.
 // nolint:revive
@@ -112,13 +112,19 @@ type GCStateManager struct {
 	// The mutex is for avoiding multiple etcd transactions running concurrently, so that in most cases (where the
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
-	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
+	// The etcd transactions are still necessary considering the possibility of rare cases like PD leader changes.
 	mu              syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	gcStateListeners                 []gcStateListener
+	nextListenerID                   atomic.Uint64
+	// Note that nodeLeadership is a counter instead of a bool. Theoretically, it's possible that an
+	// OnNodeBecomesFollower invocation of the previous lease is later than the OnNodeBecomesLeader call of the new
+	// lease during PD leader changes. Making this a counter helps in guaranteeing the eventual consistency.
+	nodeLeadership atomic.Int32
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -131,9 +137,95 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 	}
 }
 
+const (
+	gcStateListenerChannelSize = 128
+	gcStateListenerSendTimeout = 10 * time.Second
+)
+
+type gcStateListenerFlags uint64
+
+const (
+	gcStateListenerExcludeGCBarriers gcStateListenerFlags = 1 << iota
+)
+
+// GCStateWatcher watches GC state updates from GCStateManager.
+// nolint:revive
+type GCStateWatcher struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	ch     chan GCState
+
+	closeErrMu syncutil.RWMutex
+	closeErr   error
+}
+
+// Chan returns the channel that carries GC state updates.
+func (w *GCStateWatcher) Chan() <-chan GCState {
+	return w.ch
+}
+
+// Done returns a channel that is closed when the watcher stops.
+func (w *GCStateWatcher) Done() <-chan struct{} {
+	return w.ctx.Done()
+}
+
+// Close stops the watcher from the caller side.
+func (w *GCStateWatcher) Close() {
+	w.cancel()
+}
+
+func (w *GCStateWatcher) internalClose(err error) {
+	if err == nil {
+		err = context.Canceled
+	}
+
+	w.closeErrMu.Lock()
+	defer w.closeErrMu.Unlock()
+	if w.closeErr == nil {
+		w.closeErr = err
+	}
+
+	w.cancel()
+	close(w.ch)
+}
+
+// Err returns the reason why the watcher stopped. It returns nil while the watcher is still active.
+func (w *GCStateWatcher) Err() error {
+	w.closeErrMu.RLock()
+	err := w.closeErr
+	w.closeErrMu.RUnlock()
+	if err != nil {
+		return err
+	}
+	return w.ctx.Err()
+}
+
+type gcStateListener struct {
+	id      uint64
+	watcher *GCStateWatcher
+	flags   gcStateListenerFlags
+}
+
 type keyspaceNameKeyType struct{}
 
 var keyspaceNameKey = keyspaceNameKeyType{}
+
+func (m *GCStateManager) newGCStateListener(ctx context.Context, excludeGCBarriers bool) gcStateListener {
+	watchCtx, cancel := context.WithCancel(ctx)
+	watcher := &GCStateWatcher{
+		ctx:    watchCtx,
+		cancel: cancel,
+		ch:     make(chan GCState, gcStateListenerChannelSize),
+	}
+	listener := gcStateListener{
+		id:      m.nextListenerID.Add(1),
+		watcher: watcher,
+	}
+	if excludeGCBarriers {
+		listener.flags |= gcStateListenerExcludeGCBarriers
+	}
+	return listener
+}
 
 func addKeyspaceNameToCtx(ctx context.Context, keyspaceName string) context.Context {
 	return context.WithValue(ctx, keyspaceNameKey, keyspaceName)
@@ -147,6 +239,234 @@ func getKeyspaceNameFromCtx(ctx context.Context) string {
 		return value
 	}
 	return "<unknown>"
+}
+
+// OnNodeBecomesLeader marks the current PD node as leader for GC state watches.
+func (m *GCStateManager) OnNodeBecomesLeader() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(1)
+}
+
+// OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
+func (m *GCStateManager) OnNodeBecomesFollower() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.nodeLeadership.Add(-1)
+	listeners := m.gcStateListeners
+	m.gcStateListeners = nil
+
+	// The listeners must be closed within the mutex to avoid concurrent callback invocations. Otherwise the concurrent
+	// invocation has the risk of panicking due to trying to send to the closed channel.
+	for _, listener := range listeners {
+		log.Info("GC state watcher stopped",
+			zap.Uint64("listener-id", listener.id),
+			zap.Error(errs.ErrNotLeader),
+			zap.Int("listener-count", 0),
+		)
+		listener.watcher.internalClose(errs.ErrNotLeader)
+	}
+}
+
+func (m *GCStateManager) nodeIsLeader() bool {
+	return m.nodeLeadership.Load() > 0
+}
+
+// WatchGCStates watches GC state updates. The returned channel is closed when the caller's context is done, the
+// current PD node loses leadership, or the watcher becomes too slow to consume updates.
+//   - skipLoadingInitial: only observe the new updates, ignoring the state at the moment of calling this function.
+//   - excludeGCBarriers: Exclude information of GC barriers from the observed GC states; ignore GC state update
+//     events that only affect GC barriers.
+func (m *GCStateManager) WatchGCStates(ctx context.Context, skipLoadingInitial bool, excludeGCBarriers bool) (*GCStateWatcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.nodeIsLeader() {
+		return nil, errs.ErrNotLeader
+	}
+
+	listener := m.newGCStateListener(ctx, excludeGCBarriers)
+	m.gcStateListeners = append(m.gcStateListeners, listener)
+	log.Info("GC state watcher registered",
+		zap.Uint64("listener-id", listener.id),
+		zap.Bool("skip-loading-initial", skipLoadingInitial),
+		zap.Bool("exclude-gc-barriers", excludeGCBarriers),
+		zap.Int("listener-count", len(m.gcStateListeners)),
+	)
+	go m.holdGCStateWatcher(listener, skipLoadingInitial)
+
+	return listener.watcher, nil
+}
+
+func (m *GCStateManager) holdGCStateWatcher(listener gcStateListener, skipLoadingInitial bool) {
+	var stopErr error
+	defer func() {
+		// Deregister the listener if the watcher is closed by the caller.
+		// Note that deregisterGCStateListener is a noop if the listener is closed internally, in which case the listener
+		// is already closed when entering deregisterGCStateListener.
+		var err error
+		if r := recover(); r != nil {
+			log.Error("holdGCStateWatcher goroutine panicked", zap.Uint64("listener-id", listener.id), zap.Any("panic", r))
+			err = fmt.Errorf("holdGCStateWatcher goroutine panicked: %+v", r)
+		} else {
+			err = listener.watcher.Err()
+		}
+		if err == nil {
+			err = stopErr
+		}
+		m.deregisterGCStateListener(listener, err)
+	}()
+
+	if !skipLoadingInitial {
+		stopErr = m.sendInitialGCStates(listener)
+		if stopErr != nil {
+			if listener.watcher.Err() == nil &&
+				!errors.Is(stopErr, context.Canceled) &&
+				!errors.Is(stopErr, context.DeadlineExceeded) {
+				log.Warn("failed to load initial GC states for GC state watcher, watcher will be stopped",
+					zap.Uint64("listener-id", listener.id),
+					zap.Error(stopErr),
+				)
+			}
+			return
+		}
+	}
+
+	// The goroutine is responsible to call `deregisterGCStateListener` after the watcher is closed. Note the `defer`
+	// block in the function.
+	<-listener.watcher.Done()
+}
+
+func (m *GCStateManager) sendInitialGCStates(listener gcStateListener) error {
+	return m.iterateAllKeyspacesGCStates(listener.watcher.ctx, listener.flags&gcStateListenerExcludeGCBarriers != 0, func(gcState GCState) {
+		// iterateAllKeyspacesGCStates guarantees that this callback is executed within the mutex.
+		// Check whether the listener is closed during the time gap that the mutex is not hold.
+		select {
+		case <-listener.watcher.Done():
+			// Do nothing. The `iterateAllKeyspacesGCStates` call should be able to exit when it checks the context the
+			// next time.
+			return
+		default:
+		}
+		m.sendGCStateToListenerLocked(listener, gcState, false)
+	})
+}
+
+func (m *GCStateManager) deregisterGCStateListener(listener gcStateListener, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.removeGCStateListenerLocked(listener, err)
+}
+
+func (m *GCStateManager) removeGCStateListenerLocked(listener gcStateListener, err error) {
+	for i, current := range m.gcStateListeners {
+		if current.id != listener.id {
+			continue
+		}
+		current.watcher.internalClose(err)
+		m.gcStateListeners = slices.Delete(m.gcStateListeners, i, i+1)
+		log.Info("GC state watcher stopped",
+			zap.Uint64("listener-id", current.id),
+			zap.Error(err),
+			zap.Int("listener-count", len(m.gcStateListeners)),
+		)
+		return
+	}
+}
+
+func (m *GCStateManager) getGCStateListenerCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.gcStateListeners)
+}
+
+func errGCStateWatchClosed() error {
+	return status.Error(codes.Unavailable, "gc state watcher closed")
+}
+
+func cloneGCBarrier(barrier *endpoint.GCBarrier) *endpoint.GCBarrier {
+	if barrier == nil {
+		return nil
+	}
+	clone := &endpoint.GCBarrier{
+		BarrierID: barrier.BarrierID,
+		BarrierTS: barrier.BarrierTS,
+	}
+	if barrier.ExpirationTime != nil {
+		expirationTime := *barrier.ExpirationTime
+		clone.ExpirationTime = &expirationTime
+	}
+	return clone
+}
+
+func cloneGCStateForListener(gcState GCState, flags gcStateListenerFlags) GCState {
+	cloned := gcState
+	if flags&gcStateListenerExcludeGCBarriers != 0 {
+		cloned.IsGCBarriersLoaded = false
+		cloned.GCBarriers = nil
+		return cloned
+	}
+
+	if len(gcState.GCBarriers) == 0 {
+		// Always use nil to represent no GC barrier to simplify assertions in tests.
+		cloned.GCBarriers = nil
+		return cloned
+	}
+
+	cloned.GCBarriers = make([]*endpoint.GCBarrier, 0, len(gcState.GCBarriers))
+	for _, barrier := range gcState.GCBarriers {
+		cloned.GCBarriers = append(cloned.GCBarriers, cloneGCBarrier(barrier))
+	}
+	return cloned
+}
+
+func (m *GCStateManager) sendGCStateToListenerLocked(listener gcStateListener, gcState GCState, barrierOnly bool) bool {
+	if barrierOnly && listener.flags&gcStateListenerExcludeGCBarriers != 0 {
+		return true
+	}
+
+	timer := time.NewTimer(gcStateListenerSendTimeout)
+	defer timer.Stop()
+
+	select {
+	case listener.watcher.ch <- cloneGCStateForListener(gcState, listener.flags):
+		return true
+	case <-listener.watcher.Done():
+		m.removeGCStateListenerLocked(listener, listener.watcher.Err())
+		return false
+	case <-timer.C:
+		log.Warn("GC state watcher is too slow and will be closed",
+			zap.Uint64("listener-id", listener.id),
+		)
+		m.removeGCStateListenerLocked(listener, errGCStateWatchClosed())
+		return false
+	}
+}
+
+func (m *GCStateManager) triggerGCStateListenersLocked(gcState GCState, barrierOnly bool) {
+	for i := 0; i < len(m.gcStateListeners); {
+		listener := m.gcStateListeners[i]
+		if m.sendGCStateToListenerLocked(listener, gcState, barrierOnly) {
+			i++
+			continue
+		}
+	}
+}
+
+func gcBarrierEqual(lhs, rhs *endpoint.GCBarrier) bool {
+	if lhs == nil || rhs == nil {
+		return lhs == rhs
+	}
+	if lhs.BarrierID != rhs.BarrierID || lhs.BarrierTS != rhs.BarrierTS {
+		return false
+	}
+	if lhs.ExpirationTime == nil || rhs.ExpirationTime == nil {
+		return lhs.ExpirationTime == rhs.ExpirationTime
+	}
+	return lhs.ExpirationTime.Equal(*rhs.ExpirationTime)
 }
 
 // redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
@@ -226,35 +546,43 @@ func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target u
 }
 
 func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	newGCSafePoint = target
+	var (
+		oldGCState GCState
+		newGCState GCState
+	)
 
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		oldGCSafePoint, err1 = m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
+		oldGCState, _, err1 = m.getGCStateInTransaction(keyspaceID, false, wb)
 		if err1 != nil {
 			return err1
 		}
+		oldGCSafePoint = oldGCState.GCSafePoint
 		if target < oldGCSafePoint {
 			if compatible {
 				// When in compatible mode, trying to update the safe point to a smaller value fails silently, returning
-				// the actual value. There exist some use cases that fetches the current value by passing zero.
+				// the actual value. There exist some use cases that fetch the current value by passing zero.
 				log.Warn("deprecated API `UpdateGCSafePoint` is called with invalid argument",
 					zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 					zap.Uint64("current-gc-safe-point", oldGCSafePoint), zap.Uint64("attempted-gc-safe-point", target))
-				newGCSafePoint = oldGCSafePoint
+				newGCState = oldGCState
 				return nil
 			}
 			// Otherwise, return error to reject the operation explicitly.
 			return errs.ErrDecreasingGCSafePoint.GenWithStackByArgs(oldGCSafePoint, target)
 		}
-		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
-		if err1 != nil {
-			return err1
-		}
-		if target > txnSafePoint {
-			return errs.ErrGCSafePointExceedsTxnSafePoint.GenWithStackByArgs(oldGCSafePoint, target, txnSafePoint)
+		if target > oldGCState.TxnSafePoint {
+			return errs.ErrGCSafePointExceedsTxnSafePoint.GenWithStackByArgs(oldGCSafePoint, target, oldGCState.TxnSafePoint)
 		}
 
+		newGCState = GCState{
+			KeyspaceID:         keyspaceID,
+			IsKeyspaceLevel:    oldGCState.IsKeyspaceLevel,
+			TxnSafePoint:       oldGCState.TxnSafePoint,
+			GCSafePoint:        target,
+			IsGCBarriersLoaded: oldGCState.IsGCBarriersLoaded,
+			GCBarriers:         oldGCState.GCBarriers,
+		}
 		return wb.SetGCSafePoint(keyspaceID, target)
 	})
 	if err != nil {
@@ -263,6 +591,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 			zap.Uint64("target", target), zap.Bool("compatible-mode", compatible), zap.Error(err))
 		return 0, 0, err
 	}
+	newGCSafePoint = newGCState.GCSafePoint
 
 	if newGCSafePoint != oldGCSafePoint {
 		log.Info("advanced GC safe point",
@@ -277,6 +606,9 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 
 	if keyspaceID == constant.NullKeyspaceID {
 		gcSafePointGauge.WithLabelValues("gc_safepoint").Set(float64(target))
+	}
+	if newGCSafePoint != oldGCSafePoint {
+		m.triggerGCStateListenersLocked(newGCState, false)
 	}
 
 	return
@@ -322,36 +654,39 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	downgradeCompatibleMode := false
 
 	var (
-		minBlocker              = target
-		oldTxnSafePoint         uint64
-		newTxnSafePoint         uint64
-		blockingBarrier         *endpoint.GCBarrier
-		blockingGlobalBarrier   *endpoint.GlobalGCBarrier
-		blockingMinStartTSOwner *string
+		minBlocker                   = target
+		oldGCState                   GCState
+		newGCState                   GCState
+		blockingBarrier              *endpoint.GCBarrier
+		blockingGlobalBarrier        *endpoint.GlobalGCBarrier
+		blockingMinStartTSOwner      *string
+		lazyDeleteGCBarriersOccurred bool
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		var hasLegacyData bool
+		oldGCState, hasLegacyData, err1 = m.getGCStateInTransaction(keyspaceID, false, wb)
 		if err1 != nil {
 			return err1
 		}
 
-		if target < oldTxnSafePoint {
-			return errs.ErrDecreasingTxnSafePoint.GenWithStackByArgs(oldTxnSafePoint, target)
+		downgradeCompatibleMode = hasLegacyData
+
+		if target < oldGCState.TxnSafePoint {
+			return errs.ErrDecreasingTxnSafePoint.GenWithStackByArgs(oldGCState.TxnSafePoint, target)
 		}
 
-		barriers, err1 := m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
-		if err1 != nil {
-			return err1
+		newGCState = GCState{
+			KeyspaceID:         keyspaceID,
+			IsKeyspaceLevel:    oldGCState.IsKeyspaceLevel,
+			TxnSafePoint:       oldGCState.TxnSafePoint,
+			GCSafePoint:        oldGCState.GCSafePoint,
+			IsGCBarriersLoaded: true,
+			GCBarriers:         make([]*endpoint.GCBarrier, 0, len(oldGCState.MustGetGCBarriers())),
 		}
 
-		for _, barrier := range barriers {
-			if barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
-				downgradeCompatibleMode = true
-				continue
-			}
-
+		for _, barrier := range oldGCState.MustGetGCBarriers() {
 			if barrier.IsExpired(now) {
 				// Perform lazy delete to the expired GC barriers.
 				// WARNING: It might look like a reasonable optimization idea to perform the lazy-deletion in a lower
@@ -364,9 +699,12 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 				if err1 != nil {
 					return err1
 				}
+				lazyDeleteGCBarriersOccurred = true
 				// Do not block GC with expired barriers.
 				continue
 			}
+
+			newGCState.GCBarriers = append(newGCState.GCBarriers, barrier)
 
 			if barrier.BarrierTS < minBlocker {
 				minBlocker = barrier.BarrierTS
@@ -409,15 +747,15 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		}
 
 		// Txn safe point never decreases.
-		newTxnSafePoint = max(oldTxnSafePoint, minBlocker)
+		newGCState.TxnSafePoint = max(oldGCState.TxnSafePoint, minBlocker)
 
 		if downgradeCompatibleMode {
-			err1 = wb.SetGCBarrier(keyspaceID, endpoint.NewGCBarrier(keypath.GCWorkerServiceSafePointID, newTxnSafePoint, nil))
+			err1 = wb.SetGCBarrier(keyspaceID, endpoint.NewGCBarrier(keypath.GCWorkerServiceSafePointID, newGCState.TxnSafePoint, nil))
 			if err1 != nil {
 				return err1
 			}
 		}
-		return wb.SetTxnSafePoint(keyspaceID, newTxnSafePoint)
+		return wb.SetTxnSafePoint(keyspaceID, newGCState.TxnSafePoint)
 	})
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
@@ -431,27 +769,30 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		blockerDesc = blockingGlobalBarrier.String()
 		simulatedServiceID = blockingGlobalBarrier.BarrierID
 	} else if blockingMinStartTSOwner != nil {
-		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
+		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newGCState.TxnSafePoint)
 		simulatedServiceID = "tidb_min_start_ts_" + *blockingMinStartTSOwner
 	} else if blockingBarrier != nil {
 		blockerDesc = blockingBarrier.String()
 		simulatedServiceID = blockingBarrier.BarrierID
 	}
 
-	if newTxnSafePoint != target {
+	if newGCState.TxnSafePoint != target {
 		if blockingBarrier == nil && blockingMinStartTSOwner == nil && blockingGlobalBarrier == nil {
 			panic("unreachable")
 		}
 	}
 
 	result := AdvanceTxnSafePointResult{
-		OldTxnSafePoint:    oldTxnSafePoint,
+		OldTxnSafePoint:    oldGCState.TxnSafePoint,
 		Target:             target,
-		NewTxnSafePoint:    newTxnSafePoint,
+		NewTxnSafePoint:    newGCState.TxnSafePoint,
 		BlockerDescription: blockerDesc,
 		simulatedServiceID: simulatedServiceID,
 	}
 	m.logAdvancingTxnSafePoint(ctx, keyspaceID, result, minBlocker, downgradeCompatibleMode)
+	if oldGCState.TxnSafePoint != newGCState.TxnSafePoint || lazyDeleteGCBarriersOccurred {
+		m.triggerGCStateListenersLocked(newGCState, oldGCState.TxnSafePoint == newGCState.TxnSafePoint)
+	}
 	return result, nil
 }
 
@@ -542,14 +883,16 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 		expirationTime = &t
 	}
 	newBarrier := endpoint.NewGCBarrier(barrierID, barrierTS, expirationTime)
+	var gcState GCState
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		var err1 error
+		gcState, _, err1 = m.getGCStateInTransaction(keyspaceID, false, wb)
 		if err1 != nil {
 			return err1
 		}
-		if barrierTS < txnSafePoint {
-			return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
+		if barrierTS < gcState.TxnSafePoint {
+			return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, gcState.TxnSafePoint)
 		}
 		err1 = wb.SetGCBarrier(keyspaceID, newBarrier)
 		return err1
@@ -565,6 +908,25 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 		zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
 		zap.Stringer("new-gc-barrier", newBarrier))
+
+	if len(m.gcStateListeners) != 0 {
+		// Construct the new complete GCState using the new GCBarrier info.
+		replaced := false
+		unchanged := false
+		for i, barrier := range gcState.GCBarriers {
+			if barrier.BarrierID == newBarrier.BarrierID {
+				gcState.GCBarriers[i] = newBarrier
+				replaced = true
+				unchanged = gcBarrierEqual(barrier, newBarrier)
+			}
+		}
+		if !replaced {
+			gcState.GCBarriers = append(gcState.GCBarriers, newBarrier)
+		}
+		if !unchanged {
+			m.triggerGCStateListenersLocked(gcState, true)
+		}
+	}
 
 	return newBarrier, nil
 }
@@ -598,11 +960,20 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 	}
 
 	var deletedBarrier *endpoint.GCBarrier
+	var gcState GCState
+
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		deletedBarrier, err1 = m.gcMetaStorage.LoadGCBarrier(keyspaceID, barrierID)
 		if err1 != nil {
 			return err1
+		}
+		if deletedBarrier != nil {
+			// The full GC state will be required for triggering the listeners in this case.
+			gcState, _, err1 = m.getGCStateInTransaction(keyspaceID, false, wb)
+			if err1 != nil {
+				return err1
+			}
 		}
 		return wb.DeleteGCBarrier(keyspaceID, barrierID)
 	})
@@ -622,6 +993,10 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 		log.Info("GC barrier deleted",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
+		gcState.GCBarriers = slices.DeleteFunc(gcState.GCBarriers, func(barrier *endpoint.GCBarrier) bool {
+			return barrier.BarrierID == barrierID
+		})
+		m.triggerGCStateListenersLocked(gcState, true)
 	}
 
 	return deletedBarrier, nil
@@ -630,11 +1005,14 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 // getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
 // This read only and won't write anything to the GCStateWriteBatch. It still receives a write batch to ensure
 // it's running in a in-transaction context.
+// Additionally returns a bool `hasLegacyData`. Sometimes it's necessary for determining whether some compatibility
+// behavior is necessary.
 // The parameter `keyspaceID` is expected to be either the NullKeyspaceID or the ID of a keyspace that has
 // keyspace-level GC enabled. Otherwise, the result would be undefined.
-func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.GCStateWriteBatch) (GCState, error) {
+func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, excludeGCBarrier bool, _ *endpoint.GCStateWriteBatch) (GCState, bool, error) {
 	result := GCState{
-		KeyspaceID: keyspaceID,
+		KeyspaceID:         keyspaceID,
+		IsGCBarriersLoaded: !excludeGCBarrier,
 	}
 	if keyspaceID != constant.NullKeyspaceID {
 		// Assuming the parameter `keyspaceID` is either the NullKeyspaceID or the ID of a keyspace that has
@@ -645,26 +1023,33 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 	var err error
 	result.TxnSafePoint, err = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 	if err != nil {
-		return GCState{}, err
+		return GCState{}, false, err
 	}
 
 	result.GCSafePoint, err = m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
 	if err != nil {
-		return GCState{}, err
+		return GCState{}, false, err
 	}
 
-	result.GCBarriers, err = m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
-	if err != nil {
-		return GCState{}, err
+	if !excludeGCBarrier {
+		result.GCBarriers, err = m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
+		if err != nil {
+			return GCState{}, false, err
+		}
 	}
 
-	// Remove GC barrier whose barrierID is "gc_worker", which is only exists for providing compatibility with the old
+	// Remove the GC barrier whose barrierID is "gc_worker", which only exists for providing compatibility with the old
 	// versions.
+	hasLegacyData := false
 	result.GCBarriers = slices.DeleteFunc(result.GCBarriers, func(b *endpoint.GCBarrier) bool {
-		return b.BarrierID == keypath.GCWorkerServiceSafePointID
+		if b.BarrierID == keypath.GCWorkerServiceSafePointID {
+			hasLegacyData = true
+			return true
+		}
+		return false
 	})
 
-	return result, nil
+	return result, hasLegacyData, nil
 }
 
 // GetGCState returns the GC state of the given keyspace.
@@ -682,7 +1067,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	var result GCState
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
+		result, _, err1 = m.getGCStateInTransaction(keyspaceID, false, wb)
 		return err1
 	})
 
@@ -700,14 +1085,25 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
 	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
-		result, err := m.getAllKeyspacesGCStatesImpl(execCtx)
+		result := make(map[uint32]GCState)
+		err := m.iterateAllKeyspacesGCStates(execCtx, false, func(gcState GCState) {
+			result[gcState.KeyspaceID] = gcState
+		})
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
 	})
 }
 
-func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
+// iterateAllKeyspacesGCStates iterates GC states of all keyspaces, and calls the given callback on each of them.
+// It's guaranteed that `cb` is always called within the mutex.
+func (m *GCStateManager) iterateAllKeyspacesGCStates(ctx context.Context, excludeGCBarriers bool, cb func(GCState)) error {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
+	failpoint.Inject("iterateAllKeyspacesGCStatesError", func(val failpoint.Value) {
+		if errMsg, ok := val.(string); ok {
+			failpoint.Return(errors.New(errMsg))
+		}
+		failpoint.Return(errors.New("mock iterate all keyspaces gc states error"))
+	})
 
 	mutexLocked := false
 	lock := func() {
@@ -729,31 +1125,35 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	// Do not guarantee atomicity among different keyspaces here.
-	results := make(map[uint32]GCState)
 	lock()
-	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
-		if err1 != nil {
-			return err1
+	{
+		var nullKeyspaceGCState GCState
+		err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			var err1 error
+			nullKeyspaceGCState, _, err1 = m.getGCStateInTransaction(constant.NullKeyspaceID, excludeGCBarriers, wb)
+			if err1 != nil {
+				return err1
+			}
+			return nil
+		})
+		if err != nil {
+			unlock()
+			return err
 		}
-		results[constant.NullKeyspaceID] = nullKeyspaceState
-		return nil
-	})
-	unlock()
-	if err != nil {
-		return nil, err
+		cb(nullKeyspaceGCState)
 	}
+	unlock()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		default:
 		}
 
 		keyspaceMeta, ok, err := keyspaceIterator.Next()
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if !ok {
 			break
@@ -765,29 +1165,38 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 		}
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
-			results[keyspaceMeta.Id] = GCState{
-				KeyspaceID:      keyspaceMeta.Id,
-				IsKeyspaceLevel: false,
+			lock()
+			{
+				gcState := GCState{
+					KeyspaceID:      keyspaceMeta.Id,
+					IsKeyspaceLevel: false,
+				}
+				cb(gcState)
 			}
+			unlock()
 			continue
 		}
 
 		lock()
-		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
-			if err1 != nil {
-				return err1
+		{
+			var gcState GCState
+			err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+				var err1 error
+				gcState, _, err1 = m.getGCStateInTransaction(keyspaceMeta.Id, excludeGCBarriers, wb)
+				if err1 != nil {
+					return err1
+				}
+				return nil
+			})
+			if err != nil {
+				return err
 			}
-			results[keyspaceMeta.Id] = state
-			return nil
-		})
-		unlock()
-		if err != nil {
-			return nil, err
+			cb(gcState)
 		}
+		unlock()
 	}
 
-	return results, nil
+	return nil
 }
 
 // LoadAllGlobalGCBarriers returns global GC barriers.
@@ -938,7 +1347,19 @@ type GCState struct {
 	IsKeyspaceLevel bool
 	TxnSafePoint    uint64
 	GCSafePoint     uint64
-	GCBarriers      []*endpoint.GCBarrier
+	// GC barriers are not needed for some operations, in which case loading them causes significant overhead as there
+	// may be too many of them. In this case, it can be explicitly excluded when loading the GCState, marked by
+	// the IsGCBarriersLoaded field.
+	IsGCBarriersLoaded bool
+	GCBarriers         []*endpoint.GCBarrier
+}
+
+// MustGetGCBarriers asserts the GC barriers (if any) must have been loaded, and extract them.
+func (s GCState) MustGetGCBarriers() []*endpoint.GCBarrier {
+	if !s.IsGCBarriersLoaded {
+		panic("force getting GC barriers from a GCState object where GC barrier is explicitly excluded")
+	}
+	return s.GCBarriers
 }
 
 // SetGlobalGCBarrier sets a global GC barrier.

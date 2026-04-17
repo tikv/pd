@@ -541,6 +541,14 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	s.AddServiceReadyCallback(func(ctx context.Context) error {
+		s.gcStateManager.OnNodeBecomesLeader()
+		go func() {
+			<-ctx.Done()
+			s.gcStateManager.OnNodeBecomesFollower()
+		}()
+		return nil
+	})
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
