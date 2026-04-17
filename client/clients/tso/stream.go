@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -95,7 +96,10 @@ func (b *msStreamBuilder) build(
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{
+			stream:   stream,
+			calleeID: getCalleeID(b.serverURL),
+		}), nil
 	}
 	return nil, err
 }
@@ -154,7 +158,8 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 }
 
 type tsoTSOStreamAdapter struct {
-	stream tsopb.TSO_TsoClient
+	stream   tsopb.TSO_TsoClient
+	calleeID string
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
@@ -164,10 +169,19 @@ func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID 
 			ClusterId:       clusterID,
 			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
+			CalleeId:        s.calleeID,
 		},
 		Count: uint32(count),
 	}
 	return s.stream.Send(req)
+}
+
+func getCalleeID(serverURL string) string {
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Host == "" {
+		return serverURL
+	}
+	return parsed.Host
 }
 
 // Recv implements the grpcTSOStreamAdapter interface.

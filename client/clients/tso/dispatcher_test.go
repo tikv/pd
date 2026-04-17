@@ -26,12 +26,15 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
@@ -44,6 +47,7 @@ type mockTSOServiceProvider struct {
 	option       *opt.Option
 	createStream func(ctx context.Context) *tsoStream
 	conCtxMgr    *cctx.Manager[*tsoStream]
+	svcDiscovery sd.ServiceDiscovery
 }
 
 func newMockTSOServiceProvider(option *opt.Option, createStream func(ctx context.Context) *tsoStream) *mockTSOServiceProvider {
@@ -58,7 +62,10 @@ func (m *mockTSOServiceProvider) getOption() *opt.Option {
 	return m.option
 }
 
-func (*mockTSOServiceProvider) getServiceDiscovery() sd.ServiceDiscovery {
+func (m *mockTSOServiceProvider) getServiceDiscovery() sd.ServiceDiscovery {
+	if m.svcDiscovery != nil {
+		return m.svcDiscovery
+	}
 	return sd.NewMockServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
@@ -108,7 +115,7 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		created.Store(true)
 		return s.stream
 	}
-	s.dispatcher = newTSODispatcher(context.Background(), defaultMaxTSOBatchSize, newMockTSOServiceProvider(s.option, createStream))
+	s.dispatcher = newTSODispatcher(context.Background(), newMockTSOServiceProvider(s.option, createStream))
 	s.reqPool = &sync.Pool{
 		New: func() any {
 			return &Request{
@@ -183,6 +190,37 @@ func TestTSODispatcherTestSuite(t *testing.T) {
 	suite.Run(t, new(testTSODispatcherSuite))
 }
 
+type countingServiceDiscovery struct {
+	removeCount   atomic.Int32
+	scheduleCount atomic.Int32
+}
+
+func (*countingServiceDiscovery) Init() error                                        { return nil }
+func (*countingServiceDiscovery) Close()                                             {}
+func (*countingServiceDiscovery) GetClusterID() uint64                               { return 0 }
+func (*countingServiceDiscovery) GetKeyspaceID() uint32                              { return 0 }
+func (*countingServiceDiscovery) SetKeyspaceID(uint32)                               {}
+func (*countingServiceDiscovery) GetKeyspaceGroupID() uint32                         { return 0 }
+func (*countingServiceDiscovery) GetServiceURLs() []string                           { return nil }
+func (*countingServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn     { return nil }
+func (*countingServiceDiscovery) GetClientConns() *sync.Map                          { return &sync.Map{} }
+func (*countingServiceDiscovery) GetServingURL() string                              { return "" }
+func (*countingServiceDiscovery) GetBackupURLs() []string                            { return nil }
+func (*countingServiceDiscovery) GetServiceClient() sd.ServiceClient                 { return nil }
+func (*countingServiceDiscovery) GetServiceClientByKind(sd.APIKind) sd.ServiceClient { return nil }
+func (*countingServiceDiscovery) GetAllServiceClients() []sd.ServiceClient           { return nil }
+func (*countingServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
+	return nil, nil
+}
+func (s *countingServiceDiscovery) RemoveClientConn(string) { s.removeCount.Add(1) }
+func (s *countingServiceDiscovery) ScheduleCheckMemberChanged() {
+	s.scheduleCount.Add(1)
+}
+func (*countingServiceDiscovery) CheckMemberChanged() error                                      { return nil }
+func (*countingServiceDiscovery) ExecAndAddLeaderSwitchedCallback(sd.LeaderSwitchedCallbackFunc) {}
+func (*countingServiceDiscovery) AddLeaderSwitchedCallback(sd.LeaderSwitchedCallbackFunc)        {}
+func (*countingServiceDiscovery) AddMembersChangedCallback(func())                               {}
+
 func (s *testTSODispatcherSuite) TestBasic() {
 	ctx := context.Background()
 	req := s.sendReq(ctx)
@@ -194,6 +232,29 @@ func (s *testTSODispatcherSuite) TestBasic() {
 	s.streamInner.generateNext()
 	req = s.sendReq(ctx)
 	s.reqMustNotReady(req)
+}
+
+func (s *testTSODispatcherSuite) TestHandleProcessRequestErrorRemoveConnOnCalleeMismatch() {
+	svcDiscovery := &countingServiceDiscovery{}
+	td := newTSODispatcher(context.Background(), &mockTSOServiceProvider{
+		option:       s.option,
+		conCtxMgr:    cctx.NewManager[*tsoStream](),
+		svcDiscovery: svcDiscovery,
+	})
+	defer td.close()
+	bo := retry.InitialBackoffer(time.Millisecond, time.Millisecond, time.Millisecond)
+
+	ok := td.handleProcessRequestError(
+		context.Background(),
+		bo,
+		cctx.NewManager[*tsoStream](),
+		mockStreamURL,
+		fmt.Errorf("%s", errs.MismatchCalleeIDErr),
+	)
+
+	s.re.True(ok)
+	s.re.Equal(int32(1), svcDiscovery.removeCount.Load())
+	s.re.Zero(svcDiscovery.scheduleCount.Load())
 }
 
 func (s *testTSODispatcherSuite) checkIdleTokenCount(expectedTotal int) {
@@ -358,7 +419,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 		return req
 	}
 
-	dispatcher := newTSODispatcher(ctx, defaultMaxTSOBatchSize, newMockTSOServiceProvider(opt.NewOption(), nil))
+	dispatcher := newTSODispatcher(ctx, newMockTSOServiceProvider(opt.NewOption(), nil))
 	var wg sync.WaitGroup
 	wg.Add(1)
 

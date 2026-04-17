@@ -198,11 +198,15 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	if len(url) == 0 {
 		log.Fatal("[tso] the tso leader should exist")
 	}
-	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
-	if !ok {
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+	if err != nil {
+		log.Error("[tso] failed to get tso leader client connection",
+			zap.String("serving-url", url),
+			errs.ZapError(err),
+		)
 		return nil, url
 	}
-	return cc.(*grpc.ClientConn), url
+	return cc, url
 }
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
@@ -535,7 +539,7 @@ func (c *Cli) tryCreateTSODispatcher() {
 	if len(url) == 0 {
 		return
 	}
-	dispatcher := newTSODispatcher(c.ctx, defaultMaxTSOBatchSize, c)
+	dispatcher := newTSODispatcher(c.ctx, c)
 	c.wg.Add(1)
 	go dispatcher.handleDispatcher(&c.wg)
 	// Try to set the dispatcher atomically.
