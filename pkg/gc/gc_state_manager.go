@@ -306,7 +306,13 @@ func (m *GCStateManager) holdGCStateWatcher(listener gcStateListener, skipLoadin
 		// Deregister the listener if the watcher is closed by the caller.
 		// Note that deregisterGCStateListener is a noop if the listener is closed internally, in which case the listener
 		// is already closed when entering deregisterGCStateListener.
-		err := listener.watcher.Err()
+		var err error
+		if r := recover(); r != nil {
+			log.Error("holdGCStateWatcher goroutine panicked", zap.Uint64("listener-id", listener.id), zap.Any("panic", r))
+			err = fmt.Errorf("holdGCStateWatcher goroutine panicked: %+v", r)
+		} else {
+			err = listener.watcher.Err()
+		}
 		if err == nil {
 			err = stopErr
 		}
