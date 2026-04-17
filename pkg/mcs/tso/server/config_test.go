@@ -99,8 +99,6 @@ max-gap-reset-ts = "1h"
 }
 
 func TestGetAdvertiseListenHost(t *testing.T) {
-	re := require.New(t)
-
 	tests := []struct {
 		name          string
 		advertiseAddr string
@@ -130,6 +128,7 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
 			s := &Server{
 				cfg: &Config{
 					AdvertiseListenAddr: tt.advertiseAddr,
@@ -141,6 +140,7 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 
 	// Test caching: second call should return the cached value.
 	t.Run("cached value", func(t *testing.T) {
+		re := require.New(t)
 		s := &Server{
 			cfg: &Config{
 				AdvertiseListenAddr: "http://192.168.1.1:2379",
