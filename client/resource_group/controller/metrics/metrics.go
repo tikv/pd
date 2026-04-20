@@ -17,15 +17,18 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	namespace             = "resource_manager_client"
-	requestSubsystem      = "request"
-	tokenRequestSubsystem = "token_request"
+	namespace              = "resource_manager_client"
+	requestSubsystem       = "request"
+	tokenRequestSubsystem  = "token_request"
+	resourceGroupSubsystem = "resource_group"
+	resourceUnitSubsystem  = "resource_unit"
+	resourceSubsystem      = "resource"
 
 	// TODO: remove old label in 8.x
 	resourceGroupNameLabel    = "name"
 	newResourceGroupNameLabel = "resource_group"
 
-	errType = "type"
+	typeLabel = "type"
 )
 
 var (
@@ -53,6 +56,28 @@ var (
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
+	// TokenConsumedByTypeCounter tracks RU consumption broken down by RU type (rru/wru).
+	TokenConsumedByTypeCounter *prometheus.CounterVec
+	// TokenBalanceGauge exposes the current available token balance per resource group.
+	TokenBalanceGauge *prometheus.GaugeVec
+	// FillRateGauge exposes the current effective fill rate (RU/s) per resource group.
+	FillRateGauge *prometheus.GaugeVec
+	// BurstLimitGauge exposes the current burst limit per resource group.
+	BurstLimitGauge *prometheus.GaugeVec
+	// AvgRUPerSecGauge exposes the estimated average RU consumption rate per resource group.
+	AvgRUPerSecGauge *prometheus.GaugeVec
+	// DemandRUPerSecGauge exposes the estimated pre-throttling demand RU/s per resource group.
+	DemandRUPerSecGauge *prometheus.GaugeVec
+	// ThrottledGauge exposes whether each resource group is currently in throttled (trickle) mode.
+	ThrottledGauge *prometheus.GaugeVec
+	// ReadByteCost tracks client-side read bytes per resource group.
+	ReadByteCost *prometheus.CounterVec
+	// WriteByteCost tracks client-side write bytes per resource group.
+	WriteByteCost *prometheus.CounterVec
+	// KVCPUCost tracks client-side KV CPU time in milliseconds per resource group.
+	KVCPUCost *prometheus.CounterVec
+	// SQLCPUCost tracks client-side SQL CPU time in milliseconds per resource group.
+	SQLCPUCost *prometheus.CounterVec
 )
 
 func init() {
@@ -96,7 +121,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "fail",
 			Help:        "Counter of failed request.",
 			ConstLabels: constLabels,
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, errType})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
 	GroupRunningKVRequestCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -156,6 +181,105 @@ func initMetrics(constLabels prometheus.Labels) {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
+
+	TokenConsumedByTypeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "consume_by_type",
+			Help:        "Counter of token consumption broken down by RU type.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel, typeLabel})
+
+	TokenBalanceGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "token_balance",
+			Help:        "Current available token balance in the limiter per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	FillRateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "fill_rate",
+			Help:        "Current effective fill rate (RU/s) of the limiter per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	BurstLimitGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "burst_limit",
+			Help:        "Current burst limit of the limiter per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	AvgRUPerSecGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "avg_ru_per_sec",
+			Help:        "Estimated average RU consumption rate per second (EMA) per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	DemandRUPerSecGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "demand_ru_per_sec",
+			Help:        "Estimated pre-throttling demand RU/s per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	ThrottledGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "throttled",
+			Help:        "Whether the resource group is currently in throttled (trickle) mode. 1 = throttled, 0 = normal.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	ReadByteCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceSubsystem,
+			Name:        "read_byte_sum",
+			Help:        "Counter of the read byte cost for all resource groups on the client side.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	WriteByteCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceSubsystem,
+			Name:        "write_byte_sum",
+			Help:        "Counter of the write byte cost for all resource groups on the client side.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	KVCPUCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceSubsystem,
+			Name:        "kv_cpu_time_ms_sum",
+			Help:        "Counter of the KV CPU time cost in milliseconds for all resource groups on the client side.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	SQLCPUCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceSubsystem,
+			Name:        "sql_cpu_time_ms_sum",
+			Help:        "Counter of the SQL CPU time cost in milliseconds for all resource groups on the client side.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -171,4 +295,15 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
+	prometheus.MustRegister(TokenConsumedByTypeCounter)
+	prometheus.MustRegister(TokenBalanceGauge)
+	prometheus.MustRegister(FillRateGauge)
+	prometheus.MustRegister(BurstLimitGauge)
+	prometheus.MustRegister(AvgRUPerSecGauge)
+	prometheus.MustRegister(DemandRUPerSecGauge)
+	prometheus.MustRegister(ThrottledGauge)
+	prometheus.MustRegister(ReadByteCost)
+	prometheus.MustRegister(WriteByteCost)
+	prometheus.MustRegister(KVCPUCost)
+	prometheus.MustRegister(SQLCPUCost)
 }

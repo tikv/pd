@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 func TestMain(m *testing.M) {
@@ -301,6 +302,64 @@ func TestTryGetController(t *testing.T) {
 	consumption, err = controller.OnResponse(defaultResourceGroupName, requestInfo, responseInfo)
 	re.NoError(err)
 	re.NotEmpty(consumption)
+}
+
+func TestCleanupResourceGroupMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+
+	testResourceGroup := &rmpb.ResourceGroup{
+		Name: "cleanup-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "cleanup-group", mock.Anything).Return(testResourceGroup, nil)
+
+	gc, err := controller.tryGetResourceGroupController(ctx, "cleanup-group", false)
+	re.NoError(err)
+	re.NotNil(gc)
+
+	metrics.ResourceGroupStatusGauge.WithLabelValues("cleanup-group", "cleanup-group").Set(1)
+	metrics.TokenConsumedHistogram.WithLabelValues("cleanup-group").Observe(1)
+	metrics.TokenConsumedByTypeCounter.WithLabelValues("cleanup-group", "rru").Add(1)
+	metrics.TokenConsumedByTypeCounter.WithLabelValues("cleanup-group", "wru").Add(1)
+	metrics.TokenBalanceGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.FillRateGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.BurstLimitGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.AvgRUPerSecGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.DemandRUPerSecGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.ThrottledGauge.WithLabelValues("cleanup-group").Set(1)
+	metrics.ReadByteCost.WithLabelValues("cleanup-group").Add(1)
+	metrics.WriteByteCost.WithLabelValues("cleanup-group").Add(1)
+	metrics.KVCPUCost.WithLabelValues("cleanup-group").Add(1)
+	metrics.SQLCPUCost.WithLabelValues("cleanup-group").Add(1)
+
+	gc.inactive = true
+	controller.cleanUpResourceGroup()
+
+	re.False(metrics.ResourceGroupStatusGauge.DeleteLabelValues("cleanup-group", "cleanup-group"))
+	re.False(metrics.TokenConsumedHistogram.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.TokenConsumedByTypeCounter.DeleteLabelValues("cleanup-group", "rru"))
+	re.False(metrics.TokenConsumedByTypeCounter.DeleteLabelValues("cleanup-group", "wru"))
+	re.False(metrics.TokenBalanceGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.FillRateGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.BurstLimitGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.AvgRUPerSecGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.DemandRUPerSecGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.ThrottledGauge.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.ReadByteCost.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.WriteByteCost.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.KVCPUCost.DeleteLabelValues("cleanup-group"))
+	re.False(metrics.SQLCPUCost.DeleteLabelValues("cleanup-group"))
 }
 
 func TestGetResourceGroup(t *testing.T) {
