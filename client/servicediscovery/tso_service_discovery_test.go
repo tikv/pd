@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 )
 
-func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimaryOnStaleRevision(t *testing.T) {
+func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimary(t *testing.T) {
 	re := require.New(t)
 	originalGroup := &tsopb.KeyspaceGroup{Id: 1}
 	newGroup := &tsopb.KeyspaceGroup{Id: 2}
@@ -44,10 +44,10 @@ func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimaryOnStaleRevision(t *testing.T
 		9,
 	)
 
-	re.Equal("http://primary-1", oldPrimaryURL)
-	re.True(primarySwitched)
+	re.Empty(oldPrimaryURL)
+	re.False(primarySwitched)
 	re.False(success)
-	re.Equal("http://primary-2", k.primaryURL)
+	re.Equal("http://primary-1", k.primaryURL)
 	re.Equal([]string{"http://secondary-1"}, k.secondaryURLs)
 	re.Equal([]string{"http://primary-1", "http://secondary-1"}, k.urls)
 	re.Same(originalGroup, k.group)
