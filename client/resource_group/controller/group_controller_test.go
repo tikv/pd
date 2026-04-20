@@ -20,11 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -420,6 +422,59 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 	// Should have refunded tokens.
 	re.Greater(tokensAfterSettlement, tokensAfterPreCharge,
 		"onResponseImpl should refund excess pre-charged tokens")
+}
+
+func TestNonprechargeMetricsRecordedWhenHintZero(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	nonprechargeCounter := metrics.PagingNonprechargeCounter.WithLabelValues(gc.name)
+	nonprechargeBytes := metrics.PagingNonprechargeActualBytes.WithLabelValues(gc.name)
+	prechargeCounter := metrics.PagingPrechargeCounter.WithLabelValues(gc.name)
+	actualBytes := metrics.PagingActualBytesCounter.WithLabelValues(gc.name)
+
+	countBefore := testutil.ToFloat64(nonprechargeCounter)
+	bytesBefore := testutil.ToFloat64(nonprechargeBytes)
+	prechargeBefore := testutil.ToFloat64(prechargeCounter)
+	actualBytesBefore := testutil.ToFloat64(actualBytes)
+
+	// Hint=0 read: implements predictedReadBytesProvider but returns 0 ->
+	// Phase 1 skips pre-charge, Phase 2 must record nonprecharge bytes.
+	const readBytesAmount = uint64(256 * 1024)
+	coldReq := &TestRequestInfo{isWrite: false}
+	coldResp := &TestResponseInfo{readBytes: readBytesAmount, succeed: true}
+
+	_, err := gc.onResponseImpl(coldReq, coldResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"hint=0 read should increment nonprecharge counter")
+	re.InDelta(bytesBefore+float64(readBytesAmount),
+		testutil.ToFloat64(nonprechargeBytes), 1e-6,
+		"nonprecharge bytes must equal Phase 2 actual read bytes")
+	re.InDelta(prechargeBefore, testutil.ToFloat64(prechargeCounter), 1e-6,
+		"precharge counter must stay unchanged when hint=0")
+	re.InDelta(actualBytesBefore, testutil.ToFloat64(actualBytes), 1e-6,
+		"warm-path actual-bytes counter must stay unchanged when hint=0")
+
+	// Sanity: a hint>0 read should hit the warm path, not the cold path.
+	warmReq := &TestRequestInfo{isWrite: false, predictedReadBytes: 1 * 1024 * 1024}
+	warmResp := &TestResponseInfo{readBytes: readBytesAmount, succeed: true}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.TODO(), warmReq)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(warmReq, warmResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"warm request must not touch nonprecharge counter")
+	re.InDelta(prechargeBefore+1, testutil.ToFloat64(prechargeCounter), 1e-6,
+		"warm request should increment precharge counter")
+
+	// Writes skip both buckets entirely.
+	writeReq := &TestRequestInfo{isWrite: true, writeBytes: 1024}
+	writeResp := &TestResponseInfo{readBytes: 0, succeed: true}
+	_, err = gc.onResponseImpl(writeReq, writeResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"write must not touch nonprecharge counter")
 }
 
 func TestPagingPreChargeZeroDelta(t *testing.T) {

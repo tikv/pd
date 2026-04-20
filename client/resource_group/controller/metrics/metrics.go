@@ -67,6 +67,17 @@ var (
 	// PagingPredictionResidualBytes observes (actual - predicted) bytes for
 	// pre-charged requests. Shows EMA prediction accuracy.
 	PagingPredictionResidualBytes *prometheus.HistogramVec
+
+	// PagingNonprechargeCounter counts RPCs that implemented the predicted
+	// read-bytes interface but reported 0 (e.g. EMA cold-start) and therefore
+	// ran without Phase 1 pre-charge. Paired with PagingPrechargeCounter this
+	// yields the cold/ready RPC split from the PD side.
+	PagingNonprechargeCounter *prometheus.CounterVec
+	// PagingNonprechargeActualBytes sums the actual read bytes of RPCs that
+	// skipped pre-charge. Quantifies how much read volume bypassed Phase 1
+	// throttling — the "cold window" signal for token-bucket pressure
+	// analysis.
+	PagingNonprechargeActualBytes *prometheus.CounterVec
 )
 
 func init() {
@@ -209,6 +220,24 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged requests. Shows EMA prediction accuracy.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
+
+	PagingNonprechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_total",
+			Help:        "Counter of RC paging RPCs that implemented the predicted hint but reported 0 (e.g. EMA cold-start) and ran without Phase 1 pre-charge.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingNonprechargeActualBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_actual_bytes_total",
+			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint=0). Quantifies cold-window read volume bypassing Phase 1 throttling.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -228,4 +257,6 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
 	prometheus.MustRegister(PagingPredictionResidualBytes)
+	prometheus.MustRegister(PagingNonprechargeCounter)
+	prometheus.MustRegister(PagingNonprechargeActualBytes)
 }

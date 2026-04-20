@@ -114,6 +114,12 @@ type groupMetricsCollection struct {
 	prechargeBytesCounter   prometheus.Counter
 	actualBytesCounter      prometheus.Counter
 	predictionResidualBytes prometheus.Observer
+
+	// Nonprecharge bucket: RPCs that implemented the predicted-bytes
+	// interface but reported 0 (EMA cold-start or feature-disabled) and
+	// therefore skipped Phase 1 pre-charge entirely. Recorded at Phase 2.
+	nonprechargeCounter     prometheus.Counter
+	nonprechargeActualBytes prometheus.Counter
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -135,6 +141,9 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
 		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
 		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
+
+		nonprechargeCounter:     metrics.PagingNonprechargeCounter.WithLabelValues(name),
+		nonprechargeActualBytes: metrics.PagingNonprechargeActualBytes.WithLabelValues(name),
 	}
 }
 
@@ -151,6 +160,16 @@ func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64) {
 func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64) {
 	gmc.actualBytesCounter.Add(float64(actual))
 	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
+}
+
+// observePagingNonprecharge records one RPC that implemented the predicted
+// read-bytes interface but reported 0 (EMA cold or feature disabled) and
+// therefore ran without Phase 1 pre-charge. `actual` is the response's read
+// bytes, settled at Phase 2. Paired with observePagingPrecharge this gives
+// the cold/ready split and the byte volume that bypassed throttling.
+func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
+	gmc.nonprechargeCounter.Inc()
+	gmc.nonprechargeActualBytes.Add(float64(actual))
 }
 
 type tokenCounter struct {
@@ -634,6 +653,10 @@ func (gc *groupCostController) onResponseImpl(
 	}
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+	} else if !req.IsWrite() {
+		if _, ok := req.(predictedReadBytesProvider); ok {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
@@ -670,6 +693,10 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+	} else if !req.IsWrite() {
+		if _, ok := req.(predictedReadBytesProvider); ok {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
 	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
