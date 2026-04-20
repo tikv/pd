@@ -26,15 +26,6 @@ const (
 	newResourceGroupNameLabel = "resource_group"
 
 	errType = "type"
-
-	// sourceLabel distinguishes whether paging pre-charge used the learned
-	// PredictedReadBytes hint ("predicted") or fell back to PagingSizeBytes
-	// ("fallback"). Exported so call sites can pass the canonical value.
-	sourceLabel = "source"
-	// SourcePredicted is the sourceLabel value when pre-charge used a learned hint.
-	SourcePredicted = "predicted"
-	// SourceFallback is the sourceLabel value when pre-charge fell back to PagingSizeBytes.
-	SourceFallback = "fallback"
 )
 
 var (
@@ -63,18 +54,18 @@ var (
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 
-	// PagingPrechargeSourceCounter counts paging pre-charge decisions by source
-	// (predicted hint vs PagingSizeBytes fallback), per resource group.
-	PagingPrechargeSourceCounter *prometheus.CounterVec
-	// PagingPrechargeBytesCounter sums bytes used as the pre-charge basis,
-	// partitioned by source so the predicted path can be isolated from fallback.
+	// PagingPrechargeCounter counts paging pre-charge events (predicted hint
+	// present and > 0), per resource group. Cold starts and unhinted requests
+	// are not pre-charged and therefore not counted here.
+	PagingPrechargeCounter *prometheus.CounterVec
+	// PagingPrechargeBytesCounter sums bytes used as the pre-charge basis.
 	PagingPrechargeBytesCounter *prometheus.CounterVec
-	// PagingActualBytesCounter sums actual read bytes reported after the KV RPC,
-	// partitioned by the pre-charge source that was used. Ratio against
-	// PagingPrechargeBytesCounter reveals over-charge factor.
+	// PagingActualBytesCounter sums actual read bytes reported after the KV
+	// RPC for pre-charged requests. Ratio against PagingPrechargeBytesCounter
+	// reveals over/under-charge factor.
 	PagingActualBytesCounter *prometheus.CounterVec
 	// PagingPredictionResidualBytes observes (actual - predicted) bytes for
-	// requests that took the predicted path. Shows EMA prediction accuracy.
+	// pre-charged requests. Shows EMA prediction accuracy.
 	PagingPredictionResidualBytes *prometheus.HistogramVec
 )
 
@@ -180,32 +171,32 @@ func initMetrics(constLabels prometheus.Labels) {
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
 
-	PagingPrechargeSourceCounter = prometheus.NewCounterVec(
+	PagingPrechargeCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
-			Name:        "paging_precharge_source_total",
-			Help:        "Counter of paging pre-charge decisions, partitioned by whether a learned PredictedReadBytes hint was used or the PagingSizeBytes fallback.",
+			Name:        "paging_precharge_total",
+			Help:        "Counter of RC paging pre-charge events (PredictedReadBytes hint present and > 0).",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, sourceLabel})
+		}, []string{newResourceGroupNameLabel})
 
 	PagingPrechargeBytesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_precharge_bytes_total",
-			Help:        "Sum of bytes used as the RC paging pre-charge basis, partitioned by source.",
+			Help:        "Sum of bytes used as the RC paging pre-charge basis (predicted hint).",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, sourceLabel})
+		}, []string{newResourceGroupNameLabel})
 
 	PagingActualBytesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging KV requests, labelled by the pre-charge source that was used for the same request.",
+			Help:        "Sum of actual bytes read by paging KV requests that were pre-charged.",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, sourceLabel})
+		}, []string{newResourceGroupNameLabel})
 
 	PagingPredictionResidualBytes = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -215,7 +206,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			// Signed residual = actual - predicted. Buckets cover both directions
 			// up to the typical paging budget (a few MB).
 			Buckets:     []float64{-4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304},
-			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for requests that used the predicted pre-charge path. Shows EMA prediction accuracy.",
+			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged requests. Shows EMA prediction accuracy.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 }
@@ -233,7 +224,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
-	prometheus.MustRegister(PagingPrechargeSourceCounter)
+	prometheus.MustRegister(PagingPrechargeCounter)
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
 	prometheus.MustRegister(PagingPredictionResidualBytes)
