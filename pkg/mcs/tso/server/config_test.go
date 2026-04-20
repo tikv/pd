@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -101,56 +102,53 @@ max-gap-reset-ts = "1h"
 func TestGetAdvertiseListenHost(t *testing.T) {
 	re := require.New(t)
 
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+
 	tests := []struct {
 		name          string
 		advertiseAddr string
-		expected      string
+		panic         bool
 	}{
 		{
 			name:          "valid http address",
 			advertiseAddr: "http://127.0.0.1:2379",
-			expected:      "127.0.0.1:2379",
+			panic:         false,
 		},
 		{
 			name:          "valid https address",
-			advertiseAddr: "https://10.0.0.1:2379",
-			expected:      "10.0.0.1:2379",
+			advertiseAddr: "https://127.0.0.1:2379",
+			panic:         false,
 		},
 		{
 			name:          "empty address",
 			advertiseAddr: "",
-			expected:      "",
+			panic:         false,
 		},
 		{
 			name:          "address without scheme treated as path not host",
 			advertiseAddr: "127.0.0.1:2379",
-			expected:      "",
+			panic:         true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := &Server{
-				cfg: &Config{
-					AdvertiseListenAddr: tt.advertiseAddr,
-				},
+			cfg := &Config{
+				AdvertiseListenAddr: tt.advertiseAddr,
 			}
-			re.Equal(tt.expected, s.getAdvertiseListenHost())
+			if tt.panic {
+				re.Panics(func() {
+					CreateServer(ctx, cfg)
+				}, "expected panic for invalid advertise listen address")
+			} else {
+				svr := CreateServer(ctx, cfg)
+				if tt.advertiseAddr == "" {
+					re.Equal("", svr.advertiseListenHost)
+				} else {
+					re.Equal("127.0.0.1:2379", svr.advertiseListenHost)
+				}
+			}
 		})
 	}
-
-	// Test caching: second call should return the cached value.
-	t.Run("cached value", func(t *testing.T) {
-		s := &Server{
-			cfg: &Config{
-				AdvertiseListenAddr: "http://192.168.1.1:2379",
-			},
-		}
-		first := s.getAdvertiseListenHost()
-		re.Equal("192.168.1.1:2379", first)
-		// Change config; cached value should still be returned.
-		s.cfg.AdvertiseListenAddr = "http://10.0.0.1:2379"
-		second := s.getAdvertiseListenHost()
-		re.Equal("192.168.1.1:2379", second)
-	})
 }

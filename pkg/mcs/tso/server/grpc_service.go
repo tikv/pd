@@ -101,7 +101,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
-		host := s.getAdvertiseListenHost()
+		host := s.advertiseListenHost
 		if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
 			if calleeID != host {
 				return status.Errorf(

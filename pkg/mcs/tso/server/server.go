@@ -92,22 +92,8 @@ type Server struct {
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
 
-	// advertiseListenHost is the host part of the advertise listen address,
-	advertiseListenHost atomic.Pointer[string]
-}
-
-func (s *Server) getAdvertiseListenHost() string {
-	host := s.advertiseListenHost.Load()
-	if host == nil {
-		addr := s.GetConfig().GetAdvertiseListenAddr()
-		parsed, err := url.Parse(addr)
-		if err != nil || parsed.Host == "" {
-			return ""
-		}
-		s.advertiseListenHost.CompareAndSwap(nil, &parsed.Host)
-		host = s.advertiseListenHost.Load()
-	}
-	return *host
+	// advertiseListenHost is the host part of the advertise listen address
+	advertiseListenHost string
 }
 
 // Implement the following methods defined in bs.Server
@@ -403,10 +389,16 @@ func (s *Server) startServer() (err error) {
 
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
+	addr := cfg.GetAdvertiseListenAddr()
+	parsed, err := url.Parse(addr)
+	if err != nil {
+		panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
+	}
 	svr := &Server{
-		BaseServer:        server.NewBaseServer(ctx),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		cfg:               cfg,
+		BaseServer:          server.NewBaseServer(ctx),
+		DiagnosticsServer:   sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                 cfg,
+		advertiseListenHost: parsed.Host,
 	}
 	return svr
 }
