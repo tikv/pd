@@ -113,7 +113,7 @@ type GCStateManager struct {
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
 	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
-	mu              syncutil.RWMutex
+	mu              syncutil.CancellableRWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
