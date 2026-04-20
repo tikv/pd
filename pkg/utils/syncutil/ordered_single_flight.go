@@ -112,6 +112,15 @@ func NewOrderedSingleFlight[TResult any]() *OrderedSingleFlight[TResult] {
 // Do tries to execute the function `f`, or if possible, wait and reuse the result of an execution triggered by another
 // goroutine. See comments of OrderedSingleFlight for details.
 func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Context) (TResult, error)) (TResult, error) {
+	return s.doImpl(ctx, f, nil, nil)
+}
+
+func (s *OrderedSingleFlight[TResult]) doImpl(
+	ctx context.Context,
+	f func(context.Context) (TResult, error),
+	onExecutionStart func(),
+	onExecutionFinish func(),
+) (TResult, error) {
 	var currentTask *task[TResult]
 
 	s.mu.Lock()
@@ -157,10 +166,17 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Co
 	currentTask.seal()
 	s.mu.Unlock()
 
+	if onExecutionStart != nil {
+		onExecutionStart()
+	}
+
 	// Execute the function and distribute the result. Spawn it into a separate goroutine to make the current call able
 	// to be canceled by the context without interrupting other callers.
 	go func() {
 		defer func() {
+			if onExecutionFinish != nil {
+				onExecutionFinish()
+			}
 			s.tokenCh <- struct{}{}
 		}()
 
@@ -184,4 +200,85 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Co
 // ExecCount returns the accumulated number of executions of the inner function.
 func (s *OrderedSingleFlight[TResult]) ExecCount() int64 {
 	return s.execCounter.Load()
+}
+
+type orderedSingleFlightGroupEntry[TResult any] struct {
+	singleFlight *OrderedSingleFlight[TResult]
+	callers      int
+	executions   int
+}
+
+// OrderedSingleFlightGroup is a keyed wrapper around OrderedSingleFlight.
+type OrderedSingleFlightGroup[TKey comparable, TResult any] struct {
+	mu      Mutex
+	entries map[TKey]*orderedSingleFlightGroupEntry[TResult]
+}
+
+// NewOrderedSingleFlightGroup creates an instance of OrderedSingleFlightGroup.
+func NewOrderedSingleFlightGroup[TKey comparable, TResult any]() *OrderedSingleFlightGroup[TKey, TResult] {
+	return &OrderedSingleFlightGroup[TKey, TResult]{
+		entries: make(map[TKey]*orderedSingleFlightGroupEntry[TResult]),
+	}
+}
+
+// Do tries to execute the function `f` for the given key, or if possible, wait and reuse the result of an execution
+// triggered by another goroutine with the same key.
+func (g *OrderedSingleFlightGroup[TKey, TResult]) Do(ctx context.Context, key TKey, f func(context.Context) (TResult, error)) (TResult, error) {
+	entry := g.acquireEntry(key)
+	defer g.releaseCaller(key, entry)
+
+	return entry.singleFlight.doImpl(
+		ctx,
+		f,
+		func() {
+			g.startExecution(entry)
+		},
+		func() {
+			g.finishExecution(key, entry)
+		},
+	)
+}
+
+func (g *OrderedSingleFlightGroup[TKey, TResult]) acquireEntry(key TKey) *orderedSingleFlightGroupEntry[TResult] {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	entry, ok := g.entries[key]
+	if !ok {
+		entry = &orderedSingleFlightGroupEntry[TResult]{
+			singleFlight: NewOrderedSingleFlight[TResult](),
+		}
+		g.entries[key] = entry
+	}
+	entry.callers++
+	return entry
+}
+
+func (g *OrderedSingleFlightGroup[TKey, TResult]) releaseCaller(key TKey, entry *orderedSingleFlightGroupEntry[TResult]) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	entry.callers--
+	g.tryDeleteLocked(key, entry)
+}
+
+func (g *OrderedSingleFlightGroup[TKey, TResult]) startExecution(entry *orderedSingleFlightGroupEntry[TResult]) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	entry.executions++
+}
+
+func (g *OrderedSingleFlightGroup[TKey, TResult]) finishExecution(key TKey, entry *orderedSingleFlightGroupEntry[TResult]) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	entry.executions--
+	g.tryDeleteLocked(key, entry)
+}
+
+func (g *OrderedSingleFlightGroup[TKey, TResult]) tryDeleteLocked(key TKey, entry *orderedSingleFlightGroupEntry[TResult]) {
+	if entry.callers == 0 && entry.executions == 0 && g.entries[key] == entry {
+		delete(g.entries, key)
+	}
 }

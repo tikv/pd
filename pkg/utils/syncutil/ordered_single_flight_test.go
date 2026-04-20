@@ -628,6 +628,70 @@ func TestOrderedSingleFightRandom(t *testing.T) {
 	}
 }
 
+func TestOrderedSingleFlightGroup(t *testing.T) {
+	re := require.New(t)
+
+	type result struct {
+		v   int
+		err error
+	}
+
+	g := NewOrderedSingleFlightGroup[string, int]()
+	outCh := make(chan result, 10)
+	startCh1 := make(chan struct{}, 10)
+	startCh2 := make(chan struct{}, 10)
+	inCh1 := make(chan int, 10)
+	inCh2 := make(chan int, 10)
+
+	//nolint:unparam
+	f1 := func(context.Context) (int, error) {
+		startCh1 <- struct{}{}
+		return <-inCh1, nil
+	}
+	//nolint:unparam
+	f2 := func(context.Context) (int, error) {
+		startCh2 <- struct{}{}
+		return <-inCh2, nil
+	}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go func() {
+		res, err := g.Do(ctx1, "k1", f1)
+		outCh <- result{v: res, err: err}
+	}()
+	mustGetResult(re, startCh1)
+
+	cancel1()
+	res := mustGetResult(re, outCh)
+	re.ErrorIs(res.err, context.Canceled)
+
+	go func() {
+		res, err := g.Do(context.Background(), "k1", f1)
+		outCh <- result{v: res, err: err}
+	}()
+	mustBlocking(re, startCh1)
+
+	go func() {
+		res, err := g.Do(context.Background(), "k2", f2)
+		outCh <- result{v: res, err: err}
+	}()
+	mustGetResult(re, startCh2)
+
+	inCh2 <- 202
+	res = mustGetResult(re, outCh)
+	re.NoError(res.err)
+	re.Equal(202, res.v)
+
+	inCh1 <- 101
+	mustGetResult(re, startCh1)
+	inCh1 <- 102
+	res = mustGetResult(re, outCh)
+	re.NoError(res.err)
+	re.Equal(102, res.v)
+
+	re.Empty(g.entries)
+}
+
 func BenchmarkOrderedSingleFlightSingleThread(b *testing.B) {
 	s := NewOrderedSingleFlight[int]()
 	noop := func(context.Context) (int, error) { return 0, nil }

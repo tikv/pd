@@ -359,4 +359,3 @@ func TestCancellableRWMutexTryLockAndTryRLock(t *testing.T) {
 
 	assertMutexUsable(t, &mu)
 }
-

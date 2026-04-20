@@ -35,6 +35,8 @@ const (
 // It is implemented on top of a weighted semaphore, so its scheduling behavior
 // differs from sync.RWMutex. Like sync.RWMutex, it is not associated with a
 // particular goroutine, but mismatched Unlock/RUnlock calls panic.
+//
+// The zero value of CancellableRWMutex is ready to use.
 type CancellableRWMutex struct {
 	initOnce sync.Once
 	inner    *semaphore.Weighted
@@ -52,6 +54,8 @@ func (m *CancellableRWMutex) init() {
 	})
 }
 
+// RLock acquires a read lock or returns an error if ctx is canceled before the
+// lock is acquired.
 func (m *CancellableRWMutex) RLock(ctx context.Context) error {
 	m.init()
 
@@ -84,6 +88,7 @@ func (m *CancellableRWMutex) TryRLock() bool {
 	return true
 }
 
+// RUnlock releases a read lock.
 func (m *CancellableRWMutex) RUnlock() {
 	m.init()
 
@@ -100,6 +105,8 @@ func (m *CancellableRWMutex) RUnlock() {
 	m.inner.Release(1)
 }
 
+// Lock acquires a write lock or returns an error if ctx is canceled before the
+// lock is acquired.
 func (m *CancellableRWMutex) Lock(ctx context.Context) error {
 	m.init()
 
@@ -130,6 +137,7 @@ func (m *CancellableRWMutex) TryLock() bool {
 	return true
 }
 
+// Unlock releases a write lock.
 func (m *CancellableRWMutex) Unlock() {
 	m.init()
 

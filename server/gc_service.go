@@ -35,6 +35,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
+const (
+	gcStateManagerRequestTimeout          = 10 * time.Second
+	getAllKeyspacesGCStatesRequestTimeout = time.Minute
+)
+
 // UpdateGCSafePoint implements gRPC PDServer.
 //
 // Deprecated: Use AdvanceGCSafePoint instead. Note that it's only for use of GC internal.
@@ -72,7 +77,9 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	}
 
 	newSafePoint := request.GetSafePoint()
-	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(constant.NullKeyspaceID, newSafePoint)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(innerCtx, constant.NullKeyspaceID, newSafePoint)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +136,9 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(innerCtx, constant.NullKeyspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +203,9 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	min, updated, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(innerCtx, constant.NullKeyspaceID, serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +259,9 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 		return &pdpb.GetGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(request.GetKeyspaceId())
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(innerCtx, request.GetKeyspaceId())
 
 	if err != nil {
 		return &pdpb.GetGCSafePointV2Response{
@@ -299,7 +312,9 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 	}
 
 	newSafePoint := request.GetSafePoint()
-	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(request.GetKeyspaceId(), newSafePoint)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	oldSafePoint, _, err := s.gcStateManager.CompatibleUpdateGCSafePoint(innerCtx, request.GetKeyspaceId(), newSafePoint)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +396,9 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 
 	serviceID := string(request.ServiceId)
-	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	min, _, err := s.gcStateManager.CompatibleUpdateServiceGCSafePoint(innerCtx, request.GetKeyspaceId(), serviceID, request.GetSafePoint(), request.GetTtl(), now)
 
 	if err != nil {
 		return nil, err
@@ -440,7 +457,9 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 		return &pdpb.GetAllGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
+	innerCtx, cancel := context.WithTimeout(ctx, getAllKeyspacesGCStatesRequestTimeout)
+	defer cancel()
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(innerCtx)
 	if err != nil {
 		return &pdpb.GetAllGCSafePointV2Response{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -550,7 +569,9 @@ func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.Advan
 	if rc == nil {
 		return &pdpb.AdvanceGCSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
-	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(innerCtx, getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
 	if err != nil {
 		return &pdpb.AdvanceGCSafePointResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -587,7 +608,9 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 		return &pdpb.AdvanceTxnSafePointResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	res, err := s.gcStateManager.AdvanceTxnSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	res, err := s.gcStateManager.AdvanceTxnSafePoint(innerCtx, getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
 	if err != nil {
 		return &pdpb.AdvanceTxnSafePointResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -630,7 +653,9 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	newBarrier, err := s.gcStateManager.SetGCBarrier(keyspaceID, barrierID, barrierTS, ttl, now)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	newBarrier, err := s.gcStateManager.SetGCBarrier(innerCtx, keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -668,7 +693,9 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 
 	now := time.Now()
 
-	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(innerCtx, getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
 	if err != nil {
 		return &pdpb.DeleteGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -704,7 +731,9 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		return &pdpb.GetGCStateResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()))
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	gcState, err := s.gcStateManager.GetGCState(innerCtx, getKeyspaceID(request.GetKeyspaceScope()))
 	if err != nil {
 		return &pdpb.GetGCStateResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -740,7 +769,9 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 		return &pdpb.GetAllKeyspacesGCStatesResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
+	innerCtx, cancel := context.WithTimeout(ctx, getAllKeyspacesGCStatesRequestTimeout)
+	defer cancel()
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(innerCtx)
 	if err != nil {
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -752,7 +783,7 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 		gcStatesPb = append(gcStatesPb, gcStateToProto(gcState, now))
 	}
 
-	globalBarriers, err := s.gcStateManager.LoadAllGlobalGCBarriers()
+	globalBarriers, err := s.gcStateManager.LoadAllGlobalGCBarriers(innerCtx)
 	if err != nil {
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -797,7 +828,9 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(innerCtx, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGlobalGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -836,7 +869,9 @@ func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.De
 	now := time.Now()
 
 	barrierID := request.GetBarrierId()
-	deletedBarrier, err := s.gcStateManager.DeleteGlobalGCBarrier(ctx, barrierID)
+	innerCtx, cancel := context.WithTimeout(ctx, gcStateManagerRequestTimeout)
+	defer cancel()
+	deletedBarrier, err := s.gcStateManager.DeleteGlobalGCBarrier(innerCtx, barrierID)
 	if err != nil {
 		return &pdpb.DeleteGlobalGCBarrierResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
