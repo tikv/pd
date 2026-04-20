@@ -640,6 +640,10 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 	// Remove the keyspaces from the keyspace group
 	kg, err := groupManager.RemoveKeyspacesFromGroup(groupID, validKeyspaces)
 	if err != nil {
+		if errs.ErrKeyspaceGroupNotExists.Equal(err) {
+			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
