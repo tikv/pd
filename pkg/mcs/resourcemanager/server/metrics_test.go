@@ -15,9 +15,12 @@
 package server
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -113,4 +116,105 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 			re.Equal(tracker.rruSum, expectedSum[period])
 		}
 	}
+}
+
+func TestObserveTokenGrantRecordsZeroTrickle(t *testing.T) {
+	re := require.New(t)
+	groupName := "observe_token_group"
+	keyspaceName := "observe_token_keyspace"
+
+	observeTokenGrant(groupName, keyspaceName, &rmpb.GrantedRUTokenBucket{
+		GrantedTokens: &rmpb.TokenBucket{Tokens: 42},
+		TrickleTimeMs: 0,
+	})
+
+	granted := findHistogramMetric(re, "resource_manager_server_granted_tokens", map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         keyspaceName,
+	})
+	re.Equal(uint64(1), granted.GetSampleCount())
+	re.Equal(42.0, granted.GetSampleSum())
+
+	trickle := findHistogramMetric(re, "resource_manager_server_trickle_duration_ms", map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         keyspaceName,
+	})
+	re.Equal(uint64(1), trickle.GetSampleCount())
+	re.Zero(trickle.GetSampleSum())
+}
+
+func TestObserveRequestCause(t *testing.T) {
+	re := require.New(t)
+	groupName := "observe_request_group"
+	keyspaceName := "observe_request_keyspace"
+	throttleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	trickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
+
+	observeRequestCause(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	observeRequestCause(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
+
+	re.Equal(1.0, testutil.ToFloat64(throttleCounter))
+	re.Equal(1.0, testutil.ToFloat64(trickleCounter))
+}
+
+func TestGaugeMetricsSetGroupSlotMetrics(t *testing.T) {
+	re := require.New(t)
+	groupName := "slot_group"
+	keyspaceName := "slot_keyspace"
+	rg := &ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(groupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   100,
+				BurstLimit: 200,
+			},
+		}),
+	}
+	rg.RUSettings.RU.tokenSlots[1] = &tokenSlot{curTokenCapacity: -12.5}
+	rg.RUSettings.RU.slotsCreated = 2
+	rg.RUSettings.RU.slotsDeleted = 1
+	rg.RUSettings.RU.slotsExpired = 3
+
+	gm := newGaugeMetrics(keyspaceName, groupName)
+	gm.setGroup(rg, keyspaceName)
+
+	re.Equal(1.0, testutil.ToFloat64(gm.activeSlotCountGauge))
+	re.Equal(12.5, testutil.ToFloat64(gm.tokenLoanGauge))
+	re.Equal(2.0, testutil.ToFloat64(gm.slotCreatedCounter))
+	re.Equal(1.0, testutil.ToFloat64(gm.slotDeletedCounter))
+	re.Equal(3.0, testutil.ToFloat64(gm.slotExpiredCounter))
+	created, deleted, expired := rg.DrainSlotEvents()
+	re.Zero(created)
+	re.Zero(deleted)
+	re.Zero(expired)
+}
+
+func findHistogramMetric(re *require.Assertions, metricName string, labels map[string]string) *dto.Histogram {
+	metrics, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, mf := range metrics {
+		if mf.GetName() != metricName {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			if matchMetricLabels(metric.GetLabel(), labels) {
+				return metric.GetHistogram()
+			}
+		}
+	}
+	re.FailNow(fmt.Sprintf("metric %s with labels %v not found", metricName, labels))
+	return nil
+}
+
+func matchMetricLabels(actual []*dto.LabelPair, expected map[string]string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for _, label := range actual {
+		if expected[label.GetName()] != label.GetValue() {
+			return false
+		}
+	}
+	return true
 }

@@ -198,6 +198,47 @@ func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLi
 	rg.overrideBurstLimitLocked(burstLimit)
 }
 
+// SlotMetrics holds a snapshot of the token slot state for metrics reporting.
+type SlotMetrics struct {
+	SlotCount int
+	TokenLoan float64
+}
+
+// GetSlotMetrics returns the current token slot snapshot under the group lock.
+func (rg *ResourceGroup) GetSlotMetrics() SlotMetrics {
+	rg.RLock()
+	defer rg.RUnlock()
+	if rg.RUSettings == nil || rg.RUSettings.RU == nil {
+		return SlotMetrics{}
+	}
+	var tokenLoan float64
+	for _, slot := range rg.RUSettings.RU.tokenSlots {
+		if slot.curTokenCapacity < 0 {
+			tokenLoan += -slot.curTokenCapacity
+		}
+	}
+	return SlotMetrics{
+		SlotCount: len(rg.RUSettings.RU.tokenSlots),
+		TokenLoan: tokenLoan,
+	}
+}
+
+// DrainSlotEvents returns the accumulated slot event counts and resets them.
+func (rg *ResourceGroup) DrainSlotEvents() (created, deleted, expired uint64) {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings == nil || rg.RUSettings.RU == nil {
+		return 0, 0, 0
+	}
+	created = rg.RUSettings.RU.slotsCreated
+	deleted = rg.RUSettings.RU.slotsDeleted
+	expired = rg.RUSettings.RU.slotsExpired
+	rg.RUSettings.RU.slotsCreated = 0
+	rg.RUSettings.RU.slotsDeleted = 0
+	rg.RUSettings.RU.slotsExpired = 0
+	return
+}
+
 // PatchSettings patches the resource group settings.
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
@@ -274,6 +315,7 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+	keyspaceName string,
 	grt *groupRUTracker, sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
@@ -293,7 +335,8 @@ func (rg *ResourceGroup) RequestRU(
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
 	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
-	if limitedTokens < grantedTokens {
+	serviceLimited := limitedTokens < grantedTokens
+	if serviceLimited {
 		tb.Tokens = limitedTokens
 		// Retain the unused tokens for the later requests if it has a burst limit.
 		if rg.getBurstLimitLocked() > 0 {
@@ -302,6 +345,69 @@ func (rg *ResourceGroup) RequestRU(
 	}
 	if trickleTimeMs < minTrickleTimeMs {
 		trickleTimeMs = minTrickleTimeMs
+	}
+	observeTokenGrant(rg.Name, keyspaceName, &rmpb.GrantedRUTokenBucket{
+		GrantedTokens: &rmpb.TokenBucket{Tokens: tb.GetTokens()},
+		TrickleTimeMs: trickleTimeMs,
+	})
+	if serviceLimited {
+		observeRequestCause(rg.Name, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	}
+	if grantedTokens < requiredToken {
+		observeRequestCause(rg.Name, keyspaceName, throttleKindLabel, groupCauseLabel)
+	}
+	if minTrickleTimeMs > 0 {
+		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
+	}
+	if trickleTimeMs > 0 {
+		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, groupCauseLabel)
+	}
+	if serviceLimited || grantedTokens < requiredToken {
+		cause := groupCauseLabel
+		if serviceLimited {
+			cause = serviceLimitCauseLabel
+		}
+		sampledRUPerSec := 0.0
+		if grt != nil {
+			sampledRUPerSec = grt.getRUPerSec()
+		}
+		serviceLimit := 0.0
+		if sl != nil {
+			serviceLimit = sl.getServiceLimit()
+		}
+		overrideFillRate := rg.RUSettings.RU.overrideFillRate
+		log.Info("resource group token request is limited",
+			zap.String("resource-group", rg.Name),
+			zap.String("keyspace-name", keyspaceName),
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("required-token", requiredToken),
+			zap.Float64("granted-token", tb.GetTokens()),
+			zap.Int64("trickle-ms", trickleTimeMs),
+			zap.Float64("sampled-ru-per-sec", sampledRUPerSec),
+			zap.Float64("override-fill-rate", overrideFillRate),
+			zap.Float64("service-limit", serviceLimit),
+			zap.String("cause", cause),
+		)
+	}
+	if trickleTimeMs > 0 {
+		cause := groupCauseLabel
+		if minTrickleTimeMs > 0 {
+			cause = serviceLimitCauseLabel
+		}
+		serviceLimit := 0.0
+		if sl != nil {
+			serviceLimit = sl.getServiceLimit()
+		}
+		log.Debug("resource group token request is trickled",
+			zap.String("resource-group", rg.Name),
+			zap.String("keyspace-name", keyspaceName),
+			zap.Uint64("client-unique-id", clientUniqueID),
+			zap.Float64("required-token", requiredToken),
+			zap.Float64("granted-token", tb.GetTokens()),
+			zap.Int64("trickle-ms", trickleTimeMs),
+			zap.Float64("service-limit", serviceLimit),
+			zap.String("cause", cause),
+		)
 	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
