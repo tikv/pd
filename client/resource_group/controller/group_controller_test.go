@@ -208,112 +208,84 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
-func TestPagingSizeBytesPreCharge(t *testing.T) {
+func TestPredictedReadBytesPreCharge(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()
 	kvCalc := newKVCalculator(cfg)
 
-	// Phase 1: BeforeKVRequest with pagingSizeBytes should pre-charge
-	// baseCost + pagingSizeBytes * ReadBytesCost.
-	pagingSizeBytes := uint64(4 * 1024 * 1024) // 4 MB
-	req := &TestRequestInfo{
-		isWrite:         false,
-		pagingSizeBytes: pagingSizeBytes,
-	}
-	phase1 := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(phase1, req)
-
-	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*0.7
-	bytesCost := float64(cfg.ReadBytesCost) * float64(pagingSizeBytes)
-	re.InDelta(baseCost+bytesCost, phase1.RRU, 1e-6,
-		"Phase 1 should pre-charge baseCost + bytes RU")
-
-	// Phase 2: AfterKVRequest should subtract the pre-charged bytes RU.
-	resp := &TestResponseInfo{
-		readBytes: 2 * 1024 * 1024, // actual read 2 MB
-		kvCPU:     10 * time.Millisecond,
-		succeed:   true,
-	}
-	phase2 := &rmpb.Consumption{}
-	kvCalc.AfterKVRequest(phase2, req, resp)
-
-	actualReadCost := float64(cfg.ReadBytesCost) * float64(resp.readBytes)
-	cpuCost := float64(cfg.CPUMsCost) * 10.0
-	expectedPhase2RRU := actualReadCost + cpuCost - bytesCost
-	re.InDelta(expectedPhase2RRU, phase2.RRU, 1e-6,
-		"Phase 2 should be actualCost - preCharged bytesCost")
-
-	// Net total should equal baseCost + actualCost (no double-counting).
-	totalRRU := phase1.RRU + phase2.RRU
-	expectedTotal := baseCost + actualReadCost + cpuCost
-	re.InDelta(expectedTotal, totalRRU, 1e-6,
-		"Total RRU across Phase 1+2 should equal baseCost + actualCost")
-
-	// Without pagingSizeBytes, Phase 1 should only charge baseCost.
-	reqNoPaging := &TestRequestInfo{isWrite: false}
-	noPaging := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(noPaging, reqNoPaging)
-	re.InDelta(baseCost, noPaging.RRU, 1e-6,
-		"Without paging, Phase 1 should only charge baseCost")
-}
-
-func TestPredictedReadBytesOverridesPagingSizeBytes(t *testing.T) {
-	re := require.New(t)
-	cfg := DefaultRUConfig()
-	kvCalc := newKVCalculator(cfg)
-
-	// When PredictedReadBytes (the EMA hint) is > 0, it should override
-	// PagingSizeBytes as the pre-charge basis. PagingSizeBytes is kept as a
-	// safety cap and worst-case fallback; the hint gives a tighter estimate.
-	pagingSizeBytes := uint64(4 * 1024 * 1024) // 4 MB worst-case cap
-	predictedReadBytes := uint64(256 * 1024)   // 256 KB learned estimate
+	// Phase 1: BeforeKVRequest with a PredictedReadBytes hint should
+	// pre-charge baseCost + predictedReadBytes * ReadBytesCost, regardless
+	// of whether PagingSizeBytes is set. The two are decoupled.
+	pagingSizeBytes := uint64(4 * 1024 * 1024) // protocol-level cap only
+	predictedReadBytes := uint64(256 * 1024)   // learned EMA estimate
 	req := &TestRequestInfo{
 		isWrite:            false,
 		pagingSizeBytes:    pagingSizeBytes,
 		predictedReadBytes: predictedReadBytes,
 	}
-
 	phase1 := &rmpb.Consumption{}
 	kvCalc.BeforeKVRequest(phase1, req)
 
 	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 	hintCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
 	re.InDelta(baseCost+hintCost, phase1.RRU, 1e-6,
-		"Phase 1 should pre-charge based on PredictedReadBytes, not PagingSizeBytes")
+		"Phase 1 should pre-charge based on PredictedReadBytes")
 
-	// Phase 2 should subtract the same hint-based basis, preserving the
-	// invariant that Phase 1 + Phase 2 == baseCost + actualCost.
+	// Phase 2 should subtract the same hint basis, preserving
+	// Phase 1 + Phase 2 == baseCost + actualCost.
 	actualReadBytes := uint64(300 * 1024) // close to the prediction
 	resp := &TestResponseInfo{
 		readBytes: actualReadBytes,
-		kvCPU:     0,
+		kvCPU:     10 * time.Millisecond,
 		succeed:   true,
 	}
 	phase2 := &rmpb.Consumption{}
 	kvCalc.AfterKVRequest(phase2, req, resp)
 
 	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
-	expectedPhase2RRU := actualReadCost - hintCost
-	re.InDelta(expectedPhase2RRU, phase2.RRU, 1e-6,
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost-hintCost, phase2.RRU, 1e-6,
 		"Phase 2 should settle using the same hint basis as Phase 1")
 
 	totalRRU := phase1.RRU + phase2.RRU
-	re.InDelta(baseCost+actualReadCost, totalRRU, 1e-6,
-		"Total RRU across Phase 1+2 should still equal baseCost + actualCost")
+	re.InDelta(baseCost+actualReadCost+cpuCost, totalRRU, 1e-6,
+		"Total RRU across Phase 1+2 should equal baseCost + actualCost")
+}
 
-	// When the hint is zero, fall back to PagingSizeBytes (old behavior).
-	reqFallback := &TestRequestInfo{
+func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+
+	// With PagingSizeBytes but no PredictedReadBytes hint, Phase 1 must
+	// NOT pre-charge: the two quantities are decoupled. Phase 2 bills the
+	// actual read bytes only.
+	pagingSizeBytes := uint64(4 * 1024 * 1024)
+	reqPagingOnly := &TestRequestInfo{
 		isWrite:         false,
 		pagingSizeBytes: pagingSizeBytes,
-		// predictedReadBytes left at 0
 	}
-	phase1Fallback := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(phase1Fallback, reqFallback)
-	fallbackBytesCost := float64(cfg.ReadBytesCost) * float64(pagingSizeBytes)
-	re.InDelta(baseCost+fallbackBytesCost, phase1Fallback.RRU, 1e-6,
-		"With no hint, pre-charge should fall back to PagingSizeBytes")
+	phase1 := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(phase1, reqPagingOnly)
+	re.InDelta(baseCost, phase1.RRU, 1e-6,
+		"PagingSizeBytes alone must not trigger pre-charge")
 
-	// When both are zero, no byte-based pre-charge is applied.
+	actualReadBytes := uint64(2 * 1024 * 1024)
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	phase2 := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(phase2, reqPagingOnly, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost, phase2.RRU, 1e-6,
+		"Phase 2 should bill actual read cost only when nothing was pre-charged")
+
+	// Bare request without any hint or paging also pre-charges nothing.
 	reqNone := &TestRequestInfo{isWrite: false}
 	phase1None := &rmpb.Consumption{}
 	kvCalc.BeforeKVRequest(phase1None, reqNone)
@@ -333,12 +305,12 @@ func TestPagingPreChargeTokenRefund(t *testing.T) {
 		newBurst:    0,
 	})
 
-	pagingSizeBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
-	actualReadBytes := uint64(1 * 1024 * 1024)  // 1 MB actual
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(1 * 1024 * 1024)    // 1 MB actual
 
 	req := &TestRequestInfo{
-		isWrite:         false,
-		pagingSizeBytes: pagingSizeBytes,
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
 		readBytes: actualReadBytes,
@@ -358,7 +330,7 @@ func TestPagingPreChargeTokenRefund(t *testing.T) {
 	// The limiter should have more tokens after settlement than after pre-charge,
 	// because the refund (pre-charge - actual) exceeds the actual read cost.
 	cfg := DefaultRUConfig()
-	preChargeCost := float64(cfg.ReadBytesCost) * float64(pagingSizeBytes)
+	preChargeCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
 	actualCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
 	expectedRefund := preChargeCost - actualCost
 	re.Positive(expectedRefund, "sanity: pre-charge should exceed actual cost")
@@ -387,12 +359,12 @@ func TestPagingPreChargeNoRefundWhenActualExceedsEstimate(t *testing.T) {
 		newBurst:    0,
 	})
 
-	pagingSizeBytes := uint64(1 * 1024 * 1024) // 1 MB pre-charge
-	actualReadBytes := uint64(4 * 1024 * 1024)  // 4 MB actual (exceeds estimate)
+	predictedReadBytes := uint64(1 * 1024 * 1024) // 1 MB pre-charge
+	actualReadBytes := uint64(4 * 1024 * 1024)    // 4 MB actual (exceeds estimate)
 
 	req := &TestRequestInfo{
-		isWrite:         false,
-		pagingSizeBytes: pagingSizeBytes,
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
 		readBytes: actualReadBytes,
@@ -423,12 +395,12 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 		newBurst:    0,
 	})
 
-	pagingSizeBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
-	actualReadBytes := uint64(512 * 1024)       // 512 KB actual
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(512 * 1024)         // 512 KB actual
 
 	req := &TestRequestInfo{
-		isWrite:         false,
-		pagingSizeBytes: pagingSizeBytes,
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
 		readBytes: actualReadBytes,
@@ -461,15 +433,16 @@ func TestPagingPreChargeZeroDelta(t *testing.T) {
 		newBurst:    0,
 	})
 
-	// Set actual read bytes equal to pagingSizeBytes so the read-bytes delta is zero.
-	// The only settlement cost should be CPU time (which we set to zero here).
-	pagingSizeBytes := uint64(2 * 1024 * 1024)
+	// Set actual read bytes equal to the predicted bytes so the read-bytes
+	// delta is zero. The only settlement cost should be CPU time (which
+	// we set to zero here).
+	predictedReadBytes := uint64(2 * 1024 * 1024)
 	req := &TestRequestInfo{
-		isWrite:         false,
-		pagingSizeBytes: pagingSizeBytes,
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
-		readBytes: pagingSizeBytes, // exact match
+		readBytes: predictedReadBytes, // exact match
 		succeed:   true,
 	}
 
