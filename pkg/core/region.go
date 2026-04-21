@@ -265,7 +265,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		cpuStats:         heartbeat.GetCpuStats(),
 	}
 
-	// Only PD heartbeats carry the following billing and replication fields.
+	// Only PD heartbeats carry the following storage-accounting and replication fields.
 	if h, ok := heartbeat.(regionHeartbeatExtraFields); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
