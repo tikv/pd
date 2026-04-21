@@ -412,7 +412,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 }
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
-	return gc.calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
+	return calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
 }
 
 func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, delta float64) bool {
@@ -420,14 +420,14 @@ func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, delta float6
 		return false
 	}
 	counter.demandTotalRU += delta
-	ok := gc.calcMovingAvgAt(time.Now(), &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
+	ok := calcMovingAvgAt(time.Now(), &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
 	if ok {
 		gc.metrics.demandRUPerSecGauge.Set(counter.demandRUPerSec)
 	}
 	return ok
 }
 
-func (gc *groupCostController) calcMovingAvgAt(now time.Time, avg *float64, lastRU *float64, lastTime *time.Time, new float64) bool {
+func calcMovingAvgAt(now time.Time, avg *float64, lastRU *float64, lastTime *time.Time, new float64) bool {
 	deltaDuration := now.Sub(*lastTime)
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
