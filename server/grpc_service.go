@@ -1438,6 +1438,8 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				Interval:        request.GetInterval(),
 				Term:            request.GetTerm(),
 				QueryStats:      request.GetQueryStats(),
+				CpuUsage:        request.GetCpuUsage(),
+				CpuStats:        request.GetCpuStats(),
 			}
 			if err := forwardSchedulingStream.Send(schedulingpbReq); err != nil {
 				forwardSchedulingStream = nil
