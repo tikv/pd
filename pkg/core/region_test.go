@@ -357,6 +357,11 @@ func TestRegionWriteRate(t *testing.T) {
 func TestNeedSync(t *testing.T) {
 	re := require.New(t)
 	RegionGuide := GenerateRegionGuideFunc(false)
+	withReadCPUUsage := func(v uint64) RegionCreateOption {
+		return func(region *RegionInfo) {
+			region.cpuStats = &pdpb.CPUStats{UnifiedRead: v}
+		}
+	}
 	meta := &metapb.Region{
 		Id:          1000,
 		StartKey:    []byte("a"),
@@ -419,6 +424,16 @@ func TestNeedSync(t *testing.T) {
 		{
 			optionsA: []RegionCreateOption{SetWrittenBytes(0), WithFlowRoundByDigit(2)},
 			optionsB: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{SetCPUUsage(80)},
+			optionsB: []RegionCreateOption{SetCPUUsage(100)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{withReadCPUUsage(80)},
+			optionsB: []RegionCreateOption{withReadCPUUsage(100)},
 			needSync: true,
 		},
 	}

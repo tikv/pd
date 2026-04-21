@@ -677,7 +677,11 @@ func (suite *serverTestSuite) TestMicroserviceHotReadCPUStatsComeFromStoreHeartb
 		if hotPeer == nil {
 			return false
 		}
-		storeLoads := tc.GetPrimaryServer().GetCluster().GetStoresLoads()[1]
+		storesLoads := tc.GetPrimaryServer().GetCluster().GetStoresLoads()
+		storeLoads, ok := storesLoads[1]
+		if !ok {
+			return false
+		}
 		return hotPeer.GetLoad(statutils.CPUDim) == 80 &&
 			storeLoads[statutils.StoreReadCPU] == 200
 	})

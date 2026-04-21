@@ -971,10 +971,12 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			// Once flow has changed, will update the cache.
+			// Once flow or CPU has changed, will update the cache.
 			// Because keys and bytes are strongly related, only bytes are judged.
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
+				region.GetCPUUsage() != origin.GetCPUUsage() ||
+				region.GetReadCPUUsage() != origin.GetReadCPUUsage() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true
 				return
