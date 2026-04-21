@@ -249,6 +249,125 @@ func TestPredictedReadBytesPreCharge(t *testing.T) {
 		"Total RRU across precharge+settle should equal baseCost + actualCost")
 }
 
+func TestPagingPreChargeTokenRefund(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(1 * 1024 * 1024)    // 1 MB actual
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// Refund (pre-charge - actual) should exceed the actual read cost,
+	// so the limiter ends settlement with more tokens than after pre-charge.
+	cfg := DefaultRUConfig()
+	preChargeCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
+	actualCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	expectedRefund := preChargeCost - actualCost
+	re.Positive(expectedRefund, "sanity: pre-charge should exceed actual cost")
+	re.InDelta(tokensAfterPreCharge+expectedRefund, tokensAfterSettlement, 1.0,
+		"limiter should be refunded the excess pre-charged tokens")
+
+	gc.mu.Lock()
+	netRRU := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	re.InDelta(baseCost+actualCost, netRRU, 1e-6,
+		"net consumption should equal baseCost + actualReadCost")
+}
+
+func TestPagingPreChargeNoRefundWhenActualExceedsEstimate(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(1 * 1024 * 1024) // 1 MB pre-charge
+	actualReadBytes := uint64(4 * 1024 * 1024)    // 4 MB actual (exceeds estimate)
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.Less(tokensAfterSettlement, tokensAfterPreCharge,
+		"when actual exceeds pre-charge, settlement should consume tokens")
+}
+
+func TestOnResponseImplPagingRefund(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(512 * 1024)         // 512 KB actual
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.Greater(tokensAfterSettlement, tokensAfterPreCharge,
+		"onResponseImpl should refund excess pre-charged tokens")
+}
+
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()
