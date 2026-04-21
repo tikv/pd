@@ -53,6 +53,31 @@ var (
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
+
+	// PagingPrechargeCounter counts paging pre-charge events (predicted hint
+	// present and > 0), per resource group. Cold starts and unhinted requests
+	// are not pre-charged and therefore not counted here.
+	PagingPrechargeCounter *prometheus.CounterVec
+	// PagingPrechargeBytesCounter sums bytes used as the pre-charge basis.
+	PagingPrechargeBytesCounter *prometheus.CounterVec
+	// PagingActualBytesCounter sums actual read bytes reported after the KV
+	// RPC for pre-charged requests. Ratio against PagingPrechargeBytesCounter
+	// reveals over/under-charge factor.
+	PagingActualBytesCounter *prometheus.CounterVec
+	// PagingPredictionResidualBytes observes (actual - predicted) bytes for
+	// pre-charged requests. Shows EMA prediction accuracy.
+	PagingPredictionResidualBytes *prometheus.HistogramVec
+
+	// PagingNonprechargeCounter counts RPCs that implemented the predicted
+	// read-bytes interface but reported 0 (e.g. EMA cold-start) and therefore
+	// ran without pre-charge. Paired with PagingPrechargeCounter this yields
+	// the cold/ready RPC split from the PD side.
+	PagingNonprechargeCounter *prometheus.CounterVec
+	// PagingNonprechargeActualBytes sums the actual read bytes of RPCs that
+	// skipped pre-charge. Quantifies how much read volume bypassed pre-charge
+	// throttling — the "cold window" signal for token-bucket pressure
+	// analysis.
+	PagingNonprechargeActualBytes *prometheus.CounterVec
 )
 
 func init() {
@@ -156,6 +181,63 @@ func initMetrics(constLabels prometheus.Labels) {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
+
+	PagingPrechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_precharge_total",
+			Help:        "Counter of RC paging pre-charge events (PredictedReadBytes hint present and > 0).",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingPrechargeBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_precharge_bytes_total",
+			Help:        "Sum of bytes used as the RC paging pre-charge basis (predicted hint).",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingActualBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_actual_bytes_total",
+			Help:        "Sum of actual bytes read by paging KV requests that were pre-charged.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingPredictionResidualBytes = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "paging_prediction_residual_bytes",
+			// Signed residual = actual - predicted. Buckets cover both directions
+			// up to the typical paging budget (a few MB).
+			Buckets:     []float64{-4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304},
+			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged requests. Shows EMA prediction accuracy.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingNonprechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_total",
+			Help:        "Counter of RC paging RPCs that implemented the predicted hint but reported 0 (e.g. EMA cold-start) and ran without pre-charge.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingNonprechargeActualBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_actual_bytes_total",
+			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint=0). Quantifies cold-window read volume bypassing pre-charge throttling.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -171,4 +253,10 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
+	prometheus.MustRegister(PagingPrechargeCounter)
+	prometheus.MustRegister(PagingPrechargeBytesCounter)
+	prometheus.MustRegister(PagingActualBytesCounter)
+	prometheus.MustRegister(PagingPredictionResidualBytes)
+	prometheus.MustRegister(PagingNonprechargeCounter)
+	prometheus.MustRegister(PagingNonprechargeActualBytes)
 }

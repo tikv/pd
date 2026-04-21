@@ -106,6 +106,21 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+
+	// Paging pre-charge observability: cached per-RG so the hot path avoids
+	// WithLabelValues on every KV request. Only pre-charged requests (those
+	// with a PredictedReadBytes hint > 0) contribute to these metrics.
+	prechargeCounter        prometheus.Counter
+	prechargeBytesCounter   prometheus.Counter
+	actualBytesCounter      prometheus.Counter
+	predictionResidualBytes prometheus.Observer
+
+	// Nonprecharge bucket: RPCs that implemented the predicted-bytes
+	// interface but reported 0 (EMA cold-start or feature-disabled) and
+	// therefore skipped pre-charge entirely. Recorded at settle time
+	// (AfterKVRequest).
+	nonprechargeCounter     prometheus.Counter
+	nonprechargeActualBytes prometheus.Counter
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -122,7 +137,40 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+
+		prechargeCounter:        metrics.PagingPrechargeCounter.WithLabelValues(name),
+		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
+		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
+		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
+
+		nonprechargeCounter:     metrics.PagingNonprechargeCounter.WithLabelValues(name),
+		nonprechargeActualBytes: metrics.PagingNonprechargeActualBytes.WithLabelValues(name),
 	}
+}
+
+// observePagingPrecharge records one pre-charge event. Caller must guarantee
+// bytesForEst > 0; cold-start requests with no hint are not pre-charged and
+// should not be observed here.
+func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64) {
+	gmc.prechargeCounter.Inc()
+	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+}
+
+// observePagingActual records actual read bytes and the signed residual for a
+// pre-charged request. Caller must guarantee predicted > 0.
+func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64) {
+	gmc.actualBytesCounter.Add(float64(actual))
+	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
+}
+
+// observePagingNonprecharge records one RPC that implemented the predicted
+// read-bytes interface but reported 0 (EMA cold or feature disabled) and
+// therefore ran without pre-charge. `actual` is the response's read bytes,
+// settled in AfterKVRequest. Paired with observePagingPrecharge this gives
+// the cold/ready split and the byte volume that bypassed throttling.
+func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
+	gmc.nonprechargeCounter.Inc()
+	gmc.nonprechargeActualBytes.Add(float64(actual))
 }
 
 type tokenCounter struct {
@@ -551,6 +599,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
+		gc.metrics.observePagingPrecharge(bytesForEst)
+	}
 
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
@@ -601,6 +652,13 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+	} else if !req.IsWrite() {
+		if _, ok := req.(predictedReadBytesProvider); ok {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
+	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
@@ -635,6 +693,13 @@ func (gc *groupCostController) onResponseWaitImpl(
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
+	}
+	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+	} else if !req.IsWrite() {
+		if _, ok := req.(predictedReadBytesProvider); ok {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
 	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
