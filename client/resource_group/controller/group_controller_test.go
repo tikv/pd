@@ -208,6 +208,76 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
+func TestPredictedReadBytesPreCharge(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+
+	// BeforeKVRequest with a PredictedReadBytes hint should pre-charge
+	// baseCost + predictedReadBytes * ReadBytesCost.
+	predictedReadBytes := uint64(256 * 1024) // learned EMA estimate
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, req)
+
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	hintCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
+	re.InDelta(baseCost+hintCost, precharge.RRU, 1e-6,
+		"BeforeKVRequest should pre-charge based on PredictedReadBytes")
+
+	// AfterKVRequest should subtract the same hint basis, preserving
+	// precharge + settle == baseCost + actualCost.
+	actualReadBytes := uint64(300 * 1024) // close to the prediction
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost-hintCost, settle.RRU, 1e-6,
+		"AfterKVRequest should settle using the same hint basis as BeforeKVRequest")
+
+	totalRRU := precharge.RRU + settle.RRU
+	re.InDelta(baseCost+actualReadCost+cpuCost, totalRRU, 1e-6,
+		"Total RRU across precharge+settle should equal baseCost + actualCost")
+}
+
+func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+
+	// Without a PredictedReadBytes hint, BeforeKVRequest must not
+	// pre-charge; AfterKVRequest bills actual read bytes only.
+	req := &TestRequestInfo{isWrite: false}
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, req)
+	re.InDelta(baseCost, precharge.RRU, 1e-6,
+		"Without a hint, BeforeKVRequest should only charge baseCost")
+
+	actualReadBytes := uint64(2 * 1024 * 1024)
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost, settle.RRU, 1e-6,
+		"AfterKVRequest should bill actual read cost only when nothing was pre-charged")
+}
+
 func TestResourceGroupThrottledError(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
