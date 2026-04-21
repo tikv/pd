@@ -70,11 +70,11 @@ var (
 
 	// PagingNonprechargeCounter counts RPCs that implemented the predicted
 	// read-bytes interface but reported 0 (e.g. EMA cold-start) and therefore
-	// ran without Phase 1 pre-charge. Paired with PagingPrechargeCounter this
-	// yields the cold/ready RPC split from the PD side.
+	// ran without pre-charge. Paired with PagingPrechargeCounter this yields
+	// the cold/ready RPC split from the PD side.
 	PagingNonprechargeCounter *prometheus.CounterVec
 	// PagingNonprechargeActualBytes sums the actual read bytes of RPCs that
-	// skipped pre-charge. Quantifies how much read volume bypassed Phase 1
+	// skipped pre-charge. Quantifies how much read volume bypassed pre-charge
 	// throttling — the "cold window" signal for token-bucket pressure
 	// analysis.
 	PagingNonprechargeActualBytes *prometheus.CounterVec
@@ -226,7 +226,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_total",
-			Help:        "Counter of RC paging RPCs that implemented the predicted hint but reported 0 (e.g. EMA cold-start) and ran without Phase 1 pre-charge.",
+			Help:        "Counter of RC paging RPCs that implemented the predicted hint but reported 0 (e.g. EMA cold-start) and ran without pre-charge.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -235,7 +235,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint=0). Quantifies cold-window read volume bypassing Phase 1 throttling.",
+			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint=0). Quantifies cold-window read volume bypassing pre-charge throttling.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 }

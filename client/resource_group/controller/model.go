@@ -62,7 +62,7 @@ type RequestInfo interface {
 // per-logical-scan EMA maintained in TiDB) of how many bytes the request
 // will read. When present and > 0, it is used as the byte basis for RC
 // paging pre-charge; when absent or zero the request is not pre-charged
-// and will be billed at Phase 2 by actual read bytes only.
+// and will be billed in AfterKVRequest by actual read bytes only.
 //
 // Defined as an optional interface (not a method on RequestInfo) so older
 // RequestInfo implementations that have not been updated still compile;
@@ -131,10 +131,10 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		consumption.KvReadRpcCount += 1
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 		// RC Paging pre-charge: pre-charge the learned read-bytes RU so that
-		// concurrent workers are throttled at Phase 1 instead of all hitting
-		// Phase 2 at once. Only applies when the caller supplies a
-		// PredictedReadBytes hint; without it the request is billed at
-		// Phase 2 by actual read bytes only.
+		// concurrent workers are throttled at BeforeKVRequest instead of all
+		// hitting AfterKVRequest settlement at once. Only applies when the
+		// caller supplies a PredictedReadBytes hint; without it the request
+		// is billed in AfterKVRequest by actual read bytes only.
 		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
 			consumption.RRU += float64(kc.ReadBytesCost) * float64(bytesForEst)
 		}
@@ -173,7 +173,7 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 		// For now, we can only collect the KV CPU cost for a read request.
 		kc.calculateCPUCost(consumption, res)
 		// RC Paging settlement: subtract the pre-charged bytes RU added in
-		// BeforeKVRequest so the net total (Phase 1 + Phase 2) equals
+		// BeforeKVRequest so the net total (pre-charge + settle) equals
 		// baseCost + actualCost. Symmetric with BeforeKVRequest: when no
 		// hint was supplied nothing was pre-charged, so nothing is refunded.
 		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {

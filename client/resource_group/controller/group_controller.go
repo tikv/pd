@@ -117,7 +117,8 @@ type groupMetricsCollection struct {
 
 	// Nonprecharge bucket: RPCs that implemented the predicted-bytes
 	// interface but reported 0 (EMA cold-start or feature-disabled) and
-	// therefore skipped Phase 1 pre-charge entirely. Recorded at Phase 2.
+	// therefore skipped pre-charge entirely. Recorded at settle time
+	// (AfterKVRequest).
 	nonprechargeCounter     prometheus.Counter
 	nonprechargeActualBytes prometheus.Counter
 }
@@ -164,8 +165,8 @@ func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64)
 
 // observePagingNonprecharge records one RPC that implemented the predicted
 // read-bytes interface but reported 0 (EMA cold or feature disabled) and
-// therefore ran without Phase 1 pre-charge. `actual` is the response's read
-// bytes, settled at Phase 2. Paired with observePagingPrecharge this gives
+// therefore ran without pre-charge. `actual` is the response's read bytes,
+// settled in AfterKVRequest. Paired with observePagingPrecharge this gives
 // the cold/ready split and the byte volume that bypassed throttling.
 func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
 	gmc.nonprechargeCounter.Inc()

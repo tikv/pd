@@ -215,9 +215,9 @@ func TestPredictedReadBytesPreCharge(t *testing.T) {
 	cfg := DefaultRUConfig()
 	kvCalc := newKVCalculator(cfg)
 
-	// Phase 1: BeforeKVRequest with a PredictedReadBytes hint should
-	// pre-charge baseCost + predictedReadBytes * ReadBytesCost, regardless
-	// of whether PagingSizeBytes is set. The two are decoupled.
+	// BeforeKVRequest with a PredictedReadBytes hint should pre-charge
+	// baseCost + predictedReadBytes * ReadBytesCost, regardless of
+	// whether PagingSizeBytes is set. The two are decoupled.
 	pagingSizeBytes := uint64(4 * 1024 * 1024) // protocol-level cap only
 	predictedReadBytes := uint64(256 * 1024)   // learned EMA estimate
 	req := &TestRequestInfo{
@@ -225,33 +225,33 @@ func TestPredictedReadBytesPreCharge(t *testing.T) {
 		pagingSizeBytes:    pagingSizeBytes,
 		predictedReadBytes: predictedReadBytes,
 	}
-	phase1 := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(phase1, req)
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, req)
 
 	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 	hintCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
-	re.InDelta(baseCost+hintCost, phase1.RRU, 1e-6,
-		"Phase 1 should pre-charge based on PredictedReadBytes")
+	re.InDelta(baseCost+hintCost, precharge.RRU, 1e-6,
+		"BeforeKVRequest should pre-charge based on PredictedReadBytes")
 
-	// Phase 2 should subtract the same hint basis, preserving
-	// Phase 1 + Phase 2 == baseCost + actualCost.
+	// AfterKVRequest should subtract the same hint basis, preserving
+	// precharge + settle == baseCost + actualCost.
 	actualReadBytes := uint64(300 * 1024) // close to the prediction
 	resp := &TestResponseInfo{
 		readBytes: actualReadBytes,
 		kvCPU:     10 * time.Millisecond,
 		succeed:   true,
 	}
-	phase2 := &rmpb.Consumption{}
-	kvCalc.AfterKVRequest(phase2, req, resp)
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
 
 	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
 	cpuCost := float64(cfg.CPUMsCost) * 10.0
-	re.InDelta(actualReadCost+cpuCost-hintCost, phase2.RRU, 1e-6,
-		"Phase 2 should settle using the same hint basis as Phase 1")
+	re.InDelta(actualReadCost+cpuCost-hintCost, settle.RRU, 1e-6,
+		"AfterKVRequest should settle using the same hint basis as BeforeKVRequest")
 
-	totalRRU := phase1.RRU + phase2.RRU
+	totalRRU := precharge.RRU + settle.RRU
 	re.InDelta(baseCost+actualReadCost+cpuCost, totalRRU, 1e-6,
-		"Total RRU across Phase 1+2 should equal baseCost + actualCost")
+		"Total RRU across precharge+settle should equal baseCost + actualCost")
 }
 
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
@@ -260,17 +260,17 @@ func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 	kvCalc := newKVCalculator(cfg)
 	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 
-	// With PagingSizeBytes but no PredictedReadBytes hint, Phase 1 must
-	// NOT pre-charge: the two quantities are decoupled. Phase 2 bills the
-	// actual read bytes only.
+	// With PagingSizeBytes but no PredictedReadBytes hint, BeforeKVRequest
+	// must NOT pre-charge: the two quantities are decoupled. AfterKVRequest
+	// bills the actual read bytes only.
 	pagingSizeBytes := uint64(4 * 1024 * 1024)
 	reqPagingOnly := &TestRequestInfo{
 		isWrite:         false,
 		pagingSizeBytes: pagingSizeBytes,
 	}
-	phase1 := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(phase1, reqPagingOnly)
-	re.InDelta(baseCost, phase1.RRU, 1e-6,
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, reqPagingOnly)
+	re.InDelta(baseCost, precharge.RRU, 1e-6,
 		"PagingSizeBytes alone must not trigger pre-charge")
 
 	actualReadBytes := uint64(2 * 1024 * 1024)
@@ -279,20 +279,20 @@ func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 		kvCPU:     10 * time.Millisecond,
 		succeed:   true,
 	}
-	phase2 := &rmpb.Consumption{}
-	kvCalc.AfterKVRequest(phase2, reqPagingOnly, resp)
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, reqPagingOnly, resp)
 
 	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
 	cpuCost := float64(cfg.CPUMsCost) * 10.0
-	re.InDelta(actualReadCost+cpuCost, phase2.RRU, 1e-6,
-		"Phase 2 should bill actual read cost only when nothing was pre-charged")
+	re.InDelta(actualReadCost+cpuCost, settle.RRU, 1e-6,
+		"AfterKVRequest should bill actual read cost only when nothing was pre-charged")
 
 	// Bare request without any hint or paging also pre-charges nothing.
 	reqNone := &TestRequestInfo{isWrite: false}
-	phase1None := &rmpb.Consumption{}
-	kvCalc.BeforeKVRequest(phase1None, reqNone)
-	re.InDelta(baseCost, phase1None.RRU, 1e-6,
-		"Without hint or paging, Phase 1 should only charge baseCost")
+	prechargeNone := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(prechargeNone, reqNone)
+	re.InDelta(baseCost, prechargeNone.RRU, 1e-6,
+		"Without hint or paging, BeforeKVRequest should only charge baseCost")
 }
 
 func TestPagingPreChargeTokenRefund(t *testing.T) {
@@ -439,7 +439,8 @@ func TestNonprechargeMetricsRecordedWhenHintZero(t *testing.T) {
 	actualBytesBefore := testutil.ToFloat64(actualBytes)
 
 	// Hint=0 read: implements predictedReadBytesProvider but returns 0 ->
-	// Phase 1 skips pre-charge, Phase 2 must record nonprecharge bytes.
+	// BeforeKVRequest skips pre-charge, AfterKVRequest must record
+	// nonprecharge bytes.
 	const readBytesAmount = uint64(256 * 1024)
 	coldReq := &TestRequestInfo{isWrite: false}
 	coldResp := &TestResponseInfo{readBytes: readBytesAmount, succeed: true}
@@ -450,7 +451,7 @@ func TestNonprechargeMetricsRecordedWhenHintZero(t *testing.T) {
 		"hint=0 read should increment nonprecharge counter")
 	re.InDelta(bytesBefore+float64(readBytesAmount),
 		testutil.ToFloat64(nonprechargeBytes), 1e-6,
-		"nonprecharge bytes must equal Phase 2 actual read bytes")
+		"nonprecharge bytes must equal AfterKVRequest actual read bytes")
 	re.InDelta(prechargeBefore, testutil.ToFloat64(prechargeCounter), 1e-6,
 		"precharge counter must stay unchanged when hint=0")
 	re.InDelta(actualBytesBefore, testutil.ToFloat64(actualBytes), 1e-6,
