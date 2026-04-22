@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -553,4 +554,71 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 
 	// Cleanup for this test.
 	gc2.metrics.sourceState.cleanup()
+}
+
+// TestStopCleansUpRequestSourceMetricsState verifies the loopCtx.Done()
+// shutdown path: per-group state is closed, cached label tuples are deleted
+// from the vec, and post-stop addRequestSourceRU does not re-register series.
+func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
+	re.NoError(err)
+
+	group := &rmpb.ResourceGroup{
+		Name: "request-source-stop-cleanup",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, group.Name, mock.Anything).Return(group, nil)
+
+	// Start is required so that the loopCtx.Done() branch actually runs.
+	c.Start(ctx)
+
+	gc, err := c.tryGetResourceGroupController(ctx, group.Name, false)
+	re.NoError(err)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    64,
+		numReplicas:   1,
+		storeID:       1,
+		requestSource: "internal_stop_cleanup",
+	}
+	resp := &TestResponseInfo{readBytes: 64, succeed: true}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+
+	v, ok := c.requestSourceStates.Load(group.Name)
+	re.True(ok)
+	ms := v.(*requestSourceMetricsState)
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	re.NoError(c.Stop())
+
+	// cleanup() runs asynchronously on the background loop goroutine.
+	re.Eventually(func() bool {
+		ms.mu.RLock()
+		defer ms.mu.RUnlock()
+		return ms.closed && len(ms.items) == 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	// Shutdown must delete exactly the two labels (rru, wru) registered by this group.
+	re.Equal(beforeCount-2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	// Post-stop accounting must not re-register any series.
+	gc.metrics.addRequestSourceRU("internal_stop_cleanup_later", &rmpb.Consumption{RRU: 1, WRU: 1})
+	ms.mu.RLock()
+	re.Empty(ms.items)
+	ms.mu.RUnlock()
+	re.Equal(beforeCount-2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }

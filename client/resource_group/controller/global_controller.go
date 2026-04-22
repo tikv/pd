@@ -338,7 +338,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			/* channels */
 			case <-c.loopCtx.Done():
 				metrics.ResourceGroupStatusGauge.Reset()
-				metrics.RequestSourceRUCounter.Reset()
+				c.requestSourceStates.Range(func(_, v any) bool {
+					v.(*requestSourceMetricsState).cleanup()
+					return true
+				})
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
