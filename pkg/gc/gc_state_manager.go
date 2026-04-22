@@ -790,6 +790,14 @@ func (m *GCStateManager) tryGetGCStateFromCacheLocked(keyspaceID uint32) (GCStat
 	return res, ok
 }
 
+// ForceInvalidateGCStateCache invalidates all the GCState cache.
+func (m *GCStateManager) ForceInvalidateGCStateCache() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.gcStatesCache = make(map[uint32]GCState)
+}
+
 func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 	// Fast path
 	m.mu.RLock()
