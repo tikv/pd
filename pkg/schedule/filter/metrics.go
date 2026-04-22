@@ -17,15 +17,23 @@ package filter
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	filterCounter = prometheus.NewCounterVec(
+	filterSourceCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "schedule",
-			Name:      "filter",
-			Help:      "Counter of the filter",
-		}, []string{"action", "scope", "type", "source", "target"})
+			Name:      "source_filter",
+			Help:      "Counter of the source filter",
+		}, []string{"scope", "type", "source"})
+	filterTargetCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "target_filter",
+			Help:      "Counter of the target filter",
+		}, []string{"scope", "type", "target"})
 )
 
 func init() {
-	prometheus.MustRegister(filterCounter)
+	prometheus.MustRegister(filterSourceCounter)
+	prometheus.MustRegister(filterTargetCounter)
 }

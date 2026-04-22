@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,11 +23,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 // BaseServer is a basic server that provides some common functionality.
@@ -66,7 +68,7 @@ func (bs *BaseServer) Context() context.Context {
 func (bs *BaseServer) GetDelegateClient(ctx context.Context, tlsCfg *grpcutil.TLSConfig, forwardedHost string) (*grpc.ClientConn, error) {
 	client, ok := bs.clientConns.Load(forwardedHost)
 	if !ok {
-		tlsConfig, err := tlsCfg.ToTLSConfig()
+		tlsConfig, err := tlsCfg.ToClientTLSConfig()
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +148,7 @@ func (bs *BaseServer) InitListener(tlsCfg *grpcutil.TLSConfig, listenAddr string
 	if err != nil {
 		return err
 	}
-	tlsConfig, err := tlsCfg.ToTLSConfig()
+	tlsConfig, err := tlsCfg.ToServerTLSConfig()
 	if err != nil {
 		return err
 	}

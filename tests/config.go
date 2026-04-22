@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server/config"
 )
@@ -104,7 +105,7 @@ type clusterConfig struct {
 
 func newClusterConfig(n int) *clusterConfig {
 	var cc clusterConfig
-	for i := 0; i < n; i++ {
+	for range n {
 		c := newServerConfig(cc.nextServerName(), &cc, false)
 		cc.InitialServers = append(cc.InitialServers, c)
 	}

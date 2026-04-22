@@ -16,13 +16,15 @@ package ratelimit
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // RegionHeartbeatStageName is the name of the stage of the region heartbeat.
@@ -33,6 +35,7 @@ const (
 	HandleOverlaps          = "HandleOverlaps"
 	CollectRegionStatsAsync = "CollectRegionStatsAsync"
 	SaveRegionToKV          = "SaveRegionToKV"
+	SyncRegionToFollower    = "SyncRegionToFollower"
 )
 
 const (
@@ -56,9 +59,6 @@ type Task struct {
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
 }
-
-// ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
-var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
 type taskID struct {
 	id   uint64
@@ -87,7 +87,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
-		taskChan:           make(chan *Task),
+		taskChan:           make(chan *Task, 1),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
@@ -108,15 +108,15 @@ func WithRetained(retained bool) TaskOption {
 func (cr *ConcurrentRunner) Start(ctx context.Context) {
 	cr.ctx, cr.cancel = context.WithCancel(ctx)
 	cr.wg.Add(1)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
 	go func() {
 		defer cr.wg.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.AcquireToken(context.Background())
+					token, err := cr.limiter.AcquireToken(cr.ctx)
 					if err != nil {
 						continue
 					}
@@ -169,6 +169,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		task := cr.pendingTasks[0]
 		select {
 		case cr.taskChan <- task:
+			cr.pendingTasks[0] = nil // avoid memory leak
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
 			delete(cr.existTasks, taskID{id: task.id, name: task.name})
@@ -216,12 +217,12 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
 				runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-				return ErrMaxWaitingTasksExceeded
+				return errs.ErrMaxWaitingTasksExceeded
 			}
 		}
 		if pendingTaskNum > maxPendingTaskNum {
 			runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-			return ErrMaxWaitingTasksExceeded
+			return errs.ErrMaxWaitingTasksExceeded
 		}
 	}
 	cr.pendingTasks = append(cr.pendingTasks, task)

@@ -16,10 +16,12 @@ package placement
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -64,7 +66,7 @@ func addExtraRules(extraRules int) []*Rule {
 	for i := 1; i <= extraRules; i++ {
 		rules = append(rules, &Rule{
 			GroupID:        "tiflash",
-			ID:             fmt.Sprintf("%v", i),
+			ID:             strconv.Itoa(i),
 			Role:           Learner,
 			Count:          1,
 			LocationLabels: []string{},
@@ -120,7 +122,7 @@ func BenchmarkFitRegion(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -139,7 +141,7 @@ func BenchmarkFitRegionMoreStores(b *testing.B) {
 	storesSet := newMockStoresSet(200)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -158,7 +160,7 @@ func BenchmarkFitRegionMorePeers(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -184,7 +186,7 @@ func BenchmarkFitRegionMorePeersEquals(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -200,10 +202,10 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 			LocationLabels: []string{},
 		},
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
-			ID:             fmt.Sprintf("%v", i),
+			ID:             strconv.Itoa(i),
 			Role:           Follower,
 			Count:          1,
 			LocationLabels: []string{},
@@ -212,7 +214,7 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -228,10 +230,10 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 			LocationLabels: []string{},
 		},
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
-			ID:             fmt.Sprintf("%v", i),
+			ID:             strconv.Itoa(i),
 			Role:           Voter,
 			Count:          1,
 			LocationLabels: []string{},
@@ -240,7 +242,7 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -251,7 +253,7 @@ func BenchmarkFitRegionTiflash(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -266,10 +268,10 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		Count:          1,
 		LocationLabels: []string{},
 	})
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
-			ID:             fmt.Sprintf("%v", i),
+			ID:             strconv.Itoa(i),
 			Role:           Follower,
 			Count:          1,
 			LocationLabels: []string{},
@@ -278,7 +280,7 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 	storesSet := newMockStoresSet(100)
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -287,10 +289,10 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	region := mockRegion(5, 0)
 	rules := []*Rule{}
 	// create 100 rules, with each rule has 101 LabelConstraints.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		rule := &Rule{
 			GroupID:          DefaultGroupID,
-			ID:               fmt.Sprintf("%v", i),
+			ID:               strconv.Itoa(i),
 			Role:             Follower,
 			Count:            3,
 			LocationLabels:   []string{},
@@ -319,7 +321,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	// create stores, with each store has 101 normal labels(1 exclusive label).
 	lists := make([]*core.StoreInfo, 0)
 	labels := make([]*metapb.StoreLabel, 0, 101)
-	for labID := 0; labID < 100; labID++ {
+	for labID := range 100 {
 		label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
 		labels = append(labels, label)
 	}
@@ -342,7 +344,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	}
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }
@@ -400,7 +402,7 @@ func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 	}
 	stores := getStoresByRegion(storesSet, region)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		fitRegion(stores, region, rules, false)
 	}
 }

@@ -22,7 +22,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func isError(err error, re string) bool {
 	if err == nil && re == "" {
@@ -371,7 +376,7 @@ const (
 )
 
 func TestCgroupsGetCPU(t *testing.T) {
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if i == 1 {
 			// The field in /proc/self/cgroup and /proc/self/mountinfo may appear as "cpuacct,cpu" or "rw,cpuacct,cpu"
 			// while the input controller is "cpu,cpuacct"

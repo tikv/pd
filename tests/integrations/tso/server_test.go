@@ -20,15 +20,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/stretchr/testify/suite"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 type tsoServerTestSuite struct {
@@ -48,6 +51,7 @@ type tsoServerTestSuite struct {
 	tsoClientConn    *grpc.ClientConn
 
 	pdClient  pdpb.PDClient
+	conn      *grpc.ClientConn
 	tsoClient tsopb.TSOClient
 }
 
@@ -71,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount)
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
@@ -79,14 +83,19 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
-	suite.pdLeaderServer.BootstrapCluster()
+	err = suite.pdLeaderServer.BootstrapCluster()
+	re.NoError(err)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
-		suite.pdClient = tu.MustNewGrpcClient(re, backendEndpoints)
+		suite.pdClient, suite.conn = testutil.MustNewGrpcClient(re, backendEndpoints)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
 	}
+	// Ensure the TSO is ready to serve before running the tests.
+	testutil.Eventually(re, func() bool {
+		return suite.request(suite.ctx, re, 1) == nil
+	})
 }
 
 func (suite *tsoServerTestSuite) TearDownSuite() {
@@ -95,14 +104,10 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 		suite.tsoClientConn.Close()
 		suite.tsoServerCleanup()
 	}
-	suite.cluster.Destroy()
-}
-
-func (suite *tsoServerTestSuite) getClusterID() uint64 {
-	if suite.legacy {
-		return suite.pdLeaderServer.GetServer().ClusterID()
+	if suite.conn != nil {
+		suite.conn.Close()
 	}
-	return suite.tsoServer.ClusterID()
+	suite.cluster.Destroy()
 }
 
 func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) {
@@ -118,30 +123,33 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 	}
 }
 
-func (suite *tsoServerTestSuite) request(ctx context.Context, count uint32) (err error) {
-	re := suite.Require()
-	clusterID := suite.getClusterID()
+func (suite *tsoServerTestSuite) request(ctx context.Context, re *require.Assertions, count uint32) (err error) {
+	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
-			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
-			DcLocation: tsopkg.GlobalDCLocation,
-			Count:      count,
+			Header: &pdpb.RequestHeader{ClusterId: clusterID},
+			Count:  count,
 		}
 		tsoClient, err := suite.pdClient.Tso(ctx)
 		re.NoError(err)
-		defer tsoClient.CloseSend()
+		defer func() {
+			err := tsoClient.CloseSend()
+			re.NoError(err)
+		}()
 		re.NoError(tsoClient.Send(req))
 		_, err = tsoClient.Recv()
 		return err
 	}
 	req := &tsopb.TsoRequest{
-		Header:     &tsopb.RequestHeader{ClusterId: clusterID},
-		DcLocation: tsopkg.GlobalDCLocation,
-		Count:      count,
+		Header: &tsopb.RequestHeader{ClusterId: clusterID},
+		Count:  count,
 	}
 	tsoClient, err := suite.tsoClient.Tso(ctx)
 	re.NoError(err)
-	defer tsoClient.CloseSend()
+	defer func() {
+		err := tsoClient.CloseSend()
+		re.NoError(err)
+	}()
 	re.NoError(tsoClient.Send(req))
 	_, err = tsoClient.Recv()
 	return err
@@ -151,10 +159,10 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	now := time.Now()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			defer wg.Done()
-			for j := 0; j <= 50; j++ {
+			for j := range 51 {
 				// Get a copy of now then call base.add, because now is shared by all goroutines
 				// and now.add() will add to itself which isn't atomic and multi-goroutine safe.
 				base := now
@@ -172,5 +180,5 @@ func (suite *tsoServerTestSuite) TestZeroTSOCount() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	re.ErrorContains(suite.request(ctx, 0), "tso count should be positive")
+	re.ErrorContains(suite.request(ctx, re, 0), "tso count should be positive")
 }

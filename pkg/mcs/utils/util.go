@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,57 +20,45 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/kvproto/pkg/diagnosticspb"
-	"github.com/pingcap/log"
+	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/keepalive"
+
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/keepalive"
 )
-
-// InitClusterID initializes the cluster ID.
-func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
-	ticker := time.NewTicker(constant.RetryInterval)
-	defer ticker.Stop()
-	retryTimes := 0
-	for {
-		if clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath); err == nil && clusterID != 0 {
-			return clusterID, nil
-		}
-		select {
-		case <-ctx.Done():
-			return 0, err
-		case <-ticker.C:
-			retryTimes++
-			if retryTimes/500 > 0 {
-				log.Warn("etcd is not ready, retrying", errs.ZapError(err))
-				retryTimes /= 500
-			}
-		}
-	}
-}
 
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
+	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
+	if err := prometheus.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler))); err != nil {
+		log.Warn("go runtime collectors have already registered", errs.ZapError(err))
+	}
 	return func(c *gin.Context) {
 		// register promhttp.HandlerOpts DisableCompression
 		promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
@@ -87,6 +75,7 @@ func StatusHandler(c *gin.Context) {
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: svr.StartTimestamp(),
+		KernelType:     versioninfo.PDKernelType,
 	}
 
 	c.IndentedJSON(http.StatusOK, version)
@@ -119,7 +108,7 @@ type server interface {
 
 // InitClient initializes the etcd and http clients.
 func InitClient(s server) error {
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -127,7 +116,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, etcdutil.McsEtcdClientPurpose, true)
 	if err != nil {
 		return err
 	}
@@ -185,10 +174,16 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 			MinTime: 5 * time.Second,
 		}),
+		grpc.UnaryInterceptor(grpcprometheus.UnaryServerInterceptor),
+		grpc.StreamInterceptor(grpcprometheus.StreamServerInterceptor),
 	)
+	hs := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, hs)
+	grpcprometheus.Register(grpcServer)
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
+	hs.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 	s.ServerLoopWgAdd(1)
 	go startGRPCServer(s, grpcL)
 
@@ -279,15 +274,10 @@ func StopGRPCServer(s server) {
 }
 
 // Register registers the service.
-func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
-	var (
-		clusterID uint64
-		err       error
-	)
-	if clusterID, err = InitClusterID(s.Context(), s.GetEtcdClient()); err != nil {
-		return 0, nil, nil, err
+func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
+	if err := endpoint.InitClusterIDForMs(s.Context(), s.GetEtcdClient()); err != nil {
+		return nil, nil, err
 	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	execPath, err := os.Executable()
 	deployPath := filepath.Dir(execPath)
 	if err != nil {
@@ -303,15 +293,16 @@ func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryE
 	}
 	serializedEntry, err := serviceID.Serialize()
 	if err != nil {
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(), strconv.FormatUint(clusterID, 10),
-		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
+	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(),
+		serviceName, s.GetAdvertiseListenAddr(), serializedEntry,
+		discovery.DefaultLeaseInSeconds)
 	if err := serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", serviceName), errs.ZapError(err))
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	return clusterID, serviceID, serviceRegister, nil
+	return serviceID, serviceRegister, nil
 }
 
 // Exit exits the program with the given code.

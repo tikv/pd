@@ -16,10 +16,12 @@ package tests
 
 import (
 	"bytes"
+	"encoding/json"
 	"sort"
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -90,4 +92,15 @@ func CheckRegionsInfoWithoutSort(re *require.Assertions, output *response.Region
 	for i, region := range expected {
 		CheckRegionInfo(re, &got[i], region)
 	}
+}
+
+// MustExec is a helper function to execute a command and unmarshal the output into the provided variable.
+func MustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
+	output, err := ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	if v == nil {
+		return string(output)
+	}
+	re.NoError(json.Unmarshal(output, v), string(output))
+	return ""
 }

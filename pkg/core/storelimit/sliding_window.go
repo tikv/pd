@@ -41,7 +41,7 @@ type SlidingWindows struct {
 // NewSlidingWindows is the construct of SlidingWindows.
 func NewSlidingWindows() *SlidingWindows {
 	windows := make([]*window, constant.PriorityLevelLen)
-	for i := 0; i < int(constant.PriorityLevelLen); i++ {
+	for i := range constant.PriorityLevelLen {
 		windows[i] = newWindow(int64(defaultWindowSize) >> i)
 	}
 	return &SlidingWindows{

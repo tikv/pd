@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/storage"
 )
 
@@ -75,7 +76,7 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	}
 	cfg2.init("test", s, cfg2)
 	require.True(t, cfg2.isDisable())
-	require.Equal(t, "", cfg2.Value)
+	require.Empty(t, cfg2.Value)
 
 	cfg3 := &testConfig{}
 	require.NoError(t, cfg2.load(cfg3))

@@ -23,11 +23,14 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
@@ -43,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -992,6 +994,7 @@ type HotStoreStats struct {
 	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
 	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
 	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
+	CPUReadStats    map[uint64]float64 `json:"cpu-read-rate,omitempty"`
 }
 
 // GetHotStores gets all hot stores stats.
@@ -1003,6 +1006,7 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 		KeysReadStats:   make(map[uint64]float64),
 		QueryWriteStats: make(map[uint64]float64),
 		QueryReadStats:  make(map[uint64]float64),
+		CPUReadStats:    make(map[uint64]float64),
 	}
 	stores, error := h.GetStores()
 	if error != nil {
@@ -1015,7 +1019,10 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 	for _, store := range stores {
 		id := store.GetID()
 		if loads, ok := storesLoads[id]; ok {
-			if store.IsTiFlash() {
+			if store.IsTiFlashCompute() {
+				continue
+			}
+			if store.IsTiFlashWrite() {
 				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
 				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
 			} else {
@@ -1026,13 +1033,14 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 			stats.KeysReadStats[id] = loads[utils.StoreReadKeys]
 			stats.QueryWriteStats[id] = loads[utils.StoreWriteQuery]
 			stats.QueryReadStats[id] = loads[utils.StoreReadQuery]
+			stats.CPUReadStats[id] = loads[utils.StoreReadCPU]
 		}
 	}
 	return stats, nil
 }
 
 // GetStoresLoads gets all hot write stores stats.
-func (h *Handler) GetStoresLoads() (map[uint64][]float64, error) {
+func (h *Handler) GetStoresLoads() (map[uint64]statistics.StoreKindLoads, error) {
 	c := h.GetCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()

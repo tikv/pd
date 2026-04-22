@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"
@@ -98,7 +99,7 @@ func (m *Manager) serviceLoop() {
 
 // updateInfo updates information from the server.
 func (m *Manager) updateInfo() {
-	if !m.srv.GetMember().IsLeader() {
+	if !m.srv.GetMember().IsServing() {
 		m.isLeader = false
 		m.members = nil
 		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {

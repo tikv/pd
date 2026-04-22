@@ -16,29 +16,37 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/spf13/cobra"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -46,13 +54,16 @@ import (
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 var _ bs.Server = (*Server)(nil)
 
-const serviceName = "Resource Manager"
+const (
+	serviceName = "Resource Manager"
+	// Back off after service-ready callback failures so an unhealthy node does not
+	// churn the primary key with immediate re-campaign attempts.
+	primaryCallbackFailureRetryInterval = time.Second
+)
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
@@ -65,11 +76,13 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg       *Config
-	clusterID uint64
+	cfg *Config
 
 	// for the primary election of resource manager
 	participant *member.Participant
+
+	// metering writer
+	meteringWriter *metering.Writer
 
 	service *Service
 
@@ -79,6 +92,14 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
+}
+
+// GetMeteringWriter returns the metering writer.
+func (s *Server) GetMeteringWriter() *metering.Writer {
+	return s.meteringWriter
 }
 
 // Name returns the unique name for this server in the resource manager cluster.
@@ -113,10 +134,11 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.ResourceManagerServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.ResourceManagerServiceName); err != nil {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -138,7 +160,7 @@ func (s *Server) primaryElectionLoop() {
 		default:
 		}
 
-		primary, checkAgain := s.participant.CheckLeader()
+		primary, checkAgain := s.participant.CheckPrimary()
 		if checkAgain {
 			continue
 		}
@@ -149,13 +171,40 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the resource manager primary has changed, try to re-campaign a primary")
 		}
 
-		s.campaignLeader()
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
+		// Skip campaign if the expected primary is not empty and not equal to the current memberValue.
+		// Expected primary ONLY SET BY `{service}/primary/transfer` API.
+		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+			log.Info("skip campaigning of resource manager primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("participant-id", s.participant.ID()),
+				zap.String("cur-participant-value", s.participant.ParticipantString()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		if s.campaignLeader() {
+			log.Warn("backing off before retrying resource manager primary campaign after callback failure",
+				zap.Duration("retry-after", primaryCallbackFailureRetryInterval))
+			timer := time.NewTimer(primaryCallbackFailureRetryInterval)
+			select {
+			case <-s.serverLoopCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
 	}
 }
 
-func (s *Server) campaignLeader() {
+// campaignLeader campaigns the primary/leader.
+// It returns true only when the server won the campaign but service-ready
+// callbacks failed, so the caller should back off before retrying.
+func (s *Server) campaignLeader() bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
+	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
@@ -164,7 +213,7 @@ func (s *Server) campaignLeader() {
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
-		return
+		return false
 	}
 
 	// Start keepalive the leadership and enable Resource Manager service.
@@ -172,22 +221,35 @@ func (s *Server) campaignLeader() {
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
-		s.participant.ResetLeader()
+		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
 
 	// maintain the leadership, after this, Resource Manager could be ready to provide service.
-	s.participant.KeepLeader(ctx)
+	s.participant.GetLeadership().Keep(ctx)
 	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			// Do not promote a half-initialized primary: callback failures mean the
+			// service-ready state was not established, so this campaign must step down.
+			// The caller will back off before the next campaign attempt.
+			return true
 		}
 	}
+	// Check expected primary and watch the primary.
+	exitPrimary := make(chan struct{})
+	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
+		s.cfg.LeaderLease, &keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}, s.participant)
+	if err != nil {
+		log.Error("prepare resource manager primary watch error", errs.ZapError(err))
+		return false
+	}
+	s.participant.SetExpectedPrimaryLease(lease)
 
-	s.participant.EnableLeader()
+	s.participant.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 
@@ -197,14 +259,17 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.participant.IsLeader() {
+			if !s.participant.IsServing() {
 				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
-				return
+				return false
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
-			return
+			return false
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the resource manager primary/leader will step down")
+			return false
 		}
 	}
 }
@@ -217,6 +282,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}
@@ -226,6 +292,9 @@ func (s *Server) Close() {
 	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
+	if s.meteringWriter != nil {
+		s.meteringWriter.Stop()
+	}
 
 	if s.GetClient() != nil {
 		if err := s.GetClient().Close(); err != nil {
@@ -240,14 +309,41 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
+// GetConfig returns the config.
+func (s *Server) GetConfig() *Config {
+	return s.cfg
+}
+
+// GetParticipant returns the participant.
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // GetControllerConfig returns the controller config.
 func (s *Server) GetControllerConfig() *ControllerConfig {
 	return &s.cfg.Controller
 }
 
+// GetResourceGroupWriteRole returns the manager write role for the resource manager service.
+func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
+	return ResourceGroupWriteRoleLegacyAll
+}
+
+// ShouldRejectMetadataWritesViaGRPC returns whether metadata writes via RM gRPC APIs should be rejected.
+func (*Server) ShouldRejectMetadataWritesViaGRPC() bool {
+	return true
+}
+
+// EnableResourceGroupMetadataWatcher reports whether the independent RM service
+// should bootstrap manager state from the metadata watcher.
+// The PD server path does not implement this hook and keeps the legacy bootstrap path.
+func (*Server) EnableResourceGroupMetadataWatcher() bool {
+	return true
+}
+
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 func (s *Server) IsServing() bool {
-	return !s.IsClosed() && s.participant.IsLeader()
+	return !s.IsClosed() && s.participant.IsServing()
 }
 
 // IsClosed checks if the server loop is closed
@@ -290,9 +386,9 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
-func (s *Server) GetLeaderListenUrls() []string {
-	return s.participant.GetLeaderListenUrls()
+// GetServingUrls gets service endpoints from the leader in election group.
+func (s *Server) GetServingUrls() []string {
+	return s.participant.GetServingUrls()
 }
 
 func (s *Server) startServer() (err error) {
@@ -304,21 +400,33 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	s.participant = member.NewParticipant(s.GetClient(), constant.ResourceManagerServiceName)
+	s.participant = member.NewParticipant(s.GetClient(), keypath.MsParam{
+		ServiceName: constant.ResourceManagerServiceName,
+	})
 	p := &resource_manager.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, keypath.ResourceManagerSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, "primary election")
 
 	s.service = &Service{
-		ctx:     s.Context(),
-		manager: NewManager[*Server](s),
+		ctx:                         s.Context(),
+		manager:                     NewManager[*Server](s),
+		rejectMetadataWritesViaGRPC: s.ShouldRejectMetadataWritesViaGRPC(),
 	}
 
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
 		return err
+	}
+	// Only start the metering writer if a valid metering config is provided.
+	if len(s.cfg.Metering.Type) > 0 {
+		s.meteringWriter, err = metering.NewWriter(s.Context(), &s.cfg.Metering, fmt.Sprintf("pd%d", s.participant.ID()))
+		if err != nil {
+			log.Warn("failed to initialize the metering writer", errs.ZapError(err))
+		} else {
+			s.meteringWriter.Start()
+		}
 	}
 
 	serverReadyChan := make(chan struct{})
@@ -376,7 +484,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -388,9 +496,9 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	log.Info("resource manager config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+
 	svr := CreateServer(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)

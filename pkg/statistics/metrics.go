@@ -14,7 +14,13 @@
 
 package statistics
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strconv"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/tikv/pd/pkg/core"
+)
 
 var (
 	hotCacheStatusGauge = prometheus.NewGaugeVec(
@@ -47,7 +53,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "status",
 			Help:      "Status of the cluster.",
-		}, []string{"type"})
+		}, []string{"type", "engine", "store"})
 
 	placementStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -81,70 +87,6 @@ var (
 			Name:      "label_level",
 			Help:      "Number of regions in the different label level.",
 		}, []string{"type"})
-	readByteHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "read_byte_hist",
-			Help:      "The distribution of region read bytes",
-			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
-		})
-	writeByteHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "write_byte_hist",
-			Help:      "The distribution of region write bytes",
-			Buckets:   prometheus.ExponentialBuckets(1, 8, 12),
-		})
-	readKeyHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "read_key_hist",
-			Help:      "The distribution of region read keys",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
-		})
-	writeKeyHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "write_key_hist",
-			Help:      "The distribution of region write keys",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 18),
-		})
-	readQueryHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "read_query_hist",
-			Help:      "The distribution of region read query",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
-		})
-	writeQueryHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "write_query_hist",
-			Help:      "The distribution of region write query",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
-		})
-	regionHeartbeatIntervalHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "region_heartbeat_interval_hist",
-			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.LinearBuckets(0, 30, 20),
-		})
-	storeHeartbeatIntervalHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "store_heartbeat_interval_hist",
-			Help:      "Bucketed histogram of the batch size of handled requests.",
-			Buckets:   prometheus.LinearBuckets(0, 5, 12),
-		})
 
 	regionAbnormalPeerDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -153,14 +95,6 @@ var (
 			Name:      "abnormal_peer_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled success cmds.",
 			Buckets:   prometheus.ExponentialBuckets(1, 1.4, 30), // 1s ~ 6.72 hours
-		}, []string{"type"})
-
-	hotCacheFlowQueueStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "hotcache",
-			Name:      "flow_queue_status",
-			Help:      "Status of the hotspot flow queue.",
 		}, []string{"type"})
 
 	hotPeerSummary = prometheus.NewGaugeVec(
@@ -187,13 +121,14 @@ func init() {
 	prometheus.MustRegister(configStatusGauge)
 	prometheus.MustRegister(StoreLimitGauge)
 	prometheus.MustRegister(regionLabelLevelGauge)
-	prometheus.MustRegister(readByteHist)
-	prometheus.MustRegister(readKeyHist)
-	prometheus.MustRegister(writeKeyHist)
-	prometheus.MustRegister(writeByteHist)
-	prometheus.MustRegister(regionHeartbeatIntervalHist)
-	prometheus.MustRegister(storeHeartbeatIntervalHist)
 	prometheus.MustRegister(regionAbnormalPeerDuration)
-	prometheus.MustRegister(hotCacheFlowQueueStatusGauge)
 	prometheus.MustRegister(hotPeerSummary)
+}
+
+// DeleteClusterStatusMetrics deletes the cluster status metrics of a store.
+func DeleteClusterStatusMetrics(store *core.StoreInfo) {
+	engine := store.Engine()
+	for _, status := range storeStatuses {
+		clusterStatusGauge.DeleteLabelValues(status, engine, strconv.FormatUint(store.GetID(), 10))
+	}
 }

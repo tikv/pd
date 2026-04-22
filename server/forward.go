@@ -17,8 +17,10 @@ package server
 import (
 	"context"
 	"io"
-	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -26,87 +28,37 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/cluster"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-func forwardTSORequest(
-	ctx context.Context,
-	request *pdpb.TsoRequest,
-	forwardStream tsopb.TSO_TsoClient) (*tsopb.TsoResponse, error) {
-	tsopbReq := &tsopb.TsoRequest{
-		Header: &tsopb.RequestHeader{
-			ClusterId:       request.GetHeader().GetClusterId(),
-			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
-			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
-		},
-		Count:      request.GetCount(),
-		DcLocation: request.GetDcLocation(),
-	}
-
-	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
-		// block until watchDeadline routine cancels the context.
-		<-ctx.Done()
-	})
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	if err := forwardStream.Send(tsopbReq); err != nil {
-		return nil, err
-	}
-
-	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
-		// block until watchDeadline routine cancels the context.
-		<-ctx.Done()
-	})
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	return forwardStream.Recv()
-}
-
-// forwardTSO forward the TSO requests to the TSO service.
-func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
+// forwardToTSOService forwards the TSO requests to the TSO service.
+func (s *GrpcServer) forwardToTSOService(stream pdpb.PD_TsoServer) error {
 	var (
-		server            = &tsoServer{stream: stream}
-		forwardStream     tsopb.TSO_TsoClient
-		forwardCtx        context.Context
-		cancelForward     context.CancelFunc
-		tsoStreamErr      error
-		lastForwardedHost string
+		server       = &tsoServer{stream: stream}
+		forwarder    = newTSOForwarder(server)
+		tsoStreamErr error
 	)
 	defer func() {
 		s.concurrentTSOProxyStreamings.Add(-1)
-		if cancelForward != nil {
-			cancelForward()
-		}
+		forwarder.cancel()
 		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
-			s.closeDelegateClient(lastForwardedHost)
+			s.closeDelegateClient(forwarder.host)
 		}
 	}()
 
 	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
 	if maxConcurrentTSOProxyStreamings >= 0 {
 		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
-			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+			return errors.WithStack(errs.ErrMaxCountTSOProxyRoutinesExceeded)
 		}
 	}
 
@@ -131,78 +83,160 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		}
 		if request.GetCount() == 0 {
 			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-			return status.Error(codes.Unknown, err.Error())
+			return errs.ErrUnknown(err)
 		}
-
-		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
-		if !ok || len(forwardedHost) == 0 {
-			tsoStreamErr = errors.WithStack(ErrNotFoundTSOAddr)
+		tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
+		if tsoStreamErr != nil {
 			return tsoStreamErr
 		}
-		if forwardStream == nil || lastForwardedHost != forwardedHost {
-			if cancelForward != nil {
-				cancelForward()
-			}
-
-			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
-			if err != nil {
-				tsoStreamErr = errors.WithStack(err)
-				return tsoStreamErr
-			}
-			forwardStream, forwardCtx, cancelForward, err = createTSOForwardStream(stream.Context(), clientConn)
-			if err != nil {
-				tsoStreamErr = errors.WithStack(err)
-				return tsoStreamErr
-			}
-			lastForwardedHost = forwardedHost
-		}
-
-		tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
 		if err != nil {
-			tsoStreamErr = errors.WithStack(err)
-			return tsoStreamErr
-		}
-
-		// The error types defined for tsopb and pdpb are different, so we need to convert them.
-		var pdpbErr *pdpb.Error
-		tsopbErr := tsopbResp.GetHeader().GetError()
-		if tsopbErr != nil {
-			if tsopbErr.Type == tsopb.ErrorType_OK {
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_OK,
-					Message: tsopbErr.GetMessage(),
-				}
-			} else {
-				// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
-				pdpbErr = &pdpb.Error{
-					Type:    pdpb.ErrorType_UNKNOWN,
-					Message: tsopbErr.GetMessage(),
-				}
-			}
-		}
-
-		response := &pdpb.TsoResponse{
-			Header: &pdpb.ResponseHeader{
-				ClusterId: tsopbResp.GetHeader().GetClusterId(),
-				Error:     pdpbErr,
-			},
-			Count:     tsopbResp.GetCount(),
-			Timestamp: tsopbResp.GetTimestamp(),
-		}
-		if err := server.send(response); err != nil {
-			return errors.WithStack(err)
+			return err
 		}
 	}
 }
 
-func (s *GrpcServer) forwardTSORequestWithDeadLine(
-	forwardCtx context.Context,
-	cancelForward context.CancelFunc,
-	forwardStream tsopb.TSO_TsoClient,
+type tsoForwarder struct {
+	// The original source that we need to send the response back to.
+	responser interface{ Send(*pdpb.TsoResponse) error }
+	// The context for the forwarding stream.
+	ctx context.Context
+	// The cancel function for the forwarding stream.
+	canceller context.CancelFunc
+	// The current forwarding stream.
+	stream tsopb.TSO_TsoClient
+	// The current host of the forwarding stream.
+	host string
+}
+
+func newTSOForwarder(responser interface{ Send(*pdpb.TsoResponse) error }) *tsoForwarder {
+	return &tsoForwarder{
+		responser: responser,
+	}
+}
+
+func (f *tsoForwarder) cancel() {
+	if f != nil && f.canceller != nil {
+		f.canceller()
+	}
+}
+
+// forwardTSORequest sends the TSO request with the current forward stream.
+func (f *tsoForwarder) forwardTSORequest(
 	request *pdpb.TsoRequest,
-	tsDeadlineCh chan<- *tsoutil.TSDeadline) (*tsopb.TsoResponse, error) {
-	done := make(chan struct{})
-	dl := tsoutil.NewTSDeadline(tsoutil.DefaultTSOProxyTimeout, done, cancelForward)
+) (*tsopb.TsoResponse, error) {
+	tsopbReq := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       request.GetHeader().GetClusterId(),
+			SenderId:        request.GetHeader().GetSenderId(),
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+		},
+		Count: request.GetCount(),
+	}
+
+	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-f.ctx.Done()
+	})
+
+	select {
+	case <-f.ctx.Done():
+		return nil, f.ctx.Err()
+	default:
+	}
+
+	if err := f.stream.Send(tsopbReq); err != nil {
+		return nil, err
+	}
+
+	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-f.ctx.Done()
+	})
+
+	select {
+	case <-f.ctx.Done():
+		return nil, f.ctx.Err()
+	default:
+	}
+
+	return f.stream.Recv()
+}
+
+func (s *GrpcServer) handleTSOForwarding(
+	ctx context.Context,
+	forwarder *tsoForwarder,
+	request *pdpb.TsoRequest,
+	tsDeadlineCh chan<- *tsoutil.TSDeadline,
+) (tsoStreamErr, sendErr error) {
+	// Get the latest TSO primary address.
+	targetHost, ok := s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
+	if !ok || len(targetHost) == 0 {
+		return errors.WithStack(errs.ErrNotFoundTSOAddr), nil
+	}
+	// Check if the forwarder is already built with the target host.
+	if forwarder.stream == nil || forwarder.host != targetHost {
+		// Cancel the old forwarder.
+		forwarder.cancel()
+		// Build a new forward stream.
+		clientConn, err := s.getDelegateClient(s.ctx, targetHost)
+		if err != nil {
+			return errors.WithStack(err), nil
+		}
+		forwarder.stream, forwarder.ctx, forwarder.canceller, err = createTSOForwardStream(ctx, clientConn)
+		if err != nil {
+			return errors.WithStack(err), nil
+		}
+		forwarder.host = targetHost
+	}
+
+	// Forward the TSO request with the deadline.
+	tsopbResp, err := s.forwardTSORequestWithDeadLine(forwarder, request, tsDeadlineCh)
+	if err != nil {
+		return errors.WithStack(err), nil
+	}
+
+	// The error types defined for tsopb and pdpb are different, so we need to convert them.
+	var pdpbErr *pdpb.Error
+	tsopbErr := tsopbResp.GetHeader().GetError()
+	if tsopbErr != nil {
+		if tsopbErr.Type == tsopb.ErrorType_OK {
+			pdpbErr = &pdpb.Error{
+				Type:    pdpb.ErrorType_OK,
+				Message: tsopbErr.GetMessage(),
+			}
+		} else {
+			// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
+			pdpbErr = &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: tsopbErr.GetMessage(),
+			}
+		}
+	}
+	// Send the TSO response back to the original source.
+	sendErr = forwarder.responser.Send(&pdpb.TsoResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: tsopbResp.GetHeader().GetClusterId(),
+			Error:     pdpbErr,
+		},
+		Count:     tsopbResp.GetCount(),
+		Timestamp: tsopbResp.GetTimestamp(),
+	})
+
+	return nil, errors.WithStack(sendErr)
+}
+
+func (s *GrpcServer) forwardTSORequestWithDeadLine(
+	forwarder *tsoForwarder,
+	request *pdpb.TsoRequest,
+	tsDeadlineCh chan<- *tsoutil.TSDeadline,
+) (*tsopb.TsoResponse, error) {
+	var (
+		forwardCtx    = forwarder.ctx
+		forwardCancel = forwarder.canceller
+		done          = make(chan struct{})
+		dl            = tsoutil.NewTSDeadline(tsoutil.DefaultTSOProxyTimeout, done, forwardCancel)
+	)
 	select {
 	case tsDeadlineCh <- dl:
 	case <-forwardCtx.Done():
@@ -210,10 +244,10 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	}
 
 	start := time.Now()
-	resp, err := forwardTSORequest(forwardCtx, request, forwardStream)
+	resp, err := forwarder.forwardTSORequest(request)
 	close(done)
 	if err != nil {
-		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+		if errs.IsLeaderChanged(err) {
 			s.tsoPrimaryWatcher.ForceLoad()
 		}
 		return nil, err
@@ -246,6 +280,15 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	forwardCtx, cancelForward := context.WithCancel(ctx)
 	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
 	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionHeartbeat(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
+func createRegionBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionBucketsClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionBuckets(forwardCtx)
 	done <- struct{}{}
 	return forwardStream, forwardCtx, cancelForward, err
 }
@@ -323,6 +366,37 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
+func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_RegionBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err == io.EOF {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+
+		schedulingpbErr := resp.GetHeader().GetError()
+		if schedulingpbErr != nil {
+			// TODO: handle more error types if needed.
+			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
+				response := &pdpb.ReportBucketsResponse{
+					Header: grpcutil.NotBootstrappedHeader(),
+				}
+				if err := server.send(response); err != nil {
+					errCh <- errors.WithStack(err)
+					return
+				}
+			}
+		}
+		// ignore other error types or success responses for now.
+	}
+}
+
 func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -355,7 +429,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 		return client.(*grpc.ClientConn), nil
 	}
 
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -402,26 +476,26 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsAPIServiceMode() {
-		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+	if !s.IsServiceIndependent(mcs.TSOServiceName) {
+		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       s.ClusterID(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			ClusterId:       keypath.ClusterID(),
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
 	}
 	var (
 		forwardedHost string
-		forwardStream tsopb.TSO_TsoClient
+		forwardStream *streamWrapper
 		ts            *tsopb.TsoResponse
 		err           error
 		ok            bool
 	)
 	handleStreamError := func(err error) (needRetry bool) {
-		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+		if errs.IsLeaderChanged(err) {
 			s.tsoPrimaryWatcher.ForceLoad()
 			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			return true
@@ -435,27 +509,33 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		}
 		return false
 	}
-	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+	for i := range maxRetryTimesRequestTSOServer {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
-			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)
 		if err != nil {
 			return pdpb.Timestamp{}, err
 		}
+		start := time.Now()
+		forwardStream.Lock()
 		err = forwardStream.Send(request)
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
+				forwardStream.Unlock()
 				continue
 			}
 			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			forwardStream.Unlock()
 			return pdpb.Timestamp{}, err
 		}
 		ts, err = forwardStream.Recv()
+		forwardStream.Unlock()
+		forwardTsoDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
 				continue
@@ -469,7 +549,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	return pdpb.Timestamp{}, err
 }
 
-func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
+func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, error) {
 	s.tsoClientPool.RLock()
 	forwardStream, ok := s.tsoClientPool.clients[forwardedHost]
 	s.tsoClientPool.RUnlock()
@@ -495,10 +575,13 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoCli
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go grpcutil.CheckStream(ctx, cancel, done)
-	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
+	tsoClient, err := tsopb.NewTSOClient(client).Tso(ctx)
 	done <- struct{}{}
 	if err != nil {
 		return nil, err
+	}
+	forwardStream = &streamWrapper{
+		TSO_TsoClient: tsoClient,
 	}
 	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil

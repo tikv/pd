@@ -18,7 +18,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,9 +27,15 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+	"github.com/pingcap/metering_sdk/config"
+
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -39,9 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
 )
 
 // Config is the pd server configuration.
@@ -96,10 +98,7 @@ type Config struct {
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
+	// Deprecated
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
@@ -115,8 +114,6 @@ type Config struct {
 	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
 	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
 	// label keys. Now we have following special keys:
-	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
-	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
 	Labels map[string]string `toml:"labels" json:"labels"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
@@ -165,9 +162,11 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
-	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // NewConfig creates a new config.
@@ -176,7 +175,7 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = int64(3)
+	defaultLeaderLease             = int64(5)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
@@ -217,8 +216,6 @@ const (
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
-	defaultEnableWitness       = false
-	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 
@@ -227,11 +224,13 @@ const (
 	defaultMaxConcurrentTSOProxyStreamings = 5000
 	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
-	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
+	// DefaultTSOSaveInterval is the default value of the config `TSOSaveInterval`.
+	DefaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
-	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
+	MaxTSOUpdatePhysicalInterval = 10 * time.Second
+	minTSOUpdatePhysicalInterval = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 	defaultLogLevel  = "info"
@@ -242,7 +241,7 @@ const (
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
 	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = false
+	defaultEnableGOGCTuner            = true
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
@@ -252,13 +251,9 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback = true
-)
-
-// Special keys for Labels
-const (
-	// ZoneLabel is the name of the key which indicates DC location of this PD server.
-	ZoneLabel = "zone"
+	defaultEnableSchedulingFallback      = true
+	defaultEnableTSODynamicSwitching     = false
+	defaultEnableResourceManagerFallback = true
 )
 
 var (
@@ -406,11 +401,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
-	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
-		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = MaxTSOUpdatePhysicalInterval
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
@@ -465,7 +460,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
-	c.MicroService.adjust(configMetaData.Child("micro-service"))
+	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
@@ -515,9 +510,6 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions.
-	// WARN: TraceRegionFlow is deprecated.
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
@@ -581,35 +573,21 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-	if err := c.migrateConfigurationFromFile(meta); err != nil {
+	if err := migrateConfigurationFromFile(meta); err != nil {
 		return err
 	}
 	return c.Validate()
 }
 
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
+func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
-	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	defineOld := meta.IsDefined(oldName)
 	switch {
-	case defineOld && defineNew:
-		if c.TraceRegionFlow && (c.FlowRoundByDigit == defaultFlowRoundByDigit) {
-			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
-		}
-	case defineOld && !defineNew:
-		if !c.TraceRegionFlow {
-			c.FlowRoundByDigit = math.MaxInt8
-		}
+	case defineOld:
+		return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+	default:
 	}
 	return nil
-}
-
-// MigrateDeprecatedFlags updates new flags according to deprecated flags.
-func (c *PDServerConfig) MigrateDeprecatedFlags() {
-	if !c.TraceRegionFlow {
-		c.FlowRoundByDigit = math.MaxInt8
-	}
-	// json omity the false. next time will not persist to the kv.
-	c.TraceRegionFlow = false
 }
 
 // Clone returns a cloned PD server config.
@@ -671,14 +649,9 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// GetLeaderLease returns the leader lease.
-func (c *Config) GetLeaderLease() int64 {
+// GetLease returns the leader lease.
+func (c *Config) GetLease() int64 {
 	return c.LeaderLease
-}
-
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (c *Config) IsLocalTSOEnabled() bool {
-	return c.EnableLocalTSO
 }
 
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
@@ -775,6 +748,7 @@ type DashboardConfig struct {
 	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
 	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
 	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir               string `toml:"temp-dir" json:"temp-dir"`
 	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
@@ -852,26 +826,47 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
-// MicroServiceConfig is the configuration for micro service.
-type MicroServiceConfig struct {
-	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+// MicroserviceConfig is the configuration for microservice.
+type MicroserviceConfig struct {
+	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// If EnableResourceManagerFallback is false, resource manager service only
+	// works when api service is healthy. Please make sure api service is highly
+	// available before disabling this option.
+	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 
-func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
 	}
+	if !meta.IsDefined("enable-tso-dynamic-switching") {
+		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
+	}
+	if !meta.IsDefined("enable-resource-manager-fallback") {
+		c.EnableResourceManagerFallback = defaultEnableResourceManagerFallback
+	}
 }
 
-// Clone returns a copy of micro service config.
-func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+// Clone returns a copy of microservice config.
+func (c *MicroserviceConfig) Clone() *MicroserviceConfig {
 	cfg := *c
 	return &cfg
 }
 
-// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
-func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to PD.
+func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
+}
+
+// IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
+func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
+	return c.EnableTSODynamicSwitching
+}
+
+// IsResourceManagerFallbackEnabled returns whether to enable resource manager service fallback to api service.
+func (c *MicroserviceConfig) IsResourceManagerFallbackEnabled() bool {
+	return c.EnableResourceManagerFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

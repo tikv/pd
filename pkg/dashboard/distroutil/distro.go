@@ -18,9 +18,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/util/distro"
-	"go.uber.org/zap"
 )
 
 const (

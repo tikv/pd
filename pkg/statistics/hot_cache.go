@@ -17,19 +17,16 @@ package statistics
 import (
 	"context"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/smallnest/chanx"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const chanMaxLength = 6000000
-
-var (
-	readTaskMetrics  = hotCacheFlowQueueStatusGauge.WithLabelValues(utils.Read.String())
-	writeTaskMetrics = hotCacheFlowQueueStatusGauge.WithLabelValues(utils.Write.String())
-)
 
 // HotCache is a cache hold hot regions.
 type HotCache struct {
@@ -39,11 +36,11 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context) *HotCache {
+func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
-		writeCache: NewHotPeerCache(ctx, utils.Write),
-		readCache:  NewHotPeerCache(ctx, utils.Read),
+		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
+		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
@@ -76,7 +73,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-// RegionStats returns the read or write statistics for hot regions.
+// GetHotPeerStats returns hot peer stats for the specified kind (read/write).
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	ret := make(chan map[uint64][]*HotPeerStat, 1)
@@ -185,7 +182,6 @@ func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task(w.readCache)
-		readTaskMetrics.Set(float64(w.readCache.taskQueue.Len()))
 	}
 }
 
@@ -193,7 +189,6 @@ func (w *HotCache) runWriteTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
 		task(w.writeCache)
-		writeTaskMetrics.Set(float64(w.writeCache.taskQueue.Len()))
 	}
 }
 

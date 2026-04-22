@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 )
 
@@ -31,7 +32,7 @@ var (
 
 // Alloc allocates a local URL for testing.
 func Alloc() string {
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		if u := tryAllocTestURL(); u != "" {
 			return u
 		}

@@ -23,10 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -35,6 +31,12 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -74,8 +76,8 @@ func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
 	}, nil
 }
 
-// ToTLSConfig generates tls config.
-func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
+// ToClientTLSConfig generates tls config.
+func (s TLSConfig) ToClientTLSConfig() (*tls.Config, error) {
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
 		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
 		if err != nil {
@@ -100,13 +102,36 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
+	return tlsConfig, nil
+}
+
+// ToServerTLSConfig generates tls config.
+func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCNs:    s.CertAllowedCNs,
+	}
+
+	tlsConfig, err := tlsInfo.ServerConfig()
+	if err != nil {
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	tlsConfig.NextProtos = []string{"http/1.1", "h2"}
+	tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+
 	return tlsConfig, nil
 }
 
@@ -144,6 +169,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		},
 	})
 	do = append(do, opt, backoffOpts)
+	// TODO: use grpc.NewClient instead of grpc.DialContext.
+	//nolint:staticcheck
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
@@ -189,7 +216,7 @@ func IsFollowerHandleEnabled(ctx context.Context) bool {
 }
 
 func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	tlsCfg, err := tlsConfig.ToTLSConfig()
+	tlsCfg, err := tlsConfig.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +246,7 @@ func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do
 		}
 		conn, err = establish(ctx, addr, tlsConfig, do...)
 		if err != nil {
-			log.Error("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
+			log.Warn("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
 			continue
 		}
 		break

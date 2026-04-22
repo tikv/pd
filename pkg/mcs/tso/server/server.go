@@ -27,18 +27,25 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/spf13/cobra"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/systimemon"
 	"github.com/tikv/pd/pkg/tso"
@@ -49,14 +56,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var _ bs.Server = (*Server)(nil)
-var _ tso.ElectionMember = (*member.Participant)(nil)
+var _ member.Election = (*member.Participant)(nil)
 
 const serviceName = "TSO Service"
 
@@ -72,8 +75,7 @@ type Server struct {
 	serverLoopCancel func()
 	serverLoopWg     sync.WaitGroup
 
-	cfg       *Config
-	clusterID uint64
+	cfg *Config
 
 	service              *Service
 	keyspaceGroupManager *tso.KeyspaceGroupManager
@@ -85,6 +87,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // Implement the following methods defined in bs.Server
@@ -156,10 +161,11 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.TSOServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, mcs.TSOServiceName); err != nil {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -171,6 +177,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing tso server ...")
+	s.cgMonitor.StopMonitor()
 	// close tso service loops in the keyspace group manager
 	s.keyspaceGroupManager.Close()
 	if err := s.serviceRegister.Deregister(); err != nil {
@@ -195,44 +202,54 @@ func (s *Server) Close() {
 	log.Info("tso server is closed")
 }
 
-// IsServing implements basicserver. It returns whether the server is the leader
-// if there is embedded etcd, or the primary otherwise.
+// IsServing implements basicserver.
 func (s *Server) IsServing() bool {
-	return s.IsKeyspaceServing(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return s.IsKeyspaceServingByGroup(keyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
-// IsKeyspaceServing returns whether the server is the primary of the given keyspace.
-// TODO: update basicserver interface to support keyspace.
-func (s *Server) IsKeyspaceServing(keyspaceID, keyspaceGroupID uint32) bool {
+// IsKeyspaceServingByGroup returns whether the server is the primary of the given keyspace.
+// It only returns true when the keyspace ID matches the keyspace group ID.
+func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bool {
 	if atomic.LoadInt64(&s.isRunning) == 0 {
 		return false
 	}
-
-	member, err := s.keyspaceGroupManager.GetElectionMember(
-		keyspaceID, keyspaceGroupID)
-	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+	// We need to check if the keyspace group ID is expected for the given keyspace ID.
+	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
+	_, _, expected, _, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if keyspaceGroupID != expected || err != nil {
 		return false
 	}
-	return member.IsLeader()
+	return s.checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID)
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
-// The entry at the index 0 is the primary's service endpoint.
-func (s *Server) GetLeaderListenUrls() []string {
-	member, err := s.keyspaceGroupManager.GetElectionMember(
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+func (s *Server) checkKeyspaceGroupLeadership(keyspaceID, keyspaceGroupID uint32) bool {
+	member, err := s.keyspaceGroupManager.GetMember(
+		keyspaceID, keyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get election member", errs.ZapError(err))
+		log.Error("failed to get member", errs.ZapError(err))
+		return false
+	}
+	return member.IsServing()
+}
+
+// GetServingUrls gets service endpoints.
+// The entry at the index 0 is the primary's service endpoint.
+func (s *Server) GetServingUrls() []string {
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	member, err := s.keyspaceGroupManager.GetMember(
+		keyspaceID, constant.DefaultKeyspaceGroupID)
+	if err != nil {
+		log.Error("failed to get member", errs.ZapError(err))
 		return nil
 	}
 
-	return member.GetLeaderListenUrls()
+	return member.GetServingUrls()
 }
 
-// GetMember returns the election member of the given keyspace and keyspace group.
-func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMember, error) {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+// GetMember returns the member of the given keyspace and keyspace group.
+func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (member.Election, error) {
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return nil, err
 	}
@@ -241,11 +258,11 @@ func (s *Server) GetMember(keyspaceID, keyspaceGroupID uint32) (tso.ElectionMemb
 
 // ResignPrimary resigns the primary of the given keyspace.
 func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
-	member, err := s.keyspaceGroupManager.GetElectionMember(keyspaceID, keyspaceGroupID)
+	member, err := s.keyspaceGroupManager.GetMember(keyspaceID, keyspaceGroupID)
 	if err != nil {
 		return err
 	}
-	member.ResetLeader()
+	member.Resign()
 	return nil
 }
 
@@ -258,11 +275,6 @@ func (*Server) AddServiceReadyCallback(...func(context.Context) error) {
 
 // Implement the other methods
 
-// ClusterID returns the cluster ID of this server.
-func (s *Server) ClusterID() uint64 {
-	return s.clusterID
-}
-
 // IsClosed checks if the server loop is closed
 func (s *Server) IsClosed() bool {
 	return atomic.LoadInt64(&s.isRunning) == 0
@@ -273,38 +285,19 @@ func (s *Server) GetKeyspaceGroupManager() *tso.KeyspaceGroupManager {
 	return s.keyspaceGroupManager
 }
 
-// GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
-	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
-}
-
-// IsLocalRequest checks if the forwarded host is the current host
-func (*Server) IsLocalRequest(forwardedHost string) bool {
-	// TODO: Check if the forwarded host is the current host.
-	// The logic is depending on etcd service mode -- if the TSO service
-	// uses the embedded etcd, check against ClientUrls; otherwise check
-	// against the cluster membership.
-	return forwardedHost == ""
-}
-
-// ValidateInternalRequest checks if server is closed, which is used to validate
-// the gRPC communication between TSO servers internally.
-// TODO: Check if the sender is from the global TSO allocator
-func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
-	if s.IsClosed() {
-		return ErrNotStarted
-	}
-	return nil
+// GetTSOAllocator returns the TSO Allocator of the given keyspace group.
+func (s *Server) GetTSOAllocator(keyspaceGroupID uint32) (*tso.Allocator, error) {
+	return s.keyspaceGroupManager.GetAllocator(keyspaceGroupID)
 }
 
 // ValidateRequest checks if the keyspace replica is the primary and clusterID is matched.
 // TODO: Check if the keyspace replica is the primary
 func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
-	if header.GetClusterId() != s.clusterID {
-		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
+	if header.GetClusterId() != keypath.ClusterID() {
+		return errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
 	}
 	return nil
 }
@@ -328,13 +321,9 @@ func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, key
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck),
 		zap.Uint32("keyspace-group-id", keyspaceGroupID))
-	tsoAllocatorManager, err := s.GetTSOAllocatorManager(keyspaceGroupID)
+	tsoAllocator, err := s.GetTSOAllocator(keyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get allocator manager", errs.ZapError(err))
-		return err
-	}
-	tsoAllocator, err := tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
+		log.Error("failed to get tso allocator", errs.ZapError(err))
 		return err
 	}
 	if tsoAllocator == nil {
@@ -354,8 +343,9 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 }
 
 func (s *Server) startServer() (err error) {
+	clusterID := keypath.ClusterID()
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
-	metaDataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
+	metaDataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
@@ -363,11 +353,9 @@ func (s *Server) startServer() (err error) {
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	legacySvcRootPath := keypath.LegacyRootPath(s.clusterID)
-	tsoSvcRootPath := keypath.TSOSvcRootPath(s.clusterID)
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
-		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
-		s.clusterID, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(),
+		s.cfg.AdvertiseListenAddr, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
@@ -431,7 +419,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -444,9 +432,9 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	log.Info("TSO service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+
 	svr := CreateServer(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)

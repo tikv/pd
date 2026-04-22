@@ -26,11 +26,13 @@ import (
 func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
-		runner.Start(context.TODO())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner.Start(ctx)
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			time.Sleep(50 * time.Millisecond)
 			wg.Add(1)
 			err := runner.RunTask(
@@ -48,10 +50,12 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
-		runner.Start(context.TODO())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner.Start(ctx)
 		defer runner.Stop()
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			wg.Add(1)
 			err := runner.RunTask(
 				uint64(i),
@@ -77,25 +81,39 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("DuplicatedTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
-		runner.Start(context.TODO())
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		runner.Start(ctx)
 		defer runner.Stop()
+
 		for i := 1; i < 11; i++ {
 			regionID := uint64(i)
 			if i == 10 {
-				regionID = 4
+				regionID = 6
 			}
 			err := runner.RunTask(
 				regionID,
 				"test3",
-				func(context.Context) {
-					time.Sleep(time.Second)
+				func(ctx context.Context) {
+					select {
+					case <-time.After(time.Second):
+						// Normal completion
+					case <-ctx.Done():
+						// Context cancelled, return immediately
+						return
+					}
 				},
 			)
 			require.NoError(t, err)
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		updatedSubmitted := runner.pendingTasks[1].submittedAt
+		var updatedSubmitted time.Time
+		for _, task := range runner.pendingTasks {
+			if task.id == 6 {
+				updatedSubmitted = task.submittedAt
+			}
+		}
 		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
 		require.Greater(t, updatedSubmitted, lastSubmitted)
 	})

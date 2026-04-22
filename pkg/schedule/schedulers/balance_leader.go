@@ -23,7 +23,11 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -32,10 +36,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -51,7 +54,7 @@ const (
 )
 
 type balanceLeaderSchedulerParam struct {
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -104,7 +107,7 @@ func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
 func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceLeaderSchedulerParam{
 		Ranges: ranges,
@@ -118,10 +121,10 @@ func (conf *balanceLeaderSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *balanceLeaderSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *balanceLeaderSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }
@@ -331,8 +334,10 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	batch := s.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
+	leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
-	solver := newSolver(basePlan, s.tp, cluster, opInfluence)
+	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -367,7 +372,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			}
 		}
 	}
-	s.retryQuota.gc(append(sourceCandidate.stores, targetCandidate.stores...))
+	s.gc(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result, collector.GetPlans()
 }
 
@@ -376,7 +381,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
-	retryLimit := s.retryQuota.getLimit(store)
+	retryLimit := s.getLimit(store)
 	var creator func(*solver, *plan.Collector) *operator.Operator
 	switch dir {
 	case transferOut:
@@ -387,7 +392,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 		creator = s.transferLeaderIn
 	}
 	var op *operator.Operator
-	for i := 0; i < retryLimit; i++ {
+	for range retryLimit {
 		if op = creator(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
@@ -396,7 +401,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 		}
 	}
 	if op != nil {
-		s.retryQuota.resetLimit(store)
+		s.resetLimit(store)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64(dir, store.GetID()))
@@ -412,7 +417,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.Source, plan.Target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	operator.AddOpInfluence(op, plan.opInfluence, plan.SchedulerCluster.GetBasicCluster())
+	operator.AddOpInfluence(op, plan.opInfluence, plan.GetBasicCluster())
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)
@@ -424,8 +429,16 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), s.conf.getRanges()),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			// todo: check all key ranges not only the first
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		balanceLeaderNoLeaderRegionCounter.Inc()
@@ -468,8 +481,15 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), s.conf.getRanges()),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -491,12 +511,21 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		balanceLeaderNoLeaderRegionCounter.Inc()
 		return nil
 	}
-	finalFilters := s.filters
+	// Check if the source store is available as a source.
 	conf := solver.GetSchedulerConfig()
+	if filter.NewCandidates([]*core.StoreInfo{solver.Source}).
+		FilterSource(conf, nil, s.filterCounter, s.filters...).Len() == 0 {
+		log.Debug("store cannot be used as source", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.Source.GetID()))
+		balanceLeaderNoSourceStoreCounter.Inc()
+		return nil
+	}
+
+	// Check if the target store is available as a target.
+	finalFilters := s.filters
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(s.filters, leaderFilter)
 	}
-	target := filter.NewCandidates(s.R, []*core.StoreInfo{solver.Target}).
+	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, s.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {
@@ -537,7 +566,8 @@ func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 		balanceLeaderNewOpCounter,
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), solver.targetMetricLabel()),
+		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 	)
 	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

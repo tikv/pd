@@ -23,8 +23,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,10 +37,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -52,7 +55,7 @@ type balanceWitnessSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -98,7 +101,7 @@ func (conf *balanceWitnessSchedulerConfig) validateLocked() bool {
 func (conf *balanceWitnessSchedulerConfig) clone() *balanceWitnessSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceWitnessSchedulerConfig{
 		Ranges: ranges,
@@ -112,10 +115,10 @@ func (conf *balanceWitnessSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *balanceWitnessSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *balanceWitnessSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }
@@ -235,7 +238,8 @@ func (s *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
-	solver := newSolver(basePlan, s.tp, cluster, opInfluence)
+	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -255,7 +259,7 @@ func (s *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			makeInfluence(op, solver, usedRegions, sourceCandidate)
 		}
 	}
-	s.retryQuota.gc(sourceCandidate.stores)
+	s.gc(sourceCandidate.stores)
 	return result, collector.GetPlans()
 }
 
@@ -264,10 +268,10 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
-	retryLimit := s.retryQuota.getLimit(store)
+	retryLimit := s.getLimit(store)
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
-	for i := 0; i < retryLimit; i++ {
+	for range retryLimit {
 		schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 		if op = s.transferWitnessOut(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
@@ -277,7 +281,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 		}
 	}
 	if op != nil {
-		s.retryQuota.resetLimit(store)
+		s.resetLimit(store)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64("transfer-out", store.GetID()))
@@ -351,7 +355,6 @@ func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		schedulerCounter.WithLabelValues(s.GetName(), "new-operator"),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), solver.targetMetricLabel()),
 		s.counter.WithLabelValues("move-witness", solver.sourceMetricLabel()+"-out"),
 		s.counter.WithLabelValues("move-witness", solver.targetMetricLabel()+"-in"),
 	)

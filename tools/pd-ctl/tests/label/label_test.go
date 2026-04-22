@@ -19,10 +19,11 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
@@ -55,7 +56,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-west",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -71,7 +71,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-east",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},
@@ -87,7 +86,6 @@ func TestLabel(t *testing.T) {
 							Value: "us-west",
 						},
 					},
-					LastHeartbeat: time.Now().UnixNano(),
 				},
 				StateName: metapb.StoreState_Up.String(),
 			},

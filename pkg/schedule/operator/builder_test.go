@@ -18,14 +18,22 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type operatorBuilderTestSuite struct {
 	suite.Suite
@@ -555,7 +563,7 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		re.NoError(err)
 		re.Equal(testCase.kind, op.Kind())
 		re.Len(testCase.steps, op.Len())
-		for i := 0; i < op.Len(); i++ {
+		for i := range op.Len() {
 			switch step := op.Step(i).(type) {
 			case TransferLeader:
 				re.Equal(testCase.steps[i].(TransferLeader).FromStore, step.FromStore)

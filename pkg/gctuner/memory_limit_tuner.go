@@ -20,12 +20,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	util "github.com/tikv/pd/pkg/gogc"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 // GlobalMemoryLimitTuner only allow one memory limit tuner in one process
@@ -59,7 +61,7 @@ func (t *memoryLimitTuner) tuning() {
 		return
 	}
 	r := memory.ForceReadMemStats()
-	gogc := util.GetGOGC()
+	gogc := util.GetGCPercent()
 	ratio := float64(100+gogc) / 100
 	// This `if` checks whether the **last** GC was triggered by MemoryLimit as far as possible.
 	// If the **last** GC was triggered by MemoryLimit, we'll set MemoryLimit to MAXVALUE to return control back to GOGC

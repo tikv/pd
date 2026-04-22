@@ -18,25 +18,30 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 const (
-	clusterID = uint64(20240117)
-	rulesNum  = 16384
+	rulesNum = 16384
 )
 
 func TestLoadLargeRules(t *testing.T) {
@@ -53,7 +58,7 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
@@ -66,10 +71,9 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	rw := &Watcher{
 		ctx:                   ctx,
 		cancel:                cancel,
-		rulesPathPrefix:       keypath.RulesPathPrefix(clusterID),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(clusterID),
-		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(clusterID),
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(clusterID),
+		rulesPathPrefix:       keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
 		ruleStorage:           storage,
 		regionLabeler:         labelerManager,
@@ -83,12 +87,14 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
-	cfg.Dir = filepath.Join(os.TempDir(), "/pd_tests")
+	cfg := etcdutil.NewTestEtcdConfig()
+	var err error
+	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
+	re.NoError(err)
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls)
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
@@ -101,7 +107,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix(clusterID) + "/" + rule.ID
+		key := keypath.RegionLabelKeyPath(rule.ID)
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

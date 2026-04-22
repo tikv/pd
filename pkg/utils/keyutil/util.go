@@ -41,6 +41,28 @@ func MinKey(a, b []byte) []byte {
 	return a
 }
 
+// MaxStartKey returns the bigger keys, the empty key is the biggest.
+func MaxStartKey(a, b []byte) []byte {
+	if len(a) == 0 {
+		return a
+	}
+	if len(b) == 0 {
+		return b
+	}
+	return MaxKey(a, b)
+}
+
+// MinEndKey returns the smaller keys, the empty key is the biggest.
+func MinEndKey(a, b []byte) []byte {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	return MinKey(a, b)
+}
+
 type boundary int
 
 const (

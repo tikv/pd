@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -68,7 +69,7 @@ func newSchedulingController(parentCtx context.Context, basicCluster *core.Basic
 		BasicCluster: basicCluster,
 		opt:          opt,
 		labelStats:   statistics.NewLabelStatistics(),
-		hotStat:      statistics.NewHotStat(parentCtx),
+		hotStat:      statistics.NewHotStat(parentCtx, basicCluster),
 		slowStat:     statistics.NewSlowStat(),
 		regionStats:  statistics.NewRegionStatistics(basicCluster, opt, ruleManager),
 	}
@@ -256,7 +257,7 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (sc *schedulingController) GetStoresLoads() map[uint64][]float64 {
+func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return sc.hotStat.GetStoresLoads()
 }
 
@@ -468,6 +469,9 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 
 // IsPrepared return true if the prepare checker is ready.
 func (sc *schedulingController) IsPrepared() bool {
+	if sc == nil || sc.coordinator == nil {
+		return false
+	}
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetPrepareChecker().IsPrepared()

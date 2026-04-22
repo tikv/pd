@@ -21,11 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 )
 
 const (
@@ -79,10 +80,12 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 }
 
 // MustNewGrpcClient must create a new PD grpc client.
-func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
+func MustNewGrpcClient(re *require.Assertions, addr string) (pdpb.PDClient, *grpc.ClientConn) {
+	// TODO: use grpc.NewClient instead of grpc.Dial.
+	//nolint:staticcheck
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
-	return pdpb.NewPDClient(conn)
+	return pdpb.NewPDClient(conn), conn
 }
 
 // CleanServer is used to clean data directory.
@@ -109,7 +112,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 	var wg sync.WaitGroup
 	tasks := make(chan int, count)
 	workers := runtime.NumCPU()
-	for w := 0; w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -118,7 +121,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 			}
 		}()
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tasks <- i
 	}
 	close(tasks)

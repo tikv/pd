@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,18 +21,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHeartbeatRequest {
 	return &pdpb.StoreHeartbeatRequest{
@@ -136,16 +144,23 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 							peer.Role = metapb.PeerRole_Voter
 						}
 						// exit joint state
-						if peer.Role == metapb.PeerRole_DemotingVoter {
+						switch peer.Role {
+						case metapb.PeerRole_DemotingVoter:
 							peer.Role = metapb.PeerRole_Learner
-						} else if peer.Role == metapb.PeerRole_IncomingVoter {
+						case metapb.PeerRole_IncomingVoter:
 							peer.Role = metapb.PeerRole_Voter
+						default:
 						}
 					}
 					for _, failedVoter := range demote.GetFailedVoters() {
-						for _, peer := range region.GetPeers() {
+						for i, peer := range region.GetPeers() {
 							if failedVoter.GetId() == peer.GetId() {
-								peer.Role = metapb.PeerRole_Learner
+								if peer.Role == metapb.PeerRole_Learner {
+									// Remove learner peers
+									region.Peers = append(region.Peers[:i], region.Peers[i+1:]...)
+								} else {
+									peer.Role = metapb.PeerRole_Learner
+								}
 								break
 							}
 						}
@@ -194,7 +209,7 @@ func TestFinished(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -274,7 +289,7 @@ func TestFailed(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -367,7 +382,7 @@ func TestForceLeaderFail(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(4, "6.0.0") {
 		cluster.PutStore(store)
@@ -447,7 +462,7 @@ func TestAffectedTableID(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -488,7 +503,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -564,7 +579,7 @@ func TestAutoDetectMode(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(1, "6.0.0") {
 		cluster.PutStore(store)
@@ -617,7 +632,7 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(1, "6.0.0") {
 		cluster.PutStore(store)
@@ -658,7 +673,7 @@ func TestOneLearner(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -713,7 +728,7 @@ func TestTiflashLearnerPeer(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		if store.GetID() == 3 {
@@ -815,7 +830,6 @@ func TestTiflashLearnerPeer(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 8, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1},
-							{Id: 12, StoreId: 3, Role: metapb.PeerRole_Learner},
 							{Id: 13, StoreId: 5, Role: metapb.PeerRole_Learner},
 						}}}},
 		}},
@@ -888,7 +902,7 @@ func TestUninitializedPeer(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -944,7 +958,7 @@ func TestJointState(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1137,7 +1151,7 @@ func TestExecutionTimeout(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1169,7 +1183,7 @@ func TestNoHeartbeatTimeout(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1192,7 +1206,7 @@ func TestExitForceLeader(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1270,7 +1284,7 @@ func TestStep(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1325,7 +1339,7 @@ func TestOnHealthyRegions(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1401,7 +1415,7 @@ func TestCreateEmptyRegion(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1510,7 +1524,7 @@ func TestRangeOverlap1(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1533,7 +1547,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 4}, {Id: 13, StoreId: 5}}}}},
-		}},
+		}, Step: 1},
 		2: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1544,8 +1558,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 8},
 						Peers: []*metapb.Peer{
-							{Id: 21, StoreId: 1}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
-		}},
+							{Id: 21, StoreId: 2}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
+		}, Step: 1},
 		3: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1556,8 +1570,8 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
-		}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
+		}, Step: 1},
 	}
 
 	advanceUntilFinished(re, recoveryController, reports)
@@ -1585,7 +1599,7 @@ func TestRangeOverlap1(t *testing.T) {
 						EndKey:      []byte(""),
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 6},
 						Peers: []*metapb.Peer{
-							{Id: 31, StoreId: 1}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
+							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4, Role: metapb.PeerRole_Learner}, {Id: 33, StoreId: 5, Role: metapb.PeerRole_Learner}}}}},
 		}},
 	}
 
@@ -1605,7 +1619,7 @@ func TestRangeOverlap2(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1699,7 +1713,7 @@ func TestRemoveFailedStores(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -1740,7 +1754,7 @@ func TestRunning(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -1762,7 +1776,7 @@ func TestEpochComparison(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1841,8 +1855,8 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
 			Id:            i,
-			Address:       fmt.Sprintf("127.0.0.1:%d", i),
-			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),
@@ -1857,6 +1871,132 @@ func getTestDeployPath(storeID uint64) string {
 	return fmt.Sprintf("test/store%d", storeID)
 }
 
+func TestTiFlashOrphanedPeerDemote(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(4, "6.0.0") {
+		if store.GetID() == 3 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	// Mark stores 2 and 4 as failed (2 voters down)
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		2: {},
+		4: {},
+	}, 60, false))
+
+	reports := map[uint64]*pdpb.StoreReport{
+		// Store 1: voter with older data than TiFlash learner (last index 10) - only live voter
+		1: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+							{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 14, StoreId: 4, Role: metapb.PeerRole_Voter},
+						}}}},
+		}},
+		// Store 3: TiFlash learner with newer data (last index 12)
+		3: {PeerReports: []*pdpb.PeerReport{
+			{
+				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 12, HardState: &eraftpb.HardState{Term: 1, Commit: 12}},
+				RegionState: &raft_serverpb.RegionLocalState{
+					Region: &metapb.Region{
+						Id:          1001,
+						StartKey:    []byte(""),
+						EndKey:      []byte("x"),
+						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
+						Peers: []*metapb.Peer{
+							{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+							{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+							{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
+							{Id: 14, StoreId: 4, Role: metapb.PeerRole_Voter},
+						}}}},
+		}},
+	}
+
+	retry := 0
+	forcedLeaderFound := false
+	tombstoneFound := false
+	demoteStageFound := false
+
+	for {
+		for storeID, report := range reports {
+			req := newStoreHeartbeat(storeID, report)
+			req.StoreReport = report
+			resp := &pdpb.StoreHeartbeatResponse{}
+			recoveryController.HandleStoreHeartbeat(req, resp)
+
+			plan := resp.GetRecoveryPlan()
+			if plan != nil {
+				stage := recoveryController.GetStage()
+
+				if stage == TombstoneTiFlashLearner && len(plan.GetTombstones()) > 0 {
+					tombstoneFound = true
+					re.Contains(plan.GetTombstones(), uint64(1001))
+					re.Equal(uint64(3), storeID)
+				}
+
+				if stage == ForceLeader && plan.GetForceLeader() != nil && len(plan.GetForceLeader().GetEnterForceLeaders()) > 0 {
+					forcedLeaderFound = true
+					re.Contains(plan.GetForceLeader().GetEnterForceLeaders(), uint64(1001))
+					// Only store 1 should get force leader (the only live voter)
+					re.Equal(uint64(1), storeID)
+				}
+
+				if stage == DemoteFailedVoter && len(plan.GetDemotes()) > 0 {
+					demoteStageFound = true
+					found := false
+					for _, demote := range plan.GetDemotes() {
+						if demote.GetRegionId() == 1001 {
+							found = true
+							re.NotEmpty(demote.GetFailedVoters())
+							// Should include failed voters (stores 2, 4) and orphaned TiFlash peer (store 3)
+							failedStoreIDs := make(map[uint64]bool)
+							for _, peer := range demote.GetFailedVoters() {
+								failedStoreIDs[peer.GetStoreId()] = true
+							}
+							re.True(failedStoreIDs[2], "Failed voter store 2 should be demoted")
+							re.True(failedStoreIDs[4], "Failed voter store 4 should be demoted")
+							re.True(failedStoreIDs[3], "Orphaned TiFlash peer store 3 should be demoted")
+						}
+					}
+					re.True(found)
+				}
+			}
+
+			applyRecoveryPlan(re, storeID, reports, resp)
+		}
+		if recoveryController.GetStage() == Finished {
+			break
+		} else if recoveryController.GetStage() == Failed {
+			panic("Failed to recovery")
+		} else if retry >= 15 {
+			panic("retry timeout")
+		}
+		retry += 1
+	}
+
+	re.True(tombstoneFound, "TiFlash learner should be tombstoned")
+	re.True(forcedLeaderFound, "Another peer should be forced as leader")
+	re.True(demoteStageFound, "Demote stage should include the orphaned TiFlash peer")
+}
+
 func TestSelectLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1864,7 +2004,7 @@ func TestSelectLeader(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(6, "6.0.0")
 	labels := []*metapb.StoreLabel{
@@ -1873,8 +2013,8 @@ func TestSelectLeader(t *testing.T) {
 			Value: core.EngineTiFlash,
 		},
 	}
-	stores[5].IsTiFlash()
 	core.SetStoreLabels(labels)(stores[5])
+	re.True(stores[5].IsTiFlashWrite())
 	for _, store := range stores {
 		cluster.PutStore(store)
 	}

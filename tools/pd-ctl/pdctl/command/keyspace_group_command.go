@@ -23,7 +23,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 

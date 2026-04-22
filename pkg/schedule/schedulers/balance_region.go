@@ -18,8 +18,11 @@ import (
 	"sort"
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -27,13 +30,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type balanceRegionSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
@@ -106,7 +109,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	sourceStores := filter.SelectSourceStores(stores, s.filters, conf, collector, s.filterCounter)
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	s.OpController.GetFastOpInfluence(cluster.GetBasicCluster(), opInfluence)
-	solver := newSolver(basePlan, s.tp, cluster, opInfluence)
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	sort.Slice(sourceStores, func(i, j int) bool {
 		iOp := solver.getOpInfluence(sourceStores[i].GetID())
@@ -118,7 +122,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
+	affinityFilter := filter.NewAffinityFilter(cluster)
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, affinityFilter}
 	switch cluster.(type) {
 	case *rangeCluster:
 		// allow empty region to be scheduled in range cluster
@@ -133,31 +138,38 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	solver.Step++
 	var sourceIndex int
 
+	rs := s.conf.Ranges
+	if s.GetName() == types.BalanceRegionScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
-		retryLimit := s.retryQuota.getLimit(solver.Source)
-		solver.calcSourceStoreScore(s.GetName())
+		retryLimit := s.getLimit(solver.Source)
+		solver.sourceScore = solver.sourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
-		for i := 0; i < retryLimit; i++ {
+		for range retryLimit {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
-			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), rs), collector,
 				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))...)
 			if solver.Region == nil {
 				// Then pick the region that has a follower in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Then pick the region has the leader in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Finally, pick learner.
-				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), rs), collector,
 					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
@@ -188,15 +200,15 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			// satisfy all the filters, so the region fit must belong the scheduled region.
 			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
-				s.retryQuota.resetLimit(solver.Source)
+				s.resetLimit(solver.Source)
 				op.Counters = append(op.Counters, balanceRegionNewOpCounter)
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
 			solver.Step--
 		}
-		s.retryQuota.attenuate(solver.Source)
+		s.attenuate(solver.Source)
 	}
-	s.retryQuota.gc(stores)
+	s.gc(stores)
 	return nil, collector.GetPlans()
 }
 
@@ -214,7 +226,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.Region, solver.Source, solver.fit),
 	}
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.Step++
 	}
@@ -233,7 +245,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		if !solver.shouldBalance(s.GetName()) {
 			balanceRegionSkipCounter.Inc()
 			if solver.isPotentialReverse() {
-				balancePotentialReverseCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel)
+				balancePotentialReverseCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
 			}
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
@@ -257,7 +269,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		}
 		solver.Step--
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

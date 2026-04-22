@@ -17,15 +17,18 @@ package server
 import (
 	"strings"
 
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/kvproto/pkg/tsopb"
 )
 
 // MustNewGrpcClient must create a new TSO grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {
+	// TODO: use grpc.NewClient instead of grpc.Dial.
+	//nolint:staticcheck
 	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	return conn, tsopb.NewTSOClient(conn)

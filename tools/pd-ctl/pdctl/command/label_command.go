@@ -16,10 +16,11 @@ package command
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/spf13/cobra"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -74,9 +75,13 @@ func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Usage: label store name [value]")
 		return
 	}
-	namePrefix := fmt.Sprintf("name=%s", getValue(args, 0))
-	valuePrefix := fmt.Sprintf("value=%s", getValue(args, 1))
-	prefix := fmt.Sprintf("%s?%s&%s", labelsStorePrefix, namePrefix, valuePrefix)
+	query := make(url.Values)
+	query.Set("name", getValue(args, 0))
+	query.Set("value", getValue(args, 1))
+	prefix := labelsStorePrefix
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get stores through label: %s\n", err)

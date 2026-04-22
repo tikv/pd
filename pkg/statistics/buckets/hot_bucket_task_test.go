@@ -21,8 +21,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 func getAllBucketStats(ctx context.Context, hotCache *HotBucketCache) map[uint64][]*BucketStat {
@@ -47,7 +48,7 @@ func TestColdHot(t *testing.T) {
 		isHot:   true,
 	}}
 	for _, v := range testdata {
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			task := NewCheckPeerTask(v.buckets)
 			re.True(hotCache.CheckAsync(task))
 			hotBuckets := getAllBucketStats(ctx, hotCache)
@@ -110,7 +111,7 @@ func TestCollectBucketStatsTask(t *testing.T) {
 	defer cancelFn()
 	hotCache := NewBucketsCache(ctx)
 	// case1: add bucket successfully
-	for i := uint64(0); i < 10; i++ {
+	for i := range uint64(10) {
 		buckets := convertToBucketTreeItem(newTestBuckets(i, 1, [][]byte{[]byte(strconv.FormatUint(i*10, 10)),
 			[]byte(strconv.FormatUint((i+1)*10, 10))}, 0))
 		hotCache.putItem(buckets, hotCache.getBucketsByKeyRange(buckets.startKey, buckets.endKey))

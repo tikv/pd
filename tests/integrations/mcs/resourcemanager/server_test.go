@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,10 +22,12 @@ import (
 	"strings"
 	"testing"
 
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/client/grpcutil"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -36,7 +38,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -61,7 +63,7 @@ func TestResourceManagerServer(t *testing.T) {
 	_, err = c.GetResourceGroup(context.Background(), &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: "pingcap",
 	})
-	re.ErrorContains(err, "resource group not found")
+	re.ErrorContains(err, "resource group does not exist")
 
 	// Test registered REST HTTP Handler
 	url := addr + "/resource-manager/api/v1/config"
@@ -120,5 +122,13 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(versioninfo.PDBuildTS, s.BuildTS)
 		re.Equal(versioninfo.PDGitHash, s.GitHash)
 		re.Equal(versioninfo.PDReleaseVersion, s.Version)
+	}
+
+	// Test health handler
+	{
+		resp, err := tests.TestDialClient.Get(addr + "/health")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
 	}
 }

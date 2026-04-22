@@ -17,14 +17,17 @@ package schedulers
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 	"testing"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -33,13 +36,20 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
-	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
+	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	conf := &balanceLeaderSchedulerConfig{
 		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
 			Ranges: keyRanges1,
@@ -50,7 +60,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re.Equal(conf.Batch, conf2.Batch)
 	re.Equal(conf.Ranges, conf2.Ranges)
 
-	keyRanges2, _ := getKeyRanges([]string{"e", "f", "g", "h"})
+	keyRanges2, err := getKeyRanges([]string{"e", "f", "g", "h"})
+	re.NoError(err)
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
@@ -228,7 +239,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestTransferLeaderOut() {
 		1: 2,
 		2: 1,
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if len(suite.schedule()) == 0 {
 			continue
 		}
@@ -422,7 +433,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
 	re.Len(ops[0].Counters, 1)
-	re.Len(ops[0].FinishedCounters, 1)
+	re.Len(ops[0].FinishedCounters, 2)
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"h", "n"}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -447,6 +458,14 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
+
+	kye := keyutil.NewKeyRange("a", "g")
+	suite.tc.KeyRangeManager.Append([]keyutil.KeyRange{kye})
+	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	ops, _ = lb.Schedule(suite.tc, false)
+	re.Empty(ops)
+	suite.tc.KeyRangeManager.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
@@ -605,7 +624,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 		id      uint64
 		regions []*metapb.Region
 	)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		peers := []*metapb.Peer{
 			{Id: id + 1, StoreId: 1},
 			{Id: id + 2, StoreId: 2},
@@ -622,7 +641,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
+		leader := rand.IntN(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
 			meta.Peers[leader],
@@ -634,7 +653,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, err := tc.AllocPeer(1)
 		re.NoError(err)
 	}
@@ -669,11 +688,11 @@ func BenchmarkCandidateStores(b *testing.B) {
 	defer cancel()
 
 	for id := uint64(1); id < uint64(10000); id++ {
-		leaderCount := int(rand.Int31n(10000))
+		leaderCount := int(rand.Int32N(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		updateAndResortStoresInCandidateStores(tc)
 	}
 }
@@ -689,9 +708,9 @@ func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
 	for id, store := range stores {
 		offsets := cs.binarySearchStores(store)
 		if id%2 == 1 {
-			deltaMap[store.GetID()] = int64(rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(rand.Int32N(10000))
 		} else {
-			deltaMap[store.GetID()] = int64(-rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(-rand.Int32N(10000))
 		}
 		cs.resortStoreWithPos(offsets[0])
 	}

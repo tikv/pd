@@ -19,10 +19,11 @@ import (
 	"crypto/cipher"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
 )
 
 type testKeyManager struct {

@@ -20,16 +20,19 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 // Operation is detailed scheduling step of a region.
@@ -42,6 +45,8 @@ type Operation struct {
 	SplitRegion     *pdpb.SplitRegion
 	ChangePeerV2    *pdpb.ChangePeerV2
 	SwitchWitnesses *pdpb.BatchSwitchWitness
+	// PD requires preventing the auto-splitting of this region.
+	ChangeSplit *pdpb.ChangeSplit
 }
 
 // HeartbeatStream is an interface.
@@ -74,22 +79,22 @@ type HeartbeatStreams struct {
 }
 
 // NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.
-func NewHeartbeatStreams(ctx context.Context, clusterID uint64, typ string, storeInformer core.StoreSetInformer) *HeartbeatStreams {
-	return newHbStreams(ctx, clusterID, typ, storeInformer, true)
+func NewHeartbeatStreams(ctx context.Context, typ string, storeInformer core.StoreSetInformer) *HeartbeatStreams {
+	return newHbStreams(ctx, typ, storeInformer, true)
 }
 
 // NewTestHeartbeatStreams creates a new HeartbeatStreams for test purpose only.
 // Please use NewHeartbeatStreams for other usage.
-func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
-	return newHbStreams(ctx, clusterID, "", storeInformer, needRun)
+func NewTestHeartbeatStreams(ctx context.Context, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
+	return newHbStreams(ctx, "", storeInformer, needRun)
 }
 
-func newHbStreams(ctx context.Context, clusterID uint64, typ string, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
+func newHbStreams(ctx context.Context, typ string, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
-		clusterID:      clusterID,
+		clusterID:      keypath.ClusterID(),
 		streams:        make(map[uint64]HeartbeatStream),
 		msgCh:          make(chan core.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
@@ -129,7 +134,7 @@ func (s *HeartbeatStreams) run() {
 			storeLabel := strconv.FormatUint(storeID, 10)
 			store := s.storeInformer.GetStore(storeID)
 			if store == nil {
-				log.Error("failed to get store",
+				log.Warn("failed to get store",
 					zap.Uint64("region-id", msg.GetRegionId()),
 					zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 				delete(s.streams, storeID)
@@ -138,7 +143,7 @@ func (s *HeartbeatStreams) run() {
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
-					log.Error("send heartbeat message fail",
+					log.Warn("send heartbeat message fail",
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
 					delete(s.streams, storeID)
 					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
@@ -155,7 +160,7 @@ func (s *HeartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.storeInformer.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
+					log.Warn("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 					delete(s.streams, storeID)
 					continue
 				}
@@ -216,6 +221,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	default:
 		resp = &pdpb.RegionHeartbeatResponse{
@@ -229,6 +235,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	}
 
@@ -269,7 +276,7 @@ func (s *HeartbeatStreams) Drain(count int) error {
 	if s.needRun {
 		return errors.Normalize("hbstream running enabled")
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		<-s.msgCh
 	}
 	return nil

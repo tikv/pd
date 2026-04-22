@@ -20,77 +20,28 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
-	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
-	// Name must be non-empty and contains only alphanumerical, `_` and `-`.
-	namePattern = "^[-A-Za-z0-9_]+$"
+	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+	// numbers (0-9), hyphens (-), and underscores (_).
+	// currently, we enforce this rule to keyspace_name.
+	namePattern = "^[-A-Za-z0-9_]{1,20}$"
 )
 
 var (
-	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
-	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
-	// ErrRegionSplitTimeout indices to split region timeout
-	ErrRegionSplitTimeout = errors.New("region split timeout")
-	// ErrRegionSplitFailed indices to split region failed
-	ErrRegionSplitFailed = errors.New("region split failed")
-	// ErrKeyspaceExists indicates target keyspace already exists.
-	// It's used when creating a new keyspace.
-	ErrKeyspaceExists = errors.New("keyspace already exists")
-	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
-	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
-	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
-	ErrKeyspaceGroupNotExists = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v does not exist", groupID)
-	}
-	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
-	ErrKeyspaceGroupInSplit = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is in split state", groupID)
-	}
-	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
-	ErrKeyspaceGroupNotInSplit = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is not in split state", groupID)
-	}
-	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
-	ErrKeyspaceGroupInMerging = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is in merging state", groupID)
-	}
-	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
-	ErrKeyspaceGroupNotInMerging = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is not in merging state", groupID)
-	}
-	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
-	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
-	// ErrKeyspaceNotInAnyKeyspaceGroup is used to indicate target keyspace is not in any keyspace group.
-	ErrKeyspaceNotInAnyKeyspaceGroup = errors.New("keyspace is not in any keyspace group")
-	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.
-	ErrNodeNotInKeyspaceGroup = errors.New("the tso node is not in this keyspace group")
-	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
-	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
-	// ErrKeyspaceGroupWithEmptyKeyspace is used to indicate keyspace group with empty keyspace.
-	ErrKeyspaceGroupWithEmptyKeyspace = errors.New("keyspace group with empty keyspace")
-	// ErrModifyDefaultKeyspaceGroup is used to indicate that default keyspace group cannot be modified.
-	ErrModifyDefaultKeyspaceGroup = errors.New("default keyspace group cannot be modified")
-	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
-	ErrNoAvailableNode = errors.New("no available node")
-	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
-	ErrExceedMaxEtcdTxnOps = errors.New("exceed max etcd txn operations")
-	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
-	ErrModifyDefaultKeyspace = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation      = errors.New("unknown operation")
-
-	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
-	ErrUnsupportedOperationInKeyspace = errors.New("it's a unsupported operation")
-
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
 	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
@@ -101,20 +52,17 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
-
-	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
-	ErrKeyspaceGroupPrimaryNotFound = errors.New("primary of keyspace group does not exist")
 )
 
 // validateID check if keyspace falls within the acceptable range.
 // It throws errIllegalID when input id is our of range,
 // or if it collides with reserved id.
 func validateID(id uint32) error {
-	if id > spaceIDMax {
-		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, spaceIDMax)
+	if id > constant.MaxValidKeyspaceID {
+		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, constant.MaxValidKeyspaceID)
 	}
-	if id == constant.DefaultKeyspaceID {
-		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
+	if isProtectedKeyspaceID(id) {
+		return errors.Errorf("illegal keyspace id %d, collides with a protected keyspace id", id)
 	}
 	return nil
 }
@@ -130,8 +78,8 @@ func validateName(name string) error {
 	if !isValid {
 		return errors.Errorf("illegal keyspace name %s, should contain only alphanumerical and underline", name)
 	}
-	if name == constant.DefaultKeyspaceName {
-		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
+	if isProtectedKeyspaceName(name) {
+		return errors.Errorf("illegal keyspace name %s, collides with a protected keyspace name", name)
 	}
 	return nil
 }
@@ -214,6 +162,39 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 	}
 }
 
+// ParseKeyspaceIDFromLabelRule parses the keyspace ID from the label rule.
+// It will return the keyspace ID and a boolean indicating whether the label
+// rule is a keyspace label rule.
+func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
+	// Validate the ID matches the expected format "keyspaces/<id>".
+	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+		return 0, false
+	}
+	// Retrieve the keyspace ID.
+	keyspaceID, err := strconv.ParseUint(
+		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		endpoint.SpaceIDBase, 32,
+	)
+	if err != nil {
+		return 0, false
+	}
+	// Double check the keyspace ID from the label rule.
+	var idFromLabel uint64
+	for _, label := range rule.Labels {
+		if label.Key == regionLabelKey {
+			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
+			if err != nil {
+				return 0, false
+			}
+			break
+		}
+	}
+	if keyspaceID != idFromLabel {
+		return 0, false
+	}
+	return uint32(keyspaceID), true
+}
+
 // indexedHeap is a heap with index.
 type indexedHeap struct {
 	items []*endpoint.KeyspaceGroup
@@ -239,6 +220,7 @@ func (hp *indexedHeap) Less(i, j int) bool {
 	return len(hp.items[j].Keyspaces) > len(hp.items[i].Keyspaces)
 }
 
+// Swap swaps the items at the given indices.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Swap(i, j int) {
 	lid := hp.items[i].ID
@@ -248,6 +230,7 @@ func (hp *indexedHeap) Swap(i, j int) {
 	hp.index[rid] = i
 }
 
+// Push adds an item to the heap.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Push(x any) {
 	item := x.(*endpoint.KeyspaceGroup)
@@ -255,10 +238,12 @@ func (hp *indexedHeap) Push(x any) {
 	hp.items = append(hp.items, item)
 }
 
+// Pop removes the top item and returns it.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Pop() any {
 	l := hp.Len()
 	item := hp.items[l-1]
+	hp.items[l-1] = nil // avoid memory leak
 	hp.items = hp.items[:l-1]
 	delete(hp.index, item.ID)
 	return item
@@ -307,4 +292,45 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 		return item.(*endpoint.KeyspaceGroup)
 	}
 	return nil
+}
+
+// GetBootstrapKeyspaceID returns the Keyspace ID used for bootstrapping.
+// Classic: constant.DefaultKeyspaceID
+// NextGen: constant.SystemKeyspaceID
+func GetBootstrapKeyspaceID() uint32 {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceID
+	}
+	return constant.DefaultKeyspaceID
+}
+
+// GetBootstrapKeyspaceName returns the Keyspace Name used for bootstrapping.
+// Classic: constant.DefaultKeyspaceName
+// NextGen: constant.SystemKeyspaceName
+func GetBootstrapKeyspaceName() string {
+	if kerneltype.IsNextGen() {
+		return constant.SystemKeyspaceName
+	}
+	return constant.DefaultKeyspaceName
+}
+
+func newModifyProtectedKeyspaceError() error {
+	if kerneltype.IsNextGen() {
+		return errs.ErrModifyReservedKeyspace
+	}
+	return errs.ErrModifyDefaultKeyspace
+}
+
+func isProtectedKeyspaceID(id uint32) bool {
+	if kerneltype.IsNextGen() {
+		return id == constant.SystemKeyspaceID
+	}
+	return id == constant.DefaultKeyspaceID
+}
+
+func isProtectedKeyspaceName(name string) bool {
+	if kerneltype.IsNextGen() {
+		return name == constant.SystemKeyspaceName
+	}
+	return name == constant.DefaultKeyspaceName
 }

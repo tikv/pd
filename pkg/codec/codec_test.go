@@ -18,12 +18,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestDecodeBytes(t *testing.T) {
 	re := require.New(t)
 	key := "abcdefghijklmnopqrstuvwxyz"
-	for i := 0; i < len(key); i++ {
+	for i := range key {
 		_, k, err := DecodeBytes(EncodeBytes([]byte(key[:i])))
 		re.NoError(err)
 		re.Equal(key[:i], string(k))

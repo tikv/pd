@@ -20,10 +20,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap/zapcore"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
-	"go.uber.org/zap/zapcore"
 )
 
 func main() {

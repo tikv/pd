@@ -33,8 +33,8 @@ type Server interface {
 	Run() error
 	// Close closes the server.
 	Close()
-	// GetLeaderListenUrls gets service endpoints from the leader in election group.
-	GetLeaderListenUrls() []string
+	// GetServingUrls gets service endpoints.
+	GetServingUrls() []string
 	// GetClient returns builtin etcd client.
 	GetClient() *clientv3.Client
 	// GetHTTPClient returns builtin http client.

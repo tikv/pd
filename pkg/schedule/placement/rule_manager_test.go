@@ -19,8 +19,10 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -35,7 +37,7 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 	var err error
 	manager := NewRuleManager(context.Background(), store, nil, mockconfig.NewTestOptions())
 	manager.conf.SetEnableWitness(enableWitness)
-	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	return store, manager
 }
@@ -158,7 +160,7 @@ func TestSaveLoad(t *testing.T) {
 	}
 
 	m2 := NewRuleManager(context.Background(), store, nil, nil)
-	err := m2.Initialize(3, []string{"no", "labels"}, "")
+	err := m2.Initialize(3, []string{"no", "labels"}, "", false)
 	re.NoError(err)
 	re.Len(m2.GetAllRules(), 3)
 	re.Equal(m2.GetRule(DefaultGroupID, DefaultRuleID).String(), rules[0].String())
@@ -173,10 +175,11 @@ func TestSetAfterGet(t *testing.T) {
 	store, manager := newTestManager(t, false)
 	rule := manager.GetRule(DefaultGroupID, DefaultRuleID)
 	rule.Count = 1
-	manager.SetRule(rule)
+	err := manager.SetRule(rule)
+	re.NoError(err)
 
 	m2 := NewRuleManager(context.Background(), store, nil, nil)
-	err := m2.Initialize(100, []string{}, "")
+	err = m2.Initialize(100, []string{}, "", false)
 	re.NoError(err)
 	rule = m2.GetRule(DefaultGroupID, DefaultRuleID)
 	re.Equal(1, rule.Count)
@@ -201,7 +204,8 @@ func TestKeys(t *testing.T) {
 
 	toDelete := []RuleOp{}
 	for _, r := range rules {
-		manager.SetRule(r)
+		err := manager.SetRule(r)
+		re.NoError(err)
 		toDelete = append(toDelete, RuleOp{
 			Rule:             r,
 			Action:           RuleOpDel,
@@ -209,15 +213,18 @@ func TestKeys(t *testing.T) {
 		})
 	}
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {DefaultGroupID, DefaultRuleID}})
-	manager.Batch(toDelete)
+	err := manager.Batch(toDelete)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{DefaultGroupID, DefaultRuleID}})
 
 	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
 		&Rule{GroupID: "3", ID: "5", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
-	manager.SetRules(rules)
+	err = manager.SetRules(rules)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}, {DefaultGroupID, DefaultRuleID}})
 
-	manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}})
 
 	splitKeys := [][]string{
@@ -281,21 +288,26 @@ func TestKeys(t *testing.T) {
 }
 
 func TestDeleteByIDPrefix(t *testing.T) {
+	re := require.New(t)
 	_, manager := newTestManager(t, false)
-	manager.SetRules([]*Rule{
+	err := manager.SetRules([]*Rule{
 		{GroupID: "g1", ID: "foo1", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "foo1", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "foobar", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "baz2", Role: Voter, Count: 1},
 	})
-	manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
+
+	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}, {"g2", "foo1"}, {"g2", "foobar"}})
 
-	manager.Batch([]RuleOp{{
+	err = manager.Batch([]RuleOp{{
 		Rule:             &Rule{GroupID: "g2", ID: "foo"},
 		Action:           RuleOpDel,
 		DeleteByIDPrefix: true,
 	}})
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}})
 }
 
@@ -480,7 +492,7 @@ func TestCacheManager(t *testing.T) {
 		re.Nil(cache.bestFit)
 	}
 	// Store bestFit when the total number of hits is sufficient.
-	for i := 0; i < minHitCountToCacheHit; i++ {
+	for range minHitCountToCacheHit {
 		manager.FitRegion(stores, region)
 	}
 	cache := manager.cache.regionCaches[1]

@@ -19,12 +19,14 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 type status int
@@ -199,7 +201,6 @@ func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *Buc
 	}
 	newItem.inherit(overlaps)
 	newItem.calculateHotDegree()
-	newItem.collectBucketsMetrics()
 	return newItem, overlaps
 }
 
@@ -222,7 +223,7 @@ func convertToBucketTreeItem(buckets *metapb.Buckets) *BucketTreeItem {
 	if interval == 0 {
 		interval = 10 * 1000
 	}
-	for i := 0; i < len(buckets.Keys)-1; i++ {
+	for i := range len(buckets.Keys) - 1 {
 		loads := []uint64{
 			buckets.Stats.ReadBytes[i] * 1000 / interval,
 			buckets.Stats.ReadKeys[i] * 1000 / interval,

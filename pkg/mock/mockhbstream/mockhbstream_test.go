@@ -18,15 +18,22 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestActivity(t *testing.T) {
 	re := require.New(t)
@@ -38,7 +45,7 @@ func TestActivity(t *testing.T) {
 	cluster.AddRegionStore(2, 0)
 	cluster.AddLeaderRegion(1, 1)
 	region := cluster.GetRegion(1)
-	hbs := hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true)
+	hbs := hbstream.NewTestHeartbeatStreams(ctx, cluster, true)
 	stream1, stream2 := NewHeartbeatStream(), NewHeartbeatStream()
 
 	// Active stream is stream1.

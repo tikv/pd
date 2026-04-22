@@ -25,18 +25,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
+
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -47,16 +46,7 @@ func TestMemberDelete(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
-	})
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -111,13 +101,6 @@ func TestMemberDelete(t *testing.T) {
 			return true
 		})
 	}
-	// Check whether the dc-location info of the corresponding member is deleted.
-	for _, member := range members {
-		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
-		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
-		re.NoError(err)
-		re.Empty(resp.Kvs)
-	}
 }
 
 func checkMemberList(re *require.Assertions, clientURL string, configs []*config.Config) error {
@@ -130,12 +113,13 @@ func checkMemberList(re *require.Assertions, clientURL string, configs []*config
 	if res.StatusCode != http.StatusOK {
 		return errors.Errorf("load members failed, status: %v, data: %q", res.StatusCode, buf)
 	}
-	data := make(map[string][]*pdpb.Member)
-	json.Unmarshal(buf, &data)
-	if len(data["members"]) != len(configs) {
-		return errors.Errorf("member length not match, %v vs %v", len(data["members"]), len(configs))
+	data := &pdpb.GetMembersResponse{}
+	err = json.Unmarshal(buf, &data)
+	re.NoError(err)
+	if len(data.GetMembers()) != len(configs) {
+		return errors.Errorf("member length not match, %v vs %v", len(data.GetMembers()), len(configs))
 	}
-	for _, member := range data["members"] {
+	for _, member := range data.GetMembers() {
 		for _, cfg := range configs {
 			if member.GetName() == cfg.Name {
 				re.Equal([]string{cfg.ClientUrls}, member.ClientUrls)
@@ -304,39 +288,35 @@ func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	re.NotEmpty(cluster.WaitLeader())
+	originalLeader := cluster.WaitLeader()
+	re.NotEmpty(originalLeader)
+	originalLeaderServer := cluster.GetServer(originalLeader)
+	re.NotNil(originalLeaderServer)
 
-	var wg sync.WaitGroup
-	wg.Add(5)
-	for _, s := range cluster.GetServers() {
-		go func(s *tests.TestServer) {
-			defer wg.Done()
-			if s.IsLeader() {
-				s.ResignLeader()
-			} else {
-				old, _ := s.GetEtcdLeaderID()
-				s.MoveEtcdLeader(old, s.GetServerID())
-			}
-		}(s)
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("move etcd leader does not return in 10 seconds")
-	}
+	// First, resign the original leader.
+	err = originalLeaderServer.ResignLeaderWithRetry()
+	re.NoError(err)
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(originalLeader, newLeader)
+	newLeaderServer := cluster.GetServer(newLeader)
+	re.NotNil(newLeaderServer)
+	// Then, move leader back to the original leader.
+	testutil.Eventually(re, func() bool {
+		return newLeaderServer.MoveEtcdLeader(
+			newLeaderServer.GetServerID(),
+			originalLeaderServer.GetServerID(),
+		) == nil
+	})
+	testutil.Eventually(re, func() bool {
+		return originalLeaderServer.IsLeader()
+	})
 }
 
 func TestCampaignLeaderFrequently(t *testing.T) {
@@ -355,7 +335,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 
 	// need to prevent 3 times(including the above 1st time) campaign leader in 5 min.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		cluster.GetLeaderServer().ResetPDLeader()
 		re.NotEmpty(cluster.WaitLeader())
 		re.Equal(leader, cluster.GetLeader())
@@ -383,7 +363,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", leader)))
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cluster.GetLeaderServer().ResetPDLeader()
 		re.NotEmpty(cluster.WaitLeader())
 	}
@@ -397,26 +377,30 @@ func TestGetLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg, nil, server.CreateMockHandler(re, "127.0.0.1"))
+
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	defer svr.Close()
-	re.NoError(svr.Run())
+
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+
 	// Send requests after server has started.
-	go sendRequest(re, wg, done, cfg.ClientUrls)
+	go sendRequest(re, wg, done, leaderServer.GetAddr())
 	time.Sleep(100 * time.Millisecond)
 
-	server.MustWaitLeader(re, []*server.Server{svr})
-
-	re.NotNil(svr.GetLeader())
+	re.NotNil(leaderServer.GetLeader())
 
 	done <- true
 	wg.Wait()
-
-	testutil.CleanServer(cfg.DataDir)
 }
 
 func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, addr string) {
@@ -431,9 +415,12 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		default:
 			// We don't need to check the response and error,
 			// just make sure the server will not panic.
-			grpcPDClient := testutil.MustNewGrpcClient(re, addr)
+			grpcPDClient, conn := testutil.MustNewGrpcClient(re, addr)
 			if grpcPDClient != nil {
 				_, _ = grpcPDClient.AllocID(context.Background(), req)
+			}
+			if conn != nil {
+				conn.Close()
 			}
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -25,7 +25,7 @@ func TestWeightAllocator(t *testing.T) {
 
 	checkSumFunc := func(wa *WeightAllocator, length int) {
 		sum := 0.
-		for i := 0; i < length; i++ {
+		for i := range length {
 			sum += wa.Get(i)
 		}
 		re.Less(1-sum, 1e-8)
@@ -42,7 +42,7 @@ func TestWeightAllocator(t *testing.T) {
 
 	wa = NewWeightAllocator(10, 10)
 	checkSumFunc(wa, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		re.Equal(1./55.*float64(10-i), wa.Get(i))
 	}
 	checkTimeFunc(wa.Get(0), wa.Get(9), 10)

@@ -18,7 +18,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestRangeList(t *testing.T) {
 	re := require.New(t)
@@ -86,7 +93,7 @@ func TestRangeList2(t *testing.T) {
 
 	rl := b.Build()
 	re.Len(expectKeys, rl.Len())
-	for i := 0; i < rl.Len(); i++ {
+	for i := range rl.Len() {
 		key, data := rl.Get(i)
 		re.Equal(expectKeys[i], key)
 		re.Equal(expectData[i], data)

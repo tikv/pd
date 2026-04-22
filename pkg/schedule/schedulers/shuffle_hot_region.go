@@ -15,11 +15,16 @@
 package schedulers
 
 import (
+	"math/rand/v2"
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -30,8 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type shuffleHotRegionSchedulerConfig struct {
@@ -137,7 +140,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 		if len(detail.HotPeers) < 1 {
 			continue
 		}
-		i := s.r.Intn(len(detail.HotPeers))
+		i := rand.IntN(len(detail.HotPeers))
 		r := detail.HotPeers[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)
@@ -167,7 +170,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 			return nil
 		}
 		// random pick a dest store
-		destStoreID := destStoreIDs[s.r.Intn(len(destStoreIDs))]
+		destStoreID := destStoreIDs[rand.IntN(len(destStoreIDs))]
 		if destStoreID == 0 {
 			return nil
 		}

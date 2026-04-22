@@ -16,7 +16,9 @@ package cases
 
 import (
 	"github.com/docker/go-units"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -30,16 +32,16 @@ func newMakeupDownReplicas(config *sc.SimConfig) *Case {
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 
 	noEmptyStoreNum := totalStore - 1
-	for i := 0; i < totalStore; i++ {
+	for range totalStore {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
-		for j := 0; j < replica; j++ {
+		for j := range replica {
 			peers = append(peers, &metapb.Peer{
 				Id:      simutil.IDAllocator.NextID(),
 				StoreId: uint64((i+j)%totalStore + 1),

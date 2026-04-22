@@ -23,18 +23,20 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pd "github.com/tikv/pd/client"
+
 	pdHttp "github.com/tikv/pd/client/http"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Client is a PD (Placement Driver) client.
@@ -64,7 +66,7 @@ var (
 	// PDHTTPClient is a client for PD HTTP API.
 	PDHTTPClient pdHttp.Client
 	// SD is a service discovery for PD.
-	SD        pd.ServiceDiscovery
+	SD        sd.ServiceDiscovery
 	clusterID atomic.Uint64
 )
 
@@ -105,6 +107,8 @@ func (c *client) pdClient() pdpb.PDClient {
 }
 
 func createConn(url string) (*grpc.ClientConn, error) {
+	// TODO: use grpc.NewClient instead of grpc.Dial.
+	//nolint:staticcheck
 	cc, err := grpc.Dial(strings.TrimPrefix(url, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -169,7 +173,7 @@ func (c *client) heartbeatStreamLoop() {
 		wg.Wait()
 
 		// update connection to recreate heartbeat stream
-		for i := 0; i < retryTimes; i++ {
+		for range retryTimes {
 			SD.ScheduleCheckMemberChanged()
 			time.Sleep(leaderChangedWaitTime)
 			if client := SD.GetServiceClient(); client != nil {
@@ -316,7 +320,7 @@ type retryClient struct {
 
 func newRetryClient(node *Node) *retryClient {
 	// Init PD client and putting it into node.
-	tag := fmt.Sprintf("store %d", node.Store.Id)
+	tag := fmt.Sprintf("store %d", node.Id)
 	var (
 		client                   Client
 		receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
@@ -324,7 +328,7 @@ func newRetryClient(node *Node) *retryClient {
 	)
 
 	// Client should wait if PD server is not ready.
-	for i := 0; i < maxInitClusterRetries; i++ {
+	for range maxInitClusterRetries {
 		client, receiveRegionHeartbeatCh, err = NewClient(tag)
 		if err == nil {
 			break
@@ -359,7 +363,7 @@ func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
 		return res, nil
 	}
 	// retry to get leader URL
-	for i := 0; i < rc.retryCount; i++ {
+	for range rc.retryCount {
 		SD.ScheduleCheckMemberChanged()
 		time.Sleep(100 * time.Millisecond)
 		if client := SD.GetServiceClient(); client != nil {
@@ -460,7 +464,7 @@ func Bootstrap(ctx context.Context, pdAddrs string, store *metapb.Store, region 
 	}
 
 retry:
-	for i := 0; i < maxInitClusterRetries; i++ {
+	for range maxInitClusterRetries {
 		time.Sleep(100 * time.Millisecond)
 		for _, url := range urls {
 			conn, err := createConn(url)
@@ -497,7 +501,7 @@ retry:
 	newStore := typeutil.DeepClone(store, core.StoreFactory)
 	newRegion := typeutil.DeepClone(region, core.RegionFactory)
 	var res *pdpb.BootstrapResponse
-	for i := 0; i < maxInitClusterRetries; i++ {
+	for range maxInitClusterRetries {
 		// Bootstrap the cluster.
 		res, err = pdCli.Bootstrap(ctx, &pdpb.BootstrapRequest{
 			Header: requestHeader(),
@@ -522,7 +526,7 @@ retry:
 	return leaderURL, pdCli, nil
 }
 
-/* PDHTTPClient is a client for PD HTTP API, these are the functions that are used in the simulator */
+// PutPDConfig is used to put the PD config
 func PutPDConfig(config *sc.PDConfig) error {
 	if len(config.PlacementRules) > 0 {
 		ruleOps := make([]*pdHttp.RuleOp, 0)

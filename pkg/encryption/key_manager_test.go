@@ -24,14 +24,22 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // #nosec G101
 const (
@@ -41,13 +49,14 @@ const (
 	testDataKey       = "be798242dde0c40d9a65cdbc36c1c9ac"
 )
 
-func getTestDataKey() []byte {
-	key, _ := hex.DecodeString(testDataKey)
+func getTestDataKey(re *require.Assertions) []byte {
+	key, err := hex.DecodeString(testDataKey)
+	re.NoError(err)
 	return key
 }
 
 func newTestEtcd(t *testing.T) (client *clientv3.Client) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(func() {
 		clean()
 	})
@@ -134,7 +143,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re.NotNil(m.masterKeyMeta)
 	keyFileMeta := m.masterKeyMeta.GetFile()
 	re.NotNil(keyFileMeta)
-	re.Equal(config.MasterKey.MasterKeyFileConfig.FilePath, keyFileMeta.Path)
+	re.Equal(config.MasterKey.FilePath, keyFileMeta.Path)
 	// Check loaded keys.
 	re.Nil(m.keys.Load())
 	// Check etcd KV.
@@ -159,7 +168,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -205,7 +214,7 @@ func TestGetCurrentKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -239,13 +248,13 @@ func TestGetKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 			456: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
 				WasExposed:   false,
@@ -294,7 +303,7 @@ func TestLoadKeyEmpty(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -329,8 +338,7 @@ func TestWatcher(t *testing.T) {
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
-		var e struct{}
-		reloadEvent <- e
+		reloadEvent <- struct{}{}
 	}
 	// Use default config.
 	config := &Config{}
@@ -350,13 +358,15 @@ func TestWatcher(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 		},
 	}
+	// wait watch to start
+	time.Sleep(time.Second)
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent
@@ -370,13 +380,13 @@ func TestWatcher(t *testing.T) {
 		CurrentKeyId: 456,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 			456: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
 				WasExposed:   false,
@@ -500,7 +510,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -570,7 +580,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -641,7 +651,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -717,7 +727,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -771,8 +781,10 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// mock NewMasterKey
 	newMasterKeyCalled := 0
-	outputMasterKey, _ := hex.DecodeString(testMasterKey)
-	outputCiphertextKey, _ := hex.DecodeString(testCiphertextKey)
+	outputMasterKey, err := hex.DecodeString(testMasterKey)
+	re.NoError(err)
+	outputCiphertextKey, err := hex.DecodeString(testCiphertextKey)
+	re.NoError(err)
 	helper.newMasterKey = func(
 		_ *encryptionpb.MasterKey,
 		ciphertext []byte,
@@ -793,14 +805,14 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
+	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with a different master key.
 	config := &Config{
@@ -857,7 +869,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -924,7 +936,7 @@ func TestKeyRotation(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -1030,7 +1042,7 @@ func TestKeyRotationConflict(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,

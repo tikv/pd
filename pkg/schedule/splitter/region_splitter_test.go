@@ -20,10 +20,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type mockSplitRegionsHandler struct {
 	// regionID -> startKey, endKey
@@ -52,7 +59,7 @@ func (m *mockSplitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKe
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
 			regions := make(map[uint64][]byte)
-			for i := 0; i < len(splitKeys); i++ {
+			for i := range splitKeys {
 				regions[regionID+uint64(i)+1000] = splitKeys[i]
 			}
 			results.addRegionsID(regions)
@@ -86,6 +93,10 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
+	// Create stores before creating regions
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
 	splitter := NewRegionSplitter(tc, handler, tc.AddPendingProcessedRegions)
 	newRegions := map[uint64]struct{}{}
@@ -114,6 +125,10 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
+	// Create stores before creating regions
+	tc.AddLeaderStore(2, 1)
+	tc.AddLeaderStore(3, 1)
+	tc.AddLeaderStore(4, 1)
 	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(3, "fff", "ggg", 2, 3, 4)

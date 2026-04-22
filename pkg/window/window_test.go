@@ -1,6 +1,3 @@
-// The MIT License (MIT)
-// Copyright (c) 2022 go-kratos Project Authors.
-//
 // Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -10,10 +7,13 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// The MIT License (MIT)
+// Copyright (c) 2022 go-kratos Project Authors.
 
 package window
 
@@ -21,17 +21,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestWindowResetWindow(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetWindow()
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Empty(window.Bucket(i).Points)
 	}
 }
@@ -40,7 +45,7 @@ func TestWindowResetBucket(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetBucket(1)
@@ -53,11 +58,11 @@ func TestWindowResetBuckets(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetBuckets(0, 3)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Empty(window.Bucket(i).Points)
 	}
 }
@@ -66,13 +71,13 @@ func TestWindowAppend(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	for i := 1; i < opts.Size; i++ {
 		window.Append(i, 2.0)
 	}
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Equal(float64(1.0), window.Bucket(i).Points[0])
 	}
 	for i := 1; i < opts.Size; i++ {

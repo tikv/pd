@@ -15,11 +15,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -41,7 +44,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	suite.cluster = cluster
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
@@ -172,4 +175,94 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 	re.False(kg1.IsSplitting())
 	kg2 = MustLoadKeyspaceGroupByID(re, suite.server, 2)
 	re.False(kg2.IsSplitting())
+}
+
+// TestKeyspaceGroupErrorMessage verifies that BindJSON errors return clear error messages.
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupErrorMessage() {
+	re := suite.Require()
+
+	// Test SplitKeyspaceGroupByID with invalid JSON
+	httpReq, err := http.NewRequest(
+		http.MethodPost,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1/split",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	var errorMsg string
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test MergeKeyspaceGroups with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPost,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1/merge",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test AllocNodesForKeyspaceGroup with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPost,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1/alloc",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test SetNodesForKeyspaceGroup with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPatch,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test SetPriorityForKeyspaceGroup with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPatch,
+		suite.server.GetAddr()+keyspaceGroupsPrefix+"/1/test-node",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
 }

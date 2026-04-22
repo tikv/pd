@@ -19,9 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -251,10 +253,13 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	re.True(ok)
 	re.Zero(es2.conf.evictedStore())
 	// prepare with no evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err := suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 
-	es2.conf.setStoreAndPersist(1)
+	err = es2.conf.setStoreAndPersist(1)
+	re.NoError(err)
 	re.Equal(uint64(1), es2.conf.evictedStore())
 	// prepare with evict store.
-	suite.es.PrepareConfig(suite.tc)
+	err = suite.es.PrepareConfig(suite.tc)
+	re.NoError(err)
 }

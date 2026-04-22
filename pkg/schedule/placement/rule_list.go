@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/rangelist"
 )
@@ -30,10 +31,12 @@ func checkApplyRules(rules []*Rule) error {
 	leaderCount := 0
 	voterCount := 0
 	for _, rule := range rules {
-		if rule.Role == Leader {
+		switch rule.Role {
+		case Leader:
 			leaderCount += rule.Count
-		} else if rule.Role == Voter {
+		case Voter:
 			voterCount += rule.Count
+		default:
 		}
 		if leaderCount > 1 {
 			return errors.New("multiple leader replicas")
@@ -81,7 +84,7 @@ func buildRuleList(rules ruleContainer) (ruleList, error) {
 	rl := ruleList{
 		rangeList: rangeList,
 	}
-	for i := 0; i < rangeList.Len(); i++ {
+	for i := range rangeList.Len() {
 		start, data := rangeList.Get(i)
 		var end []byte
 		if i < rangeList.Len()-1 {

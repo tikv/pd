@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -27,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -45,6 +48,7 @@ func TestInfluenceAmp(t *testing.T) {
 	re := require.New(t)
 
 	R := int64(96)
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
 
 	influence := oc.GetOpInfluence(tc.GetBasicCluster())
 	influence.GetStoreInfluence(1).RegionSize = R
@@ -59,7 +63,7 @@ func TestInfluenceAmp(t *testing.T) {
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
 	tc.PutRegion(region)
 	basePlan := plan.NewBalanceSchedulerPlan()
-	solver := newSolver(basePlan, types.BalanceRegionScheduler, tc, influence)
+	solver := newSolver(basePlan, kind, tc, influence)
 	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 	solver.calcSourceStoreScore("")
 	solver.calcTargetStoreScore("")
@@ -144,9 +148,9 @@ func TestShouldBalance(t *testing.T) {
 		region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 		tc.PutRegion(region)
 		tc.SetLeaderSchedulePolicy(testCase.kind.String())
+		kind := constant.NewScheduleKind(constant.LeaderKind, testCase.kind)
 		basePlan := plan.NewBalanceSchedulerPlan()
-		solver := newSolver(basePlan, types.BalanceLeaderScheduler, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
-		solver.kind = constant.NewScheduleKind(constant.LeaderKind, testCase.kind)
+		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 		solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 		solver.calcSourceStoreScore("")
 		solver.calcTargetStoreScore("")
@@ -159,9 +163,9 @@ func TestShouldBalance(t *testing.T) {
 			tc.AddRegionStore(2, int(testCase.targetCount))
 			region := tc.GetRegion(1).Clone(core.SetApproximateSize(testCase.regionSize))
 			tc.PutRegion(region)
+			kind := constant.NewScheduleKind(constant.RegionKind, testCase.kind)
 			basePlan := plan.NewBalanceSchedulerPlan()
-			solver := newSolver(basePlan, types.BalanceRegionScheduler, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
-			solver.kind = constant.NewScheduleKind(constant.RegionKind, testCase.kind)
+			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 			solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 			solver.calcSourceStoreScore("")
 			solver.calcTargetStoreScore("")
@@ -212,9 +216,7 @@ func TestTolerantRatio(t *testing.T) {
 	for _, t := range tbl {
 		tc.SetTolerantSizeRatio(t.ratio)
 		basePlan := plan.NewBalanceSchedulerPlan()
-		solver := newSolver(basePlan, types.BalanceLeaderScheduler, tc, operator.OpInfluence{})
-		solver.kind = t.kind
-		solver.tolerantSizeRatio = adjustTolerantRatio(tc, t.kind)
+		solver := newSolver(basePlan, t.kind, tc, &operator.OpInfluence{})
 		solver.Region = region
 
 		sourceScore := t.expectTolerantResource(t.kind)
@@ -568,10 +570,12 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4
 	for i := 1; i <= 8; i++ {
-		id, _ := tc.Alloc()
+		id, _, err := tc.Alloc(1)
+		re.NoError(err)
 		origin := tc.AddLeaderRegion(id, 4)
 		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
-		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		op, err := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
+		re.NoError(err)
 		re.NotNil(op)
 		oc.AddOperator(op)
 	}
@@ -657,9 +661,16 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 		core.SetApproximateKeys(1),
 	)
 	tc.PutRegion(region)
+
+	tc.KeyRangeManager.Append([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
 	operators, _ := sb.Schedule(tc, false)
+	re.Empty(operators)
+	tc.KeyRangeManager.Delete([]keyutil.KeyRange{keyutil.NewKeyRange("a", "b")})
+
+	operators, _ = sb.Schedule(tc, false)
 	re.NotEmpty(operators)
 
+	// reject the empty regions if the cluster has more regions.
 	for i := uint64(10); i < 111; i++ {
 		tc.PutRegionStores(i, 1, 3, 4)
 	}
@@ -683,11 +694,11 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 				return
 			default:
 			}
-			sche.config.buildWithArgs(args)
+			re.NoError(sche.config.buildWithArgs(args))
 			re.NoError(sche.config.persist())
 		}
 	}()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		sche.Schedule(tc, false)
 	}
 	ch <- struct{}{}
@@ -705,7 +716,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 		id      uint64
 		regions []*metapb.Region
 	)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		peers := []*metapb.Peer{
 			{Id: id + 1, StoreId: 1},
 			{Id: id + 2, StoreId: 2},
@@ -753,10 +764,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 // scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
 func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb Scheduler, count int) {
 	limit := 0
-	for {
-		if limit > count {
-			break
-		}
+	for limit <= count {
 		ops, _ := hb.Schedule(tc, false)
 		if ops == nil {
 			limit++

@@ -20,10 +20,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -248,12 +250,14 @@ func (suite *replicaCheckerTestSuite) TestBasic() {
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 4)
 
 	// Add peer in store 4, and we have enough replicas.
-	peer4, _ := tc.AllocPeer(4)
+	peer4, err := tc.AllocPeer(4)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer4))
 	re.Nil(rc.Check(region))
 
 	// Add peer in store 3, and we have redundant replicas.
-	peer3, _ := tc.AllocPeer(3)
+	peer3, err := tc.AllocPeer(3)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer3))
 	operatorutil.CheckRemovePeer(re, rc.Check(region), 1)
 
@@ -320,16 +324,19 @@ func (suite *replicaCheckerTestSuite) TestOffline() {
 
 	// Store 2 has different zone and smallest region score.
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 2)
-	peer2, _ := tc.AllocPeer(2)
+	peer2, err := tc.AllocPeer(2)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 3 has different zone and smallest region score.
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 3)
-	peer3, _ := tc.AllocPeer(3)
+	peer3, err := tc.AllocPeer(3)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer3))
 
 	// Store 4 has the same zone with store 3 and larger region score.
-	peer4, _ := tc.AllocPeer(4)
+	peer4, err := tc.AllocPeer(4)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer4))
 	operatorutil.CheckRemovePeer(re, rc.Check(region), 4)
 
@@ -370,7 +377,8 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	tc.AddLeaderRegion(1, 1)
 	region := tc.GetRegion(1)
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 2)
-	peer2, _ := tc.AllocPeer(2)
+	peer2, err := tc.AllocPeer(2)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer2))
 
 	// Store 1,2,3 have the same zone, rack, and host.
@@ -400,7 +408,8 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 7)
 
 	// Add peer to store 7.
-	peer7, _ := tc.AllocPeer(7)
+	peer7, err := tc.AllocPeer(7)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer7))
 
 	// Replace peer in store 1 with store 6 because it has a different rack.
@@ -409,7 +418,8 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	tc.SetEnableLocationReplacement(false)
 	re.Nil(rc.Check(region))
 	tc.SetEnableLocationReplacement(true)
-	peer6, _ := tc.AllocPeer(6)
+	peer6, err := tc.AllocPeer(6)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer6))
 	operatorutil.CheckRemovePeer(re, rc.Check(region), 1)
 	region = region.Clone(core.WithRemoveStorePeer(1), core.WithLeader(region.GetStorePeer(2)))
@@ -426,7 +436,8 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore() {
 	// So replace peer in store 2 with store 10.
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z3", "rack": "r1", "host": "h1"})
 	operatorutil.CheckTransferPeer(re, rc.Check(region), operator.OpReplica, 2, 10)
-	peer10, _ := tc.AllocPeer(10)
+	peer10, err := tc.AllocPeer(10)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer10))
 	operatorutil.CheckRemovePeer(re, rc.Check(region), 2)
 	region = region.Clone(core.WithRemoveStorePeer(2))
@@ -454,11 +465,13 @@ func (suite *replicaCheckerTestSuite) TestDistinctScore2() {
 	region := tc.GetRegion(1)
 
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 6)
-	peer6, _ := tc.AllocPeer(6)
+	peer6, err := tc.AllocPeer(6)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer6))
 
 	operatorutil.CheckAddPeer(re, rc.Check(region), operator.OpReplica, 5)
-	peer5, _ := tc.AllocPeer(5)
+	peer5, err := tc.AllocPeer(5)
+	re.NoError(err)
 	region = region.Clone(core.WithAddPeer(peer5))
 
 	re.Nil(rc.Check(region))
