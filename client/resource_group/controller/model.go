@@ -66,7 +66,13 @@ type predictedReadBytesProvider interface {
 	PredictedReadBytes() uint64
 }
 
+// estimatedReadBytes returns the predicted read-bytes hint for read requests.
+// Write requests always get 0 so paging pre-charge / settlement / metrics stay
+// gated to reads even if a future write type implements the optional interface.
 func estimatedReadBytes(req RequestInfo) uint64 {
+	if req.IsWrite() {
+		return 0
+	}
 	if p, ok := req.(predictedReadBytesProvider); ok {
 		return p.PredictedReadBytes()
 	}
