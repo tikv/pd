@@ -65,6 +65,9 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateGCSafePointResponse), err
 	}
+	defer func() {
+		recordGCRequest("UpdateGCSafePoint", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -123,6 +126,9 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetGCSafePointResponse), err
 	}
+	defer func() {
+		recordGCRequest("GetGCSafePoint", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -183,6 +189,9 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
 	}
+	defer func() {
+		recordGCRequest("UpdateServiceGCSafePoint", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -242,6 +251,9 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetGCSafePointV2Response), err
 	}
+	defer func() {
+		recordGCRequest("GetGCSafePointV2", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -292,6 +304,9 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateGCSafePointV2Response), err
 	}
+	defer func() {
+		recordGCRequest("UpdateGCSafePointV2", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -368,6 +383,9 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateServiceSafePointV2Response), err
 	}
+	defer func() {
+		recordGCRequest("UpdateServiceSafePointV2", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
@@ -434,6 +452,9 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetAllGCSafePointV2Response), err
 	}
+	defer func() {
+		recordGCRequest("GetAllGCSafePointV2", request.GetHeader(), resp, errRet)
+	}()
 
 	rc := s.GetRaftCluster()
 	if rc == nil {

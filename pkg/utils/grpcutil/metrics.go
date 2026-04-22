@@ -31,31 +31,31 @@ const (
 	requestFailed  requestEvent = "failed"
 )
 
-// RequestCounter increments the region request counter with the given method, header, error, and counter.
+// RequestCounter increments the request counter with the given method, header, error, and counter.
 func RequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error, counter *prometheus.CounterVec) {
 	if err == nil && rand.IntN(100) != 0 {
-		// sample 1% region requests to avoid high cardinality
+		// sample 1% requests to avoid high cardinality
 		return
 	}
 
 	var (
 		event           = requestSuccess
-		callerID        = header.CallerId
-		callerComponent = header.CallerComponent
+		callerID        = header.GetCallerId()
+		callerComponent = header.GetCallerComponent()
 	)
-	if err != nil {
-		log.Warn("region request encounter error",
-			zap.String("method", method),
-			zap.String("caller_id", callerID),
-			zap.String("caller_component", callerComponent),
-			zap.Stringer("error", err))
-		event = requestFailed
-	}
 	if callerID == "" {
 		callerID = "unknown"
 	}
 	if callerComponent == "" {
 		callerComponent = "unknown"
+	}
+	if err != nil {
+		log.Warn("request encountered error",
+			zap.String("method", method),
+			zap.String("caller-id", callerID),
+			zap.String("caller-component", callerComponent),
+			zap.Stringer("error", err))
+		event = requestFailed
 	}
 	counter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }

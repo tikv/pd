@@ -7,6 +7,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-fts-202602
       - release-nextgen-20250815
   pull_request:
     branches:
@@ -15,6 +16,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-fts-202602
       - release-nextgen-20250815
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
