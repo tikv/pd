@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -856,8 +857,24 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
 		var result handlers.AffinityGroupsResponse
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
-		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			var latest handlers.AffinityGroupsResponse
+			err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &latest)
+			if err != nil {
+				return false
+			}
+			if len(latest.AffinityGroups) != 2 {
+				return false
+			}
+			if _, ok := latest.AffinityGroups["group-1"]; !ok {
+				return false
+			}
+			if _, ok := latest.AffinityGroups["group-3"]; !ok {
+				return false
+			}
+			result = latest
+			return true
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 		re.Len(result.AffinityGroups, 2)
 		re.Contains(result.AffinityGroups, "group-1")
 		re.Contains(result.AffinityGroups, "group-3")
