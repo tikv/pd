@@ -188,7 +188,7 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	}()
 
 	var (
-		lastTimestamp      *pdpb.Timestamp
+		lastTimestamp     *pdpb.Timestamp
 		logicalOverflowed bool
 	)
 	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
