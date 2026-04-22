@@ -52,31 +52,20 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
-}
-
-// predictedReadBytesProvider is an optional interface a RequestInfo may
-// satisfy to supply a read-bytes estimate. When PredictedReadBytes > 0
-// it is the byte basis for RC paging pre-charge in BeforeKVRequest and
-// settled symmetrically in AfterKVRequest; otherwise the request is
-// billed by actual read bytes at settlement only.
-//
-// Optional (not a method on RequestInfo) so existing implementations
-// keep compiling.
-type predictedReadBytesProvider interface {
+	// PredictedReadBytes returns the read-bytes hint used for RC paging
+	// pre-charge in BeforeKVRequest and settled symmetrically in
+	// AfterKVRequest. Return 0 to opt out; writes always return 0.
 	PredictedReadBytes() uint64
 }
 
 // estimatedReadBytes returns the predicted read-bytes hint for read requests.
-// Write requests always get 0 so paging pre-charge / settlement / metrics stay
-// gated to reads even if a future write type implements the optional interface.
+// Writes always return 0 so paging pre-charge / settlement / metrics stay
+// gated to reads.
 func estimatedReadBytes(req RequestInfo) uint64 {
 	if req.IsWrite() {
 		return 0
 	}
-	if p, ok := req.(predictedReadBytesProvider); ok {
-		return p.PredictedReadBytes()
-	}
-	return 0
+	return req.PredictedReadBytes()
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be

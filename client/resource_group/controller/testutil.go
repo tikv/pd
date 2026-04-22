@@ -71,8 +71,7 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
 }
 
-// PredictedReadBytes implements the optional predictedReadBytesProvider
-// interface so tests can exercise the RC paging pre-charge hint path.
+// PredictedReadBytes implements the RequestInfo interface.
 func (tri *TestRequestInfo) PredictedReadBytes() uint64 {
 	return tri.predictedReadBytes
 }

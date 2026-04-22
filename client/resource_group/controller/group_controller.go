@@ -661,9 +661,7 @@ func (gc *groupCostController) onResponseImpl(
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
 			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	} else if !req.IsWrite() {
-		if _, ok := req.(predictedReadBytesProvider); ok {
-			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
-		}
+		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
@@ -701,9 +699,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
 			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	} else if !req.IsWrite() {
-		if _, ok := req.(predictedReadBytesProvider); ok {
-			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
-		}
+		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
 	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
