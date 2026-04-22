@@ -21,18 +21,19 @@ import (
 	"testing"
 	"time"
 
-	pd "github.com/tikv/pd/client"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/assertutil"
+
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
+	"github.com/tikv/pd/tests"
 )
 
 const globalConfigPath = "/global/config/"
@@ -57,9 +58,11 @@ func (s testReceiver) Context() context.Context {
 
 type globalConfigTestSuite struct {
 	suite.Suite
+	ctx     context.Context
+	cancel  context.CancelFunc
+	cluster *tests.TestCluster
 	server  *server.GrpcServer
 	client  pd.Client
-	cleanup testutil.CleanupFunc
 	mu      syncutil.Mutex
 }
 
@@ -69,24 +72,30 @@ func TestGlobalConfigTestSuite(t *testing.T) {
 
 func (suite *globalConfigTestSuite) SetupSuite() {
 	re := suite.Require()
-	var (
-		err error
-		gsi *server.Server
-	)
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = server.NewTestServer(re, checker)
-	suite.server = &server.GrpcServer{Server: gsi}
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	gsi := suite.cluster.GetLeaderServer().GetServer()
+	suite.server = &server.GrpcServer{Server: gsi}
 	addr := suite.server.GetAddr()
-	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.server.Context(),
+		caller.TestComponent,
+		[]string{addr}, pd.SecurityOption{},
+	)
 	re.NoError(err)
 }
 
 func (suite *globalConfigTestSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.cleanup()
-	suite.client.Close()
+	suite.cancel()
+	suite.cluster.Destroy()
 }
 
 func getEtcdPath(configPath string) string {
@@ -208,10 +217,13 @@ func (suite *globalConfigTestSuite) TestWatch() {
 	ctx, cancel := context.WithCancel(suite.server.Context())
 	defer cancel()
 	server := testReceiver{re: suite.Require(), ctx: ctx}
-	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
-		ConfigPath: globalConfigPath,
-		Revision:   0,
-	}, server)
+	go func() {
+		err := suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
+			ConfigPath: globalConfigPath,
+			Revision:   0,
+		}, server)
+		re.NoError(err)
+	}()
 	for i := range 6 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)

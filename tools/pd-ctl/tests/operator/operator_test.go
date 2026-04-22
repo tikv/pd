@@ -22,8 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -57,7 +59,7 @@ func (suite *operatorTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorTestSuite) TestOperator() {
-	suite.env.RunTestBasedOnMode(suite.checkOperator)
+	suite.env.RunTest(suite.checkOperator)
 }
 
 func (suite *operatorTestSuite) checkOperator(cluster *pdTests.TestCluster) {
@@ -272,8 +274,10 @@ func (suite *operatorTestSuite) checkOperator(cluster *pdTests.TestCluster) {
 	re.Contains(string(output), "scatter-region")
 
 	// test echo, as the scatter region result is random, both region 1 and region 3 can be the region to be scattered
-	output1, _ := tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
-	output2, _ := tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "3")
+	output1, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")
+	re.NoError(err)
+	output2, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "3")
+	re.NoError(err)
 	re.Condition(func() bool {
 		return strings.Contains(string(output1), "Success!") || strings.Contains(string(output2), "Success!")
 	})

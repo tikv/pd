@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )

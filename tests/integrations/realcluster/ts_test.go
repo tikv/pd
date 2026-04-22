@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Authors
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ import (
 )
 
 type tsSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestTS(t *testing.T) {
 	suite.Run(t, &tsSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "ts",
 		},
 	})
@@ -55,4 +55,13 @@ func (s *tsSuite) TestTS() {
 	re.NotEqual(0, GetTimeFromTS(ts))
 
 	db.MustClose()
+}
+
+func TestMSTS(t *testing.T) {
+	suite.Run(t, &tsSuite{
+		clusterSuite: clusterSuite{
+			suiteName: "ts",
+			mode:      "ms",
+		},
+	})
 }

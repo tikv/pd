@@ -17,8 +17,9 @@ package discovery
 import (
 	"encoding/json"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 // ServiceRegistryEntry is the registry entry of a service

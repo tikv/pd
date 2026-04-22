@@ -17,8 +17,10 @@ package syncer
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
@@ -26,7 +28,7 @@ import (
 func TestBufferSize(t *testing.T) {
 	re := require.New(t)
 	var regions []*core.RegionInfo
-	for i := 0; i <= 100; i++ {
+	for i := range 101 {
 		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i)}, nil))
 	}
 

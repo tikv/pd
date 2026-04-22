@@ -18,10 +18,12 @@ import (
 	"encoding/json"
 	"reflect"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -114,7 +116,7 @@ func (c *StoreConfig) GetRegionSplitKeys() uint64 {
 	if c == nil || c.RegionSplitKeys == 0 {
 		return defaultRegionSplitKey
 	}
-	return uint64(c.Coprocessor.RegionSplitKeys)
+	return uint64(c.RegionSplitKeys)
 }
 
 // GetRegionMaxKeys returns the region split keys
@@ -130,7 +132,7 @@ func (c *StoreConfig) IsEnableRegionBucket() bool {
 	if c == nil {
 		return false
 	}
-	return c.Coprocessor.EnableRegionBucket
+	return c.EnableRegionBucket
 }
 
 // IsRaftKV2 returns true if the raft kv is v2.
@@ -138,7 +140,7 @@ func (c *StoreConfig) IsRaftKV2() bool {
 	if c == nil {
 		return false
 	}
-	return c.Storage.Engine == RaftstoreV2
+	return c.Engine == RaftstoreV2
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.
@@ -146,12 +148,12 @@ func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
 	if c == nil {
 		return
 	}
-	c.Coprocessor.EnableRegionBucket = enabled
+	c.EnableRegionBucket = enabled
 }
 
 // GetRegionBucketSize returns region bucket size if enable region buckets.
 func (c *StoreConfig) GetRegionBucketSize() uint64 {
-	if c == nil || !c.Coprocessor.EnableRegionBucket {
+	if c == nil || !c.EnableRegionBucket {
 		return 0
 	}
 	if len(c.RegionBucketSize) == 0 {
@@ -172,7 +174,7 @@ func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
 	if regionSplitSize == 0 {
 		return nil
 	}
-	// the smallest of the split regions can not be merge again, so it's size should less merge size.
+	// the smallest of the split regions can not be merge again, so it's size should be less than merge size.
 	if smallSize := size % regionSplitSize; smallSize <= mergeSize && smallSize != 0 {
 		log.Debug("region size is too small", zap.Uint64("size", size), zap.Uint64("merge-size", mergeSize), zap.Uint64("small-size", smallSize))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-size, " +
@@ -188,7 +190,7 @@ func (c *StoreConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 	}
 
 	if smallKeys := keys % c.GetRegionSplitKeys(); smallKeys <= mergeKeys && smallKeys > 0 {
-		log.Debug("region keys is too small", zap.Uint64("keys", keys), zap.Uint64("merge-keys", mergeKeys), zap.Uint64("smallSize", smallKeys))
+		log.Debug("region keys is too small", zap.Uint64("keys", keys), zap.Uint64("merge-keys", mergeKeys), zap.Uint64("small-keys", smallKeys))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-keys")
 	}
 	return nil

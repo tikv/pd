@@ -20,10 +20,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -156,7 +160,7 @@ func (tc *TestTSOCluster) ResignPrimary(keyspaceID, keyspaceGroupID uint32) erro
 // GetPrimaryServer returns the primary TSO server of the given keyspace
 func (tc *TestTSOCluster) GetPrimaryServer(keyspaceID, keyspaceGroupID uint32) *tso.Server {
 	for _, server := range tc.servers {
-		if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
+		if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
 			return server
 		}
 	}
@@ -168,7 +172,7 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 	var primary *tso.Server
 	testutil.Eventually(re, func() bool {
 		for _, server := range tc.servers {
-			if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
+			if server.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID) {
 				primary = server
 				return true
 			}
@@ -181,7 +185,8 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 
 // WaitForDefaultPrimaryServing waits for one of servers being elected to be the primary/leader of the default keyspace.
 func (tc *TestTSOCluster) WaitForDefaultPrimaryServing(re *require.Assertions) *tso.Server {
-	return tc.WaitForPrimaryServing(re, constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	return tc.WaitForPrimaryServing(re, keyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 // GetServer returns the TSO server by the given address.
@@ -204,7 +209,7 @@ func (tc *TestTSOCluster) GetKeyspaceGroupMember() (members []endpoint.KeyspaceG
 	for _, server := range tc.servers {
 		members = append(members, endpoint.KeyspaceGroupMember{
 			Address:  server.GetAddr(),
-			Priority: constant.DefaultKeyspaceGroupReplicaPriority,
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
 		})
 	}
 	return

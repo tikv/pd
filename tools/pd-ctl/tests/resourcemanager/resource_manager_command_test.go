@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	pdTests "github.com/tikv/pd/tests"
@@ -95,5 +96,35 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	expectCfg.Controller.RequestUnit.WriteBaseCost = 2
+	checkShow()
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.request-unit.write-base-cost", "2"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "can't update controller child item ")
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.write-base-cost", "2"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "can't update controller child item")
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.write-base-cost1", "2"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "controller config item write-base-cost1 not found")
+
+	// Set controller config
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.ltb-max-wait-duration", "1h"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	expectCfg.Controller.LTBMaxWaitDuration = typeutil.Duration{Duration: 1 * time.Hour}
+	checkShow()
+
+	args = []string{"-u", s.pdAddr, "config", "set", "controller.enable-controller-trace-log", "true"}
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	expectCfg.Controller.EnableControllerTraceLog = true
 	checkShow()
 }

@@ -18,11 +18,14 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/pingcap/errors"
 	"github.com/spf13/pflag"
+
+	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -69,11 +72,11 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 	if len(undecoded) == 0 {
 		return nil
 	}
-	errInfo := "Config contains undefined item: "
+	parts := make([]string, 0, len(undecoded))
 	for _, key := range undecoded {
-		errInfo += key.String() + ", "
+		parts = append(parts, key.String())
 	}
-	return errors.New(errInfo[:len(errInfo)-2])
+	return errors.New("Config contains undefined item: " + strings.Join(parts, ", "))
 }
 
 // SecurityConfig indicates the security configuration

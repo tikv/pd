@@ -29,7 +29,6 @@ type TestServiceConfig struct {
 	ListenAddr                string              // Address the service listens on.
 	AdvertiseListenAddr       string              // Address the service advertises to the clients.
 	LeaderLease               int64               // Leader lease.
-	LocalTSOEnabled           bool                // Whether local TSO is enabled.
 	TSOUpdatePhysicalInterval time.Duration       // Interval to update TSO in physical storage.
 	TSOSaveInterval           time.Duration       // Interval to save TSO to physical storage.
 	MaxResetTSGap             time.Duration       // Maximum gap to reset TSO.
@@ -41,8 +40,8 @@ func (c *TestServiceConfig) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
-func (c *TestServiceConfig) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
+func (c *TestServiceConfig) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -56,14 +55,9 @@ func (c *TestServiceConfig) GetAdvertiseListenAddr() string {
 	return c.AdvertiseListenAddr
 }
 
-// GetLeaderLease returns the LeaderLease field of TestServiceConfig.
-func (c *TestServiceConfig) GetLeaderLease() int64 {
+// GetLease returns the LeaderLease field of TestServiceConfig.
+func (c *TestServiceConfig) GetLease() int64 {
 	return c.LeaderLease
-}
-
-// IsLocalTSOEnabled returns the LocalTSOEnabled field of TestServiceConfig.
-func (c *TestServiceConfig) IsLocalTSOEnabled() bool {
-	return c.LocalTSOEnabled
 }
 
 // GetTSOUpdatePhysicalInterval returns the TSOUpdatePhysicalInterval field of TestServiceConfig.

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -38,7 +39,7 @@ func TestSplit(t *testing.T) {
 	regionLabeler := cluster.RegionLabeler
 	sc := NewSplitChecker(cluster, ruleManager, regionLabeler)
 	cluster.AddLeaderStore(1, 1)
-	ruleManager.SetRule(&placement.Rule{
+	err := ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test",
 		StartKeyHex: "aa",
@@ -46,6 +47,7 @@ func TestSplit(t *testing.T) {
 		Role:        placement.Voter,
 		Count:       1,
 	})
+	re.NoError(err)
 	cluster.AddLeaderRegionWithRange(1, "", "", 1)
 	op := sc.Check(cluster.GetRegion(1))
 	re.NotNil(op)
@@ -55,12 +57,13 @@ func TestSplit(t *testing.T) {
 	re.Equal("cc", hex.EncodeToString(splitKeys[1]))
 
 	// region label has higher priority.
-	regionLabeler.SetLabelRule(&labeler.LabelRule{
+	err = regionLabeler.SetLabelRule(&labeler.LabelRule{
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 		RuleType: labeler.KeyRange,
 		Data:     makeKeyRanges("bb", "dd"),
 	})
+	re.NoError(err)
 	op = sc.Check(cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal(1, op.Len())

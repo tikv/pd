@@ -19,15 +19,18 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // DefaultLeaseInSeconds is the default lease time in seconds.
-const DefaultLeaseInSeconds = 3
+const DefaultLeaseInSeconds = 5
 
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
@@ -40,9 +43,9 @@ type ServiceRegister struct {
 }
 
 // NewServiceRegister creates a new ServiceRegister.
-func NewServiceRegister(ctx context.Context, cli *clientv3.Client, clusterID, serviceName, serviceAddr, serializedValue string, ttl int64) *ServiceRegister {
+func NewServiceRegister(ctx context.Context, cli *clientv3.Client, serviceName, serviceAddr, serializedValue string, ttl int64) *ServiceRegister {
 	cctx, cancel := context.WithCancel(ctx)
-	serviceKey := RegistryPath(clusterID, serviceName, serviceAddr)
+	serviceKey := keypath.RegistryPath(serviceName, serviceAddr)
 	return &ServiceRegister{
 		ctx:    cctx,
 		cancel: cancel,

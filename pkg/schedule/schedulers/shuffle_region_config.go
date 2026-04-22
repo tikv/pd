@@ -18,12 +18,13 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/tikv/pd/pkg/core"
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
 )
 
 const (
@@ -38,8 +39,8 @@ type shuffleRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
-	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.
+	Ranges []keyutil.KeyRange `json:"ranges"`
+	Roles  []string           `json:"roles"` // can include `leader`, `follower`, `learner`.
 }
 
 func (conf *shuffleRegionSchedulerConfig) encodeConfig() ([]byte, error) {
@@ -54,10 +55,10 @@ func (conf *shuffleRegionSchedulerConfig) getRoles() []string {
 	return conf.Roles
 }
 
-func (conf *shuffleRegionSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *shuffleRegionSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }

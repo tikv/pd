@@ -19,11 +19,13 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
 )
 
 // Redirector is a middleware to redirect the request to the right place.
@@ -36,14 +38,14 @@ func Redirector() gin.HandlerFunc {
 			return
 		}
 		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
-		if allowFollowerHandle || svr.GetMember().IsLeader() {
+		if allowFollowerHandle || svr.GetMember().IsServing() {
 			c.Next()
 			return
 		}
 
 		// Prevent more than one redirection.
 		if name := c.Request.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
-			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+			log.Warn("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirectToNotLeader.FastGenByArgs().Error())
 			return
 		}

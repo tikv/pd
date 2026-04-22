@@ -17,12 +17,14 @@ package statistics
 import (
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 // RegionInfoProvider is an interface to provide the region information.

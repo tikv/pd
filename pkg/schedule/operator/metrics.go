@@ -16,6 +16,7 @@ package operator
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
@@ -36,14 +37,6 @@ var (
 			Name:      "operator_limit",
 			Help:      "Counter of operator meeting limit",
 		}, []string{"type", "name"})
-
-	storeLimitCostCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "schedule",
-			Name:      "store_limit_cost",
-			Help:      "limit rate cost of store.",
-		}, []string{"store", "limit_type"})
 
 	// OperatorExceededStoreLimitCounter exposes the counter when operator meet exceeded store limit.
 	OperatorExceededStoreLimitCounter = prometheus.NewCounterVec(
@@ -89,7 +82,6 @@ func init() {
 	prometheus.MustRegister(operatorCounter)
 	prometheus.MustRegister(operatorDuration)
 	prometheus.MustRegister(operatorSizeHist)
-	prometheus.MustRegister(storeLimitCostCounter)
 }
 
 // IncOperatorLimitCounter increases the counter of operator meeting limit.

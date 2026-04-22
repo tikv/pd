@@ -18,9 +18,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -31,7 +33,7 @@ func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -43,10 +45,10 @@ func TestRegionStatistics(t *testing.T) {
 	}
 
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
-		{Id: 7, Address: "mock://tikv-7"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
+		{Id: 7, Address: "mock://tikv-7:7"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -120,7 +122,7 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(true)
@@ -132,10 +134,10 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 		{Id: 9, StoreId: 8, IsWitness: true},
 	}
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
-		{Id: 7, Address: "mock://tikv-7"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
+		{Id: 7, Address: "mock://tikv-7:7"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -221,9 +223,9 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	regionID := 1
 	f := func(labels []map[string]string, res string, locationLabels []string) {
 		metaStores := []*metapb.Store{
-			{Id: 1, Address: "mock://tikv-1"},
-			{Id: 2, Address: "mock://tikv-2"},
-			{Id: 3, Address: "mock://tikv-3"},
+			{Id: 1, Address: "mock://tikv-1:1"},
+			{Id: 2, Address: "mock://tikv-2:2"},
+			{Id: 3, Address: "mock://tikv-3:3"},
 		}
 		stores := make([]*core.StoreInfo, 0, len(labels))
 		for i, m := range metaStores {
@@ -253,7 +255,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.Equal(nonIsolation, label)
 	label = GetRegionLabelIsolation(nil, nil)
 	re.Equal(nonIsolation, label)
-	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
+	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
 	label = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
 	re.Equal("zone", label)
 
@@ -271,10 +273,12 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 }
 
 func BenchmarkObserve(b *testing.B) {
+	re := require.New(b)
 	// Setup
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
+	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{
@@ -284,9 +288,9 @@ func BenchmarkObserve(b *testing.B) {
 	}
 
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -297,15 +301,16 @@ func BenchmarkObserve(b *testing.B) {
 
 	regionNum := uint64(1000000)
 	regions := make([]*core.RegionInfo, 0, regionNum)
+	leader := peers[0]
 	for i := uint64(1); i <= regionNum; i++ {
 		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}}
-		regions = append(regions, core.NewRegionInfo(r, peers[0]))
+		regions = append(regions, core.NewRegionInfo(r, leader))
 	}
 	regionStats := NewRegionStatistics(nil, opt, manager)
 
 	b.ResetTimer()
 	// Run the Observe function b.N times
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		regionStats.Observe(regions[i%int(regionNum)], stores)
 	}
 }

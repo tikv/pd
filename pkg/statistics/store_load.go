@@ -34,19 +34,22 @@ type StoreLoadDetail struct {
 func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 	storeByteRate, storeKeyRate, storeQueryRate := li.LoadPred.Current.Loads[utils.ByteDim],
 		li.LoadPred.Current.Loads[utils.KeyDim], li.LoadPred.Current.Loads[utils.QueryDim]
+	storeCPURate := li.LoadPred.Current.Loads[utils.CPUDim]
 	if len(li.HotPeers) == 0 {
 		return &HotPeersStat{
 			StoreByteRate:  storeByteRate,
 			StoreKeyRate:   storeKeyRate,
 			StoreQueryRate: storeQueryRate,
+			StoreCPURate:   storeCPURate,
 			TotalBytesRate: 0.0,
 			TotalKeysRate:  0.0,
 			TotalQueryRate: 0.0,
+			TotalCPURate:   0.0,
 			Count:          0,
 			Stats:          make([]HotPeerStatShow, 0),
 		}
 	}
-	var byteRate, keyRate, queryRate float64
+	var byteRate, keyRate, queryRate, cpuRate float64
 	peers := make([]HotPeerStatShow, 0, len(li.HotPeers))
 	for _, peer := range li.HotPeers {
 		if peer.HotDegree > 0 {
@@ -54,6 +57,7 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 			byteRate += peer.GetLoad(utils.ByteDim)
 			keyRate += peer.GetLoad(utils.KeyDim)
 			queryRate += peer.GetLoad(utils.QueryDim)
+			cpuRate += peer.GetLoad(utils.CPUDim)
 		}
 	}
 
@@ -61,9 +65,11 @@ func (li *StoreLoadDetail) ToHotPeersStat() *HotPeersStat {
 		TotalBytesRate: byteRate,
 		TotalKeysRate:  keyRate,
 		TotalQueryRate: queryRate,
+		TotalCPURate:   cpuRate,
 		StoreByteRate:  storeByteRate,
 		StoreKeyRate:   storeKeyRate,
 		StoreQueryRate: storeQueryRate,
+		StoreCPURate:   storeCPURate,
 		Count:          len(peers),
 		Stats:          peers,
 	}
@@ -78,6 +84,7 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 	byteRate := p.GetLoad(utils.ByteDim)
 	keyRate := p.GetLoad(utils.KeyDim)
 	queryRate := p.GetLoad(utils.QueryDim)
+	cpuRate := p.GetLoad(utils.CPUDim)
 	return HotPeerStatShow{
 		StoreID:   p.StoreID,
 		Stores:    p.GetStores(),
@@ -87,6 +94,7 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 		ByteRate:  byteRate,
 		KeyRate:   keyRate,
 		QueryRate: queryRate,
+		CPURate:   cpuRate,
 		AntiCount: p.AntiCount,
 	}
 }
@@ -94,14 +102,13 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
 	PendingSum *Influence
 }
 
 // Influence records operator influence.
 type Influence struct {
-	Loads []float64
-	Count float64
+	Loads        []float64
+	HotPeerCount float64
 }
 
 // SummaryStoreInfos return a mapping from store to summary information.
@@ -110,7 +117,6 @@ func SummaryStoreInfos(stores []*core.StoreInfo) map[uint64]*StoreSummaryInfo {
 	for _, store := range stores {
 		info := &StoreSummaryInfo{
 			StoreInfo:  store,
-			isTiFlash:  store.IsTiFlash(),
 			PendingSum: nil,
 		}
 		infos[store.GetID()] = info
@@ -125,38 +131,42 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 	}
 	if s.PendingSum == nil {
 		s.PendingSum = &Influence{
-			Loads: make([]float64, len(infl.Loads)),
-			Count: 0,
+			Loads:        make([]float64, len(infl.Loads)),
+			HotPeerCount: 0,
 		}
 	}
 	for i, load := range infl.Loads {
 		s.PendingSum.Loads[i] += load * w
 	}
-	s.PendingSum.Count += infl.Count * w
+	s.PendingSum.HotPeerCount += infl.HotPeerCount * w
 }
 
-// IsTiFlash returns true if the store is TiFlash.
-func (s *StoreSummaryInfo) IsTiFlash() bool {
-	return s.isTiFlash
-}
+// Loads is a vector that contains different dimensions of loads.
+type Loads [utils.DimLen]float64
 
-// SetEngineAsTiFlash set whether store is TiFlash, it is only used in tests.
-func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
-	s.isTiFlash = true
-}
+// HistoryLoads is a circular buffer of loads. The reason for using
+// [utils.DimLen][]float64 instead of [][utils.DimLen]float64 is to make it easier
+// for the `checkHistoryLoadsByPriority` function to handle.
+type HistoryLoads [utils.DimLen][] /* buffer size */ float64
+
+// StoreKindLoads is a vector that contains different dimensions of store loads.
+type StoreKindLoads [utils.StoreLoadCount]float64
+
+// RegionKindLoads is a vector that contains different dimensions of region loads.
+type RegionKindLoads [utils.RegionStatCount]float64
 
 // StoreLoad records the current load.
 type StoreLoad struct {
-	Loads        []float64
-	Count        float64
-	HistoryLoads [][]float64
+	Loads        Loads
+	HotPeerCount float64
+	HistoryLoads HistoryLoads
 }
 
 // ToLoadPred returns the current load and future predictive load.
 func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadPred {
 	future := StoreLoad{
-		Loads: append(load.Loads[:0:0], load.Loads...),
-		Count: load.Count,
+		Loads:        load.Loads,
+		HotPeerCount: load.HotPeerCount,
 	}
 	if infl != nil {
 		switch rwTy {
@@ -164,12 +174,14 @@ func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadP
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionReadBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionReadKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionReadQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionReadCPU]
 		case utils.Write:
 			future.Loads[utils.ByteDim] += infl.Loads[utils.RegionWriteBytes]
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionWriteKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionWriteQueryNum]
+			future.Loads[utils.CPUDim] += infl.Loads[utils.RegionWriteCPU]
 		}
-		future.Count += infl.Count
+		future.HotPeerCount += infl.HotPeerCount
 	}
 	return &StoreLoadPred{
 		Current: load,
@@ -198,50 +210,50 @@ func (lp *StoreLoadPred) Max() *StoreLoad {
 // Pending returns the pending load.
 func (lp *StoreLoadPred) Pending() *StoreLoad {
 	mx, mn := lp.Max(), lp.Min()
-	loads := make([]float64, len(mx.Loads))
+	var loads Loads
 	for i := range loads {
 		loads[i] = mx.Loads[i] - mn.Loads[i]
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: 0,
+		Loads:        loads,
+		HotPeerCount: 0,
 	}
 }
 
 // Diff return the difference between min and max.
 func (lp *StoreLoadPred) Diff() *StoreLoad {
 	mx, mn := lp.Max(), lp.Min()
-	loads := make([]float64, len(mx.Loads))
+	var loads Loads
 	for i := range loads {
 		loads[i] = mx.Loads[i] - mn.Loads[i]
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: mx.Count - mn.Count,
+		Loads:        loads,
+		HotPeerCount: mx.HotPeerCount - mn.HotPeerCount,
 	}
 }
 
 // MinLoad return the min store load.
 func MinLoad(a, b *StoreLoad) *StoreLoad {
-	loads := make([]float64, len(a.Loads))
+	var loads Loads
 	for i := range loads {
 		loads[i] = math.Min(a.Loads[i], b.Loads[i])
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: math.Min(a.Count, b.Count),
+		Loads:        loads,
+		HotPeerCount: math.Min(a.HotPeerCount, b.HotPeerCount),
 	}
 }
 
 // MaxLoad return the max store load.
 func MaxLoad(a, b *StoreLoad) *StoreLoad {
-	loads := make([]float64, len(a.Loads))
+	var loads Loads
 	for i := range loads {
 		loads[i] = math.Max(a.Loads[i], b.Loads[i])
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: math.Max(a.Count, b.Count),
+		Loads:        loads,
+		HotPeerCount: math.Max(a.HotPeerCount, b.HotPeerCount),
 	}
 }
 
@@ -256,15 +268,13 @@ const (
 type StoreHistoryLoads struct {
 	// loads[read/write][leader/follower]-->[store id]-->history load
 	loads          [utils.RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
-	dim            int
 	sampleInterval time.Duration
 	sampleDuration time.Duration
 }
 
 // NewStoreHistoryLoads creates a StoreHistoryLoads.
-func NewStoreHistoryLoads(dim int, sampleDuration time.Duration, sampleInterval time.Duration) *StoreHistoryLoads {
+func NewStoreHistoryLoads(sampleDuration time.Duration, sampleInterval time.Duration) *StoreHistoryLoads {
 	st := StoreHistoryLoads{
-		dim:            dim,
 		sampleDuration: sampleDuration,
 		sampleInterval: sampleInterval,
 	}
@@ -277,7 +287,7 @@ func NewStoreHistoryLoads(dim int, sampleDuration time.Duration, sampleInterval 
 }
 
 // Add adds the store load to the history.
-func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind, pointLoad []float64) {
+func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind, pointLoad Loads) {
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
 		size := int(DefaultHistorySampleDuration / DefaultHistorySampleInterval)
@@ -287,7 +297,7 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 		if s.sampleDuration == 0 {
 			size = 0
 		}
-		load = newStoreHistoryLoad(size, s.dim, s.sampleInterval)
+		load = newStoreHistoryLoad(size, s.sampleInterval)
 		s.loads[rwTp][kind][storeID] = load
 	}
 	load.add(pointLoad)
@@ -295,10 +305,10 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 
 // Get returns the store loads from the history, not one time point.
 // In another word, the result is [dim][time].
-func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind) [][]float64 {
+func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind) HistoryLoads {
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
-		return [][]float64{}
+		return HistoryLoads{}
 	}
 	return load.get()
 }
@@ -308,46 +318,43 @@ func (s *StoreHistoryLoads) UpdateConfig(sampleDuration time.Duration, sampleInt
 	if s.sampleDuration == sampleDuration && s.sampleInterval == sampleInterval {
 		return s
 	}
-	return NewStoreHistoryLoads(s.dim, sampleDuration, sampleInterval)
+	return NewStoreHistoryLoads(sampleDuration, sampleInterval)
 }
 
 type storeHistoryLoad struct {
 	update time.Time
 	// loads is a circular buffer.
-	// [dim] --> [1,2,3...]
-	loads          [][]float64
+	historyloads   HistoryLoads
 	size           int
 	count          int
 	sampleInterval time.Duration
 }
 
-func newStoreHistoryLoad(size int, dimLen int, sampleInterval time.Duration) *storeHistoryLoad {
+func newStoreHistoryLoad(size int, sampleInterval time.Duration) *storeHistoryLoad {
 	return &storeHistoryLoad{
-		loads:          make([][]float64, dimLen),
 		size:           size,
 		sampleInterval: sampleInterval,
 	}
 }
 
 // add adds the store load to the history.
-// eg. add([1,2,3]) --> [][]float64{{1}, {2}, {3}}
-func (s *storeHistoryLoad) add(pointLoad []float64) {
+func (s *storeHistoryLoad) add(pointLoad Loads) {
 	// reject if the loads length is not equal to the dimension.
-	if time.Since(s.update) < s.sampleInterval || s.size == 0 || len(pointLoad) != len(s.loads) {
+	if time.Since(s.update) < s.sampleInterval || s.size == 0 || len(pointLoad) != len(s.historyloads) {
 		return
 	}
 	if s.count == 0 {
-		for dim := range s.loads {
-			s.loads[dim] = make([]float64, s.size)
+		for dim := range s.historyloads {
+			s.historyloads[dim] = make([]float64, s.size)
 		}
 	}
 	for dim, v := range pointLoad {
-		s.loads[dim][s.count%s.size] = v
+		s.historyloads[dim][s.count%s.size] = v
 	}
 	s.count++
 	s.update = time.Now()
 }
 
-func (s *storeHistoryLoad) get() [][]float64 {
-	return s.loads
+func (s *storeHistoryLoad) get() HistoryLoads {
+	return s.historyloads
 }

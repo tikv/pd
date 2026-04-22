@@ -19,11 +19,13 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -41,6 +43,7 @@ const (
 	defaultReplicaScheduleLimit   = 64
 	defaultMergeScheduleLimit     = 8
 	defaultHotRegionScheduleLimit = 4
+	defaultAffinityScheduleLimit  = 0 // default to disable
 	defaultTolerantSizeRatio      = 0
 	defaultLowSpaceRatio          = 0.8
 	defaultHighSpaceRatio         = 0.7
@@ -67,6 +70,9 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
+	defaultPatrolRegionWorkerCount   = 1
+	maxPatrolRegionWorkerCount       = 8
+
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -75,6 +81,15 @@ const (
 	defaultHotRegionsWriteInterval = 10 * time.Minute
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
+
+	// defaultMaxAffinityMergeRegionSize is the default maximum size of affinity region when regions can be merged.
+	// It means 256 MB, according https://docs.pingcap.com/tidb/stable/tune-region-performance/#use-region-split-size-to-adjust-region-
+	// The maximum size of region maybe be larger than 256 MB, such as 512 MB or 1 GB.
+	// Because we will merge affinity region as far as possible, so defaultMaxAffinityMergeRegionSize is larger than defaultMaxMergeRegionSize.
+	defaultMaxAffinityMergeRegionSize = 256
+
+	// RegionSizeToKeysRatio is the ratio between region size and region keys.
+	RegionSizeToKeysRatio = 10000
 )
 
 var (
@@ -100,10 +115,9 @@ const (
 	ReplicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
 	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	AffinityScheduleLimitKey       = "schedule.affinity-schedule-limit"
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
-	DefaultAddPeer                 = "default-add-peer"
-	DefaultRemovePeer              = "default-remove-peer"
 
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// it's related to schedule, but it's not an explicit config
@@ -200,6 +214,8 @@ type ScheduleConfig struct {
 	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
 	// HotRegionScheduleLimit is the max coexist hot region schedules.
 	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
+	// AffinityScheduleLimit is the max coexist affinity schedules.
+	AffinityScheduleLimit uint64 `toml:"affinity-schedule-limit" json:"affinity-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
@@ -284,7 +300,7 @@ type ScheduleConfig struct {
 	// The day of hot regions data to be reserved. 0 means close.
 	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
 
-	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region.
 	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
 	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
 
@@ -306,6 +322,15 @@ type ScheduleConfig struct {
 	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
 	// and any other scheduling configs will be ignored.
 	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+
+	// PatrolRegionWorkerCount is the number of workers to patrol region.
+	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
+
+	// If the size of region is smaller than MaxAffinityMergeRegionSize,
+	// and it is affinity, it will try to merge with adjacent regions.
+	// To avoid introducing a new configuration parameter, we derive the maximum number of keys
+	// from the maximum size using the global size-to-keys ratio.
+	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -335,12 +360,18 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("max-merge-region-size") {
 		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
+	if !meta.IsDefined("max-affinity-merge-region-size") {
+		configutil.AdjustUint64(&c.MaxAffinityMergeRegionSize, defaultMaxAffinityMergeRegionSize)
+	}
 	configutil.AdjustDuration(&c.SplitMergeInterval, DefaultSplitMergeInterval)
 	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
 	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+	if !meta.IsDefined("max-store-preparing-time") {
+		configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
+	}
+
 	if !meta.IsDefined("leader-schedule-limit") {
 		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
 	}
@@ -359,6 +390,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("hot-region-schedule-limit") {
 		configutil.AdjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
 	}
+	if !meta.IsDefined("affinity-schedule-limit") {
+		configutil.AdjustUint64(&c.AffinityScheduleLimit, defaultAffinityScheduleLimit)
+	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
 		configutil.AdjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
 	}
@@ -373,6 +407,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
+	}
+	if !meta.IsDefined("patrol-region-worker-count") {
+		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
 
 	if !meta.IsDefined("enable-joint-consensus") {
@@ -461,7 +498,13 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	if keys := c.MaxMergeRegionKeys; keys != 0 {
 		return keys
 	}
-	return c.MaxMergeRegionSize * 10000
+	return c.MaxMergeRegionSize * RegionSizeToKeysRatio
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// A zero value means the affinity merge is disabled.
+func (c *ScheduleConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	return c.MaxAffinityMergeRegionSize
 }
 
 func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
@@ -518,6 +561,9 @@ func (c *ScheduleConfig) Validate() error {
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
+	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
+		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
+	}
 	return nil
 }
 
@@ -567,11 +613,18 @@ type SchedulerConfig struct {
 // DefaultSchedulers are the schedulers be created by default.
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
-var DefaultSchedulers = SchedulerConfigs{
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
-	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
+var DefaultSchedulers = defaultSchedulersInit()
+var defaultSchedulersInit = func() SchedulerConfigs {
+	defaultSchedulers := SchedulerConfigs{
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+		{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
+	}
+	if !kerneltype.IsNextGen() {
+		defaultSchedulers = append(defaultSchedulers, SchedulerConfig{Type: types.SchedulerTypeCompatibleMap[types.EvictStoppingStoreScheduler]})
+	}
+	return defaultSchedulers
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.

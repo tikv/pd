@@ -14,11 +14,19 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/tsopb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 const namespace = "tso"
 
 var (
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, "server")
+
 	timeJumpBackCounter = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -46,7 +54,12 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(metaDataGauge)
 	prometheus.MustRegister(tsoHandleDuration)
+}
+
+func newTsoMetricsStream(stream tsopb.TSO_TsoServer) tsopb.TSO_TsoServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
 }

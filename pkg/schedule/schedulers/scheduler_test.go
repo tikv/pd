@@ -20,8 +20,10 @@ import (
 	"testing"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -53,7 +55,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	if len(needToRunStream) == 0 {
 		stream = nil
 	} else {
-		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
+		stream = hbstream.NewTestHeartbeatStreams(ctx, tc, needToRunStream[0])
 	}
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSchedulerConfig(), stream)
 	tc.SetHotRegionCacheHitsThreshold(1)
@@ -271,18 +273,20 @@ func TestShuffleRegionRole(t *testing.T) {
 
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
-	tc.RuleManager.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
 		Count:   1,
 	})
+	re.NoError(err)
 
 	// Add stores 1, 2, 3, 4
 	tc.AddRegionStore(1, 6)
@@ -521,15 +525,15 @@ func TestIsDefault(t *testing.T) {
 	defer cancel()
 
 	for schedulerType := range types.SchedulerTypeCompatibleMap {
-		bs, err := CreateScheduler(schedulerType, oc,
+		s, err := CreateScheduler(schedulerType, oc,
 			storage.NewStorageWithMemoryBackend(),
 			testDecoder,
 			func(string) error { return nil })
 		re.NoError(err)
 		if slices.Contains(types.DefaultSchedulers, schedulerType) {
-			re.True(bs.IsDefault())
+			re.True(s.IsDefault())
 		} else {
-			re.False(bs.IsDefault())
+			re.False(s.IsDefault())
 		}
 	}
 }

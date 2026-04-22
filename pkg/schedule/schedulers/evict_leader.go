@@ -15,13 +15,16 @@
 package schedulers
 
 import (
-	"math/rand"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -31,9 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -47,7 +49,7 @@ type evictLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch             int `json:"batch"`
 	cluster           *core.BasicCluster
@@ -73,7 +75,7 @@ func (conf *evictLeaderSchedulerConfig) getBatch() int {
 func (conf *evictLeaderSchedulerConfig) clone() *evictLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
-	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for id, ranges := range conf.StoreIDWithRanges {
 		storeIDWithRanges[id] = append(storeIDWithRanges[id], ranges...)
 	}
@@ -98,26 +100,26 @@ func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, erro
 	_, exists := conf.StoreIDWithRanges[id]
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id)
+		conf.cluster.ResumeLeaderTransfer(id, constant.In)
 		return len(conf.StoreIDWithRanges) == 0, nil
 	}
 	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
 }
 
-func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
-	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []keyutil.KeyRange) {
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 	}
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
-func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []keyutil.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.resetStoreLocked(id, keyRange)
 }
 
-func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
 	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
@@ -139,7 +141,10 @@ func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	if err := conf.load(newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransfer(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	if newCfg.Batch == 0 {
+		newCfg.Batch = EvictLeaderBatchSize
+	}
+	pauseAndResumeLeaderTransfer(conf.cluster, constant.In, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	conf.Batch = newCfg.Batch
 	return nil
@@ -150,7 +155,7 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransfer(cluster sche.Schedul
 	defer conf.RUnlock()
 	var res error
 	for id := range conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 			res = err
 		}
 	}
@@ -161,7 +166,7 @@ func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.Schedu
 	conf.RLock()
 	defer conf.RUnlock()
 	for id := range conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, constant.In)
 	}
 }
 
@@ -169,7 +174,7 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 	conf.RLock()
 	defer conf.RUnlock()
 	if _, exist := conf.StoreIDWithRanges[id]; !exist {
-		if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+		if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 			return exist, err
 		}
 	}
@@ -179,10 +184,10 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
 	conf.RLock()
 	defer conf.RUnlock()
-	conf.cluster.ResumeLeaderTransfer(id)
+	conf.cluster.ResumeLeaderTransfer(id, constant.In)
 }
 
-func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
+func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []keyutil.KeyRange, batch int) error {
 	conf.Lock()
 	defer conf.Unlock()
 	if id != 0 {
@@ -199,13 +204,13 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
 	var resp any
+	keyRanges := conf.StoreIDWithRanges[id]
 	last, err := conf.removeStoreLocked(id)
 	if err != nil {
 		conf.Unlock()
 		return resp, err
 	}
 
-	keyRanges := conf.StoreIDWithRanges[id]
 	err = conf.save()
 	if err != nil {
 		conf.resetStoreLocked(id, keyRanges)
@@ -254,7 +259,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-// GetName implements the Scheduler interface.
+// EncodeConfig encodes the config to a byte array.
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.encodeConfig()
 }
@@ -286,7 +291,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -306,15 +311,15 @@ func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) [
 
 type evictLeaderStoresConf interface {
 	getStores() []uint64
-	getKeyRangesByID(id uint64) []core.KeyRange
+	getKeyRangesByID(id uint64) []keyutil.KeyRange
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
+		once := scheduleEvictLeaderOnce(name, cluster, conf)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -328,7 +333,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 	return ops
 }
 
-func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -359,7 +364,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
-		candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).
+		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
@@ -399,7 +404,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		exist     bool
 		err       error
 		id        uint64
-		newRanges []core.KeyRange
+		newRanges []keyutil.KeyRange
 	)
 	idFloat, inputHasStoreID := input["store_id"].(float64)
 	if inputHasStoreID {
@@ -426,7 +431,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		if !inputHasStoreID {
 			handler.config.resumeLeaderTransferIfExist(id)
-			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
+			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
 	} else if exist {
@@ -436,14 +441,14 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
 		handler.config.resumeLeaderTransferIfExist(id)
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")

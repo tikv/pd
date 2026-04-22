@@ -20,24 +20,30 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
-	alterEpsilon               = 1e-9
-	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
-	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
+	alterEpsilon          = 1e-9
+	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
+	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
+	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
+	defaultRecoverySec = 1800 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {
@@ -48,7 +54,7 @@ type slowCandidate struct {
 
 type evictSlowTrendSchedulerParam struct {
 	// Duration gap for recovering the candidate, unit: s.
-	RecoveryDurationGap uint64 `json:"recovery-duration"`
+	RecoverySec uint64 `json:"recovery-duration"`
 	// Only evict one store for now
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
@@ -71,8 +77,8 @@ func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 		evictCandidate:     slowCandidate{},
 		lastEvictCandidate: slowCandidate{},
 		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
-			RecoveryDurationGap: defaultRecoveryDurationGap,
-			EvictedStores:       make([]uint64, 0),
+			RecoverySec:   defaultRecoverySec,
+			EvictedStores: make([]uint64, 0),
 		},
 	}
 }
@@ -81,7 +87,7 @@ func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerParam
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerParam{
-		RecoveryDurationGap: conf.RecoveryDurationGap,
+		RecoverySec: conf.RecoverySec,
 	}
 }
 
@@ -91,11 +97,11 @@ func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictedStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (*evictSlowTrendSchedulerConfig) getBatch() int {
@@ -152,11 +158,11 @@ func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
 func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
-	recoveryDurationGap := conf.RecoveryDurationGap
+	recoverySec := conf.RecoverySec
 	failpoint.Inject("transientRecoveryGap", func() {
-		recoveryDurationGap = 0
+		recoverySec = 0
 	})
-	return conf.lastCandidateCapturedSecs() >= recoveryDurationGap
+	return conf.lastCandidateCapturedSecs() >= recoverySec
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
@@ -238,20 +244,20 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 	handler.config.Lock()
 	defer handler.config.Unlock()
-	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
-	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	handler.config.RecoveryDurationGap = recoveryDurationGap
+	prevRecoverySec := handler.config.RecoverySec
+	recoverySec := uint64(recoveryDurationGapFloat)
+	handler.config.RecoverySec = recoverySec
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		handler.config.RecoverySec = prevRecoverySec
 		return
 	}
-	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
+	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoverySec), zap.Uint64("cur", recoverySec))
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
@@ -307,8 +313,8 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	for _, id := range newCfg.EvictedStores {
 		new[id] = struct{}{}
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
-	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
+	s.conf.RecoverySec = newCfg.RecoverySec
 	s.conf.EvictedStores = newCfg.EvictedStores
 	return nil
 }
@@ -354,7 +360,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -465,7 +471,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slo
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if slowTrend := store.GetSlowTrend(); slowTrend != nil {
@@ -546,7 +552,7 @@ func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, sl
 			updatedStores += 1
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			updatedStores += 1
 			continue
 		}
@@ -576,7 +582,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {
@@ -630,7 +636,7 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {

@@ -16,7 +16,9 @@ package core
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
@@ -40,7 +42,6 @@ type SchedulerCluster interface {
 	buckets.BucketStatInformer
 
 	GetSchedulerConfig() sc.SchedulerConfigProvider
-	GetRegionLabeler() *labeler.RegionLabeler
 	GetStoreConfig() sc.StoreConfigProvider
 }
 
@@ -60,9 +61,13 @@ type SharedCluster interface {
 
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
+	GetRegionLabeler() *labeler.RegionLabeler
 	GetRuleManager() *placement.RuleManager
-	AllocID() (uint64, error)
+	GetKeyRangeManager() *keyrange.Manager
+	GetAffinityManager() *affinity.Manager
+	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
+	GetPrepareRegionCount() (int, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

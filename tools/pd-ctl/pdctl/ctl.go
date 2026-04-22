@@ -24,6 +24,7 @@ import (
 	shellwords "github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
@@ -43,9 +44,9 @@ func GetRootCmd() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of PD")
-	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().String("cacert", os.Getenv("CA_PATH"), "path of file that contains list of trusted SSL CAs")
+	rootCmd.PersistentFlags().String("cert", os.Getenv("CERT_PATH"), "path of file that contains X509 certificate in PEM format")
+	rootCmd.PersistentFlags().String("key", os.Getenv("KEY_PATH"), "path of file that contains X509 key in PEM format")
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 
@@ -73,6 +74,8 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
+		command.NewMaintenanceCommand(),
+		command.NewMicroServicesCommand(),
 	)
 
 	return rootCmd
@@ -84,8 +87,6 @@ func MainStart(args []string) {
 
 	rootCmd.Flags().BoolP("interact", "i", false, "Run pdctl with readline.")
 	rootCmd.Flags().BoolP("version", "V", false, "Print version information and exit.")
-	// TODO: deprecated
-	rootCmd.Flags().BoolP("detach", "d", true, "Run pdctl without readline.")
 
 	rootCmd.Run = func(cmd *cobra.Command, _ []string) {
 		if v, err := cmd.Flags().GetBool("version"); err == nil && v {

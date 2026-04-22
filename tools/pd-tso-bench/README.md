@@ -4,7 +4,7 @@ pd-tso-bench is a tool to benchmark GetTS performance.
 
 ## Build
 
-1. [Go](https://golang.org/) Version 1.23 or later
+1. [Go](https://golang.org/) Version 1.25 or later
 2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` command to compile and generate `bin/pd-tso-bench`
 
 ## Usage
@@ -24,8 +24,6 @@ This section describes how to benchmark the GetTS performance.
   the number of pd clients involved in each benchmark (default 1)
 -count int
   the count number that the test will run (default 1)
--dc string
-  which dc-location this bench will request (default "global")
 -duration duration
   how many seconds the test will last (default 1m0s)
 -interval duration

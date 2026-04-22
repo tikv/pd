@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,36 +17,27 @@ package utils
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
+	"math/rand/v2"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
-// expectedPrimaryFlag is the flag to indicate the expected primary.
-// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
-// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
-// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-const expectedPrimaryFlag = "expected_primary"
-
-// expectedPrimaryPath formats the primary path with the expected primary flag.
-func expectedPrimaryPath(primaryPath string) string {
-	return fmt.Sprintf("%s/%s", primaryPath, expectedPrimaryFlag)
-}
-
 // GetExpectedPrimaryFlag gets the expected primary flag.
-func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
-	path := expectedPrimaryPath(primaryPath)
+func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) string {
+	path := keypath.ExpectedPrimaryPath(msParam)
 	primary, err := etcdutil.GetValue(client, path)
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err), zap.String("primary-path", path))
@@ -56,17 +47,28 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string 
 	return string(primary)
 }
 
+// primaryData is used to store the primary data.
+// The raw value is used to write to etcd, while the output string is used for logging and debugging purposes.
+type primaryData struct {
+	raw    string
+	output string
+}
+
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
-	path := expectedPrimaryPath(primaryPath)
-	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader-raw", leaderRaw))
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID) (int64, error) {
+	path := keypath.ExpectedPrimaryPath(msParam)
+	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("primary", primary.output))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(expectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
+		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
-	if err != nil || !resp.Succeeded {
+	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
 		return 0, err
+	}
+	if !resp.Succeeded {
+		log.Error("mark expected primary error", zap.String("primary-path", path))
+		return 0, errors.New("mark expected primary txn did not succeed")
 	}
 	return resp.Header.Revision, nil
 }
@@ -75,25 +77,37 @@ func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leader
 // We use lease to keep `expected primary` healthy.
 // ONLY reset by the following conditions:
 // - changed by `{service}/primary/transfer` API.
-// - leader lease expired.
+// - primary lease expired.
 // ONLY primary called this function.
-func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPrimary chan<- struct{},
-	leaseTimeout int64, leaderPath, memberValue, service string) (*election.Lease, error) {
-	log.Info("primary start to watch the expected primary", zap.String("service", service), zap.String("primary-value", memberValue))
-	service = fmt.Sprintf("%s expected primary", service)
+func KeepExpectedPrimaryAlive(
+	ctx context.Context,
+	cli *clientv3.Client,
+	exitPrimary chan<- struct{},
+	leaseTimeout int64,
+	msParam *keypath.MsParam,
+	m *member.Participant) (*election.Lease, error) {
+	log.Info("primary start to watch the expected primary",
+		zap.String("service", msParam.ServiceName), zap.String("primary-value", m.ParticipantString()))
+	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
 	}
-
-	revision, err := markExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.ID.Load().(clientv3.LeaseID))
+	primary := &primaryData{
+		raw:    m.MemberValue(),
+		output: m.ParticipantString(),
+	}
+	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
+		if closeErr := lease.Close(); closeErr != nil {
+			log.Warn("failed to revoke expected primary lease", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
 	// Watch the expected primary path to check whether the expected primary has changed by `{service}/primary/transfer` API.
-	expectedPrimary := election.NewLeadership(cli, expectedPrimaryPath(leaderPath), service)
+	expectedPrimary := election.NewLeadership(cli, keypath.ExpectedPrimaryPath(msParam), service)
 	expectedPrimary.SetLease(lease)
 	expectedPrimary.Keep(ctx)
 
@@ -107,7 +121,7 @@ func watchExpectedPrimary(ctx context.Context,
 	expectedPrimary.SetPrimaryWatch(true)
 	// ONLY exited watch by the following conditions:
 	// - changed by `{service}/primary/transfer` API.
-	// - leader lease expired.
+	// - primary lease expired.
 	expectedPrimary.Watch(ctx, revision)
 	expectedPrimary.Reset()
 	defer log.Info("primary exit the primary watch loop")
@@ -151,16 +165,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	nextPrimaryID := r.Intn(len(primaryIDs))
-
-	clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath)
-	if err != nil {
-		return errors.Errorf("failed to get cluster ID: %v", err)
-	}
+	nextPrimaryID := rand.IntN(len(primaryIDs))
 
 	// update expected primary flag
-	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLeaderLease)
+	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)
 	if err != nil {
 		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
@@ -170,15 +178,15 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("failed to revoke current primary's lease: %v", err)
 	}
 
-	var primaryPath string
-	switch serviceName {
-	case constant.SchedulingServiceName:
-		primaryPath = keypath.SchedulingPrimaryPath(clusterID)
-	case constant.TSOServiceName:
-		tsoRootPath := keypath.TSOSvcRootPath(clusterID)
-		primaryPath = keypath.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+	msParam := &keypath.MsParam{
+		ServiceName: serviceName,
+		GroupID:     keyspaceGroupID,
 	}
-	_, err = markExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
+	primary := &primaryData{
+		raw:    primaryIDs[nextPrimaryID],
+		output: primaryIDs[nextPrimaryID],
+	}
+	_, err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID)
 	if err != nil {
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}

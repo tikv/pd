@@ -1,4 +1,4 @@
-// Copyright 2024 TiKV Authors
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,21 +21,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/testutil"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type schedulerSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, &schedulerSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "scheduler",
 		},
 	})
@@ -44,11 +47,12 @@ func TestScheduler(t *testing.T) {
 // https://github.com/tikv/pd/issues/6988#issuecomment-1694924611
 // https://github.com/tikv/pd/issues/6897
 func (s *schedulerSuite) TestTransferLeader() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	oldLeader := resp.Name
@@ -63,7 +67,10 @@ func (s *schedulerSuite) TestTransferLeader() {
 	// record scheduler
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), 1))
 	defer func() {
-		re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
+		err := pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	res, err := pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
@@ -94,11 +101,12 @@ func (s *schedulerSuite) TestTransferLeader() {
 }
 
 func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)
@@ -107,13 +115,17 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	err = pdHTTPCli.DeleteScheduler(ctx, types.BalanceLeaderScheduler.String())
 	if err == nil {
 		defer func() {
-			pdHTTPCli.CreateScheduler(ctx, types.BalanceLeaderScheduler.String(), 0)
+			err = pdHTTPCli.CreateScheduler(ctx, types.BalanceLeaderScheduler.String(), 0)
+			re.NoError(err)
 		}()
 	}
 
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
+		err = pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 
 	// wait leader transfer
@@ -137,7 +149,8 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	}
 	re.NoError(pdHTTPCli.SetRegionLabelRule(ctx, labelRule))
 	defer func() {
-		pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+		err = pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+		re.NoError(err)
 	}()
 	labelRules, err := pdHTTPCli.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
@@ -153,7 +166,10 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String()))
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+		err := pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
@@ -169,7 +185,10 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
+		err = pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
+		if err != nil {
+			re.ErrorContains(err, "scheduler not found")
+		}
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
@@ -185,7 +204,8 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 		return true
 	}, testutil.WithWaitFor(time.Minute))
 
-	pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+	err = pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+	re.NoError(err)
 	labelRules, err = pdHTTPCli.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
@@ -200,4 +220,76 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 		}
 		return true
 	}, testutil.WithWaitFor(time.Minute))
+}
+
+func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
+	regions, err := pdHTTPCli.GetRegions(ctx)
+	re.NoError(err)
+	re.NotEmpty(regions.Regions)
+	region1 := regions.Regions[0]
+
+	var i int
+	evictLeader := func() {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		// if the second evict leader scheduler cause the pause-leader-filter
+		// disable, the balance-leader-scheduler need some time to transfer
+		// leader. See details in https://github.com/tikv/pd/issues/8756.
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID == region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(time.Minute))
+
+		i++
+	}
+
+	evictLeader()
+	evictLeader()
+	err = pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+	re.NoError(err)
+
+	i = 0
+	grantLeader := func() {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID != region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(2*time.Minute))
+
+		i++
+	}
+
+	grantLeader()
+	grantLeader()
+	err = pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
+	re.NoError(err)
 }

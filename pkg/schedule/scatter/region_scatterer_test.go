@@ -23,18 +23,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type sequencer struct {
 	minID uint64
@@ -91,7 +102,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
@@ -171,7 +182,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
@@ -184,7 +195,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
 	tc.SetEnablePlacementRules(true)
-	re.NoError(tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}))
 
@@ -202,7 +213,8 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "", false); op != nil {
+		if op, err := scatterer.Scatter(region, "", false); op != nil {
+			re.NoError(err)
 			checkOperator(re, op)
 			operator.ApplyOperator(tc, op)
 		}
@@ -249,7 +261,7 @@ func TestStoreLimit(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	// Add stores 1~6.
@@ -269,7 +281,8 @@ func TestStoreLimit(t *testing.T) {
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "", false); op != nil {
+		if op, err := scatterer.Scatter(region, "", false); op != nil {
+			re.NoError(err)
 			re.Equal(1, oc.AddWaitingOperator(op))
 		}
 	}
@@ -281,7 +294,7 @@ func TestScatterCheck(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -330,7 +343,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 connected stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -355,18 +368,21 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	var wg sync.WaitGroup
 	for j := range 10 {
 		wg.Add(1)
-		go scatterOnce(tc, scatterer, fmt.Sprintf("group-%v", j), &wg)
+		go func() {
+			defer wg.Done()
+			scatterOnce(re, tc, scatterer, fmt.Sprintf("group-%v", j))
+		}()
 	}
 	wg.Wait()
 }
 
-func scatterOnce(tc *mockcluster.Cluster, scatter *RegionScatterer, group string, wg *sync.WaitGroup) {
+func scatterOnce(re *require.Assertions, tc *mockcluster.Cluster, scatter *RegionScatterer, group string) {
 	regionID := 1
 	for range 100 {
-		scatter.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), group, false)
+		_, err := scatter.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3), group, false)
+		re.NoError(err)
 		regionID++
 	}
-	wg.Done()
 }
 
 func TestScatterGroupInConcurrency(t *testing.T) {
@@ -375,7 +391,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -409,8 +425,9 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 		regionID := 1
 		for range 100 {
 			for j := range testCase.groupCount {
-				scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
+				_, err := scatterer.scatterRegion(tc.AddLeaderRegion(uint64(regionID), 1, 2, 3),
 					fmt.Sprintf("group-%v", j), false)
+				re.NoError(err)
 				regionID++
 			}
 		}
@@ -447,7 +464,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 60 stores.
 	for i := uint64(1); i <= 60; i++ {
@@ -464,8 +481,11 @@ func TestScatterForManyRegion(t *testing.T) {
 	failures := map[uint64]error{}
 	group := "group"
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
-	scatterer.scatterRegions(regions, failures, group, 3, false)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
+	}()
+	_, err := scatterer.scatterRegions(regions, failures, group, 3, false)
+	re.NoError(err)
 	re.Empty(failures)
 }
 
@@ -475,7 +495,7 @@ func TestScattersGroup(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -496,7 +516,7 @@ func TestScattersGroup(t *testing.T) {
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	for id, testCase := range testCases {
-		group := fmt.Sprintf("gourp-%d", id)
+		group := fmt.Sprintf("group-%d", id)
 		t.Log(testCase.name)
 		scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 		regions := map[uint64]*core.RegionInfo{}
@@ -508,7 +528,8 @@ func TestScattersGroup(t *testing.T) {
 			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail", `return(true)`))
 		}
 
-		scatterer.scatterRegions(regions, failures, group, 3, false)
+		_, err := scatterer.scatterRegions(regions, failures, group, 3, false)
+		re.NoError(err)
 		max := uint64(0)
 		min := uint64(math.MaxUint64)
 		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
@@ -563,7 +584,7 @@ func TestRegionHasLearner(t *testing.T) {
 	group := "group"
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 8 stores.
 	voterCount := uint64(6)
@@ -574,7 +595,7 @@ func TestRegionHasLearner(t *testing.T) {
 	for i := voterCount + 1; i <= 8; i++ {
 		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
 	}
-	tc.RuleManager.SetRule(&placement.Rule{
+	err := tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
@@ -587,7 +608,8 @@ func TestRegionHasLearner(t *testing.T) {
 			},
 		},
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(err)
+	err = tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
@@ -600,6 +622,7 @@ func TestRegionHasLearner(t *testing.T) {
 			},
 		},
 	})
+	re.NoError(err)
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	regionCount := 50
 	for i := 1; i <= regionCount; i++ {
@@ -651,7 +674,7 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 4; i++ {
@@ -679,7 +702,9 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 		if op != nil {
-			re.Equal(group, op.GetAdditionalInfo("group"))
+			val, exist := op.GetAdditionalInfo("group")
+			re.True(exist)
+			re.Equal(group, val)
 		}
 	}
 }
@@ -692,7 +717,7 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -722,6 +747,48 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	}
 }
 
+func TestCreateScatterRegionOperatorFailureAccountsCurrentPlacement(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddRegionStore(i, 0)
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+	for range 100 {
+		scatterer.ordinaryEngine.selectedPeer.Put(1, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(2, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(3, group)
+	}
+
+	region := tc.AddLeaderRegion(100, 2, 1, 3).Clone(
+		core.SetPeers([]*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+			{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+		}),
+		core.WithLeader(&metapb.Peer{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter}),
+	)
+
+	op, err := scatterer.scatterRegion(region, group, false)
+	re.Nil(op)
+	re.Error(err)
+
+	distribution, ok := scatterer.ordinaryEngine.selectedPeer.GetGroupDistribution(group)
+	re.True(ok)
+	re.Equal(uint64(101), distribution[1])
+	re.Equal(uint64(101), distribution[2])
+	re.Equal(uint64(101), distribution[3])
+	re.Zero(distribution[4])
+}
+
 // TestBalanceLeader only tests whether region leaders are balanced after scatter.
 func TestBalanceLeader(t *testing.T) {
 	re := require.New(t)
@@ -729,7 +796,7 @@ func TestBalanceLeader(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 3 stores
 	for i := uint64(2); i <= 4; i++ {
@@ -760,7 +827,7 @@ func TestBalanceRegion(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	opt.SetLocationLabels([]string{"host"})
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 6 stores in 3 hosts.
 	for i := uint64(2); i <= 7; i++ {
@@ -810,7 +877,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	// Add stores 1~6.
@@ -832,8 +899,118 @@ func TestRemoveStoreLimit(t *testing.T) {
 
 	for i := uint64(1); i <= 5; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "", true); op != nil {
+		if op, err := scatterer.Scatter(region, "", true); op != nil {
+			re.NoError(err)
 			re.True(oc.AddOperator(op))
 		}
 	}
+}
+
+func TestScatterReplace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	// Add regions 1~5.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	for i := uint64(2); i <= 5; i++ {
+		tc.AddLeaderRegion(i, 1, 2, 3)
+	}
+
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	for i := uint64(1); i <= 5; i++ {
+		region := tc.GetRegion(i)
+		if op, err := scatterer.Scatter(region, "", true); op != nil {
+			re.NoError(err)
+			re.True(oc.AddOperator(op))
+		}
+	}
+
+	// same scatter operator should be skipped
+	region := tc.GetRegion(2)
+	op, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(op)
+
+	// different scatter operator should be rejected
+	region = tc.GetRegion(3)
+	op, err = scatterer.Scatter(region, "test", true)
+	re.Error(err)
+	re.Nil(op)
+
+	// exist lower operator
+	op = oc.GetOperator(1)
+	if op != nil {
+		re.True(oc.RemoveOperator(op))
+	}
+	region = tc.GetRegion(1)
+	op = operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpRegion)
+	op.SetPriorityLevel(constant.Low)
+	re.True(oc.AddOperator(op))
+
+	testutil.Eventually(re, func() bool {
+		op, err = scatterer.Scatter(tc.GetRegion(1), "", true)
+		re.NoError(err)
+		return op != nil
+	})
+}
+
+func TestScatterWithAffinity(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	// Add stores 1~5.
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+
+	// Add region 1 with leader on store 1
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+
+	// Create affinity manager and group
+	affinityManager := tc.GetAffinityManager()
+	re.NotNil(affinityManager)
+
+	// Create an affinity group for region 1
+	// When LeaderStoreID and VoterStoreIDs are set and the group is available (not expired),
+	// RegularSchedulingAllowed will be false
+	group := &affinity.Group{
+		ID:            "test_group",
+		LeaderStoreID: 1,
+		VoterStoreIDs: []uint64{1, 2, 3},
+	}
+
+	keyRanges := []affinity.GroupKeyRanges{{
+		GroupID: group.ID,
+		KeyRanges: []keyutil.KeyRange{{
+			StartKey: []byte(""),
+			EndKey:   []byte(""),
+		}},
+	}}
+	err := affinityManager.CreateAffinityGroups(keyRanges)
+	re.NoError(err)
+	_, err = affinityManager.UpdateAffinityGroupPeers(group.ID, group.LeaderStoreID, group.VoterStoreIDs)
+	re.NoError(err)
+
+	// Test scatter with affinity (RegularSchedulingAllowed=false)
+	// Should return (nil, nil) to prevent client from retrying
+	region := tc.GetRegion(1)
+	op, err := scatterer.Scatter(region, "", true)
+	re.NoError(err)
+	re.Nil(op)
 }

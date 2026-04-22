@@ -17,12 +17,14 @@ package syncer
 import (
 	"strconv"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -133,6 +135,8 @@ func (h *historyBuffer) getNextIndex() uint64 {
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos := (h.head + int(index-h.firstIndex())) % h.size
 		return h.records[pos]

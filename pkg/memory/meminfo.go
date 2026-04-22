@@ -15,16 +15,18 @@
 package memory
 
 import (
+	"cmp"
 	"time"
+
+	"github.com/shirou/gopsutil/v3/mem"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/shirou/gopsutil/v3/mem"
+
 	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
-	"golang.org/x/exp/constraints"
 )
 
 // MemTotal returns the total amount of RAM on this system
@@ -108,7 +110,7 @@ var memUsage *memInfoCache
 var serverMemUsage *memInfoCache
 
 // Min returns the smallest one from its arguments.
-func min[T constraints.Ordered](x T, xs ...T) T {
+func min[T cmp.Ordered](x T, xs ...T) T {
 	min := x
 	for _, n := range xs {
 		if n < min {
@@ -208,9 +210,9 @@ func InitMemoryHook() {
 		MemTotal = MemTotalCGroup
 		MemUsed = MemUsedCGroup
 		sysutil.RegisterGetMemoryCapacity(MemTotalCGroup)
-		log.Info("use cgroup memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+		log.Info("use cgroup memory hook", zap.Int64("cgroup-memory-size", int64(cgroupValue)), zap.Int64("physical-memory-size", int64(physicalValue)))
 	} else {
-		log.Info("use physical memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+		log.Info("use physical memory hook", zap.Int64("cgroup-memory-size", int64(cgroupValue)), zap.Int64("physical-memory-size", int64(physicalValue)))
 	}
 	_, err = MemTotal()
 	mustNil(err)

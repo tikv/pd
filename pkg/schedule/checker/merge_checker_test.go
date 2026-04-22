@@ -20,8 +20,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -34,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -190,7 +192,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 
 	// merge cannot across rule key.
 	suite.cluster.SetEnablePlacementRules(true)
-	suite.cluster.RuleManager.SetRule(&placement.Rule{
+	err := suite.cluster.SetRule(&placement.Rule{
 		GroupID:     placement.DefaultGroupID,
 		ID:          "test",
 		Index:       1,
@@ -200,20 +202,23 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 		Role:        placement.Voter,
 		Count:       3,
 	})
+	re.NoError(err)
 	// region 2 can only merge with previous region now.
 	ops = suite.mc.Check(suite.regions[2])
 	re.NotNil(ops)
 	re.Equal(suite.regions[2].GetID(), ops[0].RegionID())
 	re.Equal(suite.regions[1].GetID(), ops[1].RegionID())
-	suite.cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "test")
+	err = suite.cluster.RuleManager.DeleteRule(placement.DefaultGroupID, "test")
+	re.NoError(err)
 
 	//  check 'merge_option' label
-	suite.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+	err = suite.cluster.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
 		ID:       "test",
 		Labels:   []labeler.RegionLabel{{Key: mergeOptionLabel, Value: mergeOptionValueDeny}},
 		RuleType: labeler.KeyRange,
 		Data:     makeKeyRanges("", "74"),
 	})
+	re.NoError(err)
 	ops = suite.mc.Check(suite.regions[0])
 	re.Empty(ops)
 	ops = suite.mc.Check(suite.regions[1])
@@ -481,7 +486,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	}
 
 	mc := NewMergeChecker(suite.ctx, tc, tc.GetCheckerConfig())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regions[2] = regions[2].Clone(

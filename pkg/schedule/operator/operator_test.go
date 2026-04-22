@@ -22,9 +22,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -174,7 +176,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
-	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
+	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -192,7 +194,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
-	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
+	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
@@ -211,7 +213,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
-	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
+	AddPeer{ToStore: 2, PeerID: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -220,7 +222,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
+	TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -236,7 +238,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
+	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -252,7 +254,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -268,7 +270,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -2,
@@ -475,6 +477,19 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
+		{
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpLeader),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpMerge|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpAffinity|OpRegion),
+			expect: OpAdmin,
+		},
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())
@@ -540,6 +555,7 @@ func (suite *operatorTestSuite) TestRecord() {
 }
 
 func (suite *operatorTestSuite) TestToJSONObject() {
+	re := suite.Require()
 	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 3, ToStore: 1},
@@ -548,28 +564,28 @@ func (suite *operatorTestSuite) TestToJSONObject() {
 	op := NewTestOperator(101, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	op.Start()
 	obj := op.ToJSONObject()
-	suite.Equal("test", obj.Desc)
-	suite.Equal("test", obj.Brief)
-	suite.Equal(uint64(101), obj.RegionID)
-	suite.Equal(OpLeader|OpRegion, obj.Kind)
-	suite.Equal("12m0s", obj.Timeout)
-	suite.Equal(STARTED, obj.Status)
+	re.Equal("test", obj.Desc)
+	re.Equal("test", obj.Brief)
+	re.Equal(uint64(101), obj.RegionID)
+	re.Equal(OpLeader|OpRegion, obj.Kind)
+	re.Equal("12m0s", obj.Timeout)
+	re.Equal(STARTED, obj.Status)
 
 	// Test SUCCESS status.
 	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
-	suite.Nil(op.Check(region))
-	suite.Equal(SUCCESS, op.Status())
+	re.Nil(op.Check(region))
+	re.Equal(SUCCESS, op.Status())
 	obj = op.ToJSONObject()
-	suite.Equal(SUCCESS, obj.Status)
+	re.Equal(SUCCESS, obj.Status)
 
 	// Test TIMEOUT status.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, steps...)
 	op.Start()
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
-	suite.True(op.CheckTimeout())
+	re.True(op.CheckTimeout())
 	obj = op.ToJSONObject()
-	suite.Equal(TIMEOUT, obj.Status)
+	re.Equal(TIMEOUT, obj.Status)
 }
 
 func TestOperatorCheckConcurrently(t *testing.T) {

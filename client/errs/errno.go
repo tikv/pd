@@ -26,8 +26,6 @@ const (
 	NoLeaderErr = "no leader"
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
 	NotLeaderErr = "not leader"
-	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
 	NotServedErr = "is not served"
 	// RetryTimeoutErr indicates the server is busy.
@@ -36,13 +34,26 @@ const (
 	NotPrimaryErr = "not primary"
 )
 
+// internal errors
+var (
+	// ErrUnmatchedClusterID is returned when found a PD with a different cluster ID.
+	ErrUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
+	// ErrFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
+	ErrFailInitClusterID = errors.New("[pd] failed to get cluster id")
+	// ErrClosing is returned when request is canceled when client is closing.
+	ErrClosing = errors.New("[pd] closing")
+	// ErrTSOLength is returned when the number of response timestamps is inconsistent with request.
+	ErrTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// ErrNoServiceModeReturned is returned when the response doesn't contain service mode info unexpectedly.
+	ErrNoServiceModeReturned = errors.New("[pd] no service mode returned")
+)
+
 // client errors
 var (
 	ErrClientGetProtoClient           = errors.Normalize("failed to get proto client", errors.RFCCodeText("PD:client:ErrClientGetProtoClient"))
 	ErrClientGetMetaStorageClient     = errors.Normalize("failed to get meta storage client", errors.RFCCodeText("PD:client:ErrClientGetMetaStorageClient"))
 	ErrClientCreateTSOStream          = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientTSOStreamClosed          = errors.Normalize("encountered TSO stream being closed unexpectedly", errors.RFCCodeText("PD:client:ErrClientTSOStreamClosed"))
-	ErrClientGetTSOTimeout            = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
 	ErrClientGetTSO                   = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
 	ErrClientGetMinTSO                = errors.Normalize("get min TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetMinTSO"))
 	ErrClientGetLeader                = errors.Normalize("get leader failed, %v", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
@@ -56,11 +67,14 @@ var (
 	ErrClientGetServingEndpoint       = errors.Normalize("get serving endpoint failed", errors.RFCCodeText("PD:client:ErrClientGetServingEndpoint"))
 	ErrClientFindGroupByKeyspaceID    = errors.Normalize("can't find keyspace group by keyspace id", errors.RFCCodeText("PD:client:ErrClientFindGroupByKeyspaceID"))
 	ErrClientWatchGCSafePointV2Stream = errors.Normalize("watch gc safe point v2 stream failed", errors.RFCCodeText("PD:client:ErrClientWatchGCSafePointV2Stream"))
+	ErrCircuitBreakerOpen             = errors.Normalize("circuit breaker is open", errors.RFCCodeText("PD:client:ErrCircuitBreakerOpen"))
+	ErrClientRouterConnectionTimeout  = errors.Normalize("router connection is not ready until timeout", errors.RFCCodeText("PD:client:ErrClientRouterConnectionTimeout"))
 )
 
 // grpcutil errors
 var (
 	ErrSecurityConfig = errors.Normalize("security config error: %s", errors.RFCCodeText("PD:grpcutil:ErrSecurityConfig"))
+	ErrTLSConfig      = errors.Normalize("TLS config error", errors.RFCCodeText("PD:grpcutil:ErrTLSConfig"))
 )
 
 // The third-party project error.
@@ -75,11 +89,6 @@ var (
 	ErrCloseGRPCConn = errors.Normalize("close gRPC connection failed", errors.RFCCodeText("PD:grpc:ErrCloseGRPCConn"))
 )
 
-// etcd errors
-var (
-	ErrEtcdTLSConfig = errors.Normalize("etcd TLS config error", errors.RFCCodeText("PD:etcd:ErrEtcdTLSConfig"))
-)
-
 // crypto
 var (
 	ErrCryptoX509KeyPair        = errors.Normalize("x509 keypair error", errors.RFCCodeText("PD:crypto:ErrCryptoX509KeyPair"))
@@ -88,9 +97,10 @@ var (
 
 // resource group errors
 var (
-	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
-	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
-	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation, estimated wait time %s, ltb state is %.2f:%.2f", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientListResourceGroup                  = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
+	ErrClientResourceGroupConfigUnavailable     = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
+	ErrClientResourceGroupThrottled             = errors.Normalize("exceeded resource group quota limitation, estimated wait time %s, ltb state is %.2f:%.2f", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientPutResourceGroupMismatchKeyspaceID = errors.Normalize("resource group keyspace ID %d does not match inner client keyspace ID %d", errors.RFCCodeText("PD:client:ErrClientPutResourceGroupMismatchKeyspaceID"))
 )
 
 // ErrClientGetResourceGroup is the error type for getting resource group.
@@ -102,3 +112,8 @@ type ErrClientGetResourceGroup struct {
 func (e *ErrClientGetResourceGroup) Error() string {
 	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, e.Cause)
 }
+
+// scheduler errors
+var (
+	ErrSchedulerConfigUnavailable = errors.Normalize("scheduler config is unavailable, %v", errors.RFCCodeText("PD:client:ErrSchedulerConfigUnavailable"))
+)

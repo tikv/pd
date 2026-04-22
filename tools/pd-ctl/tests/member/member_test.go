@@ -17,11 +17,13 @@ package member_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	pdTests "github.com/tikv/pd/tests"
@@ -101,7 +103,7 @@ func TestMember(t *testing.T) {
 	})
 
 	// member delete id <member_id>
-	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
+	args = []string{"-u", pdAddr, "member", "delete", "id", strconv.FormatUint(id, 10)}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {

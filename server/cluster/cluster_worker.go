@@ -17,20 +17,23 @@ package cluster
 import (
 	"bytes"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
 )
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
@@ -40,20 +43,22 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
 	defer tracer.Release()
-	var taskRunner, miscRunner, logRunner ratelimit.Runner
-	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
+	var taskRunner, miscRunner, logRunner, syncRegionRunner ratelimit.Runner
+	taskRunner, miscRunner, logRunner, syncRegionRunner = syncRunner, syncRunner, syncRunner, syncRunner
 	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		taskRunner = c.heartbeatRunner
 		miscRunner = c.miscRunner
 		logRunner = c.logRunner
+		syncRegionRunner = c.syncRegionRunner
 	}
 
 	ctx := &core.MetaProcessContext{
-		Context:    c.ctx,
-		Tracer:     tracer,
-		TaskRunner: taskRunner,
-		MiscRunner: miscRunner,
-		LogRunner:  logRunner,
+		Context:          c.ctx,
+		Tracer:           tracer,
+		TaskRunner:       taskRunner,
+		MiscRunner:       miscRunner,
+		LogRunner:        logRunner,
+		SyncRegionRunner: syncRegionRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
@@ -87,14 +92,14 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, errors.New("region split is paused by replication mode")
 	}
 
-	newRegionID, err := c.id.Alloc()
+	newRegionID, _, err := c.id.Alloc(1)
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.id.Alloc(); err != nil {
+		if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 			return nil, err
 		}
 	}
@@ -131,18 +136,25 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if repMode := c.GetReplicationMode(); repMode != nil && repMode.IsRegionSplitPaused() {
 		return nil, errors.New("region split is paused by replication mode")
 	}
+
+	region := c.GetRegion(reqRegion.GetId())
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.Reason) {
+		c.hbstreams.SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		return nil, errors.New("cannot split affinity region")
+	}
+
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.id.Alloc()
+	for range splitCount {
+		newRegionID, _, err := c.id.Alloc(1)
 		if err != nil {
 			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.id.Alloc(); err != nil {
+			if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 				return nil, err
 			}
 		}
@@ -252,9 +264,9 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
 
-// HandleReportBuckets processes buckets reports from client
-func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
-	if err := c.processReportBuckets(b); err != nil {
+// HandleRegionBuckets processes region buckets from client
+func (c *RaftCluster) HandleRegionBuckets(b *metapb.Buckets) error {
+	if err := c.processRegionBuckets(b); err != nil {
 		return err
 	}
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {

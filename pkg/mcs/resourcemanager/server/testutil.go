@@ -16,11 +16,12 @@ package server
 
 import (
 	"context"
-	"os"
 
-	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -28,7 +29,7 @@ import (
 // NewTestServer creates a resource manager server for testing.
 func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
 	// New zap logger
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	// Flushing any buffered log entries
@@ -41,7 +42,6 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,19 +34,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
-	// componentSignatureKey is used for http request header key to identify component signature.
 	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
 	// This is kept for backward compatibility.
+	// componentSignatureKey is used for http request header key to identify component signature.
 	componentSignatureKey = "component"
 	// anonymousValue identifies anonymous request source
 	anonymousValue = "anonymous"
@@ -62,10 +65,12 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
-	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
-	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
-	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
-	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
+	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
+	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroserviceHeader = "X-Forwarded-To-Microservice"
 
 	chunkSize = 4096
 )
@@ -233,12 +238,32 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
+// GetJSONWithoutBody is used to do get request without body
+func GetJSONWithoutBody(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 // PatchJSON is used to do patch request
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// PutJSON is used to do put request
+func PutJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return client.Do(req)
 }
 
@@ -310,13 +335,18 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
-	if v, ok := input[option].(string); ok {
-		for _, c := range collectors {
-			c(v)
-		}
-		return nil
+	v, exist := input[option]
+	if !exist {
+		return errs.ErrOptionNotExist.FastGenByArgs(option)
 	}
-	return errs.ErrOptionNotExist.FastGenByArgs(option)
+	str, ok := v.(string)
+	if !ok {
+		return errs.ErrOptionTypeInvalid.FastGenByArgs(option)
+	}
+	for _, c := range collectors {
+		c(str)
+	}
+	return nil
 }
 
 // ParseKey is used to parse interface into []byte and string
@@ -462,7 +492,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 		var reader io.ReadCloser
@@ -500,7 +530,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		resp.Body.Close()
 		reader.Close()
 		if err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			log.Warn("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
 			continue
 		}
@@ -537,4 +567,19 @@ func ParseTime(t string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(i, 0), nil
+}
+
+// IsPathInDirectory checks if the given path is in the specified directory.
+func IsPathInDirectory(path, directory string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	absDir, err := filepath.Abs(directory)
+	if err != nil {
+		return false
+	}
+
+	return strings.HasPrefix(absPath, absDir)
 }

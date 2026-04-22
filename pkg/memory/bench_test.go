@@ -16,16 +16,22 @@ package memory
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func BenchmarkMemTotal(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_, _ = MemTotal()
+	re := require.New(b)
+	for range b.N {
+		_, err := MemTotal()
+		re.NoError(err)
 	}
 }
 
 func BenchmarkMemUsed(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_, _ = MemUsed()
+	re := require.New(b)
+	for range b.N {
+		_, err := MemUsed()
+		re.NoError(err)
 	}
 }

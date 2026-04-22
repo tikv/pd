@@ -19,8 +19,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -30,22 +34,21 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(name string) error
 }
 
 func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
@@ -66,7 +69,7 @@ func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
 func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
-	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
+	newStoreIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for k, v := range conf.StoreIDWithRanges {
 		newStoreIDWithRanges[k] = v
 	}
@@ -99,23 +102,23 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id)
+		conf.cluster.ResumeLeaderTransfer(id, constant.Out)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
 	return succ, last
 }
 
-func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []keyutil.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
-	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 	}
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
-func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
 	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
@@ -124,10 +127,10 @@ func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 	return nil
 }
 
-func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]core.KeyRange {
+func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for id, ranges := range conf.StoreIDWithRanges {
 		storeIDWithRanges[id] = ranges
 	}
@@ -171,7 +174,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.Out, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }
@@ -182,7 +185,7 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	defer s.conf.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
 			res = err
 		}
 	}
@@ -194,7 +197,7 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, constant.Out)
 	}
 }
 
@@ -252,7 +255,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		handler.config.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
 				handler.config.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
@@ -271,14 +274,16 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.buildWithArgs(args)
 	if err != nil {
+		log.Error("fail to build config", errs.ZapError(err))
 		handler.config.Lock()
-		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
 		handler.config.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.persist()
 	if err != nil {
+		log.Error("fail to persist config", errs.ZapError(err))
 		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

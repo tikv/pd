@@ -17,20 +17,22 @@ package server
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
+	"github.com/urfave/negroni/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 // CheckAndGetPDVersion checks and returns the PD version.
@@ -51,12 +53,13 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
-			zap.String("PD-version", pdVersion.String()),
+			zap.String("pd-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
 }
 
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {
+	clusterID := keypath.ClusterID()
 	// TODO: do more check for request fields validation.
 
 	storeMeta := req.GetStore()
@@ -133,18 +136,4 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 	apiService.UseHandler(router)
 	userHandlers[pdAPIPrefix] = apiService
 	return userHandlers, nil
-}
-
-func isPathInDirectory(path, directory string) bool {
-	absPath, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-
-	absDir, err := filepath.Abs(directory)
-	if err != nil {
-		return false
-	}
-
-	return strings.HasPrefix(absPath, absDir)
 }

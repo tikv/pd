@@ -20,9 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -51,7 +53,7 @@ func (suite *metaTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -76,14 +78,14 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	_, err := meta.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
-		suite.cluster.GetCluster().GetId(),
 		cluster,
 	)
 	re.NoError(err)
 	for i := uint64(1); i <= 4; i++ {
-		suite.getRaftCluster().PutMetaStore(
-			&metapb.Store{Id: i, Address: fmt.Sprintf("mock-%d", i), State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano()},
+		err = suite.getRaftCluster().PutMetaStore(
+			&metapb.Store{Id: i, Address: fmt.Sprintf("mock://tikv-%d:%d", i, i), State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano()},
 		)
+		re.NoError(err)
 	}
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", `return(true)`))
@@ -106,9 +108,10 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	})
 
 	// test synchronized store labels
-	suite.getRaftCluster().PutMetaStore(
-		&metapb.Store{Id: 5, Address: "mock-5", State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(), Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}},
+	err = suite.getRaftCluster().PutMetaStore(
+		&metapb.Store{Id: 5, Address: "mock://tikv-5:5", State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(), Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}},
 	)
+	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		if len(cluster.GetStore(5).GetLabels()) == 0 {
 			return false

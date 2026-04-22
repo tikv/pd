@@ -23,13 +23,15 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
-	pd "github.com/tikv/pd/client"
+
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/retry"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/client/pkg/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
 const (
@@ -56,7 +58,7 @@ type clientInner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	sd pd.ServiceDiscovery
+	sd sd.ServiceDiscovery
 
 	// source is used to mark the source of the client creation,
 	// it will also be used in the caller ID of the inner client.
@@ -74,7 +76,7 @@ func newClientInner(ctx context.Context, cancel context.CancelFunc, source strin
 	return &clientInner{ctx: ctx, cancel: cancel, source: source}
 }
 
-func (ci *clientInner) init(sd pd.ServiceDiscovery) {
+func (ci *clientInner) init(sd sd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
 		ci.cli = &http.Client{Timeout: defaultTimeout}
@@ -218,7 +220,7 @@ func (ci *clientInner) doRequest(
 	resp, err := ci.cli.Do(req)
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
-		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
+		log.Warn("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return -1, errors.Trace(err)
 	}
 	ci.execDuration(name, time.Since(start))
@@ -243,13 +245,13 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
-			// API server will return a JSON body containing the detailed error message
+			// PD will return a JSON body containing the detailed error message
 			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
-		log.Error("[pd] request failed with a non-200 status", logFields...)
+		log.Warn("[pd] request failed with a non-200 status", logFields...)
 		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s', body: '%s'", resp.Status, bs)
 	}
 
@@ -302,10 +304,10 @@ func WithMetrics(
 	}
 }
 
-// NewClientWithServiceDiscovery creates a PD HTTP client with the given PD service discovery.
+// NewClientWithServiceDiscovery creates a PD HTTP client with the given service discovery.
 func NewClientWithServiceDiscovery(
 	source string,
-	sd pd.ServiceDiscovery,
+	sd sd.ServiceDiscovery,
 	opts ...ClientOption,
 ) Client {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -330,7 +332,7 @@ func NewClient(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	sd := sd.NewDefaultServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init service discovery failed",
 			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
@@ -400,42 +402,4 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 		WithBackoffer(c.bo).
 		WithTargetURL(c.targetURL),
 		headerOpts...)
-}
-
-/* The following functions are only for test */
-// requestChecker is used to check the HTTP request sent by the client.
-type requestChecker func(req *http.Request) error
-
-// RoundTrip implements the `http.RoundTripper` interface.
-func (rc requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	return &http.Response{StatusCode: http.StatusOK}, rc(req)
-}
-
-// NewHTTPClientWithRequestChecker returns a http client with checker.
-func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
-	return &http.Client{
-		Transport: checker,
-	}
-}
-
-// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock PD service discovery.
-func newClientWithMockServiceDiscovery(
-	source string,
-	pdAddrs []string,
-	opts ...ClientOption,
-) Client {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &client{inner: newClientInner(ctx, cancel, source), callerID: defaultCallerID}
-	// Apply the options first.
-	for _, opt := range opts {
-		opt(c)
-	}
-	sd := pd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
-	if err := sd.Init(); err != nil {
-		log.Error("[pd] init mock service discovery failed",
-			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
-		return nil
-	}
-	c.inner.init(sd)
-	return c
 }

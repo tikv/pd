@@ -19,11 +19,13 @@ import (
 	"strconv"
 
 	"github.com/gogo/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -32,6 +34,7 @@ const (
 	SpaceIDBase = 10
 	// spaceIDBitSizeMax is the max bitSize of spaceID.
 	// It's currently set to 24 (3bytes).
+	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
 	spaceIDBitSizeMax = 24
 )
 

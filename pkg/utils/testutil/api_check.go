@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
@@ -140,6 +141,15 @@ func CheckGetUntilStatusCode(re *require.Assertions, client *http.Client, url st
 // CheckPatchJSON is used to do patch request and do check options.
 func CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.PatchJSON(client, url, data)
+	if err != nil {
+		return err
+	}
+	return checkResp(resp, checkOpts...)
+}
+
+// CheckPutJSON is used to do put request and do check options.
+func CheckPutJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int, http.Header)) error {
+	resp, err := apiutil.PutJSON(client, url, data)
 	if err != nil {
 		return err
 	}

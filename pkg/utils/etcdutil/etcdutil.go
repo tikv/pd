@@ -17,22 +17,14 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"math/rand"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -41,6 +33,15 @@ import (
 	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
@@ -93,7 +94,7 @@ func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
+			log.Warn("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -172,6 +173,27 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	return resp, nil
 }
 
+// WriteKeyToFile writes the key to the file. It is only used for testing.
+func writeKeyToFile(file, key, op string) error {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// remove all number in the key to avoid the random number affect.
+	key = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return -1
+		}
+		return r
+	}, key)
+
+	if _, err = f.WriteString(key + " " + op + "\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // IsHealthy checks if the etcd is healthy.
 func IsHealthy(ctx context.Context, client *clientv3.Client) bool {
 	timeout := DefaultRequestTimeout
@@ -246,6 +268,20 @@ const (
 	etcdServerDisconnectedTimeout = 1 * time.Minute
 )
 
+// EtcdClientPurpose marks the purpose of the etcd client.
+type EtcdClientPurpose string
+
+const (
+	// TestEtcdClientPurpose is the default etcd client purpose, used for testing.
+	TestEtcdClientPurpose EtcdClientPurpose = "default-etcd-client"
+	// ServerEtcdClientPurpose is the etcd client purpose for server, most of the time.
+	ServerEtcdClientPurpose EtcdClientPurpose = "server-etcd-client"
+	// ElectionEtcdClientPurpose is the etcd client purpose for election and tso.
+	ElectionEtcdClientPurpose EtcdClientPurpose = "election-etcd-client"
+	// McsEtcdClientPurpose is the etcd client purpose for mcs.
+	McsEtcdClientPurpose EtcdClientPurpose = "mcs-etcd-client"
+)
+
 func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
 	if len(endpoints) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
@@ -264,7 +300,7 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...string) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -278,14 +314,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...stri
 	failpoint.Inject("fastTick", func() {
 		tickerInterval = 100 * time.Millisecond
 	})
-	failpoint.Inject("closeTick", func() {
-		failpoint.Return(client, err)
-	})
-	source := "default-etcd-client"
-	if len(sourceOpt) > 0 {
-		source = sourceOpt[0]
+	if enableChecker {
+		initHealthChecker(tickerInterval, tlsConfig, client, purpose)
 	}
-	initHealthChecker(tickerInterval, tlsConfig, client, source)
 
 	return client, err
 }
@@ -302,79 +333,6 @@ func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 		cli.Transport = transport
 	}
 	return cli
-}
-
-// InitClusterID creates a cluster ID for the given key if it hasn't existed.
-// This function assumes the cluster ID has already existed and always use a
-// cheaper read to retrieve it; if it doesn't exist, invoke the more expensive
-// operation InitOrGetClusterID().
-func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
-	// Get any cluster key to parse the cluster ID.
-	resp, err := EtcdKVGet(c, key)
-	if err != nil {
-		return 0, err
-	}
-	// If no key exist, generate a random cluster ID.
-	if len(resp.Kvs) == 0 {
-		return InitOrGetClusterID(c, key)
-	}
-	return typeutil.BytesToUint64(resp.Kvs[0].Value)
-}
-
-// GetClusterID gets the cluster ID for the given key.
-func GetClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
-	// Get any cluster key to parse the cluster ID.
-	resp, err := EtcdKVGet(c, key)
-	if err != nil {
-		return 0, err
-	}
-	// If no key exist, generate a random cluster ID.
-	if len(resp.Kvs) == 0 {
-		return 0, nil
-	}
-	return typeutil.BytesToUint64(resp.Kvs[0].Value)
-}
-
-// InitOrGetClusterID creates a cluster ID for the given key with a CAS operation,
-// if the cluster ID doesn't exist.
-func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
-	defer cancel()
-
-	// Generate a random cluster ID.
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	ts := uint64(time.Now().Unix())
-	clusterID := (ts << 32) + uint64(r.Uint32())
-	value := typeutil.Uint64ToBytes(clusterID)
-
-	// Multiple servers may try to init the cluster ID at the same time.
-	// Only one server can commit this transaction, then other servers
-	// can get the committed cluster ID.
-	resp, err := c.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-		Then(clientv3.OpPut(key, string(value))).
-		Else(clientv3.OpGet(key)).
-		Commit()
-	if err != nil {
-		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-
-	// Txn commits ok, return the generated cluster ID.
-	if resp.Succeeded {
-		return clusterID, nil
-	}
-
-	// Otherwise, parse the committed cluster ID.
-	if len(resp.Responses) == 0 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	response := resp.Responses[0].GetResponseRange()
-	if response == nil || len(response.Kvs) != 1 {
-		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-
-	return typeutil.BytesToUint64(response.Kvs[0].Value)
 }
 
 const (

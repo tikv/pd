@@ -16,32 +16,37 @@ package syncer
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
 	keepaliveTime    = 10 * time.Second
 	keepaliveTimeout = 3 * time.Second
 	msgSize          = 8 * units.MiB
+	retryInterval    = time.Second
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -67,7 +72,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 		return nil, err
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
-		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member:     s.server.GetMemberInfo(),
 		StartIndex: s.history.getNextIndex(),
 	})
@@ -126,6 +131,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				MinConnectTimeout: 5 * time.Second,
 			}),
 			// WithBlock will block the dial step until success or cancel the context.
+			// TODO: remove grpc.WithBlock to adopt the latest best practices.
+			//nolint:staticcheck
 			grpc.WithBlock())
 		// it means the context is canceled.
 		if conn == nil {
@@ -151,20 +158,41 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						return
 					}
 				}
-				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
-				time.Sleep(time.Second)
+				log.Warn("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				select {
+				case <-ctx.Done():
+					log.Info("stop synchronizing with leader due to context canceled")
+					return
+				case <-time.After(retryInterval):
+				}
 				continue
 			}
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
 			for {
 				resp, err := stream.Recv()
+				if err == io.EOF {
+					log.Info("server region sync with leader meets EOF, stop syncing", zap.String("server", s.server.Name()))
+					return
+				}
 				if err != nil {
 					s.streamingRunning.Store(false)
-					log.Error("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
+					log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
-						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
-					time.Sleep(time.Second)
+					// Check if the leader is still there to avoid waiting for a `retryInterval`.
+					if s.server.GetLeader() == nil {
+						log.Warn("stop synchronizing with leader due to leader stepped down",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+						return
+					}
+					select {
+					case <-ctx.Done():
+						log.Info("stop synchronizing with leader due to context canceled",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+						return
+					case <-time.After(retryInterval):
+					}
 					break
 				}
 				if s.history.getNextIndex() != resp.GetStartIndex() {
@@ -186,41 +214,37 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					var (
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
+						opts         = []core.RegionCreateOption{core.SetSource(core.Sync)}
 					)
 					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
-						region = core.NewRegionInfo(r, regionLeader,
+						opts = append(opts,
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
-							core.SetReadKeys(stats[i].KeysRead),
-							core.SetSource(core.Sync),
-						)
-					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
+							core.SetReadKeys(stats[i].KeysRead))
 					}
+					if hasBuckets {
+						opts = append(opts, core.SetBuckets(buckets[i]))
+					}
+					region = core.NewRegionInfo(r, regionLeader, opts...)
 
 					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					ctx := &core.MetaProcessContext{
+					cctx := &core.MetaProcessContext{
 						Context:    ctx,
 						TaskRunner: ratelimit.NewSyncRunner(),
 						Tracer:     core.NewNoopHeartbeatProcessTracer(),
 						// no limit for followers.
 					}
-					saveKV, _, _, _ := regionGuide(ctx, region, origin)
+					saveKV, _, _, _ := regionGuide(cctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
-					if hasBuckets {
-						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
-							region.UpdateBuckets(buckets[i], old)
-						}
-					}
 					if saveKV {
 						err = regionStorage.SaveRegion(r)
 					}

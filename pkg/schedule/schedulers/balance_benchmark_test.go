@@ -4,13 +4,14 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package schedulers
 
 import (
@@ -18,8 +19,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/assert"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -41,7 +44,7 @@ var (
 // newBenchCluster store region count is same with storeID and
 // the tolerate define storeCount that store can elect candidate but not should balance
 // so the case  bench the worst scene
-func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *operator.Controller) {
+func newBenchCluster(re *require.Assertions, ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
@@ -57,7 +60,8 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 	}
 
 	if ruleEnable {
-		addTiflash(tc)
+		err := addTiflash(tc)
+		re.NoError(err)
 	}
 	storeID, regionID := uint64(1), uint64(1)
 	for _, host := range hosts {
@@ -127,7 +131,7 @@ func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *
 	return cancel, tc, oc
 }
 
-func addTiflash(tc *mockcluster.Cluster) {
+func addTiflash(tc *mockcluster.Cluster) error {
 	tc.SetPlacementRuleEnabled(true)
 	for i := range tiflashCount {
 		label := make(map[string]string, 3)
@@ -148,18 +152,18 @@ func addTiflash(tc *mockcluster.Cluster) {
 		},
 		LocationLabels: []string{"host"},
 	}
-	tc.SetRule(rule)
+	return tc.SetRule(rule)
 }
 
 func BenchmarkPlacementRule(b *testing.B) {
-	re := assert.New(b)
-	cancel, tc, oc := newBenchCluster(true, true, false)
+	re := require.New(b)
+	cancel, tc, oc := newBenchCluster(re, true, true, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	var ops []*operator.Operator
 	var plans []plan.Plan
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
@@ -169,31 +173,34 @@ func BenchmarkPlacementRule(b *testing.B) {
 }
 
 func BenchmarkLabel(b *testing.B) {
-	cancel, tc, oc := newBenchCluster(false, true, false)
+	re := require.New(b)
+	cancel, tc, oc := newBenchCluster(re, false, true, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
 
 func BenchmarkNoLabel(b *testing.B) {
-	cancel, tc, oc := newBenchCluster(false, false, false)
+	re := require.New(b)
+	cancel, tc, oc := newBenchCluster(re, false, false, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
 
 func BenchmarkDiagnosticNoLabel1(b *testing.B) {
-	cancel, tc, oc := newBenchCluster(false, false, false)
+	re := require.New(b)
+	cancel, tc, oc := newBenchCluster(re, false, false, false)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -203,7 +210,7 @@ func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -213,17 +220,18 @@ func BenchmarkNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
 
 func BenchmarkTombStore(b *testing.B) {
-	cancel, tc, oc := newBenchCluster(false, false, true)
+	re := require.New(b)
+	cancel, tc, oc := newBenchCluster(re, false, false, true)
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }

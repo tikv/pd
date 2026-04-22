@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,10 +23,13 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -35,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 // stage is the stage of unsafe recovery.
@@ -108,7 +110,7 @@ type cluster interface {
 	core.StoreSetInformer
 
 	ResetRegionCache()
-	AllocID() (uint64, error)
+	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
@@ -131,6 +133,12 @@ type Controller struct {
 
 	storePlanExpires   map[uint64]time.Time
 	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
+
+	// Orphaned peers are the peers that exist in the forced leader but not in the target stores' reports
+	// they are expected to exist when some of the peers were destroyed by TombstoneTiFlashLearner phase.
+	// we need to explicitly remove them in DemoteFailedVoter phase, in case there is only one candidate store
+	// for this peer, and PD is not able to remove it through the down peer removal mechanism.
+	orphanedPeers map[uint64][]*metapb.Peer
 
 	// accumulated output for the whole recovery process
 	output []StageOutput
@@ -170,6 +178,7 @@ func (u *Controller) reset() {
 	u.AffectedTableIDs = make(map[int64]struct{}, 0)
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
 	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
+	u.orphanedPeers = make(map[uint64][]*metapb.Peer)
 	u.err = nil
 }
 
@@ -257,22 +266,26 @@ func (u *Controller) getReportStatus() StageOutput {
 	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
 	if u.numStoresReported != len(u.storeReports) {
 		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d)", u.numStoresReported, len(u.storeReports))
-		var reported, unreported, undispatched string
+		var (
+			reportedIDs     []string
+			unreportedIDs   []string
+			undispatchedIDs []string
+		)
 		for storeID, report := range u.storeReports {
-			str := strconv.FormatUint(storeID, 10) + ", "
+			s := strconv.FormatUint(storeID, 10)
 			if report == nil {
 				if _, requested := u.storePlanExpires[storeID]; !requested {
-					undispatched += str
+					undispatchedIDs = append(undispatchedIDs, s)
 				} else {
-					unreported += str
+					unreportedIDs = append(unreportedIDs, s)
 				}
 			} else {
-				reported += str
+				reportedIDs = append(reportedIDs, s)
 			}
 		}
-		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Trim(undispatched, ", "))
-		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Trim(reported, ", "))
-		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Trim(unreported, ", "))
+		status.Details = append(status.Details, "Stores that have not dispatched plan: "+strings.Join(undispatchedIDs, ", "))
+		status.Details = append(status.Details, "Stores that have reported to PD: "+strings.Join(reportedIDs, ", "))
+		status.Details = append(status.Details, "Stores that have not reported to PD: "+strings.Join(unreportedIDs, ", "))
 	} else {
 		status.Info = fmt.Sprintf("Collected reports from all %d alive stores", len(u.storeReports))
 	}
@@ -509,16 +522,11 @@ func (u *Controller) changeStage(stage stage) {
 		if u.autoDetect {
 			output.Details = append(output.Details, "auto detect mode with no specified Failed stores")
 		} else {
-			stores := ""
-			count := 0
+			ids := make([]string, 0, len(u.failedStores))
 			for store := range u.failedStores {
-				count += 1
-				stores += fmt.Sprintf("%d", store)
-				if count != len(u.failedStores) {
-					stores += ", "
-				}
+				ids = append(ids, strconv.FormatUint(store, 10))
 			}
-			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", stores))
+			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", strings.Join(ids, ", ")))
 		}
 
 	case TombstoneTiFlashLearner:
@@ -574,6 +582,7 @@ func (u *Controller) changeStage(stage stage) {
 	for k := range u.storeReports {
 		u.storeReports[k] = nil
 	}
+	u.orphanedPeers = map[uint64][]*metapb.Peer{}
 	u.numStoresReported = 0
 	u.step += 1
 }
@@ -583,14 +592,11 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 	for storeID, plan := range u.storeRecoveryPlans {
 		forceLeaders := plan.GetForceLeader()
 		if forceLeaders != nil {
-			regions := ""
-			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
-				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
-					regions += ", "
-				}
+			ids := make([]string, 0, len(forceLeaders.GetEnterForceLeaders()))
+			for _, regionID := range forceLeaders.GetEnterForceLeaders() {
+				ids = append(ids, strconv.FormatUint(regionID, 10))
 			}
-			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", regions)}
+			outputs[fmt.Sprintf("store %d", storeID)] = []string{fmt.Sprintf("force leader on regions: %s", strings.Join(ids, ", "))}
 		}
 	}
 	return outputs
@@ -604,11 +610,11 @@ func (u *Controller) getDemoteFailedVoterPlanDigest() map[string][]string {
 		}
 		output := []string{}
 		for _, demote := range plan.GetDemotes() {
-			peers := ""
+			var peerParts []string
 			for _, peer := range demote.GetFailedVoters() {
-				peers += fmt.Sprintf("{ %v}, ", peer) // the extra space is intentional
+				peerParts = append(peerParts, fmt.Sprintf("{ %v}", peer)) // the extra space is intentional
 			}
-			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Trim(peers, ", ")))
+			output = append(output, fmt.Sprintf("region %d demotes peers %s", demote.GetRegionId(), strings.Join(peerParts, ", ")))
 		}
 		for _, tombstone := range plan.GetTombstones() {
 			output = append(output, fmt.Sprintf("tombstone the peer of region %d", tombstone))
@@ -655,25 +661,25 @@ func (u *Controller) getCreateEmptyRegionPlanDigest() map[string][]string {
 func (u *Controller) getAffectedTableDigest() []string {
 	var details []string
 	if len(u.affectedMetaRegions) != 0 {
-		regions := ""
+		regionParts := make([]string, 0, len(u.affectedMetaRegions))
 		for r := range u.affectedMetaRegions {
-			regions += fmt.Sprintf("%d, ", r)
+			regionParts = append(regionParts, strconv.FormatUint(r, 10))
 		}
-		details = append(details, "affected meta regions: "+strings.Trim(regions, ", "))
+		details = append(details, "affected meta regions: "+strings.Join(regionParts, ", "))
 	}
 	if len(u.AffectedTableIDs) != 0 {
-		tables := ""
+		tableParts := make([]string, 0, len(u.AffectedTableIDs))
 		for t := range u.AffectedTableIDs {
-			tables += fmt.Sprintf("%d, ", t)
+			tableParts = append(tableParts, strconv.FormatInt(t, 10))
 		}
-		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+		details = append(details, "affected table ids: "+strings.Join(tableParts, ", "))
 	}
 	if len(u.newlyCreatedRegions) != 0 {
-		regions := ""
+		newRegionParts := make([]string, 0, len(u.newlyCreatedRegions))
 		for r := range u.newlyCreatedRegions {
-			regions += fmt.Sprintf("%d, ", r)
+			newRegionParts = append(newRegionParts, strconv.FormatUint(r, 10))
 		}
-		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
+		details = append(details, "newly created empty regions: "+strings.Join(newRegionParts, ", "))
 	} else {
 		details = append(details, "no newly created empty regions")
 	}
@@ -735,12 +741,22 @@ func (u *Controller) getFailedPeers(region *metapb.Region) []*metapb.Peer {
 		return nil
 	}
 
+	exists := func(peers []*metapb.Peer, peer *metapb.Peer) bool {
+		for _, p := range peers {
+			if p.GetId() == peer.GetId() || p.GetStoreId() == peer.GetStoreId() {
+				return true
+			}
+		}
+		return false
+	}
+
 	var failedPeers []*metapb.Peer
 	for _, peer := range region.Peers {
-		if u.isFailed(peer) {
+		if u.isFailed(peer) || exists(u.orphanedPeers[region.GetId()], peer) {
 			failedPeers = append(failedPeers, peer)
 		}
 	}
+
 	return failedPeers
 }
 
@@ -793,10 +809,10 @@ func (r *regionItem) isRaftStale(origin *regionItem, u *Controller) bool {
 			return int(a.report.GetRaftState().GetHardState().GetCommit()) - int(b.report.GetRaftState().GetHardState().GetCommit())
 		},
 		func(a, b *regionItem) int {
-			if u.cluster.GetStore(a.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(a.storeID).IsTiKV() {
 				return -1
 			}
-			if u.cluster.GetStore(b.storeID).IsTiFlash() {
+			if !u.cluster.GetStore(b.storeID).IsTiKV() {
 				return 1
 			}
 			// better use voter rather than learner
@@ -943,6 +959,27 @@ func (u *Controller) buildUpFromReports() (*regionTree, map[uint64][]*regionItem
 			continue
 		}
 		newestPeerReports = append(newestPeerReports, latest)
+
+		// find the orphaned peers, i.e. the peers exist in the forced leader but not in the target stores' reports
+		// this is expected when some of the peers were destroyed by TombstoneTiFlashLearner phase.
+		orphaned := func(peers []*regionItem, peer *metapb.Peer) bool {
+			// If the peer is in the failed stores, it is considered failed instead of orphaned.
+			if u.isFailed(peer) {
+				return false
+			}
+			for _, p := range peers {
+				if p.storeID == peer.StoreId {
+					return false
+				}
+			}
+			return true
+		}
+
+		for _, peer := range latest.report.RegionState.GetRegion().Peers {
+			if orphaned(peers, peer) {
+				u.orphanedPeers[latest.region().GetId()] = append(u.orphanedPeers[latest.region().GetId()], peer)
+			}
+		}
 	}
 
 	// sort in descending order of epoch
@@ -986,7 +1023,7 @@ func (u *Controller) generateTombstoneTiFlashLearnerPlan(newestRegionTree *regio
 				return false
 			}
 			storeID := leader.storeID
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				// tombstone the tiflash learner, as it can't be leader
 				storeRecoveryPlan := u.getRecoveryPlan(storeID)
 				storeRecoveryPlan.Tombstones = append(storeRecoveryPlan.Tombstones, region.GetId())
@@ -1149,11 +1186,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.AllocID()
+		regionID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.AllocID()
+		peerID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
@@ -1168,7 +1205,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 
 	getRandomStoreID := func() uint64 {
 		for storeID := range u.storeReports {
-			if !u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiKV() {
 				return storeID
 			}
 		}
@@ -1184,7 +1221,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 		region := item.region()
 		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			if u.cluster.GetStore(storeID).IsTiFlash() {
+			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
 				storeID = getRandomStoreID()
 				// can't create new region on tiflash store, choose a random one
 				if storeID == 0 {

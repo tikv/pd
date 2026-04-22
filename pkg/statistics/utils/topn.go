@@ -97,15 +97,14 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 		isUpdate = stn.put(item)
 	}
 	tn.ttlLst.put(item.ID())
-	tn.maintain()
 	return
 }
 
 // RemoveExpired deletes all expired items.
-func (tn *TopN) RemoveExpired() {
+func (tn *TopN) RemoveExpired() []uint64 {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
-	tn.maintain()
+	return tn.maintain()
 }
 
 // Remove deletes the item by given ID and returns it.
@@ -116,16 +115,18 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 		item = stn.remove(id)
 	}
 	_ = tn.ttlLst.remove(id)
-	tn.maintain()
 	return
 }
 
-func (tn *TopN) maintain() {
+func (tn *TopN) maintain() []uint64 {
+	ids := make([]uint64, 0)
 	for _, id := range tn.ttlLst.takeExpired() {
 		for _, stn := range tn.topns {
 			stn.remove(id)
+			ids = append(ids, id)
 		}
 	}
+	return ids
 }
 
 type singleTopN struct {
@@ -247,6 +248,7 @@ func (hp *indexedHeap) Less(i, j int) bool {
 	return hp.items[j].Less(hp.k, hp.items[i])
 }
 
+// Swap swaps the items with the given indices.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Swap(i, j int) {
 	lid := hp.items[i].ID()
@@ -256,6 +258,7 @@ func (hp *indexedHeap) Swap(i, j int) {
 	hp.index[rid] = i
 }
 
+// Push adds an item to the heap.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Push(x any) {
 	item := x.(TopNItem)
@@ -263,10 +266,12 @@ func (hp *indexedHeap) Push(x any) {
 	hp.items = append(hp.items, item)
 }
 
+// Pop removes the top item and returns it.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Pop() any {
 	l := hp.Len()
 	item := hp.items[l-1]
+	hp.items[l-1] = nil // avoid memory leak
 	hp.items = hp.items[:l-1]
 	delete(hp.index, item.ID())
 	return item

@@ -19,11 +19,13 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -55,7 +57,7 @@ func ServiceRedirector() gin.HandlerFunc {
 
 		c.Request.Header.Set(ServiceRedirectorHeader, svr.Name())
 
-		listenUrls := svr.GetLeaderListenUrls()
+		listenUrls := svr.GetServingUrls()
 		if listenUrls == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return

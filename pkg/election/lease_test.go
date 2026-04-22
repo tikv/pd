@@ -20,12 +20,13 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 func TestLease(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Create the lease.
@@ -82,14 +83,16 @@ func TestLease(t *testing.T) {
 
 func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	// Create the lease.
 	lease := NewLease(client, "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(context.Background(), 2*time.Second)
+	ch := lease.keepAliveWorker(ctx, 2*time.Second)
 	time.Sleep(2 * time.Second)
 	<-ch
 	re.NoError(lease.Close())
