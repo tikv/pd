@@ -62,6 +62,9 @@ var (
 	PagingPredictionResidualBytes *prometheus.HistogramVec
 	PagingNonprechargeCounter     *prometheus.CounterVec
 	PagingNonprechargeActualBytes *prometheus.CounterVec
+	PagingPrechargeRU             *prometheus.CounterVec
+	PagingSettlementRU            *prometheus.CounterVec
+	PagingSettlementRUDelta       *prometheus.HistogramVec
 )
 
 func init() {
@@ -225,6 +228,37 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint absent or zero). Quantifies read volume settled without pre-charge throttling.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
+
+	PagingPrechargeRU = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_precharge_ru_total",
+			Help:        "Sum of RU pre-acquired at BeforeKVRequest for pre-charged paging read requests (read base cost + ReadBytesCost * predicted_bytes).",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingSettlementRU = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_settlement_ru_total",
+			Help:        "Sum of total RU finally consumed by pre-charged paging read requests (read base cost + CPUMsCost * kv_cpu_ms + ReadBytesCost * actual_bytes). Equals precharge_ru + settlement_ru_delta.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingSettlementRUDelta = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "paging_settlement_ru_delta",
+			// v = settlement_ru - precharge_ru = CPUMsCost * kv_cpu_ms + ReadBytesCost * (actual - predicted).
+			// Negative => flows through RefundTokens; positive => flows through RemoveTokens / acquireTokens.
+			// Factor-4 spacing over ±1024 RU covers CPU (±tens of RU) plus bytes residuals up to ±64MB.
+			Buckets:     []float64{-1024, -256, -64, -16, -4, -1, -0.25, -0.0625, 0, 0.0625, 0.25, 1, 4, 16, 64, 256, 1024},
+			Help:        "Per-RPC signed settlement RU delta (settlement_ru - precharge_ru) for pre-charged paging read requests. Negative means refund, positive means extra debit.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -246,4 +280,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(PagingPredictionResidualBytes)
 	prometheus.MustRegister(PagingNonprechargeCounter)
 	prometheus.MustRegister(PagingNonprechargeActualBytes)
+	prometheus.MustRegister(PagingPrechargeRU)
+	prometheus.MustRegister(PagingSettlementRU)
+	prometheus.MustRegister(PagingSettlementRUDelta)
 }

@@ -115,6 +115,9 @@ type groupMetricsCollection struct {
 	predictionResidualBytes prometheus.Observer
 	nonprechargeCounter     prometheus.Counter
 	nonprechargeActualBytes prometheus.Counter
+	prechargeRU             prometheus.Counter
+	settlementRU            prometheus.Counter
+	settlementRUDelta       prometheus.Observer
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -139,19 +142,29 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 
 		nonprechargeCounter:     metrics.PagingNonprechargeCounter.WithLabelValues(name),
 		nonprechargeActualBytes: metrics.PagingNonprechargeActualBytes.WithLabelValues(name),
+		prechargeRU:             metrics.PagingPrechargeRU.WithLabelValues(name),
+		settlementRU:            metrics.PagingSettlementRU.WithLabelValues(name),
+		settlementRUDelta:       metrics.PagingSettlementRUDelta.WithLabelValues(name),
 	}
 }
 
 // observePagingPrecharge requires bytesForEst > 0.
-func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64) {
+// prechargeRU is the total RU pre-acquired at BeforeKVRequest
+// (base + ReadBytesCost * bytesForEst).
+func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64, prechargeRU float64) {
 	gmc.prechargeCounter.Inc()
 	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+	gmc.prechargeRU.Add(prechargeRU)
 }
 
 // observePagingActual requires predicted > 0.
-func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64) {
+// settlementRU is the total RU finally consumed (base + CPU + ReadBytesCost * actual);
+// vDelta is (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
+func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64, settlementRU, vDelta float64) {
 	gmc.actualBytesCounter.Add(float64(actual))
 	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
+	gmc.settlementRU.Add(settlementRU)
+	gmc.settlementRUDelta.Observe(vDelta)
 }
 
 func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
@@ -586,7 +599,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		calc.BeforeKVRequest(delta, info)
 	}
 	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
-		gc.metrics.observePagingPrecharge(bytesForEst)
+		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
 	}
 
 	gc.mu.Lock()
@@ -638,8 +651,15 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
+	count := &rmpb.Consumption{}
+	*count = *delta
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
-		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	} else if !req.IsWrite() {
 		if _, ok := req.(predictedReadBytesProvider); ok {
 			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
@@ -656,15 +676,7 @@ func (gc *groupCostController) onResponseImpl(
 	}
 
 	gc.mu.Lock()
-	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
-	count := &rmpb.Consumption{}
-	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -679,8 +691,15 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
+	count := &rmpb.Consumption{}
+	*count = *delta
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
-		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes())
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	} else if !req.IsWrite() {
 		if _, ok := req.(predictedReadBytesProvider); ok {
 			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
@@ -710,15 +729,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 
 	gc.mu.Lock()
-	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
-	count := &rmpb.Consumption{}
-	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
