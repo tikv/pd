@@ -54,17 +54,26 @@ var (
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 
-	// Paging pre-charge metrics, per resource group. See each metric's
-	// Help string below for semantics.
-	PagingPrechargeCounter        *prometheus.CounterVec
-	PagingPrechargeBytesCounter   *prometheus.CounterVec
-	PagingActualBytesCounter      *prometheus.CounterVec
-	PagingPredictionResidualBytes *prometheus.HistogramVec
-	PagingNonprechargeCounter     *prometheus.CounterVec
+	// PagingPrechargeCounter counts paging read requests that triggered pre-charge (hint > 0).
+	PagingPrechargeCounter *prometheus.CounterVec
+	// PagingNonprechargeCounter counts paging read requests that skipped pre-charge (hint absent or zero).
+	PagingNonprechargeCounter *prometheus.CounterVec
+
+	// PagingPrechargeBytesCounter accumulates bytes used as the pre-charge basis (sum of predicted hints).
+	PagingPrechargeBytesCounter *prometheus.CounterVec
+	// PagingActualBytesCounter accumulates actual bytes read by pre-charged paging requests.
+	PagingActualBytesCounter *prometheus.CounterVec
+	// PagingNonprechargeActualBytes accumulates actual bytes read by paging requests that skipped pre-charge.
 	PagingNonprechargeActualBytes *prometheus.CounterVec
-	PagingPrechargeRU             *prometheus.CounterVec
-	PagingSettlementRU            *prometheus.CounterVec
-	PagingSettlementRUDelta       *prometheus.HistogramVec
+	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read bytes for pre-charged requests.
+	PagingPredictionResidualBytes *prometheus.HistogramVec
+
+	// PagingPrechargeRU accumulates RU pre-acquired at BeforeKVRequest for pre-charged paging read requests.
+	PagingPrechargeRU *prometheus.CounterVec
+	// PagingSettlementRU accumulates total RU finally consumed by pre-charged paging read requests (base + CPU + bytes cost).
+	PagingSettlementRU *prometheus.CounterVec
+	// PagingSettlementRUDelta records the distribution of per-RPC signed RU delta (settlement_ru - precharge_ru) for pre-charged paging read requests.
+	PagingSettlementRUDelta *prometheus.HistogramVec
 )
 
 func init() {
@@ -178,6 +187,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
+	PagingNonprechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_total",
+			Help:        "Counter of paging read RPCs where no PredictedReadBytes hint was provided (hint absent or zero). These RPCs skip pre-charge and settle entirely on actual read bytes at response time.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
 	PagingPrechargeBytesCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
@@ -196,6 +214,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
+	PagingNonprechargeActualBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_nonprecharge_actual_bytes_total",
+			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint absent or zero). Quantifies read volume settled without pre-charge throttling.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
 	PagingPredictionResidualBytes = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -208,24 +235,6 @@ func initMetrics(constLabels prometheus.Labels) {
 			// resolution near zero.
 			Buckets: []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
 			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged paging requests. Shows predictor accuracy.",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
-
-	PagingNonprechargeCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   requestSubsystem,
-			Name:        "paging_nonprecharge_total",
-			Help:        "Counter of paging read RPCs where no PredictedReadBytes hint was provided (hint absent or zero). These RPCs skip pre-charge and settle entirely on actual read bytes at response time.",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
-
-	PagingNonprechargeActualBytes = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   requestSubsystem,
-			Name:        "paging_nonprecharge_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint absent or zero). Quantifies read volume settled without pre-charge throttling.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -275,11 +284,11 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
 	prometheus.MustRegister(PagingPrechargeCounter)
+	prometheus.MustRegister(PagingNonprechargeCounter)
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
-	prometheus.MustRegister(PagingPredictionResidualBytes)
-	prometheus.MustRegister(PagingNonprechargeCounter)
 	prometheus.MustRegister(PagingNonprechargeActualBytes)
+	prometheus.MustRegister(PagingPredictionResidualBytes)
 	prometheus.MustRegister(PagingPrechargeRU)
 	prometheus.MustRegister(PagingSettlementRU)
 	prometheus.MustRegister(PagingSettlementRUDelta)
