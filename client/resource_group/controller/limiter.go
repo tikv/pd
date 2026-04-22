@@ -325,15 +325,9 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.maybeNotify()
 }
 
-// RefundTokens returns previously consumed tokens back to the limiter.
-// This is the inverse of RemoveTokens: it increases the available token count.
-// It is used when a pre-charged estimate (e.g. a PredictedReadBytes hint)
-// exceeds the actual cost observed after the request completes.
+// RefundTokens adds tokens back to the limiter.
 //
-// No burst cap is applied here — consistent with Reconfigure. The lazy cap
-// in getTokens() normalizes the balance on the next limiter operation.
-// No low-token notification is needed because refunding moves the balance
-// away from the low-token threshold, never toward it.
+// No burst cap is applied here
 func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()

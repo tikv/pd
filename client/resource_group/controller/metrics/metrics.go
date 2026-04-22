@@ -54,29 +54,13 @@ var (
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 
-	// PagingPrechargeCounter counts paging pre-charge events (predicted hint
-	// present and > 0), per resource group. Cold starts and unhinted requests
-	// are not pre-charged and therefore not counted here.
-	PagingPrechargeCounter *prometheus.CounterVec
-	// PagingPrechargeBytesCounter sums bytes used as the pre-charge basis.
-	PagingPrechargeBytesCounter *prometheus.CounterVec
-	// PagingActualBytesCounter sums actual read bytes reported after the KV
-	// RPC for pre-charged requests. Ratio against PagingPrechargeBytesCounter
-	// reveals over/under-charge factor.
-	PagingActualBytesCounter *prometheus.CounterVec
-	// PagingPredictionResidualBytes observes (actual - predicted) bytes for
-	// pre-charged requests. Shows EMA prediction accuracy.
+	// Paging pre-charge metrics, per resource group. See each metric's
+	// Help string below for semantics.
+	PagingPrechargeCounter        *prometheus.CounterVec
+	PagingPrechargeBytesCounter   *prometheus.CounterVec
+	PagingActualBytesCounter      *prometheus.CounterVec
 	PagingPredictionResidualBytes *prometheus.HistogramVec
-
-	// PagingNonprechargeCounter counts RPCs that implemented the predicted
-	// read-bytes interface but reported 0 (e.g. EMA cold-start) and therefore
-	// ran without pre-charge. Paired with PagingPrechargeCounter this yields
-	// the cold/ready RPC split from the PD side.
-	PagingNonprechargeCounter *prometheus.CounterVec
-	// PagingNonprechargeActualBytes sums the actual read bytes of RPCs that
-	// skipped pre-charge. Quantifies how much read volume bypassed pre-charge
-	// throttling — the "cold window" signal for token-bucket pressure
-	// analysis.
+	PagingNonprechargeCounter     *prometheus.CounterVec
 	PagingNonprechargeActualBytes *prometheus.CounterVec
 )
 

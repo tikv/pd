@@ -107,18 +107,12 @@ type groupMetricsCollection struct {
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
 
-	// Paging pre-charge observability: cached per-RG so the hot path avoids
-	// WithLabelValues on every KV request. Only pre-charged requests (those
-	// with a PredictedReadBytes hint > 0) contribute to these metrics.
+	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
+	// on the hot path.
 	prechargeCounter        prometheus.Counter
 	prechargeBytesCounter   prometheus.Counter
 	actualBytesCounter      prometheus.Counter
 	predictionResidualBytes prometheus.Observer
-
-	// Nonprecharge bucket: RPCs that implemented the predicted-bytes
-	// interface but reported 0 (EMA cold-start or feature-disabled) and
-	// therefore skipped pre-charge entirely. Recorded at settle time
-	// (AfterKVRequest).
 	nonprechargeCounter     prometheus.Counter
 	nonprechargeActualBytes prometheus.Counter
 }
@@ -148,26 +142,18 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 	}
 }
 
-// observePagingPrecharge records one pre-charge event. Caller must guarantee
-// bytesForEst > 0; cold-start requests with no hint are not pre-charged and
-// should not be observed here.
+// observePagingPrecharge requires bytesForEst > 0.
 func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64) {
 	gmc.prechargeCounter.Inc()
 	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
 }
 
-// observePagingActual records actual read bytes and the signed residual for a
-// pre-charged request. Caller must guarantee predicted > 0.
+// observePagingActual requires predicted > 0.
 func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64) {
 	gmc.actualBytesCounter.Add(float64(actual))
 	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
 }
 
-// observePagingNonprecharge records one RPC that implemented the predicted
-// read-bytes interface but reported 0 (EMA cold or feature disabled) and
-// therefore ran without pre-charge. `actual` is the response's read bytes,
-// settled in AfterKVRequest. Paired with observePagingPrecharge this gives
-// the cold/ready split and the byte volume that bypassed throttling.
 func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
 	gmc.nonprechargeCounter.Inc()
 	gmc.nonprechargeActualBytes.Add(float64(actual))
@@ -664,8 +650,7 @@ func (gc *groupCostController) onResponseImpl(
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
 		} else if v < 0 {
-			// RC paging settlement: actual cost was below the pre-charge,
-			// refund the excess so the limiter reflects real consumption.
+			// Paging over-estimate: refund the excess pre-charge.
 			counter.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
@@ -719,8 +704,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 			waitDuration += d
 		} else if v < 0 {
-			// RC paging settlement: actual cost was below the pre-charge,
-			// refund the excess so the limiter reflects real consumption.
+			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
