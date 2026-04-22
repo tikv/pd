@@ -164,7 +164,6 @@ func TestEtcdClientSync(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 	})
-
 	servers, client1, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
@@ -205,7 +204,6 @@ func TestEtcdClientSync(t *testing.T) {
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
-
 }
 
 func checkEtcdEndpointNum(re *require.Assertions, client *clientv3.Client, num int) {
