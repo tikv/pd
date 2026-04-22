@@ -747,6 +747,48 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	}
 }
 
+func TestCreateScatterRegionOperatorFailureAccountsCurrentPlacement(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	for i := uint64(1); i <= 4; i++ {
+		tc.AddRegionStore(i, 0)
+		tc.SetStoreLastHeartbeatInterval(i, -10*time.Minute)
+	}
+
+	group := "group"
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+	for range 100 {
+		scatterer.ordinaryEngine.selectedPeer.Put(1, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(2, group)
+		scatterer.ordinaryEngine.selectedPeer.Put(3, group)
+	}
+
+	region := tc.AddLeaderRegion(100, 2, 1, 3).Clone(
+		core.SetPeers([]*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_DemotingVoter},
+			{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 3, Role: metapb.PeerRole_IncomingVoter},
+		}),
+		core.WithLeader(&metapb.Peer{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter}),
+	)
+
+	op, err := scatterer.scatterRegion(region, group, false)
+	re.Nil(op)
+	re.Error(err)
+
+	distribution, ok := scatterer.ordinaryEngine.selectedPeer.GetGroupDistribution(group)
+	re.True(ok)
+	re.Equal(uint64(101), distribution[1])
+	re.Equal(uint64(101), distribution[2])
+	re.Equal(uint64(101), distribution[3])
+	re.Zero(distribution[4])
+}
+
 // TestBalanceLeader only tests whether region leaders are balanced after scatter.
 func TestBalanceLeader(t *testing.T) {
 	re := require.New(t)
