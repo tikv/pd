@@ -971,14 +971,20 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			// Once flow or CPU has changed, will update the cache.
+			// Once flow has changed, update both the cache and follower sync stream.
 			// Because keys and bytes are strongly related, only bytes are judged.
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
-				region.GetCPUUsage() != origin.GetCPUUsage() ||
-				region.GetReadCPUUsage() != origin.GetReadCPUUsage() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true
+				return
+			}
+			// CPU deltas should refresh the local cache, but SyncRegions does not
+			// serialize region CPU fields yet, so CPU-only changes should not
+			// trigger follower sync traffic.
+			if region.GetCPUUsage() != origin.GetCPUUsage() ||
+				region.GetReadCPUUsage() != origin.GetReadCPUUsage() {
+				saveCache = true
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
