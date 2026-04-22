@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -118,6 +119,8 @@ type GCStateManager struct {
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 
+	gcStatesCache map[uint32]GCState
+
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
 
@@ -127,6 +130,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		gcMetaStorage:                    store,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
+		gcStatesCache:                    make(map[uint32]GCState),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 }
@@ -265,6 +269,16 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 	}
 
 	if newGCSafePoint != oldGCSafePoint {
+		// For simplicity, only update cache when it exists, as AdvanceGCSafePoint is likely to be called soon after
+		// AdvanceTxnSafePoint.
+		cachedGCState, ok := m.gcStatesCache[keyspaceID]
+		if ok {
+			cachedGCState.GCSafePoint = newGCSafePoint
+			m.gcStatesCache[keyspaceID] = cachedGCState
+		}
+	}
+
+	if newGCSafePoint != oldGCSafePoint {
 		log.Info("advanced GC safe point",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.Uint64("old-gc-safe-point", oldGCSafePoint), zap.Uint64("target", target),
@@ -328,11 +342,20 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		blockingBarrier         *endpoint.GCBarrier
 		blockingGlobalBarrier   *endpoint.GlobalGCBarrier
 		blockingMinStartTSOwner *string
+
+		gcSafePoint                uint64
+		gcBarriersAfterLazyCleanup []*endpoint.GCBarrier
 	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		if err1 != nil {
+			return err1
+		}
+
+		// Retrieve GC safe point for caching purpose. Not used in the calculation.
+		gcSafePoint, err1 = m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
 		if err1 != nil {
 			return err1
 		}
@@ -372,6 +395,8 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 				minBlocker = barrier.BarrierTS
 				blockingBarrier = barrier
 			}
+
+			gcBarriersAfterLazyCleanup = append(gcBarriersAfterLazyCleanup, barrier)
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
@@ -421,6 +446,19 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 	})
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
+	}
+
+	{
+		newCachedGCState := GCState{
+			KeyspaceID: keyspaceID,
+			// advanceTxnSafePointImpl is only called on manageable keyspaces, which are either NullKeyspace or
+			// keyspaces with keyspace-level GC enabled.
+			IsKeyspaceLevel: keyspaceID != constant.NullKeyspaceID,
+			TxnSafePoint:    newTxnSafePoint,
+			GCSafePoint:     gcSafePoint,
+			GCBarriers:      gcBarriersAfterLazyCleanup,
+		}
+		m.gcStatesCache[keyspaceID] = newCachedGCState
 	}
 
 	blockerDesc := ""
@@ -561,6 +599,28 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 		return nil, err
 	}
 
+	{
+		// For simplicity, only update if the cache already exists. In this
+		cachedGCState, ok := m.gcStatesCache[keyspaceID]
+		if ok {
+			replaced := false
+			for i, b := range cachedGCState.GCBarriers {
+				if b.BarrierID == barrierID {
+					cachedGCState.GCBarriers[i] = newBarrier
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				cachedGCState.GCBarriers = append(cachedGCState.GCBarriers, newBarrier)
+				slices.SortFunc(cachedGCState.GCBarriers, func(a, b *endpoint.GCBarrier) int {
+					return strings.Compare(a.BarrierID, b.BarrierID)
+				})
+			}
+			m.gcStatesCache[keyspaceID] = cachedGCState
+		}
+	}
+
 	log.Info("GC barrier set",
 		zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
@@ -606,12 +666,22 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 		}
 		return wb.DeleteGCBarrier(keyspaceID, barrierID)
 	})
-
 	if err != nil {
 		log.Error("failed to delete GC barrier",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.String("barrier-id", barrierID), zap.Error(err))
 		return nil, err
+	}
+
+	if deletedBarrier != nil {
+		// For simplicity, only update the cache if it already exists.
+		cachedGCState, ok := m.gcStatesCache[keyspaceID]
+		if ok {
+			cachedGCState.GCBarriers = slices.DeleteFunc(cachedGCState.GCBarriers, func(b *endpoint.GCBarrier) bool {
+				return b.BarrierID == barrierID
+			})
+			m.gcStatesCache[keyspaceID] = cachedGCState
+		}
 	}
 
 	if deletedBarrier == nil {
@@ -667,6 +737,51 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 	return result, nil
 }
 
+func (m *GCStateManager) tryGetGCStateFromCache(keyspaceID uint32) (GCState, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	res, ok := m.gcStatesCache[keyspaceID]
+
+	// Deep copy the GCBarriers field to avoid unintentional mutation.
+	if ok && res.GCBarriers != nil {
+		clonedGCBarriers := make([]*endpoint.GCBarrier, len(res.GCBarriers))
+		for i, barrier := range res.GCBarriers {
+			clonedBarrier := *barrier
+			clonedGCBarriers[i] = &clonedBarrier
+		}
+		res.GCBarriers = clonedGCBarriers
+	}
+	return res, ok
+}
+
+func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
+	// Fast path
+	if cachedGCState, ok := m.tryGetGCStateFromCache(keyspaceID); ok {
+		return cachedGCState, nil
+	}
+
+	// Slow path
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Check cache again: it may be updated by other concurrent invocations when the lock is not held.
+	if cachedGCState, ok := m.gcStatesCache[keyspaceID]; ok {
+		return cachedGCState, nil
+	}
+
+	var result GCState
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
+		return err1
+	})
+
+	m.gcStatesCache[keyspaceID] = result
+
+	return result, err
+}
+
 // GetGCState returns the GC state of the given keyspace.
 //
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
@@ -676,17 +791,8 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	if err != nil {
 		return GCState{}, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 
-	var result GCState
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		var err1 error
-		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
-		return err1
-	})
-
-	return result, err
+	return m.getGCStateImpl(keyspaceID)
 }
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
@@ -709,39 +815,16 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint3
 func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
-	mutexLocked := false
-	lock := func() {
-		m.mu.Lock()
-		mutexLocked = true
-	}
-	unlock := func() {
-		m.mu.Unlock()
-		mutexLocked = false
-	}
-
-	ensureUnlocked := func() {
-		if mutexLocked {
-			unlock()
-		}
-	}
-	defer ensureUnlocked()
-
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
-	lock()
-	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
-		if err1 != nil {
-			return err1
+	{
+		gcState, err := m.getGCStateImpl(constant.NullKeyspaceID)
+		if err != nil {
+			return nil, err
 		}
-		results[constant.NullKeyspaceID] = nullKeyspaceState
-		return nil
-	})
-	unlock()
-	if err != nil {
-		return nil, err
+		results[constant.NullKeyspaceID] = gcState
 	}
 
 	for {
@@ -772,18 +855,12 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 			continue
 		}
 
-		lock()
-		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
-			if err1 != nil {
-				return err1
+		{
+			gcState, err := m.getGCStateImpl(keyspaceMeta.Id)
+			if err != nil {
+				return nil, err
 			}
-			results[keyspaceMeta.Id] = state
-			return nil
-		})
-		unlock()
-		if err != nil {
-			return nil, err
+			results[keyspaceMeta.Id] = gcState
 		}
 	}
 
