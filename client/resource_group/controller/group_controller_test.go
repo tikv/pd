@@ -368,6 +368,48 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 		"onResponseImpl should refund excess pre-charged tokens")
 }
 
+func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	// Failed response: no bytes read, no CPU consumed, succeed=false.
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		kvCPU:     0,
+		succeed:   false,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// On a failed read, AfterKVRequest still runs: paging settlement subtracts
+	// ReadBytesCost*predicted and calculateReadCost adds 0, yielding a negative
+	// delta that flows through RefundTokens. ReadBaseCost is not refunded,
+	// matching existing behavior for non-paging read failures.
+	cfg := DefaultRUConfig()
+	expectedRefund := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
+	re.InDelta(tokensAfterPreCharge+expectedRefund, tokensAfterSettlement, 1.0,
+		"failed read with paging hint should refund ReadBytesCost*predicted")
+}
+
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()
