@@ -2089,7 +2089,7 @@ func (c *RaftCluster) resetMetrics() {
 }
 
 func (c *RaftCluster) collectHealthStatus() {
-	members, err := GetMembers(c.etcdClient)
+	members, err := GetMembers(context.Background(), c.etcdClient)
 	if err != nil {
 		log.Error("get members error", errs.ZapError(err))
 	}
@@ -2590,8 +2590,8 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 }
 
 // GetMembers return a slice of Members.
-func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient, true)
+func GetMembers(ctx context.Context, etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	listResp, err := etcdutil.ListEtcdMembers(ctx, etcdClient, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2612,7 +2612,7 @@ func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
 
 // IsClientURL returns whether addr is a ClientUrl of any member.
 func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
-	members, err := GetMembers(etcdClient)
+	members, err := GetMembers(context.Background(), etcdClient)
 	if err != nil {
 		return false
 	}

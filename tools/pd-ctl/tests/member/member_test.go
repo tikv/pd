@@ -98,9 +98,12 @@ func TestMember(t *testing.T) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		members, err = etcdutil.ListEtcdMembers(ctx, client, true)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return len(members.Members) == 2
 	})
+	re.NoError(err)
 
 	// member delete id <member_id>
 	args = []string{"-u", pdAddr, "member", "delete", "id", strconv.FormatUint(id, 10)}
@@ -108,7 +111,10 @@ func TestMember(t *testing.T) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		members, err = etcdutil.ListEtcdMembers(ctx, client, true)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		return len(members.Members) == 2
 	})
+	re.NoError(err)
 }

@@ -427,7 +427,7 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 }
 
 // GetMembers implements gRPC PDServer.
-func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+func (s *GrpcServer) GetMembers(ctx context.Context, _ *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -442,7 +442,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
-	members, err := cluster.GetMembers(s.GetClient())
+	members, err := cluster.GetMembers(ctx, s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

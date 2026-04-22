@@ -51,7 +51,7 @@ func TestHealth(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	client := tc.GetEtcdClient()
-	members, err := cluster.GetMembers(client)
+	members, err := cluster.GetMembers(ctx, client)
 	re.NoError(err)
 	healthMembers := cluster.CheckHealth(tc.GetHTTPClient(), members)
 	healths := []api.Health{}
@@ -124,7 +124,7 @@ func TestHealthTLS(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	client := tc.GetEtcdClient()
-	members, err := cluster.GetMembers(client)
+	members, err := cluster.GetMembers(ctx, client)
 	re.NoError(err)
 	healthMembers := cluster.CheckHealth(tc.GetHTTPClient(), members)
 	healths := []api.Health{}
