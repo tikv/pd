@@ -198,16 +198,38 @@ func (p *solver) scoreStore(store *core.StoreInfo, delta int64) float64 {
 }
 
 // originalStoreScores returns the scores before the tolerated-resource shift is applied.
-func (p *solver) originalStoreScores() (float64, float64) {
+func (p *solver) originalStoreScores() (sourceOriginalScore, targetOriginalScore float64) {
 	tolerantResource := p.getTolerantResource()
-	sourceOriginalScore := p.scoreStore(p.Source, p.sourceDelta+tolerantResource)
-	targetOriginalScore := p.scoreStore(p.Target, p.targetDelta-tolerantResource)
+	sourceOriginalScore = p.scoreStore(p.Source, p.sourceDelta+tolerantResource)
+	targetOriginalScore = p.scoreStore(p.Target, p.targetDelta-tolerantResource)
 	return sourceOriginalScore, targetOriginalScore
 }
 
+// isPotentialReverse reports whether the tolerated-resource shift would flip the
+// original score ordering for the current source/target pair. Call
+// calcSourceStoreScore and calcTargetStoreScore for the current p.Source and
+// p.Target first so originalStoreScores can reuse p.sourceDelta and
+// p.targetDelta with scoreStore and getTolerantResource.
 func (p *solver) isPotentialReverse() bool {
 	sourceOriginalScore, targetOriginalScore := p.originalStoreScores()
 	return sourceOriginalScore > targetOriginalScore && p.sourceScore <= p.targetScore
+}
+
+func (p *solver) recordPotentialReverse(scheduleName string) {
+	balancePotentialReverseCounter.WithLabelValues(scheduleName).Inc()
+	if log.GetLevel() > zap.DebugLevel {
+		return
+	}
+	sourceOriginalScore, targetOriginalScore := p.originalStoreScores()
+	log.Debug("potential reverse detected",
+		zap.String("scheduler", scheduleName),
+		zap.Uint64("region-id", p.Region.GetID()),
+		zap.Uint64("source-store", p.sourceStoreID()),
+		zap.Uint64("target-store", p.targetStoreID()),
+		zap.Float64("source-original-score", sourceOriginalScore),
+		zap.Float64("target-original-score", targetOriginalScore),
+		zap.Float64("source-score", p.sourceScore),
+		zap.Float64("target-score", p.targetScore))
 }
 
 func (p *solver) getTolerantResource() int64 {

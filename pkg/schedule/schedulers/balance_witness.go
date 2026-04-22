@@ -337,6 +337,7 @@ func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	if !solver.shouldBalance(s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
 		if solver.isPotentialReverse() {
+			solver.recordPotentialReverse(s.GetName())
 			schedulerCounter.WithLabelValues(s.GetName(), "potential-reverse").Inc()
 		}
 		if collector != nil {

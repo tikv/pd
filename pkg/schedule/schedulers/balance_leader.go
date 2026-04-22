@@ -547,6 +547,9 @@ func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	solver.calcTargetStoreScore(s.GetName())
 	if !solver.shouldBalance(s.GetName()) {
 		balanceLeaderSkipCounter.Inc()
+		if solver.isPotentialReverse() {
+			solver.recordPotentialReverse(s.GetName())
+		}
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}
