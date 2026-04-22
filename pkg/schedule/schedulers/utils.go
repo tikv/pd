@@ -179,15 +179,35 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	return shouldBalance
 }
 
+func (p *solver) scoreStore(store *core.StoreInfo, delta int64) float64 {
+	switch p.kind.Resource {
+	case constant.LeaderKind:
+		return store.LeaderScore(p.kind.Policy, delta)
+	case constant.RegionKind:
+		return store.RegionScore(
+			p.GetSchedulerConfig().GetRegionScoreFormulaVersion(),
+			p.GetSchedulerConfig().GetHighSpaceRatio(),
+			p.GetSchedulerConfig().GetLowSpaceRatio(),
+			delta,
+		)
+	case constant.WitnessKind:
+		return store.WitnessScore(delta)
+	default:
+		return 0
+	}
+}
+
+// originalStoreScores returns the scores before the tolerated-resource shift is applied.
+func (p *solver) originalStoreScores() (float64, float64) {
+	tolerantResource := p.getTolerantResource()
+	sourceOriginalScore := p.scoreStore(p.Source, p.sourceDelta+tolerantResource)
+	targetOriginalScore := p.scoreStore(p.Target, p.targetDelta-tolerantResource)
+	return sourceOriginalScore, targetOriginalScore
+}
+
 func (p *solver) isPotentialReverse() bool {
-	// p.sourceScore is considered as the source store's score after the region is moved out.
-	// p.targetScore is considered as the target store's score after the region is moved in.
-	// So original source store's score is p.sourceScore+p.sourceDelta, original target store's score is p.targetScore-p.targetDelta.
-	// If p.sourceScore+float64(p.sourceDelta) < p.targetScore-float64(p.targetDelta),
-	// it means although the source store's score is larger than the target store's score,
-	// after the region is moved out, the source store's score will be less than the target store's score.
-	// In another word, there will be a reverse after the region is moved.
-	return p.sourceScore+float64(p.sourceDelta) < p.targetScore-float64(p.targetDelta)
+	sourceOriginalScore, targetOriginalScore := p.originalStoreScores()
+	return sourceOriginalScore > targetOriginalScore && p.sourceScore <= p.targetScore
 }
 
 func (p *solver) getTolerantResource() int64 {

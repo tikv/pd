@@ -238,14 +238,24 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		regionID := solver.Region.GetID()
 		sourceID := solver.Source.GetID()
 		targetID := solver.Target.GetID()
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !solver.shouldBalance(s.GetName()) {
 			balanceRegionSkipCounter.Inc()
 			if solver.isPotentialReverse() {
-				balancePotentialReverseCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel).Inc()
+				balancePotentialReverseCounter.WithLabelValues(s.GetName()).Inc()
+				if log.GetLevel() <= zap.DebugLevel {
+					sourceOriginalScore, targetOriginalScore := solver.originalStoreScores()
+					log.Debug("potential reverse detected",
+						zap.String("scheduler", s.GetName()),
+						zap.Uint64("region-id", regionID),
+						zap.Uint64("source-store", sourceID),
+						zap.Uint64("target-store", targetID),
+						zap.Float64("source-original-score", sourceOriginalScore),
+						zap.Float64("target-original-score", targetOriginalScore),
+						zap.Float64("source-score", solver.sourceScore),
+						zap.Float64("target-score", solver.targetScore))
+				}
 			}
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))

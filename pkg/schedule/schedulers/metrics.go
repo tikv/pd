@@ -86,7 +86,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "potential_reverse",
 			Help:      "Counter of direction which would introduce potential reverse.",
-		}, []string{"type", "source", "target"})
+		}, []string{"type"})
 
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(
@@ -195,6 +195,7 @@ func init() {
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
+	prometheus.MustRegister(balancePotentialReverseCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPeerHist)
