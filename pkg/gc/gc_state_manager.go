@@ -168,6 +168,7 @@ func (m *GCStateManager) OnNodeBecomesLeader() {
 
 	// Also trigger cache invalidation even when transitioning from follower to leader, as a protection against
 	// potential inconsistent cache state left from the last leadership.
+	m.gcStatesCache = make(map[uint32]GCState)
 }
 
 // OnNodeBecomesFollower marks the current PD node as follower and closes all existing GC state watches.
