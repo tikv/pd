@@ -16,6 +16,7 @@ package syncer
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/docker/go-units"
@@ -130,6 +131,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				MinConnectTimeout: 5 * time.Second,
 			}),
 			// WithBlock will block the dial step until success or cancel the context.
+			// TODO: remove grpc.WithBlock to adopt the latest best practices.
+			//nolint:staticcheck
 			grpc.WithBlock())
 		// it means the context is canceled.
 		if conn == nil {
@@ -167,6 +170,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
 			for {
 				resp, err := stream.Recv()
+				if err == io.EOF {
+					log.Info("server region sync with leader meets EOF, stop syncing", zap.String("server", s.server.Name()))
+					return
+				}
 				if err != nil {
 					s.streamingRunning.Store(false)
 					log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
@@ -238,11 +245,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					saveKV, _, _, _ := regionGuide(cctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
-					if hasBuckets {
-						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
-							region.UpdateBuckets(buckets[i], old)
-						}
-					}
 					if saveKV {
 						err = regionStorage.SaveRegion(r)
 					}

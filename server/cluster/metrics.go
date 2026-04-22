@@ -33,14 +33,6 @@ var (
 			Help:      "Counter of the region event",
 		}, []string{"event"})
 
-	bucketEventCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "bucket_event",
-			Help:      "Counter of the bucket event",
-		}, []string{"event"})
-
 	updateStoreStatsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -79,6 +71,15 @@ var (
 			Name:      "store_trigger_network_slow_evict",
 			Help:      "The count of store trigger network slow evict",
 		}, []string{"store"})
+
+	raftClusterStartDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "raftcluster_start_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of raft cluster start.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 13), // 1ms ~ 4s
+		}, []string{"type"})
 )
 
 func init() {
@@ -86,8 +87,8 @@ func init() {
 	prometheus.MustRegister(healthStatusGauge)
 	prometheus.MustRegister(clusterStateCPUGauge)
 	prometheus.MustRegister(clusterStateCurrent)
-	prometheus.MustRegister(bucketEventCounter)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
 	prometheus.MustRegister(storeTriggerNetworkSlowEvict)
+	prometheus.MustRegister(raftClusterStartDuration)
 }

@@ -37,6 +37,8 @@ const (
 	RuleChecker CheckerSchedulerType = "rule-checker"
 	// SplitChecker is the name for split checker.
 	SplitChecker CheckerSchedulerType = "split-checker"
+	// AffinityChecker is the name for affinity checker.
+	AffinityChecker CheckerSchedulerType = "affinity-checker"
 
 	// BalanceLeaderScheduler is balance leader scheduler name.
 	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
@@ -164,9 +166,9 @@ var (
 			BalanceLeaderScheduler,
 			BalanceRegionScheduler,
 			BalanceHotRegionScheduler,
+			EvictSlowStoreScheduler,
 		}
 		if !kerneltype.IsNextGen() {
-			defaultSchedulers = append(defaultSchedulers, EvictSlowStoreScheduler)
 			defaultSchedulers = append(defaultSchedulers, EvictStoppingStoreScheduler)
 		}
 		return defaultSchedulers

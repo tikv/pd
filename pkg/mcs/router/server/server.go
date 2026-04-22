@@ -44,9 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -80,9 +77,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+	cluster         *Cluster
 
-	cluster *Cluster
-	storage *endpoint.StorageEndpoint
+	regionSyncer *RegionSyncer
 
 	metaWatcher *meta.Watcher
 }
@@ -133,7 +130,12 @@ func (s *Server) Run() (err error) {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	// TODO: sync the meta info
+	s.regionSyncer = NewRegionSyncer(s.serverLoopCtx, s.basicCluster, s.GetEtcdClient(), s.GetTLSConfig(), s.Name(),
+		s.GetAdvertiseListenAddr())
+	s.regionSyncer.wg.Add(2)
+	go s.regionSyncer.syncLoop()
+	go s.regionSyncer.updatePDMemberLoop()
+	s.regionSyncer.startSyncWithLeader()
 }
 
 // Close closes the server.
@@ -150,7 +152,9 @@ func (s *Server) Close() {
 	}
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
-	s.GetListener().Close()
+	if err := s.GetListener().Close(); err != nil {
+		log.Warn("close listener meet error", errs.ZapError(err))
+	}
 	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
@@ -185,6 +189,11 @@ func (s *Server) GetCluster() *Cluster {
 // GetBasicCluster returns the basic cluster.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
+}
+
+// IsReady returns whether the server is ready.
+func (s *Server) IsReady() bool {
+	return s.regionSyncer.streamingRunning.Load()
 }
 
 // AddServiceReadyCallback adds a callback function that will be called when the service is ready.
@@ -232,7 +241,7 @@ func (s *Server) startServer() (err error) {
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
-	if err := s.startCluster(s.Context()); err != nil {
+	if err := s.startCluster(); err != nil {
 		return err
 	}
 	s.startServerLoop()
@@ -250,9 +259,8 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(context.Context) (err error) {
+func (s *Server) startCluster() (err error) {
 	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
 	if err != nil {
 		return err
@@ -262,6 +270,7 @@ func (s *Server) startCluster(context.Context) (err error) {
 }
 
 func (s *Server) stopCluster() {
+	s.regionSyncer.Stop()
 	s.metaWatcher.Close()
 }
 
@@ -277,7 +286,6 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
-	schedulers.Register()
 	err := cmd.Flags().Parse(args)
 	if err != nil {
 		cmd.Println(err)
@@ -313,7 +321,6 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 
 	versioninfo.Log(serviceName)
 	log.Info("router service config", zap.Reflect("config", cfg))
-
 	grpcprometheus.EnableHandlingTimeHistogram()
 	ctx, cancel := context.WithCancel(context.Background())
 	metricutil.Push(ctx, &cfg.Metric)

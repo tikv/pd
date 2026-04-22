@@ -14,7 +14,12 @@
 
 package tso
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"strconv"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	pdNamespace  = "pd"
@@ -83,6 +88,18 @@ var (
 			Help:      "Bucketed histogram of processing time(s) of the Keyspace Group operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{typeLabel})
+
+	// keyspaceGroupKeyspaceCountGauge records the keyspace list length of each keyspace group.
+	keyspaceGroupKeyspaceCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: tsoNamespace,
+			Subsystem: "keyspace_group",
+			Name:      "keyspace_list_length",
+			Help:      "The length of keyspace list in each TSO keyspace group.",
+		}, []string{groupLabel})
+
+	// keyspaceGroupKeyspaceCountGaugeCache caches gauge per groupID to avoid repeated WithLabelValues.
+	keyspaceGroupKeyspaceCountGaugeCache sync.Map
 )
 
 func init() {
@@ -93,6 +110,7 @@ func init() {
 	prometheus.MustRegister(tsoAllocatorRole)
 	prometheus.MustRegister(keyspaceGroupStateGauge)
 	prometheus.MustRegister(keyspaceGroupOpDuration)
+	prometheus.MustRegister(keyspaceGroupKeyspaceCountGauge)
 }
 
 type tsoMetrics struct {
@@ -115,6 +133,7 @@ type tsoMetrics struct {
 	notLeaderAnymoreEvent        prometheus.Counter
 	logicalOverflowEvent         prometheus.Counter
 	exceededMaxRetryEvent        prometheus.Counter
+	notAllowedSaveTimestampEvent prometheus.Counter
 	// timestampOracle operation duration
 	syncSaveDuration   prometheus.Observer
 	resetSaveDuration  prometheus.Observer
@@ -151,6 +170,7 @@ func newTSOMetrics(groupID string) *tsoMetrics {
 		notLeaderAnymoreEvent:        tsoCounter.WithLabelValues("not_leader_anymore", groupID),
 		logicalOverflowEvent:         tsoCounter.WithLabelValues("logical_overflow", groupID),
 		exceededMaxRetryEvent:        tsoCounter.WithLabelValues("exceeded_max_retry", groupID),
+		notAllowedSaveTimestampEvent: tsoCounter.WithLabelValues("not_allowed_save_timestamp", groupID),
 		syncSaveDuration:             tsoOpDuration.WithLabelValues("sync_save", groupID),
 		resetSaveDuration:            tsoOpDuration.WithLabelValues("reset_save", groupID),
 		updateSaveDuration:           tsoOpDuration.WithLabelValues("update_save", groupID),
@@ -191,4 +211,24 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishMergeSendDuration: keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:     keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
 	}
+}
+
+// getOrInitKeyspaceCountGauge returns the cached gauge for the group, or creates one with WithLabelValues.
+func getOrInitKeyspaceCountGauge(groupID uint32) prometheus.Gauge {
+	key := groupID
+	if g, ok := keyspaceGroupKeyspaceCountGaugeCache.Load(key); ok {
+		return g.(prometheus.Gauge)
+	}
+	labelVal := strconv.FormatUint(uint64(groupID), 10)
+	gauge := keyspaceGroupKeyspaceCountGauge.WithLabelValues(labelVal)
+	if actual, loaded := keyspaceGroupKeyspaceCountGaugeCache.LoadOrStore(key, gauge); loaded {
+		return actual.(prometheus.Gauge)
+	}
+	return gauge
+}
+
+// DeleteKeyspaceListLengthMetric removes the keyspace list length metric for the given keyspace group.
+func DeleteKeyspaceListLengthMetric(groupID uint32) {
+	keyspaceGroupKeyspaceCountGauge.DeleteLabelValues(strconv.FormatUint(uint64(groupID), 10))
+	keyspaceGroupKeyspaceCountGaugeCache.Delete(groupID)
 }

@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !swagger
+
+// Because the swag command line tool doesn't provide a decent way to exclude specific packages from the documentation generation,
+// the build tag above is a workaround to avoid involving unexpected third-party dependencies when building the swagger documentation.
+
 package metering
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/pingcap/metering_sdk/common"
 	"github.com/pingcap/metering_sdk/config"
@@ -32,8 +39,10 @@ import (
 )
 
 const (
-	flushInterval = time.Minute
-	flushTimeout  = flushInterval / 2
+	flushInterval       = time.Minute
+	flushTimeout        = flushInterval / 2
+	writeMaxAttempts    = 6
+	writeRetryBaseDelay = time.Second
 )
 
 // Collector collects events into records with caller-defined fields.
@@ -93,6 +102,10 @@ func validateMeteringConfig(c *config.MeteringConfig) error {
 		if len(c.Region) == 0 {
 			return errors.New("region is required for the metering config")
 		}
+		if len(c.Bucket) == 0 {
+			return errors.New("bucket is required for the metering config")
+		}
+	case storage.ProviderTypeAzure:
 		if len(c.Bucket) == 0 {
 			return errors.New("bucket is required for the metering config")
 		}
@@ -201,18 +214,74 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 		}
 		recordCount := len(records)
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(ctx, flushTimeout)
-		// TODO: write with pagination if needed.
-		err := mw.inner.Write(ctx, meteringData)
-		cancel()
-		cost := time.Since(start)
-		logFields := []zap.Field{
+		baseLogFields := []zap.Field{
 			zap.String("self-id", mw.id),
 			zap.Int64("timestamp", ts),
 			zap.String("category", category),
 			zap.Int("record-count", recordCount),
-			zap.Duration("cost", cost),
 		}
+		var (
+			err       error
+			attempt   int
+			wait      time.Duration
+			baseDelay = writeRetryBaseDelay
+		)
+	retryLoop:
+		for {
+			attempt++
+			writeCtx, cancel := context.WithTimeout(ctx, flushTimeout)
+			// Inject mock write error for testing, value is the count to encounter error.
+			failpoint.Inject("mockWriteError", func(val failpoint.Value) {
+				baseDelay = time.Millisecond
+				if val.(int) >= attempt {
+					cancel()
+				}
+			})
+			// Ensure the context is valid before writing.
+			if writeCtx.Err() != nil {
+				err = writeCtx.Err()
+			} else {
+				// TODO: write with pagination if needed.
+				err = mw.inner.Write(writeCtx, meteringData)
+			}
+			cancel()
+			if err == nil {
+				break
+			}
+			log.Warn("failed to write metering data to underlying storage, will retry",
+				append(baseLogFields,
+					zap.Int("attempt", attempt),
+					zap.Int("max-attempts", writeMaxAttempts),
+					zap.Duration("last-wait", wait),
+					zap.Error(err))...)
+			if attempt >= writeMaxAttempts {
+				break
+			}
+			// Check whether the upper context is done.
+			if ctx.Err() != nil {
+				break
+			}
+			// Calculate the wait time for the next retry.
+			wait = time.Duration(
+				math.Min(
+					// The wait time is the base delay multiplied by 2^(attempt-1).
+					float64(baseDelay<<uint(attempt-1)),
+					// The maximum wait time is 10 times the base delay.
+					float64(10*baseDelay),
+				),
+			)
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				err = ctx.Err()
+				break retryLoop
+			}
+		}
+		cost := time.Since(start)
+		logFields := append(baseLogFields,
+			zap.Int("attempts", attempt),
+			zap.Duration("cost", cost),
+		)
 		if err != nil {
 			log.Error("failed to write metering data to underlying storage",
 				append(logFields, zap.Error(err))...)

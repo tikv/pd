@@ -95,7 +95,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	clearChannel(o.EnableRouterClientCh)
 
 	// Testing that the setting is effective and a notification is sent.
-	for _, expectBool = range []bool{true, false} {
+	for _, expectBool = range []bool{false, true} {
 		o.SetEnableRouterClient(expectBool)
 		testutil.Eventually(re, func() bool {
 			select {
@@ -110,6 +110,26 @@ func TestDynamicOptionChange(t *testing.T) {
 	// Testing that setting the same value should not trigger a notification.
 	o.SetEnableRouterClient(expectBool)
 	ensureNoNotification(t, o.EnableRouterClientCh)
+}
+
+func TestOptions(t *testing.T) {
+	re := require.New(t)
+	op := GetRegionOp{}
+	re.False(op.AllowFollowerHandle)
+	WithAllowFollowerHandle()(&op)
+	WithAllowRouterServiceHandle()(&op)
+	re.True(op.AllowFollowerHandle)
+	re.True(op.AllowRouterServiceHandle)
+	WithAllowPDLeaderOnly()(&op)
+	re.False(op.AllowFollowerHandle)
+	re.False(op.AllowRouterServiceHandle)
+
+	storeOp := GetStoreOp{}
+	re.False(storeOp.AllowRouterServiceHandle)
+	WithAllowRouterServiceHandleStoreRequest()(&storeOp)
+	re.True(storeOp.AllowRouterServiceHandle)
+	WithPDLeaderHandleStoreRequestOnly()(&storeOp)
+	re.False(storeOp.AllowRouterServiceHandle)
 }
 
 // clearChannel drains any pending events from the channel.

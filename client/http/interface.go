@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -83,6 +84,7 @@ type Client interface {
 	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	DeletePlacementRuleBundleByGroup(context.Context, string) error
 	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
 	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
 	SetPlacementRuleGroup(context.Context, *RuleGroup) error
@@ -125,6 +127,30 @@ type Client interface {
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 	GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error)
+
+	/* Affinity group interfaces */
+
+	// CreateAffinityGroups creates one or more affinity groups with key ranges.
+	// The affinityGroups parameter is a map from group ID to a list of key ranges.
+	// Use options to customize behavior (for example, skipping existing groups).
+	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error)
+	// GetAffinityGroup gets an affinity group by group ID.
+	GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error)
+	// GetAffinityGroups gets affinity groups by group IDs.
+	// When groupIDs is empty, it returns all affinity groups.
+	GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error)
+	// GetAllAffinityGroups gets all affinity groups.
+	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
+	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
+	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// DeleteAffinityGroup deletes an affinity group by group ID.
+	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
+	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
+	BatchDeleteAffinityGroups(ctx context.Context, groupIDs []string, force bool) error
+	// AddAffinityGroupKeyRanges adds key ranges to affinity groups.
+	AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error)
+	// RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.
+	RemoveAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -707,6 +733,14 @@ func (c *client) DeletePlacementRule(ctx context.Context, group, id string) erro
 		WithMethod(http.MethodDelete))
 }
 
+// DeletePlacementRuleBundleByGroup deletes the placement rule bundle by group.
+func (c *client) DeletePlacementRuleBundleByGroup(ctx context.Context, group string) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePlacementRuleBundleByGroupName).
+		WithURI(PlacementRuleBundleByGroup(group)).
+		WithMethod(http.MethodDelete))
+}
+
 // GetAllPlacementRuleGroups gets all placement rule groups.
 func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
 	var ruleGroups []*RuleGroup
@@ -1212,4 +1246,225 @@ func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (strin
 		return msg, err
 	}
 	return msg, nil
+}
+
+type createAffinityGroupsOptions struct {
+	skipExistCheck bool
+}
+
+// CreateAffinityGroupsOption customizes CreateAffinityGroups behavior.
+type CreateAffinityGroupsOption func(*createAffinityGroupsOptions)
+
+// WithSkipExistCheck skips existing groups and creates the rest.
+func WithSkipExistCheck() CreateAffinityGroupsOption {
+	return func(opts *createAffinityGroupsOptions) {
+		if opts == nil {
+			return
+		}
+		opts.skipExistCheck = true
+	}
+}
+
+// CreateAffinityGroups creates one or more affinity groups with key ranges.
+func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error) {
+	options := &createAffinityGroupsOptions{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(options)
+	}
+
+	reqGroups := make(map[string]CreateAffinityGroupInput, len(affinityGroups))
+	for groupID, ranges := range affinityGroups {
+		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges}
+	}
+	req := CreateAffinityGroupsRequest{AffinityGroups: reqGroups}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	uri := AffinityGroups
+	if options.skipExistCheck {
+		uri = AffinityGroups + "?skip_exist_check=true"
+	}
+	err = c.request(ctx, newRequestInfo().
+		WithName("CreateAffinityGroups").
+		WithURI(uri).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// GetAffinityGroup gets an affinity group by group ID.
+func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
+	var state AffinityGroupState
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroup").
+		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithMethod(http.MethodGet).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// GetAffinityGroups gets affinity groups by group IDs.
+// When groupIDs is empty, it returns all affinity groups.
+func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error) {
+	if len(groupIDs) == 0 {
+		return c.GetAllAffinityGroups(ctx)
+	}
+
+	var query strings.Builder
+	for i, id := range groupIDs {
+		if i > 0 {
+			query.WriteByte('&')
+		}
+		query.WriteString("ids=")
+		query.WriteString(url.QueryEscape(id))
+	}
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroups").
+		WithURI(fmt.Sprintf("%s?%s", AffinityGroups, query.String())).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// GetAllAffinityGroups gets all affinity groups.
+func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error) {
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAllAffinityGroups").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
+func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPeersRequest{
+		LeaderStoreID: leaderStoreID,
+		VoterStoreIDs: voterStoreIDs,
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPeers").
+		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithMethod(http.MethodPut).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// DeleteAffinityGroup deletes an affinity group by group ID.
+func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
+	uri := fmt.Sprintf(AffinityGroupByID, groupID)
+	if force {
+		uri = fmt.Sprintf("%s?force=true", uri)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName("DeleteAffinityGroup").
+		WithURI(uri).
+		WithMethod(http.MethodDelete))
+}
+
+// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
+func (c *client) BatchDeleteAffinityGroups(ctx context.Context, groupIDs []string, force bool) error {
+	req := BatchDeleteAffinityGroupsRequest{
+		IDs:   groupIDs,
+		Force: force,
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	// Use POST with ?delete query parameter for batch deletion
+	url := AffinityGroups + "?delete"
+	return c.request(ctx, newRequestInfo().
+		WithName("BatchDeleteAffinityGroups").
+		WithURI(url).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON))
+}
+
+// AddAffinityGroupKeyRanges adds key ranges to affinity groups.
+func (c *client) AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
+	// Convert to the request format
+	add := make([]GroupRangesModification, 0, len(groupKeyRanges))
+	for groupID, ranges := range groupKeyRanges {
+		add = append(add, GroupRangesModification{
+			ID:     groupID,
+			Ranges: ranges,
+		})
+	}
+	req := BatchModifyAffinityGroupsRequest{Add: add}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("AddAffinityGroupKeyRanges").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.
+func (c *client) RemoveAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
+	// Convert to the request format
+	remove := make([]GroupRangesModification, 0, len(groupKeyRanges))
+	for groupID, ranges := range groupKeyRanges {
+		remove = append(remove, GroupRangesModification{
+			ID:     groupID,
+			Ranges: ranges,
+		})
+	}
+	req := BatchModifyAffinityGroupsRequest{Remove: remove}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("RemoveAffinityGroupKeyRanges").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
 }

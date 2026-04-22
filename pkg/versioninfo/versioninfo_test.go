@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,28 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package assertutil
+package versioninfo
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestNilFail(t *testing.T) {
+func TestIsHotScheduleWithCPUSupported(t *testing.T) {
 	re := require.New(t)
-	var failErr error
-	checker := NewChecker()
-	checker.FailNow = func() {
-		failErr = errors.New("called assert func not exist")
+	re.False(IsHotScheduleWithCPUSupported(nil))
+
+	tests := []struct {
+		version string
+		expect  bool
+	}{
+		{"8.5.5", false},
+		{"8.5.6", false},
+		{"8.5.7", true},
+		{"9.0.0-beta.1", true},
+		{"9.0.0", true},
+		{"9.1.0", true},
 	}
-	re.Nil(checker.IsNil)
-	checker.AssertNil(nil)
-	re.Error(failErr)
+	for _, test := range tests {
+		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
+	}
 }

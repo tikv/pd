@@ -77,6 +77,7 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
+	stream = newTsoMetricsStream(stream)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
@@ -133,7 +134,12 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	allocator, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if request.GetModRevision() > modRevision {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
+		}, nil
+	}
 	if err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
@@ -171,6 +177,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			SplitState: splitState,
 			Members:    members,
 		},
+		ModRevision: modRevision,
 	}, nil
 }
 

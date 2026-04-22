@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
@@ -71,6 +72,7 @@ type Cluster struct {
 	ruleManager       *placement.RuleManager
 	keyRangeManager   *keyrange.Manager
 	labelerManager    *labeler.RegionLabeler
+	affinityManager   *affinity.Manager
 	regionStats       *statistics.RegionStatistics
 	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
@@ -122,6 +124,11 @@ func NewCluster(
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
+	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -129,6 +136,7 @@ func NewCluster(
 		ruleManager:       ruleManager,
 		keyRangeManager:   keyrange.NewManager(),
 		labelerManager:    labelerManager,
+		affinityManager:   affinityManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
@@ -201,6 +209,11 @@ func (c *Cluster) GetKeyRangeManager() *keyrange.Manager {
 // GetRegionLabeler returns the region labeler.
 func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.labelerManager
+}
+
+// GetAffinityManager returns the affinity manager.
+func (c *Cluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetRegionSplitter returns the region splitter.
@@ -355,6 +368,10 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			// Skip the scheduler if it is disabled.
+			if scheduler.Disable {
+				continue
+			}
 			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
 			if !ok {
 				log.Error("scheduler not found", zap.String("type", scheduler.Type))
@@ -392,13 +409,14 @@ func (c *Cluster) updateScheduler() {
 				zap.String("scheduler-name", name),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
-		// Remove the deleted schedulers.
+		// Remove the deleted schedulers or disabled schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
-			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == oldType
-			}) {
+			shouldKeep := slice.AnyOf(latestSchedulersConfig, func(i int) bool {
+				return latestSchedulersConfig[i].Type == oldType && !latestSchedulersConfig[i].Disable
+			})
+			if shouldKeep {
 				continue
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
@@ -481,6 +499,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			continue
 		}
 		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+		regionReadCPU := statistics.RegionReadCPUUsage(peerStat)
 		loads := []float64{
 			utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
 			utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
@@ -488,6 +507,8 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteBytes:    0,
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
+			utils.RegionReadCPU:       regionReadCPU * float64(interval),
+			utils.RegionWriteCPU:      0,
 		}
 		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
 			stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
@@ -791,20 +812,7 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
-		old := region.GetBuckets()
-		// region should not update if the version of the buckets is less than the old one.
-		if old != nil {
-			reportVersion := buckets.GetVersion()
-			if reportVersion < old.GetVersion() {
-				return nil
-			} else if reportVersion == old.GetVersion() {
-				return nil
-			}
-		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
-		if ok := region.UpdateBuckets(buckets, old); ok {
+		if success := region.CompareAndSetReportBuckets(buckets); success {
 			return nil
 		}
 	}

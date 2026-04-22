@@ -498,9 +498,10 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 	)
 retryLoop:
 	for range gc.mainCfg.WaitRetryTimes {
+		counter := gc.run.requestUnitTokens
+		reconfiguredCh := counter.limiter.GetReconfiguredCh()
 		now := time.Now()
 		var res *Reservation
-		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			// record the consume token histogram if enable controller debug mode.
 			if enableControllerTraceLog.Load() {
@@ -517,8 +518,28 @@ retryLoop:
 			break retryLoop
 		}
 		gc.metrics.requestRetryCounter.Inc()
-		time.Sleep(gc.mainCfg.WaitRetryInterval)
-		*waitDuration += gc.mainCfg.WaitRetryInterval
+		waitStart := time.Now()
+		waitTimer := time.NewTimer(gc.mainCfg.WaitRetryInterval)
+		select {
+		case <-ctx.Done():
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
+			*waitDuration += time.Since(waitStart)
+			return d, ctx.Err()
+		case <-reconfiguredCh:
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
+		case <-waitTimer.C:
+		}
+		*waitDuration += time.Since(waitStart)
 	}
 	return d, err
 }
@@ -648,6 +669,14 @@ func (gc *groupCostController) onResponseWaitImpl(
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
+}
+
+func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
+	gc.mu.Lock()
+	gc.mu.consumption.TikvRUV2 += tikvRUV2
+	gc.mu.consumption.TidbRUV2 += tidbRUV2
+	gc.mu.consumption.TiflashRUV2 += tiflashRUV2
 	gc.mu.Unlock()
 }
 

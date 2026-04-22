@@ -131,7 +131,8 @@ func (a *Allocator) allocatorUpdater() {
 				continue
 			}
 			if err := a.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
+				log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
+					append(a.logFields, errs.ZapError(err))...)
 				a.Reset(true)
 				// To wait for the allocator to be re-initialized next time.
 				continue
@@ -166,16 +167,20 @@ func (a *Allocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (a *Allocator) UpdateTSO() (err error) {
+	var overflowed bool
 	for i := range maxUpdateTSORetryCount {
-		err = a.timestampOracle.updateTimestamp()
+		overflowed, err = a.timestampOracle.updateTimestamp(intervalUpdate)
 		if err == nil {
 			return nil
 		}
 		log.Warn("try to update the tso but failed",
-			zap.Int("retry-count", i), zap.Duration("retry-interval", updateTSORetryInterval), errs.ZapError(err))
+			zap.Int("retry-count", i),
+			zap.Duration("retry-interval", updateTSORetryInterval),
+			zap.Bool("overflowed", overflowed),
+			errs.ZapError(err))
 		time.Sleep(updateTSORetryInterval)
 	}
-	return
+	return err
 }
 
 // SetTSO sets the physical part with given TSO.

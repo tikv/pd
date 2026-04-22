@@ -187,11 +187,14 @@ func getMetric(cli api.Client, query string, ts time.Time) ([]float64, error) {
 }
 
 func formatMetrics(ms []metric) string {
-	res := ""
-	for _, m := range ms {
-		res += "[" + m.name + "]" + " " + fmt.Sprintf("%.10f", m.value) + " "
+	if len(ms) == 0 {
+		return ""
 	}
-	return res
+	var builder strings.Builder
+	for _, m := range ms {
+		fmt.Fprintf(&builder, "[%s] %.10f ", m.name, m.value)
+	}
+	return builder.String()
 }
 
 // CollectRegionAndStoreStats collects the region and store stats

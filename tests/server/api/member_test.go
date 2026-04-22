@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strings"
@@ -84,7 +84,7 @@ func (suite *memberTestSuite) checkMemberLeader(cluster *tests.TestCluster) {
 		addrs = append(addrs, svr.GetAddr()+api.APIPrefix+"/api/v1/leader")
 	}
 
-	addr := addrs[rand.Intn(len(addrs))]
+	addr := addrs[rand.IntN(len(addrs))]
 	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -110,7 +110,7 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 		addrs = append(addrs, svr.GetAddr()+api.APIPrefix+"/api/v1/leader")
 	}
 
-	addr := addrs[rand.Intn(len(addrs))]
+	addr := addrs[rand.IntN(len(addrs))]
 	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -127,7 +127,7 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 	for _, svr := range svrs {
 		addrs1 = append(addrs1, svr.GetAddr()+api.APIPrefix+"/api/v1/members")
 	}
-	addr = addrs1[rand.Intn(len(addrs1))]
+	addr = addrs1[rand.IntN(len(addrs1))]
 	resp, err = tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)

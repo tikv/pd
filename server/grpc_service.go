@@ -476,6 +476,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
+	stream = newTsoMetricsStream(stream)
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -484,6 +485,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		defer done()
 	}
 	if s.IsServiceIndependent(constant.TSOServiceName) {
+		tsoForwardStreamCounter.Inc()
 		return s.forwardToTSOService(stream)
 	}
 
@@ -584,6 +586,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
+		tsoBatchSize.Observe(float64(count))
 		ctx, task := trace.NewTask(ctx, "tso")
 		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
@@ -820,6 +823,13 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
+	// Validate engine label value
+	if err := core.ValidateStoreEngineKey(store); err != nil {
+		return &pdpb.PutStoreResponse{
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE, err.Error()),
+		}, nil
+	}
+
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return &pdpb.PutStoreResponse{
@@ -1051,6 +1061,7 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
+	stream = newReportBucketsMetricsStream(stream)
 	var (
 		server                      = &bucketHeartbeatServer{stream: stream}
 		forwardStream               pdpb.PD_ReportBucketsClient
@@ -1230,9 +1241,10 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
+	stream = newRegionHeartbeatMetricsStream(stream)
 	var (
 		server                      = &heartbeatServer{stream: stream}
-		flowRoundDivisor            = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+		flowRoundDivisor            = core.GetFlowRoundDivisorByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 		cancel                      context.CancelFunc
 		lastBind                    time.Time
 		errCh                       chan error
@@ -1325,7 +1337,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "bind").Inc()
 			s.hbStreams.BindStream(storeID, server)
 			// refresh FlowRoundByDigit
-			flowRoundDivisor = s.persistOptions.GetPDServerConfig().FlowRoundByDigit
+			flowRoundDivisor = core.GetFlowRoundDivisorByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
 			lastBind = time.Now()
 		}
 
@@ -1530,7 +1542,6 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
-
 	defer func() {
 		grpcutil.RequestCounter("GetRegionByID", request.Header, resp.Header.Error, regionRequestCounter)
 	}()
@@ -1544,6 +1555,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 
 // QueryRegion provides a stream processing of the region query.
 func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	stream = newQueryRegionMetricsStream(stream)
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -1590,6 +1602,9 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 				continue
 			}
 		}
+		failpoint.Inject("queryRegionMetError", func() {
+			failpoint.Return(errs.ErrNotBootstrapped.FastGenByArgs())
+		})
 		start := time.Now()
 		request.NeedBuckets = s.member.IsServing() && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 		resp := grpcutil.QueryRegion(rc.GetBasicCluster(), request)
@@ -1602,6 +1617,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 }
 
 // ScanRegions implements gRPC PDServer.
+//
 // Deprecated: use BatchScanRegions instead.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (resp *pdpb.ScanRegionsResponse, err error) {
 	done, err := s.rateLimitCheck()
@@ -2022,6 +2038,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
+	stream = newSyncRegionsMetricsStream(stream)
 	if s.IsClosed() || s.cluster == nil {
 		return errs.ErrNotStarted
 	}
@@ -2442,6 +2459,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
+	server = newWatchGlobalConfigMetricsStream(server)
 	if s.client == nil {
 		return errs.ErrEtcdNotStarted
 	}

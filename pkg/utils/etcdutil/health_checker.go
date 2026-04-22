@@ -70,14 +70,14 @@ func initHealthChecker(
 	tickerInterval time.Duration,
 	tlsConfig *tls.Config,
 	client *clientv3.Client,
-	source string,
+	purpose EtcdClientPurpose,
 ) {
 	healthChecker := &healthChecker{
-		source:             source,
+		source:             string(purpose),
 		tickerInterval:     tickerInterval,
 		tlsConfig:          tlsConfig,
 		client:             client,
-		endpointCountState: etcdStateGauge.WithLabelValues(source, endpointLabel),
+		endpointCountState: etcdStateGauge.WithLabelValues(string(purpose), endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()

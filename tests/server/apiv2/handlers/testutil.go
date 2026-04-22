@@ -152,6 +152,24 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 	return meta.KeyspaceMeta
 }
 
+func tryUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta) {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, string(data), nil
+	}
+	meta := &handlers.KeyspaceMeta{}
+	re.NoError(json.Unmarshal(data, meta))
+	return resp.StatusCode, string(data), meta.KeyspaceMeta
+}
+
 func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
 	resp, err := tests.TestDialClient.Get(server.GetAddr() + keyspacesPrefix + "/" + name)
 	re.NoError(err)

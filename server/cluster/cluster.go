@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,6 +54,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -84,11 +86,6 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
-	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
-	versionStaleCounter           = bucketEventCounter.WithLabelValues("version_stale")
-	versionNotChangeCounter       = bucketEventCounter.WithLabelValues("version_no_change")
-	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
-	updateSuccessCounter          = bucketEventCounter.WithLabelValues("update_success")
 )
 
 const (
@@ -111,8 +108,6 @@ const (
 	regionLabelGCInterval = time.Hour
 	// storageSizeCollectorInterval is the interval to run storage size collector.
 	storageSizeCollectorInterval = time.Minute
-	// dfsStatsCollectorInterval is the interval to run store stats collector.
-	dfsStatsCollectorInterval = time.Minute
 
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
@@ -123,6 +118,12 @@ const (
 	miscTaskRunner       = "misc-async"
 	logTaskRunner        = "log-async"
 	syncRegionTaskRunner = "sync-region-async"
+)
+
+const (
+	tsoDynamicSwitchingStateUnknown int32 = iota
+	tsoDynamicSwitchingStateEnabled
+	tsoDynamicSwitchingStateDisabled
 )
 
 // Server is the interface for cluster.
@@ -164,12 +165,13 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running                bool
-	isKeyspaceGroupEnabled bool
-	meta                   *metapb.Cluster
-	storage                storage.Storage
-	minResolvedTS          atomic.Value // Store as uint64
-	externalTS             atomic.Value // Store as uint64
+	running                  bool
+	isKeyspaceGroupEnabled   bool
+	tsoDynamicSwitchingState atomic.Int32
+	meta                     *metapb.Cluster
+	storage                  storage.Storage
+	minResolvedTS            atomic.Value // Store as uint64
+	externalTS               atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit sync.Map // map[uint64]map[storelimit.Type]float64
@@ -181,6 +183,7 @@ type RaftCluster struct {
 	ruleManager              *placement.RuleManager
 	keyRangeManager          *keyrange.Manager
 	regionLabeler            *labeler.RegionLabeler
+	affinityManager          *affinity.Manager
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
 	progressManager          *progress.Manager
@@ -331,6 +334,15 @@ func (c *RaftCluster) InitCluster(
 
 // Start starts a cluster.
 func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
+	start := time.Now()
+	defer func() {
+		startType := "non-bootstrap"
+		if bootstrap {
+			startType = "bootstrap"
+		}
+		raftClusterStartDuration.WithLabelValues(startType).Observe(time.Since(start).Seconds())
+	}()
+
 	c.Lock()
 	defer c.Unlock()
 
@@ -339,15 +351,22 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		return nil
 	}
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
+	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
+		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
 		return err
 	}
+	initClusterDuration := time.Since(initClusterStart)
+	log.Info("initialize cluster completed", zap.Duration("cost", initClusterDuration))
 	// We should not manage tso service when bootstrap try to start raft cluster.
 	// It only is controlled by leader election.
 	// Ref: https://github.com/tikv/pd/issues/8836
 	if !bootstrap {
+		checkTSOStart := time.Now()
 		c.checkTSOService()
+		checkTSODuration := time.Since(checkTSOStart)
+		log.Info("check TSO service completed", zap.Duration("cost", checkTSODuration))
 	}
 	defer func() {
 		if !bootstrap && err != nil {
@@ -362,49 +381,84 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 		failpoint.Return(err)
 	})
+	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
+		log.Warn("failed to load cluster info", errs.ZapError(err), zap.Duration("cost", time.Since(loadClusterInfoStart)))
 		return err
 	}
 	if cluster == nil {
-		log.Warn("cluster is not bootstrapped")
+		loadClusterInfoDuration := time.Since(loadClusterInfoStart)
+		log.Warn("cluster is not bootstrapped", zap.Duration("cost", loadClusterInfoDuration))
 		return nil
 	}
 	if c.opt.IsPlacementRulesEnabled() {
+		ruleInitStart := time.Now()
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
+			log.Warn("failed to initialize placement rules", errs.ZapError(err), zap.Duration("cost", time.Since(ruleInitStart)))
 			return err
 		}
+		log.Info("initialize placement rules completed", zap.Duration("cost", time.Since(ruleInitStart)))
 	}
-
+	loadClusterInfoDuration := time.Since(loadClusterInfoStart)
+	log.Info("load cluster info completed", zap.Duration("cost", loadClusterInfoDuration))
+	labelerStart := time.Now()
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
+	labelerDuration := time.Since(labelerStart)
+	if err != nil {
+		log.Warn("region labeler creation failed", zap.Error(err), zap.Duration("cost", labelerDuration))
+		return err
+	}
+	log.Info("region labeler created", zap.Duration("cost", labelerDuration))
+
+	// create affinity manager with region labeler for key range validation and rebuild
+	c.affinityManager, err = affinity.NewManager(c.ctx, c.storage, c, c.GetOpts(), c.regionLabeler)
 	if err != nil {
 		return err
 	}
 
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		observeSlowStoreStart := time.Now()
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
 		}
+		log.Info("observe slow store status completed", zap.Duration("cost", time.Since(observeSlowStoreStart)))
 	}
+	replicationModeStart := time.Now()
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
+		log.Warn("failed to create replication mode manager", errs.ZapError(err), zap.Duration("cost", time.Since(replicationModeStart)))
 		return err
 	}
+	replicationModeDuration := time.Since(replicationModeStart)
+	log.Info("create replication mode manager completed", zap.Duration("cost", replicationModeDuration))
+	loadExternalTSStart := time.Now()
 	c.loadExternalTS()
+	log.Info("load external timestamp completed", zap.Duration("cost", time.Since(loadExternalTSStart)))
+	loadMinResolvedTSStart := time.Now()
 	c.loadMinResolvedTS()
+	log.Info("load min resolved ts completed", zap.Duration("cost", time.Since(loadMinResolvedTSStart)))
 
 	if c.isKeyspaceGroupEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
+		log.Info("start to bootstrap keyspace group manager")
+		bootstrapKeyspaceStart := time.Now()
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
 		if err != nil {
+			log.Warn("failed to bootstrap keyspace group manager", errs.ZapError(err), zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 			return err
 		}
+		log.Info("bootstrap keyspace group manager completed", zap.Duration("cost", time.Since(bootstrapKeyspaceStart)))
 	}
+	checkSchedulingStart := time.Now()
 	c.checkSchedulingService()
-	c.wg.Add(12)
+	checkSchedulingDuration := time.Since(checkSchedulingStart)
+	log.Info("check scheduling service completed", zap.Duration("cost", checkSchedulingDuration))
+	backgroundJobsStart := time.Now()
+	c.wg.Add(11)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -416,13 +470,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
-	go c.runDFSStatsCollector(s.GetMeteringWriter(), s.GetKeyspaceManager())
-
+	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
+	runnersStart := time.Now()
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
 	c.syncRegionRunner.Start(c.ctx)
+	log.Info("start runners completed", zap.Duration("cost", time.Since(runnersStart)))
 	return nil
 }
 
@@ -456,6 +511,10 @@ func (c *RaftCluster) checkSchedulingService() {
 func (c *RaftCluster) checkTSOService() {
 	if c.isKeyspaceGroupEnabled {
 		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateEnabled)
+			if prev == tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is enabled, resuming TSO service checks")
+			}
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -472,6 +531,11 @@ func (c *RaftCluster) checkTSOService() {
 					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
 				}
+			}
+		} else {
+			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateDisabled)
+			if prev != tsoDynamicSwitchingStateDisabled {
+				log.Info("TSO dynamic switching is disabled by config, skipping TSO service checks")
 			}
 		}
 		return
@@ -540,7 +604,7 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	if !c.tsoAllocator.IsInitialize() {
 		return
 	}
-	log.Info("closing the TSO allocator")
+	log.Info("closing the embedded TSO allocator")
 	c.tsoAllocator.Reset(false)
 	failpoint.Inject("updateAfterResetTSO", func() {
 		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
@@ -685,7 +749,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		// filter out the stores that are tiflash
 		store := stores[index]
-		if store.IsTiFlash() {
+		if !store.IsTiKV() {
 			continue
 		}
 
@@ -985,6 +1049,11 @@ func (c *RaftCluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.regionLabeler
 }
 
+// GetAffinityManager returns the affinity manager reference.
+func (c *RaftCluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
+}
+
 // GetStorage returns the storage.
 func (c *RaftCluster) GetStorage() storage.Storage {
 	return c.storage
@@ -1118,6 +1187,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				continue
 			}
 			readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+			regionReadCPU := statistics.RegionReadCPUUsage(peerStat)
 			loads := []float64{
 				utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
 				utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
@@ -1125,6 +1195,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteBytes:    0,
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
+				utils.RegionReadCPU:       regionReadCPU * float64(interval),
+				utils.RegionWriteCPU:      0,
 			}
 			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
 				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
@@ -1171,7 +1243,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		regionCacheMissCounter.Inc()
+		core.RegionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	// use CAS to update the bucket information.
@@ -1179,27 +1251,12 @@ func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
-		old := region.GetBuckets()
-		// region should not update if the version of the buckets is less than the old one.
-		if old != nil {
-			reportVersion := buckets.GetVersion()
-			if reportVersion < old.GetVersion() {
-				versionStaleCounter.Inc()
-				return nil
-			} else if reportVersion == old.GetVersion() {
-				versionNotChangeCounter.Inc()
-				return nil
-			}
-		}
-		failpoint.Inject("concurrentBucketHeartbeat", func() {
-			time.Sleep(500 * time.Millisecond)
-		})
-		if ok := region.UpdateBuckets(buckets, old); ok {
-			updateSuccessCounter.Inc()
+		if success := region.CompareAndSetReportBuckets(buckets); success {
+			core.UpdateSuccessCounter.Inc()
 			return nil
 		}
 	}
-	updateFailedCounter.Inc()
+	core.UpdateFailedCounter.Inc()
 	return nil
 }
 
@@ -1527,7 +1584,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		return errs.ErrStoreDestroyed.FastGenByArgs(storeID)
 	}
 	if (store.IsPreparing() || store.IsServing()) && !physicallyDestroyed {
-		if err := c.checkReplicaBeforeOfflineStore(storeID); err != nil {
+		if err := c.checkTikvReplicaBeforeOfflineStore(storeID); err != nil {
 			return err
 		}
 	}
@@ -1555,8 +1612,20 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	return nil
 }
 
-func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
-	upStores := c.getUpStores()
+func (c *RaftCluster) checkTikvReplicaBeforeOfflineStore(storeID uint64) error {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+
+	// Only TiKV stores participate in Raft voting and affect replica count.
+	// Non-TiKV stores (e.g., TiFlash) use learners and can be removed without
+	// affecting Raft replica validation.
+	if !store.IsTiKV() {
+		return nil
+	}
+
+	upStores := c.getUpTikvStores()
 	expectUpStoresNum := len(upStores) - 1
 	if expectUpStoresNum < c.opt.GetMaxReplicas() {
 		return errs.ErrStoresNotEnough.FastGenByArgs(storeID, expectUpStoresNum, c.opt.GetMaxReplicas())
@@ -1590,9 +1659,13 @@ func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
 	return nil
 }
 
-func (c *RaftCluster) getUpStores() []uint64 {
+// getUpTikvStores gets all up TiKV stores.
+func (c *RaftCluster) getUpTikvStores() []uint64 {
 	upStores := make([]uint64, 0)
 	for _, store := range c.GetStores() {
+		if !store.IsTiKV() {
+			continue
+		}
 		if store.IsUp() {
 			upStores = append(upStores, store.GetID())
 		}
@@ -1984,15 +2057,12 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 				zap.Stringer("store", store.GetMeta()))
 		}
 	}
-	var stores string
 	if len(failedStores) != 0 {
-		for i, storeID := range failedStores {
-			stores += strconv.FormatUint(storeID, 10)
-			if i != len(failedStores)-1 {
-				stores += ", "
-			}
+		ids := make([]string, 0, len(failedStores))
+		for _, storeID := range failedStores {
+			ids = append(ids, strconv.FormatUint(storeID, 10))
 		}
-		return errors.Errorf("failed stores: %v", stores)
+		return errors.Errorf("failed stores: %v", strings.Join(ids, ", "))
 	}
 	return nil
 }
@@ -2004,6 +2074,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	statistics.DeleteClusterStatusMetrics(store)
 	c.DeleteStore(store)
 	return nil
 }
@@ -2410,6 +2481,7 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	c.refreshStoreRateLimit(storeID, typ)
 	log.Info("store limit changed", zap.Uint64("store-id", storeID), zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
 }
@@ -2428,13 +2500,29 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}
+	for _, storeID := range c.GetStoreIDs() {
+		c.refreshStoreRateLimit(storeID, typ)
+	}
 	log.Info("all store limit changed", zap.String("type", typ.String()), zap.Float64("rate-per-min", ratePerMin))
 	return nil
 }
 
-// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
-	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
+// refreshStoreRateLimit applies the schedule config's store limit to the in-memory store limiter.
+func (c *RaftCluster) refreshStoreRateLimit(storeID uint64, limitType storelimit.Type) {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return
+	}
+	limit, ok := store.GetStoreLimit().(*storelimit.StoreRateLimit)
+	if !ok {
+		return
+	}
+	// Schedule config stores the unit in rate-per-minute, but limiter uses rate-per-second.
+	const storeBalanceBaseTime = float64(60)
+	ratePerSec := c.opt.GetStoreLimitByType(storeID, limitType) / storeBalanceBaseTime
+	if limit.Rate(limitType) != ratePerSec {
+		c.ResetStoreLimit(storeID, limitType, ratePerSec)
+	}
 }
 
 // GetClusterVersion returns the current cluster version.
@@ -2650,96 +2738,4 @@ func (c *RaftCluster) collectStorageSize(
 		zap.Duration("cost", time.Since(start)),
 		zap.Int("count", len(storageSizeInfoList)))
 	return storageSizeInfoList
-}
-
-// runDFSStatsCollector runs the DFS (Distributed File System) stats collector for the metering.
-func (c *RaftCluster) runDFSStatsCollector(
-	writer *metering.Writer,
-	keyspaceManager *keyspace.Manager,
-) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-
-	if writer == nil {
-		log.Info("no metering writer provided, the dfs stats collector will not be started")
-		return
-	}
-	log.Info("running the dfs stats collector")
-	// Init and register the collector before starting the loop.
-	collector := newDfsStatsCollector()
-	writer.RegisterCollector(collector)
-	// Start the ticker to collect the DFS stats data periodically.
-	ticker := time.NewTicker(dfsStatsCollectorInterval)
-	defer ticker.Stop()
-
-	var start time.Time
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("dfs stats collector has been stopped")
-			return
-		case <-ticker.C:
-			start = time.Now()
-			keyspaceDFSStats, storeCount := c.collectDFSStats(keyspaceManager)
-			log.Info("collected the incremental dfs stats from all stores",
-				zap.Duration("cost", time.Since(start)),
-				zap.Int("keyspace-dfs-stats-count", len(keyspaceDFSStats)),
-				zap.Int("collected-store-count", storeCount))
-			collector.Collect(keyspaceDFSStats)
-		}
-	}
-}
-
-type keyspaceDFSStatsKey struct {
-	keyspaceName string
-	component    string
-}
-
-type keyspaceDFSStatsMap map[keyspaceDFSStatsKey]*core.DFSStats
-
-func (c *RaftCluster) collectDFSStats(keyspaceManager *keyspace.Manager) (keyspaceDFSStatsMap, int) {
-	var (
-		keyspaceDFSStats = make(keyspaceDFSStatsMap, 0)
-		storeCount       = 0
-		keyspaceName     string
-		err              error
-	)
-	for _, store := range c.GetStores() {
-		scopedDFSStats := store.TakeScopedDFSStats()
-		if len(scopedDFSStats) == 0 {
-			continue
-		}
-		storeCount++
-		log.Info("collected the scoped dfs stats from the store",
-			zap.Uint64("store-id", store.GetID()),
-			zap.Int("collected-store-count", storeCount),
-			zap.Int("scoped-dfs-stats-count", len(scopedDFSStats)))
-		// Merge into the keyspace DFS stats.
-		for scope, stats := range scopedDFSStats {
-			// Set the keyspace name to empty string for global scope.
-			if scope.GetIsGlobal() {
-				keyspaceName = ""
-			} else {
-				keyspaceName, err = keyspaceManager.GetEnabledKeyspaceNameByID(scope.GetKeyspaceId())
-				if err != nil {
-					continue
-				}
-			}
-			key := keyspaceDFSStatsKey{
-				keyspaceName: keyspaceName,
-				component:    scope.GetComponent(),
-			}
-			dfsStats, ok := keyspaceDFSStats[key]
-			if ok {
-				dfsStats.WrittenBytes += stats.WrittenBytes
-				dfsStats.WriteRequests += stats.WriteRequests
-			} else {
-				keyspaceDFSStats[key] = &core.DFSStats{
-					WrittenBytes:  stats.WrittenBytes,
-					WriteRequests: stats.WriteRequests,
-				}
-			}
-		}
-	}
-	return keyspaceDFSStats, storeCount
 }

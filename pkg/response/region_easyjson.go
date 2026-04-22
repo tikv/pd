@@ -32,16 +32,19 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse(in *jlexer.Lexer, out *Rep
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "state":
-			out.State = string(in.String())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.State = string(in.String())
+			}
 		case "state_id":
-			out.StateID = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.StateID = uint64(in.Uint64())
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -52,7 +55,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse(in *jlexer.Lexer, out *Rep
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in *ReplicationStatus) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in ReplicationStatus) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -70,14 +73,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(out *jwriter.Writer, in *R
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v *ReplicationStatus) MarshalJSON() ([]byte, error) {
+func (v ReplicationStatus) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v *ReplicationStatus) MarshalEasyJSON(w *jwriter.Writer) {
+func (v ReplicationStatus) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse(w, v)
 }
 
@@ -105,14 +108,13 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse1(in *jlexer.Lexer, out *Re
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "count":
-			out.Count = int(in.Int())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.Count = int(in.Int())
+			}
 		case "regions":
 			if in.IsNull() {
 				in.Skip()
@@ -130,7 +132,11 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse1(in *jlexer.Lexer, out *Re
 				}
 				for !in.IsDelim(']') {
 					var v1 RegionInfo
-					(v1).UnmarshalEasyJSON(in)
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v1).UnmarshalEasyJSON(in)
+					}
 					out.Regions = append(out.Regions, v1)
 					in.WantComma()
 				}
@@ -146,7 +152,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse1(in *jlexer.Lexer, out *Re
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in *RegionsInfo) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in RegionsInfo) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -175,14 +181,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(out *jwriter.Writer, in *
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v *RegionsInfo) MarshalJSON() ([]byte, error) {
+func (v RegionsInfo) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v *RegionsInfo) MarshalEasyJSON(w *jwriter.Writer) {
+func (v RegionsInfo) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse1(w, v)
 }
 
@@ -210,18 +216,25 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "id":
-			out.ID = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ID = uint64(in.Uint64())
+			}
 		case "start_key":
-			out.StartKey = string(in.String())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.StartKey = string(in.String())
+			}
 		case "end_key":
-			out.EndKey = string(in.String())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.EndKey = string(in.String())
+			}
 		case "epoch":
 			if in.IsNull() {
 				in.Skip()
@@ -249,14 +262,22 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 				}
 				for !in.IsDelim(']') {
 					var v4 MetaPeer
-					(v4).UnmarshalEasyJSON(in)
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v4).UnmarshalEasyJSON(in)
+					}
 					out.Peers = append(out.Peers, v4)
 					in.WantComma()
 				}
 				in.Delim(']')
 			}
 		case "leader":
-			(out.Leader).UnmarshalEasyJSON(in)
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				(out.Leader).UnmarshalEasyJSON(in)
+			}
 		case "down_peers":
 			if in.IsNull() {
 				in.Skip()
@@ -274,7 +295,11 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 				}
 				for !in.IsDelim(']') {
 					var v5 PDPeerStats
-					(v5).UnmarshalEasyJSON(in)
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v5).UnmarshalEasyJSON(in)
+					}
 					out.DownPeers = append(out.DownPeers, v5)
 					in.WantComma()
 				}
@@ -297,28 +322,70 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 				}
 				for !in.IsDelim(']') {
 					var v6 MetaPeer
-					(v6).UnmarshalEasyJSON(in)
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						(v6).UnmarshalEasyJSON(in)
+					}
 					out.PendingPeers = append(out.PendingPeers, v6)
 					in.WantComma()
 				}
 				in.Delim(']')
 			}
 		case "cpu_usage":
-			out.CPUUsage = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.CPUUsage = uint64(in.Uint64())
+			}
 		case "written_bytes":
-			out.WrittenBytes = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.WrittenBytes = uint64(in.Uint64())
+			}
 		case "read_bytes":
-			out.ReadBytes = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ReadBytes = uint64(in.Uint64())
+			}
 		case "written_keys":
-			out.WrittenKeys = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.WrittenKeys = uint64(in.Uint64())
+			}
 		case "read_keys":
-			out.ReadKeys = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ReadKeys = uint64(in.Uint64())
+			}
 		case "approximate_size":
-			out.ApproximateSize = int64(in.Int64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ApproximateSize = int64(in.Int64())
+			}
 		case "approximate_keys":
-			out.ApproximateKeys = int64(in.Int64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ApproximateKeys = int64(in.Int64())
+			}
 		case "approximate_kv_size":
-			out.ApproximateKvSize = int64(in.Int64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ApproximateKvSize = int64(in.Int64())
+			}
+		case "approximate_columnar_kv_size":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ApproximateColumnarKvSize = int64(in.Int64())
+			}
 		case "buckets":
 			if in.IsNull() {
 				in.Skip()
@@ -336,14 +403,22 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 				}
 				for !in.IsDelim(']') {
 					var v7 string
-					v7 = string(in.String())
+					if in.IsNull() {
+						in.Skip()
+					} else {
+						v7 = string(in.String())
+					}
 					out.Buckets = append(out.Buckets, v7)
 					in.WantComma()
 				}
 				in.Delim(']')
 			}
 		case "bucket_version":
-			out.BucketVersion = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.BucketVersion = uint64(in.Uint64())
+			}
 		case "replication_status":
 			if in.IsNull() {
 				in.Skip()
@@ -352,7 +427,11 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 				if out.ReplicationStatus == nil {
 					out.ReplicationStatus = new(ReplicationStatus)
 				}
-				(*out.ReplicationStatus).UnmarshalEasyJSON(in)
+				if in.IsNull() {
+					in.Skip()
+				} else {
+					(*out.ReplicationStatus).UnmarshalEasyJSON(in)
+				}
 			}
 		default:
 			in.SkipRecursive()
@@ -364,7 +443,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in *RegionInfo) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in RegionInfo) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -475,6 +554,11 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in *
 		out.RawString(prefix)
 		out.Int64(int64(in.ApproximateKvSize))
 	}
+	{
+		const prefix string = ",\"approximate_columnar_kv_size\":"
+		out.RawString(prefix)
+		out.Int64(int64(in.ApproximateColumnarKvSize))
+	}
 	if len(in.Buckets) != 0 {
 		const prefix string = ",\"buckets\":"
 		out.RawString(prefix)
@@ -503,14 +587,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in *
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v *RegionInfo) MarshalJSON() ([]byte, error) {
+func (v RegionInfo) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v *RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
+func (v RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(w, v)
 }
 
@@ -538,16 +622,19 @@ func easyjson75d7afa0DecodeGithubComPingcapKvprotoPkgMetapb(in *jlexer.Lexer, ou
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "conf_ver":
-			out.ConfVer = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ConfVer = uint64(in.Uint64())
+			}
 		case "version":
-			out.Version = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.Version = uint64(in.Uint64())
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -594,16 +681,19 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse3(in *jlexer.Lexer, out *PD
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "peer":
-			(out.Peer).UnmarshalEasyJSON(in)
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				(out.Peer).UnmarshalEasyJSON(in)
+			}
 		case "down_seconds":
-			out.DownSeconds = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.DownSeconds = uint64(in.Uint64())
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -614,7 +704,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse3(in *jlexer.Lexer, out *PD
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in *PDPeerStats) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in PDPeerStats) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -632,14 +722,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(out *jwriter.Writer, in *
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v *PDPeerStats) MarshalJSON() ([]byte, error) {
+func (v PDPeerStats) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v *PDPeerStats) MarshalEasyJSON(w *jwriter.Writer) {
+func (v PDPeerStats) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse3(w, v)
 }
 
@@ -668,24 +758,43 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse4(in *jlexer.Lexer, out *Me
 	for !in.IsDelim('}') {
 		key := in.UnsafeFieldName(false)
 		in.WantColon()
-		if in.IsNull() {
-			in.Skip()
-			in.WantComma()
-			continue
-		}
 		switch key {
 		case "role_name":
-			out.RoleName = string(in.String())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.RoleName = string(in.String())
+			}
 		case "is_learner":
-			out.IsLearner = bool(in.Bool())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.IsLearner = bool(in.Bool())
+			}
 		case "id":
-			out.Id = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.Id = uint64(in.Uint64())
+			}
 		case "store_id":
-			out.StoreId = uint64(in.Uint64())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.StoreId = uint64(in.Uint64())
+			}
 		case "role":
-			out.Role = metapb.PeerRole(in.Int32())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.Role = metapb.PeerRole(in.Int32())
+			}
 		case "is_witness":
-			out.IsWitness = bool(in.Bool())
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.IsWitness = bool(in.Bool())
+			}
 		default:
 			in.SkipRecursive()
 		}
@@ -696,7 +805,7 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse4(in *jlexer.Lexer, out *Me
 		in.Consumed()
 	}
 }
-func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in *MetaPeer) {
+func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in MetaPeer) {
 	out.RawByte('{')
 	first := true
 	_ = first
@@ -734,14 +843,14 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(out *jwriter.Writer, in *
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v *MetaPeer) MarshalJSON() ([]byte, error) {
+func (v MetaPeer) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(&w, v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v *MetaPeer) MarshalEasyJSON(w *jwriter.Writer) {
+func (v MetaPeer) MarshalEasyJSON(w *jwriter.Writer) {
 	easyjson75d7afa0EncodeGithubComTikvPdPkgResponse4(w, v)
 }
 

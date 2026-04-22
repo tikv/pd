@@ -19,12 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	mrand "math/rand"
+	mrand "math/rand/v2"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -161,7 +162,7 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
@@ -216,11 +217,44 @@ func TestInherit(t *testing.T) {
 		if testCase.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
 			origin.approximateSize = int64(testCase.originSize)
+			origin.approximateKeys = 1
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(testCase.size)
+		r.approximateKeys = 1
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
+	}
+
+	// case for approximateKeys
+	// New logic: keys are only inherited when size==0
+	keysTestCases := []struct {
+		originExists bool
+		originSize   int64
+		originKeys   int64
+		size         int64
+		keys         int64
+		expectKeys   int64
+	}{
+		{false, 0, 0, 0, 0, 0},     // no origin, size=0, keys=0 -> keys remain 0 (size set to 1 only)
+		{false, 0, 0, 1, 0, 0},     // no origin, size=1, keys=0 -> keys remain 0 (no inheritance)
+		{false, 0, 0, 1, 100, 100}, // no origin, size=1, keys=100 -> keys remain 100
+		{true, 1, 50, 1, 100, 100}, // origin exists, size=1, keys=100 -> keys remain 100
+		{true, 10, 100, 0, 0, 100}, // origin exists, size=0, keys=0 -> inherit both (size=10, keys=100)
+		{true, 5, 200, 0, 0, 200},  // origin exists, size=0, keys=0 -> inherit both (size=5, keys=200)
+	}
+	for _, testCase := range keysTestCases {
+		var origin *RegionInfo
+		if testCase.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = testCase.originSize
+			origin.approximateKeys = testCase.originKeys
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = testCase.size
+		r.approximateKeys = testCase.keys
+		r.Inherit(origin, false)
+		re.Equal(testCase.expectKeys, r.approximateKeys)
 	}
 
 	// bucket
@@ -234,7 +268,8 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.UpdateBuckets(d.originBuckets, nil)
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
@@ -245,6 +280,28 @@ func TestInherit(t *testing.T) {
 			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
 		}
 	}
+
+	origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	origin.reportBuckets = unsafe.Pointer(&metapb.Buckets{
+		Version: 1,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	})
+
+	// region hasn't bucket meta, report buckets should be inherited.
+	new := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+	new.Inherit(origin, true)
+	re.Equal(uint64(1), new.GetReportBuckets().Version)
+
+	// region has bucket meta, report buckets should be inherited also.
+	new1 := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	new1.Inherit(origin, true)
+	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
 func TestRegionRoundingFlow(t *testing.T) {
@@ -642,7 +699,7 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		region.UpdateBuckets(buckets, nil)
 	}
 	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
 		b.Fatal("update buckets failed")
@@ -820,7 +877,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	b.RunParallel(
 		func(pb *testing.PB) {
 			for pb.Next() {
-				item := items[mrand.Intn(len(items))]
+				item := items[mrand.IntN(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegion(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
@@ -843,11 +900,11 @@ func newRegionInfoIDRandom() *RegionInfo {
 		leader *metapb.Peer
 	)
 	// Randomly select a peer as the leader.
-	leaderIdx := mrand.Intn(peerNum)
+	leaderIdx := mrand.IntN(peerNum)
 	for i := range peerNum {
 		id := baseID.Add(1)
 		// Randomly distribute the peers to different stores.
-		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
+		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.IntN(storeNum) + 1)}
 		if i == leaderIdx {
 			leader = p
 		}
@@ -958,7 +1015,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	b.ResetTimer()
 	for range b.N {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
@@ -1422,4 +1479,113 @@ func TestResetRegionCache(t *testing.T) {
 	regions.CheckAndPutRegion(newRegion)
 	re.Equal(1, regions.GetTotalRegionCount())
 	re.NotNil(regions.GetRegion(4))
+}
+
+func TestGetBucketMeta(t *testing.T) {
+	re := require.New(t)
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("d"))
+	re.Nil(region.GetBuckets())
+	origin := NewTestRegionInfo(1, 2, []byte("a"), []byte("d"))
+	bucket := &metapb.Buckets{
+		RegionId: 100,
+		Version:  1,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	origin.UpdateBuckets(bucket, nil)
+	re.Equal(uint64(1), origin.GetBuckets().GetVersion())
+	region.Inherit(origin, true)
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+
+	// Inherit false if region has bucket meta
+	bucket1 := &metapb.Buckets{
+		RegionId: 100,
+		Version:  2,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	re.True(origin.UpdateBuckets(bucket1, origin.GetBuckets()))
+	re.Equal(uint64(2), origin.GetBuckets().GetVersion())
+	region.bucketMeta = &metapb.BucketMeta{
+		Version: 1,
+		Keys:    [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	region.Inherit(origin, true)
+	// Inherit false if region
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+}
+
+func BenchmarkQueryRegions(b *testing.B) {
+	regionSizes := []int{100, 1000, 10000, 100000}
+	querySizes := []int{10, 50, 100, 500, 1000}
+
+	for _, regionSize := range regionSizes {
+		regions := NewRegionsInfo()
+		var regionIDs []uint64
+		var keys [][]byte
+		var prevKeys [][]byte
+
+		for i := range regionSize {
+			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+			startKey := []byte(fmt.Sprintf("%20d", i*10))
+			endKey := []byte(fmt.Sprintf("%20d", (i+1)*10))
+			region := NewRegionInfo(&metapb.Region{
+				Id:       uint64(i + 1),
+				Peers:    []*metapb.Peer{peer},
+				StartKey: startKey,
+				EndKey:   endKey,
+			}, peer)
+			regions.CheckAndPutRegion(region)
+			regionIDs = append(regionIDs, uint64(i+1))
+			keys = append(keys, startKey)
+			prevKeys = append(prevKeys, endKey)
+		}
+
+		for _, querySize := range querySizes {
+			if querySize > regionSize {
+				continue
+			}
+
+			queryIDs := make([]uint64, querySize)
+			queryKeys := make([][]byte, querySize)
+			queryPrevKeys := make([][]byte, querySize)
+			step := regionSize / querySize
+			for i := range querySize {
+				idx := i * step
+				queryIDs[i] = regionIDs[idx]
+				queryKeys[i] = keys[idx]
+				queryPrevKeys[i] = prevKeys[idx]
+			}
+
+			b.Run(fmt.Sprintf("QueryByKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(queryKeys, nil, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByPrevKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, queryPrevKeys, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByIDs_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, nil, queryIDs, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryMixed_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				halfSize := querySize / 2
+				mixedKeys := queryKeys[:halfSize]
+				mixedPrevKeys := queryPrevKeys[:halfSize]
+				mixedIDs := queryIDs[:halfSize]
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(mixedKeys, mixedPrevKeys, mixedIDs, false)
+				}
+			})
+		}
+	}
 }

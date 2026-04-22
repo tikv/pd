@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,10 @@ func TestRegionTestSuite(t *testing.T) {
 
 func (suite *regionTestSuite) SetupSuite() {
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+	suite.env.RunFunc(func(cluster *pdTests.TestCluster) {
+		suite.NotEmpty(cluster.WaitLeader())
+	})
 }
 
 func (suite *regionTestSuite) TearDownSuite() {
@@ -64,6 +69,7 @@ func (suite *regionTestSuite) TestRegionKeyFormat() {
 func (suite *regionTestSuite) checkRegionKeyFormat(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	url := cluster.GetConfig().GetClientURL()
+	cluster.WaitLeader()
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
@@ -495,5 +501,67 @@ func (suite *regionTestSuite) checkPatrolWithLimit(cluster *pdTests.TestCluster)
 		re.Equal(float64(totalRegions), res["scan_count"], "scan_count should equal total regions regardless of limit")
 		re.Empty(res["count"])
 		re.Empty(res["results"])
+	}
+}
+
+func (suite *regionTestSuite) TestFollowerDirect() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.followerDirect)
+}
+
+func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	re.NotEmpty(cluster.WaitLeader())
+	if err := cluster.GetLeaderServer().BootstrapCluster(); err != nil {
+		re.Contains(err.Error(), "already bootstrapped")
+	}
+	cmd := ctl.GetRootCmd()
+	stores := []*metapb.Store{
+		{
+			Id:    1,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    2,
+			State: metapb.StoreState_Up,
+		},
+		{
+			Id:    3,
+			State: metapb.StoreState_Up,
+		},
+	}
+
+	for i := range stores {
+		pdTests.MustPutStore(re, cluster, stores[i])
+	}
+	metaRegion := &metapb.Region{
+		Id:       100,
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 5, StoreId: 2},
+			{Id: 6, StoreId: 3}},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	region := core.NewRegionInfo(metaRegion, metaRegion.Peers[0])
+	re.NoError(cluster.HandleRegionHeartbeat(region))
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/RejectGetRegionByIDWhenAccessLeader"))
+	}()
+	for _, server := range cluster.GetServers() {
+		serverAddr := server.GetAddr()
+		// leader reject any region info request with --no-forward, followers should work normally.
+		if serverAddr == pdAddr {
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
+			re.NoError(err)
+			re.Contains(string(output), "Failed to get region")
+		} else {
+			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
+			re.NoError(err)
+			outputStr := string(output)
+			re.True(strings.Contains(outputStr, "\"id\":100") || strings.Contains(outputStr, "TiKV cluster not bootstrapped"), outputStr)
+		}
 	}
 }

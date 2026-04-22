@@ -21,6 +21,6 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccResolverWrapper).watcher"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
 }

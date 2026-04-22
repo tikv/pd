@@ -79,15 +79,16 @@ func getFunctionName(f any) string {
 }
 
 // The returned function is used as a lazy router to avoid the data race problem.
-// @title          Placement Driver Core API
-// @version        1.0
-// @description    This is placement driver.
-// @contact.name   Placement Driver Support
-// @contact.url    https://github.com/tikv/pd/issues
-// @contact.email  info@pingcap.com
-// @license.name   Apache 2.0
-// @license.url    http://www.apache.org/licenses/LICENSE-2.0.html
-// @BasePath       /pd/api/v1
+//
+//	@title			Placement Driver Core API
+//	@version		1.0
+//	@description	This is placement driver.
+//	@contact.name	Placement Driver Support
+//	@contact.url	https://github.com/tikv/pd/issues
+//	@contact.email	info@pingcap.com
+//	@license.name	Apache 2.0
+//	@license.url	http://www.apache.org/licenses/LICENSE-2.0.html
+//	@BasePath		/pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
 	registerPrefix := func(router *mux.Router, prefixPath, name string,
@@ -301,9 +302,6 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
-
-	trendHandler := newTrendHandler(svr, rd)
-	registerFunc(apiRouter, "/trend", trendHandler.GetTrend, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))

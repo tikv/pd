@@ -40,14 +40,15 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 }
 
 // GetOperatorsByRegion gets a Region's pending operator.
-// @Tags     operator
-// @Summary  Get a Region's pending operator.
-// @Param    region_id  path  int  true  "A Region's Id"
-// @Produce  json
-// @Success  200  {object}  operator.OpWithStatus
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/{region_id} [get]
+//
+//	@Tags		operator
+//	@Summary	Get a Region's pending operator.
+//	@Param		region_id	path	int	true	"A Region's Id"
+//	@Produce	json
+//	@Success	200	{object}	operator.OpWithStatus
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators/{region_id} [get]
 func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
@@ -67,14 +68,15 @@ func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Re
 }
 
 // GetOperators lists all pending operators.
-// @Tags     operator
-// @Summary  List pending operators.
-// @Param    kind    query  string  false  "Specify the operator kind."  Enums(admin, leader, region)
-// @Param    object  query  bool    false  "Whether to return as JSON object."
-// @Produce  json
-// @Success  200  {array}   operator.Operator
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [get]
+//
+//	@Tags		operator
+//	@Summary	List pending operators.
+//	@Param		kind	query	string	false	"Specify the operator kind."	Enums(admin, leader, region)
+//	@Param		object	query	bool	false	"Whether to return as JSON object."
+//	@Produce	json
+//	@Success	200	{array}		operator.Operator
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators [get]
 func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	var (
 		results []*operator.Operator
@@ -105,12 +107,13 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteOperators cancels all pending operators.
-// @Tags     operator
-// @Summary  Cancel all pending operators.
-// @Produce  json
-// @Success  200  {string}  string  "All pending operators are canceled."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [delete]
+//
+//	@Tags		operator
+//	@Summary	Cancel all pending operators.
+//	@Produce	json
+//	@Success	200	{string}	string	"All pending operators are canceled."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators [delete]
 func (h *operatorHandler) DeleteOperators(w http.ResponseWriter, _ *http.Request) {
 	if err := h.RemoveOperators(); err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -122,15 +125,16 @@ func (h *operatorHandler) DeleteOperators(w http.ResponseWriter, _ *http.Request
 
 // CreateOperator creates an operator.
 // FIXME: details of input json body params
-// @Tags     operator
-// @Summary  Create an operator.
-// @Accept   json
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The operator is created."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [post]
+//
+//	@Tags		operator
+//	@Summary	Create an operator.
+//	@Accept		json
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The operator is created."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators [post]
 func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -150,14 +154,15 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 }
 
 // DeleteOperatorByRegion cancels a Region's pending operator.
-// @Tags     operator
-// @Summary  Cancel a Region's pending operator.
-// @Param    region_id  path  int  true  "A Region's Id"
-// @Produce  json
-// @Success  200  {string}  string  "The pending operator is canceled."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/{region_id} [delete]
+//
+//	@Tags		operator
+//	@Summary	Cancel a Region's pending operator.
+//	@Param		region_id	path	int	true	"A Region's Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"The pending operator is canceled."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators/{region_id} [delete]
 func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["region_id"]
 
@@ -176,14 +181,15 @@ func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.
 }
 
 // GetOperatorRecords lists the finished operators since the given timestamp in second.
-// @Tags     operator
-// @Summary  lists the finished operators since the given timestamp in second.
-// @Param    from  query  integer  false  "From Unix timestamp"
-// @Produce  json
-// @Success  200  {object}  []operator.OpRecord
-// @Failure  400  {string}  string  "The request is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/records [get]
+//
+//	@Tags		operator
+//	@Summary	lists the finished operators since the given timestamp in second.
+//	@Param		from	query	integer	false	"From Unix timestamp"
+//	@Produce	json
+//	@Success	200	{object}	[]operator.OpRecord
+//	@Failure	400	{string}	string	"The request is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/operators/records [get]
 func (h *operatorHandler) GetOperatorRecords(w http.ResponseWriter, r *http.Request) {
 	var (
 		from time.Time

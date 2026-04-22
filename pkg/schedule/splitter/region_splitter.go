@@ -191,7 +191,7 @@ type splitRegionsHandler struct {
 
 // SplitRegionByKeys split region by keys.
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
-	op, err := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
+	op, err := operator.CreateSplitRegionOperator("region-splitter", region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
 		return err
 	}

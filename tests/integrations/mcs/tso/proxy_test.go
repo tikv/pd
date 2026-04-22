@@ -17,7 +17,7 @@ package tso
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -186,7 +186,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 	defer cancel()
 
 	for i := range clientCount {
-		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
 		stream, err := grpcPDClient.Tso(ctx)
@@ -337,7 +337,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				default:
 				}
 
-				req := reqs[rand.Intn(requestsPerClient)]
+				req := reqs[rand.IntN(requestsPerClient)]
 				err := streams[i].Send(req)
 				if err != nil && !mustReliable {
 					respErr.Store(err)
@@ -390,7 +390,7 @@ func createTSOStreams(
 	streams := make([]pdpb.PD_TsoClient, clientCount)
 
 	for i := range clientCount {
-		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
 		cctx, cancel := context.WithCancel(ctx)

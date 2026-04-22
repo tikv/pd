@@ -84,14 +84,14 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 
 func setupEtcd(re *require.Assertions) (context.Context, *clientv3.Client, func()) {
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestEtcdConfig()
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
 	re.NoError(err)
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls)
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
@@ -148,7 +148,7 @@ func (s *regionLabelRuleWatcherTestSuite) SetupTest() {
 	labelerManager, err := labeler.NewRegionLabeler(s.ctx, storage, time.Hour)
 	re.NoError(err)
 	s.labeler = labelerManager
-	rw, err := NewRegionLabelRuleWatcher(s.ctx, s.client, s.labeler)
+	rw, err := NewRegionLabelRuleWatcher(s.ctx, s.client, nil, s.labeler)
 	re.NoError(err)
 	s.rw = rw
 }

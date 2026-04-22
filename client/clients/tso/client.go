@@ -16,7 +16,7 @@ package tso
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
@@ -228,7 +228,7 @@ func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
 		err error
 	)
 	for range urls {
-		url := urls[rand.Intn(len(urls))]
+		url := urls[rand.IntN(len(urls))]
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
 		}

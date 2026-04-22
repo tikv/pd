@@ -47,6 +47,11 @@ func ResourceGroupStatePrefix() string {
 	return resourceGroupStatePath("")
 }
 
+// ResourceGroupPrefix returns the prefix of all resource-group metadata paths.
+func ResourceGroupPrefix() string {
+	return strings.TrimSuffix(ResourceGroupSettingPrefix(), "settings/")
+}
+
 // KeyspaceResourceGroupSettingPath returns the path to save the keyspace resource group settings.
 func KeyspaceResourceGroupSettingPath(keyspaceID uint32, groupName string) string {
 	if keyspaceID == constant.NullKeyspaceID {

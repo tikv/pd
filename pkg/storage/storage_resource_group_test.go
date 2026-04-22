@@ -15,7 +15,7 @@
 package storage
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -90,10 +90,10 @@ func generateRandomResourceGroupNames() []string {
 	names := make([]string, n)
 	for i := range n {
 		// Generate a random length between 1 and 100 characters.
-		length := 1 + rand.Intn(100)
+		length := 1 + rand.IntN(100)
 		name := make([]byte, length)
 		for j := range length {
-			name[j] = charset[rand.Intn(len(charset))]
+			name[j] = charset[rand.IntN(len(charset))]
 		}
 		names[i] = string(name)
 	}

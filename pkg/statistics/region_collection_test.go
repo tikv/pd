@@ -301,9 +301,10 @@ func BenchmarkObserve(b *testing.B) {
 
 	regionNum := uint64(1000000)
 	regions := make([]*core.RegionInfo, 0, regionNum)
+	leader := peers[0]
 	for i := uint64(1); i <= regionNum; i++ {
 		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}}
-		regions = append(regions, core.NewRegionInfo(r, peers[0]))
+		regions = append(regions, core.NewRegionInfo(r, leader))
 	}
 	regionStats := NewRegionStatistics(nil, opt, manager)
 

@@ -87,11 +87,34 @@ func (rule *LabelRule) String() string {
 	return b.String()
 }
 
+// GetKeyRanges returns the key ranges of the LabelRule.
+func (rule *LabelRule) GetKeyRanges() []*KeyRangeRule {
+	if rule.RuleType != KeyRange {
+		return nil
+	}
+	rs, ok := rule.Data.([]*KeyRangeRule)
+	if !ok {
+		return nil
+	}
+	return rs
+}
+
 // NewLabelRuleFromJSON creates a label rule from the JSON data.
 func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	lr := &LabelRule{}
-	err := json.Unmarshal(data, lr)
-	if err != nil {
+	if err := json.Unmarshal(data, lr); err != nil {
+		return nil, err
+	}
+	if err := lr.checkAndAdjust(); err != nil {
+		return nil, err
+	}
+	return lr, nil
+}
+
+// NewLabelRuleFromJSONWithoutCheck creates a label rule from the JSON data. It will not call checkAndAdjust.
+func NewLabelRuleFromJSONWithoutCheck(data []byte) (*LabelRule, error) {
+	lr := &LabelRule{}
+	if err := json.Unmarshal(data, lr); err != nil {
 		return nil, err
 	}
 	return lr, nil

@@ -249,11 +249,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"min-hot-byte-rate":          100.0,
 					"min-hot-key-rate":           10.0,
 					"min-hot-query-rate":         10.0,
+					"min-hot-cpu-rate":           10.0,
 					"max-zombie-rounds":          3.0,
+					"pending-weight":             1.0,
 					"max-peer-number":            1000.0,
 					"byte-rate-rank-step-ratio":  0.05,
 					"key-rate-rank-step-ratio":   0.05,
 					"query-rate-rank-step-ratio": 0.05,
+					"cpu-rate-rank-step-ratio":   0.05,
 					"count-rank-step-ratio":      0.01,
 					"great-dec-ratio":            0.95,
 					"minor-dec-ratio":            0.99,
@@ -653,7 +656,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	assertNoScheduler(re, urlPrefix, name)
-	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	if suite.env == tests.NonMicroserviceEnv {
+		suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	}
 
 	// reset schedule config
 	scheduleConfig.Schedulers = originSchedulers

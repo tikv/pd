@@ -32,8 +32,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
-// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
-func NewTestSingleConfig(c ...*log.Config) *embed.Config {
+// NewTestEtcdConfig is used to create a etcd config for the unit test purpose.
+func NewTestEtcdConfig(c ...*log.Config) *embed.Config {
 	cfg := embed.NewConfig()
 	if len(c) > 0 {
 		lg, p, _ := log.InitLogger(c[0])
@@ -73,14 +73,14 @@ func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (s
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
-	cfg := NewTestSingleConfig()
+	cfg := NewTestEtcdConfig()
 	cfg.Dir = t.TempDir()
 	if opt != nil && opt.ServerCfgModifier != nil {
 		opt.ServerCfgModifier(cfg)
 	}
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls)
+	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)
@@ -122,7 +122,7 @@ func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (s
 // MustAddEtcdMember is used to add a new etcd member to the cluster for test.
 func MustAddEtcdMember(t testing.TB, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
-	cfg2 := NewTestSingleConfig()
+	cfg2 := NewTestEtcdConfig()
 	cfg2.Dir = t.TempDir()
 	cfg2.Name = genRandName()
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.ListenPeerUrls[0])

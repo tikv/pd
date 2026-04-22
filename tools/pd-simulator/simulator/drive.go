@@ -16,7 +16,7 @@ package simulator
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/pprof"
 	"path"
@@ -271,7 +271,7 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 				for _, region := range regions {
 					hibernatePercent := d.simConfig.HibernatePercent
 					// using rand(0,100) to meet hibernatePercent
-					if !firstReport && rand.Intn(100) < hibernatePercent {
+					if !firstReport && rand.IntN(100) < hibernatePercent {
 						continue
 					}
 

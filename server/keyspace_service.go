@@ -109,6 +109,9 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 			return nil
 		}
 		defer func() {
+			for i := range keyspaces {
+				keyspaces[i] = nil // avoid memory leak
+			}
 			keyspaces = keyspaces[:0]
 		}()
 		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{

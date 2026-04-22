@@ -68,29 +68,30 @@ func (suite *logTestSuite) TearDownSuite() {
 func (suite *logTestSuite) TestLog() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
+	addr := suite.cluster.GetLeaderServer().GetAddr()
 	var testCases = []struct {
 		cmd    []string
 		expect string
 	}{
 		// log [fatal|error|warn|info|debug]
 		{
-			cmd:    []string{"-u", suite.pdAddrs[0], "log", "fatal"},
+			cmd:    []string{"-u", addr, "log", "fatal"},
 			expect: "fatal",
 		},
 		{
-			cmd:    []string{"-u", suite.pdAddrs[0], "log", "error"},
+			cmd:    []string{"-u", addr, "log", "error"},
 			expect: "error",
 		},
 		{
-			cmd:    []string{"-u", suite.pdAddrs[0], "log", "warn"},
+			cmd:    []string{"-u", addr, "log", "warn"},
 			expect: "warn",
 		},
 		{
-			cmd:    []string{"-u", suite.pdAddrs[0], "log", "info"},
+			cmd:    []string{"-u", addr, "log", "info"},
 			expect: "info",
 		},
 		{
-			cmd:    []string{"-u", suite.pdAddrs[0], "log", "debug"},
+			cmd:    []string{"-u", addr, "log", "debug"},
 			expect: "debug",
 		},
 	}
@@ -105,6 +106,7 @@ func (suite *logTestSuite) TestLog() {
 func (suite *logTestSuite) TestInstanceLog() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
+	addr := suite.cluster.GetLeaderServer().GetAddr()
 	var testCases = []struct {
 		cmd      []string
 		instance string
@@ -112,17 +114,17 @@ func (suite *logTestSuite) TestInstanceLog() {
 	}{
 		// log [fatal|error|warn|info|debug] [address]
 		{
-			cmd:      []string{"-u", suite.pdAddrs[0], "log", "debug", suite.pdAddrs[0]},
+			cmd:      []string{"-u", addr, "log", "debug", suite.pdAddrs[0]},
 			instance: suite.pdAddrs[0],
 			expect:   "debug",
 		},
 		{
-			cmd:      []string{"-u", suite.pdAddrs[0], "log", "error", suite.pdAddrs[1]},
+			cmd:      []string{"-u", addr, "log", "error", suite.pdAddrs[1]},
 			instance: suite.pdAddrs[1],
 			expect:   "error",
 		},
 		{
-			cmd:      []string{"-u", suite.pdAddrs[0], "log", "warn", suite.pdAddrs[2]},
+			cmd:      []string{"-u", addr, "log", "warn", suite.pdAddrs[2]},
 			instance: suite.pdAddrs[2],
 			expect:   "warn",
 		},

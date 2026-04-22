@@ -108,6 +108,23 @@ var (
 	queryRegionKeysCount     = queryRegionCount.WithLabelValues("keys")
 	queryRegionPrevKeysCount = queryRegionCount.WithLabelValues("prev-keys")
 	queryRegionIDsCount      = queryRegionCount.WithLabelValues("ids")
+
+	bucketEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "bucket_event",
+			Help:      "Counter of the bucket event",
+		}, []string{"event"})
+
+	versionStaleCounter     = bucketEventCounter.WithLabelValues("version_stale")
+	versionNotChangeCounter = bucketEventCounter.WithLabelValues("version_no_change")
+	// RegionCacheMissCounter  is the counter of region cache miss when processing report bucket.
+	RegionCacheMissCounter = bucketEventCounter.WithLabelValues("region_cache_miss")
+	// UpdateFailedCounter is the counter of region bucket update failed when processing report bucket.
+	UpdateFailedCounter = bucketEventCounter.WithLabelValues("update_failed")
+	// UpdateSuccessCounter is the counter of cas report bucket point success.
+	UpdateSuccessCounter = bucketEventCounter.WithLabelValues("update_success")
 )
 
 func init() {
@@ -117,6 +134,7 @@ func init() {
 	prometheus.MustRegister(AcquireRegionsLockWaitCount)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(queryRegionCount)
+	prometheus.MustRegister(bucketEventCounter)
 }
 
 var tracerPool = &sync.Pool{

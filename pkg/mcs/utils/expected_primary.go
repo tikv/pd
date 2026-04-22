@@ -17,8 +17,7 @@ package utils
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
+	"math/rand/v2"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -63,9 +62,13 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
-	if err != nil || !resp.Succeeded {
+	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
 		return 0, err
+	}
+	if !resp.Succeeded {
+		log.Error("mark expected primary error", zap.String("primary-path", path))
+		return 0, errors.New("mark expected primary txn did not succeed")
 	}
 	return resp.Header.Revision, nil
 }
@@ -97,6 +100,9 @@ func KeepExpectedPrimaryAlive(
 	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
+		if closeErr := lease.Close(); closeErr != nil {
+			log.Warn("failed to revoke expected primary lease", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
@@ -159,8 +165,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	nextPrimaryID := r.Intn(len(primaryIDs))
+	nextPrimaryID := rand.IntN(len(primaryIDs))
 
 	// update expected primary flag
 	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)

@@ -16,6 +16,8 @@ ROOT_PATH := $(shell pwd)/..
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
+# Resolve auto toolchain once so recursive go commands don't mix tool versions in CI.
+GO_EFFECTIVE_TOOLCHAIN := $(shell GOTOOLCHAIN=auto go env GOVERSION)
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools
@@ -24,20 +26,27 @@ static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
-	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
+	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
 
 tidy:
-	@ go mod tidy
+	@ GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go mod tidy
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
 test: failpoint-enable
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
+
+# gotest runs a targeted go test with failpoints automatically enabled/disabled.
+# Usage: make gotest GOTEST_ARGS='./... -run TestFoo -count=1'
+GOTEST_ARGS ?= ./...
+gotest: failpoint-enable
+	GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go test $(GOTEST_ARGS) || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 ci-test-job:
 	if [ -f covprofile ]; then rm covprofile; fi
-	CGO_ENABLED=1 go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+	CGO_ENABLED=1 GOTOOLCHAIN=$(GO_EFFECTIVE_TOOLCHAIN) go test ./... -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable

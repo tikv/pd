@@ -15,6 +15,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,11 +29,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -68,7 +72,60 @@ func (suite *ruleTestSuite) TearDownTest() {
 	suite.env.Reset(re)
 }
 
+func (suite *ruleTestSuite) TestRegionLabel() {
+	suite.env.RunTestInMicroserviceEnv(suite.checkRegionLabeler)
+}
+
+func (suite *ruleTestSuite) checkRegionLabeler(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config/region-label/rule", pdAddr)
+	startKey := codec.EncodeBytes([]byte{'r', 0, 0, 0})
+	endKey := codec.EncodeBytes([]byte{'r', 0, 0, 1})
+	rule := &labeler.LabelRule{
+		ID:    "keyspaces/0",
+		Index: 0,
+		Labels: []labeler.RegionLabel{
+			{
+				Key:   "id",
+				Value: "0",
+			},
+		},
+		RuleType: "key-range",
+		Data: []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(startKey),
+				"end_key":   hex.EncodeToString(endKey),
+			},
+		},
+	}
+	data, err := json.Marshal(rule)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, data, testutil.StatusOK(re))
+	re.NoError(err)
+	server := cluster.GetSchedulingPrimaryServer()
+	var kr [2][]byte
+	var exist bool
+	testutil.Eventually(re, func() bool {
+		kr, exist = server.GetCoordinator().GetCheckerController().PopOneSuspectKeyRange()
+		if exist {
+			return bytes.Equal(kr[0], []byte(startKey)) && bytes.Equal(kr[1], []byte(endKey))
+		}
+		return false
+	})
+}
+
 func (suite *ruleTestSuite) TestSet() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkSet)
 }
 
@@ -159,13 +216,19 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
+		var cc *checker.Controller
+		if suite.env.Env == tests.MicroserviceEnv {
+			cc = cluster.GetSchedulingPrimaryServer().GetCluster().GetCoordinator().GetCheckerController()
+		} else {
+			cc = leaderServer.GetRaftCluster().GetCoordinator().GetCheckerController()
+		}
 		// clear suspect keyRanges to prevent test case from others
-		leaderServer.GetRaftCluster().ClearSuspectKeyRanges()
+		cc.ClearSuspectKeyRanges()
 		if testCase.success {
 			err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", testCase.rawData, testutil.StatusOK(re))
 			popKeyRangeMap := map[string]struct{}{}
 			for range len(testCase.popKeyRange) / 2 {
-				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := cc.PopOneSuspectKeyRange()
 				re.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
@@ -556,6 +619,11 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDelete() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkDelete)
 }
 

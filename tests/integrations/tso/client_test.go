@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,8 +53,6 @@ import (
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
-
-var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type tsoClientTestSuite struct {
 	suite.Suite
@@ -396,7 +394,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 		// currently, the time to discover tso service is usually a little longer than 1s, compared
 		// to the previous time taken < 1s.
-		n := r.Intn(2) + 3
+		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			wg := sync.WaitGroup{}
@@ -437,22 +435,39 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
+	var closedTSOAddr string
+	if !suite.legacy {
+		defer func() {
+			if closedTSOAddr == "" {
+				return
+			}
+			re.NoError(suite.tsoCluster.AddServer(closedTSOAddr))
+		}()
+	}
 
 	parallelAct := func() {
-		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
-		// currently, the time to discover tso service is usually a little longer than 1s, compared
-		// to the previous time taken < 1s.
-		n := r.Intn(2) + 3
-		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
-			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
+			primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			closedTSOAddr = primary.GetAddr()
+			primary.Close()
+			suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+			utils.WaitForAllTSOServiceAvailable(suite.ctx, re, suite.clients)
 		} else {
+			// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
+			// currently, the time to discover tso service is usually a little longer than 1s, compared
+			// to the previous time taken < 1s.
+			n := rand.IntN(2) + 3
+			time.Sleep(time.Duration(n) * time.Second)
 			suite.cluster.GetLeaderServer().GetServer().Close()
+			time.Sleep(time.Duration(n) * time.Second)
 		}
-		time.Sleep(time.Duration(n) * time.Second)
 	}
 
 	utils.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
+	if !suite.legacy {
+		re.NotEmpty(closedTSOAddr)
+		return
+	}
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
@@ -636,7 +651,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	var wg sync.WaitGroup
 	checkTSO(ctx1, re, &wg, backendEndpoints)
 	for range 2 {
-		n := r.Intn(2) + 1
+		n := rand.IntN(2) + 1
 		time.Sleep(time.Duration(n) * time.Second)
 		err = leaderServer.ResignLeaderWithRetry()
 		re.NoError(err)

@@ -1990,6 +1990,7 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re := suite.Require()
 	// no enough store
 	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.Nil(op)
@@ -1997,7 +1998,6 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.True(exist)
 
 	// add more stores
-	suite.cluster.AddLeaderStore(2, 1)
 	suite.cluster.AddLeaderStore(3, 1)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)

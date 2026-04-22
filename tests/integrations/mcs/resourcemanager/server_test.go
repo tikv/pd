@@ -123,4 +123,12 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(versioninfo.PDGitHash, s.GitHash)
 		re.Equal(versioninfo.PDReleaseVersion, s.Version)
 	}
+
+	// Test health handler
+	{
+		resp, err := tests.TestDialClient.Get(addr + "/health")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+	}
 }

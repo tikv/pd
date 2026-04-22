@@ -120,13 +120,10 @@ func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest, isFoll
 		return &pdpb.ScanRegionsResponse{Header: NotBootstrappedHeader()}, nil
 	}
 	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
-	if len(regions) == 0 {
+	if isFollower && len(regions) == 0 {
 		return &pdpb.ScanRegionsResponse{Header: RegionNotFound()}, nil
 	}
 	resp = &pdpb.ScanRegionsResponse{Header: WrapHeader()}
-	if isFollower && len(resp.Regions) == 0 {
-		return &pdpb.ScanRegionsResponse{Header: RegionNotFound()}, nil
-	}
 	for _, r := range regions {
 		leader := r.GetLeader()
 		if leader == nil {

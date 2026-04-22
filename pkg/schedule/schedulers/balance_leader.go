@@ -438,7 +438,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		balanceLeaderNoLeaderRegionCounter.Inc()
@@ -489,7 +489,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -513,7 +513,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	}
 	// Check if the source store is available as a source.
 	conf := solver.GetSchedulerConfig()
-	if filter.NewCandidates(s.R, []*core.StoreInfo{solver.Source}).
+	if filter.NewCandidates([]*core.StoreInfo{solver.Source}).
 		FilterSource(conf, nil, s.filterCounter, s.filters...).Len() == 0 {
 		log.Debug("store cannot be used as source", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.Source.GetID()))
 		balanceLeaderNoSourceStoreCounter.Inc()
@@ -525,7 +525,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(s.filters, leaderFilter)
 	}
-	target := filter.NewCandidates(s.R, []*core.StoreInfo{solver.Target}).
+	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, s.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {

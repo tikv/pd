@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"math/rand"
 	"net/http"
 	"strconv"
 
@@ -292,7 +291,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -316,11 +315,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
+		once := scheduleEvictLeaderOnce(name, cluster, conf)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -334,7 +333,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 	return ops
 }
 
-func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -365,7 +364,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
-		candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).
+		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()

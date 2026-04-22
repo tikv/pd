@@ -70,6 +70,7 @@ func NewPlacementRuleWatcher(
 	}
 	err := rw.initializeWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	return rw, nil

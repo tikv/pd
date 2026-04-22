@@ -16,7 +16,7 @@ package connectionctx
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 )
 
@@ -132,7 +132,7 @@ func (c *Manager[T]) RandomlyPick() *ConnectionCtx[T] {
 	idx := 0
 	var connectionCtx *ConnectionCtx[T]
 	for _, cc := range c.connectionCtxs {
-		j := rand.Intn(idx + 1)
+		j := rand.IntN(idx + 1)
 		if j < 1 {
 			connectionCtx = cc
 		}
@@ -150,4 +150,11 @@ func (c *Manager[T]) GetConnectionCtx(url string) *ConnectionCtx[T] {
 		return nil
 	}
 	return cc
+}
+
+// Size is used to get the size of the connection context map.
+func (c *Manager[T]) Size() int {
+	c.RLock()
+	defer c.RUnlock()
+	return len(c.connectionCtxs)
 }

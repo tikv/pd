@@ -130,11 +130,28 @@ groups:
     labels:
       env: ENV_LABELS_ENV
       level: warning
-      expr:  count( changes(pd_tso_events{type="save"}[10m]) > 0 )   >= 2
+      expr: count( changes(pd_tso_events{type="save"}[10m]) > 0 )   >= 2
     annotations:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'
       summary: PD_leader_change
+
+  - alert: PD_leader_lease_drop_without_failover
+    expr: |
+      (changes(service_member_role{job="pd",service="PD"}[10m]) >= 2)
+      and (min_over_time(service_member_role{job="pd",service="PD"}[10m]) == 0)
+      and (service_member_role{job="pd",service="PD"} == 1)
+      and on() (sum(changes(etcd_server_is_leader{job="pd"}[10m])) == 0)
+      and on() (sum(changes(process_start_time_seconds{job="pd"}[10m]) * on(instance,job) etcd_server_is_leader{job="pd"}) == 0)
+    for: 1m
+    labels:
+      env: ENV_LABELS_ENV
+      level: warning
+      expr: (changes(service_member_role{job="pd",service="PD"}[10m]) >= 2) and (min_over_time(service_member_role{job="pd",service="PD"}[10m]) == 0) and (service_member_role{job="pd",service="PD"} == 1) and on() (sum(changes(etcd_server_is_leader{job="pd"}[10m])) == 0) and on() (sum(changes(process_start_time_seconds{job="pd"}[10m]) * on(instance,job) etcd_server_is_leader{job="pd"}) == 0)
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, PD leader lease dropped and recovered on the same node, while embedded etcd leader stayed stable; values:{{ $value }}'
+      value: '{{ $value }}'
+      summary: PD leader lease dropped without failover
 
   - alert: PD_cluster_store_space_used_more_than_80%
     expr: sum(pd_cluster_status{type="storage_size"}) / sum(pd_cluster_status{type="storage_capacity"}) * 100  > 80
