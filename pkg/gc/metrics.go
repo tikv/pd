@@ -31,6 +31,10 @@ var (
 			Name:      "gc_state_cache_access_total",
 			Help:      "Counter of GC state cache accesses by result.",
 		}, []string{"result"})
+
+	gcStateCacheAccessHitCounter     = gcStateCacheAccessCounter.WithLabelValues("hit")
+	gcStateCacheAccessSlowHitCounter = gcStateCacheAccessCounter.WithLabelValues("slow_hit")
+	gcStateCacheAccessMissCounter    = gcStateCacheAccessCounter.WithLabelValues("miss")
 )
 
 func init() {

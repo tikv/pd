@@ -120,6 +120,7 @@ type GCStateManager struct {
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 
+	// Maps from keyspaceID to the cached GCState of that keyspace.
 	gcStatesCache map[uint32]GCState
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
@@ -794,7 +795,7 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 	m.mu.RLock()
 	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
 		m.mu.RUnlock()
-		gcStateCacheAccessCounter.WithLabelValues("hit").Inc()
+		gcStateCacheAccessHitCounter.Inc()
 		return cachedGCState, nil
 	}
 	m.mu.RUnlock()
@@ -805,11 +806,11 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 
 	// Check cache again: it may be updated by other concurrent invocations when the lock is not held.
 	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
-		gcStateCacheAccessCounter.WithLabelValues("slow_hit").Inc()
+		gcStateCacheAccessSlowHitCounter.Inc()
 		return cachedGCState, nil
 	}
 
-	gcStateCacheAccessCounter.WithLabelValues("cache_miss").Inc()
+	gcStateCacheAccessMissCounter.Inc()
 
 	var result GCState
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
