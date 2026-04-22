@@ -633,7 +633,7 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 	}
 
 	{
-		// For simplicity, only update if the cache already exists. In this
+		// For simplicity, only update if the cache already exists.
 		cachedGCState, ok := m.gcStatesCache[keyspaceID]
 		if ok {
 			replaced := false
@@ -770,10 +770,7 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 	return result, nil
 }
 
-func (m *GCStateManager) tryGetGCStateFromCache(keyspaceID uint32) (GCState, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+func (m *GCStateManager) tryGetGCStateFromCacheLocked(keyspaceID uint32) (GCState, bool) {
 	if !m.nodeIsLeader() {
 		return GCState{}, false
 	}
@@ -794,17 +791,20 @@ func (m *GCStateManager) tryGetGCStateFromCache(keyspaceID uint32) (GCState, boo
 
 func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 	// Fast path
-	if cachedGCState, ok := m.tryGetGCStateFromCache(keyspaceID); ok {
+	m.mu.RLock()
+	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
+		m.mu.RUnlock()
 		gcStateCacheAccessCounter.WithLabelValues("hit").Inc()
 		return cachedGCState, nil
 	}
+	m.mu.RUnlock()
 
 	// Slow path
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Check cache again: it may be updated by other concurrent invocations when the lock is not held.
-	if cachedGCState, ok := m.gcStatesCache[keyspaceID]; ok {
+	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
 		gcStateCacheAccessCounter.WithLabelValues("slow_hit").Inc()
 		return cachedGCState, nil
 	}
@@ -817,6 +817,9 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
 		return err1
 	})
+	if err != nil {
+		return GCState{}, err
+	}
 
 	m.gcStatesCache[keyspaceID] = result
 
