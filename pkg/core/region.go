@@ -224,7 +224,6 @@ type RegionHeartbeatRequest interface {
 	GetApproximateSize() uint64
 	GetApproximateKeys() uint64
 	GetBucketMeta() *metapb.BucketMeta
-	GetCpuUsage() uint64
 	GetCpuStats() *pdpb.CPUStats
 }
 
@@ -232,6 +231,10 @@ type regionHeartbeatExtraFields interface {
 	GetApproximateKvSize() uint64
 	GetApproximateColumnarKvSize() uint64
 	GetReplicationStatus() *replication_modepb.RegionReplicationStatus
+}
+
+type regionHeartbeatLegacyCPUUsage interface {
+	GetCpuUsage() uint64
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -261,8 +264,10 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		source:           Heartbeat,
 		flowRoundDivisor: flowRoundDivisor,
 		bucketMeta:       heartbeat.GetBucketMeta(),
-		cpuUsage:         heartbeat.GetCpuUsage(),
 		cpuStats:         heartbeat.GetCpuStats(),
+	}
+	if h, ok := heartbeat.(regionHeartbeatLegacyCPUUsage); ok {
+		region.cpuUsage = h.GetCpuUsage()
 	}
 
 	// Only PD heartbeats carry the following storage-accounting and replication fields.
@@ -757,6 +762,18 @@ func (r *RegionInfo) GetCPUUsage() uint64 {
 	return r.cpuUsage
 }
 
+func totalCPUUsageFromStats(cpuStats *pdpb.CPUStats) uint64 {
+	if cpuStats == nil {
+		return 0
+	}
+	return cpuStats.GetUnifiedRead() + cpuStats.GetScheduler()
+}
+
+// GetTotalCPUUsageFromStats returns the total region CPU usage reported in cpu_stats.
+func (r *RegionInfo) GetTotalCPUUsageFromStats() uint64 {
+	return totalCPUUsageFromStats(r.cpuStats)
+}
+
 // GetReadCPUUsage returns the region-level unified-read CPU usage reported in cpu_stats.
 func (r *RegionInfo) GetReadCPUUsage() uint64 {
 	if r.cpuStats == nil {
@@ -976,6 +993,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
 				region.GetCPUUsage() != origin.GetCPUUsage() ||
+				region.GetTotalCPUUsageFromStats() != origin.GetTotalCPUUsageFromStats() ||
 				region.GetReadCPUUsage() != origin.GetReadCPUUsage() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true

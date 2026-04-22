@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -304,6 +305,27 @@ func TestInherit(t *testing.T) {
 	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
+func TestRegionFromSchedulingHeartbeatUsesCPUStats(t *testing.T) {
+	re := require.New(t)
+
+	peer := &metapb.Peer{Id: 11, StoreId: 1}
+	region := RegionFromHeartbeat(&schedulingpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id:    100,
+			Peers: []*metapb.Peer{peer},
+		},
+		Leader: peer,
+		CpuStats: &pdpb.CPUStats{
+			UnifiedRead: 80,
+			Scheduler:   20,
+		},
+	}, 0)
+
+	re.Zero(region.GetCPUUsage())
+	re.Equal(uint64(100), region.GetTotalCPUUsageFromStats())
+	re.Equal(uint64(80), region.GetReadCPUUsage())
+}
+
 func TestRegionRoundingFlow(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
@@ -360,6 +382,14 @@ func TestNeedSync(t *testing.T) {
 	withReadCPUUsage := func(v uint64) RegionCreateOption {
 		return func(region *RegionInfo) {
 			region.cpuStats = &pdpb.CPUStats{UnifiedRead: v}
+		}
+	}
+	withSchedulerCPUUsage := func(v uint64) RegionCreateOption {
+		return func(region *RegionInfo) {
+			if region.cpuStats == nil {
+				region.cpuStats = &pdpb.CPUStats{}
+			}
+			region.cpuStats.Scheduler = v
 		}
 	}
 	meta := &metapb.Region{
@@ -434,6 +464,11 @@ func TestNeedSync(t *testing.T) {
 		{
 			optionsA: []RegionCreateOption{withReadCPUUsage(80)},
 			optionsB: []RegionCreateOption{withReadCPUUsage(100)},
+			needSync: true,
+		},
+		{
+			optionsA: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(20)},
+			optionsB: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(40)},
 			needSync: true,
 		},
 	}

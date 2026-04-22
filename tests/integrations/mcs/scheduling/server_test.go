@@ -16,7 +16,9 @@ package scheduling
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -40,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -602,9 +605,9 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		Interval:        interval,
 		QueryStats:      queryStats,
 		Term:            1,
-		CpuUsage:        100,
 		CpuStats: &pdpb.CPUStats{
 			UnifiedRead: 80,
+			Scheduler:   20,
 		},
 	}
 	err = stream.Send(regionReq)
@@ -617,7 +620,88 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers) &&
-			region.GetCPUUsage() == 100 && region.GetReadCPUUsage() == 80
+			region.GetTotalCPUUsageFromStats() == 100 && region.GetReadCPUUsage() == 80
+	})
+}
+
+func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageComesFromCPUStats() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	suite.cluster.SetSchedulingCluster(tc)
+	defer suite.cluster.SetSchedulingCluster(nil)
+	tc.WaitForPrimaryServing(re)
+
+	store := &metapb.Store{
+		Id:      1,
+		Address: "mock://tikv-1:1",
+		State:   metapb.StoreState_Up,
+		Version: "8.5.7",
+	}
+	tests.MustPutStore(re, suite.cluster, store)
+
+	const regionID uint64 = 10086
+	leaderPeer := &metapb.Peer{Id: 11, StoreId: 1}
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	region := core.RegionFromHeartbeat(&schedulingpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id:       regionID,
+			Peers:    []*metapb.Peer{leaderPeer},
+			StartKey: []byte("mcs-api-cpu-a"),
+			EndKey:   []byte("mcs-api-cpu-b"),
+		},
+		Leader:          leaderPeer,
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuStats: &pdpb.CPUStats{
+			UnifiedRead: 80,
+			Scheduler:   20,
+		},
+	}, 0)
+	tests.MustPutRegionInfo(re, suite.cluster, region)
+
+	readJSON := func(url string, out any) bool {
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return false
+		}
+		resp, err := tests.TestDialClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false
+		}
+		return json.Unmarshal(body, out) == nil
+	}
+
+	baseURL := tc.GetPrimaryServer().GetAddr() + "/scheduling/api/v1/regions"
+	testutil.Eventually(re, func() bool {
+		var region response.RegionInfo
+		if !readJSON(fmt.Sprintf("%s/%d", baseURL, regionID), &region) {
+			return false
+		}
+		return region.ID == regionID && region.CPUUsage == 100
+	})
+	testutil.Eventually(re, func() bool {
+		var regions response.RegionsInfo
+		if !readJSON(baseURL, &regions) {
+			return false
+		}
+		for _, region := range regions.Regions {
+			if region.ID == regionID {
+				return region.CPUUsage == 100
+			}
+		}
+		return false
 	})
 }
 
