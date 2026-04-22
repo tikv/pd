@@ -598,9 +598,6 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
-	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
-		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
-	}
 
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
@@ -625,6 +622,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
+	}
+	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
+		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
 	}
 
 	gc.mu.Lock()

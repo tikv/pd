@@ -20,12 +20,19 @@ import (
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
 )
+
+func counterValue(re *require.Assertions, c interface{ Write(*dto.Metric) error }) float64 {
+	var m dto.Metric
+	re.NoError(c.Write(&m))
+	return m.GetCounter().GetValue()
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
@@ -450,6 +457,30 @@ func TestResourceGroupThrottledError(t *testing.T) {
 	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+}
+
+func TestPagingPrechargeNotObservedOnThrottle(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	// 4 GiB predicted ~= 65536 RU at default ReadCostPerByte (1/64KiB),
+	// exceeding the LTBMaxWaitDuration budget at the default FillRate so
+	// acquireTokens returns ErrClientResourceGroupThrottled.
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: 4 * 1024 * 1024 * 1024,
+	}
+
+	before := counterValue(re, gc.metrics.prechargeCounter)
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	after := counterValue(re, gc.metrics.prechargeCounter)
+
+	// Throttled requests never reach OnResponse for settlement, so the
+	// precharge counter must not be incremented either.
+	re.Equal(before, after,
+		"throttled paging request should not inflate PagingPrechargeCounter")
 }
 
 func TestAcquireTokensSignalAwareWait(t *testing.T) {
