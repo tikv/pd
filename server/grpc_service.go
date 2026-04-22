@@ -1438,7 +1438,11 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				Interval:        request.GetInterval(),
 				Term:            request.GetTerm(),
 				QueryStats:      request.GetQueryStats(),
-				CpuStats: request.GetCpuStats(),
+				// Keep forwarding the deprecated cpu_usage temporarily so scheduling
+				// service stays aligned with the legacy RegionInfo/API field.
+				//nolint:staticcheck // Keep the protobuf getter for consistency with the forwarded fields.
+				CpuUsage:        request.GetCpuUsage(),
+				CpuStats:        request.GetCpuStats(),
 			}
 			if err := forwardSchedulingStream.Send(schedulingpbReq); err != nil {
 				forwardSchedulingStream = nil

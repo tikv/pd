@@ -305,7 +305,7 @@ func TestInherit(t *testing.T) {
 	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
-func TestRegionFromSchedulingHeartbeatUsesCPUStats(t *testing.T) {
+func TestRegionFromSchedulingHeartbeatCarriesCPUFields(t *testing.T) {
 	re := require.New(t)
 
 	peer := &metapb.Peer{Id: 11, StoreId: 1}
@@ -314,15 +314,15 @@ func TestRegionFromSchedulingHeartbeatUsesCPUStats(t *testing.T) {
 			Id:    100,
 			Peers: []*metapb.Peer{peer},
 		},
-		Leader: peer,
+		Leader:   peer,
+		CpuUsage: 100,
 		CpuStats: &pdpb.CPUStats{
 			UnifiedRead: 80,
 			Scheduler:   20,
 		},
 	}, 0)
 
-	re.Zero(region.GetCPUUsage())
-	re.Equal(uint64(100), region.GetTotalCPUUsageFromStats())
+	re.Equal(uint64(100), region.GetCPUUsage())
 	re.Equal(uint64(80), region.GetReadCPUUsage())
 }
 
@@ -469,7 +469,7 @@ func TestNeedSync(t *testing.T) {
 		{
 			optionsA: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(20)},
 			optionsB: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(40)},
-			needSync: true,
+			needSync: false,
 		},
 	}
 

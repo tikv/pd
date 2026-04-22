@@ -605,9 +605,9 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		Interval:        interval,
 		QueryStats:      queryStats,
 		Term:            1,
+		CpuUsage:        100,
 		CpuStats: &pdpb.CPUStats{
 			UnifiedRead: 80,
-			Scheduler:   20,
 		},
 	}
 	err = stream.Send(regionReq)
@@ -620,11 +620,11 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers) &&
-			region.GetTotalCPUUsageFromStats() == 100 && region.GetReadCPUUsage() == 80
+			region.GetCPUUsage() == 100 && region.GetReadCPUUsage() == 80
 	})
 }
 
-func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageComesFromCPUStats() {
+func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageCompatibility() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
@@ -656,9 +656,9 @@ func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageComesFromCPUStats
 		ApproximateKeys: 300,
 		Interval:        interval,
 		Term:            1,
+		CpuUsage:        100,
 		CpuStats: &pdpb.CPUStats{
 			UnifiedRead: 80,
-			Scheduler:   20,
 		},
 	}, 0)
 	tests.MustPutRegionInfo(re, suite.cluster, region)

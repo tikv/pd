@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -1536,9 +1535,7 @@ func getAllStores(c *gin.Context) {
 func getAllRegions(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	regions := svr.GetBasicCluster().GetRegions()
-	b, err := response.MarshalRegionsInfoJSONWithCPUUsage(c.Request.Context(), regions, func(region *core.RegionInfo) uint64 {
-		return region.GetTotalCPUUsageFromStats()
-	})
+	b, err := response.MarshalRegionsInfoJSON(c.Request.Context(), regions)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
@@ -1581,9 +1578,7 @@ func getRegionByID(c *gin.Context) {
 		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return
 	}
-	b, err := response.MarshalRegionInfoJSONWithCPUUsage(c.Request.Context(), regionInfo, func(region *core.RegionInfo) uint64 {
-		return region.GetTotalCPUUsageFromStats()
-	})
+	b, err := response.MarshalRegionInfoJSON(c.Request.Context(), regionInfo)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

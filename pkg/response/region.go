@@ -157,18 +157,8 @@ func NewAPIRegionInfo(r *core.RegionInfo) *RegionInfo {
 	return InitRegion(r, &RegionInfo{})
 }
 
-// NewAPIRegionInfoWithCPUUsage creates a new API RegionInfo with the given CPU usage.
-func NewAPIRegionInfoWithCPUUsage(r *core.RegionInfo, cpuUsage uint64) *RegionInfo {
-	return InitRegionWithCPUUsage(r, &RegionInfo{}, cpuUsage)
-}
-
 // InitRegion init a new API RegionInfo from the core.RegionInfo.
 func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
-	return InitRegionWithCPUUsage(r, s, r.GetCPUUsage())
-}
-
-// InitRegionWithCPUUsage init a new API RegionInfo from the core.RegionInfo with the given CPU usage.
-func InitRegionWithCPUUsage(r *core.RegionInfo, s *RegionInfo, cpuUsage uint64) *RegionInfo {
 	if r == nil {
 		return nil
 	}
@@ -181,7 +171,7 @@ func InitRegionWithCPUUsage(r *core.RegionInfo, s *RegionInfo, cpuUsage uint64) 
 	s.Leader = fromPeer(r.GetLeader())
 	s.DownPeers = fromPeerStatsSlice(r.GetDownPeers())
 	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
-	s.CPUUsage = cpuUsage
+	s.CPUUsage = r.GetCPUUsage()
 	s.WrittenBytes = r.GetBytesWritten()
 	s.WrittenKeys = r.GetKeysWritten()
 	s.ReadBytes = r.GetBytesRead()
@@ -231,17 +221,6 @@ func (s *RegionsInfo) Adjust() {
 // MarshalRegionInfoJSON marshals region to bytes in `RegionInfo`'s JSON format.
 // It is used to reduce the cost of JSON serialization.
 func MarshalRegionInfoJSON(ctx context.Context, r *core.RegionInfo) ([]byte, error) {
-	return MarshalRegionInfoJSONWithCPUUsage(ctx, r, func(region *core.RegionInfo) uint64 {
-		return region.GetCPUUsage()
-	})
-}
-
-// MarshalRegionInfoJSONWithCPUUsage marshals region to bytes in `RegionInfo`'s JSON format with the given CPU usage provider.
-func MarshalRegionInfoJSONWithCPUUsage(
-	ctx context.Context,
-	r *core.RegionInfo,
-	cpuUsageProvider func(*core.RegionInfo) uint64,
-) ([]byte, error) {
 	out := &jwriter.Writer{}
 
 	region := &RegionInfo{}
@@ -253,24 +232,13 @@ func MarshalRegionInfoJSONWithCPUUsage(
 	default:
 	}
 
-	covertAPIRegionInfo(r, region, out, cpuUsageProvider)
+	covertAPIRegionInfo(r, region, out)
 	return out.Buffer.BuildBytes(), out.Error
 }
 
 // MarshalRegionsInfoJSON marshals regions to bytes in `RegionsInfo`'s JSON format.
 // It is used to reduce the cost of JSON serialization.
 func MarshalRegionsInfoJSON(ctx context.Context, regions []*core.RegionInfo) ([]byte, error) {
-	return MarshalRegionsInfoJSONWithCPUUsage(ctx, regions, func(region *core.RegionInfo) uint64 {
-		return region.GetCPUUsage()
-	})
-}
-
-// MarshalRegionsInfoJSONWithCPUUsage marshals regions to bytes in `RegionsInfo`'s JSON format with the given CPU usage provider.
-func MarshalRegionsInfoJSONWithCPUUsage(
-	ctx context.Context,
-	regions []*core.RegionInfo,
-	cpuUsageProvider func(*core.RegionInfo) uint64,
-) ([]byte, error) {
 	out := &jwriter.Writer{}
 	out.RawByte('{')
 
@@ -291,7 +259,7 @@ func MarshalRegionsInfoJSONWithCPUUsage(
 		if i > 0 {
 			out.RawByte(',')
 		}
-		covertAPIRegionInfo(r, region, out, cpuUsageProvider)
+		covertAPIRegionInfo(r, region, out)
 	}
 	out.RawByte(']')
 
@@ -299,13 +267,8 @@ func MarshalRegionsInfoJSONWithCPUUsage(
 	return out.Buffer.BuildBytes(), out.Error
 }
 
-func covertAPIRegionInfo(
-	r *core.RegionInfo,
-	region *RegionInfo,
-	out *jwriter.Writer,
-	cpuUsageProvider func(*core.RegionInfo) uint64,
-) {
-	InitRegionWithCPUUsage(r, region, cpuUsageProvider(r))
+func covertAPIRegionInfo(r *core.RegionInfo, region *RegionInfo, out *jwriter.Writer) {
+	InitRegion(r, region)
 	// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
 	// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
 	region.Leader.setDefaultIfNil()
