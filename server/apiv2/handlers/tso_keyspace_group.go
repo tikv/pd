@@ -20,9 +20,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -645,6 +647,22 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 			return
 		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	failedKeyspaces := make([]uint32, 0)
+	for _, keyspaceID := range validKeyspaces {
+		if err := keyspaceManager.RemoveKeyspace(keyspaceID); err != nil {
+			log.Warn("failed to remove keyspace", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+			if errs.ErrKeyspaceNotFound.Equal(err) {
+				continue
+			} else {
+				failedKeyspaces = append(failedKeyspaces, keyspaceID)
+			}
+
+		}
+	}
+	if len(failedKeyspaces) > 0 {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrEtcdTxnInternal.FastGenByArgs(failedKeyspaces).Error())
 		return
 	}
 

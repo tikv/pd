@@ -21,11 +21,13 @@ import (
 	"net/http"
 	"testing"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	kgconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -343,6 +345,10 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 	re.NotContains(kg.Keyspaces, keyspaceID1)
 	re.NotContains(kg.Keyspaces, keyspaceID2)
 	re.Contains(kg.Keyspaces, keyspaceID3) // keyspace3 should still be there
+	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID1)
+	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
+	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID2)
+	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
 
 	// Test 3: Mix valid and invalid keyspaces
 	// Set keyspace3 to ARCHIVED
@@ -359,6 +365,8 @@ func (suite *keyspaceGroupTestSuite) TestRemoveKeyspacesFromGroup() {
 	// Verify only keyspace3 is removed
 	kg = MustLoadKeyspaceGroupByID(re, suite.server, kgconstant.DefaultKeyspaceGroupID)
 	re.NotContains(kg.Keyspaces, keyspaceID3)
+	_, err = keyspaceManager.LoadKeyspaceByID(keyspaceID3)
+	re.True(perrors.ErrorEqual(err, errs.ErrKeyspaceNotFound))
 
 	// Test 4: Try to remove from non-existent group
 	FailRemoveKeyspacesFromGroupWithCode(re, suite.server, 999,
