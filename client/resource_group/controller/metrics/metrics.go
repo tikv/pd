@@ -199,11 +199,12 @@ func initMetrics(constLabels prometheus.Labels) {
 			Subsystem: requestSubsystem,
 			Name:      "paging_prediction_residual_bytes",
 			// Signed residual = actual - predicted. Buckets span ±64MB to
-			// absorb large first-page responses on a cold copIterator
-			// (predicted=0) and workload shifts that leave EMA above
-			// actual. Factor-4 spacing keeps resolution near zero.
+			// absorb large first-page responses when the predictor has no
+			// prior observation (predicted=0) and workload shifts that
+			// leave the prediction above actual. Factor-4 spacing keeps
+			// resolution near zero.
 			Buckets: []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
-			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged requests. Shows EMA prediction accuracy.",
+			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged paging requests. Shows predictor accuracy.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -212,7 +213,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_total",
-			Help:        "Counter of RC paging RPCs that implemented the predicted hint but reported 0 (e.g. EMA cold-start) and ran without pre-charge.",
+			Help:        "Counter of paging read RPCs where no PredictedReadBytes hint was provided (hint absent or zero). These RPCs skip pre-charge and settle entirely on actual read bytes at response time.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -221,7 +222,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint=0). Quantifies cold-window read volume bypassing pre-charge throttling.",
+			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint absent or zero). Quantifies read volume settled without pre-charge throttling.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 }
