@@ -90,14 +90,14 @@ func TestMember(t *testing.T) {
 	// member delete name <member_name>
 	err = svr.Destroy()
 	re.NoError(err)
-	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 3)
 	args = []string{"-u", pdAddr, "member", "delete", "name", name}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		members, err = etcdutil.ListEtcdMembers(ctx, client)
+		members, err = etcdutil.ListEtcdMembers(ctx, client, true)
 		re.NoError(err)
 		return len(members.Members) == 2
 	})
@@ -107,7 +107,7 @@ func TestMember(t *testing.T) {
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		members, err = etcdutil.ListEtcdMembers(ctx, client)
+		members, err = etcdutil.ListEtcdMembers(ctx, client, true)
 		re.NoError(err)
 		return len(members.Members) == 2
 	})

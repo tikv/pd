@@ -446,7 +446,7 @@ func (s *Server) startClient() error {
 
 func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 	// Update advertise peer URLs.
-	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client)
+	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client, true)
 	if err != nil {
 		return err
 	}

@@ -122,7 +122,7 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 	defer ticker.Stop()
 	var curLeader uint64
 	for {
-		members, err := etcdutil.ListEtcdMembers(s.serverCtx, s.getClient())
+		members, err := etcdutil.ListEtcdMembers(s.serverCtx, s.getClient(), true)
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 		} else {

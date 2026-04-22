@@ -121,7 +121,7 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
-	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client, true)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

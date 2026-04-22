@@ -65,7 +65,7 @@ func TestMemberHelpers(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Test ListEtcdMembers
-	listResp1, err := ListEtcdMembers(client1.Ctx(), client1)
+	listResp1, err := ListEtcdMembers(client1.Ctx(), client1, true)
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
@@ -86,7 +86,7 @@ func TestMemberHelpers(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
 	re.NoError(err)
 
-	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1, true)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
@@ -161,6 +161,9 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 func TestEtcdClientSync(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	})
 
 	servers, client1, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
@@ -176,7 +179,7 @@ func TestEtcdClientSync(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	// remove one member that is not the one we connected to.
-	resp, err := ListEtcdMembers(ctx, client1)
+	resp, err := ListEtcdMembers(ctx, client1, true)
 	re.NoError(err)
 
 	var memIDToRemove uint64
@@ -196,14 +199,13 @@ func TestEtcdClientSync(t *testing.T) {
 			return true
 		}
 		// Verify if the member was actually removed by checking the member list
-		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1)
+		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1, true)
 		return listErr == nil && len(listResp.Members) == 1
 	})
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
 func checkEtcdEndpointNum(re *require.Assertions, client *clientv3.Client, num int) {
@@ -221,6 +223,9 @@ func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
 func TestEtcdScaleInAndOut(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	})
 	// Start a etcd server.
 	servers, _, clean := NewTestEtcdCluster(t, 1, nil)
 	defer clean()
@@ -249,12 +254,14 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	_, err = RemoveEtcdMember(client3, uint64(etcd1.Server.ID()))
 	re.NoError(err)
 	checkMembers(re, client3, []*embed.Etcd{etcd2})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
 func TestRandomKillEtcd(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	})
 	// Start a etcd server.
 	etcds, client1, clean := NewTestEtcdCluster(t, 3, nil)
 	defer clean()
@@ -279,7 +286,6 @@ func TestRandomKillEtcd(t *testing.T) {
 			etcd.Close()
 		}
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
 func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
@@ -287,9 +293,11 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	var err error
 	// Test with enable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	t.Cleanup(func() {
+		require.NoError(t, failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	})
 	err = checkEtcdWithHangLeader(t, true)
 	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 
 	// Test with disable check.
 	err = checkEtcdWithHangLeader(t, false)

@@ -46,7 +46,7 @@ func TestSimpleJoin(t *testing.T) {
 
 	pd1 := cluster.GetServer("pd1")
 	client := pd1.GetEtcdClient()
-	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 1)
 
@@ -56,7 +56,7 @@ func TestSimpleJoin(t *testing.T) {
 	err = pd2.Run()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
-	members, err = etcdutil.ListEtcdMembers(ctx, client)
+	members, err = etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 
@@ -69,7 +69,7 @@ func TestSimpleJoin(t *testing.T) {
 	err = pd3.Run()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
-	members, err = etcdutil.ListEtcdMembers(ctx, client)
+	members, err = etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 3)
 }
@@ -80,7 +80,11 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	oldEtcdStartTimeout := server.EtcdStartTimeout
 	server.EtcdStartTimeout = 10 * time.Second
+	t.Cleanup(func() {
+		server.EtcdStartTimeout = oldEtcdStartTimeout
+	})
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -103,7 +107,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	res := tests.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }
@@ -113,7 +117,11 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	oldEtcdStartTimeout := server.EtcdStartTimeout
 	server.EtcdStartTimeout = 10 * time.Second
+	t.Cleanup(func() {
+		server.EtcdStartTimeout = oldEtcdStartTimeout
+	})
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
@@ -136,7 +144,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	res := tests.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client, true)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }
