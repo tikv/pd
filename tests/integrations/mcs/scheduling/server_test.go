@@ -648,8 +648,8 @@ func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageCompatibility() {
 		Region: &metapb.Region{
 			Id:       regionID,
 			Peers:    []*metapb.Peer{leaderPeer},
-			StartKey: []byte("mcs-api-cpu-a"),
-			EndKey:   []byte("mcs-api-cpu-b"),
+			StartKey: []byte("c"),
+			EndKey:   []byte("d"),
 		},
 		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
@@ -657,9 +657,6 @@ func (suite *serverTestSuite) TestMicroserviceRegionAPICPUUsageCompatibility() {
 		Interval:        interval,
 		Term:            1,
 		CpuUsage:        100,
-		CpuStats: &pdpb.CPUStats{
-			UnifiedRead: 80,
-		},
 	}, 0)
 	tests.MustPutRegionInfo(re, suite.cluster, region)
 
@@ -763,7 +760,7 @@ func (suite *serverTestSuite) TestMicroserviceHotReadCPUStatsComeFromStoreHeartb
 		}
 		storesLoads := tc.GetPrimaryServer().GetCluster().GetStoresLoads()
 		storeLoads, ok := storesLoads[1]
-		if !ok {
+		if !ok || len(storeLoads) <= int(statutils.StoreReadCPU) {
 			return false
 		}
 		return hotPeer.GetLoad(statutils.CPUDim) == 80 &&
