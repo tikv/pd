@@ -794,6 +794,7 @@ func (m *GCStateManager) tryGetGCStateFromCache(keyspaceID uint32) (GCState, boo
 func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 	// Fast path
 	if cachedGCState, ok := m.tryGetGCStateFromCache(keyspaceID); ok {
+		gcStateCacheAccessCounter.WithLabelValues("hit").Inc()
 		return cachedGCState, nil
 	}
 
@@ -803,8 +804,11 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 
 	// Check cache again: it may be updated by other concurrent invocations when the lock is not held.
 	if cachedGCState, ok := m.gcStatesCache[keyspaceID]; ok {
+		gcStateCacheAccessCounter.WithLabelValues("slow_hit").Inc()
 		return cachedGCState, nil
 	}
+
+	gcStateCacheAccessCounter.WithLabelValues("cache_miss").Inc()
 
 	var result GCState
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
