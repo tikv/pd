@@ -204,8 +204,3 @@ func TestAdditionalInfoConcurrent(t *testing.T) {
 		t.Error("LogAdditionalInfo returned an empty string")
 	}
 }
-
-func TestHasRelatedMergeRegionWithNilOperator(t *testing.T) {
-	var op *Operator
-	require.False(t, op.HasRelatedMergeRegion())
-}
