@@ -803,10 +803,17 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 	m.mu.RLock()
 	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
 		m.mu.RUnlock()
+		failpoint.InjectCall("getGCStateCacheAccess", "hit")
 		gcStateCacheAccessHitCounter.Inc()
 		return cachedGCState, nil
 	}
 	m.mu.RUnlock()
+
+	// This hook is intentionally before taking the write lock. Tests use it to
+	// cover leadership churn after the first leader-gated cache check but before
+	// the slow path reads from storage, without blocking leadership callbacks on
+	// GCStateManager's lock.
+	failpoint.InjectCall("getGCStateBeforeSlowPath")
 
 	// Slow path
 	m.mu.Lock()
@@ -814,10 +821,12 @@ func (m *GCStateManager) getGCStateImpl(keyspaceID uint32) (GCState, error) {
 
 	// Check cache again: it may be updated by other concurrent invocations when the lock is not held.
 	if cachedGCState, ok := m.tryGetGCStateFromCacheLocked(keyspaceID); ok {
+		failpoint.InjectCall("getGCStateCacheAccess", "slow_hit")
 		gcStateCacheAccessSlowHitCounter.Inc()
 		return cachedGCState, nil
 	}
 
+	failpoint.InjectCall("getGCStateCacheAccess", "miss")
 	gcStateCacheAccessMissCounter.Inc()
 
 	var result GCState
