@@ -131,11 +131,11 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	// Exclude the gc_worker as it's not included in GetGCState's result.
 	re.Equal(list.ServiceGCSafepoints[1:3], leftSsps)
 
-	res, err = tests.TestDialClient.Get(sspURL)
+	resAfterDelete, err := tests.TestDialClient.Get(sspURL)
 	re.NoError(err)
-	defer res.Body.Close()
-	listResp = &api.ListServiceGCSafepoint{}
-	err = apiutil.ReadJSON(res.Body, listResp)
+	defer resAfterDelete.Body.Close()
+	listRespAfterDelete := &api.ListServiceGCSafepoint{}
+	err = apiutil.ReadJSON(resAfterDelete.Body, listRespAfterDelete)
 	re.NoError(err)
 	// Also verify the public HTTP view. This catches stale cache reuse in
 	// GetGCSafePoint itself, not only direct GCStateManager reads.
@@ -144,5 +144,5 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 		GCSafePoint:           list.GCSafePoint,
 		MinServiceGcSafepoint: list.MinServiceGcSafepoint,
 	}
-	re.Equal(expectedAfterDelete, listResp)
+	re.Equal(expectedAfterDelete, listRespAfterDelete)
 }

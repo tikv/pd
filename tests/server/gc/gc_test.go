@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 const (
 	getGCStateBeforeSecondClusterCheckFailpoint = "github.com/tikv/pd/server/getGCStateBeforeSecondClusterCheck"
 	getGCStateBeforeSlowPathFailpoint           = "github.com/tikv/pd/pkg/gc/getGCStateBeforeSlowPath"
+	skipCampaignLeaderCheckFailpoint            = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
 )
 
 func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.GetGCStateRequest, func()) {
@@ -60,6 +61,7 @@ func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
+	re.NoError(failpoint.Enable(skipCampaignLeaderCheckFailpoint, "return(true)"))
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
@@ -70,6 +72,7 @@ func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.
 		KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: constant.NullKeyspaceID},
 	}
 	cleanup := func() {
+		re.NoError(failpoint.Disable(skipCampaignLeaderCheckFailpoint))
 		cancel()
 		cluster.Destroy()
 	}
@@ -480,11 +483,6 @@ func TestGetGCStateRejectsOldLeaderAfterTransfer(t *testing.T) {
 	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
 	defer cleanup()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-
 	oldLeader := cluster.GetLeader()
 	re.NotEmpty(oldLeader)
 	oldLeaderServer := cluster.GetServer(oldLeader)
@@ -506,11 +504,6 @@ func TestGetGCStateFailsIfLeaderLostBeforeReply(t *testing.T) {
 	re := require.New(t)
 	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
 	defer cleanup()
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
@@ -566,11 +559,6 @@ func TestGetGCStateReturnsCachedStateAfterLeadershipRecovery(t *testing.T) {
 	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
 	defer cleanup()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 	oldLeader := leaderServer.GetConfig().Name
@@ -582,10 +570,12 @@ func TestGetGCStateReturnsCachedStateAfterLeadershipRecovery(t *testing.T) {
 	re.Nil(resp.GetHeader().GetError())
 	re.Equal(uint64(10), resp.GetGcState().GetTxnSafePoint())
 
-	// This test intentionally documents the current cache-hit semantics. The
-	// request already obtained the old cached state before leadership churn, so
-	// if the same PD regains leadership before the final response check, it can
-	// return that old cached value.
+	// This test pins the current cache-hit behavior; it does not claim that this
+	// is the ideal long-term contract. Once the request has already obtained the
+	// cached GC state before leadership churn, regaining leadership before the
+	// final response check currently lets it return that earlier cached value.
+	// If GetGCState is intentionally tightened in the future, update this test
+	// together with the corresponding semantics documentation.
 	point := enableBlockingFailpoint(re, getGCStateBeforeSecondClusterCheckFailpoint)
 	defer point.releaseAndDisable(re)
 
@@ -637,11 +627,6 @@ func TestGetGCStateSlowPathFailsIfLeaderLostBeforeRead(t *testing.T) {
 	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
 	defer cleanup()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
-
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 	oldLeader := leaderServer.GetConfig().Name
@@ -689,11 +674,6 @@ func TestGetGCStateSlowPathReadsLatestStateAfterLeadershipRecovery(t *testing.T)
 	re := require.New(t)
 	cluster, req, cleanup := newGCStateLeaderTransitionCluster(t)
 	defer cleanup()
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
-	}()
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
