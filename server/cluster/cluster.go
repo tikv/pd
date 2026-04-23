@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -140,6 +141,7 @@ type Server interface {
 	GetKeyspaceGroupManager() *keyspace.GroupManager
 	IsKeyspaceGroupEnabled() bool
 	GetMeteringWriter() *metering.Writer
+	GetGCStateManager() *gc.GCStateManager
 }
 
 // RaftCluster is used for cluster config management.
@@ -200,6 +202,8 @@ type RaftCluster struct {
 	logRunner ratelimit.Runner
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
+
+	stopGCStateManager func()
 }
 
 // Status saves some state information.
@@ -423,6 +427,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
+
+	s.GetGCStateManager().OnNodeBecomesLeader()
+	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesFollower
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -923,6 +930,9 @@ func (c *RaftCluster) Stop() {
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
 	c.syncRegionRunner.Stop()
+	if c.stopGCStateManager != nil {
+		c.stopGCStateManager()
+	}
 	c.Unlock()
 
 	c.wg.Wait()

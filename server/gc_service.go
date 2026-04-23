@@ -732,6 +732,11 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		}, nil
 	}
 
+	rc = s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetGCStateResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
+	}
+
 	return &pdpb.GetGCStateResponse{
 		Header:  grpcutil.WrapHeader(),
 		GcState: gcStateToProto(gcState, time.Now()),

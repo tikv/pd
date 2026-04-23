@@ -134,5 +134,6 @@ func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	h.svr.GetGCStateManager().ForceInvalidateGCStateCache()
 	h.rd.JSON(w, http.StatusOK, "Delete service GC safepoint successfully.")
 }
