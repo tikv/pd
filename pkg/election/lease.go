@@ -186,11 +186,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			// extended expireTime. Only step down when the local lease estimate is
 			// actually exhausted.
 			if remaining := time.Until(actualExpire); remaining > 0 {
-				log.Info("keep alive lease timer fired before local lease expired",
-					zap.Duration("timeout-duration", l.leaseTimeout),
-					zap.Duration("remaining", remaining),
-					zap.Time("actual-expire", actualExpire),
-					zap.String("purpose", l.Purpose))
 				timer.Reset(remaining)
 				continue
 			}
@@ -220,22 +215,17 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 		if l.ID.Load() != nil {
 			leaseID = l.ID.Load().(clientv3.LeaseID)
 		}
-		stopReason := "context_canceled"
 		log.Info("start lease keep alive worker",
 			zap.String("purpose", l.Purpose),
 			zap.Int64("lease-id", int64(leaseID)),
 			zap.Duration("lease-timeout", l.leaseTimeout),
 			zap.Duration("expected-interval", expectedInterval))
-		defer func() {
-			log.Info("stop lease keep alive worker",
-				zap.String("purpose", l.Purpose),
-				zap.Int64("lease-id", int64(leaseID)),
-				zap.String("reason", stopReason))
-		}()
+		defer log.Info("stop lease keep alive worker",
+			zap.String("purpose", l.Purpose),
+			zap.Int64("lease-id", int64(leaseID)))
 
 		keepAliveCh, err := l.lease.KeepAlive(ctx, leaseID)
 		if err != nil {
-			stopReason = "keepalive_error"
 			log.Warn("lease keep alive stream failed",
 				zap.String("purpose", l.Purpose),
 				zap.Int64("lease-id", int64(leaseID)),
@@ -245,7 +235,6 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 			return
 		}
 		var lastResponseTime time.Time
-		var lastSlowConsumerLogTime time.Time
 		for {
 			select {
 			case <-ctx.Done():
@@ -256,7 +245,6 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 					// longer maintain this lease stream. Propagate that as an
 					// immediate worker stop instead of waiting for the watchdog.
 					if ctx.Err() == nil {
-						stopReason = "channel_closed"
 						log.Warn("lease keep alive channel closed",
 							zap.String("purpose", l.Purpose),
 							zap.Int64("lease-id", int64(leaseID)),
@@ -273,7 +261,6 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 					// etcd reports non-positive TTL when the lease is no longer
 					// valid. Continuing the local loop would hide a lost lease from
 					// the election owner.
-					stopReason = "invalid_ttl"
 					log.Warn("lease keep alive got invalid ttl",
 						zap.String("purpose", l.Purpose),
 						zap.Int64("lease-id", int64(leaseID)),
@@ -285,13 +272,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 				// streaming model. Use arrival time so the local estimate reflects
 				// when PD actually observed the renewal.
 				now := time.Now()
-				if lastResponseTime.IsZero() {
-					log.Info("lease keep alive stream received first response",
-						zap.String("purpose", l.Purpose),
-						zap.Int64("lease-id", int64(leaseID)),
-						zap.Int64("ttl", ttl),
-						zap.Duration("expected-interval", expectedInterval))
-				} else if expectedInterval > 0 {
+				if !lastResponseTime.IsZero() && expectedInterval > 0 {
 					responseInterval := now.Sub(lastResponseTime)
 					if responseInterval > expectedInterval*2 {
 						log.Warn("the interval between lease keep alive responses is too long",
@@ -306,16 +287,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 				lastResponseTime = now
 				expire := now.Add(time.Duration(ttl) * time.Second)
 				select {
-				case oldExpire := <-ch:
-					if lastSlowConsumerLogTime.IsZero() || expectedInterval <= 0 || now.Sub(lastSlowConsumerLogTime) > expectedInterval*2 {
-						lastSlowConsumerLogTime = now
-						log.Warn("drop stale lease keep alive expire time because outer loop is slow",
-							zap.String("purpose", l.Purpose),
-							zap.Int64("lease-id", int64(leaseID)),
-							zap.Time("old-expire", oldExpire),
-							zap.Time("new-expire", expire),
-							zap.Int64("ttl", ttl))
-					}
+				case <-ch:
 				default:
 				}
 				select {

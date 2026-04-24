@@ -238,19 +238,19 @@ type fakeLease struct {
 	keepAliveErr error
 }
 
-func (l *fakeLease) Grant(context.Context, int64) (*clientv3.LeaseGrantResponse, error) {
+func (*fakeLease) Grant(context.Context, int64) (*clientv3.LeaseGrantResponse, error) {
 	return nil, nil
 }
 
-func (l *fakeLease) Revoke(context.Context, clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
+func (*fakeLease) Revoke(context.Context, clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
 	return nil, nil
 }
 
-func (l *fakeLease) TimeToLive(context.Context, clientv3.LeaseID, ...clientv3.LeaseOption) (*clientv3.LeaseTimeToLiveResponse, error) {
+func (*fakeLease) TimeToLive(context.Context, clientv3.LeaseID, ...clientv3.LeaseOption) (*clientv3.LeaseTimeToLiveResponse, error) {
 	return nil, nil
 }
 
-func (l *fakeLease) Leases(context.Context) (*clientv3.LeaseLeasesResponse, error) {
+func (*fakeLease) Leases(context.Context) (*clientv3.LeaseLeasesResponse, error) {
 	return nil, nil
 }
 
@@ -258,10 +258,10 @@ func (l *fakeLease) KeepAlive(context.Context, clientv3.LeaseID) (<-chan *client
 	return l.keepAliveCh, l.keepAliveErr
 }
 
-func (l *fakeLease) KeepAliveOnce(context.Context, clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error) {
+func (*fakeLease) KeepAliveOnce(context.Context, clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error) {
 	return nil, nil
 }
 
-func (l *fakeLease) Close() error {
+func (*fakeLease) Close() error {
 	return nil
 }
