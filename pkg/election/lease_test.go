@@ -102,20 +102,25 @@ func TestLease(t *testing.T) {
 	re.True(lease1.IsExpired())
 }
 
+// TestLeaseKeepAlive runs KeepAlive against a real etcd cluster and verifies
+// that expireTime keeps advancing while the loop is active.
 func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
-	// Create the lease.
 	lease := NewLease(client, "test_lease")
-
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(ctx, 2*time.Second)
-	time.Sleep(2 * time.Second)
-	<-ch
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go lease.KeepAlive(ctx)
+
+	origExpire := lease.expireTime.Load().(time.Time)
+	re.Eventually(func() bool {
+		return lease.expireTime.Load().(time.Time).After(origExpire)
+	}, (defaultLeaseTimeout+1)*time.Second, 50*time.Millisecond)
+
 	re.NoError(lease.Close())
 }
 
@@ -171,36 +176,60 @@ func TestLeaseKeepAliveExitsWhenWorkerChannelCloses(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestLeaseKeepAliveWorkerExitsOnInvalidTTL(t *testing.T) {
-	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
+// TestLeaseKeepAliveExitsOnInvalidTTL verifies that a keepalive response with
+// non-positive TTL (etcd signalling that the lease is no longer valid) causes
+// KeepAlive to return so the election owner can step down.
+func TestLeaseKeepAliveExitsOnInvalidTTL(t *testing.T) {
+	re := require.New(t)
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse, 1)
 	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, 5*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	timeCh := lease.keepAliveWorker(ctx, time.Second)
+
+	done := make(chan struct{})
+	go func() {
+		lease.KeepAlive(ctx)
+		close(done)
+	}()
 
 	sendKeepAliveResponse(t, keepAliveCh, 0)
-	requireClosedTimeCh(t, timeCh)
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
 }
 
-func TestLeaseKeepAliveWorkerKeepsLatestExpireWhenConsumerIsSlow(t *testing.T) {
+// TestLeaseKeepAliveKeepsExpireMonotonic verifies that when a response with a
+// smaller TTL arrives after a larger one, expireTime is not pulled backwards.
+// This protects against out-of-order or stale renewals overriding a good
+// estimate.
+func TestLeaseKeepAliveKeepsExpireMonotonic(t *testing.T) {
 	re := require.New(t)
-	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
-	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, 5*time.Second)
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse, 1)
+	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	timeCh := lease.keepAliveWorker(ctx, time.Second)
+	go lease.KeepAlive(ctx)
 
-	sendKeepAliveResponse(t, keepAliveCh, 1)
-	sendKeepAliveResponse(t, keepAliveCh, 5)
+	// The large TTL lands first and should push expireTime well into the future.
 	sendKeepAliveResponse(t, keepAliveCh, 30)
+	re.Eventually(func() bool {
+		return time.Until(lease.expireTime.Load().(time.Time)) > 20*time.Second
+	}, time.Second, 10*time.Millisecond)
+	beforeSmall := lease.expireTime.Load().(time.Time)
 
-	select {
-	case expire, ok := <-timeCh:
-		re.True(ok)
-		re.Greater(time.Until(expire), 20*time.Second)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for keepalive expire time")
-	}
+	// A subsequent smaller TTL must not regress expireTime, because its absolute
+	// deadline is earlier than the stored maxExpire.
+	sendKeepAliveResponse(t, keepAliveCh, 1)
+	// Give the loop a beat to process and (incorrectly) store the smaller expire
+	// if the monotonicity guard were missing.
+	time.Sleep(100 * time.Millisecond)
+	afterSmall := lease.expireTime.Load().(time.Time)
+	re.False(afterSmall.Before(beforeSmall))
 }
 
 func newTestLeaseWithKeepAliveCh(keepAliveCh chan *clientv3.LeaseKeepAliveResponse, leaseTimeout time.Duration) *Lease {
@@ -220,16 +249,6 @@ func sendKeepAliveResponse(t *testing.T, keepAliveCh chan<- *clientv3.LeaseKeepA
 	case keepAliveCh <- &clientv3.LeaseKeepAliveResponse{ID: clientv3.LeaseID(1), TTL: ttl}:
 	case <-time.After(time.Second):
 		t.Fatal("timed out sending keepalive response")
-	}
-}
-
-func requireClosedTimeCh(t *testing.T, timeCh <-chan time.Time) {
-	t.Helper()
-	select {
-	case _, ok := <-timeCh:
-		require.False(t, ok)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for keepalive worker to exit")
 	}
 }
 
