@@ -112,13 +112,21 @@ func (l *Lease) Close() error {
 	return err
 }
 
+func (l *Lease) getExpireTime() time.Time {
+	if l == nil {
+		return typeutil.ZeroTime
+	}
+	expireTime := l.expireTime.Load()
+	if expireTime == nil {
+		return typeutil.ZeroTime
+	}
+	return expireTime.(time.Time)
+}
+
 // IsExpired checks if the lease is expired. If it returns true,
 // the current leader/primary should step down and try to re-elect again.
 func (l *Lease) IsExpired() bool {
-	if l == nil || l.expireTime.Load() == nil {
-		return true
-	}
-	return time.Now().After(l.expireTime.Load().(time.Time))
+	return time.Now().After(l.getExpireTime())
 }
 
 // KeepAlive auto renews the lease and update expireTime.
@@ -145,7 +153,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			if !ok {
 				log.Info("lease keep alive worker stopped",
 					zap.String("purpose", l.Purpose),
-					zap.Time("actual-expire", l.expireTime.Load().(time.Time)))
+					zap.Time("actual-expire", l.getExpireTime()))
 				return
 			}
 			now := time.Now()
@@ -173,7 +181,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			}
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			actualExpire := l.expireTime.Load().(time.Time)
+			actualExpire := l.getExpireTime()
 			// Timer delivery can race with a keepalive response that already
 			// extended expireTime. Only step down when the local lease estimate is
 			// actually exhausted.
