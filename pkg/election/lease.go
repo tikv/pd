@@ -143,7 +143,9 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 		select {
 		case t, ok := <-timeCh:
 			if !ok {
-				log.Info("lease keep alive worker stopped", zap.String("purpose", l.Purpose))
+				log.Info("lease keep alive worker stopped",
+					zap.String("purpose", l.Purpose),
+					zap.Time("actual-expire", l.expireTime.Load().(time.Time)))
 				return
 			}
 			now := time.Now()
@@ -176,6 +178,11 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			// extended expireTime. Only step down when the local lease estimate is
 			// actually exhausted.
 			if remaining := time.Until(actualExpire); remaining > 0 {
+				log.Info("keep alive lease timer fired before local lease expired",
+					zap.Duration("timeout-duration", l.leaseTimeout),
+					zap.Duration("remaining", remaining),
+					zap.Time("actual-expire", actualExpire),
+					zap.String("purpose", l.Purpose))
 				timer.Reset(remaining)
 				continue
 			}
@@ -191,7 +198,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 }
 
 // keepAliveWorker keeps the lease alive through the etcd lease keepalive stream.
-func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Duration) <-chan time.Time {
 	// Keep the stream reader independent from the outer loop. If the outer loop
 	// is delayed, the latest successful response is enough to refresh the local
 	// lease estimate; older expire times would only add stale work.
@@ -201,18 +208,35 @@ func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan tim
 		defer logutil.LogPanic()
 		defer close(ch)
 
-		log.Info("start lease keep alive worker", zap.String("purpose", l.Purpose))
-		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
-
 		var leaseID clientv3.LeaseID
 		if l.ID.Load() != nil {
 			leaseID = l.ID.Load().(clientv3.LeaseID)
 		}
+		stopReason := "context_canceled"
+		log.Info("start lease keep alive worker",
+			zap.String("purpose", l.Purpose),
+			zap.Int64("lease-id", int64(leaseID)),
+			zap.Duration("lease-timeout", l.leaseTimeout),
+			zap.Duration("expected-interval", expectedInterval))
+		defer func() {
+			log.Info("stop lease keep alive worker",
+				zap.String("purpose", l.Purpose),
+				zap.Int64("lease-id", int64(leaseID)),
+				zap.String("reason", stopReason))
+		}()
+
 		keepAliveCh, err := l.lease.KeepAlive(ctx, leaseID)
 		if err != nil {
-			log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
+			stopReason = "keepalive_error"
+			log.Warn("lease keep alive stream failed",
+				zap.String("purpose", l.Purpose),
+				zap.Int64("lease-id", int64(leaseID)),
+				zap.Duration("lease-timeout", l.leaseTimeout),
+				zap.Duration("expected-interval", expectedInterval),
+				errs.ZapError(err))
 			return
 		}
+		var lastResponseTime time.Time
 		for {
 			select {
 			case <-ctx.Done():
@@ -223,7 +247,11 @@ func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan tim
 					// longer maintain this lease stream. Propagate that as an
 					// immediate worker stop instead of waiting for the watchdog.
 					if ctx.Err() == nil {
-						log.Warn("lease keep alive channel closed", zap.String("purpose", l.Purpose))
+						stopReason = "channel_closed"
+						log.Warn("lease keep alive channel closed",
+							zap.String("purpose", l.Purpose),
+							zap.Int64("lease-id", int64(leaseID)),
+							zap.Time("last-response-time", lastResponseTime))
 					}
 					return
 				}
@@ -236,15 +264,46 @@ func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan tim
 					// etcd reports non-positive TTL when the lease is no longer
 					// valid. Continuing the local loop would hide a lost lease from
 					// the election owner.
-					log.Warn("lease keep alive got invalid ttl", zap.String("purpose", l.Purpose), zap.Int64("ttl", ttl))
+					stopReason = "invalid_ttl"
+					log.Warn("lease keep alive got invalid ttl",
+						zap.String("purpose", l.Purpose),
+						zap.Int64("lease-id", int64(leaseID)),
+						zap.Int64("ttl", ttl),
+						zap.Time("last-response-time", lastResponseTime))
 					return
 				}
 				// KeepAlive responses do not have a per-request start time in this
 				// streaming model. Use arrival time so the local estimate reflects
 				// when PD actually observed the renewal.
-				expire := time.Now().Add(time.Duration(ttl) * time.Second)
+				now := time.Now()
+				if lastResponseTime.IsZero() {
+					log.Info("lease keep alive stream received first response",
+						zap.String("purpose", l.Purpose),
+						zap.Int64("lease-id", int64(leaseID)),
+						zap.Int64("ttl", ttl),
+						zap.Duration("expected-interval", expectedInterval))
+				} else if expectedInterval > 0 {
+					responseInterval := now.Sub(lastResponseTime)
+					if responseInterval > expectedInterval*2 {
+						log.Warn("the interval between lease keep alive responses is too long",
+							zap.String("purpose", l.Purpose),
+							zap.Int64("lease-id", int64(leaseID)),
+							zap.Duration("interval", responseInterval),
+							zap.Duration("expected-interval", expectedInterval),
+							zap.Int64("ttl", ttl),
+							zap.Time("last-response-time", lastResponseTime))
+					}
+				}
+				lastResponseTime = now
+				expire := now.Add(time.Duration(ttl) * time.Second)
 				select {
-				case <-ch:
+				case oldExpire := <-ch:
+					log.Warn("drop stale lease keep alive expire time because outer loop is slow",
+						zap.String("purpose", l.Purpose),
+						zap.Int64("lease-id", int64(leaseID)),
+						zap.Time("old-expire", oldExpire),
+						zap.Time("new-expire", expire),
+						zap.Int64("ttl", ttl))
 				default:
 				}
 				select {
