@@ -67,6 +67,8 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 	if l == nil {
 		return errs.ErrEtcdGrantLease.GenWithStackByCause("lease is nil")
 	}
+	// Closing an etcd lessor permanently halts its keepalive stream, while
+	// existing callers still reuse Lease after Close.
 	if l.closed.Swap(false) {
 		l.lease = clientv3.NewLease(l.client)
 	}
@@ -170,6 +172,9 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			actualExpire := l.expireTime.Load().(time.Time)
+			// Timer delivery can race with a keepalive response that already
+			// extended expireTime. Only step down when the local lease estimate is
+			// actually exhausted.
 			if remaining := time.Until(actualExpire); remaining > 0 {
 				timer.Reset(remaining)
 				continue
@@ -187,6 +192,9 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 
 // keepAliveWorker keeps the lease alive through the etcd lease keepalive stream.
 func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan time.Time {
+	// Keep the stream reader independent from the outer loop. If the outer loop
+	// is delayed, the latest successful response is enough to refresh the local
+	// lease estimate; older expire times would only add stale work.
 	ch := make(chan time.Time, 1)
 
 	go func() {
@@ -211,6 +219,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan tim
 				return
 			case res, ok := <-keepAliveCh:
 				if !ok {
+					// A closed keepalive channel means the etcd client can no
+					// longer maintain this lease stream. Propagate that as an
+					// immediate worker stop instead of waiting for the watchdog.
 					if ctx.Err() == nil {
 						log.Warn("lease keep alive channel closed", zap.String("purpose", l.Purpose))
 					}
@@ -222,9 +233,15 @@ func (l *Lease) keepAliveWorker(ctx context.Context, _ time.Duration) <-chan tim
 				}
 				if ttl <= 0 {
 					l.metrics.invalidTTL.Inc()
+					// etcd reports non-positive TTL when the lease is no longer
+					// valid. Continuing the local loop would hide a lost lease from
+					// the election owner.
 					log.Warn("lease keep alive got invalid ttl", zap.String("purpose", l.Purpose), zap.Int64("ttl", ttl))
 					return
 				}
+				// KeepAlive responses do not have a per-request start time in this
+				// streaming model. Use arrival time so the local estimate reflects
+				// when PD actually observed the renewal.
 				expire := time.Now().Add(time.Duration(ttl) * time.Second)
 				select {
 				case <-ch:
