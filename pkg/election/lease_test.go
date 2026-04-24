@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -116,4 +117,151 @@ func TestLeaseKeepAlive(t *testing.T) {
 	time.Sleep(2 * time.Second)
 	<-ch
 	re.NoError(lease.Close())
+}
+
+func TestLeaseKeepAliveRefreshesExpireTime(t *testing.T) {
+	re := require.New(t)
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
+	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		lease.KeepAlive(ctx)
+		close(done)
+	}()
+
+	sendKeepAliveResponse(t, keepAliveCh, 30)
+	re.Eventually(func() bool {
+		expire := lease.expireTime.Load().(time.Time)
+		return time.Until(expire) > 20*time.Second
+	}, time.Second, 10*time.Millisecond)
+
+	cancel()
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestLeaseKeepAliveExitsWhenWorkerChannelCloses(t *testing.T) {
+	re := require.New(t)
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
+	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		lease.KeepAlive(ctx)
+		close(done)
+	}()
+
+	close(keepAliveCh)
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestLeaseKeepAliveWorkerExitsOnInvalidTTL(t *testing.T) {
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
+	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timeCh := lease.keepAliveWorker(ctx, time.Second)
+
+	sendKeepAliveResponse(t, keepAliveCh, 0)
+	requireClosedTimeCh(t, timeCh)
+}
+
+func TestLeaseKeepAliveWorkerKeepsLatestExpireWhenConsumerIsSlow(t *testing.T) {
+	re := require.New(t)
+	keepAliveCh := make(chan *clientv3.LeaseKeepAliveResponse)
+	lease := newTestLeaseWithKeepAliveCh(keepAliveCh, 5*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	timeCh := lease.keepAliveWorker(ctx, time.Second)
+
+	sendKeepAliveResponse(t, keepAliveCh, 1)
+	sendKeepAliveResponse(t, keepAliveCh, 5)
+	sendKeepAliveResponse(t, keepAliveCh, 30)
+
+	select {
+	case expire, ok := <-timeCh:
+		re.True(ok)
+		re.Greater(time.Until(expire), 20*time.Second)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for keepalive expire time")
+	}
+}
+
+func newTestLeaseWithKeepAliveCh(keepAliveCh chan *clientv3.LeaseKeepAliveResponse, leaseTimeout time.Duration) *Lease {
+	lease := &Lease{
+		Purpose:      "test_lease",
+		lease:        &fakeLease{keepAliveCh: keepAliveCh},
+		leaseTimeout: leaseTimeout,
+	}
+	lease.ID.Store(clientv3.LeaseID(1))
+	lease.expireTime.Store(time.Now().Add(-time.Second))
+	return lease
+}
+
+func sendKeepAliveResponse(t *testing.T, keepAliveCh chan<- *clientv3.LeaseKeepAliveResponse, ttl int64) {
+	t.Helper()
+	select {
+	case keepAliveCh <- &clientv3.LeaseKeepAliveResponse{ID: clientv3.LeaseID(1), TTL: ttl}:
+	case <-time.After(time.Second):
+		t.Fatal("timed out sending keepalive response")
+	}
+}
+
+func requireClosedTimeCh(t *testing.T, timeCh <-chan time.Time) {
+	t.Helper()
+	select {
+	case _, ok := <-timeCh:
+		require.False(t, ok)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for keepalive worker to exit")
+	}
+}
+
+type fakeLease struct {
+	keepAliveCh  chan *clientv3.LeaseKeepAliveResponse
+	keepAliveErr error
+}
+
+func (l *fakeLease) Grant(context.Context, int64) (*clientv3.LeaseGrantResponse, error) {
+	return nil, nil
+}
+
+func (l *fakeLease) Revoke(context.Context, clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error) {
+	return nil, nil
+}
+
+func (l *fakeLease) TimeToLive(context.Context, clientv3.LeaseID, ...clientv3.LeaseOption) (*clientv3.LeaseTimeToLiveResponse, error) {
+	return nil, nil
+}
+
+func (l *fakeLease) Leases(context.Context) (*clientv3.LeaseLeasesResponse, error) {
+	return nil, nil
+}
+
+func (l *fakeLease) KeepAlive(context.Context, clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	return l.keepAliveCh, l.keepAliveErr
+}
+
+func (l *fakeLease) KeepAliveOnce(context.Context, clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error) {
+	return nil, nil
+}
+
+func (l *fakeLease) Close() error {
+	return nil
 }
