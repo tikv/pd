@@ -245,6 +245,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 			return
 		}
 		var lastResponseTime time.Time
+		var lastSlowConsumerLogTime time.Time
 		for {
 			select {
 			case <-ctx.Done():
@@ -306,12 +307,15 @@ func (l *Lease) keepAliveWorker(ctx context.Context, expectedInterval time.Durat
 				expire := now.Add(time.Duration(ttl) * time.Second)
 				select {
 				case oldExpire := <-ch:
-					log.Warn("drop stale lease keep alive expire time because outer loop is slow",
-						zap.String("purpose", l.Purpose),
-						zap.Int64("lease-id", int64(leaseID)),
-						zap.Time("old-expire", oldExpire),
-						zap.Time("new-expire", expire),
-						zap.Int64("ttl", ttl))
+					if lastSlowConsumerLogTime.IsZero() || expectedInterval <= 0 || now.Sub(lastSlowConsumerLogTime) > expectedInterval*2 {
+						lastSlowConsumerLogTime = now
+						log.Warn("drop stale lease keep alive expire time because outer loop is slow",
+							zap.String("purpose", l.Purpose),
+							zap.Int64("lease-id", int64(leaseID)),
+							zap.Time("old-expire", oldExpire),
+							zap.Time("new-expire", expire),
+							zap.Int64("ttl", ttl))
+					}
 				default:
 				}
 				select {
