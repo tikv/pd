@@ -48,6 +48,7 @@ type Lease struct {
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
+	metrics      leaseMetrics
 }
 
 // NewLease creates a new Lease instance.
@@ -78,7 +79,12 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 	l.ID.Store(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
+	l.initMetrics()
 	return nil
+}
+
+func (l *Lease) initMetrics() {
+	l.metrics = newLeaseMetrics(l.Purpose)
 }
 
 // Close releases the lease.
@@ -123,11 +129,17 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
 
 	var maxExpire time.Time
+	var lastResponseTime time.Time
 	timer := time.NewTimer(l.leaseTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case t := <-timeCh:
+			now := time.Now()
+			if !lastResponseTime.IsZero() {
+				l.metrics.responseInterval.Observe(now.Sub(lastResponseTime).Seconds())
+			}
+			lastResponseTime = now
 			if t.After(maxExpire) {
 				maxExpire = t
 				// Check again to make sure the `expireTime` still needs to be updated.
@@ -138,9 +150,13 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
+			l.metrics.ttlRemaining.Set(maxExpire.Sub(now).Seconds())
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
+			actualExpire := l.expireTime.Load().(time.Time)
+			l.metrics.ttlRemaining.Set(time.Until(actualExpire).Seconds())
+			l.metrics.leaseExpired.Inc()
+			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():
 			return
@@ -178,14 +194,16 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
 					return
 				}
-				if res.TTL > 0 {
-					expire := start.Add(time.Duration(res.TTL) * time.Second)
-					select {
-					case ch <- expire:
-					// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
-					case <-ctx.Done():
-						log.Info("lease keep alive once exit", zap.String("purpose", l.Purpose), zap.Time("start", start), zap.Time("expire", expire))
-					}
+				if res.TTL <= 0 {
+					l.metrics.invalidTTL.Inc()
+					return
+				}
+				expire := start.Add(time.Duration(res.TTL) * time.Second)
+				select {
+				case ch <- expire:
+				// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
+				case <-ctx.Done():
+					log.Info("lease keep alive once exit", zap.String("purpose", l.Purpose), zap.Time("start", start), zap.Time("expire", expire))
 				}
 			}(start)
 
