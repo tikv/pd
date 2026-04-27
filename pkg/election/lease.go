@@ -110,10 +110,18 @@ func (l *Lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // the current leader/primary should step down and try to re-elect again.
 func (l *Lease) IsExpired() bool {
-	if l == nil || l.expireTime.Load() == nil {
-		return true
+	return time.Now().After(l.loadExpireTime())
+}
+
+func (l *Lease) loadExpireTime() time.Time {
+	if l == nil {
+		return typeutil.ZeroTime
 	}
-	return time.Now().After(l.expireTime.Load().(time.Time))
+	expireTime, ok := l.expireTime.Load().(time.Time)
+	if !ok {
+		return typeutil.ZeroTime
+	}
+	return expireTime
 }
 
 // KeepAlive auto renews the lease and update expireTime.
@@ -128,8 +136,10 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
 
-	var maxExpire time.Time
-	var lastResponseTime time.Time
+	var (
+		maxExpire        time.Time
+		lastResponseTime time.Time
+	)
 	timer := time.NewTimer(l.leaseTimeout)
 	defer timer.Stop()
 	for {
@@ -153,7 +163,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			l.metrics.ttlRemaining.Set(maxExpire.Sub(now).Seconds())
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			actualExpire := l.expireTime.Load().(time.Time)
+			actualExpire := l.loadExpireTime()
 			l.metrics.ttlRemaining.Set(time.Until(actualExpire).Seconds())
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
