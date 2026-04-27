@@ -115,6 +115,9 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	re.NoError(err)
 	re.Equal(list, listResp)
 
+	// The GET above warms GCStateManager's local cache. The following delete
+	// bypasses the manager and writes storage directly, so this test verifies
+	// that DeleteGCSafePoint also invalidates the warmed cache.
 	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
@@ -127,4 +130,19 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	}
 	// Exclude the gc_worker as it's not included in GetGCState's result.
 	re.Equal(list.ServiceGCSafepoints[1:3], leftSsps)
+
+	resAfterDelete, err := tests.TestDialClient.Get(sspURL)
+	re.NoError(err)
+	defer resAfterDelete.Body.Close()
+	listRespAfterDelete := &api.ListServiceGCSafepoint{}
+	err = apiutil.ReadJSON(resAfterDelete.Body, listRespAfterDelete)
+	re.NoError(err)
+	// Also verify the public HTTP view. This catches stale cache reuse in
+	// GetGCSafePoint itself, not only direct GCStateManager reads.
+	expectedAfterDelete := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints:   list.ServiceGCSafepoints[1:],
+		GCSafePoint:           list.GCSafePoint,
+		MinServiceGcSafepoint: list.MinServiceGcSafepoint,
+	}
+	re.Equal(expectedAfterDelete, listRespAfterDelete)
 }

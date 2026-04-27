@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -731,6 +732,11 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
+
+	// Keep this hook immediately before the second cluster check so tests can
+	// deterministically cover requests that lose leadership after GC state is
+	// loaded but before the response is committed.
+	failpoint.InjectCall("getGCStateBeforeSecondClusterCheck")
 
 	rc = s.GetRaftCluster()
 	if rc == nil {
