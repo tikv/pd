@@ -92,8 +92,9 @@ const (
 	// patrol phases
 	phaseWaitForChannel = "wait_for_channel"
 	phaseCheckPriority  = "check_priority"
-	phaseCheckPending   = "check_pending"
-	phaseScanRegions    = "scan_regions"
+	phaseCheckPending        = "check_pending"
+	phaseDispatchSplitScatter = "dispatch_split_scatter"
+	phaseScanRegions         = "scan_regions"
 	phaseUpdateLabel    = "update_label_stats"
 )
 
@@ -114,6 +115,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		phaseWaitForChannel,
 		phaseCheckPriority,
 		phaseCheckPending,
+		phaseDispatchSplitScatter,
 		phaseScanRegions,
 		phaseUpdateLabel,
 	}

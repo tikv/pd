@@ -79,6 +79,8 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	if limit <= 0 {
 		return nil
 	}
+	// TODO: currently iterating over the pending map in random order and
+	// truncating to limit; consider ordering by region priority score.
 	now := time.Now()
 	c.pendingMu.RLock()
 
@@ -152,16 +154,16 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	}
 	group := makeSplitScatterGroup(sourceRegionID, newRegionIDs[0])
 	expireAt := time.Now().Add(splitScatterPendingTTL)
+	sourceWaitVersion := uint64(1)
+	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil && sourceRegion.GetRegionEpoch() != nil {
+		sourceWaitVersion = sourceRegion.GetRegionEpoch().GetVersion() + 1
+	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	for _, regionID := range newRegionIDs {
 		c.pending[regionID] = splitScatterPendingItem{regionID: regionID, group: group, expireAt: expireAt}
 	}
-	sourcePending := splitScatterPendingItem{regionID: sourceRegionID, group: group, waitVersion: 1, expireAt: expireAt}
-	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil && sourceRegion.GetRegionEpoch() != nil {
-		sourcePending.waitVersion = sourceRegion.GetRegionEpoch().GetVersion() + 1
-	}
-	c.pending[sourceRegionID] = sourcePending
+	c.pending[sourceRegionID] = splitScatterPendingItem{regionID: sourceRegionID, group: group, waitVersion: sourceWaitVersion, expireAt: expireAt}
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {

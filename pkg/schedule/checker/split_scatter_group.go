@@ -58,6 +58,8 @@ func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint
 	// back to the table-scoped group instead of dropping back to the family
 	// group, so table-boundary splits and merged ranges still participate in
 	// the broader scatter continuity/baseline.
+	// Both endKey and indexRange.endKey are MemComparable-encoded, so
+	// bytes.Compare correctly reflects the key ordering.
 	if len(endKey) == 0 || len(indexRange.startKey) == 0 || len(indexRange.endKey) == 0 || bytes.Compare(endKey, indexRange.endKey) > 0 {
 		return splitScatterPrefixRange(tablePrefix)
 	}

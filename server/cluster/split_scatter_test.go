@@ -134,7 +134,12 @@ func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {
 		newSplitScatterRegion(splitRegionID, []byte("m"), []byte(""), 120),
 	))
 
-	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, nil)
+	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
+		// PatrolRegions uses a ticker; wait for at least one tick interval
+		// so the dispatch phase is guaranteed to have executed.
+		time.Sleep(100 * time.Millisecond)
+		return true
+	})
 
 	re.Nil(cluster.GetOperatorController().GetOperator(splitRegionID))
 	re.Nil(cluster.GetOperatorController().GetOperator(100))
@@ -173,11 +178,7 @@ func dispatchSplitScatterInPatrol(t *testing.T, cluster *RaftCluster, cancelPatr
 		defer close(done)
 		checkerController.PatrolRegions()
 	}()
-	if wait != nil {
-		testutil.Eventually(require.New(t), wait)
-	} else {
-		time.Sleep(50 * time.Millisecond)
-	}
+	testutil.Eventually(require.New(t), wait)
 	cancelPatrol()
 	select {
 	case <-done:
