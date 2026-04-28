@@ -128,15 +128,25 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	return candidates
 }
 
-func (c *splitScatterController) delayPendingSplitScatter(regionID uint64) {
+func (c *splitScatterController) delayPendingSplitScatter(expected splitScatterPendingItem) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	pending, ok := c.pending[regionID]
-	if !ok {
+	pending, ok := c.pending[expected.regionID]
+	if !ok || pending.group != expected.group {
 		return
 	}
 	pending.retryAt = time.Now().Add(splitScatterRetryBackoff)
-	c.pending[regionID] = pending
+	c.pending[expected.regionID] = pending
+}
+
+func (c *splitScatterController) deletePendingSplitScatter(expected splitScatterPendingItem) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	pending, ok := c.pending[expected.regionID]
+	if !ok || pending.group != expected.group {
+		return
+	}
+	delete(c.pending, expected.regionID)
 }
 
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
@@ -173,7 +183,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 			continue
 		}
 		if !filter.IsRegionReplicated(c.cluster, region) {
-			c.delayPendingSplitScatter(pending.regionID)
+			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter delayed",
 				zap.Uint64("region-id", pending.regionID),
 				zap.String("group", pending.group),
@@ -183,7 +193,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		rangeHint := resolveSplitScatterRangeHint(region)
 		op, err := c.regionScatterer.ScatterInternal(region, pending.group, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
-			c.delayPendingSplitScatter(pending.regionID)
+			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter failed",
 				zap.Uint64("region-id", pending.regionID),
 				zap.String("group", pending.group),
@@ -192,7 +202,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		if op != nil {
 			if c.opController.ExceedStoreLimit(op) {
-				c.delayPendingSplitScatter(pending.regionID)
+				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter delayed",
 					zap.Uint64("region-id", pending.regionID),
 					zap.String("group", pending.group),
@@ -201,7 +211,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 				continue
 			}
 			if !c.opController.AddOperator(op) {
-				c.delayPendingSplitScatter(pending.regionID)
+				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter add operator failed",
 					zap.Uint64("region-id", pending.regionID),
 					zap.String("group", pending.group),
@@ -209,8 +219,6 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 				continue
 			}
 		}
-		c.pendingMu.Lock()
-		delete(c.pending, pending.regionID)
-		c.pendingMu.Unlock()
+		c.deletePendingSplitScatter(pending)
 	}
 }

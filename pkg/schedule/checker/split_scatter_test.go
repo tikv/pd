@@ -217,7 +217,7 @@ func TestDispatchSplitScatterBacksOffWhenRegionIsNotFullyReplicated(t *testing.T
 	controller.dispatchSplitScatterRegions()
 
 	re.Equal(2, splitScatterPendingCount(controller))
-	pending := splitScatterPendingItemAt(t, controller, 101)
+	pending := splitScatterObservedPending(t, controller)
 	re.True(pending.retryAt.After(time.Now()))
 	re.Empty(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
 }
@@ -233,9 +233,34 @@ func TestDispatchSplitScatterBacksOffWhenScatterInternalFails(t *testing.T) {
 	controller.dispatchSplitScatterRegions()
 
 	re.Equal(2, splitScatterPendingCount(controller))
-	pending := splitScatterPendingItemAt(t, controller, 101)
+	pending := splitScatterObservedPending(t, controller)
 	re.True(pending.retryAt.After(time.Now()))
 	re.Empty(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
+}
+
+func TestDispatchSplitScatterIgnoresStalePendingSnapshot(t *testing.T) {
+	re := require.New(t)
+	controller, _, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	stalePending := splitScatterObservedPending(t, controller)
+
+	controller.RecordSplitScatterBatch(100, []uint64{102, 101})
+	currentPending := splitScatterObservedPending(t, controller)
+	re.NotEqual(stalePending.group, currentPending.group)
+	re.Equal(time.Time{}, currentPending.retryAt)
+
+	controller.splitScatter.delayPendingSplitScatter(stalePending)
+
+	currentPending = splitScatterObservedPending(t, controller)
+	re.Equal(time.Time{}, currentPending.retryAt)
+
+	controller.splitScatter.deletePendingSplitScatter(stalePending)
+
+	currentPending = splitScatterObservedPending(t, controller)
+	re.Equal(makeSplitScatterGroup(100, 102), currentPending.group)
+	re.Equal(time.Time{}, currentPending.retryAt)
 }
 
 func newTestSplitScatterController(t *testing.T) (*Controller, *mockcluster.Cluster, *operator.Controller, func()) {
@@ -337,11 +362,11 @@ func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uin
 	return pending.group
 }
 
-func splitScatterPendingItemAt(t *testing.T, controller *Controller, regionID uint64) splitScatterPendingItem {
+func splitScatterObservedPending(t *testing.T, controller *Controller) splitScatterPendingItem {
 	t.Helper()
 	controller.splitScatter.pendingMu.RLock()
 	defer controller.splitScatter.pendingMu.RUnlock()
-	pending, ok := controller.splitScatter.pending[regionID]
+	pending, ok := controller.splitScatter.pending[splitScatterObservedRegionID]
 	require.True(t, ok)
 	return pending
 }
