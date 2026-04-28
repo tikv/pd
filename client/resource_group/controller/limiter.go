@@ -71,7 +71,7 @@ func Every(interval time.Duration) fillRate {
 //     can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	fillRate fillRate
 	tokens   float64
 	burst    int64
@@ -300,16 +300,23 @@ func (lim *Limiter) isLowTokensLocked() bool {
 
 // IsLowTokens returns whether the limiter is in low tokens
 func (lim *Limiter) IsLowTokens() bool {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	return lim.isLowTokensLocked()
 }
 
 // GetBurst returns the burst size of the limiter
 func (lim *Limiter) GetBurst() int64 {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	return lim.burst
+}
+
+// GetFillRate returns the current fill rate of the limiter.
+func (lim *Limiter) GetFillRate() float64 {
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
+	return float64(lim.fillRate)
 }
 
 // RemoveTokens decreases the amount of tokens currently available.
@@ -380,10 +387,10 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Int64("burst", lim.burst))
 }
 
-// AvailableTokens decreases the amount of tokens currently available.
+// AvailableTokens returns the current number of available tokens.
 func (lim *Limiter) AvailableTokens(now time.Time) float64 {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	_, tokens := lim.getTokens(now)
 	return tokens
 }

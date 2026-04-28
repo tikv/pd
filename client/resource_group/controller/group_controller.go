@@ -106,6 +106,13 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+	consumeTokenByTypeRRU             prometheus.Counter
+	consumeTokenByTypeWRU             prometheus.Counter
+	tokenBalanceGauge                 prometheus.Gauge
+	fillRateGauge                     prometheus.Gauge
+	burstLimitGauge                   prometheus.Gauge
+	avgRUPerSecGauge                  prometheus.Gauge
+	throttledGauge                    prometheus.Gauge
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -122,6 +129,13 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+		consumeTokenByTypeRRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "rru"),
+		consumeTokenByTypeWRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "wru"),
+		tokenBalanceGauge:                 metrics.TokenBalanceGauge.WithLabelValues(name),
+		fillRateGauge:                     metrics.FillRateGauge.WithLabelValues(name),
+		burstLimitGauge:                   metrics.BurstLimitGauge.WithLabelValues(name),
+		avgRUPerSecGauge:                  metrics.AvgRUPerSecGauge.WithLabelValues(name),
+		throttledGauge:                    metrics.ThrottledGauge.WithLabelValues(name),
 	}
 }
 
@@ -260,6 +274,17 @@ func (gc *groupCostController) updateRunState() {
 	gc.mu.Unlock()
 	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.run.now = newTime
+
+	// Expose limiter internal state for observability.
+	counter := gc.run.requestUnitTokens
+	gc.metrics.tokenBalanceGauge.Set(counter.limiter.AvailableTokens(gc.run.now))
+	gc.metrics.fillRateGauge.Set(counter.limiter.GetFillRate())
+	gc.metrics.burstLimitGauge.Set(float64(counter.limiter.GetBurst()))
+	if gc.isThrottled.Load() {
+		gc.metrics.throttledGauge.Set(1)
+	} else {
+		gc.metrics.throttledGauge.Set(0)
+	}
 }
 
 func (gc *groupCostController) updateAvgRequestResourcePerSec() {
@@ -271,6 +296,7 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
 		return
 	}
+	gc.metrics.avgRUPerSecGauge.Set(counter.avgRUPerSec)
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.burstable.Store(isBurstable)
 }
@@ -489,6 +515,19 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	return value
 }
 
+// observeConsumption records token consumption metrics for the given delta.
+func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
+	if v := getRUValueFromConsumption(delta); v > 0 {
+		gc.metrics.consumeTokenHistogram.Observe(v)
+	}
+	if delta.RRU > 0 {
+		gc.metrics.consumeTokenByTypeRRU.Add(delta.RRU)
+	}
+	if delta.WRU > 0 {
+		gc.metrics.consumeTokenByTypeWRU.Add(delta.WRU)
+	}
+}
+
 func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Consumption, waitDuration *time.Duration, allowDebt bool) (time.Duration, error) {
 	gc.metrics.runningKVRequestCounter.Inc()
 	defer gc.metrics.runningKVRequestCounter.Dec()
@@ -503,10 +542,7 @@ retryLoop:
 		now := time.Now()
 		var res *Reservation
 		if v := getRUValueFromConsumption(delta); v > 0 {
-			// record the consume token histogram if enable controller debug mode.
-			if enableControllerTraceLog.Load() {
-				gc.metrics.consumeTokenHistogram.Observe(v)
-			}
+			gc.observeConsumption(delta)
 			// allow debt for small request or not in throttled. remove tokens directly.
 			if allowDebt {
 				counter.limiter.RemoveTokens(now, v)
@@ -607,6 +643,7 @@ func (gc *groupCostController) onResponseImpl(
 			counter.limiter.RemoveTokens(time.Now(), v)
 		}
 	}
+	gc.observeConsumption(delta)
 
 	gc.mu.Lock()
 	// Record the consumption of the request
