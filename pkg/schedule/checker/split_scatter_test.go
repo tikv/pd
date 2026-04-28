@@ -222,6 +222,22 @@ func TestDispatchSplitScatterBacksOffWhenRegionIsNotFullyReplicated(t *testing.T
 	re.Empty(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
 }
 
+func TestDispatchSplitScatterBacksOffWhenScatterInternalFails(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	putSplitScatterRegionWithoutLeader(tc, 101, "m", "", 120)
+
+	controller.dispatchSplitScatterRegions()
+
+	re.Equal(2, splitScatterPendingCount(controller))
+	pending := splitScatterPendingItemAt(t, controller, 101)
+	re.True(pending.retryAt.After(time.Now()))
+	re.Empty(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
+}
+
 func newTestSplitScatterController(t *testing.T) (*Controller, *mockcluster.Cluster, *operator.Controller, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -279,6 +295,29 @@ func putSplitScatterRegionWithStores(tc *mockcluster.Cluster, regionID uint64, s
 	tc.PutRegion(core.NewRegionInfo(
 		region,
 		peers[0],
+		core.SetCPUUsage(cpu),
+	))
+}
+
+func putSplitScatterRegionWithoutLeader(tc *mockcluster.Cluster, regionID uint64, startKey, endKey string, cpu uint64) {
+	peers := []*metapb.Peer{
+		{Id: regionID*10 + 1, StoreId: 1},
+		{Id: regionID*10 + 2, StoreId: 2},
+		{Id: regionID*10 + 3, StoreId: 3},
+	}
+	region := &metapb.Region{
+		Id:       regionID,
+		StartKey: []byte(startKey),
+		EndKey:   []byte(endKey),
+		Peers:    peers,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
+	tc.PutRegion(core.NewRegionInfo(
+		region,
+		nil,
 		core.SetCPUUsage(cpu),
 	))
 }

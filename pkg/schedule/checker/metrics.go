@@ -90,12 +90,12 @@ const (
 
 const (
 	// patrol phases
-	phaseWaitForChannel = "wait_for_channel"
-	phaseCheckPriority  = "check_priority"
-	phaseCheckPending        = "check_pending"
+	phaseWaitForChannel       = "wait_for_channel"
+	phaseCheckPriority        = "check_priority"
+	phaseCheckPending         = "check_pending"
 	phaseDispatchSplitScatter = "dispatch_split_scatter"
-	phaseScanRegions         = "scan_regions"
-	phaseUpdateLabel    = "update_label_stats"
+	phaseScanRegions          = "scan_regions"
+	phaseUpdateLabel          = "update_label_stats"
 )
 
 // checkerControllerMetrics contains pre-created Prometheus metrics for the checker controller.

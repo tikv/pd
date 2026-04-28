@@ -128,14 +128,14 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	return candidates
 }
 
-func (c *splitScatterController) delayPendingSplitScatter(regionID uint64, delay time.Duration) {
+func (c *splitScatterController) delayPendingSplitScatter(regionID uint64) {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	pending, ok := c.pending[regionID]
 	if !ok {
 		return
 	}
-	pending.retryAt = time.Now().Add(delay)
+	pending.retryAt = time.Now().Add(splitScatterRetryBackoff)
 	c.pending[regionID] = pending
 }
 
@@ -173,7 +173,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 			continue
 		}
 		if !filter.IsRegionReplicated(c.cluster, region) {
-			c.delayPendingSplitScatter(pending.regionID, splitScatterRetryBackoff)
+			c.delayPendingSplitScatter(pending.regionID)
 			log.Info("dispatch internal split scatter delayed",
 				zap.Uint64("region-id", pending.regionID),
 				zap.String("group", pending.group),
@@ -183,6 +183,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		rangeHint := resolveSplitScatterRangeHint(region)
 		op, err := c.regionScatterer.ScatterInternal(region, pending.group, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
+			c.delayPendingSplitScatter(pending.regionID)
 			log.Info("dispatch internal split scatter failed",
 				zap.Uint64("region-id", pending.regionID),
 				zap.String("group", pending.group),
@@ -191,7 +192,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		if op != nil {
 			if c.opController.ExceedStoreLimit(op) {
-				c.delayPendingSplitScatter(pending.regionID, splitScatterRetryBackoff)
+				c.delayPendingSplitScatter(pending.regionID)
 				log.Info("dispatch internal split scatter delayed",
 					zap.Uint64("region-id", pending.regionID),
 					zap.String("group", pending.group),
@@ -200,6 +201,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 				continue
 			}
 			if !c.opController.AddOperator(op) {
+				c.delayPendingSplitScatter(pending.regionID)
 				log.Info("dispatch internal split scatter add operator failed",
 					zap.Uint64("region-id", pending.regionID),
 					zap.String("group", pending.group),
