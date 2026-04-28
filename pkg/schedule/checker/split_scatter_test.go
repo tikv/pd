@@ -299,6 +299,29 @@ func putSplitScatterRegionWithKeys(tc *mockcluster.Cluster, startKey, endKey []b
 	tc.PutRegion(region)
 }
 
+func newSplitScatterRegionInfo(
+	regionID uint64,
+	startKey, endKey string,
+	peers []*metapb.Peer,
+	leader *metapb.Peer,
+	cpu uint64,
+) *core.RegionInfo {
+	return core.NewRegionInfo(
+		&metapb.Region{
+			Id:       regionID,
+			StartKey: []byte(startKey),
+			EndKey:   []byte(endKey),
+			Peers:    peers,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		},
+		leader,
+		core.SetCPUUsage(cpu),
+	)
+}
+
 func putSplitScatterRegionWithStores(tc *mockcluster.Cluster, regionID uint64, startKey, endKey string, cpu uint64, stores ...uint64) {
 	peers := make([]*metapb.Peer, 0, len(stores))
 	for i, storeID := range stores {
@@ -307,21 +330,7 @@ func putSplitScatterRegionWithStores(tc *mockcluster.Cluster, regionID uint64, s
 			StoreId: storeID,
 		})
 	}
-	region := &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(startKey),
-		EndKey:   []byte(endKey),
-		Peers:    peers,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-	}
-	tc.PutRegion(core.NewRegionInfo(
-		region,
-		peers[0],
-		core.SetCPUUsage(cpu),
-	))
+	tc.PutRegion(newSplitScatterRegionInfo(regionID, startKey, endKey, peers, peers[0], cpu))
 }
 
 func putSplitScatterRegionWithoutLeader(tc *mockcluster.Cluster, regionID uint64, startKey, endKey string, cpu uint64) {
@@ -330,21 +339,7 @@ func putSplitScatterRegionWithoutLeader(tc *mockcluster.Cluster, regionID uint64
 		{Id: regionID*10 + 2, StoreId: 2},
 		{Id: regionID*10 + 3, StoreId: 3},
 	}
-	region := &metapb.Region{
-		Id:       regionID,
-		StartKey: []byte(startKey),
-		EndKey:   []byte(endKey),
-		Peers:    peers,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-	}
-	tc.PutRegion(core.NewRegionInfo(
-		region,
-		nil,
-		core.SetCPUUsage(cpu),
-	))
+	tc.PutRegion(newSplitScatterRegionInfo(regionID, startKey, endKey, peers, nil, cpu))
 }
 
 func splitScatterPendingCount(controller *Controller) int {
