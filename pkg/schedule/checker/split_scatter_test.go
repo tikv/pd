@@ -242,7 +242,7 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 			advanceSplitScatterSourceVersion(t, tc)
 
 			re.Equal(makeSplitScatterGroup(100, 101), splitScatterPendingGroup(t, controller, 101))
-			re.Equal([]uint64{101}, pendingRegionIDs(controller.collectTopPendingSplitScatter(1)))
+			re.ElementsMatch([]uint64{100, 101}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
 			rangeHint := resolveSplitScatterRangeHint(tc.GetRegion(101))
 			re.Equal(testCase.wantRange.startKey, rangeHint.startKey)
 			re.Equal(testCase.wantRange.endKey, rangeHint.endKey)
