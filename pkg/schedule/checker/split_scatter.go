@@ -222,6 +222,8 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
+	// Dispatch sequentially so operators added for earlier pending items in this pass
+	// are visible to later ScatterInternal calls through the running-operator delta.
 	for _, pending := range c.collectTopPendingSplitScatter(splitScatterDispatchLimit) {
 		region := c.cluster.GetRegion(pending.regionID)
 		if region == nil {
