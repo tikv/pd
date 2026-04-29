@@ -661,8 +661,6 @@ func (gc *groupCostController) onRequestWaitImpl(
 		waitDuration += d
 	}
 
-	gc.metrics.addRequestSourceRU(info.RequestSource(), delta)
-
 	gc.mu.Lock()
 	// Calculate the penalty of the store
 	penalty = &rmpb.Consumption{}
@@ -695,12 +693,15 @@ func (gc *groupCostController) onResponseImpl(
 	}
 
 	gc.mu.Lock()
-	// Record the consumption of the request
+	// Record the consumption of the request.
 	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
+	// Build the round-trip net consumption for this request: AfterKVRequest's
+	// delta (which includes payBackWriteCost on failed writes) plus the cost
+	// added in BeforeKVRequest. Used both for store/global penalty bookkeeping
+	// and for the per-source RU counter, so the latter mirrors the controller's
+	// own consumption.
 	count := &rmpb.Consumption{}
 	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
@@ -708,7 +709,7 @@ func (gc *groupCostController) onResponseImpl(
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(req.RequestSource(), delta)
+	gc.metrics.addRequestSourceRU(req.RequestSource(), count)
 
 	return delta, nil
 }
@@ -738,12 +739,13 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 
 	gc.mu.Lock()
-	// Record the consumption of the request
+	// Record the consumption of the request.
 	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
+	// See onResponseImpl for the rationale of `count` — it represents the
+	// round-trip net consumption of this request and is reused for the
+	// per-source RU counter so that it tracks the controller's consumption.
 	count := &rmpb.Consumption{}
 	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
@@ -751,7 +753,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(req.RequestSource(), delta)
+	gc.metrics.addRequestSourceRU(req.RequestSource(), count)
 
 	return delta, waitDuration, nil
 }

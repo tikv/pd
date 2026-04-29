@@ -622,3 +622,52 @@ func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 	ms.mu.RUnlock()
 	re.Equal(beforeCount-2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }
+
+// TestFailedWriteMatchesControllerConsumption verifies that the per-source RU
+// counter mirrors the controller's own consumption, even when payBackWriteCost
+// reduces the controller's WRU on failed writes. The metric exports
+// round-trip net consumption at response time, so the cumulative source
+// counter must equal gc.mu.consumption across mixed success / failure traffic.
+func TestFailedWriteMatchesControllerConsumption(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    100,
+		numReplicas:   3,
+		storeID:       1,
+		accessType:    AccessUnknown,
+		requestSource: "internal_failed_write",
+	}
+	successResp := &TestResponseInfo{readBytes: 0, succeed: true}
+	failedResp := &TestResponseInfo{readBytes: 0, succeed: false}
+
+	for i, resp := range []*TestResponseInfo{successResp, failedResp, failedResp, successResp, failedResp} {
+		_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+		re.NoError(err, "iteration %d", i)
+		_, err = gc.onResponseImpl(req, resp)
+		re.NoError(err, "iteration %d", i)
+	}
+
+	sourceMetrics, _ := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.NotNil(sourceMetrics)
+
+	gc.mu.Lock()
+	controllerWRU := gc.mu.consumption.WRU
+	controllerRRU := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+
+	re.InDelta(controllerWRU, counterValue(t, sourceMetrics.wru), 1e-9,
+		"per-source WRU diverges from controller consumption — failed-write payback dropped?")
+	re.InDelta(controllerRRU, counterValue(t, sourceMetrics.rru), 1e-9,
+		"per-source RRU diverges from controller consumption")
+
+	// Sanity: failed writes still consume some WRU (calculateWriteCost adds
+	// per-batch and replication terms that payBackWriteCost does not refund),
+	// so the counter is non-zero.
+	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
+
+	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "rru")
+	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "wru")
+}
