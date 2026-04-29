@@ -32,6 +32,7 @@ import (
 
 const (
 	splitScatterDispatchLimit = 4
+	splitScatterPendingLimit  = 1024
 	splitScatterRetryBackoff  = time.Second
 	splitScatterPendingTTL    = 3 * time.Minute
 )
@@ -154,6 +155,14 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 	delete(c.pending, expected.regionID)
 }
 
+func (c *splitScatterController) removeExpiredPendingSplitScatterLocked(now time.Time) {
+	for regionID, pending := range c.pending {
+		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
+			delete(c.pending, regionID)
+		}
+	}
+}
+
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
 	return fmt.Sprintf("split-scatter-%d-%d", sourceRegionID, firstNewRegionID)
 }
@@ -175,6 +184,25 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
+	c.removeExpiredPendingSplitScatterLocked(time.Now())
+	newPendingCount := 0
+	if _, ok := c.pending[sourceRegionID]; !ok {
+		newPendingCount++
+	}
+	for _, regionID := range newRegionIDs {
+		if _, ok := c.pending[regionID]; !ok {
+			newPendingCount++
+		}
+	}
+	if len(c.pending)+newPendingCount > splitScatterPendingLimit {
+		log.Info("skip recording split scatter batch due to pending limit",
+			zap.Uint64("source-region-id", sourceRegionID),
+			zap.Uint64s("new-region-ids", newRegionIDs),
+			zap.Int("pending-count", len(c.pending)),
+			zap.Int("new-pending-count", newPendingCount),
+			zap.Int("pending-limit", splitScatterPendingLimit))
+		return
+	}
 	for _, regionID := range newRegionIDs {
 		c.pending[regionID] = splitScatterPendingItem{
 			regionID:          regionID,

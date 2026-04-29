@@ -133,6 +133,49 @@ func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
 	re.Equal(0, splitScatterPendingCount(controller))
 }
 
+func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
+	re := require.New(t)
+	controller, _, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.splitScatter.pendingMu.Lock()
+	for regionID := uint64(1000); regionID < 1000+splitScatterPendingLimit; regionID++ {
+		controller.splitScatter.pending[regionID] = splitScatterPendingItem{regionID: regionID, group: "old"}
+	}
+	controller.splitScatter.pendingMu.Unlock()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+
+	re.Equal(splitScatterPendingLimit, splitScatterPendingCount(controller))
+	controller.splitScatter.pendingMu.RLock()
+	_, sourceExists := controller.splitScatter.pending[100]
+	_, childExists := controller.splitScatter.pending[101]
+	controller.splitScatter.pendingMu.RUnlock()
+	re.False(sourceExists)
+	re.False(childExists)
+}
+
+func TestRecordSplitScatterBatchClearsExpiredPendingBeforeLimitCheck(t *testing.T) {
+	re := require.New(t)
+	controller, _, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.splitScatter.pendingMu.Lock()
+	for regionID := uint64(1000); regionID < 1000+splitScatterPendingLimit; regionID++ {
+		controller.splitScatter.pending[regionID] = splitScatterPendingItem{
+			regionID: regionID,
+			group:    "old",
+			expireAt: time.Now().Add(-time.Second),
+		}
+	}
+	controller.splitScatter.pendingMu.Unlock()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+
+	re.Equal(2, splitScatterPendingCount(controller))
+	re.Equal(makeSplitScatterGroup(100, 101), splitScatterPendingGroup(t, controller, 101))
+}
+
 func TestCollectTopPendingDefersBatchUntilSourceVersionAdvances(t *testing.T) {
 	re := require.New(t)
 	controller, tc, _, cleanup := newTestSplitScatterController(t)
