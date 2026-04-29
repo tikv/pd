@@ -37,11 +37,12 @@ const (
 )
 
 type splitScatterPendingItem struct {
-	regionID    uint64
-	group       string
-	waitVersion uint64
-	retryAt     time.Time
-	expireAt    time.Time
+	regionID          uint64
+	group             string
+	sourceRegionID    uint64
+	sourceWaitVersion uint64
+	retryAt           time.Time
+	expireAt          time.Time
 }
 
 type splitScatterController struct {
@@ -98,11 +99,15 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
 			continue
 		}
-		currentVersion := uint64(0)
-		if region.GetRegionEpoch() != nil {
-			currentVersion = region.GetRegionEpoch().GetVersion()
+		sourceRegion := c.cluster.GetRegion(pending.sourceRegionID)
+		if sourceRegion == nil {
+			continue
 		}
-		if pending.waitVersion > 0 && currentVersion < pending.waitVersion {
+		sourceVersion := uint64(0)
+		if sourceRegion.GetRegionEpoch() != nil {
+			sourceVersion = sourceRegion.GetRegionEpoch().GetVersion()
+		}
+		if pending.sourceWaitVersion > 0 && sourceVersion < pending.sourceWaitVersion {
 			continue
 		}
 		candidates = append(candidates, pending)
@@ -171,9 +176,21 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	for _, regionID := range newRegionIDs {
-		c.pending[regionID] = splitScatterPendingItem{regionID: regionID, group: group, expireAt: expireAt}
+		c.pending[regionID] = splitScatterPendingItem{
+			regionID:          regionID,
+			group:             group,
+			sourceRegionID:    sourceRegionID,
+			sourceWaitVersion: sourceWaitVersion,
+			expireAt:          expireAt,
+		}
 	}
-	c.pending[sourceRegionID] = splitScatterPendingItem{regionID: sourceRegionID, group: group, waitVersion: sourceWaitVersion, expireAt: expireAt}
+	c.pending[sourceRegionID] = splitScatterPendingItem{
+		regionID:          sourceRegionID,
+		group:             group,
+		sourceRegionID:    sourceRegionID,
+		sourceWaitVersion: sourceWaitVersion,
+		expireAt:          expireAt,
+	}
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {

@@ -52,6 +52,7 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		resp.GetIds()[0].GetNewRegionId(),
 		resp.GetIds()[1].GetNewRegionId(),
 	}
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), 0).Clone(core.WithIncVersion())))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), 120)))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), 80)))
 
@@ -77,7 +78,6 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		re.Equal(group, opGroup)
 	}
 	re.NotEmpty(group)
-	re.Nil(cluster.GetOperatorController().GetOperator(100))
 }
 
 func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) {
@@ -98,6 +98,7 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re.Len(resp.GetIds(), 1)
 
 	splitRegionID := resp.GetIds()[0].GetNewRegionId()
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, newSplitScatterIndexKey("w"), newSplitScatterIndexKey("z"), 0).Clone(core.WithIncVersion())))
 	re.NoError(cluster.processRegionHeartbeat(
 		core.ContextTODO(),
 		newSplitScatterRegion(splitRegionID, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("w"), 120),
