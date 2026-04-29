@@ -81,6 +81,96 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
+func TestLeaderLeasePersistAndReload(t *testing.T) {
+	re := require.New(t)
+	cfg := NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.LeaderLease = 7
+	opt := NewPersistOptions(cfg)
+	opt.SetMaxReplicas(5)
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(opt.Persist(storage))
+
+	var stored struct {
+		LeaderLease int64 `json:"lease"`
+	}
+	exists, err := storage.LoadConfig(&stored)
+	re.NoError(err)
+	re.True(exists)
+	re.Equal(int64(7), stored.LeaderLease)
+
+	cfg.LeaderLease = 9
+	newOpt := NewPersistOptions(cfg)
+	re.NoError(newOpt.Reload(storage))
+	re.Equal(int64(7), newOpt.GetLeaderLease())
+}
+
+func TestLeaderLeaseSetPersistAndReload(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	opt.SetLeaderLease(7)
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(opt.Persist(storage))
+	var stored struct {
+		LeaderLease int64 `json:"lease"`
+	}
+	exists, err := storage.LoadConfig(&stored)
+	re.NoError(err)
+	re.True(exists)
+	re.Equal(int64(7), stored.LeaderLease)
+
+	cfg := NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.LeaderLease = 9
+	newOpt := NewPersistOptions(cfg)
+	re.NoError(newOpt.Reload(storage))
+	re.Equal(int64(7), newOpt.GetLeaderLease())
+}
+
+func TestLeaderLeaseReloadIgnoresNonPositivePersistedValues(t *testing.T) {
+	for _, persistedLease := range []int64{0, -1} {
+		t.Run(fmt.Sprintf("lease-%d", persistedLease), func(t *testing.T) {
+			re := require.New(t)
+			storage := storage.NewStorageWithMemoryBackend()
+			re.NoError(storage.SaveConfig(struct {
+				LeaderLease int64 `json:"lease"`
+			}{LeaderLease: persistedLease}))
+
+			cfg := NewConfig()
+			re.NoError(cfg.Adjust(nil, false))
+			cfg.LeaderLease = 7
+			opt := NewPersistOptions(cfg)
+			re.NoError(opt.Reload(storage))
+			re.Equal(int64(7), opt.GetLeaderLease())
+		})
+	}
+}
+
+func TestReloadKeepsCustomLeaderLeaseWhenPersistedConfigMissesLease(t *testing.T) {
+	re := require.New(t)
+	storage := storage.NewStorageWithMemoryBackend()
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	type OldConfig struct {
+		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
+		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
+	}
+	old := &OldConfig{
+		Schedule:    *opt.GetScheduleConfig(),
+		Replication: *opt.GetReplicationConfig(),
+	}
+	re.NoError(storage.SaveConfig(old))
+
+	cfg := NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.LeaderLease = 7
+	newOpt := NewPersistOptions(cfg)
+	re.NoError(newOpt.Reload(storage))
+	re.Equal(int64(7), newOpt.GetLeaderLease())
+}
+
 func TestReloadUpgrade(t *testing.T) {
 	re := require.New(t)
 	opt, err := newTestScheduleOption()

@@ -16,6 +16,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -55,6 +56,7 @@ type PersistOptions struct {
 	keyspace        atomic.Value
 	microservice    atomic.Value
 	storeConfig     atomic.Value
+	leaderLease     atomic.Int64
 	clusterVersion  unsafe.Pointer
 }
 
@@ -68,6 +70,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.keyspace.Store(&cfg.Keyspace)
 	o.microservice.Store(&cfg.Microservice)
+	o.leaderLease.Store(cfg.LeaderLease)
 	// storeConfig will be fetched from TiKV later,
 	// set it to an empty config here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
@@ -154,6 +157,16 @@ func (o *PersistOptions) GetStoreConfig() *sc.StoreConfig {
 // SetStoreConfig sets the store configuration.
 func (o *PersistOptions) SetStoreConfig(cfg *sc.StoreConfig) {
 	o.storeConfig.Store(cfg)
+}
+
+// GetLeaderLease returns the PD leader lease timeout in seconds.
+func (o *PersistOptions) GetLeaderLease() int64 {
+	return o.leaderLease.Load()
+}
+
+// SetLeaderLease sets the PD leader lease timeout in seconds.
+func (o *PersistOptions) SetLeaderLease(lease int64) {
+	o.leaderLease.Store(lease)
 }
 
 // GetClusterVersion returns the cluster version.
@@ -761,6 +774,30 @@ type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
 	StoreConfig sc.StoreConfig `json:"store"`
+	// leaseLoaded records whether the persisted etcd blob explicitly included
+	// the top-level "lease" field. Older blobs without that field should not
+	// silently overwrite the startup value with the default-filled lease.
+	leaseLoaded bool
+}
+
+// UnmarshalJSON records whether the persisted blob explicitly contains the
+// leader lease field while preserving the default Config JSON decoding.
+func (cfg *persistedConfig) UnmarshalJSON(data []byte) error {
+	if cfg.Config == nil {
+		cfg.Config = &Config{}
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, cfg.leaseLoaded = fields["lease"]
+
+	type persistedConfigAlias persistedConfig
+	return json.Unmarshal(data, (*persistedConfigAlias)(cfg))
+}
+
+func (cfg *persistedConfig) hasValidLeaderLease() bool {
+	return cfg.leaseLoaded && IsValidLeaderLease(cfg.LeaderLease)
 }
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
@@ -781,6 +818,7 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 			Keyspace:        *o.GetKeyspaceConfig(),
 			Microservice:    *o.GetMicroserviceConfig(),
 			ClusterVersion:  *o.GetClusterVersion(),
+			LeaderLease:     o.GetLeaderLease(),
 		},
 		StoreConfig: *o.GetStoreConfig(),
 	}
@@ -797,7 +835,6 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err := cfg.Adjust(nil, true); err != nil {
 		return err
 	}
-
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
@@ -813,10 +850,18 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.keyspace.Store(&cfg.Keyspace)
 		o.microservice.Store(&cfg.Microservice)
+		if cfg.hasValidLeaderLease() {
+			o.SetLeaderLease(cfg.LeaderLease)
+		}
 		o.storeConfig.Store(&cfg.StoreConfig)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 	}
 	return nil
+}
+
+// IsValidLeaderLease returns whether the given PD leader lease timeout is valid.
+func IsValidLeaderLease(lease int64) bool {
+	return lease > 0
 }
 
 func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
