@@ -923,7 +923,8 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
-	res, err, _ := c.flight.Do("GetClusterInfo", func() (any, error) {
+	key := "GetClusterInfo-" + url
+	res, err, _ := c.flight.Do(key, func() (any, error) {
 		return pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	})
 	if err != nil {
@@ -949,7 +950,8 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
-	res, err, _ := c.flight.Do("GetMembers", func() (any, error) {
+	key := "GetMembers-" + url
+	res, err, _ := c.flight.Do(key, func() (any, error) {
 		return pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	})
 	if err != nil {
