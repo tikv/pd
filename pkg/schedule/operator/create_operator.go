@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -237,6 +238,16 @@ func isRegionMatch(a, b *core.RegionInfo) bool {
 
 // CreateScatterRegionOperator creates an operator that scatters the specified region.
 func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
+	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpAdmin)
+}
+
+// CreateNonAdminScatterRegionOperator creates a scatter operator for automatic
+// background flows. The final kind is derived from the generated steps.
+func CreateNonAdminScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
+	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, 0)
+}
+
+func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, kind OpKind) (*Operator, error) {
 	// randomly pick a leader.
 	var ids []uint64
 	for id, peer := range targetPeers {
@@ -257,13 +268,18 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 		builder.SetRemoveLightPeer()
 	}
 
-	return builder.
+	op, err := builder.
 		SetPeers(targetPeers).
 		SetLeader(leader).
 		SetAddLightPeer().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
-		Build(OpAdmin)
+		Build(kind)
+	if err != nil {
+		return nil, err
+	}
+	op.SetPriorityLevel(constant.High)
+	return op, nil
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.

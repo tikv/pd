@@ -684,7 +684,11 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	createScatterOperator := operator.CreateScatterRegionOperator
+	if internalScatter {
+		createScatterOperator = operator.CreateNonAdminScatterRegionOperator
+	}
+	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
@@ -708,10 +712,6 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		if !internalScatter {
 			op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		}
-		// CreateScatterRegionOperator currently builds an OpAdmin operator. Keep
-		// scatter priority at High so internal split-scatter does not bypass the
-		// explicit store-limit check in the dispatcher like an Urgent admin op.
-		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }

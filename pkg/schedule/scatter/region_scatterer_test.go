@@ -87,6 +87,8 @@ func TestScatterRegions(t *testing.T) {
 }
 
 func checkOperator(re *require.Assertions, op *operator.Operator) {
+	re.Equal(operator.OpAdmin, op.SchedulerKind())
+	re.Equal(constant.High, op.GetPriorityLevel())
 	for i := range op.Len() {
 		if rp, ok := op.Step(i).(operator.RemovePeer); ok {
 			for j := i + 1; j < op.Len(); j++ {
@@ -771,7 +773,8 @@ func TestSeedGroupDistributionByRange(t *testing.T) {
 	op, err := scatterer.ScatterInternal(tc.GetRegion(3), group, []byte("a"), []byte("z"))
 	re.NoError(err)
 	re.NotNil(op)
-	re.Equal(operator.OpAdmin, op.SchedulerKind())
+	re.Equal(operator.OpRegion, op.SchedulerKind())
+	re.Zero(op.Kind() & operator.OpAdmin)
 	re.Equal(constant.High, op.GetPriorityLevel())
 	re.NotZero(op.Kind() & operator.OpRegion)
 	val, exist := op.GetAdditionalInfo("group")
@@ -811,7 +814,8 @@ func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {
 	op, err := scatterer.ScatterInternal(region, group, []byte("a"), []byte("z"))
 	re.NoError(err)
 	re.NotNil(op)
-	re.Equal(operator.OpAdmin, op.SchedulerKind())
+	re.Equal(operator.OpRegion, op.SchedulerKind())
+	re.Zero(op.Kind() & operator.OpAdmin)
 	re.Equal(constant.High, op.GetPriorityLevel())
 	re.NotZero(op.Kind() & operator.OpRegion)
 	finalPeers, finalLeaderStoreID := finalPlacementAfterScatter(region, op)
