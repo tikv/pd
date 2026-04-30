@@ -308,6 +308,37 @@ func TestDispatchSplitScatterUsesRangeScatterGroup(t *testing.T) {
 	re.Equal(batchGroup, opBatchGroup)
 }
 
+func TestDispatchSplitScatterKeepsStableGroupWhenRegionSplitsAgain(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	stableGroup := makeSplitScatterIndexGroup(splitScatterTestTableID, splitScatterTestIndexID)
+	sourceID := uint64(100)
+	childIDs := []uint64{101, 201, 301}
+	splitKeys := []string{"m", "t", "x"}
+	previousBatchGroup := ""
+
+	putSplitScatterRegionWithKeysByID(tc, sourceID, newSplitScatterIndexKey("a"), newSplitScatterIndexKey("z"), 0)
+	for i, childID := range childIDs {
+		controller.RecordSplitScatterBatch(sourceID, []uint64{childID})
+		batchGroup := splitScatterPendingGroup(t, controller, childID)
+		re.NotEqual(previousBatchGroup, batchGroup)
+
+		tc.PutRegion(tc.GetRegion(sourceID).Clone(
+			core.WithEndKey(newSplitScatterIndexKey(splitKeys[i])),
+			core.WithIncVersion(),
+		))
+		putSplitScatterRegionWithKeysByID(tc, childID, newSplitScatterIndexKey(splitKeys[i]), newSplitScatterIndexKey("z"), 120)
+
+		controller.dispatchSplitScatterRegions()
+
+		requireInternalScatterOpsUseGroups(t, oc, stableGroup, batchGroup)
+		removeInternalScatterOps(oc)
+		previousBatchGroup = batchGroup
+	}
+}
+
 func TestDispatchSplitScatterBacksOffWhenRegionIsNotFullyReplicated(t *testing.T) {
 	re := require.New(t)
 	controller, tc, _, cleanup := newTestSplitScatterController(t)
@@ -507,6 +538,28 @@ func expireSplitScatterPendingAt(t *testing.T, controller *Controller, regionID 
 	require.True(t, ok)
 	pending.expireAt = expireAt
 	controller.splitScatter.pending[regionID] = pending
+}
+
+func requireInternalScatterOpsUseGroups(t *testing.T, oc *operator.Controller, scatterGroup, batchGroup string) {
+	t.Helper()
+	re := require.New(t)
+	ops := oc.GetOperators()
+	re.NotEmpty(ops)
+	for _, op := range ops {
+		re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
+		opGroup, ok := op.GetAdditionalInfo("group")
+		re.True(ok)
+		re.Equal(scatterGroup, opGroup)
+		opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
+		re.True(ok)
+		re.Equal(batchGroup, opBatchGroup)
+	}
+}
+
+func removeInternalScatterOps(oc *operator.Controller) {
+	for _, op := range oc.GetOperators() {
+		oc.RemoveOperator(op)
+	}
 }
 
 func pendingRegionIDs(regions []splitScatterPendingItem) []uint64 {
