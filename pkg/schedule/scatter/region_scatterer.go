@@ -712,6 +712,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		if !internalScatter {
 			op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		}
+		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
 }

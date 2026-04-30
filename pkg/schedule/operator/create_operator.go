@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -268,18 +267,13 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 		builder.SetRemoveLightPeer()
 	}
 
-	op, err := builder.
+	return builder.
 		SetPeers(targetPeers).
 		SetLeader(leader).
 		SetAddLightPeer().
 		// EnableForceTargetLeader in order to ignore the leader schedule limit
 		EnableForceTargetLeader().
 		Build(kind)
-	if err != nil {
-		return nil, err
-	}
-	op.SetPriorityLevel(constant.High)
-	return op, nil
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.
