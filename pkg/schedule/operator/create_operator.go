@@ -267,13 +267,16 @@ func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.R
 		builder.SetRemoveLightPeer()
 	}
 
-	return builder.
+	builder = builder.
 		SetPeers(targetPeers).
 		SetLeader(leader).
-		SetAddLightPeer().
-		// EnableForceTargetLeader in order to ignore the leader schedule limit
-		EnableForceTargetLeader().
-		Build(kind)
+		SetAddLightPeer()
+	if kind&OpAdmin != 0 {
+		// Admin scatter keeps the historical behavior: force the selected
+		// target leader so manual scatter can bypass leader scheduling limits.
+		builder.EnableForceTargetLeader()
+	}
+	return builder.Build(kind)
 }
 
 // OpDescLeaveJointState is the expected desc for LeaveJointStateOperator.

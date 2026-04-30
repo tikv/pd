@@ -165,8 +165,9 @@ func newSplitScatterTestCluster(t *testing.T) (*RaftCluster, context.CancelFunc)
 		hbStreams.Close()
 	})
 
+	now := time.Now()
 	for _, store := range newTestStores(4, "6.0.0") {
-		re.NoError(cluster.setStore(store))
+		re.NoError(cluster.setStore(store.Clone(core.SetLastHeartbeatTS(now))))
 	}
 
 	re.NoError(cluster.putRegion(newSplitScatterRegion(100, []byte(""), []byte("m"), 0)))
