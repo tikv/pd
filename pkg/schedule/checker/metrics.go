@@ -65,6 +65,20 @@ var (
 			Name:      "patrol_region_channel_size",
 			Help:      "Size of patrol region channel.",
 		})
+	splitScatterPendingExpiredCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "split_scatter_pending_expired_total",
+			Help:      "Counter of expired split-scatter pending entries.",
+		})
+	splitScatterPendingDroppedCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "split_scatter_pending_dropped_total",
+			Help:      "Counter of split-scatter pending entries dropped by the capacity limit.",
+		})
 )
 
 func init() {
@@ -74,6 +88,8 @@ func init() {
 	prometheus.MustRegister(patrolPhaseDuration)
 	prometheus.MustRegister(checkRegionDuration)
 	prometheus.MustRegister(patrolRegionChannelSize)
+	prometheus.MustRegister(splitScatterPendingExpiredCounter)
+	prometheus.MustRegister(splitScatterPendingDroppedCounter)
 }
 
 const (

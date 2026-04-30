@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -129,8 +130,10 @@ func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
 	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
 	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
 
+	expiredBefore := promtestutil.ToFloat64(splitScatterPendingExpiredCounter)
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 	re.Equal(0, splitScatterPendingCount(controller))
+	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterPendingExpiredCounter)-expiredBefore)
 }
 
 func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
@@ -144,9 +147,11 @@ func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
 	}
 	controller.splitScatter.pendingMu.Unlock()
 
+	droppedBefore := promtestutil.ToFloat64(splitScatterPendingDroppedCounter)
 	controller.RecordSplitScatterBatch(100, []uint64{101})
 
 	re.Equal(splitScatterPendingLimit, splitScatterPendingCount(controller))
+	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterPendingDroppedCounter)-droppedBefore)
 	controller.splitScatter.pendingMu.RLock()
 	_, sourceExists := controller.splitScatter.pending[100]
 	_, childExists := controller.splitScatter.pending[101]
@@ -174,6 +179,24 @@ func TestRecordSplitScatterBatchClearsExpiredPendingBeforeLimitCheck(t *testing.
 
 	re.Equal(2, splitScatterPendingCount(controller))
 	re.Equal(makeSplitScatterGroup(100, 101), splitScatterPendingGroup(t, controller, 101))
+}
+
+func TestCollectTopPendingSortsBeforeLimit(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(200, []uint64{201})
+	putSplitScatterRegion(tc, 200, "n", "o", 0)
+	putSplitScatterRegion(tc, 201, "o", "p", 120)
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "n", 120)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	pending := controller.collectTopPendingSplitScatter(1)
+	re.Len(pending, 1)
+	re.Equal(uint64(100), pending[0].regionID)
 }
 
 func TestCollectTopPendingDefersBatchUntilSourceVersionAdvances(t *testing.T) {

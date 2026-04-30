@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -81,8 +82,6 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	if limit <= 0 {
 		return nil
 	}
-	// TODO: currently iterating over the pending map in random order and
-	// truncating to limit; consider ordering by region priority score.
 	now := time.Now()
 	c.pendingMu.RLock()
 
@@ -113,12 +112,19 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		}
 		candidates = append(candidates, pending)
 	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].group != candidates[j].group {
+			return candidates[i].group < candidates[j].group
+		}
+		return candidates[i].regionID < candidates[j].regionID
+	})
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
 	c.pendingMu.RUnlock()
 
 	if len(expiredRegionIDs) > 0 {
+		expiredCount := 0
 		c.pendingMu.Lock()
 		for _, regionID := range expiredRegionIDs {
 			pending, ok := c.pending[regionID]
@@ -127,9 +133,13 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 			}
 			if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 				delete(c.pending, regionID)
+				expiredCount++
 			}
 		}
 		c.pendingMu.Unlock()
+		if expiredCount > 0 {
+			splitScatterPendingExpiredCounter.Add(float64(expiredCount))
+		}
 	}
 	return candidates
 }
@@ -155,12 +165,15 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 	delete(c.pending, expected.regionID)
 }
 
-func (c *splitScatterController) removeExpiredPendingSplitScatterLocked(now time.Time) {
+func (c *splitScatterController) removeExpiredPendingSplitScatterLocked(now time.Time) int {
+	expiredCount := 0
 	for regionID, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 			delete(c.pending, regionID)
+			expiredCount++
 		}
 	}
+	return expiredCount
 }
 
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
@@ -184,7 +197,9 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	c.removeExpiredPendingSplitScatterLocked(time.Now())
+	if expiredCount := c.removeExpiredPendingSplitScatterLocked(time.Now()); expiredCount > 0 {
+		splitScatterPendingExpiredCounter.Add(float64(expiredCount))
+	}
 	newPendingCount := 0
 	if _, ok := c.pending[sourceRegionID]; !ok {
 		newPendingCount++
@@ -195,6 +210,7 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 		}
 	}
 	if len(c.pending)+newPendingCount > splitScatterPendingLimit {
+		splitScatterPendingDroppedCounter.Add(float64(newPendingCount))
 		log.Info("skip recording split scatter batch due to pending limit",
 			zap.Uint64("source-region-id", sourceRegionID),
 			zap.Uint64s("new-region-ids", newRegionIDs),

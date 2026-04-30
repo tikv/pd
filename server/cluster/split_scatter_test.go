@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -57,16 +58,14 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), 80)))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
-		return cluster.GetOperatorController().GetOperator(splitRegionIDs[0]) != nil ||
+		return cluster.GetOperatorController().GetOperator(splitRegionIDs[0]) != nil &&
 			cluster.GetOperatorController().GetOperator(splitRegionIDs[1]) != nil
 	})
 
 	group := ""
 	for _, regionID := range splitRegionIDs {
 		op := cluster.GetOperatorController().GetOperator(regionID)
-		if op == nil {
-			continue
-		}
+		re.NotNil(op)
 		re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
 		opGroup, ok := op.GetAdditionalInfo("group")
 		re.True(ok)
@@ -113,7 +112,7 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
 	opGroup, ok := op.GetAdditionalInfo("group")
 	re.True(ok)
-	re.Equal("split-scatter-100-1", opGroup)
+	re.Equal(fmt.Sprintf("split-scatter-100-%d", splitRegionID), opGroup)
 }
 
 func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {
