@@ -824,14 +824,19 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 	id := uint64(0)
 	unusedAlternativeID := uint64(0)
 	unusedAlternativePeerCount := uint64(math.MaxUint64)
+	currentLeaderID := region.GetLeader().GetStoreId()
+	currentLeaderCanStay := false
 	for _, storeID := range leaderCandidateStores {
 		store := r.cluster.GetStore(storeID)
 		if store == nil {
 			continue
 		}
+		if storeID == currentLeaderID {
+			currentLeaderCanStay = true
+		}
 		storeGroupLeaderCount := context.selectedLeader.Get(storeID, group)
 		storeGroupPeerCount := context.selectedPeer.Get(storeID, group)
-		if internalScatter && storeID != region.GetLeader().GetStoreId() && storeGroupLeaderCount == 0 {
+		if internalScatter && storeID != currentLeaderID && storeGroupLeaderCount == 0 {
 			if unusedAlternativeID == 0 || storeGroupPeerCount < unusedAlternativePeerCount ||
 				(storeGroupPeerCount == unusedAlternativePeerCount && storeID < unusedAlternativeID) {
 				unusedAlternativeID = storeID
@@ -852,6 +857,10 @@ func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.
 	if selectedID == 0 {
 		return 0, 0
 	}
+	if internalScatter && currentLeaderCanStay && selectedID != currentLeaderID &&
+		!leaderMoveReducesSourceTargetGap(context.selectedLeader, group, currentLeaderID, selectedID) {
+		selectedID = currentLeaderID
+	}
 	return selectedID, context.selectedLeader.Get(selectedID, group)
 }
 
@@ -859,6 +868,14 @@ func peerMoveReducesSourceTargetGap(selectedPeers selectedStoreCounter, group st
 	fromCount := selectedPeers.Get(fromStoreID, group)
 	toCount := selectedPeers.Get(toStoreID, group)
 	return fromCount > toCount+1
+}
+
+func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, group string, fromStoreID, toStoreID uint64) bool {
+	fromCount := selectedLeaders.Get(fromStoreID, group)
+	toCount := selectedLeaders.Get(toStoreID, group)
+	// A zero source count means this group has no seeded/current leader history
+	// for the origin store, so keep the original scatter fallback behavior.
+	return fromCount == 0 || fromCount > toCount+1
 }
 
 func finalPlacementAfterOperator(region *core.RegionInfo, op *operator.Operator) (map[uint64]*metapb.Peer, uint64) {

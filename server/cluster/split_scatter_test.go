@@ -112,7 +112,10 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
 	opGroup, ok := op.GetAdditionalInfo("group")
 	re.True(ok)
-	re.Equal(fmt.Sprintf("split-scatter-100-%d", splitRegionID), opGroup)
+	re.Equal("split-scatter-index-42-7", opGroup)
+	batchGroup, ok := op.GetAdditionalInfo("batch-group")
+	re.True(ok)
+	re.Equal(fmt.Sprintf("split-scatter-100-%d", splitRegionID), batchGroup)
 }
 
 func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {

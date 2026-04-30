@@ -74,8 +74,9 @@ func newSplitScatterController(
 // group. When available, split-scatter seeds the scatterer's group
 // distribution with the existing region count in this range before dispatch.
 type splitScatterRangeHint struct {
-	startKey []byte
-	endKey   []byte
+	startKey     []byte
+	endKey       []byte
+	scatterGroup string
 }
 
 func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []splitScatterPendingItem {
@@ -245,30 +246,38 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		if region == nil {
 			continue
 		}
+		rangeHint := resolveSplitScatterRangeHint(region)
+		scatterGroup := pending.group
+		if rangeHint.scatterGroup != "" {
+			scatterGroup = rangeHint.scatterGroup
+		}
 		if !filter.IsRegionReplicated(c.cluster, region) {
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter delayed",
 				zap.Uint64("region-id", pending.regionID),
-				zap.String("group", pending.group),
+				zap.String("batch-group", pending.group),
+				zap.String("scatter-group", scatterGroup),
 				zap.String("reason", "not-fully-replicated"))
 			continue
 		}
-		rangeHint := resolveSplitScatterRangeHint(region)
-		op, err := c.regionScatterer.ScatterInternal(region, pending.group, rangeHint.startKey, rangeHint.endKey)
+		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter failed",
 				zap.Uint64("region-id", pending.regionID),
-				zap.String("group", pending.group),
+				zap.String("batch-group", pending.group),
+				zap.String("scatter-group", scatterGroup),
 				zap.Error(err))
 			continue
 		}
 		if op != nil {
+			op.SetAdditionalInfo("batch-group", pending.group)
 			if c.opController.ExceedStoreLimit(op) {
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter delayed",
 					zap.Uint64("region-id", pending.regionID),
-					zap.String("group", pending.group),
+					zap.String("batch-group", pending.group),
+					zap.String("scatter-group", scatterGroup),
 					zap.String("reason", "exceed-store-limit"),
 					zap.String("operator-desc", op.Desc()))
 				continue
@@ -277,7 +286,8 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter add operator failed",
 					zap.Uint64("region-id", pending.regionID),
-					zap.String("group", pending.group),
+					zap.String("batch-group", pending.group),
+					zap.String("scatter-group", scatterGroup),
 					zap.String("operator-desc", op.Desc()))
 				continue
 			}

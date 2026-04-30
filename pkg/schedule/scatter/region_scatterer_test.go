@@ -1436,6 +1436,11 @@ func TestInternalScatterLeaderPrefersUnusedStore(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
 	state := newTestScatterState(scatterer)
 	group := "test-leader-coverage"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
+		1: 2,
+		4: 0,
+		5: 0,
+	}))
 
 	adminLeader, adminCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, scatterer.ordinaryEngine.asSelectionContext(), false)
 	re.Equal(uint64(1), adminLeader)
@@ -1443,6 +1448,34 @@ func TestInternalScatterLeaderPrefersUnusedStore(t *testing.T) {
 
 	internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, state.ordinaryEngine.asSelectionContext(), true)
 	re.Equal(uint64(4), internalLeader)
+	re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
+}
+
+func TestInternalScatterLeaderKeepsOriginWhenSourceTargetGapIsOne(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	for i := uint64(1); i <= 5; i++ {
+		tc.AddRegionStore(i, 0)
+	}
+	region := tc.AddLeaderRegion(1, 1, 2, 3)
+
+	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+	state := newTestScatterState(scatterer)
+	group := "test-leader-gap-one"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
+		1: 1,
+		4: 0,
+		5: 0,
+	}))
+
+	internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, state.ordinaryEngine.asSelectionContext(), true)
+	re.Equal(uint64(1), internalLeader)
 	re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
 }
 
@@ -1464,7 +1497,7 @@ func TestInternalScatterLeaderBreaksTiesByPeerDeficit(t *testing.T) {
 	state := newTestScatterState(scatterer)
 	group := "test-leader-peer-deficit"
 	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
-		1: 1,
+		1: 3,
 		4: 1,
 		5: 1,
 	}))

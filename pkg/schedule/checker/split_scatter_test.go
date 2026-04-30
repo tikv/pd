@@ -94,6 +94,9 @@ func TestCheckSplitScatterRegionsCreatesScatterOperator(t *testing.T) {
 	opGroup, ok := op.GetAdditionalInfo("group")
 	re.True(ok)
 	re.Equal(group, opGroup)
+	batchGroup, ok := op.GetAdditionalInfo("batch-group")
+	re.True(ok)
+	re.Equal(group, batchGroup)
 }
 
 func TestDispatchSplitScatterKeepsPendingUntilSplitHeartbeat(t *testing.T) {
@@ -220,36 +223,42 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 		startKey  []byte
 		endKey    []byte
 		wantRange splitScatterRangeHint
+		wantGroup string
 	}{
 		{
 			name:      "index region",
 			startKey:  newSplitScatterIndexKey("a"),
 			endKey:    newSplitScatterIndexKey("m"),
 			wantRange: splitScatterPrefixRange(splitScatterIndexKeyPrefix()),
+			wantGroup: makeSplitScatterIndexGroup(splitScatterTestTableID, splitScatterTestIndexID),
 		},
 		{
 			name:      "record region",
 			startKey:  newSplitScatterRecordKey(42, "a"),
 			endKey:    newSplitScatterRecordKey(42, "m"),
 			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
+			wantGroup: makeSplitScatterTableGroup(42),
 		},
 		{
 			name:      "bare table boundary",
 			startKey:  newSplitScatterTableBoundaryKey(42),
 			endKey:    newSplitScatterIndexKey("m"),
 			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
+			wantGroup: makeSplitScatterTableGroup(42),
 		},
 		{
 			name:      "cross entity falls back to table",
 			startKey:  newSplitScatterIndexKey("a"),
 			endKey:    newSplitScatterRecordKey(42, "m"),
 			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
+			wantGroup: makeSplitScatterTableGroup(42),
 		},
 		{
 			name:      "cross table uses start table",
 			startKey:  newSplitScatterRecordKey(42, "a"),
 			endKey:    newSplitScatterRecordKey(43, "m"),
 			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
+			wantGroup: makeSplitScatterTableGroup(42),
 		},
 	}
 
@@ -269,8 +278,34 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 			rangeHint := resolveSplitScatterRangeHint(tc.GetRegion(101))
 			re.Equal(testCase.wantRange.startKey, rangeHint.startKey)
 			re.Equal(testCase.wantRange.endKey, rangeHint.endKey)
+			re.Equal(testCase.wantGroup, rangeHint.scatterGroup)
 		})
 	}
+}
+
+func TestDispatchSplitScatterUsesRangeScatterGroup(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	putSplitScatterRegionWithKeysByID(tc, 90, newSplitScatterIndexKey("m"), newSplitScatterIndexKey("z"), 0)
+	putSplitScatterRegionWithKeysByID(tc, 101, newSplitScatterIndexKey("a"), newSplitScatterIndexKey("m"), 120)
+	advanceSplitScatterRegionVersion(t, tc, 100)
+
+	batchGroup := splitScatterPendingGroup(t, controller, 101)
+
+	controller.dispatchSplitScatterRegions()
+
+	expectedScatterGroup := makeSplitScatterIndexGroup(splitScatterTestTableID, splitScatterTestIndexID)
+	op := oc.GetOperator(101)
+	re.NotNil(op)
+	opGroup, ok := op.GetAdditionalInfo("group")
+	re.True(ok)
+	re.Equal(expectedScatterGroup, opGroup)
+	opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
+	re.True(ok)
+	re.Equal(batchGroup, opBatchGroup)
 }
 
 func TestDispatchSplitScatterBacksOffWhenRegionIsNotFullyReplicated(t *testing.T) {
@@ -360,9 +395,27 @@ func putSplitScatterRegion(tc *mockcluster.Cluster, regionID uint64, startKey, e
 }
 
 func putSplitScatterRegionWithKeys(tc *mockcluster.Cluster, startKey, endKey []byte, cpu uint64) {
-	region := tc.AddLeaderRegion(splitScatterObservedRegionID, 1, 2, 3).Clone(
-		core.WithStartKey(startKey),
-		core.WithEndKey(endKey),
+	putSplitScatterRegionWithKeysByID(tc, splitScatterObservedRegionID, startKey, endKey, cpu)
+}
+
+func putSplitScatterRegionWithKeysByID(tc *mockcluster.Cluster, regionID uint64, startKey, endKey []byte, cpu uint64) {
+	peers := []*metapb.Peer{
+		{Id: regionID*10 + 1, StoreId: 1},
+		{Id: regionID*10 + 2, StoreId: 2},
+		{Id: regionID*10 + 3, StoreId: 3},
+	}
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Id:       regionID,
+			StartKey: startKey,
+			EndKey:   endKey,
+			Peers:    peers,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		},
+		peers[0],
 		core.SetCPUUsage(cpu),
 	)
 	tc.PutRegion(region)
@@ -412,8 +465,12 @@ func putSplitScatterRegionWithoutLeader(tc *mockcluster.Cluster, regionID uint64
 }
 
 func advanceSplitScatterSourceVersion(t *testing.T, tc *mockcluster.Cluster) {
+	advanceSplitScatterRegionVersion(t, tc, 100)
+}
+
+func advanceSplitScatterRegionVersion(t *testing.T, tc *mockcluster.Cluster, regionID uint64) {
 	t.Helper()
-	region := tc.GetRegion(100)
+	region := tc.GetRegion(regionID)
 	require.NotNil(t, region)
 	tc.PutRegion(region.Clone(core.WithIncVersion()))
 }
