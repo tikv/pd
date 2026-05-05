@@ -16,12 +16,13 @@ package api
 
 import (
 	"net/http"
+	"time"
 
-	"github.com/unrolled/render"
-
+	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
+	"github.com/unrolled/render"
 )
 
 type unsafeOperationHandler struct {
@@ -75,7 +76,23 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		timeout = uint64(rawTimeout)
 	}
 
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout, autoDetect); err != nil {
+	var planExecutionTimeout time.Duration
+	if rawTimeout, exists := input["plan-execution-timeout"].(float64); exists {
+		planExecutionTimeout = time.Duration(uint64(rawTimeout)) * time.Second
+	}
+	if rawTimeout, exists := input["plan_execution_timeout"].(float64); exists {
+		planExecutionTimeout = time.Duration(uint64(rawTimeout)) * time.Second
+	}
+
+	disableParanoidCheck, _ := input["disable-paranoid-check"].(bool)
+	if rawDisableParanoidCheck, exists := input["disable_paranoid_check"].(bool); exists {
+		disableParanoidCheck = rawDisableParanoidCheck
+	}
+
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStoresWithOptions(stores, timeout, autoDetect, unsaferecovery.RemoveFailedStoresOptions{
+		PlanExecutionTimeout: planExecutionTimeout,
+		DisableParanoidCheck: disableParanoidCheck,
+	}); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
