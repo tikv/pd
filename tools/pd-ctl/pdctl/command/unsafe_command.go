@@ -16,14 +16,18 @@ package command
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 const unsafePrefix = "pd/api/v1/admin/unsafe"
+
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(1<<63-1) / time.Second)
 
 // NewUnsafeCommand returns the unsafe subcommand of rootCmd.
 func NewUnsafeCommand() *cobra.Command {
@@ -110,6 +114,10 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(err)
 		return
 	} else if planExecutionTimeout != 60 {
+		if err := validatePlanExecutionTimeoutSeconds(planExecutionTimeout); err != nil {
+			cmd.Println(err)
+			return
+		}
 		postInput["plan-execution-timeout"] = planExecutionTimeout
 	}
 
@@ -122,6 +130,13 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	postJSON(cmd, prefix, postInput)
+}
+
+func validatePlanExecutionTimeoutSeconds(timeout float64) error {
+	if timeout <= 0 || timeout != math.Trunc(timeout) || timeout > maxPlanExecutionTimeoutSeconds {
+		return fmt.Errorf("plan-execution-timeout must be a positive integer number of seconds no greater than %.0f", maxPlanExecutionTimeoutSeconds)
+	}
+	return nil
 }
 
 func removeFailedStoresShowCommandFunc(cmd *cobra.Command, _ []string) {

@@ -87,6 +87,18 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 		testutil.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
 	re.NoError(err)
 
+	for _, input := range []map[string]any{
+		{"stores": []uint64{1}, "plan-execution-timeout": -1},
+		{"stores": []uint64{1}, "plan-execution-timeout": 1.5},
+		{"stores": []uint64{1}, "plan_execution_timeout": "60"},
+	} {
+		data, err = json.Marshal(input)
+		re.NoError(err)
+		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusNotOK(re),
+			testutil.StringContain(re, "plan-execution-timeout is invalid"))
+		re.NoError(err)
+	}
+
 	input = map[string]any{"stores": []uint64{1}, "plan-execution-timeout": 300, "disable-paranoid-check": true}
 	data, err = json.Marshal(input)
 	re.NoError(err)

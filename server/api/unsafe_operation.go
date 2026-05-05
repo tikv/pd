@@ -15,15 +15,20 @@
 package api
 
 import (
+	"errors"
+	"math"
 	"net/http"
 	"time"
+
+	"github.com/unrolled/render"
 
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
+
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(1<<63-1) / time.Second)
 
 type unsafeOperationHandler struct {
 	svr *server.Server
@@ -76,12 +81,10 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		timeout = uint64(rawTimeout)
 	}
 
-	var planExecutionTimeout time.Duration
-	if rawTimeout, exists := input["plan-execution-timeout"].(float64); exists {
-		planExecutionTimeout = time.Duration(uint64(rawTimeout)) * time.Second
-	}
-	if rawTimeout, exists := input["plan_execution_timeout"].(float64); exists {
-		planExecutionTimeout = time.Duration(uint64(rawTimeout)) * time.Second
+	planExecutionTimeout, err := parsePlanExecutionTimeout(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	disableParanoidCheck, _ := input["disable-paranoid-check"].(bool)
@@ -97,6 +100,22 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
+}
+
+func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
+	var planExecutionTimeout time.Duration
+	for _, key := range []string{"plan-execution-timeout", "plan_execution_timeout"} {
+		raw, exists := input[key]
+		if !exists {
+			continue
+		}
+		rawTimeout, ok := raw.(float64)
+		if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
+			return 0, errors.New("plan-execution-timeout is invalid")
+		}
+		planExecutionTimeout = time.Duration(int64(rawTimeout)) * time.Second
+	}
+	return planExecutionTimeout, nil
 }
 
 // GetFailedStoresRemovalStatus gets the current status of failed stores removal.
