@@ -82,6 +82,25 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
 }
 
+// AbortFailedStoresRemoval aborts the current failed stores removal.
+//
+//	@Tags		unsafe
+//	@Summary	Abort the current failed stores removal.
+//	@Produce	json
+//
+// Success 200 {string} string "Request has been accepted."
+// Failure 500 {string} string "PD server failed to proceed the request."
+//
+//	@Router		/admin/unsafe/remove-failed-stores/abort [post]
+func (h *unsafeOperationHandler) AbortFailedStoresRemoval(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	if err := rc.GetUnsafeRecoveryController().AbortFailedStoresRemoval(); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
+}
+
 // GetFailedStoresRemovalStatus gets the current status of failed stores removal.
 //
 //	@Tags		unsafe
