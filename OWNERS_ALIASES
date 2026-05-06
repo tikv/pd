@@ -2,7 +2,7 @@
 # The members of 'sig-community-*' are synced from memberships defined in repository: https://github.com/tikv/community.
 aliases:
   sig-critical-approvers-config:
-    - BenMeadowcroft
+    - likidu
     - niubell
     - yudongusa
   sig-community-reviewers:
