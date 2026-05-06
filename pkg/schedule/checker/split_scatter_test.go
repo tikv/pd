@@ -229,6 +229,30 @@ func TestCollectTopPendingSortsBeforeLimit(t *testing.T) {
 	re.Equal(uint64(100), pending[0].regionID)
 }
 
+func TestCollectTopPendingPrioritizesNearExpiration(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	controller.RecordSplitScatterBatch(200, []uint64{201})
+	putSplitScatterRegion(tc, 100, "m", "n", 0)
+	putSplitScatterRegion(tc, 101, "n", "o", 120)
+	putSplitScatterRegion(tc, 200, "o", "p", 0)
+	putSplitScatterRegion(tc, 201, "p", "q", 120)
+	advanceSplitScatterSourceVersion(t, tc)
+	advanceSplitScatterRegionVersion(t, tc, 200)
+
+	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(2*time.Minute))
+	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(2*time.Minute))
+	expireSplitScatterPendingAt(t, controller, 200, time.Now().Add(time.Minute))
+	expireSplitScatterPendingAt(t, controller, 201, time.Now().Add(time.Minute))
+
+	pending := controller.collectTopPendingSplitScatter(1)
+	re.Len(pending, 1)
+	re.Equal(uint64(200), pending[0].regionID)
+}
+
 func TestCollectTopPendingDefersBatchUntilSourceVersionAdvances(t *testing.T) {
 	re := require.New(t)
 	controller, tc, _, cleanup := newTestSplitScatterController(t)

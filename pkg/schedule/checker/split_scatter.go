@@ -34,6 +34,9 @@ import (
 
 const (
 	splitScatterPendingLimit = 1024
+	// The actual retry cadence is also bounded by the checker dispatch loop. This
+	// is only the minimum interval to avoid retrying the same pending item too
+	// frequently when checker ticks are fast.
 	splitScatterRetryBackoff = time.Second
 	splitScatterPendingTTL   = 3 * time.Minute
 )
@@ -53,7 +56,10 @@ type splitScatterController struct {
 	regionScatterer *scatter.RegionScatterer
 
 	pendingMu syncutil.RWMutex
-	pending   map[uint64]splitScatterPendingItem
+	// pending maps a pending region ID to its latest split-scatter batch item.
+	// The item keeps its batch group so stale snapshots cannot mutate a newer
+	// pending entry for the same region.
+	pending map[uint64]splitScatterPendingItem
 }
 
 func newSplitScatterController(
@@ -90,10 +96,10 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	// to block pending updates. Stale snapshots are safe because delay/delete
 	// recheck regionID + group before mutating pending.
 	pendingSnapshot := make([]splitScatterPendingItem, 0, len(c.pending))
-	expiredRegionIDs := make([]uint64, 0)
-	for regionID, pending := range c.pending {
+	expiredSnapshot := make([]splitScatterPendingItem, 0)
+	for _, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
-			expiredRegionIDs = append(expiredRegionIDs, regionID)
+			expiredSnapshot = append(expiredSnapshot, pending)
 			continue
 		}
 		pendingSnapshot = append(pendingSnapshot, pending)
@@ -124,6 +130,9 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		candidates = append(candidates, pending)
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].expireAt.Equal(candidates[j].expireAt) {
+			return candidates[i].expireAt.Before(candidates[j].expireAt)
+		}
 		if candidates[i].group != candidates[j].group {
 			return candidates[i].group < candidates[j].group
 		}
@@ -133,16 +142,13 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		candidates = candidates[:limit]
 	}
 
-	if len(expiredRegionIDs) > 0 {
+	if len(expiredSnapshot) > 0 {
 		expiredCount := 0
 		c.pendingMu.Lock()
-		for _, regionID := range expiredRegionIDs {
-			pending, ok := c.pending[regionID]
-			if !ok {
-				continue
-			}
-			if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
-				delete(c.pending, regionID)
+		for _, expired := range expiredSnapshot {
+			pending, ok := c.pending[expired.regionID]
+			if ok && pending.group == expired.group && !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
+				delete(c.pending, expired.regionID)
 				expiredCount++
 			}
 		}
@@ -175,7 +181,8 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 	delete(c.pending, expected.regionID)
 }
 
-func (c *splitScatterController) removeExpiredPendingSplitScatterLocked(now time.Time) int {
+func (c *splitScatterController) removeExpiredPendingSplitScatterLocked() int {
+	now := time.Now()
 	expiredCount := 0
 	for regionID, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
@@ -207,7 +214,7 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	if expiredCount := c.removeExpiredPendingSplitScatterLocked(time.Now()); expiredCount > 0 {
+	if expiredCount := c.removeExpiredPendingSplitScatterLocked(); expiredCount > 0 {
 		splitScatterPendingExpiredCounter.Add(float64(expiredCount))
 	}
 	newPendingCount := 0
@@ -220,6 +227,9 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 		}
 	}
 	if len(c.pending)+newPendingCount > splitScatterPendingLimit {
+		// Keep each split batch atomic. Recording only part of a source/child
+		// batch would make the scatter group incomplete, so skip the whole batch
+		// when the remaining capacity cannot fit it.
 		splitScatterPendingDroppedCounter.Add(float64(newPendingCount))
 		log.Info("skip recording split scatter batch due to pending limit",
 			zap.Uint64("source-region-id", sourceRegionID),

@@ -69,7 +69,7 @@ const (
 	// AdminScatterOperatorDesc is used by external admin/API scatter requests.
 	AdminScatterOperatorDesc = "scatter-region"
 	// InternalScatterOperatorDesc is used by PD-internal split-scatter dispatch.
-	InternalScatterOperatorDesc = "internal-scatter-region"
+	InternalScatterOperatorDesc = "split-scatter-region"
 )
 
 type selectedStoreCounter interface {
