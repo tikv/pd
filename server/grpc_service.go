@@ -485,6 +485,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		defer done()
 	}
 	if s.IsServiceIndependent(constant.TSOServiceName) {
+		tsoForwardStreamCounter.Inc()
 		return s.forwardToTSOService(stream)
 	}
 

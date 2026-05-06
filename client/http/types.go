@@ -71,20 +71,21 @@ var NewKeyRange = pd.NewKeyRange
 
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
-	ID              int64            `json:"id"`
-	StartKey        string           `json:"start_key"`
-	EndKey          string           `json:"end_key"`
-	Epoch           RegionEpoch      `json:"epoch"`
-	Peers           []RegionPeer     `json:"peers"`
-	Leader          RegionPeer       `json:"leader"`
-	DownPeers       []RegionPeerStat `json:"down_peers"`
-	PendingPeers    []RegionPeer     `json:"pending_peers"`
-	WrittenBytes    uint64           `json:"written_bytes"`
-	ReadBytes       uint64           `json:"read_bytes"`
-	WrittenKeys     uint64           `json:"written_keys"`
-	ReadKeys        uint64           `json:"read_keys"`
-	ApproximateSize int64            `json:"approximate_size"`
-	ApproximateKeys int64            `json:"approximate_keys"`
+	ID                int64            `json:"id"`
+	StartKey          string           `json:"start_key"`
+	EndKey            string           `json:"end_key"`
+	Epoch             RegionEpoch      `json:"epoch"`
+	Peers             []RegionPeer     `json:"peers"`
+	Leader            RegionPeer       `json:"leader"`
+	DownPeers         []RegionPeerStat `json:"down_peers"`
+	PendingPeers      []RegionPeer     `json:"pending_peers"`
+	WrittenBytes      uint64           `json:"written_bytes"`
+	ReadBytes         uint64           `json:"read_bytes"`
+	WrittenKeys       uint64           `json:"written_keys"`
+	ReadKeys          uint64           `json:"read_keys"`
+	ApproximateSize   int64            `json:"approximate_size"`
+	ApproximateKvSize int64            `json:"approximate_kv_size"`
+	ApproximateKeys   int64            `json:"approximate_keys"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -170,9 +171,11 @@ type HotPeersStat struct {
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
+	StoreCPURate   float64           `json:"store_cpu"`
 	TotalBytesRate float64           `json:"total_flow_bytes"`
 	TotalKeysRate  float64           `json:"total_flow_keys"`
 	TotalQueryRate float64           `json:"total_flow_query"`
+	TotalCPURate   float64           `json:"total_flow_cpu"`
 	Count          int               `json:"regions_count"`
 	Stats          []HotPeerStatShow `json:"statistics"`
 }
@@ -188,6 +191,7 @@ type HotPeerStatShow struct {
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
+	CPURate        float64   `json:"flow_cpu"`
 	AntiCount      int       `json:"anti_count"`
 	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 }
@@ -249,6 +253,7 @@ type HistoryHotRegion struct {
 	HotRegionType string  `json:"hot_region_type"`
 	HotDegree     int64   `json:"hot_degree"`
 	FlowBytes     float64 `json:"flow_bytes"`
+	FlowCPU       float64 `json:"flow_cpu"`
 	KeyRate       float64 `json:"key_rate"`
 	QueryRate     float64 `json:"query_rate"`
 	StartKey      string  `json:"start_key"`

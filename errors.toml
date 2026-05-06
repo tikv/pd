@@ -56,6 +56,11 @@ error = '''
 the option %s does not exist
 '''
 
+["PD:apiutil:ErrOptionTypeInvalid"]
+error = '''
+the type of option %s is invalid
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed

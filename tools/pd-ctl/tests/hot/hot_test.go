@@ -177,6 +177,7 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 					utils.RegionWriteBytes:    0,
 					utils.RegionWriteKeys:     0,
 					utils.RegionWriteQueryNum: 0,
+					utils.RegionReadCPU:       0,
 				}
 				leader := &metapb.Peer{
 					Id:      100 + regionIDCounter,
