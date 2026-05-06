@@ -159,7 +159,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				// Check again to make sure the `expireTime` still needs to be updated.
 				select {
 				case <-ctx.Done():
-					log.Info("lease keep alive canceled while applying keepalive response", zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+					log.Info("lease keep alive canceled while applying keepalive response", zap.String("purpose", l.Purpose), zap.Time("last-response-time", lastResponseTime), zap.Time("max-expire", maxExpire), zap.Error(ctx.Err()))
 					l.metrics.contextCanceled.Inc()
 					return
 				default:
