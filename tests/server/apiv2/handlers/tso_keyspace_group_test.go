@@ -21,9 +21,9 @@ import (
 	"net/http"
 	"testing"
 
-	perrors "github.com/pingcap/errors"
 	"github.com/stretchr/testify/suite"
 
+	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 

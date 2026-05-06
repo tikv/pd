@@ -655,10 +655,8 @@ func RemoveKeyspacesFromGroup(c *gin.Context) {
 			log.Warn("failed to remove keyspace", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
 			if errs.ErrKeyspaceNotFound.Equal(err) {
 				continue
-			} else {
-				failedKeyspaces = append(failedKeyspaces, keyspaceID)
 			}
-
+			failedKeyspaces = append(failedKeyspaces, keyspaceID)
 		}
 	}
 	if len(failedKeyspaces) > 0 {

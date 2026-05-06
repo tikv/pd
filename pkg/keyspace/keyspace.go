@@ -863,7 +863,7 @@ func (manager *Manager) RemoveKeyspace(id uint32) error {
 		if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
 			return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
 		}
-		return manager.store.RemoveKeysapce(txn, id, meta.GetName())
+		return manager.store.RemoveKeyspace(txn, id, meta.GetName())
 	})
 	if err != nil {
 		manager.keyspaceNameLookup.Delete(id)

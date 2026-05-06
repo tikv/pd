@@ -44,7 +44,7 @@ type KeyspaceStorage interface {
 	LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error)
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
-	RemoveKeysapce(txn kv.Txn, id uint32, name string) error
+	RemoveKeyspace(txn kv.Txn, id uint32, name string) error
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
@@ -85,8 +85,8 @@ func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	return txn.Save(idPath, idVal)
 }
 
-// RemoveKeysapce removes keyspace meta and keyspace ID mapping.
-func (s *StorageEndpoint) RemoveKeysapce(txn kv.Txn, id uint32, name string) error {
+// RemoveKeyspace removes keyspace meta and keyspace ID mapping.
+func (*StorageEndpoint) RemoveKeyspace(txn kv.Txn, id uint32, name string) error {
 	idPath := keypath.KeyspaceMetaPath(id)
 	err := txn.Remove(idPath)
 	if err != nil {
