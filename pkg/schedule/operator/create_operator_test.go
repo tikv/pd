@@ -1207,8 +1207,15 @@ func (suite *createOperatorTestSuite) TestNonAdminScatterDoesNotForceTargetLeade
 	re.NoError(err)
 	re.NotNil(adminOp)
 	re.Equal(OpAdmin, adminOp.SchedulerKind())
+	re.Zero(adminOp.Kind() & OpSplitScatter)
 
-	nonAdminOp, err := CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 10, false)
+	nonAdminOp, err := CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 2, false)
+	re.NoError(err)
+	re.NotNil(nonAdminOp)
+	re.Equal(OpSplitScatter, nonAdminOp.SchedulerKind())
+	re.NotZero(nonAdminOp.Kind() & OpSplitScatter)
+
+	nonAdminOp, err = CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 10, false)
 	re.Error(err)
 	re.Nil(nonAdminOp)
 	re.Contains(err.Error(), "target leader is not allowed")
