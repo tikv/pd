@@ -169,15 +169,15 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			l.metrics.ttlRemaining.Set(maxExpire.Sub(now).Seconds())
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
+			actualExpire := l.loadExpireTime()
 			// The keepalive timeout can fire concurrently with a caller-initiated
 			// cancellation. Treat that race as a clean shutdown so we don't
 			// over-count `lease_expired`.
 			if ctx.Err() != nil {
-				log.Info("lease keep alive timed out during caller cancellation", zap.Duration("timeout-duration", l.leaseTimeout), zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+				log.Info("lease keep alive timed out during caller cancellation", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
 				l.metrics.contextCanceled.Inc()
 				return
 			}
-			actualExpire := l.loadExpireTime()
 			l.metrics.ttlRemaining.Set(time.Until(actualExpire).Seconds())
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
