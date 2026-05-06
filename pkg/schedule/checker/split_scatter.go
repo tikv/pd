@@ -28,14 +28,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	splitScatterDispatchLimit = 4
-	splitScatterPendingLimit  = 1024
-	splitScatterRetryBackoff  = time.Second
-	splitScatterPendingTTL    = 3 * time.Minute
+	splitScatterPendingLimit = 1024
+	splitScatterRetryBackoff = time.Second
+	splitScatterPendingTTL   = 3 * time.Minute
 )
 
 type splitScatterPendingItem struct {
@@ -239,9 +239,19 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
+	limit := c.cluster.GetCheckerConfig().GetSplitScatterScheduleLimit()
+	if limit == 0 {
+		return
+	}
+	running := c.opController.OperatorCount(operator.OpSplitScatter)
+	if running >= limit {
+		operator.IncOperatorLimitCounter(types.SplitScatterChecker, operator.OpSplitScatter)
+		return
+	}
+	dispatchLimit := int(limit - running)
 	// Dispatch sequentially so operators added for earlier pending items in this pass
 	// are visible to later ScatterInternal calls through the running-operator delta.
-	for _, pending := range c.collectTopPendingSplitScatter(splitScatterDispatchLimit) {
+	for _, pending := range c.collectTopPendingSplitScatter(dispatchLimit) {
 		region := c.cluster.GetRegion(pending.regionID)
 		if region == nil {
 			continue

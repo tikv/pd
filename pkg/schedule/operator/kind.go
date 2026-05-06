@@ -46,6 +46,8 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
+	// Initiated by internal split-scatter dispatcher.
+	OpSplitScatter
 	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
@@ -69,6 +71,7 @@ var flagToName = map[OpKind]string{
 	OpWitness:       "witness",
 	OpWitnessLeader: "witness-leader",
 	OpAffinity:      "affinity",
+	OpSplitScatter:  "split-scatter",
 }
 
 var nameToFlag = map[string]OpKind{
@@ -82,6 +85,7 @@ var nameToFlag = map[string]OpKind{
 	"range":          OpRange,
 	"witness-leader": OpWitnessLeader,
 	"affinity":       OpAffinity,
+	"split-scatter":  OpSplitScatter,
 }
 
 func (k OpKind) String() string {

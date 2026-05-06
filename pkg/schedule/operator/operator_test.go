@@ -481,6 +481,9 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpRegion),
 			expect: OpAffinity,
 		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpSplitScatter|OpRegion),
+			expect: OpSplitScatter,
+		}, {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpLeader),
 			expect: OpAffinity,
 		}, {

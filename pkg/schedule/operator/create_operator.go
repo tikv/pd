@@ -240,10 +240,10 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpAdmin)
 }
 
-// CreateNonAdminScatterRegionOperator creates a scatter operator for automatic
-// background flows. The final kind is derived from the generated steps.
+// CreateNonAdminScatterRegionOperator creates a scatter operator for internal
+// split-scatter background flows.
 func CreateNonAdminScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool) (*Operator, error) {
-	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, 0)
+	return newScatterRegionOperator(desc, ci, origin, targetPeers, targetLeader, skipLimitCheck, OpSplitScatter)
 }
 
 func newScatterRegionOperator(desc string, ci sche.SharedCluster, origin *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, skipLimitCheck bool, kind OpKind) (*Operator, error) {

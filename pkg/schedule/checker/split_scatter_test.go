@@ -124,6 +124,33 @@ func TestDispatchSplitScatterKeepsPendingUntilSplitHeartbeat(t *testing.T) {
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
 }
 
+func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	tc.SetSplitScatterScheduleLimit(0)
+	controller.RecordSplitScatterBatch(100, []uint64{101, 102})
+	putSplitScatterRegion(tc, 101, "m", "t", 120)
+	putSplitScatterRegion(tc, 102, "t", "", 80)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	controller.dispatchSplitScatterRegions()
+
+	re.Empty(oc.GetOperators())
+	re.Equal(3, splitScatterPendingCount(controller))
+
+	tc.SetSplitScatterScheduleLimit(1)
+	controller.dispatchSplitScatterRegions()
+
+	re.Len(oc.GetOperators(), 1)
+	re.Equal(uint64(1), oc.OperatorCount(operator.OpSplitScatter))
+
+	controller.dispatchSplitScatterRegions()
+
+	re.Len(oc.GetOperators(), 1)
+}
+
 func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
 	re := require.New(t)
 	controller, _, _, cleanup := newTestSplitScatterController(t)
