@@ -90,6 +90,19 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 	re.NoError(err)
 
 	for _, input := range []map[string]any{
+		{"stores": []uint64{1}, "timeout": -1},
+		{"stores": []uint64{1}, "timeout": 1.5},
+		{"stores": []uint64{1}, "timeout": maxPlanExecutionTimeoutSeconds + 1},
+		{"stores": []uint64{1}, "timeout": "60"},
+	} {
+		data, err = json.Marshal(input)
+		re.NoError(err)
+		err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusNotOK(re),
+			testutil.StringContain(re, "timeout is invalid"))
+		re.NoError(err)
+	}
+
+	for _, input := range []map[string]any{
 		{"stores": []uint64{1}, "plan-execution-timeout": -1},
 		{"stores": []uint64{1}, "plan-execution-timeout": 1.5},
 		{"stores": []uint64{1}, "plan-execution-timeout": maxPlanExecutionTimeoutSeconds + 1},

@@ -76,9 +76,10 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		}
 	}
 
-	timeout := uint64(600)
-	if rawTimeout, exists := input["timeout"].(float64); exists {
-		timeout = uint64(rawTimeout)
+	timeout, err := parseTimeout(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	planExecutionTimeout, err := parsePlanExecutionTimeout(input)
@@ -101,6 +102,18 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
+}
+
+func parseTimeout(input map[string]any) (uint64, error) {
+	raw, exists := input["timeout"]
+	if !exists {
+		return 600, nil
+	}
+	rawTimeout, ok := raw.(float64)
+	if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
+		return 0, errors.New("timeout is invalid")
+	}
+	return uint64(rawTimeout), nil
 }
 
 func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {

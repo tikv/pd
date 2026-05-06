@@ -56,6 +56,33 @@ func TestParsePlanExecutionTimeout(t *testing.T) {
 	re.EqualError(err, "plan-execution-timeout is specified multiple times")
 }
 
+func TestParseTimeout(t *testing.T) {
+	re := require.New(t)
+
+	timeout, err := parseTimeout(map[string]any{})
+	re.NoError(err)
+	re.Equal(uint64(600), timeout)
+
+	timeout, err = parseTimeout(map[string]any{"timeout": float64(300)})
+	re.NoError(err)
+	re.Equal(uint64(300), timeout)
+
+	timeout, err = parseTimeout(map[string]any{"timeout": maxPlanExecutionTimeoutSeconds})
+	re.NoError(err)
+	re.Equal(uint64(maxPlanExecutionTimeoutSeconds), timeout)
+
+	for _, input := range []map[string]any{
+		{"timeout": float64(0)},
+		{"timeout": float64(-1)},
+		{"timeout": 1.5},
+		{"timeout": maxPlanExecutionTimeoutSeconds + 1},
+		{"timeout": "60"},
+	} {
+		_, err = parseTimeout(input)
+		re.EqualError(err, "timeout is invalid")
+	}
+}
+
 func TestParseDisableParanoidCheck(t *testing.T) {
 	re := require.New(t)
 
