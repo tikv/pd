@@ -525,54 +525,58 @@ func TestScattersGroup(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
 	}()
 	for id, testCase := range testCases {
-		ctx, cancel := context.WithCancel(context.Background())
-		opt := mockconfig.NewTestOptions()
-		tc := mockcluster.NewCluster(ctx, opt)
-		stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-		oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-		for i := uint64(1); i <= 5; i++ {
-			tc.AddRegionStore(i, 0)
-		}
-		group := fmt.Sprintf("group-%d", id)
-		t.Log(testCase.name)
-		scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-		regions := map[uint64]*core.RegionInfo{}
-		for i := 1; i <= 100; i++ {
-			regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
-		}
-		failures := map[uint64]error{}
-		if testCase.failure {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail", `return(true)`))
-		}
+		func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			opt := mockconfig.NewTestOptions()
+			tc := mockcluster.NewCluster(ctx, opt)
+			stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+			defer stream.Close()
+			oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+			for i := uint64(1); i <= 5; i++ {
+				tc.AddRegionStore(i, 0)
+			}
+			group := fmt.Sprintf("group-%d", id)
+			t.Log(testCase.name)
+			scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
+			regions := map[uint64]*core.RegionInfo{}
+			for i := 1; i <= 100; i++ {
+				regions[uint64(i)] = tc.AddLightWeightLeaderRegion(uint64(i), 1, 2, 3)
+			}
+			failures := map[uint64]error{}
+			if testCase.failure {
+				re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail", `return(true)`))
+				defer func() {
+					re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail"))
+				}()
+			}
 
-		_, err := scatterer.scatterRegions(regions, failures, group, 3, false)
-		re.NoError(err)
-		max := uint64(0)
-		min := uint64(math.MaxUint64)
-		groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
-		re.True(exist)
-		for _, count := range groupDistribution {
-			if count > max {
-				max = count
+			_, err := scatterer.scatterRegions(regions, failures, group, 3, false)
+			re.NoError(err)
+			max := uint64(0)
+			min := uint64(math.MaxUint64)
+			groupDistribution, exist := scatterer.ordinaryEngine.selectedLeader.GetGroupDistribution(group)
+			re.True(exist)
+			for _, count := range groupDistribution {
+				if count > max {
+					max = count
+				}
+				if count < min {
+					min = count
+				}
 			}
-			if count < min {
-				min = count
+			// 100 regions divided 5 stores, each store expected to have about 20 regions.
+			re.LessOrEqual(min, uint64(20))
+			re.GreaterOrEqual(max, uint64(20))
+			re.LessOrEqual(max-min, uint64(3))
+			if testCase.failure {
+				re.Len(failures, 1)
+				_, ok := failures[1]
+				re.True(ok)
+			} else {
+				re.Empty(failures)
 			}
-		}
-		// 100 regions divided 5 stores, each store expected to have about 20 regions.
-		re.LessOrEqual(min, uint64(20))
-		re.GreaterOrEqual(max, uint64(20))
-		re.LessOrEqual(max-min, uint64(3))
-		if testCase.failure {
-			re.Len(failures, 1)
-			_, ok := failures[1]
-			re.True(ok)
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterFail"))
-		} else {
-			re.Empty(failures)
-		}
-		stream.Close()
-		cancel()
+		}()
 	}
 }
 

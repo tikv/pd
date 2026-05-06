@@ -620,10 +620,14 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                            // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                             // selected StoreID set
-	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                              // StoreID allowed to become Leader
-	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context scatterSelectionContext) { // peers: StoreID -> Peer
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
+	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
+	scatterWithSameEngine := func(
+		peers map[uint64]*metapb.Peer,
+		context scatterSelectionContext,
+		collectLeaderCandidates bool,
+	) { // peers: StoreID -> Peer
 		filterLen := len(context.filterFuncs) + 2
 		filters := make([]filter.Filter, filterLen)
 		for i, filterFunc := range context.filterFuncs {
@@ -632,7 +636,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
 		for _, peer := range peers {
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if allowLeader(oldFit, peer) {
+				if collectLeaderCandidates && allowLeader(oldFit, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -653,7 +657,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
 					selectedStores[peer.GetStoreId()] = struct{}{}
-					if allowLeader(oldFit, peer) {
+					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -662,9 +666,11 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		}
 	}
 
-	scatterWithSameEngine(ordinaryPeers, ordinaryContext)
+	scatterWithSameEngine(ordinaryPeers, ordinaryContext, true)
 	for engine, peers := range specialPeers {
-		scatterWithSameEngine(peers, getSpecialEngineContext(engine))
+		// Special-engine stores are only peer targets for now. Keep them out of
+		// leader candidates so leader selection still only considers ordinary stores.
+		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
