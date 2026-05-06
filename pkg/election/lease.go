@@ -139,6 +139,11 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
+	// Always zero the local TTL gauge on exit so the dashboard does not retain
+	// the last positive sample. Close() also performs this reset, but doing it
+	// here closes the race window where Close() runs before this loop observes
+	// ctx.Done() and a late timeCh delivery would otherwise re-set the gauge.
+	defer l.metrics.ttlRemaining.Set(0)
 
 	var (
 		maxExpire        time.Time

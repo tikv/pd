@@ -16749,7 +16749,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": null,
-          "description": "Lease renewal failures by purpose and reason.",
+          "description": "Lease keepalive loop terminations by purpose and reason. `context_canceled` is benign (caller-initiated shutdown); other reasons indicate abnormal renewal failures.",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -16789,7 +16789,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_lease_renewal_failure_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])*60) by (job, purpose, reason, instance)",
+              "expr": "sum(rate(pd_lease_renewal_termination_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])*60) by (job, purpose, reason, instance)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16802,7 +16802,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Lease renewal failures",
+          "title": "Lease renewal terminations",
           "tooltip": {
             "msResolution": false,
             "shared": true,

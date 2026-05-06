@@ -41,12 +41,12 @@ var (
 		[]string{metricsLabelPurpose},
 	)
 
-	renewalFailureTotal = prometheus.NewCounterVec(
+	renewalTerminationTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
-			Name:      "renewal_failure_total",
-			Help:      "Number of lease keepalive terminations, broken down by purpose and reason. Reason `context_canceled` is benign (caller-initiated shutdown); other reasons indicate an abnormal renewal failure.",
+			Name:      "renewal_termination_total",
+			Help:      "Number of lease keepalive loop terminations, broken down by purpose and reason. Reason `context_canceled` is benign (caller-initiated shutdown); `invalid_ttl` and `lease_expired` indicate abnormal renewal failures.",
 		},
 		[]string{metricsLabelPurpose, metricsLabelReason},
 	)
@@ -64,7 +64,7 @@ var (
 
 func init() {
 	prometheus.MustRegister(keepAliveResponseInterval)
-	prometheus.MustRegister(renewalFailureTotal)
+	prometheus.MustRegister(renewalTerminationTotal)
 	prometheus.MustRegister(localTTLRemaining)
 }
 
@@ -80,8 +80,8 @@ func newLeaseMetrics(purpose string) leaseMetrics {
 	return leaseMetrics{
 		responseInterval: keepAliveResponseInterval.WithLabelValues(purpose),
 		ttlRemaining:     localTTLRemaining.WithLabelValues(purpose),
-		invalidTTL:       renewalFailureTotal.WithLabelValues(purpose, reasonInvalidTTL),
-		leaseExpired:     renewalFailureTotal.WithLabelValues(purpose, reasonLeaseExpired),
-		contextCanceled:  renewalFailureTotal.WithLabelValues(purpose, reasonContextCanceled),
+		invalidTTL:       renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
+		leaseExpired:     renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
+		contextCanceled:  renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
 }
