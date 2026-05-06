@@ -23,6 +23,16 @@ const (
 	metricsLabelReason  = "reason"
 )
 
+// TODO: keyspace-group-aware lease purposes (e.g. embedding the group ID into
+// the `purpose` label so each keyspace group's primary election lease becomes
+// a distinct series) were considered to enable per-group attribution. We keep
+// purposes aggregated on purpose: these metrics are designed to surface
+// process- and instance-level keepalive health under network jitter or
+// runtime pressure, which manifests across all leases on the same node
+// rather than per group. Splitting by group ID would inflate cardinality
+// without adding meaningful diagnostic signal. Revisit if a future use case
+// genuinely needs per-group attribution.
+
 const (
 	reasonInvalidTTL      = "invalid_ttl"
 	reasonLeaseExpired    = "lease_expired"
