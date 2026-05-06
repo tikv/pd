@@ -1320,32 +1320,41 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	var lastStoreID uint64
 	var createPlans []createPlan
 	var emptyRegions []*metapb.Region
+	appendCreatePlan := func(startKey, endKey []byte, storeID uint64) error {
+		store := u.cluster.GetStore(storeID)
+		if storeID == 0 || store == nil || store.IsTiFlashWrite() {
+			storeID = getRandomStoreID()
+			if storeID == 0 {
+				return errors.New("can't find available store(exclude tiflash) to create new region")
+			}
+		}
+		newRegion, createRegionErr := createRegion(startKey, endKey, storeID)
+		if createRegionErr != nil {
+			return createRegionErr
+		}
+		createPlans = append(createPlans, createPlan{storeID: storeID, region: newRegion})
+		emptyRegions = append(emptyRegions, newRegion)
+		return nil
+	}
 	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
 		region := item.region()
-		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
-				storeID = getRandomStoreID()
-				// can't create new region on tiflash store, choose a random one
-				if storeID == 0 {
-					err = errors.New("can't find available store(exclude tiflash) to create new region")
-					return false
-				}
-			}
-			newRegion, createRegionErr := createRegion(lastEnd, region.StartKey, storeID)
-			if createRegionErr != nil {
+			if createRegionErr := appendCreatePlan(lastEnd, region.StartKey, item.storeID); createRegionErr != nil {
 				err = createRegionErr
 				return false
 			}
-			createPlans = append(createPlans, createPlan{storeID: storeID, region: newRegion})
-			emptyRegions = append(emptyRegions, newRegion)
 		}
 		lastEnd = region.EndKey
-		lastStoreID = storeID
+		lastStoreID = item.storeID
 		return true
 	})
 	if err != nil {
 		return false, err
+	}
+	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
+		if err := appendCreatePlan(lastEnd, []byte(""), lastStoreID); err != nil {
+			return false, err
+		}
 	}
 
 	if !u.disableParanoidCheck {
@@ -1363,24 +1372,6 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, createPlan.region)
 		u.recordAffectedRegion(createPlan.region)
 		u.newlyCreatedRegions[createPlan.region.GetId()] = struct{}{}
-		hasPlan = true
-	}
-
-	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
-		if lastStoreID == 0 {
-			// the last store id is invalid, so choose a random one
-			lastStoreID = getRandomStoreID()
-			if lastStoreID == 0 {
-				return false, errors.New("can't find available store(exclude tiflash) to create new region")
-			}
-		}
-		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
-		if err != nil {
-			return false, err
-		}
-		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
-		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
-		u.recordAffectedRegion(newRegion)
 		hasPlan = true
 	}
 	return hasPlan, nil

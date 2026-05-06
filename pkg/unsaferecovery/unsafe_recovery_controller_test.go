@@ -194,6 +194,83 @@ func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
 	re.Len(recoveryController.storeRecoveryPlans[1].GetCreates(), 1)
 }
 
+func TestCreateEmptyRegionTailParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "a", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "x", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionFullRangeParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "a", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newRegionTree(), peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionTailUsesTiKVStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(2, "6.0.0") {
+		if store.GetID() == 1 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil, 2: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, nil)
+	re.True(hasPlan)
+	re.NoError(err)
+	re.Nil(recoveryController.storeRecoveryPlans[1])
+	re.Len(recoveryController.storeRecoveryPlans[2].GetCreates(), 1)
+	re.Equal([]byte("m"), recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetStartKey())
+	re.Empty(recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetEndKey())
+}
+
 func hasQuorum(region *metapb.Region, failedStores []uint64) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0

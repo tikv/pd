@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-var maxPlanExecutionTimeoutSeconds = float64(time.Duration(1<<63-1) / time.Second)
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(math.MaxInt64/2) / time.Second)
 
 type unsafeOperationHandler struct {
 	svr *server.Server
@@ -87,9 +87,10 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		return
 	}
 
-	disableParanoidCheck, _ := input["disable-paranoid-check"].(bool)
-	if rawDisableParanoidCheck, exists := input["disable_paranoid_check"].(bool); exists {
-		disableParanoidCheck = rawDisableParanoidCheck
+	disableParanoidCheck, err := parseDisableParanoidCheck(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	if err := rc.GetUnsafeRecoveryController().RemoveFailedStoresWithOptions(stores, timeout, autoDetect, unsaferecovery.RemoveFailedStoresOptions{
@@ -116,6 +117,22 @@ func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
 		planExecutionTimeout = time.Duration(int64(rawTimeout)) * time.Second
 	}
 	return planExecutionTimeout, nil
+}
+
+func parseDisableParanoidCheck(input map[string]any) (bool, error) {
+	var disableParanoidCheck bool
+	for _, key := range []string{"disable-paranoid-check", "disable_paranoid_check"} {
+		raw, exists := input[key]
+		if !exists {
+			continue
+		}
+		rawDisableParanoidCheck, ok := raw.(bool)
+		if !ok {
+			return false, errors.New("disable-paranoid-check is invalid")
+		}
+		disableParanoidCheck = rawDisableParanoidCheck
+	}
+	return disableParanoidCheck, nil
 }
 
 // GetFailedStoresRemovalStatus gets the current status of failed stores removal.

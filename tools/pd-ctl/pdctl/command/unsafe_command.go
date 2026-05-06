@@ -27,7 +27,7 @@ import (
 
 const unsafePrefix = "pd/api/v1/admin/unsafe"
 
-var maxPlanExecutionTimeoutSeconds = float64(time.Duration(1<<63-1) / time.Second)
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(math.MaxInt64/2) / time.Second)
 
 // NewUnsafeCommand returns the unsafe subcommand of rootCmd.
 func NewUnsafeCommand() *cobra.Command {

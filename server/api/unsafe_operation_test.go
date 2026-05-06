@@ -39,6 +39,12 @@ func TestParsePlanExecutionTimeout(t *testing.T) {
 	re.NoError(err)
 	re.Equal(10*time.Minute, timeout)
 
+	timeout, err = parsePlanExecutionTimeout(map[string]any{
+		"plan-execution-timeout": maxPlanExecutionTimeoutSeconds,
+	})
+	re.NoError(err)
+	re.Equal(time.Duration(int64(maxPlanExecutionTimeoutSeconds))*time.Second, timeout)
+
 	for _, input := range []map[string]any{
 		{"plan-execution-timeout": float64(0)},
 		{"plan-execution-timeout": float64(-1)},
@@ -47,6 +53,29 @@ func TestParsePlanExecutionTimeout(t *testing.T) {
 		{"plan-execution-timeout": "60"},
 	} {
 		_, err = parsePlanExecutionTimeout(input)
+		re.Error(err)
+	}
+}
+
+func TestParseDisableParanoidCheck(t *testing.T) {
+	re := require.New(t)
+
+	disableParanoidCheck, err := parseDisableParanoidCheck(map[string]any{})
+	re.NoError(err)
+	re.False(disableParanoidCheck)
+
+	disableParanoidCheck, err = parseDisableParanoidCheck(map[string]any{
+		"disable-paranoid-check": true,
+		"disable_paranoid_check": false,
+	})
+	re.NoError(err)
+	re.False(disableParanoidCheck)
+
+	for _, input := range []map[string]any{
+		{"disable-paranoid-check": "true"},
+		{"disable_paranoid_check": 1},
+	} {
+		_, err = parseDisableParanoidCheck(input)
 		re.Error(err)
 	}
 }
