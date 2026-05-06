@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -90,14 +91,12 @@ func (l *Lease) Close() error {
 	}
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
-	// Reset the local TTL remaining gauge so the dashboard does not show a
-	// stale positive sample after stepdown/resign.
-	l.metrics.ttlRemaining.Set(0)
-	// Drop the keepalive response interval histogram series so the dashboard
-	// does not keep displaying stale percentiles for up to the rate() window
-	// after the lease stops renewing. The series is automatically recreated on
-	// the next successful keepalive observation when the lease is re-granted.
+	// Drop both keepalive histogram series so the dashboard does not keep
+	// displaying stale percentiles for up to the rate() window after the
+	// lease stops renewing. The series are automatically recreated on the
+	// next successful keepalive observation when the lease is re-granted.
 	keepAliveResponseInterval.DeleteLabelValues(l.Purpose)
+	localTTLRemaining.DeleteLabelValues(l.Purpose)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -128,6 +127,17 @@ func (l *Lease) loadExpireTime() time.Time {
 	return expireTime
 }
 
+// observeRemainingTTL records the lease's remaining TTL into the histogram,
+// clamping non-positive durations (already expired) to 0 so the histogram's
+// `_sum` stays monotonic and the lowest bucket captures expired-lease events.
+func observeRemainingTTL(o prometheus.Observer, remaining time.Duration) {
+	seconds := remaining.Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	o.Observe(seconds)
+}
+
 // KeepAlive auto renews the lease and update expireTime.
 func (l *Lease) KeepAlive(ctx context.Context) {
 	defer logutil.LogPanic()
@@ -139,11 +149,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
-	// Always zero the local TTL gauge on exit so the dashboard does not retain
-	// the last positive sample. Close() also performs this reset, but doing it
-	// here closes the race window where Close() runs before this loop observes
-	// ctx.Done() and a late timeCh delivery would otherwise re-set the gauge.
-	defer l.metrics.ttlRemaining.Set(0)
 
 	var (
 		maxExpire        time.Time
@@ -171,7 +176,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			l.metrics.ttlRemaining.Set(maxExpire.Sub(now).Seconds())
+			observeRemainingTTL(l.metrics.ttlRemaining, maxExpire.Sub(now))
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			actualExpire := l.loadExpireTime()
@@ -183,7 +188,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				l.metrics.contextCanceled.Inc()
 				return
 			}
-			l.metrics.ttlRemaining.Set(time.Until(actualExpire).Seconds())
+			observeRemainingTTL(l.metrics.ttlRemaining, time.Until(actualExpire))
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
 			return

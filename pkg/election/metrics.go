@@ -61,12 +61,13 @@ var (
 		[]string{metricsLabelPurpose, metricsLabelReason},
 	)
 
-	localTTLRemaining = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
+	localTTLRemaining = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
 			Name:      "local_ttl_remaining_seconds",
-			Help:      "Event-sampled PD local estimate of remaining lease TTL based on observed keepalive responses or local expiration checks; not etcd authoritative TTL.",
+			Help:      "Distribution of PD local estimate of remaining lease TTL, sampled on every keepalive response and on keepalive timeout firing; not etcd authoritative TTL. Histogram is used so multiple leases sharing the same purpose on a single instance aggregate correctly under quantile queries.",
+			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60},
 		},
 		[]string{metricsLabelPurpose},
 	)
@@ -80,7 +81,7 @@ func init() {
 
 type leaseMetrics struct {
 	responseInterval prometheus.Observer
-	ttlRemaining     prometheus.Gauge
+	ttlRemaining     prometheus.Observer
 	invalidTTL       prometheus.Counter
 	leaseExpired     prometheus.Counter
 	contextCanceled  prometheus.Counter
