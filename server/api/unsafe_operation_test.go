@@ -63,6 +63,14 @@ func TestParseDisableParanoidCheck(t *testing.T) {
 	re.NoError(err)
 	re.False(disableParanoidCheck)
 
+	disableParanoidCheck, err = parseDisableParanoidCheck(map[string]any{"disable-paranoid-check": true})
+	re.NoError(err)
+	re.True(disableParanoidCheck)
+
+	disableParanoidCheck, err = parseDisableParanoidCheck(map[string]any{"disable_paranoid_check": false})
+	re.NoError(err)
+	re.False(disableParanoidCheck)
+
 	for _, input := range []map[string]any{
 		{"disable-paranoid-check": "true"},
 		{"disable_paranoid_check": 1},

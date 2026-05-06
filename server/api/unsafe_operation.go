@@ -104,7 +104,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 }
 
 func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
-	raw, exists, err := getAliasedOption(input, "plan-execution-timeout", "plan-execution-timeout", "plan_execution_timeout")
+	raw, exists, err := getAliasedOption(input, "plan-execution-timeout", "plan_execution_timeout")
 	if err != nil {
 		return 0, err
 	}
@@ -119,7 +119,7 @@ func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
 }
 
 func parseDisableParanoidCheck(input map[string]any) (bool, error) {
-	raw, exists, err := getAliasedOption(input, "disable-paranoid-check", "disable-paranoid-check", "disable_paranoid_check")
+	raw, exists, err := getAliasedOption(input, "disable-paranoid-check", "disable_paranoid_check")
 	if err != nil {
 		return false, err
 	}
@@ -133,7 +133,7 @@ func parseDisableParanoidCheck(input map[string]any) (bool, error) {
 	return rawDisableParanoidCheck, nil
 }
 
-func getAliasedOption(input map[string]any, name string, keys ...string) (any, bool, error) {
+func getAliasedOption(input map[string]any, keys ...string) (any, bool, error) {
 	var (
 		raw   any
 		exist bool
@@ -144,7 +144,7 @@ func getAliasedOption(input map[string]any, name string, keys ...string) (any, b
 			continue
 		}
 		if exist {
-			return nil, false, errors.New(name + " is specified multiple times")
+			return nil, false, errors.New(keys[0] + " is specified multiple times")
 		}
 		raw = value
 		exist = true
