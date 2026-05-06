@@ -944,8 +944,9 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 		}
 		return clusterInfo, nil
 	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		return nil, errors.WithStack(ctx.Err())
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 }
 
@@ -979,8 +980,9 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 		}
 		return members, nil
 	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		return nil, errors.WithStack(ctx.Err())
+		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 }
 
