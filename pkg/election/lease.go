@@ -94,6 +94,11 @@ func (l *Lease) Close() error {
 	}
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
+	// Reset the local TTL remaining gauge so the dashboard does not show a
+	// stale positive sample after stepdown/resign.
+	if l.metrics.ttlRemaining != nil {
+		l.metrics.ttlRemaining.Set(0)
+	}
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
