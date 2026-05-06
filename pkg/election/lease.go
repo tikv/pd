@@ -90,12 +90,6 @@ func (l *Lease) Close() error {
 	}
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
-	// Drop both keepalive histogram series so the dashboard does not keep
-	// displaying stale percentiles for up to the rate() window after the
-	// lease stops renewing. The series are automatically recreated on the
-	// next successful keepalive observation when the lease is re-granted.
-	keepAliveResponseInterval.DeleteLabelValues(l.Purpose)
-	localTTLRemaining.DeleteLabelValues(l.Purpose)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()

@@ -16593,7 +16593,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_local_ttl_remaining_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (job, purpose, instance, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_local_ttl_remaining_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (job, purpose, instance, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16691,7 +16691,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (job, purpose, instance, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (job, purpose, instance, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
