@@ -924,21 +924,29 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
 	key := "GetClusterInfo-" + url
-	res, err, _ := c.flight.Do(key, func() (any, error) {
+	r := c.flight.DoChan(key, func() (any, error) {
 		return pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	})
-	if err != nil {
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		clusterInfo := val.(*pdpb.GetClusterInfoResponse)
+		if clusterInfo.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		return clusterInfo, nil
+	case <-ctx.Done():
 		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		return nil, errors.WithStack(ctx.Err())
 	}
-	clusterInfo := res.(*pdpb.GetClusterInfoResponse)
-	if clusterInfo.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
-	}
-	return clusterInfo, nil
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
@@ -951,21 +959,29 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
 	key := "GetMembers-" + url
-	res, err, _ := c.flight.Do(key, func() (any, error) {
+	r := c.flight.DoChan(key, func() (any, error) {
 		return pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	})
-	if err != nil {
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		members := val.(*pdpb.GetMembersResponse)
+		if members.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		return members, nil
+	case <-ctx.Done():
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, errors.WithStack(ctx.Err())
 	}
-	members := res.(*pdpb.GetMembersResponse)
-	if members.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
-	}
-	return members, nil
 }
 
 func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
