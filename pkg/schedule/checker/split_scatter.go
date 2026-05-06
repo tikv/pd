@@ -86,13 +86,23 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	now := time.Now()
 	c.pendingMu.RLock()
 
-	candidates := make([]splitScatterPendingItem, 0, len(c.pending))
+	// Keep pendingMu short: cluster reads below can be slower and do not need
+	// to block pending updates. Stale snapshots are safe because delay/delete
+	// recheck regionID + group before mutating pending.
+	pendingSnapshot := make([]splitScatterPendingItem, 0, len(c.pending))
 	expiredRegionIDs := make([]uint64, 0)
 	for regionID, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 			expiredRegionIDs = append(expiredRegionIDs, regionID)
 			continue
 		}
+		pendingSnapshot = append(pendingSnapshot, pending)
+	}
+	c.pendingMu.RUnlock()
+
+	candidates := make([]splitScatterPendingItem, 0, len(pendingSnapshot))
+	for _, pending := range pendingSnapshot {
+		regionID := pending.regionID
 		region := c.cluster.GetRegion(regionID)
 		if region == nil {
 			continue
@@ -122,7 +132,6 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
 	}
-	c.pendingMu.RUnlock()
 
 	if len(expiredRegionIDs) > 0 {
 		expiredCount := 0

@@ -77,6 +77,10 @@ func splitScatterPrefixRangeWithGroup(rawPrefix []byte, scatterGroup string) spl
 	startKey := append([]byte(nil), codec.EncodeBytes(rawPrefix)...)
 	endRawPrefix := splitScatterNextPrefix(rawPrefix)
 	if len(endRawPrefix) == 0 {
+		// Current callers use TiDB table/index prefixes, which always start
+		// with 't' and therefore have a finite next prefix. Keep the fallback
+		// here so this helper remains safe if it is ever used with an all-0xff
+		// prefix.
 		return splitScatterRangeHint{startKey: startKey, scatterGroup: scatterGroup}
 	}
 	return splitScatterRangeHint{
