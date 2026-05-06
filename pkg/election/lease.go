@@ -19,7 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -127,17 +126,6 @@ func (l *Lease) loadExpireTime() time.Time {
 	return expireTime
 }
 
-// observeRemainingTTL records the lease's remaining TTL into the histogram,
-// clamping non-positive durations (already expired) to 0 so the histogram's
-// `_sum` stays monotonic and the lowest bucket captures expired-lease events.
-func observeRemainingTTL(o prometheus.Observer, remaining time.Duration) {
-	seconds := remaining.Seconds()
-	if seconds < 0 {
-		seconds = 0
-	}
-	o.Observe(seconds)
-}
-
 // KeepAlive auto renews the lease and update expireTime.
 func (l *Lease) KeepAlive(ctx context.Context) {
 	defer logutil.LogPanic()
@@ -176,7 +164,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			observeRemainingTTL(l.metrics.ttlRemaining, maxExpire.Sub(now))
+			l.metrics.observeRemainingTTL(maxExpire.Sub(now))
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			actualExpire := l.loadExpireTime()
@@ -188,7 +176,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				l.metrics.contextCanceled.Inc()
 				return
 			}
-			observeRemainingTTL(l.metrics.ttlRemaining, time.Until(actualExpire))
+			l.metrics.observeRemainingTTL(time.Until(actualExpire))
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
 			return

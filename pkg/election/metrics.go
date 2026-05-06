@@ -14,7 +14,11 @@
 
 package election
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 const (
 	metricsNamespace    = "pd"
@@ -95,4 +99,15 @@ func newLeaseMetrics(purpose string) leaseMetrics {
 		leaseExpired:     renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
 		contextCanceled:  renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
+}
+
+// observeRemainingTTL records the lease's remaining TTL into the histogram,
+// clamping non-positive durations (already expired) to 0 so the histogram's
+// `_sum` stays monotonic and the lowest bucket captures expired-lease events.
+func (m leaseMetrics) observeRemainingTTL(remaining time.Duration) {
+	seconds := remaining.Seconds()
+	if seconds < 0 {
+		seconds = 0
+	}
+	m.ttlRemaining.Observe(seconds)
 }
