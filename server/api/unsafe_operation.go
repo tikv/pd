@@ -104,35 +104,52 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 }
 
 func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
-	var planExecutionTimeout time.Duration
-	for _, key := range []string{"plan-execution-timeout", "plan_execution_timeout"} {
-		raw, exists := input[key]
-		if !exists {
-			continue
-		}
-		rawTimeout, ok := raw.(float64)
-		if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
-			return 0, errors.New("plan-execution-timeout is invalid")
-		}
-		planExecutionTimeout = time.Duration(int64(rawTimeout)) * time.Second
+	raw, exists, err := getAliasedOption(input, "plan-execution-timeout", "plan-execution-timeout", "plan_execution_timeout")
+	if err != nil {
+		return 0, err
 	}
-	return planExecutionTimeout, nil
+	if !exists {
+		return 0, nil
+	}
+	rawTimeout, ok := raw.(float64)
+	if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
+		return 0, errors.New("plan-execution-timeout is invalid")
+	}
+	return time.Duration(int64(rawTimeout)) * time.Second, nil
 }
 
 func parseDisableParanoidCheck(input map[string]any) (bool, error) {
-	var disableParanoidCheck bool
-	for _, key := range []string{"disable-paranoid-check", "disable_paranoid_check"} {
-		raw, exists := input[key]
-		if !exists {
+	raw, exists, err := getAliasedOption(input, "disable-paranoid-check", "disable-paranoid-check", "disable_paranoid_check")
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	rawDisableParanoidCheck, ok := raw.(bool)
+	if !ok {
+		return false, errors.New("disable-paranoid-check is invalid")
+	}
+	return rawDisableParanoidCheck, nil
+}
+
+func getAliasedOption(input map[string]any, name string, keys ...string) (any, bool, error) {
+	var (
+		raw   any
+		exist bool
+	)
+	for _, key := range keys {
+		value, ok := input[key]
+		if !ok {
 			continue
 		}
-		rawDisableParanoidCheck, ok := raw.(bool)
-		if !ok {
-			return false, errors.New("disable-paranoid-check is invalid")
+		if exist {
+			return nil, false, errors.New(name + " is specified multiple times")
 		}
-		disableParanoidCheck = rawDisableParanoidCheck
+		raw = value
+		exist = true
 	}
-	return disableParanoidCheck, nil
+	return raw, exist, nil
 }
 
 // GetFailedStoresRemovalStatus gets the current status of failed stores removal.

@@ -108,6 +108,26 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 		testutil.StringContain(re, "disable-paranoid-check is invalid"))
 	re.NoError(err)
 
+	data, err = json.Marshal(map[string]any{
+		"stores":                 []uint64{1},
+		"plan-execution-timeout": 300,
+		"plan_execution_timeout": 600,
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusNotOK(re),
+		testutil.StringContain(re, "plan-execution-timeout is specified multiple times"))
+	re.NoError(err)
+
+	data, err = json.Marshal(map[string]any{
+		"stores":                 []uint64{1},
+		"disable-paranoid-check": true,
+		"disable_paranoid_check": false,
+	})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusNotOK(re),
+		testutil.StringContain(re, "disable-paranoid-check is specified multiple times"))
+	re.NoError(err)
+
 	input = map[string]any{"stores": []uint64{1}, "plan-execution-timeout": 300, "disable-paranoid-check": true}
 	data, err = json.Marshal(input)
 	re.NoError(err)
