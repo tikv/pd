@@ -57,6 +57,7 @@ func NewLease(client *clientv3.Client, purpose string) *Lease {
 		Purpose: purpose,
 		client:  client,
 		lease:   clientv3.NewLease(client),
+		metrics: newLeaseMetrics(purpose),
 	}
 }
 
@@ -79,12 +80,7 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 	l.ID.Store(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
-	l.initMetrics()
 	return nil
-}
-
-func (l *Lease) initMetrics() {
-	l.metrics = newLeaseMetrics(l.Purpose)
 }
 
 // Close releases the lease.
@@ -96,9 +92,12 @@ func (l *Lease) Close() error {
 	l.expireTime.Store(typeutil.ZeroTime)
 	// Reset the local TTL remaining gauge so the dashboard does not show a
 	// stale positive sample after stepdown/resign.
-	if l.metrics.ttlRemaining != nil {
-		l.metrics.ttlRemaining.Set(0)
-	}
+	l.metrics.ttlRemaining.Set(0)
+	// Drop the keepalive response interval histogram series so the dashboard
+	// does not keep displaying stale percentiles for up to the rate() window
+	// after the lease stops renewing. The series is automatically recreated on
+	// the next successful keepalive observation when the lease is re-granted.
+	keepAliveResponseInterval.DeleteLabelValues(l.Purpose)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -160,6 +159,8 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				// Check again to make sure the `expireTime` still needs to be updated.
 				select {
 				case <-ctx.Done():
+					log.Info("lease keep alive canceled while applying keepalive response", zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+					l.metrics.contextCanceled.Inc()
 					return
 				default:
 					l.expireTime.Store(t)
@@ -168,12 +169,22 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			l.metrics.ttlRemaining.Set(maxExpire.Sub(now).Seconds())
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
+			// The keepalive timeout can fire concurrently with a caller-initiated
+			// cancellation. Treat that race as a clean shutdown so we don't
+			// over-count `lease_expired`.
+			if ctx.Err() != nil {
+				log.Info("lease keep alive timed out during caller cancellation", zap.Duration("timeout-duration", l.leaseTimeout), zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+				l.metrics.contextCanceled.Inc()
+				return
+			}
 			actualExpire := l.loadExpireTime()
 			l.metrics.ttlRemaining.Set(time.Until(actualExpire).Seconds())
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():
+			log.Info("lease keep alive canceled by caller", zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+			l.metrics.contextCanceled.Inc()
 			return
 		}
 	}

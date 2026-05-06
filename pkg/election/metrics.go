@@ -24,8 +24,9 @@ const (
 )
 
 const (
-	reasonInvalidTTL   = "invalid_ttl"
-	reasonLeaseExpired = "lease_expired"
+	reasonInvalidTTL      = "invalid_ttl"
+	reasonLeaseExpired    = "lease_expired"
+	reasonContextCanceled = "context_canceled"
 )
 
 var (
@@ -45,7 +46,7 @@ var (
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
 			Name:      "renewal_failure_total",
-			Help:      "Number of lease renewal failures, broken down by purpose and reason.",
+			Help:      "Number of lease keepalive terminations, broken down by purpose and reason. Reason `context_canceled` is benign (caller-initiated shutdown); other reasons indicate an abnormal renewal failure.",
 		},
 		[]string{metricsLabelPurpose, metricsLabelReason},
 	)
@@ -72,6 +73,7 @@ type leaseMetrics struct {
 	ttlRemaining     prometheus.Gauge
 	invalidTTL       prometheus.Counter
 	leaseExpired     prometheus.Counter
+	contextCanceled  prometheus.Counter
 }
 
 func newLeaseMetrics(purpose string) leaseMetrics {
@@ -80,5 +82,6 @@ func newLeaseMetrics(purpose string) leaseMetrics {
 		ttlRemaining:     localTTLRemaining.WithLabelValues(purpose),
 		invalidTTL:       renewalFailureTotal.WithLabelValues(purpose, reasonInvalidTTL),
 		leaseExpired:     renewalFailureTotal.WithLabelValues(purpose, reasonLeaseExpired),
+		contextCanceled:  renewalFailureTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
 }
