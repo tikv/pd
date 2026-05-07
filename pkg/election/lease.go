@@ -90,6 +90,7 @@ func (l *Lease) Close() error {
 	}
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
+	l.metrics.ttlRemaining.Set(0)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -207,7 +208,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				if l.ID.Load() != nil {
 					leaseID = l.ID.Load().(clientv3.LeaseID)
 				}
+				requestStart := time.Now()
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
+				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
 				if err != nil {
 					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
 					return

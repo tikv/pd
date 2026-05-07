@@ -15,6 +15,8 @@
 package election
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,22 +27,17 @@ const (
 	metricsSubsystem    = "lease"
 	metricsLabelPurpose = "purpose"
 	metricsLabelReason  = "reason"
+	metricsLabelResult  = "result"
 )
-
-// TODO: keyspace-group-aware lease purposes (e.g. embedding the group ID into
-// the `purpose` label so each keyspace group's primary election lease becomes
-// a distinct series) were considered to enable per-group attribution. We keep
-// purposes aggregated on purpose: these metrics are designed to surface
-// process- and instance-level keepalive health under network jitter or
-// runtime pressure, which manifests across all leases on the same node
-// rather than per group. Splitting by group ID would inflate cardinality
-// without adding meaningful diagnostic signal. Revisit if a future use case
-// genuinely needs per-group attribution.
 
 const (
 	reasonInvalidTTL      = "invalid_ttl"
 	reasonLeaseExpired    = "lease_expired"
 	reasonContextCanceled = "context_canceled"
+
+	metricsResultSuccess  = "success"
+	metricsResultError    = "error"
+	metricsResultCanceled = "canceled"
 )
 
 var (
@@ -60,20 +57,30 @@ var (
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
 			Name:      "renewal_termination_total",
-			Help:      "Number of lease keepalive loop terminations, broken down by purpose and reason. Reason `context_canceled` is benign (caller-initiated shutdown); `invalid_ttl` and `lease_expired` indicate abnormal renewal failures.",
+			Help:      "Number of lease renewal stop or anomaly events, broken down by purpose and reason. Reason `context_canceled` is benign (caller-initiated shutdown); `lease_expired` indicates keepalive timeout; `invalid_ttl` indicates a successful keepalive response with non-positive TTL.",
 		},
 		[]string{metricsLabelPurpose, metricsLabelReason},
 	)
 
-	localTTLRemaining = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+	localTTLRemaining = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
 			Name:      "local_ttl_remaining_seconds",
-			Help:      "Distribution of PD local estimate of remaining lease TTL, sampled on every keepalive response and on keepalive timeout firing; not etcd authoritative TTL. Histogram is used so multiple leases sharing the same purpose on a single instance aggregate correctly under quantile queries.",
-			Buckets:   []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 3, 5, 10, 30, 60},
+			Help:      "PD local estimate of remaining lease TTL, updated on every keepalive response and on keepalive timeout firing; not etcd authoritative TTL.",
 		},
 		[]string{metricsLabelPurpose},
+	)
+
+	keepAliveRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: metricsSubsystem,
+			Name:      "keepalive_request_duration_seconds",
+			Help:      "Duration of etcd Lease.KeepAliveOnce requests observed by PD, by purpose and result.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
+		},
+		[]string{metricsLabelPurpose, metricsLabelResult},
 	)
 )
 
@@ -81,33 +88,51 @@ func init() {
 	prometheus.MustRegister(keepAliveResponseInterval)
 	prometheus.MustRegister(renewalTerminationTotal)
 	prometheus.MustRegister(localTTLRemaining)
+	prometheus.MustRegister(keepAliveRequestDuration)
 }
 
 type leaseMetrics struct {
-	responseInterval prometheus.Observer
-	ttlRemaining     prometheus.Observer
-	invalidTTL       prometheus.Counter
-	leaseExpired     prometheus.Counter
-	contextCanceled  prometheus.Counter
+	responseInterval                prometheus.Observer
+	ttlRemaining                    prometheus.Gauge
+	keepAliveRequestSuccessLatency  prometheus.Observer
+	keepAliveRequestErrorLatency    prometheus.Observer
+	keepAliveRequestCanceledLatency prometheus.Observer
+	invalidTTL                      prometheus.Counter
+	leaseExpired                    prometheus.Counter
+	contextCanceled                 prometheus.Counter
 }
 
 func newLeaseMetrics(purpose string) leaseMetrics {
 	return leaseMetrics{
-		responseInterval: keepAliveResponseInterval.WithLabelValues(purpose),
-		ttlRemaining:     localTTLRemaining.WithLabelValues(purpose),
-		invalidTTL:       renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
-		leaseExpired:     renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
-		contextCanceled:  renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
+		responseInterval:                keepAliveResponseInterval.WithLabelValues(purpose),
+		ttlRemaining:                    localTTLRemaining.WithLabelValues(purpose),
+		keepAliveRequestSuccessLatency:  keepAliveRequestDuration.WithLabelValues(purpose, metricsResultSuccess),
+		keepAliveRequestErrorLatency:    keepAliveRequestDuration.WithLabelValues(purpose, metricsResultError),
+		keepAliveRequestCanceledLatency: keepAliveRequestDuration.WithLabelValues(purpose, metricsResultCanceled),
+		invalidTTL:                      renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
+		leaseExpired:                    renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
+		contextCanceled:                 renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
 }
 
-// observeRemainingTTL records the lease's remaining TTL into the histogram,
-// clamping non-positive durations (already expired) to 0 so the histogram's
-// `_sum` stays monotonic and the lowest bucket captures expired-lease events.
+// observeRemainingTTL records the lease's remaining TTL into the gauge,
+// clamping non-positive durations (already expired) to 0.
 func (m leaseMetrics) observeRemainingTTL(remaining time.Duration) {
 	seconds := remaining.Seconds()
 	if seconds < 0 {
 		seconds = 0
 	}
-	m.ttlRemaining.Observe(seconds)
+	m.ttlRemaining.Set(seconds)
+}
+
+func (m leaseMetrics) observeKeepAliveRequestDurationMetrics(duration time.Duration, err error) {
+	if err == nil {
+		m.keepAliveRequestSuccessLatency.Observe(duration.Seconds())
+		return
+	}
+	if errors.Is(err, context.Canceled) {
+		m.keepAliveRequestCanceledLatency.Observe(duration.Seconds())
+		return
+	}
+	m.keepAliveRequestErrorLatency.Observe(duration.Seconds())
 }
