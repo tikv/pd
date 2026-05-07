@@ -521,6 +521,11 @@ func (s *Server) startCluster(ctx context.Context) error {
 		metaWatcher.Close()
 		return err
 	}
+	defer func() {
+		if cluster != nil {
+			cluster.StopBackgroundJobs()
+		}
+	}()
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err := rule.NewWatcher(ctx, s.GetClient(), storage,
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
@@ -548,6 +553,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	s.affinityWatcher = affinityWatcher
 	s.cluster.Store(cluster)
 	cluster.StartBackgroundJobs()
+	cluster = nil // defer cleanup no longer needed
 	return nil
 }
 
