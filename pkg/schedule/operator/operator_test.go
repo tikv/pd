@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -496,6 +497,31 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())
+	}
+}
+
+func (suite *operatorTestSuite) TestOpKindValues() {
+	re := suite.Require()
+	testCases := []struct {
+		name string
+		kind OpKind
+		want OpKind
+	}{
+		{"admin", OpAdmin, 1 << 0},
+		{"affinity", OpAffinity, 1 << 1},
+		{"merge", OpMerge, 1 << 2},
+		{"range", OpRange, 1 << 3},
+		{"replica", OpReplica, 1 << 4},
+		{"split", OpSplit, 1 << 5},
+		{"hot-region", OpHotRegion, 1 << 6},
+		{"region", OpRegion, 1 << 7},
+		{"leader", OpLeader, 1 << 8},
+		{"witness-leader", OpWitnessLeader, 1 << 9},
+		{"witness", OpWitness, 1 << 10},
+		{"split-scatter", OpSplitScatter, 1 << 11},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.want, testCase.kind, fmt.Sprintf("unexpected %s kind value", testCase.name))
 	}
 }
 

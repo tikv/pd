@@ -71,7 +71,7 @@ func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Re
 //
 //	@Tags		operator
 //	@Summary	List pending operators.
-//	@Param		kind	query	string	false	"Specify the operator kind."	Enums(admin, leader, region)
+//	@Param		kind	query	string	false	"Specify the operator kind."	Enums(admin, leader, region, split-scatter, waiting)
 //	@Param		object	query	bool	false	"Whether to return as JSON object."
 //	@Produce	json
 //	@Success	200	{array}		operator.Operator

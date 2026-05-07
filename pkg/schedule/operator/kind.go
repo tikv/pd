@@ -46,8 +46,6 @@ const (
 	OpSplit
 	// Initiated by hot region scheduler.
 	OpHotRegion
-	// Initiated by internal split-scatter dispatcher.
-	OpSplitScatter
 	// Include peer addition or removal or switch witness. This means that this operator may take a long time.
 	OpRegion
 	// Include leader transfer.
@@ -56,6 +54,8 @@ const (
 	OpWitnessLeader
 	// Include witness transfer.
 	OpWitness
+	// Initiated by internal split-scatter dispatcher.
+	OpSplitScatter
 	opMax
 )
 
