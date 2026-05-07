@@ -38,7 +38,9 @@ const (
 	// is only the minimum interval to avoid retrying the same pending item too
 	// frequently when checker ticks are fast.
 	splitScatterRetryBackoff = time.Second
-	splitScatterPendingTTL   = 3 * time.Minute
+	// Keep the pending TTL aligned with PD's slow operator step threshold so a
+	// scatter blocked by slow AddLearner/store limits still has time to retry.
+	splitScatterPendingTTL = 10 * time.Minute
 )
 
 type splitScatterPendingItem struct {
