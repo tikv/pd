@@ -506,32 +506,47 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(context.Context) error {
-	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	err := s.startMetaConfWatcher()
+func (s *Server) startCluster(ctx context.Context) error {
+	basicCluster := core.NewBasicCluster()
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	metaWatcher, configWatcher, err := s.startMetaConfWatcher(ctx, basicCluster, storage)
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
-	cluster, err := NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	cluster, err := NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
 	if err != nil {
+		hbStreams.Close()
+		configWatcher.Close()
+		metaWatcher.Close()
 		return err
 	}
-	s.cluster.Store(cluster)
-	// Inject the cluster components into the config watcher after the scheduler controller is created.
-	s.configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
-	// Start the rule watcher after the cluster is created.
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
+	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
+	ruleWatcher, err := rule.NewWatcher(ctx, s.GetClient(), storage,
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
 	if err != nil {
+		hbStreams.Close()
+		configWatcher.Close()
+		metaWatcher.Close()
 		return err
 	}
-	// Start the affinity watcher after the cluster is created.
-	s.affinityWatcher, err = affinity.NewWatcher(s.Context(), s.GetClient(), cluster.GetAffinityManager())
+	affinityWatcher, err := affinity.NewWatcher(ctx, s.GetClient(), cluster.GetAffinityManager())
 	if err != nil {
+		ruleWatcher.Close()
+		hbStreams.Close()
+		configWatcher.Close()
+		metaWatcher.Close()
 		return err
 	}
+
+	s.basicCluster = basicCluster
+	s.storage = storage
+	s.metaWatcher = metaWatcher
+	s.configWatcher = configWatcher
+	s.hbStreams = hbStreams
+	s.ruleWatcher = ruleWatcher
+	s.affinityWatcher = affinityWatcher
+	s.cluster.Store(cluster)
 	cluster.StartBackgroundJobs()
 	return nil
 }
@@ -539,37 +554,56 @@ func (s *Server) startCluster(context.Context) error {
 func (s *Server) stopCluster() {
 	cluster := s.GetCluster()
 	if cluster != nil {
-		s.cluster.Store((*Cluster)(nil))
 		cluster.StopBackgroundJobs()
 	}
-	s.stopWatcher()
+	s.cleanupClusterResources()
 }
 
-func (s *Server) startMetaConfWatcher() (err error) {
-	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
+func (s *Server) startMetaConfWatcher(
+	ctx context.Context,
+	basicCluster *core.BasicCluster,
+	storage *endpoint.StorageEndpoint,
+) (metaWatcher *meta.Watcher, configWatcher *config.Watcher, err error) {
+	metaWatcher, err = meta.NewWatcher(ctx, s.GetClient(), basicCluster)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
 	if err != nil {
-		return err
+		metaWatcher.Close()
+		return nil, nil, err
 	}
-	return err
+	return metaWatcher, configWatcher, nil
 }
 
 func (s *Server) stopWatcher() {
 	if s.affinityWatcher != nil {
 		s.affinityWatcher.Close()
+		s.affinityWatcher = nil
 	}
 	if s.ruleWatcher != nil {
 		s.ruleWatcher.Close()
+		s.ruleWatcher = nil
 	}
 	if s.metaWatcher != nil {
 		s.metaWatcher.Close()
+		s.metaWatcher = nil
 	}
 	if s.configWatcher != nil {
 		s.configWatcher.Close()
+		s.configWatcher = nil
 	}
+}
+
+func (s *Server) cleanupClusterResources() {
+	s.stopWatcher()
+	if s.hbStreams != nil {
+		s.hbStreams.Close()
+		s.hbStreams = nil
+	}
+	s.cluster.Store((*Cluster)(nil))
+	s.basicCluster = nil
+	s.storage = nil
 }
 
 // GetPersistConfig returns the persist config.
