@@ -434,7 +434,7 @@ func getOperatorByRegion(c *gin.Context) {
 
 // @Tags     operators
 // @Summary  List operators.
-// @Param    kind   query  string  false  "Specify the operator kind."  Enums(admin, leader, region, split-scatter, waiting)
+// @Param    kind   query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
 // @Param    object query  bool    false  "Whether to return as JSON object."
 // @Produce  json
 // @Success  200  {array}   operator.Operator

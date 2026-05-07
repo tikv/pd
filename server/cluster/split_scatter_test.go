@@ -36,6 +36,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+const (
+	// CPU usage is only populated to mimic load-split region heartbeat data.
+	// Current split-scatter dispatch does not rank pending regions by CPU.
+	splitScatterNoCPUUsage       uint64 = 0
+	splitScatterReportedCPUUsage uint64 = 1
+)
+
 func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 	re := require.New(t)
 	cluster, cancelPatrol := newSplitScatterTestCluster(t)
@@ -53,9 +60,9 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		resp.GetIds()[0].GetNewRegionId(),
 		resp.GetIds()[1].GetNewRegionId(),
 	}
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), 0).Clone(core.WithIncVersion())))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), 120)))
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), 80)))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage).Clone(core.WithIncVersion())))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[0], []byte("m"), []byte("t"), splitScatterReportedCPUUsage)))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(splitRegionIDs[1], []byte("t"), []byte(""), splitScatterReportedCPUUsage)))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
 		return cluster.GetOperatorController().GetOperator(splitRegionIDs[0]) != nil &&
@@ -83,9 +90,9 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re := require.New(t)
 	cluster, cancelPatrol := newSplitScatterTestCluster(t)
 
-	re.NoError(cluster.putRegion(newSplitScatterRegion(90, newSplitScatterIndexKey("a"), newSplitScatterIndexKey("j"), 0)))
-	re.NoError(cluster.putRegion(newSplitScatterRegion(91, newSplitScatterIndexKey("j"), newSplitScatterIndexKey("t"), 0)))
-	re.NoError(cluster.putRegion(newSplitScatterRegion(100, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("z"), 0)))
+	re.NoError(cluster.putRegion(newSplitScatterRegion(90, newSplitScatterIndexKey("a"), newSplitScatterIndexKey("j"), splitScatterNoCPUUsage)))
+	re.NoError(cluster.putRegion(newSplitScatterRegion(91, newSplitScatterIndexKey("j"), newSplitScatterIndexKey("t"), splitScatterNoCPUUsage)))
+	re.NoError(cluster.putRegion(newSplitScatterRegion(100, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("z"), splitScatterNoCPUUsage)))
 
 	request := &pdpb.AskBatchSplitRequest{
 		Region:     cluster.GetRegion(100).GetMeta(),
@@ -97,10 +104,10 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	re.Len(resp.GetIds(), 1)
 
 	splitRegionID := resp.GetIds()[0].GetNewRegionId()
-	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, newSplitScatterIndexKey("w"), newSplitScatterIndexKey("z"), 0).Clone(core.WithIncVersion())))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), newSplitScatterRegion(100, newSplitScatterIndexKey("w"), newSplitScatterIndexKey("z"), splitScatterNoCPUUsage).Clone(core.WithIncVersion())))
 	re.NoError(cluster.processRegionHeartbeat(
 		core.ContextTODO(),
-		newSplitScatterRegion(splitRegionID, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("w"), 120),
+		newSplitScatterRegion(splitRegionID, newSplitScatterIndexKey("t"), newSplitScatterIndexKey("w"), splitScatterReportedCPUUsage),
 	))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
@@ -134,7 +141,7 @@ func TestHandleAskBatchSplitSkipsSplitScatterForSizeReason(t *testing.T) {
 	splitRegionID := resp.GetIds()[0].GetNewRegionId()
 	re.NoError(cluster.processRegionHeartbeat(
 		core.ContextTODO(),
-		newSplitScatterRegion(splitRegionID, []byte("m"), []byte(""), 120),
+		newSplitScatterRegion(splitRegionID, []byte("m"), []byte(""), splitScatterReportedCPUUsage),
 	))
 
 	dispatchSplitScatterInPatrol(t, cluster, cancelPatrol, func() bool {
@@ -170,7 +177,7 @@ func newSplitScatterTestCluster(t *testing.T) (*RaftCluster, context.CancelFunc)
 		re.NoError(cluster.setStore(store.Clone(core.SetLastHeartbeatTS(now))))
 	}
 
-	re.NoError(cluster.putRegion(newSplitScatterRegion(100, []byte(""), []byte("m"), 0)))
+	re.NoError(cluster.putRegion(newSplitScatterRegion(100, []byte(""), []byte("m"), splitScatterNoCPUUsage)))
 	return cluster, cancel
 }
 
@@ -191,11 +198,11 @@ func dispatchSplitScatterInPatrol(t *testing.T, cluster *RaftCluster, cancelPatr
 	}
 }
 
-func newSplitScatterRegion(regionID uint64, start, end []byte, cpu uint64) *core.RegionInfo {
-	return newSplitScatterRegionWithStores(regionID, start, end, cpu, 1, 2, 3)
+func newSplitScatterRegion(regionID uint64, start, end []byte, cpuUsage uint64) *core.RegionInfo {
+	return newSplitScatterRegionWithStores(regionID, start, end, cpuUsage, 1, 2, 3)
 }
 
-func newSplitScatterRegionWithStores(regionID uint64, start, end []byte, cpu uint64, stores ...uint64) *core.RegionInfo {
+func newSplitScatterRegionWithStores(regionID uint64, start, end []byte, cpuUsage uint64, stores ...uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{}
 	for i, storeID := range stores {
 		peers = append(peers, &metapb.Peer{
@@ -216,15 +223,12 @@ func newSplitScatterRegionWithStores(regionID uint64, start, end []byte, cpu uin
 	return core.NewRegionInfo(
 		region,
 		peers[0],
-		core.SetCPUUsage(cpu),
+		core.SetCPUUsage(cpuUsage),
 	)
 }
 
 func newSplitScatterIndexKey(suffix string) []byte {
-	key := []byte{'t'}
-	key = codec.EncodeInt(key, 42)
-	key = append(key, '_', 'i')
-	key = codec.EncodeInt(key, 7)
+	key := codec.GenerateIndexKey(42, 7)
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
 }

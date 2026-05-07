@@ -50,8 +50,7 @@ func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint
 		return splitScatterRangeHint{}
 	}
 
-	indexPrefix := append(append([]byte(nil), tablePrefix...), splitScatterIndexPrefix...)
-	indexPrefix = codec.EncodeInt(indexPrefix, indexID)
+	indexPrefix := codec.GenerateIndexKey(tableID, indexID)
 	indexGroup := makeSplitScatterIndexGroup(tableID, indexID)
 	indexRange := splitScatterPrefixRangeWithGroup(indexPrefix, indexGroup)
 	endKey := region.GetEndKey()

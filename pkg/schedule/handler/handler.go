@@ -171,8 +171,6 @@ func (h *Handler) GetOperatorsByKinds(kinds []string) ([]*operator.Operator, err
 			ops, err = h.GetLeaderOperators()
 		case operator.OpRegion.String():
 			ops, err = h.GetRegionOperators()
-		case operator.OpSplitScatter.String():
-			ops, err = h.GetSplitScatterOperators()
 		case operator.OpWaiting:
 			ops, err = h.GetWaitingOperators()
 		}
@@ -218,15 +216,6 @@ func (h *Handler) GetRegionOperators() ([]*operator.Operator, error) {
 		return nil, err
 	}
 	return c.GetOperatorsOfKind(operator.OpRegion), nil
-}
-
-// GetSplitScatterOperators returns the running split-scatter operators.
-func (h *Handler) GetSplitScatterOperators() ([]*operator.Operator, error) {
-	c, err := h.GetOperatorController()
-	if err != nil {
-		return nil, err
-	}
-	return c.GetOperatorsOfKind(operator.OpSplitScatter), nil
 }
 
 // GetHistory returns finished operators' history since start.

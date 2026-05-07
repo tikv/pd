@@ -691,7 +691,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	if isSameDistribution(region, targetPeers, targetLeader) {
 		scatterUnnecessaryCounter.Inc()
 		if state != nil {
-			r.applyScatterStateDelta(state, region, targetPeers, targetLeader, group, true)
+			r.applyScatterStateDelta(state, region, targetPeers, targetLeader, group, !internalScatter)
 		} else {
 			r.Put(targetPeers, targetLeader, group)
 		}
@@ -709,7 +709,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 			currentPeers[peer.GetStoreId()] = peer
 		}
 		if state != nil {
-			r.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, true)
+			r.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, !internalScatter)
 		} else {
 			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
 		}

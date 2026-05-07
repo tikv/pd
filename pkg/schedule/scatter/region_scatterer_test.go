@@ -824,7 +824,7 @@ func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {
 	re.Equal(constant.High, op.GetPriorityLevel())
 	re.NotZero(op.Kind() & operator.OpSplitScatter)
 	re.NotZero(op.Kind() & operator.OpRegion)
-	finalPeers, finalLeaderStoreID := finalPlacementAfterScatter(region, op)
+	finalPeers, finalLeaderStoreID := finalPlacementAfterOperator(region, op)
 
 	expectedPeerDistribution := cloneDistribution(peerSnapshot)
 	for _, peer := range region.GetPeers() {
@@ -956,30 +956,6 @@ func TestCreateScatterRegionOperatorFailureAccountsCurrentPlacement(t *testing.T
 	leaderAfter, ok := state.ordinaryEngine.selectedLeader.getGroupDistributionClone(group)
 	re.True(ok)
 	re.Equal(expectedLeaderDistribution, leaderAfter)
-}
-
-func finalPlacementAfterScatter(region *core.RegionInfo, op *operator.Operator) (map[uint64]struct{}, uint64) {
-	finalPeers := make(map[uint64]struct{}, len(region.GetPeers()))
-	for _, peer := range region.GetPeers() {
-		finalPeers[peer.GetStoreId()] = struct{}{}
-	}
-	finalLeaderStoreID := region.GetLeader().GetStoreId()
-	if op == nil {
-		return finalPeers, finalLeaderStoreID
-	}
-	for i := range op.Len() {
-		switch step := op.Step(i).(type) {
-		case operator.TransferLeader:
-			finalLeaderStoreID = step.ToStore
-		case operator.AddPeer:
-			finalPeers[step.ToStore] = struct{}{}
-		case operator.AddLearner:
-			finalPeers[step.ToStore] = struct{}{}
-		case operator.RemovePeer:
-			delete(finalPeers, step.FromStore)
-		}
-	}
-	return finalPeers, finalLeaderStoreID
 }
 
 func removeZeroCountEntries(distribution map[uint64]uint64) {
@@ -1294,230 +1270,151 @@ func TestScatterInternalSkipsHotOnlyForAdmin(t *testing.T) {
 	}
 }
 
-func TestInternalScatterKeepsOriginWhenPeerCountsAreEven(t *testing.T) {
+func TestInternalScatterPeerSelection(t *testing.T) {
+	testCases := []struct {
+		name              string
+		storeRegionCounts map[uint64]int
+		peerDistribution  map[uint64]uint64
+		excludedStores    []uint64
+		checkAdmin        bool
+		wantAdmin         uint64
+		want              uint64
+		wantAny           []uint64
+	}{
+		{
+			name:             "keeps origin when peer counts are even",
+			peerDistribution: map[uint64]uint64{},
+			excludedStores:   []uint64{2, 3},
+			checkAdmin:       true,
+			wantAdmin:        1,
+			want:             1,
+		},
+		{
+			name:              "prefers less loaded lowest count store",
+			storeRegionCounts: map[uint64]int{4: 100, 5: 10},
+			peerDistribution:  map[uint64]uint64{1: 3, 2: 3, 3: 3, 4: 1, 5: 1},
+			excludedStores:    []uint64{2, 3},
+			want:              5,
+		},
+		{
+			name:             "keeps origin when source target gap is one",
+			peerDistribution: map[uint64]uint64{1: 2, 2: 2, 3: 2, 4: 1, 5: 1},
+			want:             1,
+		},
+		{
+			name:             "moves when source target gap exceeds one",
+			peerDistribution: map[uint64]uint64{1: 6, 2: 4, 3: 4, 4: 1, 5: 1},
+			wantAny:          []uint64{4, 5},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			scatterer, state, _, peer := newInternalScatterSelectionTestFixture(t, testCase.storeRegionCounts)
+			group := "test-peer-selection"
+			re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, testCase.peerDistribution))
+			filters := newTestExcludedStoreFilter(testCase.excludedStores...)
+
+			if testCase.checkAdmin {
+				adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, false)
+				re.Equal(testCase.wantAdmin, adminPeer.GetStoreId())
+			}
+
+			internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true)
+			if len(testCase.wantAny) > 0 {
+				re.Contains(testCase.wantAny, internalPeer.GetStoreId())
+			} else {
+				re.Equal(testCase.want, internalPeer.GetStoreId())
+			}
+		})
+	}
+}
+
+func TestInternalScatterLeaderSelection(t *testing.T) {
+	testCases := []struct {
+		name               string
+		leaderDistribution map[uint64]uint64
+		peerDistribution   map[uint64]uint64
+		checkAdmin         bool
+		wantAdmin          uint64
+		want               uint64
+	}{
+		{
+			name:               "prefers unused store",
+			leaderDistribution: map[uint64]uint64{1: 2, 4: 0, 5: 0},
+			checkAdmin:         true,
+			wantAdmin:          1,
+			want:               4,
+		},
+		{
+			name:               "keeps origin when source target gap is one",
+			leaderDistribution: map[uint64]uint64{1: 1, 4: 0, 5: 0},
+			want:               1,
+		},
+		{
+			name:               "breaks ties by peer deficit",
+			leaderDistribution: map[uint64]uint64{1: 3, 4: 1, 5: 1},
+			peerDistribution:   map[uint64]uint64{1: 10, 4: 9, 5: 2},
+			checkAdmin:         true,
+			wantAdmin:          1,
+			want:               5,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+			group := "test-leader-selection"
+			candidates := []uint64{1, 4, 5}
+			re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, testCase.leaderDistribution))
+			if testCase.peerDistribution != nil {
+				re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, testCase.peerDistribution))
+			}
+
+			if testCase.checkAdmin {
+				adminLeader, adminCount := scatterer.selectAvailableLeaderStore(group, region, candidates, scatterer.ordinaryEngine.asSelectionContext(), false)
+				re.Equal(testCase.wantAdmin, adminLeader)
+				re.Equal(scatterer.ordinaryEngine.selectedLeader.Get(adminLeader, group), adminCount)
+			}
+
+			internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
+			re.Equal(testCase.want, internalLeader)
+			re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
+		})
+	}
+}
+
+func newInternalScatterSelectionTestFixture(t *testing.T, storeRegionCounts map[uint64]int) (*RegionScatterer, *scatterState, *core.RegionInfo, *metapb.Peer) {
+	t.Helper()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	t.Cleanup(cancel)
 
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	t.Cleanup(stream.Close)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
+		tc.AddRegionStore(i, storeRegionCounts[i])
 	}
 	region := tc.AddLeaderRegion(1, 1, 2, 3)
 	peer := region.GetStorePeer(1)
 	re.NotNil(peer)
 
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-peer-coverage"
-	re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{}))
-	filters := []filter.Filter{filter.NewExcludedFilter("test", nil, map[uint64]struct{}{
-		2: {},
-		3: {},
-	})}
-
-	adminPeer := scatterer.selectNewPeer(scatterer.ordinaryEngine.asSelectionContext(), group, peer, filters, false)
-	re.Equal(uint64(1), adminPeer.GetStoreId())
-
-	internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true)
-	re.Equal(uint64(1), internalPeer.GetStoreId())
+	return scatterer, newTestScatterState(scatterer), region, peer
 }
 
-func TestInternalScatterPrefersLessLoadedLowestCountStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	tc.AddRegionStore(1, 0)
-	tc.AddRegionStore(2, 0)
-	tc.AddRegionStore(3, 0)
-	tc.AddRegionStore(4, 100)
-	tc.AddRegionStore(5, 10)
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	peer := region.GetStorePeer(1)
-	re.NotNil(peer)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-peer-less-loaded"
-	re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{
-		1: 3,
-		2: 3,
-		3: 3,
-		4: 1,
-		5: 1,
-	}))
-	filters := []filter.Filter{filter.NewExcludedFilter("test", nil, map[uint64]struct{}{
-		2: {},
-		3: {},
-	})}
-
-	internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, filters, true)
-	re.Equal(uint64(5), internalPeer.GetStoreId())
-}
-
-func TestInternalScatterPeerKeepsOriginWhenSourceTargetGapIsOne(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
+func newTestExcludedStoreFilter(stores ...uint64) []filter.Filter {
+	if len(stores) == 0 {
+		return nil
 	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	peer := region.GetStorePeer(1)
-	re.NotNil(peer)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-peer-post-coverage"
-	re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{
-		1: 2,
-		2: 2,
-		3: 2,
-		4: 1,
-		5: 1,
-	}))
-
-	internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, nil, true)
-	re.Equal(uint64(1), internalPeer.GetStoreId())
-}
-
-func TestInternalScatterPeerMovesWhenSourceTargetGapExceedsOne(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
+	excluded := make(map[uint64]struct{}, len(stores))
+	for _, storeID := range stores {
+		excluded[storeID] = struct{}{}
 	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-	peer := region.GetStorePeer(1)
-	re.NotNil(peer)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-peer-strict-improvement"
-	re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{
-		1: 6,
-		2: 4,
-		3: 4,
-		4: 1,
-		5: 1,
-	}))
-
-	internalPeer := scatterer.selectNewPeer(state.ordinaryEngine.asSelectionContext(), group, peer, nil, true)
-	re.Contains([]uint64{4, 5}, internalPeer.GetStoreId())
-}
-
-func TestInternalScatterLeaderPrefersUnusedStore(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-leader-coverage"
-	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
-		1: 2,
-		4: 0,
-		5: 0,
-	}))
-
-	adminLeader, adminCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, scatterer.ordinaryEngine.asSelectionContext(), false)
-	re.Equal(uint64(1), adminLeader)
-	re.Equal(scatterer.ordinaryEngine.selectedLeader.Get(adminLeader, group), adminCount)
-
-	internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, state.ordinaryEngine.asSelectionContext(), true)
-	re.Equal(uint64(4), internalLeader)
-	re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
-}
-
-func TestInternalScatterLeaderKeepsOriginWhenSourceTargetGapIsOne(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-leader-gap-one"
-	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
-		1: 1,
-		4: 0,
-		5: 0,
-	}))
-
-	internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, state.ordinaryEngine.asSelectionContext(), true)
-	re.Equal(uint64(1), internalLeader)
-	re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
-}
-
-func TestInternalScatterLeaderBreaksTiesByPeerDeficit(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	opt := mockconfig.NewTestOptions()
-	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
-	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
-	for i := uint64(1); i <= 5; i++ {
-		tc.AddRegionStore(i, 0)
-	}
-	region := tc.AddLeaderRegion(1, 1, 2, 3)
-
-	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddPendingProcessedRegions)
-	state := newTestScatterState(scatterer)
-	group := "test-leader-peer-deficit"
-	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{
-		1: 3,
-		4: 1,
-		5: 1,
-	}))
-	re.True(state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, map[uint64]uint64{
-		1: 10,
-		4: 9,
-		5: 2,
-	}))
-
-	adminLeader, adminCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, scatterer.ordinaryEngine.asSelectionContext(), false)
-	re.Equal(uint64(1), adminLeader)
-	re.Equal(scatterer.ordinaryEngine.selectedLeader.Get(adminLeader, group), adminCount)
-
-	internalLeader, internalCount := scatterer.selectAvailableLeaderStore(group, region, []uint64{1, 4, 5}, state.ordinaryEngine.asSelectionContext(), true)
-	re.Equal(uint64(5), internalLeader)
-	re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
+	return []filter.Filter{filter.NewExcludedFilter("test", nil, excluded)}
 }
