@@ -54,6 +54,7 @@ func TestRecordSplitScatterBatchCollectsPendingRegions(t *testing.T) {
 
 	controller.RecordSplitScatterBatch(100, []uint64{101, 102, 103})
 	re.Equal(4, splitScatterPendingCount(controller))
+	re.Equal(float64(4), promtestutil.ToFloat64(splitScatterPendingGauge))
 
 	sourceGroup := splitScatterPendingGroup(t, controller, 100)
 	for _, regionID := range []uint64{101, 102, 103} {
@@ -160,10 +161,33 @@ func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
 	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
 	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
 
-	expiredBefore := promtestutil.ToFloat64(splitScatterPendingExpiredCounter)
+	expiredBefore := splitScatterPendingExpiredCount("false")
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterPendingExpiredCounter)-expiredBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(2), splitScatterPendingExpiredCount("false")-expiredBefore)
+}
+
+func TestCollectTopPendingMarksAttemptedBeforeExpiration(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "", 120)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	attemptedBefore := splitScatterPendingExpiredCount("true")
+	unattemptedBefore := splitScatterPendingExpiredCount("false")
+	re.Len(controller.collectTopPendingSplitScatter(1), 1)
+	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
+	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
+
+	re.Empty(controller.collectTopPendingSplitScatter(2))
+	re.Equal(0, splitScatterPendingCount(controller))
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(1), splitScatterPendingExpiredCount("true")-attemptedBefore)
+	re.Equal(float64(1), splitScatterPendingExpiredCount("false")-unattemptedBefore)
 }
 
 func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
@@ -561,6 +585,10 @@ func splitScatterPendingCount(controller *Controller) int {
 	controller.splitScatter.pendingMu.RLock()
 	defer controller.splitScatter.pendingMu.RUnlock()
 	return len(controller.splitScatter.pending)
+}
+
+func splitScatterPendingExpiredCount(attempted string) float64 {
+	return promtestutil.ToFloat64(splitScatterPendingExpiredCounter.WithLabelValues(attempted))
 }
 
 func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uint64) string {

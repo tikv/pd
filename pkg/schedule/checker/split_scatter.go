@@ -48,6 +48,8 @@ type splitScatterPendingItem struct {
 	sourceWaitVersion uint64
 	retryAt           time.Time
 	expireAt          time.Time
+	// attempted means this item has been selected by the dispatcher at least once.
+	attempted bool
 }
 
 type splitScatterController struct {
@@ -142,20 +144,41 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		candidates = candidates[:limit]
 	}
 
+	if len(candidates) > 0 {
+		c.pendingMu.Lock()
+		for i := range candidates {
+			pending, ok := c.pending[candidates[i].regionID]
+			if !ok || pending.group != candidates[i].group {
+				continue
+			}
+			pending.attempted = true
+			c.pending[pending.regionID] = pending
+			candidates[i].attempted = true
+		}
+		c.pendingMu.Unlock()
+	}
+
 	if len(expiredSnapshot) > 0 {
-		expiredCount := 0
+		attemptedExpiredCount := 0
+		unattemptedExpiredCount := 0
 		c.pendingMu.Lock()
 		for _, expired := range expiredSnapshot {
 			pending, ok := c.pending[expired.regionID]
-			if ok && pending.group == expired.group && !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
+			if ok && pending.group == expired.group && pending.expireAt.Equal(expired.expireAt) &&
+				!pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 				delete(c.pending, expired.regionID)
-				expiredCount++
+				if pending.attempted {
+					attemptedExpiredCount++
+				} else {
+					unattemptedExpiredCount++
+				}
 			}
 		}
-		c.pendingMu.Unlock()
-		if expiredCount > 0 {
-			splitScatterPendingExpiredCounter.Add(float64(expiredCount))
+		if attemptedExpiredCount+unattemptedExpiredCount > 0 {
+			c.updatePendingGaugeLocked()
 		}
+		c.pendingMu.Unlock()
+		observeSplitScatterPendingExpired(attemptedExpiredCount, unattemptedExpiredCount)
 	}
 	return candidates
 }
@@ -179,18 +202,38 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 		return
 	}
 	delete(c.pending, expected.regionID)
+	c.updatePendingGaugeLocked()
 }
 
-func (c *splitScatterController) removeExpiredPendingSplitScatterLocked() int {
+func (c *splitScatterController) updatePendingGaugeLocked() {
+	splitScatterPendingGauge.Set(float64(len(c.pending)))
+}
+
+func observeSplitScatterPendingExpired(attemptedCount, unattemptedCount int) {
+	if attemptedCount > 0 {
+		splitScatterPendingExpiredCounter.WithLabelValues("true").Add(float64(attemptedCount))
+	}
+	if unattemptedCount > 0 {
+		splitScatterPendingExpiredCounter.WithLabelValues("false").Add(float64(unattemptedCount))
+	}
+}
+
+func (c *splitScatterController) removeExpiredPendingSplitScatterLocked() (attemptedCount, unattemptedCount int) {
 	now := time.Now()
-	expiredCount := 0
 	for regionID, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 			delete(c.pending, regionID)
-			expiredCount++
+			if pending.attempted {
+				attemptedCount++
+			} else {
+				unattemptedCount++
+			}
 		}
 	}
-	return expiredCount
+	if attemptedCount+unattemptedCount > 0 {
+		c.updatePendingGaugeLocked()
+	}
+	return attemptedCount, unattemptedCount
 }
 
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
@@ -214,9 +257,8 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	if expiredCount := c.removeExpiredPendingSplitScatterLocked(); expiredCount > 0 {
-		splitScatterPendingExpiredCounter.Add(float64(expiredCount))
-	}
+	attemptedExpiredCount, unattemptedExpiredCount := c.removeExpiredPendingSplitScatterLocked()
+	observeSplitScatterPendingExpired(attemptedExpiredCount, unattemptedExpiredCount)
 	newPendingCount := 0
 	if _, ok := c.pending[sourceRegionID]; !ok {
 		newPendingCount++
@@ -255,6 +297,7 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 		sourceWaitVersion: sourceWaitVersion,
 		expireAt:          expireAt,
 	}
+	c.updatePendingGaugeLocked()
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
