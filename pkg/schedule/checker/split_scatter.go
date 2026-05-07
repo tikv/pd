@@ -216,10 +216,10 @@ func (c *splitScatterController) updatePendingGaugeLocked() {
 
 func observeSplitScatterPendingExpired(attemptedCount, unattemptedCount int) {
 	if attemptedCount > 0 {
-		splitScatterPendingExpiredCounter.WithLabelValues("true").Add(float64(attemptedCount))
+		splitScatterPendingExpiredAttemptedCounter.Add(float64(attemptedCount))
 	}
 	if unattemptedCount > 0 {
-		splitScatterPendingExpiredCounter.WithLabelValues("false").Add(float64(unattemptedCount))
+		splitScatterPendingExpiredUnattemptedCounter.Add(float64(unattemptedCount))
 	}
 }
 

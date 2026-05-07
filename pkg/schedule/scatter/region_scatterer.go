@@ -891,6 +891,11 @@ func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, grou
 	return fromCount == 0 || fromCount > toCount+1
 }
 
+// finalPlacementAfterOperator projects the final target placement of an
+// in-flight operator by walking its steps without considering partial execution
+// progress. This is a forward-looking estimate: the caller uses it to deduct the
+// operator's intended footprint from the next round of store selection, so the
+// estimate is intentionally the end state rather than the current half-done state.
 func finalPlacementAfterOperator(region *core.RegionInfo, op *operator.Operator) (map[uint64]*metapb.Peer, uint64) {
 	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	for _, peer := range region.GetPeers() {

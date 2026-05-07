@@ -17,7 +17,6 @@ package operator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -521,7 +520,7 @@ func (suite *operatorTestSuite) TestOpKindValues() {
 		{"split-scatter", OpSplitScatter, 1 << 11},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.want, testCase.kind, fmt.Sprintf("unexpected %s kind value", testCase.name))
+		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)
 	}
 }
 

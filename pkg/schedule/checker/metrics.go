@@ -88,6 +88,12 @@ var (
 		})
 )
 
+// WithLabelValues is a heavy operation, pre-cache the label handles.
+var (
+	splitScatterPendingExpiredAttemptedCounter   = splitScatterPendingExpiredCounter.WithLabelValues("true")
+	splitScatterPendingExpiredUnattemptedCounter = splitScatterPendingExpiredCounter.WithLabelValues("false")
+)
+
 func init() {
 	prometheus.MustRegister(checkerCounter)
 	prometheus.MustRegister(regionListGauge)
