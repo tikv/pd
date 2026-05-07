@@ -212,6 +212,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
 					return
 				}
+				// KeepAliveOnce currently returns ErrLeaseNotFound for a non-positive
+				// TTL. Keep this as a defensive guard for mocked or custom lease
+				// implementations that may return a successful response with an invalid TTL.
 				if res.TTL <= 0 {
 					l.metrics.invalidTTL.Inc()
 					return
