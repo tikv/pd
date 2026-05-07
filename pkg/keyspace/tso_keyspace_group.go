@@ -427,7 +427,7 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 // RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
 // If a keyspace is not in the group, it will be skipped (no error).
 // It returns the updated keyspace group and any error encountered.
-func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
 	m.Lock()
 	defer m.Unlock()
 
@@ -435,6 +435,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []ui
 		kg  *endpoint.KeyspaceGroup
 		err error
 	)
+	removedIDs := make([]uint32, 0, len(keyspaceIDs))
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		// Load the keyspace group
@@ -462,6 +463,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []ui
 			// Only add if it exists in the group (skip if not present)
 			if slice.Contains(kg.Keyspaces, ksID) {
 				toRemove[ksID] = struct{}{}
+				removedIDs = append(removedIDs, ksID)
 			}
 		}
 
@@ -475,6 +477,11 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, keyspaceIDs []ui
 		for _, ks := range kg.Keyspaces {
 			if _, shouldRemove := toRemove[ks]; !shouldRemove {
 				newKeyspaces = append(newKeyspaces, ks)
+			} else {
+				err = km.RemoveKeyspace(txn, ks)
+				if err != nil {
+					return err
+				}
 			}
 		}
 		kg.Keyspaces = newKeyspaces

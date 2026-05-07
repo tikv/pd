@@ -844,28 +844,21 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 }
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
-func (manager *Manager) RemoveKeyspace(id uint32) error {
-	if isProtectedKeyspaceID(id) {
-		err := newModifyProtectedKeyspaceError()
-		log.Warn("[keyspace] failed to update keyspace config", errs.ZapError(err))
+func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
+	manager.metaLock.Lock(id)
+	defer manager.metaLock.Unlock(id)
+	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
+	if err != nil {
 		return err
 	}
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		manager.metaLock.Lock(id)
-		defer manager.metaLock.Unlock(id)
-		meta, err := manager.store.LoadKeyspaceMeta(txn, id)
-		if err != nil {
-			return err
-		}
-		if meta == nil {
-			return errs.ErrKeyspaceNotFound
-		}
-		if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
-			return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
-		}
-		return manager.store.RemoveKeyspace(txn, id, meta.GetName())
-	})
-	if err != nil {
+	if meta == nil {
+		return errs.ErrKeyspaceNotFound
+	}
+	if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
+		return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
+	}
+	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
+	if err == nil {
 		manager.keyspaceNameLookup.Delete(id)
 		manager.keyspaceStateLookup.Delete(id)
 	}
