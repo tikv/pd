@@ -351,8 +351,15 @@ func (r *RegionScatterer) seedScatterStateByRange(state *scatterState, group str
 		storeID := store.GetID()
 		peerCount := uint64(r.cluster.GetStorePeerCountByRange(storeID, startKey, endKey))
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
-			ordinaryPeer[storeID] = peerCount
-			ordinaryLeader[storeID] = uint64(r.cluster.GetStoreLeaderCountByRange(storeID, startKey, endKey))
+			if peerCount > 0 {
+				ordinaryPeer[storeID] = peerCount
+			}
+			if leaderCount := uint64(r.cluster.GetStoreLeaderCountByRange(storeID, startKey, endKey)); leaderCount > 0 {
+				ordinaryLeader[storeID] = leaderCount
+			}
+			continue
+		}
+		if peerCount == 0 {
 			continue
 		}
 

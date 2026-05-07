@@ -473,6 +473,32 @@ func TestDispatchSplitScatterIgnoresStalePendingSnapshot(t *testing.T) {
 	re.Equal(time.Time{}, currentPending.retryAt)
 }
 
+func TestDispatchSplitScatterIgnoresStalePendingWithSameGroup(t *testing.T) {
+	re := require.New(t)
+	controller, _, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	stalePending := splitScatterObservedPending(t, controller)
+
+	controller.splitScatter.pendingMu.Lock()
+	currentPending := controller.splitScatter.pending[splitScatterObservedRegionID]
+	currentPending.expireAt = currentPending.expireAt.Add(time.Minute)
+	controller.splitScatter.pending[splitScatterObservedRegionID] = currentPending
+	controller.splitScatter.pendingMu.Unlock()
+
+	controller.splitScatter.delayPendingSplitScatter(stalePending)
+
+	currentPending = splitScatterObservedPending(t, controller)
+	re.Equal(time.Time{}, currentPending.retryAt)
+
+	controller.splitScatter.deletePendingSplitScatter(stalePending)
+
+	currentPending = splitScatterObservedPending(t, controller)
+	re.Equal(stalePending.group, currentPending.group)
+	re.NotEqual(stalePending.expireAt, currentPending.expireAt)
+}
+
 func newTestSplitScatterController(t *testing.T) (*Controller, *mockcluster.Cluster, *operator.Controller, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	splitScatterPendingLimit = 1024
+	splitScatterPendingLimit = 4096
 	// The actual retry cadence is also bounded by the checker dispatch loop. This
 	// is only the minimum interval to avoid retrying the same pending item too
 	// frequently when checker ticks are fast.
@@ -97,8 +97,8 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	c.pendingMu.RLock()
 
 	// Keep pendingMu short: cluster reads below can be slower and do not need
-	// to block pending updates. Stale snapshots are safe because delay/delete
-	// recheck regionID + group before mutating pending.
+	// to block pending updates. Stale snapshots are safe because candidates
+	// are rechecked before dispatch and delay/delete recheck the pending identity.
 	pendingSnapshot := make([]splitScatterPendingItem, 0, len(c.pending))
 	expiredSnapshot := make([]splitScatterPendingItem, 0)
 	for _, pending := range c.pending {
@@ -148,15 +148,18 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 
 	if len(candidates) > 0 {
 		c.pendingMu.Lock()
-		for i := range candidates {
-			pending, ok := c.pending[candidates[i].regionID]
-			if !ok || pending.group != candidates[i].group {
+		selected := candidates[:0]
+		for _, candidate := range candidates {
+			pending, ok := c.pending[candidate.regionID]
+			if !ok || pending.group != candidate.group || !pending.expireAt.Equal(candidate.expireAt) {
 				continue
 			}
 			pending.attempted = true
 			c.pending[pending.regionID] = pending
-			candidates[i].attempted = true
+			candidate.attempted = true
+			selected = append(selected, candidate)
 		}
+		candidates = selected
 		c.pendingMu.Unlock()
 	}
 
@@ -189,7 +192,7 @@ func (c *splitScatterController) delayPendingSplitScatter(expected splitScatterP
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	pending, ok := c.pending[expected.regionID]
-	if !ok || pending.group != expected.group {
+	if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
 		return
 	}
 	pending.retryAt = time.Now().Add(splitScatterRetryBackoff)
@@ -200,7 +203,7 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	pending, ok := c.pending[expected.regionID]
-	if !ok || pending.group != expected.group {
+	if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
 		return
 	}
 	delete(c.pending, expected.regionID)
