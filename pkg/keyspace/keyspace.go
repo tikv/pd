@@ -847,6 +847,9 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	manager.metaLock.Lock(id)
 	defer manager.metaLock.Unlock(id)
+	if isProtectedKeyspaceID(id) {
+		return newModifyProtectedKeyspaceError()
+	}
 	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 	if err != nil {
 		return err

@@ -435,7 +435,6 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 		kg  *endpoint.KeyspaceGroup
 		err error
 	)
-	removedIDs := make([]uint32, 0, len(keyspaceIDs))
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		// Load the keyspace group
@@ -463,7 +462,6 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 			// Only add if it exists in the group (skip if not present)
 			if slice.Contains(kg.Keyspaces, ksID) {
 				toRemove[ksID] = struct{}{}
-				removedIDs = append(removedIDs, ksID)
 			}
 		}
 
