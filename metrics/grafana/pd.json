@@ -16593,11 +16593,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.01, sum(rate(pd_lease_local_ttl_remaining_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (job, purpose, instance, le))",
+              "expr": "max(pd_lease_local_ttl_remaining_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}) by (job, purpose)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
-              "legendFormat": "{{job}}-{{purpose}}-{{instance}}-1%",
+              "legendFormat": "{{job}}-{{purpose}}",
               "refId": "A",
               "step": 4
             }
@@ -16691,11 +16691,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (job, purpose, instance, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}[1m])) by (job, purpose, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
-              "legendFormat": "{{job}}-{{purpose}}-{{instance}}-99%",
+              "legendFormat": "{{job}}-{{purpose}}-99%",
               "refId": "A",
               "step": 4
             }
@@ -16705,6 +16705,104 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "Lease keepalive response interval",
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "s",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": "0",
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
+          "description": "Duration of etcd Lease.KeepAliveOnce requests observed by PD.",
+          "editable": true,
+          "error": false,
+          "fill": 1,
+          "grid": {},
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 50
+          },
+          "id": 1706,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": true,
+            "min": true,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_request_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", result=\"success\", purpose!~\".+ expected primary\"}[1m])) by (job, purpose, le))",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{job}}-{{purpose}}-99%",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Lease keepalive request duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -16789,11 +16887,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_lease_renewal_termination_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])*60) by (job, purpose, reason, instance)",
+              "expr": "sum(rate(pd_lease_renewal_termination_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}[1m])*60) by (job, purpose, reason)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
-              "legendFormat": "{{job}}-{{purpose}}-{{reason}}-{{instance}}",
+              "legendFormat": "{{job}}-{{purpose}}-{{reason}}",
               "refId": "A",
               "step": 4
             }
