@@ -1432,6 +1432,28 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 	re.Equal(uint64(1), leader)
 }
 
+func TestInternalScatterKeepsLeaderPeerWhenSourcePausedOut(t *testing.T) {
+	re := require.New(t)
+	scatterer, _, region, _ := newInternalScatterSelectionTestFixture(t, map[uint64]int{
+		1: 10,
+		2: 10,
+		3: 10,
+		4: 1,
+		5: 1,
+	})
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	re.NoError(tc.PauseLeaderTransfer(1, constant.Out))
+
+	op, err := scatterer.ScatterInternal(region, "paused-out", []byte(""), []byte(""))
+	re.NoError(err)
+	if op == nil {
+		return
+	}
+	targetPeers, targetLeader := finalPlacementAfterOperator(region, op)
+	re.Contains(targetPeers, uint64(1))
+	re.Equal(uint64(1), targetLeader)
+}
+
 func newInternalScatterSelectionTestFixture(t *testing.T, storeRegionCounts map[uint64]int) (*RegionScatterer, *scatterState, *core.RegionInfo, *metapb.Peer) {
 	t.Helper()
 	re := require.New(t)

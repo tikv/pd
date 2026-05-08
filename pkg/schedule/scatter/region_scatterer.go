@@ -630,6 +630,21 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
 	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
 	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
+	if internalScatter {
+		leader := region.GetLeader()
+		if leader == nil {
+			return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no source leader store found, region: %v", region))
+		}
+		leaderStoreID := leader.GetStoreId()
+		if !r.isAllowedLeaderSource(leaderStoreID) {
+			peer := region.GetStorePeer(leaderStoreID)
+			if peer == nil {
+				return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("source leader peer not found, region: %v", region))
+			}
+			targetPeers[leaderStoreID] = peer
+			selectedStores[leaderStoreID] = struct{}{}
+		}
+	}
 	scatterWithSameEngine := func(
 		peers map[uint64]*metapb.Peer,
 		context scatterSelectionContext,
@@ -747,15 +762,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		return filtered
 	}
 	currentLeaderStoreID := leader.GetStoreId()
-	sourceStore := r.cluster.GetStore(currentLeaderStoreID)
-	if sourceStore == nil {
-		return filtered
-	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: r.name, TransferLeader: true}
-	sourceAllowed := filter.NewCandidates([]*core.StoreInfo{sourceStore}).
-		FilterSource(r.cluster.GetSharedConfig(), nil, nil, stateFilter).
-		Len() > 0
-	if !sourceAllowed {
+	if !r.isAllowedLeaderSource(currentLeaderStoreID) {
 		for _, storeID := range candidateStores {
 			if storeID == currentLeaderStoreID {
 				return append(filtered, storeID)
@@ -773,6 +780,17 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		}
 	}
 	return filtered
+}
+
+func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
+	store := r.cluster.GetStore(storeID)
+	if store == nil {
+		return false
+	}
+	stateFilter := &filter.StoreStateFilter{ActionScope: r.name, TransferLeader: true}
+	return filter.NewCandidates([]*core.StoreInfo{store}).
+		FilterSource(r.cluster.GetSharedConfig(), nil, nil, stateFilter).
+		Len() > 0
 }
 
 func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
