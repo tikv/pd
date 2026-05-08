@@ -255,19 +255,24 @@ func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
 }
 
 // RecordSplitScatterBatch records a newly split batch for later scatter.
-func (c *Controller) RecordSplitScatterBatch(sourceRegionID uint64, newRegionIDs []uint64) {
-	c.splitScatter.recordSplitScatterBatch(sourceRegionID, newRegionIDs)
+func (c *Controller) RecordSplitScatterBatch(sourceRegionID, sourceWaitVersion uint64, newRegionIDs []uint64) {
+	c.splitScatter.recordSplitScatterBatch(sourceRegionID, sourceWaitVersion, newRegionIDs)
 }
 
-func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, newRegionIDs []uint64) {
+func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceWaitVersion uint64, newRegionIDs []uint64) {
 	if len(newRegionIDs) == 0 {
 		return
 	}
 	group := makeSplitScatterGroup(sourceRegionID, newRegionIDs[0])
 	expireAt := time.Now().Add(splitScatterPendingTTL)
-	sourceWaitVersion := uint64(1)
+	if sourceWaitVersion == 0 {
+		sourceWaitVersion = 1
+	}
 	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil && sourceRegion.GetRegionEpoch() != nil {
-		sourceWaitVersion = sourceRegion.GetRegionEpoch().GetVersion() + 1
+		cachedWaitVersion := sourceRegion.GetRegionEpoch().GetVersion() + 1
+		if cachedWaitVersion > sourceWaitVersion {
+			sourceWaitVersion = cachedWaitVersion
+		}
 	}
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()

@@ -181,7 +181,11 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// priority.
 	c.AddPendingProcessedRegions(false, recordRegions...)
 	if request.GetReason() == pdpb.SplitReason_LOAD {
-		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(reqRegion.GetId(), newRegionIDs)
+		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
+			reqRegion.GetId(),
+			reqRegion.GetRegionEpoch().GetVersion()+1,
+			newRegionIDs,
+		)
 	}
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
