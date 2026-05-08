@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -1384,6 +1385,51 @@ func TestInternalScatterLeaderSelection(t *testing.T) {
 			re.Equal(state.ordinaryEngine.selectedLeader.Get(internalLeader, group), internalCount)
 		})
 	}
+}
+
+func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
+	re := require.New(t)
+	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	tc.SetLabelProperty(config.RejectLeader, "reject", "leader")
+	tc.PutStoreWithLabels(4, "reject", "leader")
+
+	group := "test-leader-target-filter"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{1: 3, 4: 0, 5: 1}))
+	targetPeers := map[uint64]*metapb.Peer{
+		1: region.GetStorePeer(1),
+		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
+		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	candidates := scatterer.filterAllowedLeaderCandidateStores(
+		region,
+		targetPeers,
+		[]uint64{1, 4, 5},
+	)
+	re.NotContains(candidates, uint64(4))
+
+	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
+	re.Equal(uint64(5), leader)
+}
+
+func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
+	re := require.New(t)
+	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	re.NoError(tc.PauseLeaderTransfer(1, constant.Out))
+
+	group := "test-leader-source-filter"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{1: 3, 4: 0, 5: 1}))
+	targetPeers := map[uint64]*metapb.Peer{
+		1: region.GetStorePeer(1),
+		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
+		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5})
+	re.Equal([]uint64{1}, candidates)
+
+	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
+	re.Equal(uint64(1), leader)
 }
 
 func newInternalScatterSelectionTestFixture(t *testing.T, storeRegionCounts map[uint64]int) (*RegionScatterer, *scatterState, *core.RegionInfo, *metapb.Peer) {

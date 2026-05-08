@@ -679,6 +679,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	if internalScatter {
+		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores)
+	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
@@ -728,6 +731,48 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
+}
+
+func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
+	region *core.RegionInfo,
+	targetPeers map[uint64]*metapb.Peer,
+	candidateStores []uint64,
+) []uint64 {
+	if len(candidateStores) == 0 {
+		return candidateStores
+	}
+	filtered := candidateStores[:0]
+	leader := region.GetLeader()
+	if leader == nil {
+		return filtered
+	}
+	currentLeaderStoreID := leader.GetStoreId()
+	sourceStore := r.cluster.GetStore(currentLeaderStoreID)
+	if sourceStore == nil {
+		return filtered
+	}
+	stateFilter := &filter.StoreStateFilter{ActionScope: r.name, TransferLeader: true}
+	sourceAllowed := filter.NewCandidates([]*core.StoreInfo{sourceStore}).
+		FilterSource(r.cluster.GetSharedConfig(), nil, nil, stateFilter).
+		Len() > 0
+	if !sourceAllowed {
+		for _, storeID := range candidateStores {
+			if storeID == currentLeaderStoreID {
+				return append(filtered, storeID)
+			}
+		}
+		return filtered
+	}
+	for _, storeID := range candidateStores {
+		peer := targetPeers[storeID]
+		if peer == nil {
+			continue
+		}
+		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
+			filtered = append(filtered, storeID)
+		}
+	}
+	return filtered
 }
 
 func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {

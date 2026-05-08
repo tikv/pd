@@ -308,10 +308,12 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
 	limit := c.cluster.GetCheckerConfig().GetSplitScatterScheduleLimit()
 	if limit == 0 {
+		splitScatterDispatchDisabledCounter.Inc()
 		return
 	}
 	running := c.opController.OperatorCount(operator.OpSplitScatter)
 	if running >= limit {
+		splitScatterDispatchScheduleLimitCounter.Inc()
 		operator.IncOperatorLimitCounter(types.SplitScatterChecker, operator.OpSplitScatter)
 		return
 	}
@@ -321,6 +323,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 	for _, pending := range c.collectTopPendingSplitScatter(dispatchLimit) {
 		region := c.cluster.GetRegion(pending.regionID)
 		if region == nil {
+			splitScatterDispatchRegionMissingCounter.Inc()
 			continue
 		}
 		rangeHint := resolveSplitScatterRangeHint(region)
@@ -328,7 +331,13 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		if rangeHint.scatterGroup != "" {
 			scatterGroup = rangeHint.scatterGroup
 		}
+		if labeler := c.cluster.GetRegionLabeler(); labeler != nil && labeler.ScheduleDisabled(region) {
+			splitScatterDispatchScheduleDisabledCounter.Inc()
+			c.delayPendingSplitScatter(pending)
+			continue
+		}
 		if !filter.IsRegionReplicated(c.cluster, region) {
+			splitScatterDispatchNotReplicatedCounter.Inc()
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter delayed",
 				zap.Uint64("region-id", pending.regionID),
@@ -339,6 +348,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
+			splitScatterDispatchScatterFailedCounter.Inc()
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter failed",
 				zap.Uint64("region-id", pending.regionID),
@@ -350,6 +360,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		if op != nil {
 			op.SetAdditionalInfo("batch-group", pending.group)
 			if c.opController.ExceedStoreLimit(op) {
+				splitScatterDispatchStoreLimitCounter.Inc()
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter delayed",
 					zap.Uint64("region-id", pending.regionID),
@@ -360,6 +371,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 				continue
 			}
 			if !c.opController.AddOperator(op) {
+				splitScatterDispatchAddOperatorFailedCounter.Inc()
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter add operator failed",
 					zap.Uint64("region-id", pending.regionID),
@@ -368,6 +380,9 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 					zap.String("operator-desc", op.Desc()))
 				continue
 			}
+			splitScatterDispatchOperatorCreatedCounter.Inc()
+		} else {
+			splitScatterDispatchNoOperatorNeededCounter.Inc()
 		}
 		c.deletePendingSplitScatter(pending)
 	}

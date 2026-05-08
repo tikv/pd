@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 )
@@ -154,6 +155,34 @@ func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
 	controller.dispatchSplitScatterRegions()
 
 	re.Len(oc.GetOperators(), 1)
+}
+
+func TestDispatchSplitScatterRespectsScheduleDeny(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "", splitScatterReportedCPUUsage)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	re.NoError(tc.GetRegionLabeler().SetLabelRule(&labeler.LabelRule{
+		ID:       "split-scatter-schedule-deny",
+		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
+		RuleType: labeler.KeyRange,
+		Data:     []any{map[string]any{"start_key": "", "end_key": ""}},
+	}))
+
+	counterBefore := promtestutil.ToFloat64(splitScatterDispatchScheduleDisabledCounter)
+	controller.dispatchSplitScatterRegions()
+
+	re.Empty(oc.GetOperators())
+	re.Equal(2, splitScatterPendingCount(controller))
+	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterDispatchScheduleDisabledCounter)-counterBefore)
+	for _, regionID := range []uint64{100, 101} {
+		pending := splitScatterPending(t, controller, regionID)
+		re.True(pending.retryAt.After(time.Now()))
+	}
 }
 
 func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
@@ -613,11 +642,16 @@ func splitScatterPendingExpiredCount(attempted string) float64 {
 
 func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uint64) string {
 	t.Helper()
+	return splitScatterPending(t, controller, regionID).group
+}
+
+func splitScatterPending(t *testing.T, controller *Controller, regionID uint64) splitScatterPendingItem {
+	t.Helper()
 	controller.splitScatter.pendingMu.RLock()
 	defer controller.splitScatter.pendingMu.RUnlock()
 	pending, ok := controller.splitScatter.pending[regionID]
 	require.True(t, ok)
-	return pending.group
+	return pending
 }
 
 func splitScatterObservedPending(t *testing.T, controller *Controller) splitScatterPendingItem {

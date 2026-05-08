@@ -109,13 +109,14 @@ func init() {
 const (
 	// NOTE: these types are different from pkg/schedule/config/type.go,
 	// they are only used for prometheus metrics to keep the compatibility.
-	ruleChecker       = "rule_checker"
-	jointStateChecker = "joint_state_checker"
-	learnerChecker    = "learner_checker"
-	mergeChecker      = "merge_checker"
-	replicaChecker    = "replica_checker"
-	splitChecker      = "split_checker"
-	affinityChecker   = "affinity_checker"
+	ruleChecker         = "rule_checker"
+	jointStateChecker   = "joint_state_checker"
+	learnerChecker      = "learner_checker"
+	mergeChecker        = "merge_checker"
+	replicaChecker      = "replica_checker"
+	splitChecker        = "split_checker"
+	splitScatterChecker = "split_scatter_checker"
+	affinityChecker     = "affinity_checker"
 )
 
 const (
@@ -191,6 +192,10 @@ func mergeCheckerCounterWithEvent(event string) prometheus.Counter {
 
 func replicaCheckerCounterWithEvent(event string) prometheus.Counter {
 	return checkerCounter.WithLabelValues(replicaChecker, event)
+}
+
+func splitScatterCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(splitScatterChecker, event)
 }
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -274,6 +279,17 @@ var (
 
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
 	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+
+	splitScatterDispatchDisabledCounter          = splitScatterCheckerCounterWithEvent("dispatch-disabled")
+	splitScatterDispatchScheduleLimitCounter     = splitScatterCheckerCounterWithEvent("dispatch-schedule-limit")
+	splitScatterDispatchRegionMissingCounter     = splitScatterCheckerCounterWithEvent("dispatch-region-missing")
+	splitScatterDispatchScheduleDisabledCounter  = splitScatterCheckerCounterWithEvent("dispatch-schedule-disabled")
+	splitScatterDispatchNotReplicatedCounter     = splitScatterCheckerCounterWithEvent("dispatch-not-fully-replicated")
+	splitScatterDispatchScatterFailedCounter     = splitScatterCheckerCounterWithEvent("dispatch-scatter-failed")
+	splitScatterDispatchStoreLimitCounter        = splitScatterCheckerCounterWithEvent("dispatch-store-limit")
+	splitScatterDispatchAddOperatorFailedCounter = splitScatterCheckerCounterWithEvent("dispatch-add-operator-failed")
+	splitScatterDispatchOperatorCreatedCounter   = splitScatterCheckerCounterWithEvent("dispatch-operator-created")
+	splitScatterDispatchNoOperatorNeededCounter  = splitScatterCheckerCounterWithEvent("dispatch-no-operator-needed")
 
 	affinityCheckerCounter                        = checkerCounter.WithLabelValues(affinityChecker, "check")
 	affinityCheckerPausedCounter                  = checkerCounter.WithLabelValues(affinityChecker, "paused")
