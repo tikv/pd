@@ -168,12 +168,12 @@ func (c *Controller) PatrolRegions() {
 				c.checkPriorityRegions()
 			})
 
-			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
-				c.splitScatter.dispatchSplitScatterRegions()
-			})
-
 			measure(c.metrics.patrolPhaseHistograms[phaseCheckPending], func() {
 				c.checkPendingProcessedRegions()
+			})
+
+			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
+				c.splitScatter.dispatchSplitScatterRegions()
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {

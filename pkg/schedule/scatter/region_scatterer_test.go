@@ -1157,6 +1157,13 @@ func TestScatterReplace(t *testing.T) {
 	re.NoError(err)
 	re.Nil(op)
 
+	// A same-group operator from an older epoch must not consume a newer
+	// split-scatter attempt for the same region.
+	tc.PutRegion(tc.MockRegionInfo(2, 1, []uint64{2, 3}, nil, &metapb.RegionEpoch{ConfVer: 1, Version: 2}))
+	op, err = scatterer.Scatter(tc.GetRegion(2), "", true)
+	re.Error(err)
+	re.Nil(op)
+
 	// different scatter operator should be rejected
 	region = tc.GetRegion(3)
 	op, err = scatterer.Scatter(region, "test", true)

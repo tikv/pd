@@ -548,6 +548,14 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 		val, exist := op.GetAdditionalInfo("group")
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
 		if op.Desc() == expectedDesc && exist && val == group {
+			if !isSameRegionEpoch(op.RegionEpoch(), region.GetRegionEpoch()) {
+				scatterOperatorExistedCounter.Inc()
+				log.Debug("same group scatter operator epoch does not match",
+					zap.Uint64("region-id", region.GetID()),
+					zap.Reflect("operator-epoch", op.RegionEpoch()),
+					zap.Reflect("region-epoch", region.GetRegionEpoch()))
+				return nil, errors.Errorf("the operator of region %d already exist with different epoch", region.GetID())
+			}
 			scatterOperatorRunningCounter.Inc()
 			log.Debug("scatter operator is already running",
 				zap.Uint64("region-id", region.GetID()))
@@ -887,8 +895,9 @@ func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group s
 	return newPeer
 }
 
-// selectAvailableLeaderStore select the target leader store from the candidates. The candidates would be collected by
-// the existed peers store depended on the leader counts in the group level. Please use this func before scatter spacial engines.
+// selectAvailableLeaderStore selects the target leader store from candidate
+// peer stores after ordinary and special-engine peer scatter. Special-engine
+// stores are excluded from candidates because they cannot become leaders.
 func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo,
 	leaderCandidateStores []uint64, context scatterSelectionContext, internalScatter bool) (leaderID uint64, leaderStorePickedCount uint64) {
 	if r.cluster.GetStore(region.GetLeader().GetStoreId()) == nil {
@@ -952,6 +961,13 @@ func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, grou
 	// A zero source count means this group has no seeded/current leader history
 	// for the origin store, so keep the original scatter fallback behavior.
 	return fromCount == 0 || fromCount > toCount+1
+}
+
+func isSameRegionEpoch(left, right *metapb.RegionEpoch) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.GetVersion() == right.GetVersion() && left.GetConfVer() == right.GetConfVer()
 }
 
 // finalPlacementAfterOperator projects the final target placement of an
