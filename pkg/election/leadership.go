@@ -248,11 +248,6 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue())
 }
 
-// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
-func (ls *Leadership) DeleteLeaderKey() error {
-	return ls.removeLeaderKey(clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue()))
-}
-
 // DeleteLeaderKeyByRevision deletes the leader key only when its mod revision
 // is the same as the observed revision.
 func (ls *Leadership) DeleteLeaderKeyByRevision(revision int64) error {
