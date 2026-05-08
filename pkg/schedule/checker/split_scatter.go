@@ -241,6 +241,15 @@ func (c *splitScatterController) removeExpiredPendingSplitScatterLocked() (attem
 	return attemptedCount, unattemptedCount
 }
 
+func (c *splitScatterController) cleanupExpiredPendingSplitScatter() int {
+	c.pendingMu.Lock()
+	attemptedExpiredCount, unattemptedExpiredCount := c.removeExpiredPendingSplitScatterLocked()
+	pendingCount := len(c.pending)
+	c.pendingMu.Unlock()
+	observeSplitScatterPendingExpired(attemptedExpiredCount, unattemptedExpiredCount)
+	return pendingCount
+}
+
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
 	return fmt.Sprintf("split-scatter-%d-%d", sourceRegionID, firstNewRegionID)
 }
@@ -306,6 +315,9 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID uint64, 
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
+	if c.cleanupExpiredPendingSplitScatter() == 0 {
+		return
+	}
 	limit := c.cluster.GetCheckerConfig().GetSplitScatterScheduleLimit()
 	if limit == 0 {
 		splitScatterDispatchDisabledCounter.Inc()

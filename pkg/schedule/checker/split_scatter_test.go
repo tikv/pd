@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
@@ -155,6 +156,59 @@ func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
 	controller.dispatchSplitScatterRegions()
 
 	re.Len(oc.GetOperators(), 1)
+}
+
+func TestDispatchSplitScatterCleansExpiredPendingBeforeEarlyReturn(t *testing.T) {
+	testCases := []struct {
+		name             string
+		setupEarlyReturn func(*mockcluster.Cluster, *operator.Controller)
+		counter          prometheus.Counter
+	}{
+		{
+			name: "disabled",
+			setupEarlyReturn: func(tc *mockcluster.Cluster, _ *operator.Controller) {
+				tc.SetSplitScatterScheduleLimit(0)
+			},
+			counter: splitScatterDispatchDisabledCounter,
+		},
+		{
+			name: "schedule limit",
+			setupEarlyReturn: func(tc *mockcluster.Cluster, oc *operator.Controller) {
+				tc.SetSplitScatterScheduleLimit(1)
+				region := tc.GetRegion(100)
+				op := operator.NewTestOperator(
+					region.GetID(),
+					region.GetRegionEpoch(),
+					operator.OpSplitScatter|operator.OpRegion,
+					operator.TransferLeader{FromStore: 1, ToStore: 2},
+				)
+				require.True(t, oc.AddOperator(op))
+			},
+			counter: splitScatterDispatchScheduleLimitCounter,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			controller, tc, oc, cleanup := newTestSplitScatterController(t)
+			defer cleanup()
+
+			controller.RecordSplitScatterBatch(100, []uint64{101})
+			expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
+			expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
+			testCase.setupEarlyReturn(tc, oc)
+
+			expiredBefore := splitScatterPendingExpiredCount("false")
+			counterBefore := promtestutil.ToFloat64(testCase.counter)
+			controller.dispatchSplitScatterRegions()
+
+			re.Equal(0, splitScatterPendingCount(controller))
+			re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+			re.Equal(float64(2), splitScatterPendingExpiredCount("false")-expiredBefore)
+			re.Equal(float64(0), promtestutil.ToFloat64(testCase.counter)-counterBefore)
+		})
+	}
 }
 
 func TestDispatchSplitScatterRespectsScheduleDeny(t *testing.T) {
