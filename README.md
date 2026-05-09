@@ -16,8 +16,8 @@ If you're interested in contributing to PD, see [CONTRIBUTING.md](./CONTRIBUTING
 
 ## Build
 
-1. Make sure [*Go*](https://golang.org/) (version 1.23) is installed.
-2. Use `make` to install PD. `pd-server` will be installed in the `bin` directory.
+1. Make sure [*Go*](https://golang.org/) (version 1.25 or later) is installed.
+2. Run `make` (equivalent to `make build`) to build PD. `pd-server`, `pd-ctl`, and `pd-recover` will be produced in the `bin` directory.
 
 ## Usage
 
@@ -55,14 +55,14 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
         "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
-      "binary_version": "v6.1.3",
-      "git_hash": "1a4e975892512a97fb0e5b45c9be69aa76148793"
+      "binary_version": "v8.5.6",
+      "git_hash": "<git-commit-hash>"
     }
   ]
 }
 ```
 
-You can also use [httpie](https://github.com/jkbrzt/httpie) to call the API:
+You can also use [httpie](https://github.com/httpie/cli) to call the API:
 
 ```bash
 http http://${HOST_IP}:2379/pd/api/v1/members
@@ -72,7 +72,7 @@ Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE
 Access-Control-Allow-Origin: *
 Content-Length: 1003
 Content-Type: application/json; charset=UTF-8
-Date: Mon, 12 Dec 2022 13:46:33 GMT
+Date: <response-date>
 
 {
   "members": [
@@ -86,8 +86,8 @@ Date: Mon, 12 Dec 2022 13:46:33 GMT
         "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
-      "binary_version": "v6.1.3",
-      "git_hash": "1a4e975892512a97fb0e5b45c9be69aa76148793"
+      "binary_version": "v8.5.6",
+      "git_hash": "<git-commit-hash>"
     }
   ]
 }
