@@ -15,8 +15,6 @@
 package election
 
 import (
-	"context"
-	"errors"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -27,17 +25,12 @@ const (
 	metricsSubsystem    = "lease"
 	metricsLabelPurpose = "purpose"
 	metricsLabelReason  = "reason"
-	metricsLabelResult  = "result"
 )
 
 const (
 	reasonInvalidTTL      = "invalid_ttl"
 	reasonLeaseExpired    = "lease_expired"
 	reasonContextCanceled = "context_canceled"
-
-	metricsResultSuccess  = "success"
-	metricsResultError    = "error"
-	metricsResultCanceled = "canceled"
 )
 
 var (
@@ -71,47 +64,29 @@ var (
 		},
 		[]string{metricsLabelPurpose},
 	)
-
-	keepAliveRequestDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metricsNamespace,
-			Subsystem: metricsSubsystem,
-			Name:      "keepalive_request_duration_seconds",
-			Help:      "Duration of etcd Lease.KeepAliveOnce requests observed by PD, by purpose and result.",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
-		},
-		[]string{metricsLabelPurpose, metricsLabelResult},
-	)
 )
 
 func init() {
 	prometheus.MustRegister(keepAliveResponseInterval)
 	prometheus.MustRegister(renewalTerminationTotal)
 	prometheus.MustRegister(localTTLRemaining)
-	prometheus.MustRegister(keepAliveRequestDuration)
 }
 
 type leaseMetrics struct {
-	responseInterval                prometheus.Observer
-	ttlRemaining                    prometheus.Gauge
-	keepAliveRequestSuccessLatency  prometheus.Observer
-	keepAliveRequestErrorLatency    prometheus.Observer
-	keepAliveRequestCanceledLatency prometheus.Observer
-	invalidTTL                      prometheus.Counter
-	leaseExpired                    prometheus.Counter
-	contextCanceled                 prometheus.Counter
+	responseInterval prometheus.Observer
+	ttlRemaining     prometheus.Gauge
+	invalidTTL       prometheus.Counter
+	leaseExpired     prometheus.Counter
+	contextCanceled  prometheus.Counter
 }
 
 func newLeaseMetrics(purpose string) leaseMetrics {
 	return leaseMetrics{
-		responseInterval:                keepAliveResponseInterval.WithLabelValues(purpose),
-		ttlRemaining:                    localTTLRemaining.WithLabelValues(purpose),
-		keepAliveRequestSuccessLatency:  keepAliveRequestDuration.WithLabelValues(purpose, metricsResultSuccess),
-		keepAliveRequestErrorLatency:    keepAliveRequestDuration.WithLabelValues(purpose, metricsResultError),
-		keepAliveRequestCanceledLatency: keepAliveRequestDuration.WithLabelValues(purpose, metricsResultCanceled),
-		invalidTTL:                      renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
-		leaseExpired:                    renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
-		contextCanceled:                 renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
+		responseInterval: keepAliveResponseInterval.WithLabelValues(purpose),
+		ttlRemaining:     localTTLRemaining.WithLabelValues(purpose),
+		invalidTTL:       renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
+		leaseExpired:     renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
+		contextCanceled:  renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
 }
 
@@ -123,16 +98,4 @@ func (m leaseMetrics) observeRemainingTTL(remaining time.Duration) {
 		seconds = 0
 	}
 	m.ttlRemaining.Set(seconds)
-}
-
-func (m leaseMetrics) observeKeepAliveRequestDurationMetrics(duration time.Duration, err error) {
-	if err == nil {
-		m.keepAliveRequestSuccessLatency.Observe(duration.Seconds())
-		return
-	}
-	if errors.Is(err, context.Canceled) {
-		m.keepAliveRequestCanceledLatency.Observe(duration.Seconds())
-		return
-	}
-	m.keepAliveRequestErrorLatency.Observe(duration.Seconds())
 }

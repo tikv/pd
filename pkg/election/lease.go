@@ -168,6 +168,9 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 
 	keepAliveCh, err := l.lease.KeepAlive(ctx, leaseID)
 	if err != nil {
+		if ctx.Err() != nil {
+			l.metrics.contextCanceled.Inc()
+		}
 		logger.Error("lease keep alive stream failed",
 			zap.Duration("lease-timeout", l.leaseTimeout),
 			zap.Duration("expected-interval", expectedInterval),
@@ -194,10 +197,12 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				// A closed keepalive channel means the etcd client can no
 				// longer maintain this lease stream. Stop immediately rather
 				// than waiting for the watchdog deadline.
-				if ctx.Err() == nil {
-					logger.Warn("lease keep alive channel closed",
-						zap.Time("last-response-time", lastResponseTime))
+				if ctx.Err() != nil {
+					l.metrics.contextCanceled.Inc()
+					return
 				}
+				logger.Warn("lease keep alive channel closed",
+					zap.Time("last-response-time", lastResponseTime))
 				return
 			}
 			now := time.Now()
