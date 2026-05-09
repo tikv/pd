@@ -72,6 +72,7 @@ type Controller struct {
 	affinityChecker         *AffinityChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
+	splitScatter            *splitScatterController
 	pendingProcessedRegions *cache.TTLUint64
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
 	patrolRegionContext     *PatrolRegionContext
@@ -116,6 +117,12 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
+<<<<<<< HEAD
+=======
+	c.splitScatter = newSplitScatterController(ctx, cluster, opController, c.AddPendingProcessedRegions)
+	c.duration.Store(time.Duration(0))
+	return c
+>>>>>>> 38a0f9ab0a (checker, scatter, server: add load-based split-scatter with range-aware group baseline (#10621))
 }
 
 // PatrolRegions is used to scan regions.
@@ -154,7 +161,21 @@ func (c *Controller) PatrolRegions() {
 			// Check pending processed regions first.
 			c.checkPendingProcessedRegions()
 
+<<<<<<< HEAD
 			key, regions = c.checkRegions(key)
+=======
+			measure(c.metrics.patrolPhaseHistograms[phaseCheckPending], func() {
+				c.checkPendingProcessedRegions()
+			})
+
+			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
+				c.splitScatter.dispatchSplitScatterRegions()
+			})
+
+			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
+				key, regions = c.checkRegions(key)
+			})
+>>>>>>> 38a0f9ab0a (checker, scatter, server: add load-based split-scatter with range-aware group baseline (#10621))
 			if len(regions) == 0 {
 				continue
 			}

@@ -101,6 +101,7 @@ type SharedConfigProvider interface {
 	GetMaxReplicas() int
 	IsPlacementRulesEnabled() bool
 	GetAffinityScheduleLimit() uint64
+	GetSplitScatterScheduleLimit() uint64
 	GetMaxAffinityMergeRegionSize() uint64
 	GetMaxSnapshotCount() uint64
 	GetMaxPendingPeerCount() uint64
