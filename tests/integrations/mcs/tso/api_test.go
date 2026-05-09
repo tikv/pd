@@ -168,10 +168,19 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer tsoCluster.Destroy()
 	<-ch
 
+	var keyspace2ID uint32
+	testutil.Eventually(re, func() bool {
+		ks, err := pdLeaderServer.GetServer().GetKeyspaceManager().LoadKeyspace("k2")
+		if err != nil {
+			return false
+		}
+		keyspace2ID = ks.Id
+		return true
+	})
 	time.Sleep(time.Second * 1)
 	input := make(map[string]any)
 	input["new-id"] = 1
-	input["keyspaces"] = []uint32{2}
+	input["keyspaces"] = []uint32{keyspace2ID}
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, addr+"/pd/api/v2/tso/keyspace-groups/0/split", bytes.NewBuffer(jsonBody))

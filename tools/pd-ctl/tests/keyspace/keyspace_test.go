@@ -82,10 +82,13 @@ func TestKeyspace(t *testing.T) {
 	var k api.KeyspaceMeta
 	keyspaceName := "keyspace_1"
 	testutil.Eventually(re, func() bool {
+		fmt.Printf("get keyspace aaaa: %v\n", k)
 		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
 		output, err := tests.ExecuteCommand(cmd, args...)
+		fmt.Printf("get keyspace bbbb: %v,err:%+v\n", string(output), err)
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &k))
+		fmt.Printf("get keyspace ccc: %v\n", k)
 		return k.GetName() == keyspaceName
 	})
 	re.Equal(keyspaceIDs[0], k.GetId())

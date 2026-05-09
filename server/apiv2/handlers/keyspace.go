@@ -171,6 +171,7 @@ func LoadKeyspace(c *gin.Context) {
 		}
 		meta.Config[keyspace.TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(groupID), 10)
 	}
+	manager.CheckKeyspaceState(meta)
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
@@ -200,6 +201,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	manager.CheckKeyspaceState(meta)
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
 
