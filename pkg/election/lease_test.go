@@ -117,3 +117,11 @@ func TestLeaseKeepAlive(t *testing.T) {
 	<-ch
 	re.NoError(lease.Close())
 }
+
+func TestLeaseKeepAliveInterval(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(time.Second/3, getLeaseKeepAliveInterval(time.Second))
+	re.Equal(5*time.Second/3, getLeaseKeepAliveInterval(5*time.Second))
+	re.Equal(5*time.Second/3, getLeaseKeepAliveInterval(300*time.Second))
+}

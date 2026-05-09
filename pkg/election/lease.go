@@ -34,6 +34,8 @@ const (
 	revokeLeaseTimeout = time.Second
 	requestTimeout     = etcdutil.DefaultRequestTimeout
 	slowRequestTime    = etcdutil.DefaultSlowRequestTime
+	// maxLeaseKeepAliveInterval keeps the default 5-second lease renewal cadence as an upper bound.
+	maxLeaseKeepAliveInterval = 5 * time.Second / 3
 )
 
 // Lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -156,7 +158,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
+	timeCh := l.keepAliveWorker(ctx, getLeaseKeepAliveInterval(l.leaseTimeout))
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -218,6 +220,14 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			return
 		}
 	}
+}
+
+func getLeaseKeepAliveInterval(leaseTimeout time.Duration) time.Duration {
+	interval := leaseTimeout / 3
+	if interval > maxLeaseKeepAliveInterval {
+		return maxLeaseKeepAliveInterval
+	}
+	return interval
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
