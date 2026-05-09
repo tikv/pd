@@ -16,10 +16,16 @@ package server
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -58,3 +64,64 @@ func TestCleanupClusterResources(t *testing.T) {
 	re.Nil(s.hbStreams)
 	re.Nil(s.storage)
 }
+
+func TestRegionHeartbeatReturnsNotBootstrappedWhenHeartbeatStreamsMissing(t *testing.T) {
+	re := require.New(t)
+	cluster := &Cluster{BasicCluster: core.NewBasicCluster()}
+	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "store-1"}))
+	service := &Service{Server: &Server{service: &Service{}, hbStreams: nil}}
+	service.service = service
+	service.cluster.Store(cluster)
+
+	stream := &mockRegionHeartbeatStream{
+		recvs: []*schedulingpb.RegionHeartbeatRequest{{
+			Leader: &metapb.Peer{StoreId: 1},
+			Region: &metapb.Region{Id: 1},
+		}},
+	}
+
+	err := service.RegionHeartbeat(stream)
+	re.NoError(err)
+	re.Len(stream.sent, 1)
+	re.Equal(schedulingpb.ErrorType_NOT_BOOTSTRAPPED, stream.sent[0].GetHeader().GetError().GetType())
+}
+
+func TestStoreHeartbeatReturnsNotBootstrappedWhenMetaWatcherMissing(t *testing.T) {
+	re := require.New(t)
+	service := &Service{Server: &Server{service: &Service{}, metaWatcher: nil}}
+	service.service = service
+	service.cluster.Store(&Cluster{BasicCluster: core.NewBasicCluster()})
+
+	resp, err := service.StoreHeartbeat(context.Background(), &schedulingpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1},
+	})
+	re.NoError(err)
+	re.Equal(schedulingpb.ErrorType_NOT_BOOTSTRAPPED, resp.GetHeader().GetError().GetType())
+}
+
+type mockRegionHeartbeatStream struct {
+	schedulingpb.Scheduling_RegionHeartbeatServer
+	recvs []*schedulingpb.RegionHeartbeatRequest
+	sent  []*schedulingpb.RegionHeartbeatResponse
+}
+
+func (m *mockRegionHeartbeatStream) Send(resp *schedulingpb.RegionHeartbeatResponse) error {
+	m.sent = append(m.sent, resp)
+	return nil
+}
+
+func (m *mockRegionHeartbeatStream) Recv() (*schedulingpb.RegionHeartbeatRequest, error) {
+	if len(m.recvs) == 0 {
+		return nil, io.EOF
+	}
+	req := m.recvs[0]
+	m.recvs = m.recvs[1:]
+	return req, nil
+}
+
+func (*mockRegionHeartbeatStream) SetHeader(metadata.MD) error  { return nil }
+func (*mockRegionHeartbeatStream) SendHeader(metadata.MD) error { return nil }
+func (*mockRegionHeartbeatStream) SetTrailer(metadata.MD)       {}
+func (*mockRegionHeartbeatStream) Context() context.Context     { return context.Background() }
+func (*mockRegionHeartbeatStream) SendMsg(any) error            { return nil }
+func (*mockRegionHeartbeatStream) RecvMsg(any) error            { return nil }

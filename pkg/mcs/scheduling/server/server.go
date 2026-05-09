@@ -602,12 +602,12 @@ func (s *Server) stopWatcher() {
 }
 
 func (s *Server) cleanupClusterResources() {
+	s.cluster.Store((*Cluster)(nil))
 	s.stopWatcher()
 	if s.hbStreams != nil {
 		s.hbStreams.Close()
 		s.hbStreams = nil
 	}
-	s.cluster.Store((*Cluster)(nil))
 	s.basicCluster = nil
 	s.storage = nil
 }
