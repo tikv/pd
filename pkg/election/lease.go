@@ -158,7 +158,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	timeCh := l.keepAliveWorker(ctx, leaseKeepAliveInterval, leaseKeepAliveInterval)
+	timeCh := l.keepAliveWorker(ctx)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -223,17 +223,17 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *Lease) keepAliveWorker(ctx context.Context, interval, timeout time.Duration) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
 		defer logutil.LogPanic()
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(leaseKeepAliveInterval)
 		defer ticker.Stop()
 
 		logger := log.With(zap.String("purpose", l.purpose),
 			zap.Int64("lease-id", int64(l.GetID())),
-			zap.Duration("interval", interval))
+			zap.Duration("interval", leaseKeepAliveInterval))
 		logger.Info("start lease keep alive worker")
 		defer logger.Info("stop lease keep alive worker")
 
@@ -249,7 +249,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval, timeout time.Dura
 			go func() {
 				defer logutil.LogPanic()
 
-				ctx1, cancel := context.WithTimeout(ctx, timeout)
+				ctx1, cancel := context.WithTimeout(ctx, leaseKeepAliveInterval)
 				defer cancel()
 				// Record the start time of the `KeepAliveOnce` request to track the request duration
 				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
@@ -263,7 +263,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval, timeout time.Dura
 				tickInterval := requestStart.Sub(lastRequestStart)
 				l.metrics.tickInterval.Observe(tickInterval.Seconds())
 				// If the interval is too long, log a warning to indicate the potential runtime schedule delay.
-				if tickInterval > interval*2 {
+				if tickInterval > leaseKeepAliveInterval*2 {
 					logger.Warn("the interval between keeping alive lease is too long",
 						zap.Time("start", start),
 						zap.Time("current-time", requestStart),
