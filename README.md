@@ -59,7 +59,7 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
       ],
       "deploy_path": "/",
       "binary_version": "v8.5.6",
-      "git_hash": "<git-commit-hash>"
+      "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
     }
   ],
   "leader": {
@@ -73,7 +73,7 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
-    "git_hash": "<git-commit-hash>"
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
   },
   "etcd_leader": {
     "name": "pd",
@@ -86,7 +86,7 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
-    "git_hash": "<git-commit-hash>"
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
   }
 }
 ```
@@ -119,7 +119,7 @@ Date: <response-date>
       ],
       "deploy_path": "/",
       "binary_version": "v8.5.6",
-      "git_hash": "<git-commit-hash>"
+      "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
     }
   ],
   "leader": {
@@ -133,7 +133,7 @@ Date: <response-date>
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
-    "git_hash": "<git-commit-hash>"
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
   },
   "etcd_leader": {
     "name": "pd",
@@ -146,7 +146,7 @@ Date: <response-date>
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
-    "git_hash": "<git-commit-hash>"
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
   }
 }
 ```
