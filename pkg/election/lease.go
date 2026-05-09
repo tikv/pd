@@ -31,11 +31,14 @@ import (
 )
 
 const (
+	// DefaultLeaderLease is the default election leader lease in seconds.
+	DefaultLeaderLease = int64(5)
+
 	revokeLeaseTimeout = time.Second
 	requestTimeout     = etcdutil.DefaultRequestTimeout
 	slowRequestTime    = etcdutil.DefaultSlowRequestTime
-	// maxLeaseKeepAliveInterval keeps the default 5-second lease renewal cadence as an upper bound.
-	maxLeaseKeepAliveInterval = 5 * time.Second / 3
+	// maxLeaseKeepAliveInterval keeps the default leader lease renewal cadence as an upper bound.
+	maxLeaseKeepAliveInterval = time.Duration(DefaultLeaderLease) * time.Second / 3
 )
 
 // Lease is used as the low-level mechanism for campaigning and renewing elected leadership.
