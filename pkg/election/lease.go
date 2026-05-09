@@ -80,6 +80,7 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 	l.ID.Store(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
+	localTTLRemaining.register(l)
 	return nil
 }
 
@@ -90,7 +91,7 @@ func (l *Lease) Close() error {
 	}
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
-	l.metrics.ttlRemaining.Set(0)
+	localTTLRemaining.unregister(l)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
@@ -159,7 +160,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			l.metrics.observeRemainingTTL(maxExpire.Sub(now))
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			actualExpire := l.loadExpireTime()
@@ -171,7 +171,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				l.metrics.contextCanceled.Inc()
 				return
 			}
-			l.metrics.observeRemainingTTL(time.Until(actualExpire))
 			l.metrics.leaseExpired.Inc()
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
 			return
@@ -197,7 +196,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 		lastTime := time.Now()
 		for {
 			start := time.Now()
-			if start.Sub(lastTime) > interval*2 {
+			tickInterval := start.Sub(lastTime)
+			l.metrics.tickInterval.Observe(tickInterval.Seconds())
+			if tickInterval > interval*2 {
 				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
 			}
 			go func(start time.Time) {

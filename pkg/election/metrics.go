@@ -17,6 +17,8 @@ package election
 import (
 	"context"
 	"errors"
+	"maps"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,6 +40,12 @@ const (
 	metricsResultSuccess  = "success"
 	metricsResultError    = "error"
 	metricsResultCanceled = "canceled"
+
+	// Per-Lease GaugeFunc registered at Grant time computes time.Until(expireTime)
+	// on every scrape, so the metric reflects the actual decay of the lease
+	// between renewals instead of being frozen at TTL.
+	localTTLRemainingName = "local_ttl_remaining_seconds"
+	localTTLRemainingHelp = "PD local estimate of remaining lease TTL, computed at scrape time as time.Until(expireTime), clamped to 0."
 )
 
 var (
@@ -62,16 +70,6 @@ var (
 		[]string{metricsLabelPurpose, metricsLabelReason},
 	)
 
-	localTTLRemaining = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: metricsNamespace,
-			Subsystem: metricsSubsystem,
-			Name:      "local_ttl_remaining_seconds",
-			Help:      "PD local estimate of remaining lease TTL, updated on every keepalive response and on keepalive timeout firing; not etcd authoritative TTL.",
-		},
-		[]string{metricsLabelPurpose},
-	)
-
 	keepAliveRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
@@ -82,6 +80,19 @@ var (
 		},
 		[]string{metricsLabelPurpose, metricsLabelResult},
 	)
+
+	keepAliveTickInterval = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metricsNamespace,
+			Subsystem: metricsSubsystem,
+			Name:      "keepalive_tick_interval_seconds",
+			Help:      "Interval between consecutive iterations of the lease keepalive worker loop, by purpose. Spikes correlate with the `the interval between keeping alive lease is too long` warning.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
+		},
+		[]string{metricsLabelPurpose},
+	)
+
+	localTTLRemaining = newLocalTTLRemainingCollector()
 )
 
 func init() {
@@ -89,14 +100,15 @@ func init() {
 	prometheus.MustRegister(renewalTerminationTotal)
 	prometheus.MustRegister(localTTLRemaining)
 	prometheus.MustRegister(keepAliveRequestDuration)
+	prometheus.MustRegister(keepAliveTickInterval)
 }
 
 type leaseMetrics struct {
 	responseInterval                prometheus.Observer
-	ttlRemaining                    prometheus.Gauge
 	keepAliveRequestSuccessLatency  prometheus.Observer
 	keepAliveRequestErrorLatency    prometheus.Observer
 	keepAliveRequestCanceledLatency prometheus.Observer
+	tickInterval                    prometheus.Observer
 	invalidTTL                      prometheus.Counter
 	leaseExpired                    prometheus.Counter
 	contextCanceled                 prometheus.Counter
@@ -105,24 +117,74 @@ type leaseMetrics struct {
 func newLeaseMetrics(purpose string) leaseMetrics {
 	return leaseMetrics{
 		responseInterval:                keepAliveResponseInterval.WithLabelValues(purpose),
-		ttlRemaining:                    localTTLRemaining.WithLabelValues(purpose),
 		keepAliveRequestSuccessLatency:  keepAliveRequestDuration.WithLabelValues(purpose, metricsResultSuccess),
 		keepAliveRequestErrorLatency:    keepAliveRequestDuration.WithLabelValues(purpose, metricsResultError),
 		keepAliveRequestCanceledLatency: keepAliveRequestDuration.WithLabelValues(purpose, metricsResultCanceled),
+		tickInterval:                    keepAliveTickInterval.WithLabelValues(purpose),
 		invalidTTL:                      renewalTerminationTotal.WithLabelValues(purpose, reasonInvalidTTL),
 		leaseExpired:                    renewalTerminationTotal.WithLabelValues(purpose, reasonLeaseExpired),
 		contextCanceled:                 renewalTerminationTotal.WithLabelValues(purpose, reasonContextCanceled),
 	}
 }
 
-// observeRemainingTTL records the lease's remaining TTL into the gauge,
-// clamping non-positive durations (already expired) to 0.
-func (m leaseMetrics) observeRemainingTTL(remaining time.Duration) {
-	seconds := remaining.Seconds()
-	if seconds < 0 {
-		seconds = 0
+// localTTLRemainingCollector is a custom Prometheus collector that emits the
+// remaining lease TTL for every active Lease at scrape time. Computing the
+// value lazily means the curve naturally decays between renewals instead of
+// being frozen at the configured TTL.
+type localTTLRemainingCollector struct {
+	desc   *prometheus.Desc
+	mu     sync.Mutex
+	leases map[string]*Lease // purpose -> active Lease
+}
+
+func newLocalTTLRemainingCollector() *localTTLRemainingCollector {
+	return &localTTLRemainingCollector{
+		desc: prometheus.NewDesc(
+			prometheus.BuildFQName(metricsNamespace, metricsSubsystem, localTTLRemainingName),
+			localTTLRemainingHelp,
+			[]string{metricsLabelPurpose},
+			nil,
+		),
+		leases: make(map[string]*Lease),
 	}
-	m.ttlRemaining.Set(seconds)
+}
+
+func (c *localTTLRemainingCollector) register(l *Lease) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.leases[l.Purpose] = l
+}
+
+// unregister removes l only if it is the current registered lease for that
+// purpose. This guards against the race where a new Lease has already taken
+// over the slot before the old one's Close() runs.
+func (c *localTTLRemainingCollector) unregister(l *Lease) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.leases[l.Purpose] == l {
+		delete(c.leases, l.Purpose)
+	}
+}
+
+// Describe implements prometheus.Collector.
+func (c *localTTLRemainingCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.desc
+}
+
+// Collect implements prometheus.Collector.
+func (c *localTTLRemainingCollector) Collect(ch chan<- prometheus.Metric) {
+	c.mu.Lock()
+	snapshot := make(map[string]*Lease, len(c.leases))
+	maps.Copy(snapshot, c.leases)
+	c.mu.Unlock()
+	now := time.Now()
+	for purpose, l := range snapshot {
+		remaining := l.loadExpireTime().Sub(now).Seconds()
+		if remaining < 0 {
+			remaining = 0
+		}
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, remaining, purpose)
+	}
 }
 
 func (m leaseMetrics) observeKeepAliveRequestDurationMetrics(duration time.Duration, err error) {
