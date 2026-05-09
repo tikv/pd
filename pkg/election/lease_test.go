@@ -112,7 +112,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	lease := NewLease(client, "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(ctx, 2*time.Second)
+	ch := lease.keepAliveWorker(ctx, 2*time.Second, 2*time.Second)
 	time.Sleep(2 * time.Second)
 	<-ch
 	re.NoError(lease.Close())
@@ -124,4 +124,12 @@ func TestLeaseKeepAliveInterval(t *testing.T) {
 	re.Equal(time.Second/3, getLeaseKeepAliveInterval(time.Second))
 	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveInterval(time.Duration(DefaultLeaderLease)*time.Second))
 	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveInterval(300*time.Second))
+}
+
+func TestLeaseKeepAliveTimeout(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(time.Second/3, getLeaseKeepAliveTimeout(time.Second))
+	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveTimeout(time.Duration(DefaultLeaderLease)*time.Second))
+	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveTimeout(300*time.Second))
 }

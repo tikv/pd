@@ -161,7 +161,8 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	timeCh := l.keepAliveWorker(ctx, getLeaseKeepAliveInterval(l.leaseTimeout))
+	keepAliveInterval := getLeaseKeepAliveInterval(l.leaseTimeout)
+	timeCh := l.keepAliveWorker(ctx, keepAliveInterval, getLeaseKeepAliveTimeout(l.leaseTimeout))
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -233,8 +234,16 @@ func getLeaseKeepAliveInterval(leaseTimeout time.Duration) time.Duration {
 	return interval
 }
 
+func getLeaseKeepAliveTimeout(leaseTimeout time.Duration) time.Duration {
+	timeout := getLeaseKeepAliveInterval(leaseTimeout)
+	if leaseTimeout < timeout {
+		return leaseTimeout
+	}
+	return timeout
+}
+
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context, interval, timeout time.Duration) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
@@ -260,7 +269,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 			go func() {
 				defer logutil.LogPanic()
 
-				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
+				ctx1, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 				// Record the start time of the `KeepAliveOnce` request to track the request duration
 				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
