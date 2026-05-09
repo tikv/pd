@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/metering_sdk/config"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -176,7 +175,7 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = election.DefaultLeaderLease
+	defaultLeaderLease             = int64(5)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB

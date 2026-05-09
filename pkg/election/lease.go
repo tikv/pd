@@ -31,14 +31,11 @@ import (
 )
 
 const (
-	// DefaultLeaderLease is the default election leader lease in seconds.
-	DefaultLeaderLease = int64(5)
-
 	revokeLeaseTimeout = time.Second
 	requestTimeout     = etcdutil.DefaultRequestTimeout
 	slowRequestTime    = etcdutil.DefaultSlowRequestTime
-	// maxLeaseKeepAliveInterval keeps the default leader lease renewal cadence as an upper bound.
-	maxLeaseKeepAliveInterval = time.Duration(DefaultLeaderLease) * time.Second / 3
+	// leaseKeepAliveInterval is fixed to renew leases frequently regardless of the configured lease timeout.
+	leaseKeepAliveInterval = 500 * time.Millisecond
 )
 
 // Lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -161,8 +158,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	keepAliveInterval := getLeaseKeepAliveInterval(l.leaseTimeout)
-	timeCh := l.keepAliveWorker(ctx, keepAliveInterval, getLeaseKeepAliveTimeout(l.leaseTimeout))
+	timeCh := l.keepAliveWorker(ctx, leaseKeepAliveInterval, leaseKeepAliveInterval)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -224,22 +220,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			return
 		}
 	}
-}
-
-func getLeaseKeepAliveInterval(leaseTimeout time.Duration) time.Duration {
-	interval := leaseTimeout / 3
-	if interval > maxLeaseKeepAliveInterval {
-		return maxLeaseKeepAliveInterval
-	}
-	return interval
-}
-
-func getLeaseKeepAliveTimeout(leaseTimeout time.Duration) time.Duration {
-	timeout := getLeaseKeepAliveInterval(leaseTimeout)
-	if leaseTimeout < timeout {
-		return leaseTimeout
-	}
-	return timeout
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.

@@ -121,15 +121,5 @@ func TestLeaseKeepAlive(t *testing.T) {
 func TestLeaseKeepAliveInterval(t *testing.T) {
 	re := require.New(t)
 
-	re.Equal(time.Second/3, getLeaseKeepAliveInterval(time.Second))
-	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveInterval(time.Duration(DefaultLeaderLease)*time.Second))
-	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveInterval(300*time.Second))
-}
-
-func TestLeaseKeepAliveTimeout(t *testing.T) {
-	re := require.New(t)
-
-	re.Equal(time.Second/3, getLeaseKeepAliveTimeout(time.Second))
-	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveTimeout(time.Duration(DefaultLeaderLease)*time.Second))
-	re.Equal(time.Duration(DefaultLeaderLease)*time.Second/3, getLeaseKeepAliveTimeout(300*time.Second))
+	re.Equal(500*time.Millisecond, leaseKeepAliveInterval)
 }
