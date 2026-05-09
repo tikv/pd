@@ -52,10 +52,10 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
       "name": "pd",
       "member_id": 15980934438217023866,
       "peer_urls": [
-        "http://<host-ip>:2380"
+        "http://192.168.199.105:2380"
       ],
       "client_urls": [
-        "http://<host-ip>:2379"
+        "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
       "binary_version": "v8.5.6",
@@ -66,10 +66,10 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
     "name": "pd",
     "member_id": 15980934438217023866,
     "peer_urls": [
-      "http://<host-ip>:2380"
+      "http://192.168.199.105:2380"
     ],
     "client_urls": [
-      "http://<host-ip>:2379"
+      "http://192.168.199.105:2379"
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
@@ -79,10 +79,10 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
     "name": "pd",
     "member_id": 15980934438217023866,
     "peer_urls": [
-      "http://<host-ip>:2380"
+      "http://192.168.199.105:2380"
     ],
     "client_urls": [
-      "http://<host-ip>:2379"
+      "http://192.168.199.105:2379"
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
@@ -112,10 +112,10 @@ Date: <response-date>
       "name": "pd",
       "member_id": 15980934438217023866,
       "peer_urls": [
-        "http://<host-ip>:2380"
+        "http://192.168.199.105:2380"
       ],
       "client_urls": [
-        "http://<host-ip>:2379"
+        "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
       "binary_version": "v8.5.6",
@@ -126,10 +126,10 @@ Date: <response-date>
     "name": "pd",
     "member_id": 15980934438217023866,
     "peer_urls": [
-      "http://<host-ip>:2380"
+      "http://192.168.199.105:2380"
     ],
     "client_urls": [
-      "http://<host-ip>:2379"
+      "http://192.168.199.105:2379"
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
@@ -139,10 +139,10 @@ Date: <response-date>
     "name": "pd",
     "member_id": 15980934438217023866,
     "peer_urls": [
-      "http://<host-ip>:2380"
+      "http://192.168.199.105:2380"
     ],
     "client_urls": [
-      "http://<host-ip>:2379"
+      "http://192.168.199.105:2379"
     ],
     "deploy_path": "/",
     "binary_version": "v8.5.6",
