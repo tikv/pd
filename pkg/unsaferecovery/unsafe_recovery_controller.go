@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,6 +47,12 @@ type stage int
 const (
 	storeRequestInterval = time.Second * 40
 )
+
+var globalRecoveryStep = uint64(time.Now().UnixNano())
+
+func nextRecoveryStep() uint64 {
+	return atomic.AddUint64(&globalRecoveryStep, 1)
+}
 
 // Stage transition graph: for more details, please check `Controller.HandleStoreHeartbeat()`
 //
@@ -122,10 +129,11 @@ type Controller struct {
 	cluster cluster
 	stage   stage
 	// the round of recovery, which is an increasing number to identify the reports of each round
-	step         uint64
-	failedStores map[uint64]struct{}
-	timeout      time.Time
-	autoDetect   bool
+	step              uint64
+	recoveryStartStep uint64
+	failedStores      map[uint64]struct{}
+	timeout           time.Time
+	autoDetect        bool
 
 	// collected reports from store, if not reported yet, it would be nil
 	storeReports      map[uint64]*pdpb.StoreReport
@@ -169,6 +177,7 @@ func NewController(cluster cluster) *Controller {
 func (u *Controller) reset() {
 	u.stage = Idle
 	u.step = 0
+	u.recoveryStartStep = 0
 	u.failedStores = make(map[uint64]struct{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
@@ -237,9 +246,26 @@ func (u *Controller) RemoveFailedStores(failedStores map[uint64]struct{}, timeou
 	}
 
 	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
+	u.step = nextRecoveryStep()
+	u.recoveryStartStep = u.step
 	u.failedStores = failedStores
 	u.autoDetect = autoDetect
 	u.changeStage(CollectReport)
+	return nil
+}
+
+// AbortFailedStoresRemoval aborts the current unsafe recovery process in a best-effort way.
+// It asks TiKV to exit force leader by dispatching empty recovery plans, but any plan that
+// has already been delivered to TiKV may keep running until TiKV finishes or times it out.
+func (u *Controller) AbortFailedStoresRemoval() error {
+	u.Lock()
+	defer u.Unlock()
+
+	if !isRunning(u.stage) {
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no ongoing unsafe recovery")
+	}
+
+	u.handleErr(errors.New("aborted by operator"))
 	return nil
 }
 
@@ -550,8 +576,9 @@ func (u *Controller) changeStage(stage stage) {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
 		}
 	case Finished:
-		if u.step > 1 {
-			// == 1 means no operation has done, no need to invalid cache
+		if u.step > u.recoveryStartStep+1 {
+			// Only CollectReport has finished when step == recoveryStartStep+1,
+			// which means no operation has done and no cache invalidation is needed.
 			u.cluster.ResetRegionCache()
 		}
 		output.Info = "Unsafe recovery Finished"

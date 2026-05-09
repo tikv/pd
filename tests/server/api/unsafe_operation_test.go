@@ -93,6 +93,9 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, testutil.StatusOK(re))
 	re.NoError(err)
 
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores/abort", nil, testutil.StatusOK(re))
+	re.NoError(err)
+
 	// Test show
 	var output []unsaferecovery.StageOutput
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/remove-failed-stores/show", &output)
