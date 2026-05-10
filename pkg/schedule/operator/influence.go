@@ -142,10 +142,10 @@ func (s *StoreInfluence) AddStepCost(limitType storelimit.Type, cost int64) {
 }
 
 // AdjustStepCost adjusts the step cost of specific type store limit according to region size
-func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSize int64) {
-	if regionSize > storelimit.SmallRegionThreshold {
+func (s *StoreInfluence) AdjustStepCost(limitType storelimit.Type, regionSizeKb int64) {
+	if regionSizeKb > storelimit.SmallRegionThreshold {
 		s.AddStepCost(limitType, storelimit.RegionInfluence[limitType])
-	} else if regionSize > core.EmptyRegionApproximateSize {
+	} else if regionSizeKb > core.EmptyRegionApproximateSize {
 		s.AddStepCost(limitType, storelimit.SmallRegionInfluence[limitType])
 	}
 }

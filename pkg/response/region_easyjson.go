@@ -368,6 +368,12 @@ func easyjson75d7afa0DecodeGithubComTikvPdPkgResponse2(in *jlexer.Lexer, out *Re
 			} else {
 				out.ApproximateSize = int64(in.Int64())
 			}
+		case "approximate_size_kb":
+			if in.IsNull() {
+				in.Skip()
+			} else {
+				out.ApproximateSizeKb = int64(in.Int64())
+			}
 		case "approximate_keys":
 			if in.IsNull() {
 				in.Skip()
@@ -543,6 +549,11 @@ func easyjson75d7afa0EncodeGithubComTikvPdPkgResponse2(out *jwriter.Writer, in R
 		const prefix string = ",\"approximate_size\":"
 		out.RawString(prefix)
 		out.Int64(int64(in.ApproximateSize))
+	}
+	{
+		const prefix string = ",\"approximate_size_kb\":"
+		out.RawString(prefix)
+		out.Int64(int64(in.ApproximateSizeKb))
 	}
 	{
 		const prefix string = ",\"approximate_keys\":"

@@ -2416,7 +2416,11 @@ func newTestRegionMeta(regionID uint64) *metapb.Region {
 }
 
 func checkRegion(re *require.Assertions, a *core.RegionInfo, b *core.RegionInfo) {
-	re.Equal(b, a)
+	if a != nil && b != nil {
+		re.Equal(b.Clone(), a.Clone())
+	} else {
+		re.Equal(b, a)
+	}
 	re.Equal(b.GetMeta(), a.GetMeta())
 	re.Equal(b.GetLeader(), a.GetLeader())
 	re.Equal(b.GetPeers(), a.GetPeers())

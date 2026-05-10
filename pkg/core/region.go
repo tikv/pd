@@ -82,6 +82,7 @@ type RegionInfo struct {
 	readBytes                 uint64
 	readKeys                  uint64
 	approximateSize           int64
+	approximateSizeKb         int64
 	approximateKvSize         int64 // Unit: MiB
 	approximateColumnarKvSize int64 // Unit: MiB
 	approximateKeys           int64
@@ -188,7 +189,7 @@ func (r *RegionInfo) rangeEqualsTo(region *RegionInfo) bool {
 
 const (
 	// EmptyRegionApproximateSize is the region approximate size of an empty region
-	// (heartbeat size <= 1MB).
+	// (heartbeat size <= 1KB).
 	EmptyRegionApproximateSize = 1
 	// ImpossibleFlowSize is an impossible flow size (such as written_bytes, read_keys, etc.)
 	// It may be caused by overflow, refer to https://github.com/tikv/pd/issues/3379.
@@ -222,6 +223,7 @@ type RegionHeartbeatRequest interface {
 	GetInterval() *pdpb.TimeInterval
 	GetQueryStats() *pdpb.QueryStats
 	GetApproximateSize() uint64
+	GetApproximateSizeKb() uint64
 	GetApproximateKeys() uint64
 	GetBucketMeta() *metapb.BucketMeta
 }
@@ -229,30 +231,29 @@ type RegionHeartbeatRequest interface {
 // RegionFromHeartbeat constructs a Region from region heartbeat.
 func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint64) *RegionInfo {
 	// Convert unit to MB.
-	// If region isn't empty and less than 1MB, use 1MB instead.
-	// The size and keys of empty region will be corrected by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
-	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
-		regionSize = EmptyRegionApproximateSize
-	}
 
 	region := &RegionInfo{
-		term:             heartbeat.GetTerm(),
-		meta:             heartbeat.GetRegion(),
-		leader:           heartbeat.GetLeader(),
-		downPeers:        heartbeat.GetDownPeers(),
-		pendingPeers:     heartbeat.GetPendingPeers(),
-		writtenBytes:     heartbeat.GetBytesWritten(),
-		writtenKeys:      heartbeat.GetKeysWritten(),
-		readBytes:        heartbeat.GetBytesRead(),
-		readKeys:         heartbeat.GetKeysRead(),
-		approximateSize:  int64(regionSize),
-		approximateKeys:  int64(heartbeat.GetApproximateKeys()),
-		interval:         heartbeat.GetInterval(),
-		queryStats:       heartbeat.GetQueryStats(),
-		source:           Heartbeat,
-		flowRoundDivisor: flowRoundDivisor,
-		bucketMeta:       heartbeat.GetBucketMeta(),
+		term:              heartbeat.GetTerm(),
+		meta:              heartbeat.GetRegion(),
+		leader:            heartbeat.GetLeader(),
+		downPeers:         heartbeat.GetDownPeers(),
+		pendingPeers:      heartbeat.GetPendingPeers(),
+		writtenBytes:      heartbeat.GetBytesWritten(),
+		writtenKeys:       heartbeat.GetKeysWritten(),
+		readBytes:         heartbeat.GetBytesRead(),
+		readKeys:          heartbeat.GetKeysRead(),
+		approximateSize:   int64(regionSize),
+		approximateSizeKb: int64(heartbeat.GetApproximateSizeKb()),
+		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
+		interval:          heartbeat.GetInterval(),
+		queryStats:        heartbeat.GetQueryStats(),
+		source:            Heartbeat,
+		flowRoundDivisor:  flowRoundDivisor,
+		bucketMeta:        heartbeat.GetBucketMeta(),
+	}
+	if region.approximateSizeKb == 0 {
+		region.approximateSizeKb = int64((heartbeat.GetApproximateSize() + 1023) / 1024)
 	}
 
 	// scheduling service doesn't need the following fields.
@@ -296,12 +297,14 @@ func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
 	// - size=1, keys=0: Truly empty region
 	// - size>1, keys>0: Region has data
 	// Ref: https://github.com/tikv/tikv/pull/19181
-	if r.GetApproximateSize() == 0 {
+	if r.approximateSize == 0 && r.approximateSizeKb == 0 && r.GetApproximateKeys() == 0 {
 		if origin != nil {
 			r.approximateSize = origin.approximateSize
+			r.approximateSizeKb = origin.approximateSizeKb
 			r.approximateKeys = origin.approximateKeys
 		} else {
-			r.approximateSize = EmptyRegionApproximateSize
+			r.approximateSize = 0
+			r.approximateSizeKb = EmptyRegionApproximateSize
 		}
 	}
 	if bucketEnable && origin != nil && atomic.LoadPointer(&r.reportBuckets) == nil {
@@ -334,6 +337,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		readBytes:                 r.readBytes,
 		readKeys:                  r.readKeys,
 		approximateSize:           r.approximateSize,
+		approximateSizeKb:         r.approximateSizeKb,
 		approximateKvSize:         r.approximateKvSize,
 		approximateColumnarKvSize: r.approximateColumnarKvSize,
 		approximateKeys:           r.approximateKeys,
@@ -698,9 +702,23 @@ func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
 	return r.approximateSize
 }
 
+// GetStorePeerApproximateSizeKb returns the approximate size (in KB) of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateSizeKb(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateSizeKb
+}
+
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
+}
+
+// GetApproximateSizeKb returns the approximate size (in KB) of the region.
+func (r *RegionInfo) GetApproximateSizeKb() int64 {
+	return r.approximateSizeKb
 }
 
 // GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.

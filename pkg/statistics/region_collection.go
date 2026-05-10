@@ -214,7 +214,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	pendingPeers := region.GetPendingPeers()
 	learners := region.GetLearners()
 	voters := region.GetVoters()
-	regionSize := region.GetApproximateSize()
+	regionSize := region.GetApproximateSizeKb()
 	regionMaxSize := int64(r.conf.GetRegionMaxSize())
 	regionMaxKeys := int64(r.conf.GetRegionMaxKeys())
 	maxMergeRegionSize := int64(r.conf.GetMaxMergeRegionSize())

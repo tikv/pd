@@ -59,10 +59,12 @@ type StoreStatus struct {
 	LeaderWeight           float64            `json:"leader_weight"`
 	LeaderScore            float64            `json:"leader_score"`
 	LeaderSize             int64              `json:"leader_size"`
+	LeaderSizeKb           int64              `json:"leader_size_kb"`
 	RegionCount            int                `json:"region_count"`
 	RegionWeight           float64            `json:"region_weight"`
 	RegionScore            float64            `json:"region_score"`
 	RegionSize             int64              `json:"region_size"`
+	RegionSizeKb           int64              `json:"region_size_kb"`
 	LearnerCount           int                `json:"learner_count,omitempty"`
 	WitnessCount           int                `json:"witness_count,omitempty"`
 	PendingPeerCount       int                `json:"pending_peer_count,omitempty"`
@@ -112,10 +114,12 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			LeaderWeight:           store.GetLeaderWeight(),
 			LeaderScore:            store.LeaderScore(constant.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
 			LeaderSize:             store.GetLeaderSize(),
+			LeaderSizeKb:           store.GetLeaderSizeKb(),
 			RegionCount:            store.GetRegionCount(),
 			RegionWeight:           store.GetRegionWeight(),
 			RegionScore:            store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
 			RegionSize:             store.GetRegionSize(),
+			RegionSizeKb:           store.GetRegionSizeKb(),
 			LearnerCount:           store.GetLearnerCount(),
 			WitnessCount:           store.GetWitnessCount(),
 			SlowScore:              store.GetSlowScore(),

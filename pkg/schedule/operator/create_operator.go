@@ -171,7 +171,7 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		}
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
-	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, region.GetApproximateSize(), step)
+	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind, region.GetApproximateSizeKb(), step)
 	op.SetAdditionalInfo("region-start-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey())))
 	op.SetAdditionalInfo("region-end-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey())))
 	return op, nil
@@ -211,8 +211,8 @@ func CreateMergeRegionOperator(desc string, ci sche.SharedCluster, source *core.
 	})
 
 	brief := fmt.Sprintf("merge: region %v to %v", source.GetID(), target.GetID())
-	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind, source.GetApproximateSize(), steps...)
-	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind, target.GetApproximateSize(), MergeRegion{
+	op1 := NewOperator(desc, brief, source.GetID(), source.GetRegionEpoch(), kind, source.GetApproximateSizeKb(), steps...)
+	op2 := NewOperator(desc, brief, target.GetID(), target.GetRegionEpoch(), kind, target.GetApproximateSizeKb(), MergeRegion{
 		FromRegion: source.GetMeta(),
 		ToRegion:   target.GetMeta(),
 		IsPassive:  true,
@@ -339,7 +339,7 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 	}
 
 	b.execChangePeerV2(false, true)
-	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSize(), b.steps...), nil
+	return NewOperator(b.desc, brief, b.regionID, b.regionEpoch, kind, origin.GetApproximateSizeKb(), b.steps...), nil
 }
 
 // CreateWitnessPeerOperator creates an operator that set a follower or learner peer with witness

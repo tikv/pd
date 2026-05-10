@@ -405,8 +405,18 @@ func (s *StoreInfo) GetLeaderSize() int64 {
 	return s.leaderSize
 }
 
+// GetLeaderSizeKb returns the leader size (in KB) of the store.
+func (s *StoreInfo) GetLeaderSizeKb() int64 {
+	return s.leaderSize
+}
+
 // GetRegionSize returns the Region size of the store.
 func (s *StoreInfo) GetRegionSize() int64 {
+	return s.regionSize
+}
+
+// GetRegionSizeKb returns the Region size (in KB) of the store.
+func (s *StoreInfo) GetRegionSizeKb() int64 {
 	return s.regionSize
 }
 
