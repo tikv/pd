@@ -2350,6 +2350,11 @@ func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
 	if currentRegion == nil {
 		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(RegionToHexMeta(region)))
 	}
+	if currentRegion.GetID() != region.GetId() {
+		return errors.Errorf("region id mismatch, request region: %v, current region: %v",
+			logutil.RedactStringer(RegionToHexMeta(region)),
+			logutil.RedactStringer(RegionToHexMeta(currentRegion.GetMeta())))
+	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	regionEpoch := region.GetRegionEpoch()
 	currentEpoch := currentRegion.GetMeta().GetRegionEpoch()

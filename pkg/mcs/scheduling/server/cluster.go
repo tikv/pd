@@ -165,6 +165,11 @@ func (c *Cluster) GetCoordinator() *schedule.Coordinator {
 	return c.coordinator
 }
 
+// SendRegionHeartbeatMessage sends an operation to the target region through heartbeat stream.
+func (c *Cluster) SendRegionHeartbeatMessage(region *core.RegionInfo, op *hbstream.Operation) {
+	c.coordinator.GetHeartbeatStreams().SendMsg(region, op)
+}
+
 // GetHotStat gets hot stat.
 func (c *Cluster) GetHotStat() *statistics.HotStat {
 	return c.hotStat

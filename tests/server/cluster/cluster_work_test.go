@@ -81,6 +81,8 @@ func (s *raftClusterTestSuite) checkValidRequestRegion(cluster *tests.TestCluste
 	re.Error(rc.ValidRegion(r4))
 	r5 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
 	re.NoError(rc.ValidRegion(r5))
+	r6 := &metapb.Region{Id: 2, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
+	re.ErrorContains(rc.ValidRegion(r6), "region id mismatch")
 }
 
 func (s *raftClusterTestSuite) TestAskSplit() {
