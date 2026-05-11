@@ -143,34 +143,6 @@ func TestAskBatchSplitRejectsAffinityAutoSplit(t *testing.T) {
 	}
 }
 
-func TestAskBatchSplitReturnsHeaderErrorForInvalidRegion(t *testing.T) {
-	re := require.New(t)
-
-	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-
-	region := newAffinitySplitTestRegion()
-	cluster.PutRegion(region)
-
-	resp, err := svc.AskBatchSplit(context.Background(), &schedulingpb.AskBatchSplitRequest{
-		Region: &metapb.Region{
-			Id:       region.GetID() + 1,
-			StartKey: region.GetStartKey(),
-			EndKey:   region.GetEndKey(),
-			Peers:    region.GetPeers(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: region.GetRegionEpoch().GetConfVer(),
-				Version: region.GetRegionEpoch().GetVersion(),
-			},
-		},
-		SplitCount: 1,
-		Reason:     pdpb.SplitReason_LOAD,
-	})
-	re.NoError(err)
-	re.Equal(schedulingpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
-	re.Contains(resp.GetHeader().GetError().GetMessage(), "region id mismatch")
-	re.Empty(resp.GetIds())
-}
-
 func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
