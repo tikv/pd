@@ -79,7 +79,7 @@ var (
 			Subsystem: metricsSubsystem,
 			Name:      "keepalive_request_duration_seconds",
 			Help:      "Duration of etcd Lease.KeepAliveOnce requests observed by PD, by purpose and result.",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 13),
 		},
 		[]string{metricsLabelPurpose, metricsLabelResult},
 	)
@@ -90,7 +90,7 @@ var (
 			Subsystem: metricsSubsystem,
 			Name:      "keepalive_tick_interval_seconds",
 			Help:      "Interval between consecutive iterations of the lease keepalive worker loop, by purpose. Spikes correlate with the `the interval between keeping alive lease is too long` warning.",
-			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 16),
+			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 13),
 		},
 		[]string{metricsLabelPurpose},
 	)
