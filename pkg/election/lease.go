@@ -239,7 +239,11 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 			tickInterval := start.Sub(lastTime)
 			l.metrics.tickInterval.Observe(tickInterval.Seconds())
 			if tickInterval > interval*2 {
-				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
+				log.Warn("the interval between keeping alive lease is too long",
+					zap.String("purpose", l.purpose),
+					zap.Time("last-time", lastTime),
+					zap.Duration("tick-interval", tickInterval),
+					zap.Duration("expected-interval", interval))
 			}
 			go func(start time.Time) {
 				defer logutil.LogPanic()
