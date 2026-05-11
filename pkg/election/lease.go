@@ -234,35 +234,45 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 			zap.Duration("interval", interval))
 		logger.Info("start lease keep alive worker")
 		defer logger.Info("stop lease keep alive worker")
-		var lastTime time.Time
+
+		// Although it's very unlikely, under extreme conditions (such as multiple `KeepAliveOnce`
+		// goroutines triggered in a short period of time) there may be race condition updates,
+		// so atomic.Value is used here.
+		var lastTime atomic.Value
+		lastTime.Store(time.Now())
 		for {
+			// Record the start time outside the later `KeepAliveOnce` goroutine
+			// to avoid being affected by the potential runtime schedule delay.
+			start := time.Now()
 			go func() {
 				defer logutil.LogPanic()
+
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
-				start := time.Now()
+				// Record the start time of the `KeepAliveOnce` request to track the request duration
+				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
+				requestStart := time.Now()
+				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
 				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
 
 				// Record the duration of the `KeepAliveOnce` request.
-				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(start), err)
+				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
 				// Record the interval between the consecutive `KeepAliveOnce` requests.
-				if !lastTime.IsZero() {
-					tickInterval := start.Sub(lastTime)
-					l.metrics.tickInterval.Observe(tickInterval.Seconds())
-					// If the interval is too long, log a warning.
-					if tickInterval > interval*2 {
-						logger.Warn("the interval between keeping alive lease is too long",
-							zap.Time("current-time", start),
-							zap.Time("last-time", lastTime),
-							zap.Duration("tick-interval", tickInterval))
-					}
+				tickInterval := requestStart.Sub(lastRequestStart)
+				l.metrics.tickInterval.Observe(tickInterval.Seconds())
+				// If the interval is too long, log a warning to indicate the potential runtime schedule delay.
+				if tickInterval > interval*2 {
+					logger.Warn("the interval between keeping alive lease is too long",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Time("last-time", lastRequestStart),
+						zap.Duration("tick-interval", tickInterval))
 				}
-				lastTime = start
 
 				if err != nil {
-					log.Warn("lease keep alive failed",
-						zap.Time("current-time", start),
-						zap.Time("last-time", lastTime),
+					logger.Warn("lease keep alive failed",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
 						errs.ZapError(err))
 					return
 				}
@@ -270,6 +280,10 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				// TTL. Keep this as a defensive guard for mocked or custom lease
 				// implementations that may return a successful response with an invalid TTL.
 				if res.TTL <= 0 {
+					logger.Error("lease keep alive failed with an invalid ttl value received",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Int64("ttl", res.TTL))
 					l.metrics.invalidTTL.Inc()
 					return
 				}
@@ -278,8 +292,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				case ch <- expire:
 				// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
 				case <-ctx.Done():
-					log.Info("lease keep alive once exit",
+					logger.Info("lease keep alive once exit",
 						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
 						zap.Time("expire", expire))
 				}
 			}()

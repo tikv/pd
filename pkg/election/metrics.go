@@ -93,7 +93,7 @@ var (
 			Namespace: metricsNamespace,
 			Subsystem: metricsSubsystem,
 			Name:      "keepalive_tick_interval_seconds",
-			Help:      "Interval between consecutive iterations of the lease keepalive worker loop, by purpose. Spikes correlate with the `the interval between keeping alive lease is too long` warning.",
+			Help:      "Interval between consecutive KeepAliveOnce call start times, observed inside each worker goroutine by purpose. Spikes indicate local scheduling delay (CPU starvation, GC pauses, goroutine pressure) and correlate with the `the interval between keeping alive lease is too long` warning.",
 			Buckets:   keepAliveLatencyBuckets,
 		},
 		[]string{metricsLabelPurpose},
