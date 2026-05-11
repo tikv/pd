@@ -22,6 +22,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 const (
@@ -128,9 +131,9 @@ func newLeaseMetrics(purpose string) leaseMetrics {
 }
 
 // localTTLRemainingCollector is a custom Prometheus collector that emits the
-// remaining lease TTL for every active Lease at scrape time. Computing the
-// value lazily means the curve naturally decays between renewals instead of
-// being frozen at the configured TTL.
+// remaining lease TTL per lease purpose at scrape time. Computing the value
+// lazily means the curve naturally decays between renewals instead of being
+// frozen at the configured TTL.
 type localTTLRemainingCollector struct {
 	desc   *prometheus.Desc
 	mu     sync.Mutex
@@ -151,18 +154,51 @@ func newLocalTTLRemainingCollector() *localTTLRemainingCollector {
 
 func (c *localTTLRemainingCollector) register(l *Lease) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.leases[l.Purpose] = l
+	existing, ok := c.leases[l.purpose]
+	if !ok {
+		c.leases[l.purpose] = l
+	}
+	c.mu.Unlock()
+
+	leaseID := int64(l.GetID())
+	if ok {
+		log.Warn("skipped registering a duplicate lease to the metrics collector",
+			zap.String("purpose", l.purpose),
+			zap.Int64("existing-lease-id", int64(existing.GetID())),
+			zap.Int64("new-lease-id", leaseID))
+	} else {
+		log.Info("registered a new lease to the metrics collector",
+			zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", leaseID))
+	}
 }
 
 // unregister removes l only if it is the current registered lease for that
 // purpose. This guards against the race where a new Lease has already taken
 // over the slot before the old one's Close() runs.
 func (c *localTTLRemainingCollector) unregister(l *Lease) {
+	var deleted bool
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.leases[l.Purpose] == l {
-		delete(c.leases, l.Purpose)
+	if c.leases[l.purpose] == l {
+		deleted = true
+		delete(c.leases, l.purpose)
+	}
+	existing, ok := c.leases[l.purpose]
+	c.mu.Unlock()
+	leaseID := int64(l.GetID())
+	if deleted {
+		log.Info("unregistered a lease from the metrics collector",
+			zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", leaseID))
+	} else if ok {
+		log.Warn("skipped unregistering a different lease from the metrics collector",
+			zap.String("purpose", l.purpose),
+			zap.Int64("existing-lease-id", int64(existing.GetID())),
+			zap.Int64("lease-id", leaseID))
+	} else {
+		log.Warn("skipped unregistering a non-existent lease from the metrics collector",
+			zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", leaseID))
 	}
 }
 

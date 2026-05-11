@@ -97,7 +97,7 @@ func KeepExpectedPrimaryAlive(
 		raw:    m.MemberValue(),
 		output: m.ParticipantString(),
 	}
-	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.GetID())
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		if closeErr := lease.Close(); closeErr != nil {

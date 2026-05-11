@@ -40,11 +40,11 @@ const (
 // The way to gain and maintain leadership is to update and keep the lease alive continuously.
 type Lease struct {
 	// purpose is used to show what this election for
-	Purpose string
+	purpose string
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
-	ID     atomic.Value // store as clientv3.LeaseID
+	id     atomic.Value // store as clientv3.LeaseID
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
@@ -54,11 +54,31 @@ type Lease struct {
 // NewLease creates a new Lease instance.
 func NewLease(client *clientv3.Client, purpose string) *Lease {
 	return &Lease{
-		Purpose: purpose,
+		purpose: purpose,
 		client:  client,
 		lease:   clientv3.NewLease(client),
 		metrics: newLeaseMetrics(purpose),
 	}
+}
+
+func (l *Lease) setID(id clientv3.LeaseID) {
+	if l == nil {
+		return
+	}
+	l.id.Store(id)
+}
+
+// GetID returns the underlying etcd lease ID. It returns 0 if the lease has not
+// been granted yet.
+func (l *Lease) GetID() clientv3.LeaseID {
+	if l == nil {
+		return 0
+	}
+	loaded := l.id.Load()
+	if loaded == nil {
+		return 0
+	}
+	return loaded.(clientv3.LeaseID)
 }
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
@@ -74,10 +94,15 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 		return errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
+		log.Warn("lease grants too slow",
+			zap.Duration("cost", cost),
+			zap.String("purpose", l.purpose))
 	}
-	log.Info("lease granted", zap.Int64("lease-id", int64(leaseResp.ID)), zap.Int64("lease-timeout", leaseTimeout), zap.String("purpose", l.Purpose))
-	l.ID.Store(leaseResp.ID)
+	log.Info("lease granted",
+		zap.Int64("lease-id", int64(leaseResp.ID)),
+		zap.Int64("lease-timeout", leaseTimeout),
+		zap.String("purpose", l.purpose))
+	l.setID(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
 	localTTLRemaining.register(l)
@@ -89,18 +114,18 @@ func (l *Lease) Close() error {
 	if l == nil {
 		return nil
 	}
+	localTTLRemaining.unregister(l)
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
-	localTTLRemaining.unregister(l)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
-	var leaseID clientv3.LeaseID
-	if l.ID.Load() != nil {
-		leaseID = l.ID.Load().(clientv3.LeaseID)
-	}
+	leaseID := l.GetID()
 	if _, err := l.lease.Revoke(ctx, leaseID); err != nil {
-		log.Error("revoke lease failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
+		log.Error("revoke lease failed",
+			zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", int64(leaseID)),
+			errs.ZapError(err))
 	}
 	return l.lease.Close()
 }
@@ -132,7 +157,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
-	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
+	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
 		maxExpire        time.Time
@@ -153,7 +178,11 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				// Check again to make sure the `expireTime` still needs to be updated.
 				select {
 				case <-ctx.Done():
-					log.Info("lease keep alive canceled while applying keepalive response", zap.String("purpose", l.Purpose), zap.Time("last-response-time", lastResponseTime), zap.Time("max-expire", maxExpire), zap.Error(ctx.Err()))
+					log.Info("lease keep alive canceled while applying keepalive response",
+						zap.String("purpose", l.purpose),
+						zap.Time("last-response-time", lastResponseTime),
+						zap.Time("max-expire", maxExpire),
+						zap.Error(ctx.Err()))
 					l.metrics.contextCanceled.Inc()
 					return
 				default:
@@ -167,15 +196,24 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			// cancellation. Treat that race as a clean shutdown so we don't
 			// over-count `lease_expired`.
 			if ctx.Err() != nil {
-				log.Info("lease keep alive timed out during caller cancellation", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+				log.Info("lease keep alive timed out during caller cancellation",
+					zap.Duration("timeout-duration", l.leaseTimeout),
+					zap.Time("actual-expire", actualExpire),
+					zap.String("purpose", l.purpose),
+					zap.Error(ctx.Err()))
 				l.metrics.contextCanceled.Inc()
 				return
 			}
 			l.metrics.leaseExpired.Inc()
-			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", actualExpire), zap.String("purpose", l.Purpose))
+			log.Info("keep alive lease too slow",
+				zap.Duration("timeout-duration", l.leaseTimeout),
+				zap.Time("actual-expire", actualExpire),
+				zap.String("purpose", l.purpose))
 			return
 		case <-ctx.Done():
-			log.Info("lease keep alive canceled by caller", zap.String("purpose", l.Purpose), zap.Error(ctx.Err()))
+			log.Info("lease keep alive canceled by caller",
+				zap.String("purpose", l.purpose),
+				zap.Error(ctx.Err()))
 			l.metrics.contextCanceled.Inc()
 			return
 		}
@@ -191,8 +229,10 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		log.Info("start lease keep alive worker", zap.Duration("interval", interval), zap.String("purpose", l.Purpose))
-		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
+		log.Info("start lease keep alive worker",
+			zap.Duration("interval", interval),
+			zap.String("purpose", l.purpose))
+		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.purpose))
 		lastTime := time.Now()
 		for {
 			start := time.Now()
@@ -205,15 +245,16 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				defer logutil.LogPanic()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
-				var leaseID clientv3.LeaseID
-				if l.ID.Load() != nil {
-					leaseID = l.ID.Load().(clientv3.LeaseID)
-				}
+				leaseID := l.GetID()
 				requestStart := time.Now()
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
 				if err != nil {
-					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
+					log.Warn("lease keep alive failed",
+						zap.String("purpose", l.purpose),
+						zap.Int64("lease-id", int64(leaseID)),
+						zap.Time("start", start),
+						errs.ZapError(err))
 					return
 				}
 				// KeepAliveOnce currently returns ErrLeaseNotFound for a non-positive
@@ -228,7 +269,11 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				case ch <- expire:
 				// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
 				case <-ctx.Done():
-					log.Info("lease keep alive once exit", zap.String("purpose", l.Purpose), zap.Time("start", start), zap.Time("expire", expire))
+					log.Info("lease keep alive once exit",
+						zap.String("purpose", l.purpose),
+						zap.Int64("lease-id", int64(leaseID)),
+						zap.Time("start", start),
+						zap.Time("expire", expire))
 				}
 			}(start)
 
