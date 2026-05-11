@@ -229,35 +229,40 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		log.Info("start lease keep alive worker",
-			zap.Duration("interval", interval),
-			zap.String("purpose", l.purpose))
-		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.purpose))
-		lastTime := time.Now()
+		logger := log.With(zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", int64(l.GetID())),
+			zap.Duration("interval", interval))
+		logger.Info("start lease keep alive worker")
+		defer logger.Info("stop lease keep alive worker")
+		var lastTime time.Time
 		for {
-			start := time.Now()
-			tickInterval := start.Sub(lastTime)
-			l.metrics.tickInterval.Observe(tickInterval.Seconds())
-			if tickInterval > interval*2 {
-				log.Warn("the interval between keeping alive lease is too long",
-					zap.String("purpose", l.purpose),
-					zap.Time("last-time", lastTime),
-					zap.Duration("tick-interval", tickInterval),
-					zap.Duration("expected-interval", interval))
-			}
-			go func(start time.Time) {
+			go func() {
 				defer logutil.LogPanic()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
-				leaseID := l.GetID()
-				requestStart := time.Now()
-				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
-				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
+				start := time.Now()
+				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
+
+				// Record the duration of the `KeepAliveOnce` request.
+				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(start), err)
+				// Record the interval between the consecutive `KeepAliveOnce` requests.
+				if !lastTime.IsZero() {
+					tickInterval := start.Sub(lastTime)
+					l.metrics.tickInterval.Observe(tickInterval.Seconds())
+					// If the interval is too long, log a warning.
+					if tickInterval > interval*2 {
+						logger.Warn("the interval between keeping alive lease is too long",
+							zap.Time("current-time", start),
+							zap.Time("last-time", lastTime),
+							zap.Duration("tick-interval", tickInterval))
+					}
+				}
+				lastTime = start
+
 				if err != nil {
 					log.Warn("lease keep alive failed",
-						zap.String("purpose", l.purpose),
-						zap.Int64("lease-id", int64(leaseID)),
-						zap.Time("start", start),
+						zap.Time("current-time", start),
+						zap.Time("last-time", lastTime),
 						errs.ZapError(err))
 					return
 				}
@@ -274,18 +279,15 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
 				case <-ctx.Done():
 					log.Info("lease keep alive once exit",
-						zap.String("purpose", l.purpose),
-						zap.Int64("lease-id", int64(leaseID)),
 						zap.Time("start", start),
 						zap.Time("expire", expire))
 				}
-			}(start)
+			}()
 
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				lastTime = start
 			}
 		}
 	}()
