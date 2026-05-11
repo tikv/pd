@@ -52,6 +52,10 @@ const (
 )
 
 var (
+	// keepAliveLatencyBuckets is shared by histograms that measure
+	// etcd lease-operation latencies in the 10 ms–40 s range.
+	keepAliveLatencyBuckets = prometheus.ExponentialBuckets(0.01, 2, 13)
+
 	keepAliveResponseInterval = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metricsNamespace,
@@ -79,7 +83,7 @@ var (
 			Subsystem: metricsSubsystem,
 			Name:      "keepalive_request_duration_seconds",
 			Help:      "Duration of etcd Lease.KeepAliveOnce requests observed by PD, by purpose and result.",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 13),
+			Buckets:   keepAliveLatencyBuckets,
 		},
 		[]string{metricsLabelPurpose, metricsLabelResult},
 	)
@@ -90,7 +94,7 @@ var (
 			Subsystem: metricsSubsystem,
 			Name:      "keepalive_tick_interval_seconds",
 			Help:      "Interval between consecutive iterations of the lease keepalive worker loop, by purpose. Spikes correlate with the `the interval between keeping alive lease is too long` warning.",
-			Buckets:   prometheus.ExponentialBuckets(0.01, 2, 13),
+			Buckets:   keepAliveLatencyBuckets,
 		},
 		[]string{metricsLabelPurpose},
 	)
