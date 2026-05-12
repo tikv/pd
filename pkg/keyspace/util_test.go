@@ -61,6 +61,25 @@ func TestValidateID(t *testing.T) {
 	}
 }
 
+func TestMakeRegionBound(t *testing.T) {
+	re := require.New(t)
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+
+	regionBound := MakeRegionBound(0x010203)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x03}), regionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x04}), regionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x03}), regionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x04}), regionBound.TxnRightBound)
+
+	maxRegionBound := MakeRegionBound(constant.MaxValidKeyspaceID)
+	re.Equal(encodeKey([]byte{'r', 0xff, 0xff, 0xff}), maxRegionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'s', 0x00, 0x00, 0x00}), maxRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0xff, 0xff, 0xff}), maxRegionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
+}
+
 func TestValidateName(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {

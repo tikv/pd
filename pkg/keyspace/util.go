@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"container/heap"
-	"encoding/binary"
 	"encoding/hex"
 	"regexp"
 	"strconv"
@@ -97,9 +96,9 @@ func MaskKeyspaceID(id uint32) uint32 {
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
 //	Lower bound for raw mode: ['r', 'a', 'b', 'c']
-//	Upper bound for raw mode: ['r', 'a', 'b', 'c + 1']
+//	Upper bound for raw mode: next prefix of ['r', 'a', 'b', 'c']
 //	Lower bound for txn mode: ['x', 'a', 'b', 'c']
-//	Upper bound for txn mode: ['x', 'a', 'b', 'c + 1']
+//	Upper bound for txn mode: next prefix of ['x', 'a', 'b', 'c']
 //
 // From which it shares the lower bound with keyspace with id ['a', 'b', 'c-1'].
 // And shares upper bound with keyspace with id ['a', 'b', 'c + 1'].
@@ -114,16 +113,33 @@ type RegionBound struct {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-	keyspaceIDBytes := make([]byte, 4)
-	nextKeyspaceIDBytes := make([]byte, 4)
-	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
-	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
+	rawLeftBound := makeKeyspaceModePrefix('r', id)
+	rawRightBound := nextKeyspaceModePrefix(rawLeftBound)
+	txnLeftBound := makeKeyspaceModePrefix('x', id)
+	txnRightBound := nextKeyspaceModePrefix(txnLeftBound)
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)),
-		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),
-		TxnLeftBound:  codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...)),
-		TxnRightBound: codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...)),
+		RawLeftBound:  codec.EncodeBytes(rawLeftBound),
+		RawRightBound: codec.EncodeBytes(rawRightBound),
+		TxnLeftBound:  codec.EncodeBytes(txnLeftBound),
+		TxnRightBound: codec.EncodeBytes(txnRightBound),
 	}
+}
+
+func makeKeyspaceModePrefix(mode byte, id uint32) []byte {
+	return []byte{mode, byte(id >> 16), byte(id >> 8), byte(id)}
+}
+
+func nextKeyspaceModePrefix(prefix []byte) []byte {
+	next := append([]byte(nil), prefix...)
+	for i := len(next) - 1; i >= 0; i-- {
+		if next[i] == 0xff {
+			next[i] = 0
+			continue
+		}
+		next[i]++
+		return next
+	}
+	return nil
 }
 
 // MakeKeyRanges encodes keyspace ID to correct LabelRule data.
