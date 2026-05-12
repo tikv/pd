@@ -176,6 +176,17 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// status may be left, and these regions need to be checked with higher
 	// priority.
 	c.AddPendingProcessedRegions(false, recordRegions...)
+<<<<<<< HEAD
+=======
+	if request.GetReason() == pdpb.SplitReason_LOAD {
+		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
+			reqRegion.GetId(),
+			// Wait until PD observes the source region version advanced by the split.
+			reqRegion.GetRegionEpoch().GetVersion()+1,
+			newRegionIDs,
+		)
+	}
+>>>>>>> 428acf2854 (server,mcs: pass split reason to scheduling service (#10652))
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
 
