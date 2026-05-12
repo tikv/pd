@@ -224,6 +224,14 @@ type RegionHeartbeatRequest interface {
 	GetApproximateSize() uint64
 	GetApproximateKeys() uint64
 	GetBucketMeta() *metapb.BucketMeta
+	GetCpuUsage() uint64
+	GetCpuStats() *pdpb.CPUStats
+}
+
+type regionHeartbeatExtraFields interface {
+	GetApproximateKvSize() uint64
+	GetApproximateColumnarKvSize() uint64
+	GetReplicationStatus() *replication_modepb.RegionReplicationStatus
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
@@ -253,15 +261,15 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		source:           Heartbeat,
 		flowRoundDivisor: flowRoundDivisor,
 		bucketMeta:       heartbeat.GetBucketMeta(),
+		cpuUsage:         heartbeat.GetCpuUsage(),
+		cpuStats:         heartbeat.GetCpuStats(),
 	}
 
-	// scheduling service doesn't need the following fields.
-	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
+	// Only PD heartbeats carry the following storage-accounting and replication fields.
+	if h, ok := heartbeat.(regionHeartbeatExtraFields); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-		region.cpuStats = h.GetCpuStats()
-		region.cpuUsage = h.CpuUsage
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -963,12 +971,20 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 				return
 			}
-			// Once flow has changed, will update the cache.
+			// Once flow has changed, update both the cache and follower sync stream.
 			// Because keys and bytes are strongly related, only bytes are judged.
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
 				saveCache, needSync = true, true
+				return
+			}
+			// CPU deltas should refresh the local cache, but SyncRegions does not
+			// serialize region CPU fields yet, so CPU-only changes should not
+			// trigger follower sync traffic.
+			if region.GetCPUUsage() != origin.GetCPUUsage() ||
+				region.GetReadCPUUsage() != origin.GetReadCPUUsage() {
+				saveCache = true
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {

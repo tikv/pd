@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
@@ -304,6 +305,27 @@ func TestInherit(t *testing.T) {
 	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
+func TestRegionFromSchedulingHeartbeatCarriesCPUFields(t *testing.T) {
+	re := require.New(t)
+
+	peer := &metapb.Peer{Id: 11, StoreId: 1}
+	region := RegionFromHeartbeat(&schedulingpb.RegionHeartbeatRequest{
+		Region: &metapb.Region{
+			Id:    100,
+			Peers: []*metapb.Peer{peer},
+		},
+		Leader:   peer,
+		CpuUsage: 100,
+		CpuStats: &pdpb.CPUStats{
+			UnifiedRead: 80,
+			Scheduler:   20,
+		},
+	}, 0)
+
+	re.Equal(uint64(100), region.GetCPUUsage())
+	re.Equal(uint64(80), region.GetReadCPUUsage())
+}
+
 func TestRegionRoundingFlow(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
@@ -357,6 +379,19 @@ func TestRegionWriteRate(t *testing.T) {
 func TestNeedSync(t *testing.T) {
 	re := require.New(t)
 	RegionGuide := GenerateRegionGuideFunc(false)
+	withReadCPUUsage := func(v uint64) RegionCreateOption {
+		return func(region *RegionInfo) {
+			region.cpuStats = &pdpb.CPUStats{UnifiedRead: v}
+		}
+	}
+	withSchedulerCPUUsage := func(v uint64) RegionCreateOption {
+		return func(region *RegionInfo) {
+			if region.cpuStats == nil {
+				region.cpuStats = &pdpb.CPUStats{}
+			}
+			region.cpuStats.Scheduler = v
+		}
+	}
 	meta := &metapb.Region{
 		Id:          1000,
 		StartKey:    []byte("a"),
@@ -421,6 +456,21 @@ func TestNeedSync(t *testing.T) {
 			optionsB: []RegionCreateOption{SetWrittenBytes(100000), WithFlowRoundByDigit(127)},
 			needSync: true,
 		},
+		{
+			optionsA: []RegionCreateOption{SetCPUUsage(80)},
+			optionsB: []RegionCreateOption{SetCPUUsage(100)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{withReadCPUUsage(80)},
+			optionsB: []RegionCreateOption{withReadCPUUsage(100)},
+			needSync: false,
+		},
+		{
+			optionsA: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(20)},
+			optionsB: []RegionCreateOption{withReadCPUUsage(80), withSchedulerCPUUsage(40)},
+			needSync: false,
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -428,6 +478,56 @@ func TestNeedSync(t *testing.T) {
 		regionB := region.Clone(testCase.optionsB...)
 		_, _, needSync, _ := RegionGuide(ContextTODO(), regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
+	}
+}
+
+func TestCPUOnlyHeartbeatRefreshesCacheWithoutSync(t *testing.T) {
+	re := require.New(t)
+	regionGuide := GenerateRegionGuideFunc(false)
+	meta := &metapb.Region{
+		Id:          1001,
+		StartKey:    []byte("a"),
+		EndKey:      []byte("z"),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+			{Id: 13, StoreId: 3, Role: metapb.PeerRole_Voter},
+		},
+	}
+	baseRegion := NewRegionInfo(meta, meta.Peers[0])
+
+	testCases := []struct {
+		name     string
+		optionsA []RegionCreateOption
+		optionsB []RegionCreateOption
+	}{
+		{
+			name:     "legacy cpu_usage",
+			optionsA: []RegionCreateOption{SetCPUUsage(80)},
+			optionsB: []RegionCreateOption{SetCPUUsage(100)},
+		},
+		{
+			name: "unified read cpu",
+			optionsA: []RegionCreateOption{
+				func(region *RegionInfo) {
+					region.cpuStats = &pdpb.CPUStats{UnifiedRead: 80}
+				},
+			},
+			optionsB: []RegionCreateOption{
+				func(region *RegionInfo) {
+					region.cpuStats = &pdpb.CPUStats{UnifiedRead: 100}
+				},
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		origin := baseRegion.Clone(testCase.optionsA...)
+		region := baseRegion.Clone(testCase.optionsB...)
+		_, saveCache, needSync, _ := regionGuide(ContextTODO(), region, origin)
+		re.True(saveCache, testCase.name)
+		re.False(needSync, testCase.name)
 	}
 }
 
