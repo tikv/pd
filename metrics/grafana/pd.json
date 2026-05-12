@@ -16122,7 +16122,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": null,
-          "description": "Remaining lease TTL on each instance. Sustained drops indicate keepalive renewal pressure.",
+          "description": "Live estimate of remaining lease seconds, computed at scrape time as `expireTime − now`. The value reflects the actual remaining TTL from the last known expire time rather than being frozen at the configured timeout. Sustained near-zero means the instance is on the verge of losing its lease — correlate with keepalive tick interval and request duration for root cause.",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -16162,7 +16162,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "max(pd_lease_local_ttl_remaining_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}) by (job, purpose)",
+              "expr": "max(pd_lease_local_ttl_remaining_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".*expected primary.*\"}) by (job, purpose)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16220,7 +16220,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": null,
-          "description": "Interval between consecutive lease keepalive responses.",
+          "description": "End-to-end interval between consecutive successful etcd keepalive responses, measured in the main keepalive loop outside the worker goroutine. This captures the full renewal cadence: it includes both local scheduling jitter (tick interval) and remote latency (request duration). Sustained increase means the lease is being refreshed less frequently than expected.",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -16260,7 +16260,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}[1m])) by (job, purpose, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_response_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".*expected primary.*\"}[1m])) by (job, purpose, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16318,7 +16318,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": null,
-          "description": "Duration of etcd Lease.KeepAliveOnce requests observed by PD.",
+          "description": "Latency of individual KeepAliveOnce RPC calls to etcd, recorded for all outcomes (success, error, and canceled). Spikes in the success path point to etcd load, network saturation, or disk latency on the etcd side. If this approaches the lease TTL, renewals will start failing and the lease may expire.",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -16358,7 +16358,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_request_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", result=\"success\", purpose!~\".+ expected primary\"}[1m])) by (job, purpose, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_request_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", result=\"success\", purpose!~\".*expected primary.*\"}[1m])) by (job, purpose, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16416,7 +16416,7 @@
           "dashes": false,
           "datasource": "${DS_TEST-CLUSTER}",
           "decimals": null,
-          "description": "Lease keepalive loop terminations per reason.",
+          "description": "Rate of keepalive loop stops, broken down by termination reason. `lease_expired` is critical: it means the keepalive timer fired before a renewal arrived and the PD stepped down.",
           "editable": true,
           "error": false,
           "fill": 1,
@@ -16425,9 +16425,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 50
+            "y": 58
           },
-          "id": 1705,
+          "id": 1707,
           "legend": {
             "alignAsTable": true,
             "avg": true,
@@ -16456,7 +16456,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_lease_renewal_termination_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".+ expected primary\"}[1m])*60) by (job, purpose, reason)",
+              "expr": "sum(rate(pd_lease_renewal_termination_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".*expected primary.*\"}[1m])*60) by (job, purpose, reason)",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
@@ -16487,6 +16487,104 @@
           "yaxes": [
             {
               "format": "opm",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": "0",
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false,
+            "alignLevel": null
+          }
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "decimals": null,
+          "description": "Interval between consecutive KeepAliveOnce calls as measured by the worker loop. Expected to stay close to leaseTimeout/3. Spikes indicate local scheduling delays — CPU starvation, GC pauses, or goroutine pressure — and can combine with request latency to push the end-to-end response interval past the lease timeout.",
+          "editable": true,
+          "error": false,
+          "fill": 1,
+          "grid": {},
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 50
+          },
+          "id": 1705,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": false,
+            "max": true,
+            "min": true,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": true
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "paceLength": 10,
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(pd_lease_keepalive_tick_interval_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", purpose!~\".*expected primary.*\"}[1m])) by (job, purpose, le))",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{job}}-{{purpose}}-99%",
+              "refId": "A",
+              "step": 4
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "Lease keepalive tick interval",
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "s",
               "label": null,
               "logBase": 1,
               "max": null,
