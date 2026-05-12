@@ -250,4 +250,4 @@ require (
 // TODO: fix those flasky tests introduced by the behavior change of `Eventually` and `EventuallyWithT` assertions.
 replace github.com/stretchr/testify => github.com/stretchr/testify v1.10.0
 
-replace github.com/pingcap/kvproto => github.com/MyonKeminta/kvproto v0.0.0-20260511085116-e83518b06cc0
+replace github.com/pingcap/kvproto => github.com/MyonKeminta/kvproto v0.0.0-20260512093457-b1cdacbc026b
