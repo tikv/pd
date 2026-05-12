@@ -440,7 +440,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 		return &pdpb.GetAllGCSafePointV2Response{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx, true)
 	if err != nil {
 		return &pdpb.GetAllGCSafePointV2Response{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -704,7 +704,7 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		return &pdpb.GetGCStateResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()))
+	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()), request.GetExcludeGcBarriers())
 	if err != nil {
 		return &pdpb.GetGCStateResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -740,7 +740,7 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 		return &pdpb.GetAllKeyspacesGCStatesResponse{Header: grpcutil.NotBootstrappedHeader()}, nil
 	}
 
-	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx)
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx, request.GetExcludeGcBarriers())
 	if err != nil {
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
