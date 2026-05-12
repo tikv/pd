@@ -269,9 +269,9 @@ func TestMakeLabelRule(t *testing.T) {
 
 func TestKeyTypeToRegionBoundType(t *testing.T) {
 	re := require.New(t)
-	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
 	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
-	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {

@@ -135,11 +135,13 @@ func (t regionBoundType) String() string {
 	}
 }
 
+// keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
+// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
 func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
-	if keyType == coreconstant.Table {
-		return txnRegionBound
+	if keyType == coreconstant.Raw {
+		return rawRegionBound
 	}
-	return rawRegionBound
+	return txnRegionBound
 }
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
