@@ -1861,23 +1861,13 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 		cli := forwardCli.getClient()
 		if cli != nil {
-			// TODO(split-scatter): propagate split reason and support load-based split-scatter
-			// after scheduling-service/NEXT_GEN path is explicitly in scope.
-			req := &schedulingpb.AskBatchSplitRequest{
-				Header: &schedulingpb.RequestHeader{
-					ClusterId: request.GetHeader().GetClusterId(),
-					SenderId:  request.GetHeader().GetSenderId(),
-				},
-				Region:     request.GetRegion(),
-				SplitCount: request.GetSplitCount(),
-			}
-			resp, err := cli.AskBatchSplit(ctx, req)
+			resp, err := cli.AskBatchSplit(ctx, newSchedulingAskBatchSplitRequest(request))
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return convertAskSplitResponse(resp), err
+				return convertAskBatchSplitResponse(resp), err
 			}
-			return convertAskSplitResponse(resp), nil
+			return convertAskBatchSplitResponse(resp), nil
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2493,26 +2483,30 @@ func regionNotFound() *pdpb.ResponseHeader {
 }
 
 func convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
+	if header.GetError() == nil || header.GetError().GetType() == schedulingpb.ErrorType_OK {
+		return &pdpb.ResponseHeader{ClusterId: header.GetClusterId()}
+	}
+
+	message := header.GetError().GetMessage()
+	errorType := pdpb.ErrorType_UNKNOWN
 	switch header.GetError().GetType() {
 	case schedulingpb.ErrorType_UNKNOWN:
-		if strings.Contains(header.GetError().GetMessage(), "region not found") {
-			return &pdpb.ResponseHeader{
-				ClusterId: header.GetClusterId(),
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_REGION_NOT_FOUND,
-					Message: header.GetError().GetMessage(),
-				},
-			}
+		if strings.Contains(message, "region not found") {
+			errorType = pdpb.ErrorType_REGION_NOT_FOUND
 		}
-		return &pdpb.ResponseHeader{
-			ClusterId: header.GetClusterId(),
-			Error: &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: header.GetError().GetMessage(),
-			},
-		}
-	default:
-		return &pdpb.ResponseHeader{ClusterId: header.GetClusterId()}
+	case schedulingpb.ErrorType_NOT_BOOTSTRAPPED:
+		errorType = pdpb.ErrorType_NOT_BOOTSTRAPPED
+	case schedulingpb.ErrorType_ALREADY_BOOTSTRAPPED:
+		errorType = pdpb.ErrorType_ALREADY_BOOTSTRAPPED
+	case schedulingpb.ErrorType_INVALID_VALUE:
+		errorType = pdpb.ErrorType_INVALID_VALUE
+	}
+	return &pdpb.ResponseHeader{
+		ClusterId: header.GetClusterId(),
+		Error: &pdpb.Error{
+			Type:    errorType,
+			Message: message,
+		},
 	}
 }
 
@@ -2541,7 +2535,19 @@ func convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOp
 	}
 }
 
-func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
+func newSchedulingAskBatchSplitRequest(request *pdpb.AskBatchSplitRequest) *schedulingpb.AskBatchSplitRequest {
+	return &schedulingpb.AskBatchSplitRequest{
+		Header: &schedulingpb.RequestHeader{
+			ClusterId: request.GetHeader().GetClusterId(),
+			SenderId:  request.GetHeader().GetSenderId(),
+		},
+		Region:     request.GetRegion(),
+		SplitCount: request.GetSplitCount(),
+		Reason:     request.GetReason(),
+	}
+}
+
+func convertAskBatchSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
 	return &pdpb.AskBatchSplitResponse{
 		Header: convertHeader(resp.GetHeader()),
 		Ids:    resp.GetIds(),
