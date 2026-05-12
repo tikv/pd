@@ -101,7 +101,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 		SharedCluster:   ci,
 		regionID:        region.GetID(),
 		regionEpoch:     region.GetRegionEpoch(),
-		approximateSize: region.GetApproximateSize(),
+		approximateSize: region.GetApproximateSizeKb(),
 	}
 
 	// options

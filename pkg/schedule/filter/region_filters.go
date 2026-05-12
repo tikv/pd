@@ -153,7 +153,7 @@ func (f *regionEmptyFilter) Select(region *core.RegionInfo) *plan.Status {
 
 // isEmptyRegionAllowBalance returns true if the region is not empty or the number of regions is too small.
 func isEmptyRegionAllowBalance(cluster sche.SharedCluster, region *core.RegionInfo) bool {
-	return region.GetApproximateSize() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
+	return region.GetApproximateSizeKb() > core.EmptyRegionApproximateSize || cluster.GetTotalRegionCount() < core.InitClusterRegionThreshold
 }
 
 type regionWitnessFilter struct {

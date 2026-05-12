@@ -126,6 +126,7 @@ type RegionInfo struct {
 	WrittenKeys               uint64        `json:"written_keys"`
 	ReadKeys                  uint64        `json:"read_keys"`
 	ApproximateSize           int64         `json:"approximate_size"`
+	ApproximateSizeKb         int64         `json:"approximate_size_kb"`
 	ApproximateKeys           int64         `json:"approximate_keys"`
 	ApproximateKvSize         int64         `json:"approximate_kv_size"`
 	ApproximateColumnarKvSize int64         `json:"approximate_columnar_kv_size"`
@@ -177,6 +178,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ReadBytes = r.GetBytesRead()
 	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
+	s.ApproximateSizeKb = r.GetApproximateSizeKb()
 	s.ApproximateKeys = r.GetApproximateKeys()
 	s.ApproximateKvSize = r.GetApproximateKvSize()
 	s.ApproximateColumnarKvSize = r.GetApproximateColumnarKvSize()

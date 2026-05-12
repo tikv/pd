@@ -22,7 +22,7 @@ import (
 
 const (
 	// SmallRegionThreshold is used to represent a region which can be regarded as a small region once the size is small than it.
-	SmallRegionThreshold int64 = 20
+	SmallRegionThreshold int64 = 20 * 1024
 	// Unlimited is used to control the store limit. Here uses a big enough number to represent unlimited.
 	Unlimited = float64(100000000)
 	// influence is the influence of a normal region.

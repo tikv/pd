@@ -180,7 +180,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
@@ -190,7 +190,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 0,
 		RegionSize:  0,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 51200},
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
@@ -198,7 +198,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
-		RegionSize:   50,
+		RegionSize:   51200,
 		RegionCount:  0,
 		WitnessCount: -1,
 		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
@@ -209,7 +209,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		LeaderCount: 0,
 		RegionSize:  0,
 		RegionCount: 0,
-		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 50},
+		StepCost:    map[storelimit.Type]int64{storelimit.SendSnapshot: 51200},
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
@@ -217,71 +217,71 @@ func (suite *operatorTestSuite) TestInfluence() {
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
 	TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
-		LeaderSize:  -50,
+		LeaderSize:  -51200,
 		LeaderCount: -1,
 		RegionSize:  0,
 		RegionCount: 0,
 		StepCost:    nil,
 	}, *storeOpInfluence[1])
 	re.Equal(StoreInfluence{
-		LeaderSize:  50,
+		LeaderSize:  51200,
 		LeaderCount: 1,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
 	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
-		LeaderSize:  -50,
+		LeaderSize:  -51200,
 		LeaderCount: -1,
-		RegionSize:  -50,
+		RegionSize:  -51200,
 		RegionCount: -1,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
 	re.Equal(StoreInfluence{
-		LeaderSize:  50,
+		LeaderSize:  51200,
 		LeaderCount: 1,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
-		LeaderSize:  -50,
+		LeaderSize:  -51200,
 		LeaderCount: -1,
-		RegionSize:  -50,
+		RegionSize:  -51200,
 		RegionCount: -1,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
 	re.Equal(StoreInfluence{
-		LeaderSize:  50,
+		LeaderSize:  51200,
 		LeaderCount: 1,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 1,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
-		LeaderSize:  -50,
+		LeaderSize:  -51200,
 		LeaderCount: -2,
-		RegionSize:  -50,
+		RegionSize:  -51200,
 		RegionCount: -2,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
 	re.Equal(StoreInfluence{
-		LeaderSize:  50,
+		LeaderSize:  51200,
 		LeaderCount: 1,
-		RegionSize:  50,
+		RegionSize:  51200,
 		RegionCount: 0,
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
@@ -537,33 +537,33 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 		{
 			// case1: 10GB region will have 60,000s to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10 * 1000,
+			regionSize: 10 * 1000 * 1024,
 			expect:     time.Second * (6 * 10 * 1000),
 		}, {
 			// case2: 10MB region will have at least SlowStepWaitTime(10min) to executor.
 			step:       []OpStep{AddLearner{}, AddPeer{}},
-			regionSize: 10,
+			regionSize: 10 * 1024,
 			expect:     SlowStepWaitTime,
 		}, {
 			// case3:  10GB region will have 1000s to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			regionSize: 10 * 1000,
+			regionSize: 10 * 1000 * 1024,
 			expect:     time.Second * (10 * 1000 * 0.6),
 		}, {
 			// case4: 10MB will have at lease FastStepWaitTime(10s) to executor for RemovePeer, TransferLeader, SplitRegion, PromoteLearner.
 			step:       []OpStep{RemovePeer{}, TransferLeader{}, SplitRegion{}, PromoteLearner{}},
-			regionSize: 10,
+			regionSize: 10 * 1024,
 			expect:     FastStepWaitTime,
 		}, {
 			// case5: 10GB region will have 1000*3 for ChangePeerV2Enter, ChangePeerV2Leave.
 			step: []OpStep{ChangePeerV2Enter{PromoteLearners: []PromoteLearner{{}, {}}},
 				ChangePeerV2Leave{PromoteLearners: []PromoteLearner{{}, {}}}},
-			regionSize: 10 * 1000,
+			regionSize: 10 * 1000 * 1024,
 			expect:     time.Second * (10 * 1000 * 0.6 * 3),
 		}, {
 			//case6: 10GB region will have 1000*10s for ChangePeerV2Enter, ChangePeerV2Leave.
 			step:       []OpStep{MergeRegion{}},
-			regionSize: 10 * 1000,
+			regionSize: 10 * 1000 * 1024,
 			expect:     time.Second * (10 * 1000 * 0.6 * 10),
 		},
 	}

@@ -206,7 +206,7 @@ func TestInherit(t *testing.T) {
 		size         uint64
 		expect       uint64
 	}{
-		{false, 0, 0, 1},
+		{false, 0, 0, 0},
 		{false, 0, 2, 2},
 		{true, 0, 2, 2},
 		{true, 1, 2, 2},
@@ -221,9 +221,12 @@ func TestInherit(t *testing.T) {
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(testCase.size)
-		r.approximateKeys = 1
+		r.approximateKeys = 0
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
+		if testCase.expect == 0 && testCase.size == 0 && !testCase.originExists {
+			re.Equal(int64(1), r.GetApproximateSizeKb())
+		}
 	}
 
 	// case for approximateKeys
