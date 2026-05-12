@@ -16,23 +16,33 @@ package server
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+)
+
+const (
+	gcStateWatchReceiveBatchSize = 1024
+	gcStateWatchMaxResponseBytes = 1 << 20
 )
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -396,12 +406,247 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 
 // WatchGCSafePointV2 watch keyspaces gc safe point changes.
 //
-// Deprecated: Poll GetAllKeyspacesGCStates instead.
+// Deprecated: Use WatchGCStates or poll GetAllKeyspacesGCStates instead.
 //
 //nolint:staticcheck
-func (*GrpcServer) WatchGCSafePointV2(_ *pdpb.WatchGCSafePointV2Request, _ pdpb.PD_WatchGCSafePointV2Server) error {
-	log.Error("removed API WatchGCSafePointV2 is called")
-	return status.Errorf(codes.Unimplemented, "WatchGCSafePointV2 is obsolete. Poll GetAllKeyspacesGCStates instead if necessary")
+func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request, stream pdpb.PD_WatchGCSafePointV2Server) error {
+	log.Warn("deprecated API WatchGCSafePointV2 is called", zap.Int64("req-revision", request.GetRevision()))
+
+	const watchGCSafePointV2SkipLoadingInitial = true
+
+	watcher, done, err := s.openGCStateWatch(
+		stream.Context(),
+		request.GetHeader(),
+		watchGCSafePointV2SkipLoadingInitial,
+		true,
+	)
+	if err != nil {
+		return err
+	}
+	// GCStateManager cancels the watcher itself on internal shutdown such as leadership loss. This deferred
+	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
+	defer watcher.Close()
+	if done != nil {
+		defer done()
+	}
+
+	lastSafePoints := make(map[uint32]uint64)
+	return s.consumeGCStateWatch(watcher, func(gcStates []gc.GCState) error {
+		header := grpcutil.WrapHeader()
+		baseResponse := &pdpb.WatchGCSafePointV2Response{Header: header}
+		currentEvents := make([]*pdpb.SafePointEvent, 0, len(gcStates))
+		currentSize := proto.Size(baseResponse)
+		flush := func() error {
+			if len(currentEvents) == 0 {
+				return nil
+			}
+			if err := stream.Send(&pdpb.WatchGCSafePointV2Response{
+				Header: header,
+				Events: currentEvents,
+			}); err != nil {
+				return err
+			}
+			currentEvents = currentEvents[:0]
+			currentSize = proto.Size(baseResponse)
+			return nil
+		}
+
+		for _, gcState := range gcStates {
+			if gcState.KeyspaceID == constant.NullKeyspaceID {
+				continue
+			}
+			if previous, loaded := lastSafePoints[gcState.KeyspaceID]; loaded && previous == gcState.GCSafePoint {
+				continue
+			}
+			lastSafePoints[gcState.KeyspaceID] = gcState.GCSafePoint
+
+			event := &pdpb.SafePointEvent{
+				KeyspaceId: gcState.KeyspaceID,
+				SafePoint:  gcState.GCSafePoint,
+				Type:       pdpb.EventType_PUT,
+			}
+			eventSize := proto.Size(event)
+			if currentSize+eventSize > gcStateWatchMaxResponseBytes && len(currentEvents) > 0 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			if currentSize+eventSize > gcStateWatchMaxResponseBytes {
+				log.Warn(
+					"single WatchGCSafePointV2 event exceeds response size limit",
+					zap.Uint32("keyspace-id", gcState.KeyspaceID),
+					zap.Int("response-size", currentSize+eventSize),
+					zap.Int("size-limit", gcStateWatchMaxResponseBytes),
+				)
+			}
+			currentEvents = append(currentEvents, event)
+			currentSize += eventSize
+		}
+
+		return flush()
+	})
+}
+
+// WatchGCStates watches GC state changes.
+func (s *GrpcServer) WatchGCStates(request *pdpb.WatchGCStatesRequest, stream pdpb.PD_WatchGCStatesServer) error {
+	watcher, done, err := s.openGCStateWatch(
+		stream.Context(),
+		request.GetHeader(),
+		request.GetSkipLoadingInitial(),
+		request.GetExcludeGcBarriers(),
+	)
+	if err != nil {
+		return err
+	}
+	// GCStateManager cancels the watcher itself on internal shutdown such as leadership loss. This deferred
+	// cancel remains as a fallback for stream-send failures or other early exits owned by the gRPC handler.
+	defer watcher.Close()
+	if done != nil {
+		defer done()
+	}
+
+	return s.consumeGCStateWatch(watcher, func(gcStates []gc.GCState) error {
+		header := grpcutil.WrapHeader()
+		baseResponse := &pdpb.WatchGCStatesResponse{Header: header}
+		currentStates := make([]*pdpb.GCState, 0, len(gcStates))
+		currentSize := proto.Size(baseResponse)
+		flush := func() error {
+			if len(currentStates) == 0 {
+				return nil
+			}
+			if err := stream.Send(&pdpb.WatchGCStatesResponse{
+				Header:   header,
+				GcStates: currentStates,
+			}); err != nil {
+				return err
+			}
+			currentStates = currentStates[:0]
+			currentSize = proto.Size(baseResponse)
+			return nil
+		}
+
+		for _, gcState := range gcStates {
+			pbGCState := gcStateToProto(gcState, time.Now())
+			pbGCStateSize := proto.Size(pbGCState)
+			if currentSize+pbGCStateSize > gcStateWatchMaxResponseBytes && len(currentStates) > 0 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+			if currentSize+pbGCStateSize > gcStateWatchMaxResponseBytes {
+				log.Warn(
+					"single WatchGCStates item exceeds response size limit",
+					zap.Uint32("keyspace-id", gcState.KeyspaceID),
+					zap.Int("response-size", currentSize+pbGCStateSize),
+					zap.Int("size-limit", gcStateWatchMaxResponseBytes),
+				)
+			}
+			currentStates = append(currentStates, pbGCState)
+			currentSize += pbGCStateSize
+		}
+
+		return flush()
+	})
+}
+
+func (s *GrpcServer) openGCStateWatch(
+	streamCtx context.Context,
+	header *pdpb.RequestHeader,
+	skipLoadingInitial bool,
+	excludeGCBarriers bool,
+) (*gc.GCStateWatcher, ratelimit.DoneFunc, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.validateRequest(header); err != nil {
+		if done != nil {
+			done()
+		}
+		return nil, nil, err
+	}
+	if s.GetRaftCluster() == nil {
+		if done != nil {
+			done()
+		}
+		return nil, nil, errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+
+	watcher, err := s.gcStateManager.WatchGCStates(streamCtx, skipLoadingInitial, excludeGCBarriers)
+	if err != nil {
+		if done != nil {
+			done()
+		}
+		return nil, nil, err
+	}
+	return watcher, done, nil
+}
+
+func (*GrpcServer) consumeGCStateWatch(
+	watcher *gc.GCStateWatcher,
+	send func([]gc.GCState) error,
+) error {
+	for {
+		gcStates, err := recvGCStateBatch(watcher)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+		if len(gcStates) > 0 {
+			if err := send(gcStates); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+func recvGCStateBatch(watcher *gc.GCStateWatcher) ([]gc.GCState, error) {
+	batchSize := gcStateWatchReceiveBatchSize
+	failpoint.Inject("gcStateWatchReceiveBatchSize", func(val failpoint.Value) {
+		batchSize = val.(int)
+	})
+
+	if err := watcher.Err(); err != nil {
+		return nil, err
+	}
+
+	select {
+	case gcState, ok := <-watcher.Chan():
+		if !ok {
+			return nil, gcStateWatchClosedErr(watcher)
+		}
+
+		gcStates := make([]gc.GCState, 1, batchSize)
+		gcStates[0] = gcState
+		for len(gcStates) < batchSize {
+			if watcher.Err() != nil {
+				return gcStates, nil
+			}
+			select {
+			case gcState, ok := <-watcher.Chan():
+				if !ok {
+					return gcStates, nil
+				}
+				gcStates = append(gcStates, gcState)
+			case <-watcher.Done():
+				return gcStates, nil
+			default:
+				return gcStates, nil
+			}
+		}
+		return gcStates, nil
+	case <-watcher.Done():
+		return nil, gcStateWatchClosedErr(watcher)
+	}
+}
+
+func gcStateWatchClosedErr(watch *gc.GCStateWatcher) error {
+	if err := watch.Err(); err != nil {
+		return err
+	}
+	return status.Errorf(codes.Unavailable, "gc state watch closed")
 }
 
 // GetAllGCSafePointV2 return all gc safe point v2.
@@ -514,8 +759,10 @@ func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.Gl
 
 func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	gcBarriers := make([]*pdpb.GCBarrierInfo, 0, len(gcState.GCBarriers))
-	for _, b := range gcState.GCBarriers {
-		gcBarriers = append(gcBarriers, gcBarrierToProto(b, now))
+	if gcState.IsGCBarriersLoaded {
+		for _, b := range gcState.GCBarriers {
+			gcBarriers = append(gcBarriers, gcBarrierToProto(b, now))
+		}
 	}
 	return &pdpb.GCState{
 		KeyspaceScope: &pdpb.KeyspaceScope{
