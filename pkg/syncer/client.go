@@ -85,14 +85,50 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
-func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage) bool {
+type regionSyncState struct {
+	syncingHistory bool
+	fullSyncing    bool
+}
+
+func (*RegionSyncer) resetRegionCacheAndStorage(ctx context.Context, bc *core.BasicCluster, regionStorage storage.Storage) error {
+	if err := regionStorage.Flush(); err != nil {
+		return err
+	}
+	for _, region := range bc.GetRegions() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+		if err := regionStorage.DeleteRegion(region.GetMeta()); err != nil {
+			return err
+		}
+	}
+	bc.ResetRegionCache()
+	return nil
+}
+
+func (s *RegionSyncer) handleRegionSyncResponse(
+	ctx context.Context,
+	resp *pdpb.SyncRegionResponse,
+	bc *core.BasicCluster,
+	regionStorage storage.Storage,
+	state *regionSyncState,
+) (bool, error) {
 	if syncErr := resp.GetHeader().GetError(); syncErr != nil {
 		s.streamingRunning.Store(false)
 		log.Warn("region sync with leader received error response",
 			zap.String("server", s.server.Name()),
 			zap.String("error-type", syncErr.GetType().String()),
 			zap.String("error-message", syncErr.GetMessage()))
-		return false
+		return false, nil
+	}
+	if state.syncingHistory && resp.GetStartIndex() == 0 && s.history.getNextIndex() != 0 {
+		s.streamingRunning.Store(false)
+		if err := s.resetRegionCacheAndStorage(ctx, bc, regionStorage); err != nil {
+			return true, err
+		}
+		state.fullSyncing = true
 	}
 	if s.history.getNextIndex() != resp.GetStartIndex() {
 		log.Warn("server sync index not match the leader",
@@ -154,9 +190,20 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 			_ = regionStorage.DeleteRegion(old.GetMeta())
 		}
 	}
+	if state.fullSyncing && len(regions) == 0 {
+		if err := regionStorage.Flush(); err != nil {
+			return true, err
+		}
+		state.fullSyncing = false
+		state.syncingHistory = false
+	} else if state.syncingHistory && !state.fullSyncing {
+		state.syncingHistory = false
+	}
 	// mark the client as running status when it finished the first history region sync.
-	s.streamingRunning.Store(true)
-	return true
+	if !state.fullSyncing {
+		s.streamingRunning.Store(true)
+	}
+	return true, nil
 }
 
 // IsRunning returns whether the region syncer client is running.
@@ -242,6 +289,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				continue
 			}
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
+			syncState := &regionSyncState{syncingHistory: true}
 			for {
 				resp, err := stream.Recv()
 				if err == io.EOF {
@@ -259,7 +307,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					break
 				}
-				if !s.handleRegionSyncResponse(ctx, resp, bc, regionStorage) {
+				handled, err := s.handleRegionSyncResponse(ctx, resp, bc, regionStorage, syncState)
+				if err != nil {
+					log.Warn("failed to handle region sync response",
+						zap.String("server", s.server.Name()),
+						zap.String("leader", s.server.GetLeader().GetName()),
+						errs.ZapError(err))
+					if err = stream.CloseSend(); err != nil {
+						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+					}
+					break
+				}
+				if !handled {
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}

@@ -281,6 +281,8 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 			continue
 		}
 		log.Info("server starts to synchronize with leader", zap.String("server", s.name), zap.String("leader", leaderAddr), zap.Uint64("request-index", s.nextSyncIndex))
+		syncingHistory := true
+		fullSyncing := false
 		for {
 			resp, err := stream.Recv()
 			failpoint.Inject("syncMetError", func() {
@@ -309,6 +311,10 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 				log.Warn("server broken the connection, it needs to reconnect again", zap.String("error-message", e.GetMessage()))
 				s.triggerMembershipCheck()
 				return
+			}
+			if syncingHistory && resp.GetStartIndex() == 0 && s.nextSyncIndex != 0 {
+				bc.ResetRegionCache()
+				fullSyncing = true
 			}
 			// client maybe loss some region info, need to reset the nextSyncIndex
 			if s.nextSyncIndex != resp.GetStartIndex() {
@@ -352,6 +358,12 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 					lastIndexGauge.Set(float64(s.nextSyncIndex))
 					s.nextSyncIndex++
 				}
+			}
+			if fullSyncing && len(regions) == 0 {
+				fullSyncing = false
+				syncingHistory = false
+			} else if syncingHistory && !fullSyncing {
+				syncingHistory = false
 			}
 		}
 	}
