@@ -15,7 +15,6 @@
 package command
 
 import (
-	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -33,10 +32,10 @@ func TestMakeKeyRanges(t *testing.T) {
 		goldenTxnStart string
 		goldenTxnEnd   string
 	}{
-		{keyspaceID: 0},
-		{keyspaceID: 1},
-		{keyspaceID: 10},
-		{keyspaceID: 100},
+		{0, "7200000000000000fb", "7200000100000000fb", "7800000000000000fb", "7800000100000000fb"},
+		{1, "7200000100000000fb", "7200000200000000fb", "7800000100000000fb", "7800000200000000fb"},
+		{10, "7200000a00000000fb", "7200000b00000000fb", "7800000a00000000fb", "7800000b00000000fb"},
+		{100, "7200006400000000fb", "7200006500000000fb", "7800006400000000fb", "7800006500000000fb"},
 		{
 			keyspaceID:     16777215, // max valid keyspace ID (2^24 - 1)
 			goldenRawStart: "72ffffff00000000fb",
@@ -64,16 +63,9 @@ func TestMakeKeyRanges(t *testing.T) {
 		re.NotEmpty(txnStart)
 		re.NotEmpty(txnEnd)
 
-		regionBound := keyspace.MakeRegionBound(tc.keyspaceID)
-		re.Equal(hex.EncodeToString(regionBound.RawLeftBound), rawStart)
-		re.Equal(hex.EncodeToString(regionBound.RawRightBound), rawEnd)
-		re.Equal(hex.EncodeToString(regionBound.TxnLeftBound), txnStart)
-		re.Equal(hex.EncodeToString(regionBound.TxnRightBound), txnEnd)
-		if tc.goldenRawStart != "" {
-			re.Equal(tc.goldenRawStart, rawStart)
-			re.Equal(tc.goldenRawEnd, rawEnd)
-			re.Equal(tc.goldenTxnStart, txnStart)
-			re.Equal(tc.goldenTxnEnd, txnEnd)
-		}
+		re.Equal(tc.goldenRawStart, rawStart)
+		re.Equal(tc.goldenRawEnd, rawEnd)
+		re.Equal(tc.goldenTxnStart, txnStart)
+		re.Equal(tc.goldenTxnEnd, txnEnd)
 	}
 }
