@@ -17,6 +17,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -24,7 +25,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	apiv2handlers "github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
@@ -61,12 +64,18 @@ func (suite *safePointTestSuite) TearDownTest() {
 func (suite *safePointTestSuite) TestLoadGCSafePoint() {
 	re := suite.Require()
 	gcStateManager := suite.server.GetServer().GetGCStateManager()
-	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 200, time.Now())
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	gcKeyspaceID := constant.NullKeyspaceID
+	if kerneltype.IsNextGen() {
+		gcKeyspaceID = keyspaceID
+	}
+	_, err := gcStateManager.AdvanceTxnSafePoint(gcKeyspaceID, 200, time.Now())
 	re.NoError(err)
-	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 200)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(gcKeyspaceID, 200)
 	re.NoError(err)
 
-	resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + v2Prefix + "/gc/safepoint/0")
+	sp := fmt.Sprintf("/gc/safepoint/%d", keyspaceID)
+	resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + v2Prefix + sp)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -75,6 +84,6 @@ func (suite *safePointTestSuite) TestLoadGCSafePoint() {
 	re.NoError(err)
 	safePoint := &apiv2handlers.GCSafePoint{}
 	re.NoError(json.Unmarshal(data, safePoint))
-	re.Equal(uint32(0), safePoint.KeyspaceID)
+	re.Equal(keyspaceID, safePoint.KeyspaceID)
 	re.Equal(uint64(200), safePoint.SafePoint)
 }
