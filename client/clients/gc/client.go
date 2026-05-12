@@ -43,7 +43,8 @@ type GCStatesAPIOptions struct {
 // DefaultGCStatesAPIOptions returns the default options for GC states API.
 func DefaultGCStatesAPIOptions() GCStatesAPIOptions {
 	return GCStatesAPIOptions{
-		ExcludeGCBarriers: true,
+		ExcludeGCBarriers:       true,
+		ExcludeGlobalGCBarriers: true,
 	}
 }
 
@@ -314,7 +315,7 @@ func (s GCState) HasGCBarriers() bool {
 	return s.hasGCBarriers
 }
 
-func (s GCState) GCBarriers() ([]*GCBarrierInfo, error) {
+func (s GCState) GetGCBarriers() ([]*GCBarrierInfo, error) {
 	if !s.HasGCBarriers() {
 		return nil, errors.New("trying to get GC barriers from GCState that doesn't provide GC barriers info. " +
 			"to retrieve GC barriers, pass false to excludeGCBarriers parameter to GC APIs")
@@ -352,7 +353,7 @@ func (s ClusterGCStates) HasGlobalGCBarriers() bool {
 	return s.hasGlobalGCBarriers
 }
 
-func (s ClusterGCStates) GlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
+func (s ClusterGCStates) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
 	if !s.HasGlobalGCBarriers() {
 		return nil, errors.New("trying to get global GC barriers from ClusterGCStates that doesn't provide global GC barriers info. " +
 			"to retrieve global GC barriers, pass false to excludeGlobalGCBarriers parameter to GC APIs")
