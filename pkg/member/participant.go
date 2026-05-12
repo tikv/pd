@@ -16,171 +16,179 @@ package member
 
 import (
 	"context"
-	"fmt"
-	"path"
-	"strconv"
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+type leadershipCheckFunc func(*election.Leadership) bool
+
+type participant interface {
+	GetName() string
+	GetId() uint64
+	GetListenUrls() []string
+	String() string
+	Marshal() ([]byte, error)
+	Reset()
+	ProtoMessage()
+}
+
 // Participant is used for the election related logic. Compared to its counterpart
-// EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
+// Member, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
 type Participant struct {
+	keypath.MsParam
 	leadership *election.Leadership
-	// stored as member type
-	leader     atomic.Value
-	client     *clientv3.Client
-	rootPath   string
-	leaderPath string
-	member     *tsopb.Participant
-	// memberValue is the serialized string of `member`. It will be saved in the
-	// leader key when this participant is successfully elected as the leader of
+	// stored as participant type
+	primary     atomic.Value
+	client      *clientv3.Client
+	participant participant
+	// participantValue is the serialized string of `participant`. It will be saved in the
+	// primary key when this participant is successfully elected as the primary of
 	// the group. Every write will use it to check the leadership.
-	memberValue string
+	participantValue string
+	// campaignChecker is used to check whether the additional constraints for a
+	// campaign are satisfied. If it returns false, the campaign will fail.
+	campaignChecker atomic.Value // Store as leadershipCheckFunc
+	// expectedPrimaryLease is the expected lease for the primary.
+	expectedPrimaryLease atomic.Value // stored as *election.Lease
 }
 
 // NewParticipant create a new Participant.
-func NewParticipant(client *clientv3.Client) *Participant {
+func NewParticipant(client *clientv3.Client, msParam keypath.MsParam) *Participant {
 	return &Participant{
-		client: client,
+		MsParam: msParam,
+		client:  client,
 	}
 }
 
-// InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(name string, id uint64, rootPath string, leaderName string, purpose string, advertiseListenAddr string) {
-	leader := &tsopb.Participant{
-		Name:       name,
-		Id:         id, // id is unique among all participants
-		ListenUrls: []string{advertiseListenAddr},
-	}
-
-	data, err := leader.Marshal()
+// InitInfo initializes the participant info.
+func (p *Participant) InitInfo(participant participant, purpose string) {
+	data, err := participant.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.Stringer("leader-name", leader), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Fatal("marshal participant meet error", zap.String("participant-name", participant.String()), errs.ZapError(errs.ErrMarshalParticipant, err))
 	}
-	m.member = leader
-	m.memberValue = string(data)
-	m.rootPath = rootPath
-	m.leaderPath = path.Join(rootPath, leaderName)
-	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
-	log.Info("Participant joining election", zap.Stringer("participant-info", m.member), zap.String("leader-path", m.leaderPath))
+	p.participant = participant
+	p.participantValue = string(data)
+	p.leadership = election.NewLeadership(p.client, p.GetElectionPath(), purpose)
+	log.Info("participant joining election", zap.String("participant-info", participant.String()), zap.String("primary-path", p.GetElectionPath()))
 }
 
 // ID returns the unique ID for this participant in the election group
-func (m *Participant) ID() uint64 {
-	return m.member.Id
+func (p *Participant) ID() uint64 {
+	return p.participant.GetId()
 }
 
 // Name returns the unique name in the election group.
-func (m *Participant) Name() string {
-	return m.member.Name
+func (p *Participant) Name() string {
+	return p.participant.GetName()
 }
 
-// GetMember returns the member.
-func (m *Participant) GetMember() interface{} {
-	return m.member
+// GetMember returns the participant.
+func (p *Participant) GetMember() any {
+	return p.participant
 }
 
-// MemberValue returns the member value.
-func (m *Participant) MemberValue() string {
-	return m.memberValue
+// MemberValue returns the participant value.
+func (p *Participant) MemberValue() string {
+	return p.participantValue
+}
+
+// ParticipantString returns the participant string.
+func (p *Participant) ParticipantString() string {
+	if p.participant == nil {
+		return ""
+	}
+	return p.participant.String()
 }
 
 // Client returns the etcd client.
-func (m *Participant) Client() *clientv3.Client {
-	return m.client
+func (p *Participant) Client() *clientv3.Client {
+	return p.client
 }
 
-// IsLeader returns whether the participant is the leader or not by checking its leadership's
-// lease and leader info.
-func (m *Participant) IsLeader() bool {
-	return m.leadership.Check() && m.GetLeader().GetId() == m.member.GetId()
+// IsServing returns whether the participant is the primary or not by checking its leadership's
+// lease and primary info.
+func (p *Participant) IsServing() bool {
+	return p.leadership.Check() && p.getPrimary().GetId() == p.participant.GetId() && p.campaignCheck()
 }
 
-// IsLeaderElected returns true if the leader exists; otherwise false
-func (m *Participant) IsLeaderElected() bool {
-	return m.GetLeader() != nil
+// IsPrimaryElected returns true if the primary exists; otherwise false
+func (p *Participant) IsPrimaryElected() bool {
+	return p.getPrimary().GetId() != 0
 }
 
-// GetLeaderListenUrls returns current leader's listen urls
-func (m *Participant) GetLeaderListenUrls() []string {
-	return m.GetLeader().GetListenUrls()
+// GetServingUrls returns current primary's listen urls
+func (p *Participant) GetServingUrls() []string {
+	return p.getPrimary().GetListenUrls()
 }
 
-// GetLeaderID returns current leader's member ID.
-func (m *Participant) GetLeaderID() uint64 {
-	return m.GetLeader().GetId()
+// GetPrimaryID returns current primary's participant ID.
+func (p *Participant) GetPrimaryID() uint64 {
+	return p.getPrimary().GetId()
 }
 
-// GetLeader returns current leader of the election group.
-func (m *Participant) GetLeader() *tsopb.Participant {
-	leader := m.leader.Load()
-	if leader == nil {
-		return nil
+// getPrimary returns current primary of the election group.
+func (p *Participant) getPrimary() participant {
+	primary := p.primary.Load()
+	if primary == nil {
+		return NewParticipantByService(p.ServiceName)
 	}
-	member := leader.(*tsopb.Participant)
-	if member.GetId() == 0 {
-		return nil
+	return primary.(participant)
+}
+
+// setPrimary sets the participant's primary.
+func (p *Participant) setPrimary(participant participant) {
+	p.primary.Store(participant)
+}
+
+// unsetPrimary unsets the participant's primary.
+func (p *Participant) unsetPrimary() {
+	primary := NewParticipantByService(p.ServiceName)
+	p.primary.Store(primary)
+}
+
+// PromoteSelf declares the participant itself to be the primary.
+func (p *Participant) PromoteSelf() {
+	p.setPrimary(p.participant)
+}
+
+// GetElectionPath returns the path of the primary.
+func (p *Participant) GetElectionPath() string {
+	return keypath.ElectionPath(&p.MsParam)
+}
+
+// GetLeadership returns the leadership of the participant.
+func (p *Participant) GetLeadership() *election.Leadership {
+	return p.leadership
+}
+
+// Campaign is used to campaign the leadership and make it become a primary.
+func (p *Participant) Campaign(_ context.Context, leaseTimeout int64) error {
+	if !p.campaignCheck() {
+		return errs.ErrCheckCampaign
 	}
-	return member
+	return p.leadership.Campaign(leaseTimeout, p.MemberValue())
 }
 
-// setLeader sets the member's leader.
-func (m *Participant) setLeader(member *tsopb.Participant) {
-	m.leader.Store(member)
-}
-
-// unsetLeader unsets the member's leader.
-func (m *Participant) unsetLeader() {
-	m.leader.Store(&tsopb.Participant{})
-}
-
-// EnableLeader declares the member itself to be the leader.
-func (m *Participant) EnableLeader() {
-	m.setLeader(m.member)
-}
-
-// GetLeaderPath returns the path of the leader.
-func (m *Participant) GetLeaderPath() string {
-	return m.leaderPath
-}
-
-// GetLeadership returns the leadership of the member.
-func (m *Participant) GetLeadership() *election.Leadership {
-	return m.leadership
-}
-
-// CampaignLeader is used to campaign the leadership and make it become a leader.
-func (m *Participant) CampaignLeader(leaseTimeout int64) error {
-	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
-}
-
-// KeepLeader is used to keep the leader's leadership.
-func (m *Participant) KeepLeader(ctx context.Context) {
-	m.leadership.Keep(ctx)
-}
-
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
-// It returns true if it passes the pre-check, false otherwise.
-func (m *Participant) PrecheckLeader() error {
-	// No specific thing to check. Returns no error.
-	return nil
-}
-
-// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
-	leader := &tsopb.Participant{}
-	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
+// getPersistentPrimary gets the corresponding primary from etcd by given electionPath (as the key).
+func (p *Participant) getPersistentPrimary() (participant, int64, error) {
+	primary := NewParticipantByService(p.ServiceName)
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(p.client, p.GetElectionPath(), primary)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -188,36 +196,30 @@ func (m *Participant) getPersistentLeader() (*tsopb.Participant, int64, error) {
 		return nil, 0, nil
 	}
 
-	return leader, rev, nil
+	return primary, rev, nil
 }
 
-// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
+// CheckPrimary checks if someone else is taking the leadership. If yes, returns the primary;
 // otherwise returns a bool which indicates if it is needed to check later.
-func (m *Participant) CheckLeader() (ElectionLeader, bool) {
-	if err := m.PrecheckLeader(); err != nil {
-		log.Error("failed to pass pre-check, check the leader later", errs.ZapError(errs.ErrEtcdLeaderNotFound))
-		time.Sleep(200 * time.Millisecond)
-		return nil, true
-	}
-
-	leader, revision, err := m.getPersistentLeader()
+func (p *Participant) CheckPrimary() (*Primary, bool) {
+	primary, revision, err := p.getPersistentPrimary()
 	if err != nil {
-		log.Error("getting the leader meets error", errs.ZapError(err))
+		log.Error("getting the primary meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leader == nil {
-		// no leader yet
+	if primary == nil {
+		// no primary yet
 		return nil, false
 	}
 
-	if m.IsSameLeader(leader) {
-		// oh, we are already the leader, which indicates we may meet something wrong
-		// in previous CampaignLeader. We should delete the leadership and campaign again.
-		log.Warn("the leader has not changed, delete and campaign again", zap.Stringer("old-leader", leader))
-		// Delete the leader itself and let others start a new election again.
-		if err = m.leadership.DeleteLeaderKey(); err != nil {
-			log.Error("deleting the leader key meets error", errs.ZapError(err))
+	if p.isSamePrimary(primary) {
+		// oh, we are already the primary, which indicates we may meet something wrong
+		// in previous Campaign. We should delete the leadership and campaign again.
+		log.Warn("the primary has not changed, delete and campaign again", zap.Stringer("old-primary", primary))
+		// Delete the primary itself and let others start a new election again.
+		if err = p.leadership.DeleteLeaderKeyByRevision(revision); err != nil {
+			log.Error("deleting the primary key meets error", errs.ZapError(err))
 			time.Sleep(200 * time.Millisecond)
 			return nil, true
 		}
@@ -225,106 +227,100 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 		return nil, false
 	}
 
-	return &EtcdLeader{
-		wrapper:      m,
-		pariticipant: leader,
-		revision:     revision,
+	return &Primary{
+		wrapper:     p,
+		participant: primary,
+		revision:    revision,
 	}, false
 }
 
-// WatchLeader is used to watch the changes of the leader.
-func (m *Participant) WatchLeader(ctx context.Context, leader *tsopb.Participant, revision int64) {
-	m.setLeader(leader)
-	m.leadership.Watch(ctx, revision)
-	m.unsetLeader()
+// WatchLeader is used to watch the changes of the primary.
+func (p *Participant) WatchLeader(ctx context.Context, primary participant, revision int64) {
+	p.setPrimary(primary)
+	p.leadership.Watch(ctx, revision)
+	p.unsetPrimary()
 }
 
-// ResetLeader is used to reset the member's current leadership.
-// Basically it will reset the leader lease and unset leader info.
-func (m *Participant) ResetLeader() {
-	m.leadership.Reset()
-	m.unsetLeader()
+// Resign is used to reset the participant's current leadership.
+// Basically it will reset the primary lease and unset primary info.
+func (p *Participant) Resign() {
+	p.leadership.Reset()
+	p.unsetPrimary()
 }
 
-// IsSameLeader checks whether a server is the leader itself.
-func (m *Participant) IsSameLeader(leader *tsopb.Participant) bool {
-	return leader.GetId() == m.ID()
+// isSamePrimary checks whether a server is the primary itself.
+func (p *Participant) isSamePrimary(primary participant) bool {
+	return primary.GetId() == p.ID()
 }
 
-// CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
-func (m *Participant) CheckPriority(ctx context.Context) {
-	// TODO: implement weighted-election when it's in need
-}
-
-func (m *Participant) getLeaderPriorityPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("participant/%d/leader_priority", id))
-}
-
-// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (m *Participant) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
-}
-
-// GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (m *Participant) GetDCLocationPath(id uint64) string {
-	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
-}
-
-// SetLeaderPriority saves the priority to be elected as the etcd leader.
-func (m *Participant) SetLeaderPriority(id uint64, priority int) error {
-	key := m.getLeaderPriorityPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
+func (p *Participant) campaignCheck() bool {
+	checker := p.campaignChecker.Load()
+	if checker == nil {
+		return true
 	}
-	if !res.Succeeded {
-		log.Error("save etcd leader priority failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	checkerFunc, ok := checker.(leadershipCheckFunc)
+	if !ok || checkerFunc == nil {
+		return true
 	}
-	return nil
+	return checkerFunc(p.leadership)
 }
 
-// DeleteLeaderPriority removes the etcd leader priority config.
-func (m *Participant) DeleteLeaderPriority(id uint64) error {
-	key := m.getLeaderPriorityPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("delete etcd leader priority failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
+// SetCampaignChecker sets the pre-campaign checker.
+func (p *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
+	p.campaignChecker.Store(checker)
 }
 
-// DeleteDCLocationInfo removes the dc-location info.
-func (m *Participant) DeleteDCLocationInfo(id uint64) error {
-	key := m.GetDCLocationPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("delete dc-location info failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
+// SetExpectedPrimaryLease sets the expected lease for the primary.
+func (p *Participant) SetExpectedPrimaryLease(lease *election.Lease) {
+	p.expectedPrimaryLease.Store(lease)
 }
 
-// GetLeaderPriority loads the priority to be elected as the etcd leader.
-func (m *Participant) GetLeaderPriority(id uint64) (int, error) {
-	key := m.getLeaderPriorityPath(id)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return 0, err
+// GetExpectedPrimaryLease gets the expected lease for the primary.
+func (p *Participant) GetExpectedPrimaryLease() *election.Lease {
+	l := p.expectedPrimaryLease.Load()
+	if l == nil {
+		return nil
 	}
-	if len(res.Kvs) == 0 {
-		return 0, nil
+	return l.(*election.Lease)
+}
+
+// NewParticipantByService creates a new participant by service name.
+func NewParticipantByService(serviceName string) (p participant) {
+	switch serviceName {
+	case constant.TSOServiceName:
+		p = &tsopb.Participant{}
+	case constant.SchedulingServiceName:
+		p = &schedulingpb.Participant{}
+	case constant.ResourceManagerServiceName:
+		p = &resource_manager.Participant{}
 	}
-	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
-	if err != nil {
-		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
-	}
-	return int(priority), nil
+	return p
+}
+
+// Primary is the primary in the election group backed by the etcd, but it's
+// decoupled from the embedded etcd.
+type Primary struct {
+	wrapper     *Participant
+	participant participant
+	revision    int64
+}
+
+// GetListenUrls returns current primary's client urls
+func (l *Primary) GetListenUrls() []string {
+	return l.participant.GetListenUrls()
+}
+
+// GetRevision the revision of the primary in etcd
+func (l *Primary) GetRevision() int64 {
+	return l.revision
+}
+
+// String declares fmt.Stringer
+func (l *Primary) String() string {
+	return l.participant.String()
+}
+
+// Watch on the primary
+func (l *Primary) Watch(ctx context.Context) {
+	l.wrapper.WatchLeader(ctx, l.participant, l.revision)
 }

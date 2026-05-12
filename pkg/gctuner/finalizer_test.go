@@ -12,24 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build enable_flaky_tests
-
 package gctuner
 
 import (
 	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type testState struct {
 	count int32
 }
 
 func TestFinalizer(t *testing.T) {
-	maxCount := int32(16)
+	maxCount := int32(8)
 	state := &testState{}
 	f := newFinalizer(func() {
 		n := atomic.AddInt32(&state.count, 1)
@@ -39,6 +45,7 @@ func TestFinalizer(t *testing.T) {
 	})
 	for i := int32(1); i <= maxCount; i++ {
 		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
 		require.Equal(t, i, atomic.LoadInt32(&state.count))
 	}
 	require.Nil(t, f.ref)

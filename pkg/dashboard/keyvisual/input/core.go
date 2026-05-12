@@ -15,11 +15,13 @@
 package input
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
 	regionpkg "github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
 )
 
 const limit = 1024
@@ -94,7 +96,7 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 	regions := make([]*core.RegionInfo, 0, limit)
 
 	for {
-		rs := rc.ScanRange(startKey, endKey, limit)
+		rs := rc.ScanRegions(startKey, endKey, limit)
 		length := len(rs)
 		if length == 0 {
 			break

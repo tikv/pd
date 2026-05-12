@@ -17,8 +17,6 @@ package encryption
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -26,17 +24,24 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+// #nosec G101
 const (
 	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
 	testMasterKey2    = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b531"
@@ -44,40 +49,17 @@ const (
 	testDataKey       = "be798242dde0c40d9a65cdbc36c1c9ac"
 )
 
-func getTestDataKey() []byte {
-	key, _ := hex.DecodeString(testDataKey)
+func getTestDataKey(re *require.Assertions) []byte {
+	key, err := hex.DecodeString(testDataKey)
+	re.NoError(err)
 	return key
 }
 
-func newTestEtcd(t *testing.T, re *require.Assertions) (client *clientv3.Client) {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.Logger = "zap"
-	pu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	server, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	<-server.Server.ReadyNotify()
-
-	client, err = clientv3.New(clientv3.Config{
-		Endpoints: []string{cfg.LCUrls[0].String()},
-	})
-	re.NoError(err)
-
+func newTestEtcd(t *testing.T) (client *clientv3.Client) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	t.Cleanup(func() {
-		client.Close()
-		server.Close()
+		clean()
 	})
-
 	return client
 }
 
@@ -113,7 +95,7 @@ func checkMasterKeyMeta(re *require.Assertions, value []byte, meta *encryptionpb
 func TestNewKeyManagerBasic(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -135,7 +117,7 @@ func TestNewKeyManagerBasic(t *testing.T) {
 func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	// Custom config
 	rotatePeriod, err := time.ParseDuration("100h")
@@ -161,7 +143,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re.NotNil(m.masterKeyMeta)
 	keyFileMeta := m.masterKeyMeta.GetFile()
 	re.NotNil(keyFileMeta)
-	re.Equal(config.MasterKey.MasterKeyFileConfig.FilePath, keyFileMeta.Path)
+	re.Equal(config.MasterKey.FilePath, keyFileMeta.Path)
 	// Check loaded keys.
 	re.Nil(m.keys.Load())
 	// Check etcd KV.
@@ -173,7 +155,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 func TestNewKeyManagerLoadKeys(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Use default config.
@@ -186,7 +168,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -214,7 +196,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 func TestGetCurrentKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -232,7 +214,7 @@ func TestGetCurrentKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -257,7 +239,7 @@ func TestGetCurrentKey(t *testing.T) {
 func TestGetKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
@@ -266,13 +248,13 @@ func TestGetKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 			456: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
 				WasExposed:   false,
@@ -312,7 +294,7 @@ func TestGetKey(t *testing.T) {
 func TestLoadKeyEmpty(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
@@ -321,7 +303,7 @@ func TestLoadKeyEmpty(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -340,7 +322,7 @@ func TestLoadKeyEmpty(t *testing.T) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	re.NoError(err)
-	re.NotNil(m.loadKeys())
+	re.Error(m.loadKeys())
 }
 
 func TestWatcher(t *testing.T) {
@@ -348,7 +330,7 @@ func TestWatcher(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -356,8 +338,7 @@ func TestWatcher(t *testing.T) {
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
-		var e struct{}
-		reloadEvent <- e
+		reloadEvent <- struct{}{}
 	}
 	// Use default config.
 	config := &Config{}
@@ -377,13 +358,15 @@ func TestWatcher(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 		},
 	}
+	// wait watch to start
+	time.Sleep(time.Second)
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent
@@ -397,13 +380,13 @@ func TestWatcher(t *testing.T) {
 		CurrentKeyId: 456,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
 			},
 			456: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679534),
 				WasExposed:   false,
@@ -424,7 +407,7 @@ func TestWatcher(t *testing.T) {
 func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -449,7 +432,7 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -502,7 +485,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -527,7 +510,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -536,7 +519,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes256-ctr",
 		MasterKey: MasterKeyConfig{
@@ -578,7 +561,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -597,7 +580,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   true,
@@ -606,7 +589,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
 		MasterKey: MasterKeyConfig{
@@ -649,7 +632,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -668,7 +651,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -724,7 +707,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
 	leadership := newTestLeader(re, client)
@@ -744,7 +727,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -789,7 +772,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -798,10 +781,12 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	helper.now = func() time.Time { return time.Unix(int64(1601679533), 0) }
 	// mock NewMasterKey
 	newMasterKeyCalled := 0
-	outputMasterKey, _ := hex.DecodeString(testMasterKey)
-	outputCiphertextKey, _ := hex.DecodeString(testCiphertextKey)
+	outputMasterKey, err := hex.DecodeString(testMasterKey)
+	re.NoError(err)
+	outputCiphertextKey, err := hex.DecodeString(testCiphertextKey)
+	re.NoError(err)
 	helper.newMasterKey = func(
-		meta *encryptionpb.MasterKey,
+		_ *encryptionpb.MasterKey,
 		ciphertext []byte,
 	) (*MasterKey, error) {
 		if newMasterKeyCalled < 2 {
@@ -820,14 +805,14 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
 			},
 		},
 	}
-	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
+	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	// Config with a different master key.
 	config := &Config{
@@ -867,7 +852,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -884,7 +869,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -923,7 +908,7 @@ func TestKeyRotation(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -932,7 +917,7 @@ func TestKeyRotation(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
@@ -951,7 +936,7 @@ func TestKeyRotation(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,
@@ -1019,7 +1004,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -1028,7 +1013,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time, 10)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 10)
 	helper.eventAfterTicker = func() {
@@ -1057,7 +1042,7 @@ func TestKeyRotationConflict(t *testing.T) {
 		CurrentKeyId: 123,
 		Keys: map[uint64]*encryptionpb.DataKey{
 			123: {
-				Key:          getTestDataKey(),
+				Key:          getTestDataKey(re),
 				Method:       encryptionpb.EncryptionMethod_AES128_CTR,
 				CreationTime: uint64(1601679533),
 				WasExposed:   false,

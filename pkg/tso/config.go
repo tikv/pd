@@ -24,16 +24,20 @@ import (
 type ServiceConfig interface {
 	// GetName returns the Name
 	GetName() string
-	// GeBackendEndpoints returns the BackendEndpoints
-	GeBackendEndpoints() string
+	// GetBackendEndpoints returns the BackendEndpoints
+	GetBackendEndpoints() string
 	// GetListenAddr returns the ListenAddr
 	GetListenAddr() string
 	// GetAdvertiseListenAddr returns the AdvertiseListenAddr
 	GetAdvertiseListenAddr() string
-	// GetLeaderLease returns the leader lease.
-	GetLeaderLease() int64
-	// IsLocalTSOEnabled returns if the local TSO is enabled.
-	IsLocalTSOEnabled() bool
+	// TSO-related configuration
+	Config
+}
+
+// Config is used to provide TSO configuration.
+type Config interface {
+	// GetLease returns the lease.
+	GetLease() int64
 	// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 	GetTSOUpdatePhysicalInterval() time.Duration
 	// GetTSOSaveInterval returns TSO save interval.

@@ -24,15 +24,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/utils/requestutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestLabelMatcher(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
@@ -41,8 +46,7 @@ func TestLabelMatcher(t *testing.T) {
 	re.False(matcher.Match(labels2))
 }
 
-func TestPrometheusHistogramBackend(t *testing.T) {
-	t.Parallel()
+func TestPrometheusBackend(t *testing.T) {
 	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -51,18 +55,28 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 			Name:      "audit_handling_seconds_test",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
+		}, []string{"service", "method"})
+
+	serviceAuditCounterTest := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "audit_requests_total_test",
+			Help:      "Total number of service requests for audit test",
+		}, []string{"service", "method", "caller_id"})
 
 	prometheus.MustRegister(serviceAuditHistogramTest)
+	prometheus.MustRegister(serviceAuditCounterTest)
 
 	ts := httptest.NewServer(promhttp.Handler())
 	defer ts.Close()
 
-	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", nil)
+	backend := NewPrometheusBackend(serviceAuditHistogramTest, serviceAuditCounterTest, true)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
+	re.NoError(err)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
-	info.Component = "user1"
+	info.CallerID = "user1"
 	info.IP = "localhost"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.False(backend.ProcessHTTPRequest(req))
@@ -73,37 +87,40 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	re.True(backend.ProcessHTTPRequest(req))
 	re.True(backend.ProcessHTTPRequest(req))
 
-	info.Component = "user2"
+	info.CallerID = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
 	time.Sleep(time.Second)
-	req, _ = http.NewRequest(http.MethodGet, ts.URL, nil)
+	req, err = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
+	re.NoError(err)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
-	content, _ := io.ReadAll(resp.Body)
+	content, err := io.ReadAll(resp.Body)
+	re.NoError(err)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 2")
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{method=\"HTTP\",service=\"test\"}")
+	re.Contains(output, "pd_service_audit_requests_total_test{caller_id=\"user1\",method=\"HTTP\",service=\"test\"}")
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
-	defer os.Remove(fname)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
 	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
-	b, _ := os.ReadFile(fname)
+	b, err := os.ReadFile(fname)
+	re.NoError(err)
 	output := strings.SplitN(string(b), "]", 4)
 	re.Equal(
-		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, CallerID:anonymous, IP:, Port:, "+
 			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),
 		output[3],
@@ -111,11 +128,13 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 }
 
 func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
+	re := require.New(b)
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -123,27 +142,17 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 }
 
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
+	re := require.New(b)
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
-	defer os.Remove(fname)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
+	re.NoError(err)
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
-		backend.ProcessHTTPRequest(req)
+		re.True(backend.ProcessHTTPRequest(req))
 	}
-}
-
-func initLog() string {
-	cfg := &log.Config{}
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
-	fname := f.Name()
-	f.Close()
-	cfg.File.Filename = fname
-	cfg.Level = "info"
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
-	return fname
 }

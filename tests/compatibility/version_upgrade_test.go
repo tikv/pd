@@ -19,13 +19,21 @@ import (
 	"testing"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestStoreRegister(t *testing.T) {
 	re := require.New(t)
@@ -37,15 +45,15 @@ func TestStoreRegister(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	putStoreRequest := &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 		Store: &metapb.Store{
 			Id:      1,
-			Address: "mock-1",
+			Address: "mock://tikv-1:1",
 			Version: "2.0.1",
 		},
 	}
@@ -54,16 +62,16 @@ func TestStoreRegister(t *testing.T) {
 	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	re.NoError(err)
 	// FIX ME: read v0.0.0 in sometime
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	version := leaderServer.GetClusterVersion()
 	// Restart all PDs.
 	err = cluster.StopAll()
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 	newVersion := leaderServer.GetClusterVersion()
 	re.Equal(version, newVersion)
@@ -73,7 +81,7 @@ func TestStoreRegister(t *testing.T) {
 		Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 		Store: &metapb.Store{
 			Id:      4,
-			Address: "mock-4",
+			Address: "mock://tikv-4:4",
 			Version: "1.0.1",
 		},
 	}
@@ -91,8 +99,8 @@ func TestRollingUpgrade(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	stores := []*pdpb.PutStoreRequest{
@@ -100,7 +108,7 @@ func TestRollingUpgrade(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      1,
-				Address: "mock-1",
+				Address: "mock://tikv-1:1",
 				Version: "2.0.1",
 			},
 		},
@@ -108,7 +116,7 @@ func TestRollingUpgrade(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      4,
-				Address: "mock-4",
+				Address: "mock://tikv-4:4",
 				Version: "2.0.1",
 			},
 		},
@@ -116,7 +124,7 @@ func TestRollingUpgrade(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      6,
-				Address: "mock-6",
+				Address: "mock://tikv-6:6",
 				Version: "2.0.1",
 			},
 		},
@@ -124,7 +132,7 @@ func TestRollingUpgrade(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      7,
-				Address: "mock-7",
+				Address: "mock://tikv-7:7",
 				Version: "2.0.1",
 			},
 		},

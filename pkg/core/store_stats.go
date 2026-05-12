@@ -16,9 +16,17 @@ package core
 
 import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+// DFSStats is used to calculate the DFS stats info for each scope.
+type DFSStats struct {
+	WrittenBytes  uint64
+	WriteRequests uint64
+}
 
 type storeStats struct {
 	mu       syncutil.RWMutex
@@ -40,10 +48,9 @@ func (ss *storeStats) updateRawStats(rawStats *pdpb.StoreStats) {
 	defer ss.mu.Unlock()
 	ss.rawStats = rawStats
 
-	if ss.avgAvailable == nil {
-		return
+	if ss.avgAvailable != nil {
+		ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 	}
-	ss.avgAvailable.Add(float64(rawStats.GetAvailable()))
 }
 
 // GetStoreStats returns the statistics information of the store.
@@ -56,10 +63,8 @@ func (ss *storeStats) GetStoreStats() *pdpb.StoreStats {
 // CloneStoreStats returns the statistics information cloned from the store.
 func (ss *storeStats) CloneStoreStats() *pdpb.StoreStats {
 	ss.mu.RLock()
-	b, _ := ss.rawStats.Marshal()
+	stats := typeutil.DeepClone(ss.rawStats, StoreStatsFactory)
 	ss.mu.RUnlock()
-	stats := &pdpb.StoreStats{}
-	stats.Unmarshal(b)
 	return stats
 }
 

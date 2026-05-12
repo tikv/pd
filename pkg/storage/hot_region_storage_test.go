@@ -8,6 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -18,14 +19,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 type MockPackHotRegionInfo struct {
@@ -36,18 +40,18 @@ type MockPackHotRegionInfo struct {
 	pullInterval     time.Duration
 }
 
-// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
-func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotReads))
-	copy(result, m.historyHotReads)
-	return result, nil
-}
-
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
-func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotWrites))
-	copy(result, m.historyHotWrites)
-	return result, nil
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (m *MockPackHotRegionInfo) GetHistoryHotRegions(typ utils.RWType) ([]HistoryHotRegion, error) {
+	switch typ {
+	case utils.Write:
+		result := make([]HistoryHotRegion, len(m.historyHotWrites))
+		copy(result, m.historyHotWrites)
+		return result, nil
+	default: // case utils.Read:
+		result := make([]HistoryHotRegion, len(m.historyHotReads))
+		copy(result, m.historyHotReads)
+		return result, nil
+	}
 }
 
 // IsLeader return isLeader.
@@ -57,7 +61,7 @@ func (m *MockPackHotRegionInfo) IsLeader() bool {
 
 // GenHistoryHotRegions generate history hot region for test.
 func (m *MockPackHotRegionInfo) GenHistoryHotRegions(num int, updateTime time.Time) {
-	for i := 0; i < num; i++ {
+	for i := range num {
 		historyHotRegion := HistoryHotRegion{
 			UpdateTime:    updateTime.UnixNano() / int64(time.Millisecond),
 			RegionID:      uint64(i),
@@ -115,7 +119,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -123,7 +127,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -131,14 +135,16 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
 	}
 	var copyHotRegionStorages []HistoryHotRegion
-	data, _ := json.Marshal(hotRegionStorages)
-	json.Unmarshal(data, &copyHotRegionStorages)
+	data, err := json.Marshal(hotRegionStorages)
+	re.NoError(err)
+	err = json.Unmarshal(data, &copyHotRegionStorages)
+	re.NoError(err)
 	for i, region := range hotRegionStorages {
 		copyHotRegionStorages[i].StartKey = region.StartKey
 		copyHotRegionStorages[i].EndKey = region.EndKey
@@ -149,12 +155,13 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      4,
 			StoreID:       1,
-			HotRegionType: WriteType.String(),
+			HotRegionType: utils.Write.String(),
 		},
 	}
-	store.pullHotRegionInfo()
+	err = store.pullHotRegionInfo()
+	re.NoError(err)
 	store.flush()
-	iter := store.NewIterator([]string{ReadType.String()},
+	iter := store.NewIterator([]string{utils.Read.String()},
 		now.UnixNano()/int64(time.Millisecond),
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
@@ -171,26 +178,29 @@ func TestHotRegionWrite(t *testing.T) {
 func TestHotRegionDelete(t *testing.T) {
 	re := require.New(t)
 	defaultRemainDay := 7
-	defaultDelteData := 30
+	defaultDeleteData := 30
 	deleteDate := time.Now().AddDate(0, 0, 0)
 	packHotRegionInfo := &MockPackHotRegionInfo{}
 	store, clean, err := newTestHotRegionStorage(10*time.Minute, uint64(defaultRemainDay), packHotRegionInfo)
 	re.NoError(err)
 	defer clean()
 	historyHotRegions := make([]HistoryHotRegion, 0)
-	for i := 0; i < defaultDelteData; i++ {
+	for range defaultDeleteData {
 		historyHotRegion := HistoryHotRegion{
 			UpdateTime:    deleteDate.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 		}
 		historyHotRegions = append(historyHotRegions, historyHotRegion)
 		deleteDate = deleteDate.AddDate(0, 0, -1)
 	}
 	packHotRegionInfo.historyHotReads = historyHotRegions
-	store.pullHotRegionInfo()
-	store.flush()
-	store.delete(defaultRemainDay)
+	err = store.pullHotRegionInfo()
+	re.NoError(err)
+	err = store.flush()
+	re.NoError(err)
+	err = store.delete(defaultRemainDay)
+	re.NoError(err)
 	iter := store.NewIterator(HotRegionTypes,
 		deleteDate.UnixNano()/int64(time.Millisecond),
 		time.Now().UnixNano()/int64(time.Millisecond))
@@ -202,61 +212,65 @@ func TestHotRegionDelete(t *testing.T) {
 }
 
 func BenchmarkInsert(b *testing.B) {
+	re := require.New(b)
 	packHotRegionInfo := &MockPackHotRegionInfo{}
 	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 7, packHotRegionInfo)
 	defer clear()
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	packHotRegionInfo.GenHistoryHotRegions(1000, time.Now())
 	b.ResetTimer()
-	regionStorage.pullHotRegionInfo()
-	regionStorage.flush()
+	err = regionStorage.pullHotRegionInfo()
+	re.NoError(err)
+	err = regionStorage.flush()
+	re.NoError(err)
 	b.StopTimer()
 }
 
 func BenchmarkInsertAfterManyDays(b *testing.B) {
+	re := require.New(b)
 	defaultInsertDay := 30
 	packHotRegionInfo := &MockPackHotRegionInfo{}
 	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, uint64(defaultInsertDay), packHotRegionInfo)
 	defer clear()
-	if err != nil {
-		b.Fatal(err)
-	}
-	nextTime := newTestHotRegions(regionStorage, packHotRegionInfo, 144*defaultInsertDay, 1000, time.Now())
+	re.NoError(err)
+	nextTime, err := newTestHotRegions(regionStorage, packHotRegionInfo, 144*defaultInsertDay, 1000, time.Now())
+	re.NoError(err)
 	packHotRegionInfo.GenHistoryHotRegions(1000, nextTime)
 	b.ResetTimer()
-	regionStorage.pullHotRegionInfo()
-	regionStorage.flush()
+	err = regionStorage.pullHotRegionInfo()
+	re.NoError(err)
+	err = regionStorage.flush()
+	re.NoError(err)
 	b.StopTimer()
 }
 
 func BenchmarkDelete(b *testing.B) {
+	re := require.New(b)
 	defaultInsertDay := 7
 	defaultRemainDay := 7
 	packHotRegionInfo := &MockPackHotRegionInfo{}
 	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, uint64(defaultRemainDay), packHotRegionInfo)
 	defer clear()
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
 	deleteTime := time.Now().AddDate(0, 0, -14)
-	newTestHotRegions(regionStorage, packHotRegionInfo, 144*defaultInsertDay, 1000, deleteTime)
+	_, err = newTestHotRegions(regionStorage, packHotRegionInfo, 144*defaultInsertDay, 1000, deleteTime)
+	re.NoError(err)
 	b.ResetTimer()
-	regionStorage.delete(defaultRemainDay)
+	err = regionStorage.delete(defaultRemainDay)
+	re.NoError(err)
 	b.StopTimer()
 }
 
 func BenchmarkRead(b *testing.B) {
+	re := require.New(b)
 	packHotRegionInfo := &MockPackHotRegionInfo{}
 	regionStorage, clear, err := newTestHotRegionStorage(10*time.Hour, 7, packHotRegionInfo)
-	if err != nil {
-		b.Fatal(err)
-	}
 	defer clear()
+	re.NoError(err)
 	endTime := time.Now()
 	startTime := endTime
-	endTime = newTestHotRegions(regionStorage, packHotRegionInfo, 144*7, 1000, endTime)
+	endTime, err = newTestHotRegions(regionStorage, packHotRegionInfo, 144*7, 1000, endTime)
+	re.NoError(err)
 	b.ResetTimer()
 	iter := regionStorage.NewIterator(HotRegionTypes, startTime.UnixNano()/int64(time.Millisecond),
 		endTime.AddDate(0, 1, 0).UnixNano()/int64(time.Millisecond))
@@ -264,21 +278,26 @@ func BenchmarkRead(b *testing.B) {
 	for next != nil && err == nil {
 		next, err = iter.Next()
 	}
-	if err != nil {
-		b.Fatal(err)
-	}
+	re.NoError(err)
+	re.Nil(next)
 	b.StopTimer()
 }
 
-func newTestHotRegions(storage *HotRegionStorage, mock *MockPackHotRegionInfo, cycleTimes, num int, updateTime time.Time) time.Time {
-	for i := 0; i < cycleTimes; i++ {
+func newTestHotRegions(storage *HotRegionStorage, mock *MockPackHotRegionInfo, cycleTimes, num int, updateTime time.Time) (time.Time, error) {
+	for range cycleTimes {
 		mock.GenHistoryHotRegions(num, updateTime)
-		storage.pullHotRegionInfo()
-		storage.flush()
+		err := storage.pullHotRegionInfo()
+		if err != nil {
+			return time.Time{}, err
+		}
+		err = storage.flush()
+		if err != nil {
+			return time.Time{}, err
+		}
 		updateTime = updateTime.Add(10 * time.Minute)
 		mock.ClearHotRegion()
 	}
-	return updateTime
+	return updateTime, nil
 }
 
 func newTestHotRegionStorage(pullInterval time.Duration,
@@ -286,7 +305,7 @@ func newTestHotRegionStorage(pullInterval time.Duration,
 	packHotRegionInfo *MockPackHotRegionInfo) (
 	hotRegionStorage *HotRegionStorage,
 	clear func(), err error) {
-	writePath := "./tmp"
+	writePath := strings.Join([]string{".", "tmp"}, string(filepath.Separator))
 	ctx := context.Background()
 	packHotRegionInfo.pullInterval = pullInterval
 	packHotRegionInfo.reservedDays = reservedDays

@@ -14,20 +14,18 @@
 
 package statistics
 
-import (
-	"time"
-
-	"github.com/tikv/pd/pkg/core"
-)
+import "time"
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
+	StoreCPURate   float64           `json:"store_cpu"`
 	TotalBytesRate float64           `json:"total_flow_bytes"`
 	TotalKeysRate  float64           `json:"total_flow_keys"`
 	TotalQueryRate float64           `json:"total_flow_query"`
+	TotalCPURate   float64           `json:"total_flow_cpu"`
 	Count          int               `json:"regions_count"`
 	Stats          []HotPeerStatShow `json:"statistics"`
 }
@@ -43,15 +41,7 @@ type HotPeerStatShow struct {
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
+	CPURate        float64   `json:"flow_cpu"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time"`
-}
-
-// UpdateHotPeerStatShow updates the region information, such as `IsLearner` and `LastUpdateTime`.
-func (h *HotPeerStatShow) UpdateHotPeerStatShow(region *core.RegionInfo) {
-	if region == nil {
-		return
-	}
-	h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
-	h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
+	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 }

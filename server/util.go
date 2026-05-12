@@ -19,35 +19,47 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
+	"github.com/urfave/negroni/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
-// CheckPDVersion checks if PD needs to be upgraded.
-func CheckPDVersion(opt *config.PersistOptions) {
+// CheckAndGetPDVersion checks and returns the PD version.
+func CheckAndGetPDVersion() *semver.Version {
 	pdVersion := versioninfo.MinSupportedVersion(versioninfo.Base)
 	if versioninfo.PDReleaseVersion != "None" {
 		pdVersion = versioninfo.MustParseVersion(versioninfo.PDReleaseVersion)
 	}
+	return pdVersion
+}
+
+// CheckPDVersionWithClusterVersion checks if PD needs to be upgraded by comparing the PD version with the cluster version.
+func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
+	pdVersion := CheckAndGetPDVersion()
 	clusterVersion := *opt.GetClusterVersion()
-	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
+	log.Info("load pd and cluster version",
+		zap.Stringer("pd-version", pdVersion), zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
-			zap.String("PD-version", pdVersion.String()),
+			zap.String("pd-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
 }
 
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {
+	clusterID := keypath.ClusterID()
 	// TODO: do more check for request fields validation.
 
 	storeMeta := req.GetStore()
@@ -120,6 +132,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			userHandlers[pathPrefix] = handler
 		}
 	}
+
 	apiService.UseHandler(router)
 	userHandlers[pdAPIPrefix] = apiService
 	return userHandlers, nil

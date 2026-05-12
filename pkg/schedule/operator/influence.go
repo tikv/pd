@@ -18,10 +18,12 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // OpInfluence records the influence of the cluster.
 type OpInfluence struct {
+	mu              syncutil.RWMutex
 	StoresInfluence map[uint64]*StoreInfluence
 }
 
@@ -32,14 +34,47 @@ func NewOpInfluence() *OpInfluence {
 	}
 }
 
-// GetStoreInfluence get storeInfluence of specific store.
-func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+// Add adds another influence.
+func (m *OpInfluence) Add(other *OpInfluence) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	otherCopy := other.getAllInfluenceCopy()
+	for id, v := range otherCopy {
+		m.getOrCreateStoreInfluenceLocked(id).add(v)
+	}
+}
+
+func (m *OpInfluence) getAllInfluenceCopy() map[uint64]*StoreInfluence {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	ret := make(map[uint64]*StoreInfluence, len(m.StoresInfluence))
+	for id, v := range m.StoresInfluence {
+		ret[id] = &StoreInfluence{
+			RegionSize:   v.RegionSize,
+			RegionCount:  v.RegionCount,
+			LeaderSize:   v.LeaderSize,
+			LeaderCount:  v.LeaderCount,
+			WitnessCount: v.WitnessCount,
+			StepCost:     v.StepCost,
+		}
+	}
+	return ret
+}
+
+func (m *OpInfluence) getOrCreateStoreInfluenceLocked(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
 		m.StoresInfluence[id] = storeInfluence
 	}
 	return storeInfluence
+}
+
+// GetStoreInfluence get storeInfluence of specific store.
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getOrCreateStoreInfluenceLocked(id)
 }
 
 // StoreInfluence records influences that pending operators will make.
@@ -52,8 +87,19 @@ type StoreInfluence struct {
 	StepCost     map[storelimit.Type]int64
 }
 
+func (s *StoreInfluence) add(other *StoreInfluence) {
+	s.RegionCount += other.RegionCount
+	s.RegionSize += other.RegionSize
+	s.LeaderSize += other.LeaderSize
+	s.LeaderCount += other.LeaderCount
+	s.WitnessCount += other.WitnessCount
+	for _, v := range storelimit.TypeNameValue {
+		s.AddStepCost(v, other.GetStepCost(v))
+	}
+}
+
 // ResourceProperty returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
+func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 	switch kind.Resource {
 	case constant.LeaderKind:
 		switch kind.Policy {
@@ -65,7 +111,13 @@ func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 			return 0
 		}
 	case constant.RegionKind:
-		return s.RegionSize
+		switch kind.Policy {
+		case constant.ByCount:
+			return s.RegionCount
+		default:
+			return s.RegionSize
+		}
+
 	case constant.WitnessKind:
 		return s.WitnessCount
 	default:
@@ -74,7 +126,7 @@ func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 }
 
 // GetStepCost returns the specific type step cost
-func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
+func (s *StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	if s.StepCost == nil {
 		return 0
 	}

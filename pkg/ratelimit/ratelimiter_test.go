@@ -22,7 +22,6 @@ import (
 )
 
 func TestRateLimiter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	limiter := NewRateLimiter(100, 100)
 

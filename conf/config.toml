@@ -33,7 +33,10 @@
 # key-path = ""
 ## A CN which must be provided by a client
 # cert-allowed-cn = ["example.com"]
-## Whether or not to enable redact log.
+## Whether to enable the log redaction. It can be the following values:
+##   - false: disable redact log.
+##   - true: enable redact log, which will replace the sensitive information with "?".
+##   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
 # redact-info-log = false
 
 [security.encryption]
@@ -108,9 +111,9 @@
 
 [schedule]
 ## Controls the size limit of Region Merge.
-# max-merge-region-size = 20
+# max-merge-region-size = 54
 ## Specifies the upper limit of the Region Merge key.
-# max-merge-region-keys = 200000
+# max-merge-region-keys = 540000
 ## Controls the time interval between the split and merge operations on the same Region.
 # split-merge-interval = "1h"
 ## When PD fails to receive the heartbeat from a store after the specified period of time,
@@ -201,9 +204,12 @@
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = false
 
-[keyspaces]
+## When enabled, configuring a custom prometheus address through Dashboard will not be allowed.
+# disable-custom-prom-addr = false
+
+[keyspace]
 ## pre-alloc is used to pre-allocate keyspaces during pd bootstrap.
-## Its value should be a list of strings, denotting the name of the keyspaces.
+## Its value should be a list of strings, denoting the name of the keyspaces.
 ## Example:
 ## pre-alloc = ["admin", "user1", "user2"]
 # pre-alloc = []

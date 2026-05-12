@@ -16,38 +16,34 @@ package checker
 
 import (
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 )
 
 // LearnerChecker ensures region has a learner will be promoted.
 type LearnerChecker struct {
 	PauseController
-	cluster schedule.Cluster
+	cluster sche.CheckerCluster
 }
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	learnerCheckerPausedCounter = checkerCounter.WithLabelValues("learner_checker", "paused")
-)
-
 // NewLearnerChecker creates a learner checker.
-func NewLearnerChecker(cluster schedule.Cluster) *LearnerChecker {
+func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 	return &LearnerChecker{
 		cluster: cluster,
 	}
 }
 
 // Check verifies a region's role, creating an Operator if need.
-func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
-	if l.IsPaused() {
+func (c *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
+	if c.IsPaused() {
 		learnerCheckerPausedCounter.Inc()
 		return nil
 	}
 	for _, p := range region.GetLearners() {
-		op, err := operator.CreatePromoteLearnerOperator("promote-learner", l.cluster, region, p)
+		op, err := operator.CreatePromoteLearnerOperator("promote-learner", c.cluster, region, p)
 		if err != nil {
 			log.Debug("fail to create promote learner operator", errs.ZapError(err))
 			continue

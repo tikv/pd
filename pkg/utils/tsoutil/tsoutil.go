@@ -25,6 +25,11 @@ const (
 	logicalBits       = (1 << physicalShiftBits) - 1
 )
 
+// TimeToTS converts a `time.Time` to an `uint64` TS.
+func TimeToTS(t time.Time) uint64 {
+	return ComposeTS(t.UnixNano()/int64(time.Millisecond), 0)
+}
+
 // ParseTS parses the ts to (physical,logical).
 func ParseTS(ts uint64) (time.Time, uint64) {
 	physical, logical := ParseTSUint64(ts)

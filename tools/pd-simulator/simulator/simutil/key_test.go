@@ -15,11 +15,14 @@
 package simutil
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func TestGenerateTableKeys(t *testing.T) {
@@ -33,7 +36,7 @@ func TestGenerateTableKeys(t *testing.T) {
 		re.Less(keys[i-1], keys[i])
 		s := []byte(keys[i-1])
 		e := []byte(keys[i])
-		for j := 0; j < 1000; j++ {
+		for range 1000 {
 			split, err := GenerateTiDBEncodedSplitKey(s, e)
 			re.NoError(err)
 			re.Less(string(s), string(split))
@@ -47,7 +50,7 @@ func TestGenerateTiDBEncodedSplitKey(t *testing.T) {
 	re := require.New(t)
 	s := []byte(codec.EncodeBytes([]byte("a")))
 	e := []byte(codec.EncodeBytes([]byte("ab")))
-	for i := 0; i <= 1000; i++ {
+	for range 1001 {
 		cc, err := GenerateTiDBEncodedSplitKey(s, e)
 		re.NoError(err)
 		re.Less(string(s), string(cc))
@@ -81,7 +84,7 @@ func TestGenerateTiDBEncodedSplitKey(t *testing.T) {
 	// split equal key
 	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
 	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
-	for i := 0; i <= 1000; i++ {
+	for range 1001 {
 		re.Less(string(s), string(e))
 		splitKey, err = GenerateTiDBEncodedSplitKey(s, e)
 		re.NoError(err)
@@ -97,58 +100,41 @@ func TestGenerateTiDBEncodedSplitKey(t *testing.T) {
 	re.Error(err)
 }
 
-func TestGenerateKeys(t *testing.T) {
+func TestRegionSplitKey(t *testing.T) {
 	re := require.New(t)
-
-	numKeys := 10
-	actual := GenerateKeys(numKeys)
-	re.Equal(len(actual), numKeys)
-
-	// make sure every key:
-	// i.  has length `keyLen`
-	// ii. has only characters from `keyChars`
-	for _, key := range actual {
-		re.Equal(len(key), keyLen)
-		for _, char := range key {
-			re.True(strings.ContainsRune(keyChars, char))
-		}
-	}
-}
-
-func TestGenerateSplitKey(t *testing.T) {
-	re := require.New(t)
-
-	// empty key
-	s := []byte("")
-	e := []byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248}
-	splitKey := GenerateSplitKey(s, e)
-	re.Less(string(s), string(splitKey))
-	re.Less(string(splitKey), string(e))
-
-	// empty end key
-	s = []byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248}
-	e = []byte("")
-	splitKey = GenerateSplitKey(s, e)
-	re.Less(string(s), string(splitKey))
-	re.Less(string(e), string(splitKey))
 
 	// empty start and end keys
-	s = []byte{}
-	e = []byte{}
-	splitKey = GenerateSplitKey(s, e)
-	re.Less(string(s), string(splitKey))
-	re.Less(string(e), string(splitKey))
+	var s []byte
+	var e []byte
+	splitKey, err := GenerateTiDBEncodedSplitKey(s, e)
+	re.NoError(err)
 
-	// same start and end keys
-	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248})
-	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248})
-	splitKey = GenerateSplitKey(s, e)
-	re.Greater(string(s), string(splitKey))
-	re.Greater(string(e), string(splitKey))
+	// left
+	leftSplit, err := GenerateTiDBEncodedSplitKey(s, splitKey)
+	re.NoError(err)
+	re.Less(string(leftSplit), string(splitKey))
+	rightSplit, err := GenerateTiDBEncodedSplitKey(splitKey, e)
+	re.NoError(err)
+	re.Less(string(splitKey), string(rightSplit))
 
-	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
-	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
-	splitKey = GenerateSplitKey(s, e)
-	re.Greater(string(s), string(splitKey))
-	re.Less(string(splitKey), string(e))
+	meta := &metapb.Region{
+		Id:          0,
+		Peers:       nil,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	meta.StartKey = s
+	meta.EndKey = leftSplit
+	region := core.NewRegionInfo(
+		meta,
+		nil,
+		core.SetApproximateSize(int64(1)),
+		core.SetApproximateKeys(int64(1)),
+	)
+
+	regionsInfo := core.NewRegionsInfo()
+	origin, overlaps, rangeChanged := regionsInfo.SetRegion(region)
+	regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+
+	getRegion := regionsInfo.GetRegionByKey([]byte("a"))
+	re.NotNil(getRegion)
 }

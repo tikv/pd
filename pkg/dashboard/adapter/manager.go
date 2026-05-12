@@ -19,9 +19,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"
@@ -75,6 +77,10 @@ func (m *Manager) Stop() {
 func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
+	// TODO: After we fix the atomic problem of config, we can remove this failpoint.
+	failpoint.Inject("skipDashboardLoop", func() {
+		failpoint.Return()
+	})
 
 	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()
@@ -93,7 +99,7 @@ func (m *Manager) serviceLoop() {
 
 // updateInfo updates information from the server.
 func (m *Manager) updateInfo() {
-	if !m.srv.GetMember().IsLeader() {
+	if !m.srv.GetMember().IsServing() {
 		m.isLeader = false
 		m.members = nil
 		if err := m.srv.GetPersistOptions().Reload(m.srv.GetStorage()); err != nil {

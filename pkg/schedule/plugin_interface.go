@@ -18,10 +18,12 @@ import (
 	"path/filepath"
 	"plugin"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 // PluginInterface is used to manage all plugin.
@@ -46,19 +48,19 @@ func (p *PluginInterface) GetFunction(path string, funcName string) (plugin.Symb
 		// open plugin
 		filePath, err := filepath.Abs(path)
 		if err != nil {
-			return nil, errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrFilePathAbs.Wrap(err)
 		}
 		log.Info("open plugin file", zap.String("file-path", filePath))
 		plugin, err := plugin.Open(filePath)
 		if err != nil {
-			return nil, errs.ErrLoadPlugin.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrLoadPlugin.Wrap(err)
 		}
 		p.pluginMap[path] = plugin
 	}
 	// get func from plugin
 	f, err := p.pluginMap[path].Lookup(funcName)
 	if err != nil {
-		return nil, errs.ErrLookupPluginFunc.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrLookupPluginFunc.Wrap(err)
 	}
 	return f, nil
 }

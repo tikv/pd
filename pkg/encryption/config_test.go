@@ -19,38 +19,36 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestAdjustDefaultValue(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &Config{}
 	err := config.Adjust()
 	re.NoError(err)
 	re.Equal(methodPlaintext, config.DataEncryptionMethod)
-	defaultRotationPeriod, _ := time.ParseDuration(defaultDataKeyRotationPeriod)
+	defaultRotationPeriod, err := time.ParseDuration(defaultDataKeyRotationPeriod)
+	re.NoError(err)
 	re.Equal(defaultRotationPeriod, config.DataKeyRotationPeriod.Duration)
 	re.Equal(masterKeyTypePlaintext, config.MasterKey.Type)
 }
 
 func TestAdjustInvalidDataEncryptionMethod(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &Config{DataEncryptionMethod: "unknown"}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }
 
 func TestAdjustNegativeRotationDuration(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &Config{DataKeyRotationPeriod: typeutil.NewDuration(time.Duration(int64(-1)))}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }
 
 func TestAdjustInvalidMasterKeyType(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &Config{MasterKey: MasterKeyConfig{Type: "unknown"}}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }

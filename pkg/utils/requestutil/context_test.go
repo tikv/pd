@@ -21,10 +21,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
 func TestRequestInfo(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	ctx := context.Background()
 	_, ok := RequestInfoFrom(ctx)
@@ -34,7 +38,7 @@ func TestRequestInfo(t *testing.T) {
 		RequestInfo{
 			ServiceLabel:   "test label",
 			Method:         http.MethodPost,
-			Component:      "pdctl",
+			CallerID:       "pdctl",
 			IP:             "localhost",
 			URLParam:       "{\"id\"=1}",
 			BodyParam:      "{\"state\"=\"Up\"}",
@@ -45,7 +49,7 @@ func TestRequestInfo(t *testing.T) {
 	re.True(ok)
 	re.Equal("test label", result.ServiceLabel)
 	re.Equal(http.MethodPost, result.Method)
-	re.Equal("pdctl", result.Component)
+	re.Equal("pdctl", result.CallerID)
 	re.Equal("localhost", result.IP)
 	re.Equal("{\"id\"=1}", result.URLParam)
 	re.Equal("{\"state\"=\"Up\"}", result.BodyParam)
@@ -53,7 +57,6 @@ func TestRequestInfo(t *testing.T) {
 }
 
 func TestEndTime(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	ctx := context.Background()
 	_, ok := EndTimeFrom(ctx)

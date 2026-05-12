@@ -1,0 +1,16 @@
+pd = "127.0.0.1:2379"
+[http]
+    [http.GetRegionStatus]
+    qps = 1000
+    burst = 2
+[grpc]
+    [grpc.GetRegion]
+    qps = 10000
+    burst = 1
+    [grpc.GetStores]
+    qps = 1000
+    burst = 1
+[etcd]
+    [etcd.Get]
+    qps = 1
+    burst = 1

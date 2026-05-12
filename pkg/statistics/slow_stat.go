@@ -15,8 +15,6 @@
 package statistics
 
 import (
-	"context"
-
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -26,7 +24,7 @@ type SlowStat struct {
 }
 
 // NewSlowStat creates the container to hold slow nodes' statistics.
-func NewSlowStat(ctx context.Context) *SlowStat {
+func NewSlowStat() *SlowStat {
 	return &SlowStat{
 		SlowStoresStats: NewSlowStoresStats(),
 	}

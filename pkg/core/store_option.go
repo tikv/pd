@@ -19,6 +19,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -74,50 +76,61 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	}
 }
 
-// OfflineStore offline a store
-func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
+// SetStoreState sets the state for the store.
+func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Offline
-		meta.NodeState = metapb.NodeState_Removing
-		meta.PhysicallyDestroyed = physicallyDestroyed
+		switch state {
+		case metapb.StoreState_Up:
+			meta.State = metapb.StoreState_Up
+			meta.NodeState = metapb.NodeState_Serving
+		case metapb.StoreState_Offline:
+			if len(physicallyDestroyed) != 0 {
+				meta.State = metapb.StoreState_Offline
+				meta.NodeState = metapb.NodeState_Removing
+				meta.PhysicallyDestroyed = physicallyDestroyed[0]
+			} else {
+				panic("physicallyDestroyed should be set when set store state to offline")
+			}
+		case metapb.StoreState_Tombstone:
+			meta.State = metapb.StoreState_Tombstone
+			meta.NodeState = metapb.NodeState_Removed
+		}
 		store.meta = meta
 	}
 }
 
-// UpStore up a store
-func UpStore() StoreCreateOption {
+// SetNodeState sets the node state for the store.
+// Only used for testing.
+func SetNodeState(nodeState metapb.NodeState) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Up
-		meta.NodeState = metapb.NodeState_Serving
+		meta.NodeState = nodeState
 		store.meta = meta
 	}
 }
 
-// TombstoneStore set a store to tombstone.
-func TombstoneStore() StoreCreateOption {
+// PauseLeaderTransfer prevents the store from been selected as source or target store of TransferLeader.
+func PauseLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
-		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Tombstone
-		meta.NodeState = metapb.NodeState_Removed
-		store.meta = meta
+		switch d {
+		case constant.In:
+			store.pauseLeaderTransferIn.Add(1)
+		case constant.Out:
+			store.pauseLeaderTransferOut.Add(1)
+		}
 	}
 }
 
-// PauseLeaderTransfer prevents the store from been selected as source or
-// target store of TransferLeader.
-func PauseLeaderTransfer() StoreCreateOption {
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected as source or target of TransferLeader again.
+func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.pauseLeaderTransfer = true
-	}
-}
-
-// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
-// as source or target of TransferLeader again.
-func ResumeLeaderTransfer() StoreCreateOption {
-	return func(store *StoreInfo) {
-		store.pauseLeaderTransfer = false
+		switch d {
+		case constant.In:
+			store.pauseLeaderTransferIn.Add(-1)
+		case constant.Out:
+			store.pauseLeaderTransferOut.Add(-1)
+		}
 	}
 }
 
@@ -125,7 +138,15 @@ func ResumeLeaderTransfer() StoreCreateOption {
 // leader to the store
 func SlowStoreEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowStoreEvicted = true
+		store.slowStoreEvicted.Add(1)
+	}
+}
+
+// StoppingStoreEvicted marks a store as a stopping store and prevents transferring
+// leader to the store
+func StoppingStoreEvicted() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.stoppingStoreEvicted.Add(1)
 	}
 }
 
@@ -133,21 +154,28 @@ func SlowStoreEvicted() StoreCreateOption {
 // leader to the store
 func SlowTrendEvicted() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowTrendEvicted = true
+		store.slowTrendEvicted.Add(1)
 	}
 }
 
 // SlowTrendRecovered cleans the evicted by slow trend state of a store.
 func SlowTrendRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowTrendEvicted = false
+		store.slowTrendEvicted.Add(-1)
 	}
 }
 
 // SlowStoreRecovered cleans the evicted state of a store.
 func SlowStoreRecovered() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.slowStoreEvicted = false
+		store.slowStoreEvicted.Add(-1)
+	}
+}
+
+// StoppingStoreRecovered cleans the evicted state of a store.
+func StoppingStoreRecovered() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.stoppingStoreEvicted.Add(-1)
 	}
 }
 
@@ -162,6 +190,13 @@ func SetLeaderCount(leaderCount int) StoreCreateOption {
 func SetRegionCount(regionCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.regionCount = regionCount
+	}
+}
+
+// SetLearnerCount sets the learner count for the store.
+func SetLearnerCount(learnerCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.learnerCount = learnerCount
 	}
 }
 
@@ -224,7 +259,7 @@ func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
 // SetStoreStats sets the statistics information for the store.
 func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.storeStats.updateRawStats(stats)
+		store.updateRawStats(stats)
 	}
 }
 
@@ -259,9 +294,45 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	}
 }
 
+// SetStoreLimit set the store for a store, it may switch the store limit mode.
+func SetStoreLimit(limit storelimit.StoreLimit) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.limiter = limit
+	}
+}
+
 // SetLastAwakenTime sets last awaken time for the store.
 func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.lastAwakenTime = lastAwaken
+	}
+}
+
+// SetNetworkSlowTriggers sets triggered network slow evict count for the store.
+func SetNetworkSlowTriggers(networkSlowTriggers uint64) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.networkSlowTriggers = networkSlowTriggers
+	}
+}
+
+// SetStoreMeta sets the meta for the store.
+// NOTICE: LastHeartbeat is not persisted each time, so it is not set by this function. Please use SetLastHeartbeatTS instead.
+func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.Version = newMeta.GetVersion()
+		meta.GitHash = newMeta.GetGitHash()
+		meta.Address = newMeta.GetAddress()
+		meta.StatusAddress = newMeta.GetStatusAddress()
+		meta.PeerAddress = newMeta.GetPeerAddress()
+		meta.StartTimestamp = newMeta.GetStartTimestamp()
+		meta.DeployPath = newMeta.GetDeployPath()
+		meta.State = newMeta.GetState()
+		meta.Labels = newMeta.GetLabels()
+		meta.NodeState = newMeta.GetNodeState()
+		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
+		store.meta = meta
 	}
 }

@@ -1,0 +1,5 @@
+[schedule]
+patrol-region-interval = "100ms"
+
+[log]
+level = "debug"

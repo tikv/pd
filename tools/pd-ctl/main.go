@@ -20,7 +20,12 @@ import (
 	"os/signal"
 	"syscall"
 
+	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 func main() {
@@ -45,8 +50,12 @@ func main() {
 		default:
 			os.Exit(1)
 		}
+		if command.PDCli != nil {
+			command.PDCli.Close()
+		}
 	}()
 
+	log.SetLevel(zapcore.FatalLevel)
 	var inputs []string
 	stat, _ := os.Stdin.Stat()
 	if (stat.Mode() & os.ModeCharDevice) == 0 {

@@ -17,9 +17,10 @@ package checker
 import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -28,21 +29,13 @@ import (
 // SplitChecker splits regions when the key range spans across rule/label boundary.
 type SplitChecker struct {
 	PauseController
-	cluster     schedule.Cluster
+	cluster     sche.CheckerCluster
 	ruleManager *placement.RuleManager
 	labeler     *labeler.RegionLabeler
 }
 
-const splitCheckerName = "split_checker"
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitCheckerCounter       = checkerCounter.WithLabelValues(splitCheckerName, "check")
-	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitCheckerName, "paused")
-)
-
 // NewSplitChecker creates a new SplitChecker.
-func NewSplitChecker(cluster schedule.Cluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
+func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
 	return &SplitChecker{
 		cluster:     cluster,
 		ruleManager: ruleManager,
@@ -51,7 +44,7 @@ func NewSplitChecker(cluster schedule.Cluster, ruleManager *placement.RuleManage
 }
 
 // GetType returns the checker type.
-func (c *SplitChecker) GetType() string {
+func (*SplitChecker) GetType() string {
 	return "split-checker"
 }
 
@@ -71,7 +64,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 	desc := "labeler-split-region"
 	keys := c.labeler.GetSplitKeys(start, end)
 
-	if len(keys) == 0 && c.cluster.GetOpts().IsPlacementRulesEnabled() {
+	if len(keys) == 0 && c.cluster.GetCheckerConfig().IsPlacementRulesEnabled() {
 		desc = "rule-split-region"
 		keys = c.ruleManager.GetSplitKeys(start, end)
 	}
@@ -80,7 +73,7 @@ func (c *SplitChecker) Check(region *core.RegionInfo) *operator.Operator {
 		return nil
 	}
 
-	op, err := operator.CreateSplitRegionOperator(desc, region, 0, pdpb.CheckPolicy_USEKEY, keys)
+	op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, keys)
 	if err != nil {
 		log.Debug("create split region operator failed", errs.ZapError(err))
 		return nil

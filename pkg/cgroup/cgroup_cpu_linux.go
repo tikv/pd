@@ -25,9 +25,9 @@ import (
 
 // GetCgroupCPU returns the CPU usage and quota for the current cgroup.
 func GetCgroupCPU() (CPUUsage, error) {
-	cpuusage, err := getCgroupCPUHelper("/")
-	cpuusage.NumCPU = runtime.NumCPU()
-	return cpuusage, err
+	cpuUsage, err := getCgroupCPUHelper("/")
+	cpuUsage.NumCPU = runtime.NumCPU()
+	return cpuUsage, err
 }
 
 // CPUQuotaToGOMAXPROCS converts the CPU quota applied to the calling process
@@ -42,6 +42,11 @@ func CPUQuotaToGOMAXPROCS(minValue int) (int, CPUQuotaStatus, error) {
 		return minValue, CPUQuotaMinUsed, nil
 	}
 	return maxProcs, CPUQuotaUsed, nil
+}
+
+// GetCPUPeriodAndQuota returns CPU period and quota time of cgroup.
+func GetCPUPeriodAndQuota() (period int64, quota int64, err error) {
+	return getCgroupCPUPeriodAndQuota("/")
 }
 
 // InContainer returns true if the process is running in a container.

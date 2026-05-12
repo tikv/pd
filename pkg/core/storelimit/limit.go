@@ -32,7 +32,22 @@ const (
 	storeLimitTypeLen
 )
 
+const (
+	// VersionV1 represents the rate limit version of the store limit
+	VersionV1 = "v1"
+	// VersionV2 represents the sliding window version of the store limit
+	VersionV2 = "v2"
+)
+
 // StoreLimit is an interface to control the operator rate of store
+// TODO: add a method to control the rate of store
+// the normal control flow is:
+// 1. check the store limit with Available in checker or scheduler.
+// 2. check the store limit with Available in operator controller again.
+// the different between 1 and 2 is that 1 maybe not use the operator level.
+// 3. take the cost of operator with Take in operator controller.
+// 4. ack will put back the cost into the limit for the next waiting operator after the operator is finished.
+// the cost is the operator influence, so the influence should be same in the life of the operator.
 type StoreLimit interface {
 	// Available returns true if the store can accept the operator
 	Available(cost int64, typ Type, level constant.PriorityLevel) bool
@@ -40,4 +55,11 @@ type StoreLimit interface {
 	Take(count int64, typ Type, level constant.PriorityLevel) bool
 	// Reset resets the store limit
 	Reset(rate float64, typ Type)
+	// Feedback update limit capacity by auto-tuning.
+	Feedback(e float64)
+	// Ack put back the cost into the limit for the next waiting operator after the operator is finished.
+	// only snapshot type can use this method.
+	Ack(cost int64, typ Type)
+	// Version returns the version of the store limit
+	Version() string
 }

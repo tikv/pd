@@ -20,39 +20,38 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func TestLoadExpireTime(t *testing.T) {
+	re := require.New(t)
+
+	var nilLease *Lease
+	re.Equal(typeutil.ZeroTime, nilLease.loadExpireTime())
+
+	emptyLease := &Lease{}
+	re.Equal(typeutil.ZeroTime, emptyLease.loadExpireTime())
+
+	invalidLease := &Lease{}
+	invalidLease.expireTime.Store("invalid expire time")
+	re.Equal(typeutil.ZeroTime, invalidLease.loadExpireTime())
+
+	expireTime := time.Now()
+	validLease := &Lease{}
+	validLease.expireTime.Store(expireTime)
+	re.Equal(expireTime, validLease.loadExpireTime())
+}
 
 func TestLease(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
 
 	// Create the lease.
-	lease1 := &lease{
-		Purpose: "test_lease_1",
-		client:  client,
-		lease:   clientv3.NewLease(client),
-	}
-	lease2 := &lease{
-		Purpose: "test_lease_2",
-		client:  client,
-		lease:   clientv3.NewLease(client),
-	}
+	lease1 := NewLease(client, "test_lease_1")
+	lease2 := NewLease(client, "test_lease_2")
 	re.True(lease1.IsExpired())
 	re.True(lease2.IsExpired())
 	re.NoError(lease1.Close())
@@ -100,4 +99,21 @@ func TestLease(t *testing.T) {
 	re.NoError(lease1.Close())
 	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	re.True(lease1.IsExpired())
+}
+
+func TestLeaseKeepAlive(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	// Create the lease.
+	lease := NewLease(client, "test_lease")
+
+	re.NoError(lease.Grant(defaultLeaseTimeout))
+	ch := lease.keepAliveWorker(ctx, 2*time.Second)
+	time.Sleep(2 * time.Second)
+	<-ch
+	re.NoError(lease.Close())
 }

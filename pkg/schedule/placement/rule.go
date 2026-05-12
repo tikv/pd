@@ -73,6 +73,15 @@ type Rule struct {
 	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 }
 
+// NewRuleFromJSON creates a rule from the JSON data.
+func NewRuleFromJSON(data []byte) (*Rule, error) {
+	r := &Rule{}
+	if err := json.Unmarshal(data, r); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
 func (r *Rule) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
@@ -81,7 +90,7 @@ func (r *Rule) String() string {
 // Clone returns a copy of Rule.
 func (r *Rule) Clone() *Rule {
 	var clone Rule
-	json.Unmarshal([]byte(r.String()), &clone)
+	_ = json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
 	return &clone
@@ -112,6 +121,15 @@ type RuleGroup struct {
 	Override bool   `json:"override,omitempty"`
 }
 
+// NewRuleGroupFromJSON creates a rule group from the JSON data.
+func NewRuleGroupFromJSON(data []byte) (*RuleGroup, error) {
+	rg := &RuleGroup{}
+	if err := json.Unmarshal(data, rg); err != nil {
+		return nil, err
+	}
+	return rg, nil
+}
+
 func (g *RuleGroup) isDefault() bool {
 	return g.Index == 0 && !g.Override
 }
@@ -119,6 +137,15 @@ func (g *RuleGroup) isDefault() bool {
 func (g *RuleGroup) String() string {
 	b, _ := json.Marshal(g)
 	return string(b)
+}
+
+// Clone returns a copy of RuleGroup.
+func (g *RuleGroup) Clone() *RuleGroup {
+	return &RuleGroup{
+		ID:       g.ID,
+		Index:    g.Index,
+		Override: g.Override,
+	}
 }
 
 // Rules are ordered by (GroupID, Index, ID).

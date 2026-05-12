@@ -20,11 +20,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 // testingWriter is a WriteSyncer that writes to the the messages.
 type testingWriter struct {
@@ -43,7 +49,7 @@ func (w *testingWriter) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (w *testingWriter) Sync() error {
+func (*testingWriter) Sync() error {
 	return nil
 }
 
@@ -59,63 +65,73 @@ func (logger *verifyLogger) Message() string {
 	return logger.w.messages[len(logger.w.messages)-1]
 }
 
-func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
+func newZapTestLogger(cfg *log.Config, opts ...zap.Option) (verifyLogger, error) {
 	// TestingWriter is used to write to memory.
 	// Used in the verify logger.
 	writer := newTestingWriter()
-	lg, _, _ := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
+	lg, _, err := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
 
 	return verifyLogger{
 		Logger: lg,
 		w:      writer,
-	}
+	}, err
 }
 
 func TestError(t *testing.T) {
 	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg := newZapTestLogger(conf)
+	lg, err := newZapTestLogger(conf)
+	re.NoError(err)
 	log.ReplaceGlobals(lg.Logger, nil)
 
 	rfc := `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found`
 	log.Error("test", zap.Error(ErrEtcdLeaderNotFound.FastGenByArgs()))
 	re.Contains(lg.Message(), rfc)
-	err := errors.New("test error")
-	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
-	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error`
-	re.Contains(lg.Message(), rfc)
+	err = errors.New("test error")
+	// use Info() because of no stack for comparing.
+	log.Info("test", ZapError(ErrEtcdLeaderNotFound, err))
+	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found: test error`
+	m1 := lg.Message()
+	re.Contains(m1, rfc)
+	log.Info("test", zap.Error(ErrEtcdLeaderNotFound.Wrap(err)))
+	m2 := lg.Message()
+	idx1 := strings.Index(m1, "[error")
+	idx2 := strings.Index(m2, "[error")
+	re.Equal(m1[idx1:], m2[idx2:])
+	log.Info("test", zap.Error(ErrEtcdLeaderNotFound.Wrap(err).FastGenWithCause()))
+	m3 := lg.Message()
+	re.NotContains(m3, rfc)
 }
 
 func TestErrorEqual(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	err1 := ErrSchedulerNotFound.FastGenByArgs()
 	err2 := ErrSchedulerNotFound.FastGenByArgs()
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err)
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err1 = ErrSchedulerNotFound.FastGenByArgs()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.False(errors.ErrorEqual(err1, err2))
 
 	err3 := errors.New("test")
 	err4 := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err3 = errors.New("test1")
 	err4 = errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.False(errors.ErrorEqual(err1, err2))
 }
 
-func TestZapError(t *testing.T) {
+func TestZapError(_ *testing.T) {
 	err := errors.New("test")
 	log.Info("test", ZapError(err))
 	err1 := ErrSchedulerNotFound
@@ -124,22 +140,27 @@ func TestZapError(t *testing.T) {
 }
 
 func TestErrorWithStack(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
-	lg := newZapTestLogger(conf)
+	lg, err := newZapTestLogger(conf)
+	re.NoError(err)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	_, err := strconv.ParseUint("-42", 10, 64)
+	_, err = strconv.ParseUint("-42", 10, 64)
 	log.Error("test", ZapError(ErrStrconvParseInt.Wrap(err).GenWithStackByCause()))
 	m1 := lg.Message()
 	log.Error("test", zap.Error(errors.WithStack(err)))
 	m2 := lg.Message()
+	log.Error("test", ZapError(ErrStrconvParseInt.GenWithStackByCause(), err))
+	m3 := lg.Message()
 	// This test is based on line number and the first log is in line 141, the second is in line 142.
 	// So they have the same length stack. Move this test to another place need to change the corresponding length.
 	idx1 := strings.Index(m1, "[stack=")
 	re.GreaterOrEqual(idx1, -1)
 	idx2 := strings.Index(m2, "[stack=")
 	re.GreaterOrEqual(idx2, -1)
+	idx3 := strings.Index(m3, "[stack=")
+	re.GreaterOrEqual(idx3, -1)
 	re.Len(m2[idx2:], len(m1[idx1:]))
+	re.Len(m3[idx3:], len(m1[idx1:]))
 }

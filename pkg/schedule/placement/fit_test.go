@@ -21,9 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -44,7 +46,10 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
+					if id == 1111 || id == 2111 || id == 3111 {
+						labels["disk"] = "ssd"
+					}
+					stores.PutStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
 				}
 			}
 		}
@@ -53,7 +58,7 @@ func makeStores() StoreSet {
 }
 
 // example: "1111_leader,1234,2111_learner"
-func makeRegion(def string) *core.RegionInfo {
+func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
 	for _, peerDef := range strings.Split(def, ",") {
@@ -62,22 +67,32 @@ func makeRegion(def string) *core.RegionInfo {
 			splits := strings.Split(peerDef, "_")
 			idStr, role = splits[0], PeerRoleType(splits[1])
 		}
-		id, _ := strconv.Atoi(idStr)
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, err
+		}
 		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), Role: role.MetaPeerRole()}
 		regionMeta.Peers = append(regionMeta.Peers, peer)
 		if role == Leader {
 			leader = peer
 		}
 	}
-	return core.NewRegionInfo(&regionMeta, leader)
+	return core.NewRegionInfo(&regionMeta, leader), nil
 }
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
 // count role constraints location_labels
-func makeRule(def string) *Rule {
-	var rule Rule
+func makeRule(def string) (*Rule, error) {
+	var (
+		rule Rule
+		err  error
+	)
 	splits := strings.Split(def, "/")
-	rule.Count, _ = strconv.Atoi(splits[0])
+	rule.Count, err = strconv.Atoi(splits[0])
+	if err != nil {
+		return nil, err
+	}
+
 	rule.Role = PeerRoleType(splits[1])
 	// only support k=v type constraint
 	for _, c := range strings.Split(splits[2], ",") {
@@ -92,7 +107,7 @@ func makeRule(def string) *Rule {
 		})
 	}
 	rule.LocationLabels = strings.Split(splits[3], ",")
-	return &rule
+	return &rule, nil
 }
 
 func checkPeerMatch(peers []*metapb.Peer, expect string) bool {
@@ -147,10 +162,13 @@ func TestReplace(t *testing.T) {
 		{"1111_leader,1121,1131", []string{"1/leader/host=host1/host", "1/voter/host=host2/host", "1/voter/host=host3/host"}, 1111, 1121, false},
 	}
 	for _, tc := range testCases {
-		region := makeRegion(tc.region)
-		var rules []*Rule
+		region, err := makeRegion(tc.region)
+		re.NoError(err)
+		rules := make([]*Rule, 0, len(tc.rules))
 		for _, r := range tc.rules {
-			rules = append(rules, makeRule(r))
+			rule, err := makeRule(r)
+			re.NoError(err)
+			rules = append(rules, rule)
 		}
 		rf := fitRegion(stores.GetStores(), region, rules, false)
 		re.True(rf.IsSatisfied())
@@ -186,13 +204,19 @@ func TestFitRegion(t *testing.T) {
 		{"1111,1112,1113,1114", []string{"3/voter//", "1/voter/id=id1/"}, "1112,1113,1114/1111"},
 		{"1111,2211,3111,3112", []string{"3/voter//zone", "1/voter/rack=rack2/"}, "1111,2211,3111//3112"},
 		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
+		{"1111_leader,2111,3111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111/"},
+		{"1111_leader,2111,3111,4111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,4111/3111"},
+		{"1111_leader,2111,3111,4111_learner", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111//4111"},
 	}
 
 	for _, testCase := range testCases {
-		region := makeRegion(testCase.region)
-		var rules []*Rule
+		region, err := makeRegion(testCase.region)
+		re.NoError(err)
+		rules := make([]*Rule, 0, len(testCase.rules))
 		for _, r := range testCase.rules {
-			rules = append(rules, makeRule(r))
+			rule, err := makeRule(r)
+			re.NoError(err)
+			rules = append(rules, rule)
 		}
 		rf := fitRegion(stores.GetStores(), region, rules, false)
 		expects := strings.Split(testCase.fitPeers, "/")
@@ -209,7 +233,7 @@ func TestIsolationScore(t *testing.T) {
 	as := assert.New(t)
 	stores := makeStores()
 	testCases := []struct {
-		checker func(interface{}, interface{}, ...interface{}) bool
+		checker func(any, any, ...any) bool
 		peers1  []uint64
 		peers2  []uint64
 	}{
@@ -265,7 +289,7 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 		re.NoError(err)
 		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
 		re.Len(selected, len(c.expectedPeers))
-		for id := 0; id < len(selected); id++ {
+		for id := range selected {
 			re.Equal(selected[id].Id, c.expectedPeers[id])
 		}
 	}

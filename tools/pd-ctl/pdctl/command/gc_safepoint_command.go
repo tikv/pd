@@ -15,21 +15,18 @@
 package command
 
 import (
-	"net/http"
+	"sort"
 
 	"github.com/spf13/cobra"
-)
-
-var (
-	serviceGCSafepointPrefix = "pd/api/v1/gc/safepoint"
 )
 
 // NewServiceGCSafepointCommand return a service gc safepoint subcommand of rootCmd
 func NewServiceGCSafepointCommand() *cobra.Command {
 	l := &cobra.Command{
-		Use:   "service-gc-safepoint",
-		Short: "show all service gc safepoint",
-		Run:   showSSPs,
+		Use:               "service-gc-safepoint",
+		Short:             "show all service gc safepoint",
+		PersistentPreRunE: requirePDClient,
+		Run:               showSSPs,
 	}
 	l.AddCommand(NewDeleteServiceGCSafepointCommand())
 	return l
@@ -46,13 +43,16 @@ func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 	return l
 }
 
-func showSSPs(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet, http.Header{})
+func showSSPs(cmd *cobra.Command, _ []string) {
+	safepoint, err := PDCli.GetGCSafePoint(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get service GC safepoint: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	sort.Slice(safepoint.ServiceGCSafepoints, func(i, j int) bool {
+		return safepoint.ServiceGCSafepoints[i].SafePoint < safepoint.ServiceGCSafepoints[j].SafePoint
+	})
+	jsonPrint(cmd, safepoint)
 }
 
 func deleteSSP(cmd *cobra.Command, args []string) {
@@ -60,12 +60,10 @@ func deleteSSP(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	serviceID := args[0]
-	deleteURL := serviceGCSafepointPrefix + "/" + serviceID
-	r, err := doRequest(cmd, deleteURL, http.MethodDelete, http.Header{})
+	r, err := PDCli.DeleteGCSafePoint(cmd.Context(), args[0])
 	if err != nil {
 		cmd.Printf("Failed to delete service GC safepoint: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }

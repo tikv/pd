@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,164 +21,147 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/time/rate"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-func TestUpdateConcurrencyLimiter(t *testing.T) {
-	t.Parallel()
+type releaseUtil struct {
+	dones []DoneFunc
+}
+
+func (r *releaseUtil) release() {
+	if len(r.dones) > 0 {
+		r.dones[0]()
+		r.dones = r.dones[1:]
+	}
+}
+
+func (r *releaseUtil) append(d DoneFunc) {
+	r.dones = append(r.dones, d)
+}
+
+func TestWithConcurrencyLimiter(t *testing.T) {
 	re := require.New(t)
 
-	opts := []Option{UpdateConcurrencyLimiter(10)}
-	limiter := NewLimiter()
-
-	label := "test"
-	status := limiter.Update(label, opts...)
-	re.True(status&ConcurrencyChanged != 0)
-	var lock sync.Mutex
+	limiter := newLimiter()
+	status := limiter.updateConcurrencyConfig(10)
+	re.NotZero(status & LimiterUpdated)
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
-	for i := 0; i < 15; i++ {
+	r := &releaseUtil{}
+	for range 15 {
 		wg.Add(1)
 		go func() {
-			countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+			countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 		}()
 	}
 	wg.Wait()
 	re.Equal(5, failedCount)
 	re.Equal(10, successCount)
-	for i := 0; i < 10; i++ {
-		limiter.Release(label)
+	for range 10 {
+		r.release()
 	}
 
-	limit, current := limiter.GetConcurrencyLimiterStatus(label)
+	limit, current := limiter.getConcurrencyLimiterStatus()
 	re.Equal(uint64(10), limit)
 	re.Equal(uint64(0), current)
 
-	status = limiter.Update(label, UpdateConcurrencyLimiter(10))
-	re.True(status&ConcurrencyNoChange != 0)
+	status = limiter.updateConcurrencyConfig(10)
+	re.NotZero(status & LimiterNotChanged)
 
-	status = limiter.Update(label, UpdateConcurrencyLimiter(5))
-	re.True(status&ConcurrencyChanged != 0)
+	status = limiter.updateConcurrencyConfig(5)
+	re.NotZero(status & LimiterUpdated)
 	failedCount = 0
 	successCount = 0
-	for i := 0; i < 15; i++ {
+	for range 15 {
 		wg.Add(1)
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(10, failedCount)
 	re.Equal(5, successCount)
-	for i := 0; i < 5; i++ {
-		limiter.Release(label)
+	for range 5 {
+		r.release()
 	}
 
-	status = limiter.Update(label, UpdateConcurrencyLimiter(0))
-	re.True(status&ConcurrencyDeleted != 0)
+	status = limiter.updateConcurrencyConfig(0)
+	re.NotZero(status & LimiterDeleted)
 	failedCount = 0
 	successCount = 0
-	for i := 0; i < 15; i++ {
+	for range 15 {
 		wg.Add(1)
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(0, failedCount)
 	re.Equal(15, successCount)
 
-	limit, current = limiter.GetConcurrencyLimiterStatus(label)
+	limit, current = limiter.getConcurrencyLimiterStatus()
 	re.Equal(uint64(0), limit)
-	re.Equal(uint64(0), current)
+	re.Equal(uint64(15), current)
 }
 
-func TestBlockList(t *testing.T) {
-	t.Parallel()
+func TestWithQPSLimiter(t *testing.T) {
 	re := require.New(t)
-	opts := []Option{AddLabelAllowList()}
-	limiter := NewLimiter()
-	label := "test"
+	limiter := newLimiter()
+	status := limiter.updateQPSConfig(float64(rate.Every(time.Second)), 1)
+	re.NotZero(status & LimiterUpdated)
 
-	re.False(limiter.IsInAllowList(label))
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
-	re.True(limiter.IsInAllowList(label))
-
-	status := UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
-	re.True(status&InAllowList != 0)
-	for i := 0; i < 10; i++ {
-		re.True(limiter.Allow(label))
-	}
-}
-
-func TestUpdateQPSLimiter(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
-	opts := []Option{UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)}
-	limiter := NewLimiter()
-
-	label := "test"
-	status := limiter.Update(label, opts...)
-	re.True(status&QPSChanged != 0)
-
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
+	r := &releaseUtil{}
 	wg.Add(3)
-	for i := 0; i < 3; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	for range 3 {
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(2, failedCount)
 	re.Equal(1, successCount)
 
-	limit, burst := limiter.GetQPSLimiterStatus(label)
+	limit, burst := limiter.getQPSLimiterStatus()
 	re.Equal(rate.Limit(1), limit)
 	re.Equal(1, burst)
 
-	status = limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(time.Second)), 1))
-	re.True(status&QPSNoChange != 0)
+	status = limiter.updateQPSConfig(float64(rate.Every(time.Second)), 1)
+	re.NotZero(status & LimiterNotChanged)
 
-	status = limiter.Update(label, UpdateQPSLimiter(5, 5))
-	re.True(status&QPSChanged != 0)
-	limit, burst = limiter.GetQPSLimiterStatus(label)
+	status = limiter.updateQPSConfig(5, 5)
+	re.NotZero(status & LimiterUpdated)
+	limit, burst = limiter.getQPSLimiterStatus()
 	re.Equal(rate.Limit(5), limit)
 	re.Equal(5, burst)
 	time.Sleep(time.Second)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if i < 5 {
-			re.True(limiter.Allow(label))
+			_, err := limiter.allow()
+			re.NoError(err)
 		} else {
-			re.False(limiter.Allow(label))
+			_, err := limiter.allow()
+			re.Error(err)
 		}
 	}
 	time.Sleep(time.Second)
 
-	status = limiter.Update(label, UpdateQPSLimiter(0, 0))
-	re.True(status&QPSDeleted != 0)
-	for i := 0; i < 10; i++ {
-		re.True(limiter.Allow(label))
+	status = limiter.updateQPSConfig(0, 0)
+	re.NotZero(status & LimiterDeleted)
+	for range 10 {
+		_, err := limiter.allow()
+		re.NoError(err)
 	}
-	qLimit, qCurrent := limiter.GetQPSLimiterStatus(label)
+	qLimit, qCurrent := limiter.getQPSLimiterStatus()
 	re.Equal(rate.Limit(0), qLimit)
-	re.Equal(0, qCurrent)
-}
+	re.Zero(qCurrent)
 
-func TestQPSLimiter(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
-	opts := []Option{UpdateQPSLimiter(float64(rate.Every(3*time.Second)), 100)}
-	limiter := NewLimiter()
-
-	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
-
-	var lock sync.Mutex
-	successCount, failedCount := 0, 0
-	var wg sync.WaitGroup
+	successCount = 0
+	failedCount = 0
+	status = limiter.updateQPSConfig(float64(rate.Every(3*time.Second)), 100)
+	re.NotZero(status & LimiterUpdated)
 	wg.Add(200)
-	for i := 0; i < 200; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	for range 200 {
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(200, failedCount+successCount)
@@ -187,33 +170,30 @@ func TestQPSLimiter(t *testing.T) {
 
 	time.Sleep(4 * time.Second) // 3+1
 	wg.Add(1)
-	countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	wg.Wait()
 	re.Equal(101, successCount)
 }
 
-func TestTwoLimiters(t *testing.T) {
-	t.Parallel()
+func TestWithTwoLimiters(t *testing.T) {
 	re := require.New(t)
 	cfg := &DimensionConfig{
 		QPS:              100,
 		QPSBurst:         100,
 		ConcurrencyLimit: 100,
 	}
-	opts := []Option{UpdateDimensionConfig(cfg)}
-	limiter := NewLimiter()
+	limiter := newLimiter()
+	status := limiter.updateDimensionConfig(cfg)
+	re.NotZero(status & LimiterUpdated)
+	re.NotZero(status & LimiterUpdated)
 
-	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
-
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
+	r := &releaseUtil{}
 	wg.Add(200)
-	for i := 0; i < 200; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	for range 200 {
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(100, failedCount)
@@ -221,36 +201,43 @@ func TestTwoLimiters(t *testing.T) {
 	time.Sleep(time.Second)
 
 	wg.Add(100)
-	for i := 0; i < 100; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	for range 100 {
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(200, failedCount)
 	re.Equal(100, successCount)
 
-	for i := 0; i < 100; i++ {
-		limiter.Release(label)
+	for range 100 {
+		r.release()
 	}
-	limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(10*time.Second)), 1))
+	status = limiter.updateQPSConfig(float64(rate.Every(10*time.Second)), 1)
+	re.NotZero(status & LimiterUpdated)
 	wg.Add(100)
-	for i := 0; i < 100; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg)
+	for range 100 {
+		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
 	}
 	wg.Wait()
 	re.Equal(101, successCount)
 	re.Equal(299, failedCount)
-	limit, current := limiter.GetConcurrencyLimiterStatus(label)
+	limit, current := limiter.getConcurrencyLimiterStatus()
 	re.Equal(uint64(100), limit)
 	re.Equal(uint64(1), current)
+
+	cfg = &DimensionConfig{}
+	status = limiter.updateDimensionConfig(cfg)
+	re.NotZero(status & LimiterDeleted)
+	re.NotZero(status & LimiterDeleted)
 }
 
-func countRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
-	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
-	result := limiter.Allow(label)
+func countSingleLimiterHandleResult(limiter *limiter, successCount *int,
+	failedCount *int, lock *syncutil.Mutex, wg *sync.WaitGroup, r *releaseUtil) {
+	doneFucn, err := limiter.allow()
 	lock.Lock()
 	defer lock.Unlock()
-	if result {
+	if err == nil {
 		*successCount++
+		r.append(doneFucn)
 	} else {
 		*failedCount++
 	}

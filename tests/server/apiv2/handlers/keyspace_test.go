@@ -12,35 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package handlers_test
+package handlers
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
+	"strconv"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
-	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
-
-const keyspacesPrefix = "/pd/api/v2/keyspaces"
-
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -58,20 +53,24 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	suite.cluster = cluster
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
-	suite.server = cluster.GetServer(cluster.GetLeader())
-	suite.NoError(suite.server.BootstrapCluster())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	suite.server = cluster.GetLeaderServer()
+	re.NoError(suite.server.BootstrapCluster())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
+	re := suite.Require()
 	suite.cleanup()
 	suite.cluster.Destroy()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
@@ -81,9 +80,21 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
 	}
-	defaultKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.DefaultKeyspaceName)
-	re.Equal(keyspace.DefaultKeyspaceName, defaultKeyspace.Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
+	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
+}
+
+func (suite *keyspaceTestSuite) TestCreateLoadKeyspaceByID() {
+	re := suite.Require()
+	keyspaces := mustMakeTestKeyspacesByIDs(re, suite.server, 10)
+	for _, created := range keyspaces {
+		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
+		re.Equal(created, loaded)
+	}
+	bootstrapKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
@@ -102,6 +113,132 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	}
 }
 
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditions() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace_cas",
+		Config: map[string]string{},
+	})
+	re.NotNil(created)
+
+	currentKey := "current_file_id"
+	nextKey := "next_file_id"
+
+	next := "1000"
+	status, body, meta := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: &next,
+		},
+		Preconditions: map[string]*string{
+			nextKey: nil,
+		},
+	})
+	re.Equal(http.StatusOK, status, body)
+	re.Equal(next, meta.Config[nextKey])
+
+	otherNext := "2000"
+	status, body, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: &otherNext,
+		},
+		Preconditions: map[string]*string{
+			nextKey: nil,
+		},
+	})
+	re.Equal(http.StatusConflict, status)
+	re.Nil(meta)
+	re.Contains(body, "precondition failed")
+
+	status, _, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			currentKey: &next,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &next,
+		},
+	})
+	re.Equal(http.StatusOK, status)
+	re.Equal(next, meta.Config[currentKey])
+	re.Equal(next, meta.Config[nextKey])
+
+	wrongExpected := "999"
+	status, body, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: nil,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &wrongExpected,
+		},
+	})
+	re.Equal(http.StatusConflict, status)
+	re.Nil(meta)
+	re.Contains(body, "expected")
+
+	status, _, meta = tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+		Config: map[string]*string{
+			nextKey: nil,
+		},
+		Preconditions: map[string]*string{
+			nextKey: &next,
+		},
+	})
+	re.Equal(http.StatusOK, status)
+	re.Equal(next, meta.Config[currentKey])
+	re.NotContains(meta.GetConfig(), nextKey)
+}
+
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigPreconditionsConcurrentSetNextIfAbsent() {
+	re := suite.Require()
+	created := MustCreateKeyspace(re, suite.server, &handlers.CreateKeyspaceParams{
+		Name:   "test_keyspace_cas2",
+		Config: map[string]string{},
+	})
+	re.NotNil(created)
+
+	nextKey := "next_file_id"
+	start := make(chan struct{})
+	results := make(chan int, 2)
+
+	go func() {
+		<-start
+		next := "1000"
+		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{
+				nextKey: &next,
+			},
+			Preconditions: map[string]*string{
+				nextKey: nil,
+			},
+		})
+		if status != http.StatusOK && status != http.StatusConflict {
+			re.FailNow("unexpected status", "status=%d body=%s", status, body)
+		}
+		results <- status
+	}()
+	go func() {
+		<-start
+		next := "2000"
+		status, body, _ := tryUpdateKeyspaceConfig(re, suite.server, created.Name, &handlers.UpdateConfigParams{
+			Config: map[string]*string{
+				nextKey: &next,
+			},
+			Preconditions: map[string]*string{
+				nextKey: nil,
+			},
+		})
+		if status != http.StatusOK && status != http.StatusConflict {
+			re.FailNow("unexpected status", "status=%d body=%s", status, body)
+		}
+		results <- status
+	}()
+
+	close(start)
+
+	s1 := <-results
+	s2 := <-results
+	re.ElementsMatch([]int{http.StatusOK, http.StatusConflict}, []int{s1, s2})
+}
+
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 10)
@@ -117,7 +254,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
-		// Tombstoning a DISABLED keyspace should not be allowed.
+		// Tombstone a DISABLED keyspace should not be allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.False(success)
 		// Archiving a DISABLED keyspace should be allowed.
@@ -127,13 +264,13 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Enabling an ARCHIVED keyspace is not allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "enabled"})
 		re.False(success)
-		// Tombstoning an ARCHIVED keyspace is allowed.
+		// Tombstone an ARCHIVED keyspace is allowed.
 		success, tombstone := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, tombstone.State)
 	}
 	// Changing default keyspace's state is NOT allowed.
-	success, _ := sendUpdateStateRequest(re, suite.server, keyspace.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
+	success, _ := sendUpdateStateRequest(re, suite.server, constant.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
 	re.False(success)
 }
 
@@ -142,119 +279,62 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 50)
 	loadResponse := sendLoadRangeRequest(re, suite.server, "", "")
 	re.Empty(loadResponse.NextPageToken) // Load response should contain no more pages.
-	// Load response should contain all created keyspace and a default.
-	re.Equal(len(keyspaces)+1, len(loadResponse.Keyspaces))
-	for i, created := range keyspaces {
-		re.Equal(created, loadResponse.Keyspaces[i+1].KeyspaceMeta)
+	// Load response should contain all created keyspace and a bootstrap keyspace.
+	re.Len(loadResponse.Keyspaces, len(keyspaces)+1)
+
+	// Find the bootstrap keyspace in the response
+	var bootstrapKeyspace *handlers.KeyspaceMeta
+	var userKeyspaces []*handlers.KeyspaceMeta
+	for _, ks := range loadResponse.Keyspaces {
+		if ks.Name == keyspace.GetBootstrapKeyspaceName() {
+			bootstrapKeyspace = ks
+		} else {
+			userKeyspaces = append(userKeyspaces, ks)
+		}
 	}
-	re.Equal(keyspace.DefaultKeyspaceName, loadResponse.Keyspaces[0].Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, loadResponse.Keyspaces[0].State)
+
+	// Verify bootstrap keyspace exists and is enabled
+	re.NotNil(bootstrapKeyspace)
+	re.Equal(keyspace.GetBootstrapKeyspaceName(), bootstrapKeyspace.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, bootstrapKeyspace.State)
+
+	// Verify we have the correct number of user keyspaces
+	re.Len(userKeyspaces, len(keyspaces))
 }
 
-func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
-	// Construct load range request.
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspacesPrefix, nil)
-	re.NoError(err)
-	query := httpReq.URL.Query()
-	query.Add("page_token", token)
-	query.Add("limit", limit)
-	httpReq.URL.RawQuery = query.Encode()
-	// Send request.
-	httpResp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer httpResp.Body.Close()
-	re.Equal(http.StatusOK, httpResp.StatusCode)
-	// Receive & decode response.
-	data, err := io.ReadAll(httpResp.Body)
-	re.NoError(err)
-	resp := &handlers.LoadAllKeyspacesResponse{}
-	re.NoError(json.Unmarshal(data, resp))
-	return resp
-}
-
-func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateStateParam) (bool, *keyspacepb.KeyspaceMeta) {
-	data, err := json.Marshal(request)
-	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPut, server.GetAddr()+keyspacesPrefix+"/"+name+"/state", bytes.NewBuffer(data))
-	re.NoError(err)
-	httpResp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer httpResp.Body.Close()
-	if httpResp.StatusCode != http.StatusOK {
-		return false, nil
-	}
-	data, err = io.ReadAll(httpResp.Body)
-	re.NoError(err)
-	meta := &handlers.KeyspaceMeta{}
-	re.NoError(json.Unmarshal(data, meta))
-	return true, meta.KeyspaceMeta
-}
 func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
 	testConfig := map[string]string{
 		"config1": "100",
 		"config2": "200",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
-			Name:   fmt.Sprintf("test_keyspace%d", i),
+			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,
 		}
-		resultMeta[i] = mustCreateKeyspace(re, server, createRequest)
+		resultMeta[i] = MustCreateKeyspace(re, server, createRequest)
 	}
 	return resultMeta
 }
 
-func mustCreateKeyspace(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceParams) *keyspacepb.KeyspaceMeta {
-	data, err := json.Marshal(request)
-	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix, bytes.NewBuffer(data))
-	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-	data, err = io.ReadAll(resp.Body)
-	re.NoError(err)
-	meta := &handlers.KeyspaceMeta{}
-	re.NoError(json.Unmarshal(data, meta))
-	checkCreateRequest(re, request, meta.KeyspaceMeta)
-	return meta.KeyspaceMeta
-}
-
-func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {
-	data, err := json.Marshal(request)
-	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
-	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-	data, err = io.ReadAll(resp.Body)
-	re.NoError(err)
-	meta := &handlers.KeyspaceMeta{}
-	re.NoError(json.Unmarshal(data, meta))
-	return meta.KeyspaceMeta
-}
-
-func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
-	resp, err := dialClient.Get(server.GetAddr() + keyspacesPrefix + "/" + name)
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-	data, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	meta := &handlers.KeyspaceMeta{}
-	re.NoError(json.Unmarshal(data, meta))
-	return meta.KeyspaceMeta
-}
-
-// checkCreateRequest verifies a keyspace meta matches a create request.
-func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspaceParams, meta *keyspacepb.KeyspaceMeta) {
-	re.Equal(request.Name, meta.Name)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+func mustMakeTestKeyspacesByIDs(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
+	testConfig := map[string]string{
+		"config1": "100",
+		"config2": "200",
+	}
+	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
+	for i := range count {
+		name := strconv.Itoa(i + 1)
+		id := uint32(i + 1)
+		createRequest := &handlers.CreateKeyspaceByIDParams{
+			ID:     &id,
+			Name:   name,
+			Config: testConfig,
+		}
+		resultMeta[i] = MustCreateKeyspaceByID(re, server, createRequest)
+	}
+	return resultMeta
 }
 
 // checkUpdateRequest verifies a keyspace meta matches a update request.
@@ -271,4 +351,58 @@ func checkUpdateRequest(re *require.Assertions, request *handlers.UpdateConfigPa
 		}
 	}
 	re.Equal(expected, newConfig)
+}
+
+// TestKeyspaceErrorMessage verifies that BindJSON errors return clear error messages.
+func (suite *keyspaceTestSuite) TestKeyspaceErrorMessage() {
+	re := suite.Require()
+
+	// Test CreateKeyspace with invalid JSON
+	resp, err := tests.TestDialClient.Post(
+		suite.server.GetAddr()+keyspacesPrefix,
+		"application/json",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	var errorMsg string
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test UpdateKeyspaceConfig with invalid JSON
+	httpReq, err := http.NewRequest(
+		http.MethodPatch,
+		suite.server.GetAddr()+keyspacesPrefix+"/test/config",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
+
+	// Test UpdateKeyspaceState with invalid JSON
+	httpReq, err = http.NewRequest(
+		http.MethodPut,
+		suite.server.GetAddr()+keyspacesPrefix+"/test/state",
+		bytes.NewBufferString("{invalid json}"),
+	)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+
+	errorMsg = ""
+	re.NoError(json.NewDecoder(resp.Body).Decode(&errorMsg))
+	re.NotEmpty(errorMsg, "Error message should not be empty")
+	re.Contains(errorMsg, "invalid", "Error message should indicate invalid input")
 }

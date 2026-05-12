@@ -22,6 +22,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type redirectorTestSuite struct {
@@ -36,20 +39,26 @@ type redirectorTestSuite struct {
 	noRedirectHTTPClient *http.Client
 }
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestRedirectorTestSuite(t *testing.T) {
 	suite.Run(t, new(redirectorTestSuite))
 }
 
 func (suite *redirectorTestSuite) SetupSuite() {
+	re := suite.Require()
 	suite.tempText = "temp1"
-	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, suite.tempText)
+	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, err := io.WriteString(w, suite.tempText)
+		re.NoError(err)
 	}))
 
 	suite.testName = "test1"
 	suite.redirector = NewRedirector(suite.testName, nil)
 	suite.noRedirectHTTPClient = &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(*http.Request, []*http.Request) error {
 			// ErrUseLastResponse can be returned by Client.CheckRedirect hooks to
 			// control how redirects are processed. If returned, the next request
 			// is not sent and the most recent response is returned with its body
@@ -65,38 +74,40 @@ func (suite *redirectorTestSuite) TearDownSuite() {
 }
 
 func (suite *redirectorTestSuite) TestReverseProxy() {
+	re := suite.Require()
 	redirectorServer := httptest.NewServer(http.HandlerFunc(suite.redirector.ReverseProxy))
 	defer redirectorServer.Close()
 
 	suite.redirector.SetAddress(suite.tempServer.URL)
 	// Test normal forwarding
-	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, nil)
-	suite.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
+	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
+	re.NoError(err)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
 	// Test the requests that are forwarded by others
-	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, nil)
-	suite.NoError(err)
+	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
+	re.NoError(err)
 	req.Header.Set(proxyHeader, "other")
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
 	// Test LoopDetected
 	suite.redirector.SetAddress(redirectorServer.URL)
-	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, nil)
-	suite.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusLoopDetected, "")
+	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
+	re.NoError(err)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusLoopDetected, "")
 }
 
 func (suite *redirectorTestSuite) TestTemporaryRedirect() {
+	re := suite.Require()
 	redirectorServer := httptest.NewServer(http.HandlerFunc(suite.redirector.TemporaryRedirect))
 	defer redirectorServer.Close()
 	suite.redirector.SetAddress(suite.tempServer.URL)
 	// Test TemporaryRedirect
-	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, nil)
-	suite.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusTemporaryRedirect, "")
+	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
+	re.NoError(err)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusTemporaryRedirect, "")
 	// Test Response
-	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, nil)
-	suite.NoError(err)
-	checkHTTPRequest(suite.Require(), http.DefaultClient, req, http.StatusOK, suite.tempText)
+	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
+	re.NoError(err)
+	checkHTTPRequest(re, http.DefaultClient, req, http.StatusOK, suite.tempText)
 }
 
 func checkHTTPRequest(re *require.Assertions, client *http.Client, req *http.Request, expectedCode int, expectedText string) {

@@ -15,12 +15,17 @@
 package syncutil
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestLockGroup(t *testing.T) {
 	re := require.New(t)
@@ -28,10 +33,10 @@ func TestLockGroup(t *testing.T) {
 	concurrency := 50
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func(spaceID uint32) {
 			defer wg.Done()
-			mustSequentialUpdateSingle(re, spaceID, group)
+			mustSequentialUpdateSingle(re, spaceID, group, concurrency)
 		}(rand.Uint32())
 	}
 	wg.Wait()
@@ -39,13 +44,43 @@ func TestLockGroup(t *testing.T) {
 	re.LessOrEqual(len(group.entries), 16)
 }
 
+func TestLockGroupWithRemoveEntryOnUnlock(t *testing.T) {
+	re := require.New(t)
+	group := NewLockGroup(WithRemoveEntryOnUnlock(true))
+	maxID := 1024
+
+	// Test Concurrent lock/unlock.
+	var wg sync.WaitGroup
+	wg.Add(maxID)
+	for i := range maxID {
+		go func(spaceID uint32) {
+			defer wg.Done()
+			mustSequentialUpdateSingle(re, spaceID, group, 10)
+		}(uint32(i))
+	}
+
+	// Test range lock in a scenario with non-consecutive large key space. One of example is
+	// keyspace group split loads non-consecutive keyspace meta in batches and lock all loaded
+	// keyspace meta within a batch at the same time.
+	for i := range maxID {
+		group.Lock(uint32(i))
+	}
+	re.Len(group.entries, maxID)
+	for i := range maxID {
+		group.Unlock(uint32(i))
+	}
+
+	wg.Wait()
+	// Check that size of the lock group is limited.
+	re.Empty(group.entries)
+}
+
 // mustSequentialUpdateSingle checks that for any given update, update is sequential.
-func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *LockGroup) {
-	concurrency := 50
+func mustSequentialUpdateSingle(re *require.Assertions, spaceID uint32, group *LockGroup, concurrency int) {
 	total := 0
 	var wg sync.WaitGroup
 	wg.Add(concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			defer wg.Done()
 			group.Lock(spaceID)

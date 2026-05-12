@@ -17,44 +17,34 @@ package pd
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"runtime/trace"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/routerpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/grpcutil"
-	"github.com/tikv/pd/client/tlsutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
 )
-
-const (
-	// defaultKeyspaceID is the default key space id.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap and reserved for users who haven't been assigned keyspace.
-	defaultKeyspaceID = uint32(0)
-)
-
-// Region contains information of a region's meta and its peers.
-type Region struct {
-	Meta         *metapb.Region
-	Leader       *metapb.Peer
-	DownPeers    []*metapb.Peer
-	PendingPeers []*metapb.Peer
-	Buckets      *metapb.Buckets
-}
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
 type GlobalConfigItem struct {
@@ -64,49 +54,32 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) client.
-// It should not be used after calling Close().
-type Client interface {
-	// GetClusterID gets the cluster ID from PD.
-	GetClusterID(ctx context.Context) uint64
+// RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
+type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
-	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderAddr returns current leader's address. It returns "" before
-	// syncing leader from server.
-	GetLeaderAddr() string
-	// GetRegion gets a region and its leader Peer from PD by key.
-	// The region may expire after split. Caller is responsible for caching and
-	// taking care of region change.
-	// Also it may return nil if PD finds no Region for the key temporarily,
-	// client should retry later.
-	GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
-	// GetRegionFromMember gets a region from certain members.
-	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
-	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
-	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
-	// GetRegionByID gets a region and its leader Peer from PD by id.
-	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
-	// ScanRegion gets a list of regions, starts from the region that contains key.
-	// Limit limits the maximum number of regions returned.
-	// If a region has no leader, corresponding leader will be placed by a peer
-	// with empty value (PeerID is 0).
-	ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error)
+	GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error)
+	GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error)
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
-	GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error)
-	// Update GC safe point. TiKV will check it and do GC themselves if necessary.
+	GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error)
+	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
+	//
+	// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+	// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+	// read the current GC safe point, consider using GetGCStates instead.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
+	//
+	// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
@@ -114,11 +87,11 @@ type Client interface {
 	ScatterRegion(ctx context.Context, regionID uint64) error
 	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
-	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error)
+	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error)
 	// SplitRegions split regions by given split keys
-	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error)
+	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitRegionsResponse, error)
 	// SplitAndScatterRegions split regions by given split keys and scatter new regions
-	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
+	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 
@@ -126,163 +99,89 @@ type Client interface {
 	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error)
 	// StoreGlobalConfig set the config from etcd
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
-	// WatchGlobalConfig returns an stream with all global config and updates
+	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
-	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value interface{}) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// TSOClient is the TSO client.
-	TSOClient
-	// MetaStorageClient is the meta storage client.
-	MetaStorageClient
+	router.Client
+	tso.Client
+	metastorage.Client
+	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// Client is a PD (Placement Driver) RPC client.
+// It should not be used after calling Close().
+type Client interface {
+	RPCClient
+
+	// GetClusterID gets the cluster ID from PD.
+	GetClusterID(ctx context.Context) uint64
+	// GetLeaderURL returns current leader's URL. It returns "" before
+	// syncing leader from server.
+	GetLeaderURL() string
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() sd.ServiceDiscovery
+
+	// UpdateOption updates the client option.
+	UpdateOption(option opt.DynamicOption, value any) error
+	// WithCallerComponent returns a new Client with the specified caller
+	// component. Caller component refers to the specific part or module within
+	// the process. You can set the component in two ways:
+	//   * Define it manually, like `caller.Component("DDL")`.
+	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
+	//     The upperLayer parameter specifies the depth of the caller stack,
+	//     where 0 means the current function. Adjust the upperLayer value based
+	//     on your needs.
+	WithCallerComponent(callerComponent caller.Component) Client
+
 	// Close closes the client.
 	Close()
-}
-
-// GetStoreOp represents available options when getting stores.
-type GetStoreOp struct {
-	excludeTombstone bool
-}
-
-// GetStoreOption configures GetStoreOp.
-type GetStoreOption func(*GetStoreOp)
-
-// WithExcludeTombstone excludes tombstone stores from the result.
-func WithExcludeTombstone() GetStoreOption {
-	return func(op *GetStoreOp) { op.excludeTombstone = true }
-}
-
-// RegionsOp represents available options when operate regions
-type RegionsOp struct {
-	group      string
-	retryLimit uint64
-}
-
-// RegionsOption configures RegionsOp
-type RegionsOption func(op *RegionsOp)
-
-// WithGroup specify the group during Scatter/Split Regions
-func WithGroup(group string) RegionsOption {
-	return func(op *RegionsOp) { op.group = group }
-}
-
-// WithRetry specify the retry limit during Scatter/Split Regions
-func WithRetry(retry uint64) RegionsOption {
-	return func(op *RegionsOp) { op.retryLimit = retry }
-}
-
-// GetRegionOp represents available options when getting regions.
-type GetRegionOp struct {
-	needBuckets bool
-}
-
-// GetRegionOption configures GetRegionOp.
-type GetRegionOption func(op *GetRegionOp)
-
-// WithBuckets means getting region and its buckets.
-func WithBuckets() GetRegionOption {
-	return func(op *GetRegionOp) { op.needBuckets = true }
-}
-
-// LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
-var LeaderHealthCheckInterval = time.Second
-
-var (
-	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
-	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
-	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
-	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
-	// errClosing is returned when request is canceled when client is closing.
-	errClosing = errors.New("[pd] closing")
-	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
-	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
-)
-
-// ClientOption configures client.
-type ClientOption func(c *client)
-
-// WithGRPCDialOptions configures the client with gRPC dial options.
-func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *client) {
-		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, opts...)
-	}
-}
-
-// WithCustomTimeoutOption configures the client with timeout option.
-func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
-	return func(c *client) {
-		c.option.timeout = timeout
-	}
-}
-
-// WithForwardingOption configures the client with forwarding option.
-func WithForwardingOption(enableForwarding bool) ClientOption {
-	return func(c *client) {
-		c.option.enableForwarding = enableForwarding
-	}
-}
-
-// WithMaxErrorRetry configures the client max retry times when connect meets error.
-func WithMaxErrorRetry(count int) ClientOption {
-	return func(c *client) {
-		c.option.maxRetryTimes = count
-	}
 }
 
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
-	serviceMode     pdpb.ServiceMode
-	tsoClient       atomic.Value // *tsoClient
-	tsoSvcDiscovery ServiceDiscovery
+	serviceMode              pdpb.ServiceMode
+	tsoClient                *tso.Cli
+	tsoSvcDiscovery          sd.ServiceDiscovery
+	routerClient             *router.Cli
+	resourceManagerDiscovery *sd.ResourceManagerDiscovery
+	msDiscovery              sd.ServiceDiscovery
 }
 
-func (smk *serviceModeKeeper) close() {
-	smk.Lock()
-	defer smk.Unlock()
-	switch smk.serviceMode {
-	case pdpb.ServiceMode_API_SVC_MODE:
-		smk.tsoSvcDiscovery.Close()
-		fallthrough
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		if tsoCli := smk.tsoClient.Load(); tsoCli != nil {
-			tsoCli.(*tsoClient).Close()
-		}
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+func (k *serviceModeKeeper) close() {
+	k.Lock()
+	defer k.Unlock()
+	if k.tsoSvcDiscovery != nil {
+		k.tsoSvcDiscovery.Close()
+		k.tsoSvcDiscovery = nil
 	}
+	if k.resourceManagerDiscovery != nil {
+		k.resourceManagerDiscovery.Close()
+		k.resourceManagerDiscovery = nil
+	}
+	if k.msDiscovery != nil {
+		k.msDiscovery.Close()
+	}
+
+	k.tsoClient.Close()
 }
 
 type client struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  ServiceDiscovery
-	tokenDispatcher *tokenDispatcher
+	// Caller component refers to the components within the process.
+	callerComponent caller.Component
 
-	// For service mode switching.
-	serviceModeKeeper
-
-	// For internal usage.
-	updateTokenConnectionCh chan struct{}
-	leaderNetworkFailure    int32
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	tlsCfg *tlsutil.TLSConfig
-	option *option
+	inner *innerClient
 }
 
 // SecurityOption records options about tls
@@ -297,20 +196,49 @@ type SecurityOption struct {
 }
 
 // NewClient creates a PD client.
-func NewClient(svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	return NewClientWithContext(context.Background(), svrAddrs, security, opts...)
+func NewClient(
+	callerComponent caller.Component,
+	svrAddrs []string, security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	return NewClientWithContext(context.Background(), callerComponent,
+		svrAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
-func NewClientWithContext(ctx context.Context, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	return NewClientWithKeyspace(ctx, defaultKeyspaceID, svrAddrs, security, opts...)
+func NewClientWithContext(
+	ctx context.Context,
+	callerComponent caller.Component,
+	svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	return createClientWithKeyspace(ctx, callerComponent,
+		constants.NullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
-func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []string, security SecurityOption, opts ...ClientOption) (Client, error) {
-	log.Info("[pd] create pd client with endpoints and keyspace", zap.Strings("pd-address", svrAddrs), zap.Uint32("keyspace-id", keyspaceID))
+// And now, it's only for test purpose.
+func NewClientWithKeyspace(
+	ctx context.Context,
+	callerComponent caller.Component,
+	keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
+		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
+	}
+	return createClientWithKeyspace(ctx, callerComponent, keyspaceID,
+		svrAddrs, security, opts...)
+}
 
-	tlsCfg := &tlsutil.TLSConfig{
+// createClientWithKeyspace creates a client with context and the specified keyspace id.
+func createClientWithKeyspace(
+	ctx context.Context,
+	callerComponent caller.Component,
+	keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -318,382 +246,440 @@ func NewClientWithKeyspace(ctx context.Context, keyspaceID uint32, svrAddrs []st
 		SSLCABytes:   security.SSLCABytes,
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, err
 	}
-
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		updateTokenConnectionCh: make(chan struct{}, 1),
-		ctx:                     clientCtx,
-		cancel:                  clientCancel,
-		keyspaceID:              keyspaceID,
-		svrUrls:                 addrsToUrls(svrAddrs),
-		tlsCfg:                  tlsCfg,
-		option:                  newOption(),
+		callerComponent: adjustCallerComponent(callerComponent),
+		inner: &innerClient{
+			keyspaceID:              keyspaceID,
+			svrUrls:                 svrAddrs,
+			updateTokenConnectionCh: make(chan struct{}, 1),
+			ctx:                     clientCtx,
+			cancel:                  clientCancel,
+			tlsCfg:                  tlsCfg,
+			option:                  opt.NewOption(),
+		},
 	}
 
 	// Inject the client options.
 	for _, opt := range opts {
-		opt(c)
+		opt(c.inner.option)
 	}
 
-	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg, c.setServiceMode, c.svrUrls, c.tlsCfg, c.option)
-	if err := c.setup(); err != nil {
-		c.cancel()
+	return c, c.inner.init(nil)
+}
+
+// APIVersion is the API version the server and the client is using.
+// See more details in https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md#kvproto
+type APIVersion int
+
+// The API versions the client supports.
+// As for V1TTL, client won't use it and we just remove it.
+const (
+	V1 APIVersion = iota
+	_
+	V2
+)
+
+// APIContext is the context for API version.
+type APIContext interface {
+	GetAPIVersion() (apiVersion APIVersion)
+	GetKeyspaceName() (keyspaceName string)
+}
+
+type apiContextV1 struct{}
+
+// NewAPIContextV1 creates a API context for V1.
+func NewAPIContextV1() APIContext {
+	return &apiContextV1{}
+}
+
+// GetAPIVersion returns the API version.
+func (*apiContextV1) GetAPIVersion() (version APIVersion) {
+	return V1
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (*apiContextV1) GetKeyspaceName() (keyspaceName string) {
+	return ""
+}
+
+type apiContextV2 struct {
+	keyspaceName string
+}
+
+// NewAPIContextV2 creates a API context with the specified keyspace name for V2.
+func NewAPIContextV2(keyspaceName string) APIContext {
+	if len(keyspaceName) == 0 {
+		keyspaceName = constants.DefaultKeyspaceName
+	}
+	return &apiContextV2{keyspaceName: keyspaceName}
+}
+
+// GetAPIVersion returns the API version.
+func (*apiContextV2) GetAPIVersion() (version APIVersion) {
+	return V2
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
+	return apiCtx.keyspaceName
+}
+
+// NewClientWithAPIContext creates a client according to the API context.
+func NewClientWithAPIContext(
+	ctx context.Context, apiCtx APIContext,
+	callerComponent caller.Component,
+	svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
+	switch apiVersion {
+	case V1:
+		return NewClientWithContext(ctx, callerComponent, svrAddrs,
+			security, opts...)
+	case V2:
+		return newClientWithKeyspaceName(ctx, callerComponent,
+			keyspaceName, svrAddrs, security, opts...)
+	default:
+		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
+	}
+}
+
+// newClientWithKeyspaceName creates a client with context and the specified keyspace name.
+func newClientWithKeyspaceName(
+	ctx context.Context,
+	callerComponent caller.Component,
+	keyspaceName string, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	tlsCfg, err := tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
 		return nil, err
 	}
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		callerComponent: adjustCallerComponent(callerComponent),
+		inner: &innerClient{
+			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
+			// finally update the keyspace id to the service discovery for the following interactions.
+			keyspaceID:              constants.NullKeyspaceID,
+			updateTokenConnectionCh: make(chan struct{}, 1),
+			ctx:                     clientCtx,
+			cancel:                  clientCancel,
+			svrUrls:                 svrAddrs,
+			tlsCfg:                  tlsCfg,
+			option:                  opt.NewOption(),
+		},
+	}
 
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c.inner.option)
+	}
+
+	updateKeyspaceIDFunc := func() error {
+		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
+		if err != nil {
+			return err
+		}
+		c.inner.keyspaceID = keyspaceMeta.GetId()
+		c.inner.keyspaceMeta = keyspaceMeta
+		// c.keyspaceID is the source of truth for keyspace id.
+		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
+		return nil
+	}
+
+	if err := c.inner.init(updateKeyspaceIDFunc); err != nil {
+		return nil, err
+	}
+	log.Info("[pd] create pd client with endpoints and keyspace",
+		zap.Strings("pd-address", svrAddrs),
+		zap.String("keyspace-name", keyspaceName),
+		zap.Uint32("keyspace-id", c.inner.keyspaceID))
 	return c, nil
 }
 
-func (c *client) setup() error {
-	// Init the client base.
-	if err := c.pdSvcDiscovery.Init(); err != nil {
-		return err
-	}
-
-	// Register callbacks
-	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
-
-	// Create dispatchers
-	c.createTokenDispatcher()
-
-	// Start the daemons.
-	c.wg.Add(1)
-	go c.leaderCheckLoop()
-	return nil
-}
-
+// Close closes the client.
 func (c *client) Close() {
-	c.cancel()
-	c.wg.Wait()
-
-	c.serviceModeKeeper.close()
-	c.pdSvcDiscovery.Close()
-
-	if c.tokenDispatcher != nil {
-		tokenErr := errors.WithStack(errClosing)
-		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
-		c.tokenDispatcher.dispatcherCancel()
-	}
+	c.inner.close()
 }
 
-func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
-	c.Lock()
-	defer c.Unlock()
-	if newMode == c.serviceMode {
-		return
-	}
-	log.Info("[pd] changing service mode",
-		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
-	// Re-create a new TSO client.
-	var (
-		newTSOCli          *tsoClient
-		newTSOSvcDiscovery ServiceDiscovery
-	)
-	switch newMode {
-	case pdpb.ServiceMode_PD_SVC_MODE:
-		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
-			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
-	case pdpb.ServiceMode_API_SVC_MODE:
-		newTSOSvcDiscovery = newTSOServiceDiscovery(c.ctx, MetaStorageClient(c),
-			c.GetClusterID(c.ctx), c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
-		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
-			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
-		if err := newTSOSvcDiscovery.Init(); err != nil {
-			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
-				zap.Strings("svr-urls", c.svrUrls), zap.String("current-mode", c.serviceMode.String()), zap.Error(err))
-			return
-		}
-	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
-		log.Warn("[pd] intend to switch to unknown service mode, just return")
-		return
-	}
-	newTSOCli.Setup()
-	// Replace the old TSO client.
-	oldTSOClient := c.getTSOClient()
-	c.tsoClient.Store(newTSOCli)
-	oldTSOClient.Close()
-	// Replace the old TSO service discovery if needed.
-	oldTSOSvcDiscovery := c.tsoSvcDiscovery
-	if newTSOSvcDiscovery != nil {
-		c.tsoSvcDiscovery = newTSOSvcDiscovery
-		// Close the old TSO service discovery safely after both the old client
-		// and service discovery are replaced.
-		if oldTSOSvcDiscovery != nil {
-			oldTSOSvcDiscovery.Close()
-		}
-	}
-	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
-}
-
-func (c *client) getTSOClient() *tsoClient {
-	if tsoCli := c.tsoClient.Load(); tsoCli != nil {
-		return tsoCli.(*tsoClient)
-	}
-	return nil
-}
-
-func (c *client) scheduleUpdateTokenConnection() {
-	select {
-	case c.updateTokenConnectionCh <- struct{}{}:
-	default:
-	}
+// ResetTSOClient resets the TSO client, only for test.
+func (c *client) ResetTSOClient() {
+	c.inner.Lock()
+	defer c.inner.Unlock()
+	c.inner.resetTSOClientLocked(c.inner.serviceMode)
 }
 
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
-	return c.pdSvcDiscovery.GetClusterID()
+	return c.inner.serviceDiscovery.GetClusterID()
 }
 
-// GetLeaderAddr returns the leader address.
-func (c *client) GetLeaderAddr() string {
-	return c.pdSvcDiscovery.GetServingAddr()
+// GetLeaderURL returns the leader URL.
+func (c *client) GetLeaderURL() string {
+	return c.inner.serviceDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
-func (c *client) GetServiceDiscovery() ServiceDiscovery {
-	return c.pdSvcDiscovery
+func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
+	return c.inner.serviceDiscovery
+}
+
+// GetResourceManagerServiceURL returns the discovered standalone resource manager
+// service URL. It is an optional extension method (not part of the Client
+// interface) mainly intended for integration tests.
+//
+// When it returns an empty string, the client will fall back to PD-provided
+// resource manager service.
+func (c *client) GetResourceManagerServiceURL() string {
+	if ds := c.inner.getResourceManagerDiscovery(); ds != nil {
+		return ds.GetServiceURL()
+	}
+	return ""
+}
+
+// GetTSOServiceDiscovery returns the TSO service discovery object. Only used for testing.
+func (c *client) GetTSOServiceDiscovery() sd.ServiceDiscovery {
+	return c.inner.tsoSvcDiscovery
 }
 
 // UpdateOption updates the client option.
-func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
+func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 	switch option {
-	case MaxTSOBatchWaitInterval:
+	case opt.MaxTSOBatchWaitInterval:
 		interval, ok := value.(time.Duration)
 		if !ok {
 			return errors.New("[pd] invalid value type for MaxTSOBatchWaitInterval option, it should be time.Duration")
 		}
-		if err := c.option.setMaxTSOBatchWaitInterval(interval); err != nil {
+		if err := c.inner.option.SetMaxTSOBatchWaitInterval(interval); err != nil {
 			return err
 		}
-	case EnableTSOFollowerProxy:
+	case opt.EnableTSOFollowerProxy:
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
-		c.option.setEnableTSOFollowerProxy(enable)
+		if c.inner.getTSOProvider() != tsoProviderPD && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
+		}
+		c.inner.option.SetEnableTSOFollowerProxy(enable)
+	case opt.EnableFollowerHandle:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableFollowerHandle option, it should be bool")
+		}
+		c.inner.option.SetEnableFollowerHandle(enable)
+	case opt.TSOClientRPCConcurrency:
+		value, ok := value.(int)
+		if !ok {
+			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
+		}
+		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.inner.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
 	return nil
 }
 
-func (c *client) leaderCheckLoop() {
-	defer c.wg.Done()
-
-	leaderCheckLoopCtx, leaderCheckLoopCancel := context.WithCancel(c.ctx)
-	defer leaderCheckLoopCancel()
-
-	ticker := time.NewTicker(LeaderHealthCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			c.checkLeaderHealth(leaderCheckLoopCtx)
-		}
-	}
-}
-
-func (c *client) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	defer cancel()
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		healthCli := healthpb.NewHealthClient(client)
-		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
-		rpcErr, ok := status.FromError(err)
-		failpoint.Inject("unreachableNetwork1", func() {
-			resp = nil
-			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
-		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
-		} else {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(0))
-		}
-	}
-}
-
-func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
+// GetAllMembers gets the members Info from PD.
+func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	start := time.Now()
-	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetMembers(ctx, req)
-	cancel()
-	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return resp.GetMembers(), nil
+	return resp, nil
 }
 
-// leaderClient gets the client of current PD leader.
-func (c *client) leaderClient() pdpb.PDClient {
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		return pdpb.NewPDClient(client)
+// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
+// follower pd client and the context which holds forward information.
+func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
+	serviceClient := c.inner.serviceDiscovery.GetServiceClient()
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
+		return nil, ctx
 	}
-	return nil
+	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
 }
 
-// backupClientConn gets a grpc client connection of the current reachable and healthy
-// backup service endpoints randomly. Backup service endpoints are followers in a
-// quorum-based cluster or secondaries in a primary/secondary configured cluster.
-func (c *client) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.pdSvcDiscovery.GetBackupAddrs()
-	if len(addrs) < 1 {
-		return nil, ""
+// GetTSAsync implements the TSOClient interface.
+func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
+	defer trace.StartRegion(ctx, "pdclient.GetTSAsync").End()
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetTSAsync", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
 	}
-	var (
-		cc  *grpc.ClientConn
-		err error
-	)
-	for i := 0; i < len(addrs); i++ {
-		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.pdSvcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
-			continue
-		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
-		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		healthCancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return cc, addr
-		}
-	}
-	return nil, ""
+	return c.inner.dispatchTSORequestWithRetry(ctx)
 }
 
-func (c *client) getClient() pdpb.PDClient {
-	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		backupClientConn, addr := c.backupClientConn()
-		if backupClientConn != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(backupClientConn)
-		}
-	}
-	return c.leaderClient()
+// GetLocalTSAsync implements the TSOClient interface.
+//
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTSAsync`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
+	return c.GetTSAsync(ctx)
 }
 
-func (c *client) GetTSAsync(ctx context.Context) TSFuture {
-	return c.GetLocalTSAsync(ctx, globalDCLocation)
-}
+const (
+	// maxTSORetryTimes is the max retry times for TSO request.
+	maxTSORetryTimes = 20
+	// retryInterval is the interval between two TSO requests.
+	retryInterval = 100 * time.Millisecond
+)
 
-func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
-		ctx = opentracing.ContextWithSpan(ctx, span)
-	}
-
-	req := tsoReqPool.Get().(*tsoRequest)
-	req.requestCtx = ctx
-	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
-	req.start = time.Now()
-	req.keyspaceID = c.keyspaceID
-	req.dcLocation = dcLocation
-
-	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO
-		return req
-	}
-
-	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
-		// Wait for a while and try again
-		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
-			req.done <- err
-		}
-	}
-	return req
-}
-
+// GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
-	resp := c.GetTSAsync(ctx)
-	return resp.Wait()
+	var retryCount int
+	maxRetries := maxTSORetryTimes
+	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+		if newMax, ok := val.(int); ok {
+			maxRetries = newMax
+		}
+	})
+
+	for retryCount = range maxRetries {
+		resp := c.GetTSAsync(ctx)
+		physical, logical, err = resp.Wait()
+		// directly return if no error to avoid metrics recording
+		if err == nil {
+			return physical, logical, err
+		}
+
+		if !errs.IsLeaderChange(err) {
+			break
+		}
+
+		log.Debug("[pd] get tso failed, retrying",
+			zap.Int("retry-count", retryCount),
+			zap.Error(err))
+		failpoint.Inject("skipRetry", func() {
+			failpoint.Return(physical, logical, err)
+		})
+
+		// If the leader changes, we need to retry.
+		// For the first time, we retry immediately to avoid impacting the latency.
+		var interval time.Duration
+		if retryCount != 0 {
+			interval = retryInterval
+		}
+		select {
+		case <-ctx.Done():
+			return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+		case <-time.After(interval):
+		}
+	}
+	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+		if maxRetry, ok := val.(int); ok {
+			if retryCount >= maxRetry {
+				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+			}
+		}
+	})
+	metrics.TSORetryCount.Observe(float64(retryCount))
+	return physical, logical, err
 }
 
-func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
-	resp := c.GetLocalTSAsync(ctx, dcLocation)
-	return resp.Wait()
+// GetLocalTS implements the TSOClient interface.
+//
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTS`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
+func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
+	return c.GetTS(ctx)
 }
 
-func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
-	if res.Region == nil {
-		return nil
+// GetMinTS implements the TSOClient interface.
+func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+	if c.inner.serviceMode == pdpb.ServiceMode_UNKNOWN_SVC_MODE {
+		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("unknown service mode")
 	}
 
-	r := &Region{
-		Meta:         res.Region,
-		Leader:       res.Leader,
-		PendingPeers: res.PendingPeers,
-		Buckets:      res.Buckets,
+	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
+	if c.inner.getTSOProvider() == tsoProviderPD {
+		// If the service mode is switched to API during GetTS() call, which happens during migration,
+		// returning the default timeline should be fine.
+		return c.GetTS(ctx)
 	}
-	for _, s := range res.DownPeers {
-		r.DownPeers = append(r.DownPeers, s.Peer)
-	}
-	return r
-}
 
-func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-	start := time.Now()
-	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-
-	options := &GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req := &pdpb.GetRegionRequest{
-		Header:      c.requestHeader(),
-		RegionKey:   key,
-		NeedBuckets: options.needBuckets,
-	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	// Call GetMinTS API to get the minimal TS from the API leader.
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
-		return nil, errs.ErrClientGetProtoClient
+		return 0, 0, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegion(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
-		return nil, err
+	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
+		Header: c.requestHeader(),
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "Unimplemented") {
+			// If the method is not supported, we fallback to GetTS.
+			return c.GetTS(ctx)
+		}
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(err).GenWithStackByCause()
 	}
-	return handleRegionResponse(resp), nil
+	if resp == nil {
+		attachErr := errors.Errorf("error:%s", "no min ts info collected")
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s s", resp.GetHeader().GetError().String())
+		return 0, 0, errs.ErrClientGetMinTSO.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	minTS := resp.GetTimestamp()
+	return minTS.Physical, minTS.Logical, nil
 }
 
-func isNetworkError(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.DeadlineExceeded
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
 }
 
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
+// GetRegionFromMember implements the RPCClient interface.
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(url)
+		conn, err := c.inner.serviceDiscovery.GetOrCreateGRPCConn(url)
 		if err != nil {
 			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -713,122 +699,312 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	}
 
 	if resp == nil {
-		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
-func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
+// GetRegion implements the RPCClient interface.
+func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 
-	options := &GetRegionOp{}
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
+	}
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
 	}
 	req := &pdpb.GetRegionRequest{
 		Header:      c.requestHeader(),
 		RegionKey:   key,
-		NeedBuckets: options.needBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
-	if protoClient == nil {
-		cancel()
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetPrevRegion(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	}
+
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegion(cctx, req)
+	}
+
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
-func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
+// GetPrevRegion implements the RPCClient interface.
+func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 
-	options := &GetRegionOp{}
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
+	}
+
+	option := &opt.GetRegionOp{}
 	for _, opt := range opts {
-		opt(options)
+		opt(option)
+	}
+	req := &pdpb.GetRegionRequest{
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: option.NeedBuckets,
+	}
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
+	if serviceClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	}
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetPrevRegion(cctx, req)
+	}
+
+	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return router.ConvertToRegion(resp), nil
+}
+
+// GetRegionByID implements the RPCClient interface.
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
+
+	option := &opt.GetRegionOp{}
+	for _, opt := range opts {
+		opt(option)
 	}
 	req := &pdpb.GetRegionByIDRequest{
 		Header:      c.requestHeader(),
 		RegionId:    regionID,
-		NeedBuckets: options.needBuckets,
+		NeedBuckets: option.NeedBuckets,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
-	if protoClient == nil {
-		cancel()
+	var (
+		resp *pdpb.GetRegionResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, option)
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegionByID(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	}
+
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegionByID(cctx, req)
+	}
+
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
-func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
+// ScanRegions implements the RPCClient interface.
+func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
+	defer func() { metrics.CmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
 	if _, ok := ctx.Deadline(); !ok {
-		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
+		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
 		defer cancel()
 	}
+	option := &opt.GetRegionOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
+
 	req := &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
-	protoClient := c.getClient()
-	if protoClient == nil {
-		cancel()
+	var (
+		serviceClient sd.ServiceClient
+		cctx          context.Context
+	)
+	// the scan region api is not supported by the router service, so we need to use the leader client.
+	option.AllowRouterServiceHandle = false
+	serviceClient, cctx, _ = c.inner.getServiceClient(scanCtx, option)
+
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.ScanRegions(scanCtx, req)
+	//nolint:staticcheck
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(scanCtx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		//nolint:staticcheck
+		resp, err = protoClient.ScanRegions(cctx, req)
+	}
 
-	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 
 	return handleRegionsResponse(resp), nil
 }
 
-func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
-	var regions []*Region
+// BatchScanRegions implements the RPCClient interface.
+func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.BatchScanRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { metrics.CmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
+
+	var cancel context.CancelFunc
+	scanCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		scanCtx, cancel = context.WithTimeout(ctx, c.inner.option.Timeout)
+		defer cancel()
+	}
+	option := &opt.GetRegionOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
+	pbRanges := make([]*pdpb.KeyRange, 0, len(ranges))
+	for _, r := range ranges {
+		pbRanges = append(pbRanges, &pdpb.KeyRange{StartKey: r.StartKey, EndKey: r.EndKey})
+	}
+	req := &pdpb.BatchScanRegionsRequest{
+		Header:             c.requestHeader(),
+		NeedBuckets:        option.NeedBuckets,
+		Ranges:             pbRanges,
+		Limit:              int32(limit),
+		ContainAllKeyRange: option.OutputMustContainAllKeyRange,
+	}
+	var (
+		resp *pdpb.BatchScanRegionsResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(scanCtx, option)
+	if serviceClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+	}
+
+	failpoint.Inject("responseNil", func() {
+		resp = nil
+	})
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(scanCtx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.BatchScanRegions(cctx, req)
+	}
+
+	if err = c.respForErr(metrics.CmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	return handleBatchRegionsResponse(resp), nil
+}
+
+func handleBatchRegionsResponse(resp *pdpb.BatchScanRegionsResponse) []*router.Region {
+	regions := make([]*router.Region, 0, len(resp.GetRegions()))
+	for _, r := range resp.GetRegions() {
+		region := &router.Region{
+			Meta:         r.Region,
+			Leader:       r.Leader,
+			PendingPeers: r.PendingPeers,
+			Buckets:      r.Buckets,
+		}
+		for _, p := range r.DownPeers {
+			region.DownPeers = append(region.DownPeers, p.Peer)
+		}
+		regions = append(regions, region)
+	}
+	return regions
+}
+
+func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
+	var regions []*router.Region
 	if len(resp.GetRegions()) == 0 {
 		// Make it compatible with old server.
 		metas, leaders := resp.GetRegionMetas(), resp.GetLeaders()
 		for i := range metas {
-			r := &Region{Meta: metas[i]}
+			r := &router.Region{Meta: metas[i]}
 			if i < len(leaders) {
 				r.Leader = leaders[i]
 			}
@@ -836,10 +1012,11 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
 		}
 	} else {
 		for _, r := range resp.GetRegions() {
-			region := &Region{
+			region := &router.Region{
 				Meta:         r.Region,
 				Leader:       r.Leader,
 				PendingPeers: r.PendingPeers,
+				Buckets:      r.Buckets,
 			}
 			for _, p := range r.DownPeers {
 				region.DownPeers = append(region.DownPeers, p.Peer)
@@ -850,29 +1027,50 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
 	return regions
 }
 
-func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
+// GetStore implements the RPCClient interface.
+func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
-	if protoClient == nil {
-		cancel()
+	var (
+		resp *pdpb.GetStoreResponse
+		err  error
+	)
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
+
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetStore(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetStore(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetStore(cctx, req)
+	}
+
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetStore(cctx, req)
+	}
+
+	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleStoreResponse(resp)
@@ -889,63 +1087,78 @@ func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {
 	return store, nil
 }
 
-func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*metapb.Store, error) {
-	// Applies options
-	options := &GetStoreOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
+// GetAllStores implements the RPCClient interface.
+func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) ([]*metapb.Store, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+	// Applies option
+	option := &opt.GetStoreOp{}
+	for _, opt := range opts {
+		opt(option)
+	}
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.GetAllStoresRequest{
 		Header:                 c.requestHeader(),
-		ExcludeTombstoneStores: options.excludeTombstone,
+		ExcludeTombstoneStores: option.ExcludeTombstone,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
-	if protoClient == nil {
-		cancel()
+
+	var (
+		resp *pdpb.GetAllStoresResponse
+		err  error
+	)
+	serviceClient, cctx, isRouterServiceClient := c.inner.getServiceClient(ctx, &opt.GetRegionOp{}, option)
+
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetAllStores(ctx, req)
-	cancel()
+	if isRouterServiceClient {
+		resp, err = routerpb.NewRouterClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+	} else {
+		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).GetAllStores(cctx, req)
+	}
 
-	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp.GetStores(), nil
 }
 
+// UpdateGCSafePoint implements the RPCClient interface.
+//
+// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
+// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
+// read the current GC safe point, consider using GetGCStates instead.
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateGCSafePointV2(ctx, c.inner.keyspaceID, safePoint)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.UpdateGCSafePointRequest{
 		Header:    c.requestHeader(),
 		SafePoint: safePoint,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
@@ -955,40 +1168,45 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // returns the minimum safepoint across all services, this value is used to
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
+//
+// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
+	if c.inner.keyspaceID != constants.NullKeyspaceID {
+		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
+	}
+
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 
 	start := time.Now()
-	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.UpdateServiceGCSafePointRequest{
 		Header:    c.requestHeader(),
 		ServiceId: []byte(serviceID),
 		TTL:       ttl,
 		SafePoint: safePoint,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
-	cancel()
 
-	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
 }
 
+// ScatterRegion implements the RPCClient interface.
 func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	return c.scatterRegionsWithGroup(ctx, regionID, "")
@@ -996,114 +1214,109 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 
 func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 		Group:    group,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.ScatterRegion(ctx, req)
-	cancel()
 	if err != nil {
 		return err
 	}
-	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.GetHeader().GetError().String())
 	}
 	return nil
 }
 
-func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
+// ScatterRegions implements the RPCClient interface.
+func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	return c.scatterRegionsWithOptions(ctx, regionsID, opts...)
 }
 
-func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
+// SplitAndScatterRegions implements the RPCClient interface.
+func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer func() { metrics.CmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
-	options := &RegionsOp{}
+	options := &opt.RegionsOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
 	req := &pdpb.SplitAndScatterRegionsRequest{
 		Header:     c.requestHeader(),
 		SplitKeys:  splitKeys,
-		Group:      options.group,
-		RetryLimit: options.retryLimit,
+		Group:      options.Group,
+		RetryLimit: options.RetryLimit,
 	}
 
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.SplitAndScatterRegions(ctx, req)
 }
 
+// GetOperator implements the RPCClient interface.
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetOperatorRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.GetOperator(ctx, req)
 }
 
 // SplitRegions split regions by given split keys
-func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
+func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitRegionsResponse, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer func() { metrics.CmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
-	options := &RegionsOp{}
+	options := &opt.RegionsOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
 	req := &pdpb.SplitRegionsRequest{
 		Header:     c.requestHeader(),
 		SplitKeys:  splitKeys,
-		RetryLimit: options.retryLimit,
+		RetryLimit: options.RetryLimit,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.SplitRegions(ctx, req)
@@ -1111,73 +1324,49 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: c.pdSvcDiscovery.GetClusterID(),
+		ClusterId:       c.inner.serviceDiscovery.GetClusterID(),
+		CallerId:        string(caller.GetCallerID()),
+		CallerComponent: string(c.callerComponent),
 	}
 }
 
-func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
+func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
-	options := &RegionsOp{}
+	defer func() { metrics.CmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	options := &opt.RegionsOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
 	req := &pdpb.ScatterRegionRequest{
-		Header:     c.requestHeader(),
-		Group:      options.group,
-		RegionsId:  regionsID,
-		RetryLimit: options.retryLimit,
+		Header:         c.requestHeader(),
+		Group:          options.Group,
+		RegionsId:      regionsID,
+		RetryLimit:     options.RetryLimit,
+		SkipStoreLimit: options.SkipStoreLimit,
 	}
 
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.ScatterRegion(ctx, req)
-	cancel()
 
 	if err != nil {
 		return nil, err
 	}
-	if resp.Header.GetError() != nil {
-		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
 }
 
-func addrsToUrls(addrs []string) []string {
-	// Add default schema "http://" to addrs.
-	urls := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
-	}
-	return urls
-}
-
-// IsLeaderChange will determine whether there is a leader change.
-func IsLeaderChange(err error) bool {
-	if err == errs.ErrClientTSOStreamClosed {
-		return true
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, errs.NotLeaderErr) || strings.Contains(errMsg, errs.MismatchLeaderErr)
-}
-
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
+// LoadGlobalConfig implements the RPCClient interface.
 func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
 		return nil, 0, errs.ErrClientGetProtoClient
 	}
@@ -1201,12 +1390,15 @@ func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPat
 	return res, resp.GetRevision(), nil
 }
 
+// StoreGlobalConfig implements the RPCClient interface.
 func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error {
 	resArr := make([]*pdpb.GlobalConfigItem, len(items))
 	for i, it := range items {
 		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value, Kind: it.EventType, Payload: it.PayLoad}
 	}
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient
 	}
@@ -1217,11 +1409,14 @@ func (c *client) StoreGlobalConfig(ctx context.Context, configPath string, items
 	return nil
 }
 
+// WatchGlobalConfig implements the RPCClient interface.
 func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error) {
 	// TODO: Add retry mechanism
 	// register watch components there
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -1266,8 +1461,11 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 	return globalConfigWatcherCh, err
 }
 
+// GetExternalTimestamp implements the RPCClient interface.
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
 		return 0, errs.ErrClientGetProtoClient
 	}
@@ -1279,13 +1477,16 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 	}
 	resErr := resp.GetHeader().GetError()
 	if resErr != nil {
-		return 0, errors.Errorf("[pd]" + resErr.Message)
+		return 0, errors.New("[pd]" + resErr.Message)
 	}
 	return resp.GetTimestamp(), nil
 }
 
+// SetExternalTimestamp implements the RPCClient interface.
 func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
-	protoClient := c.getClient()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
 		return errs.ErrClientGetProtoClient
 	}
@@ -1298,7 +1499,7 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 	}
 	resErr := resp.GetHeader().GetError()
 	if resErr != nil {
-		return errors.Errorf("[pd]" + resErr.Message)
+		return errors.New("[pd]" + resErr.Message)
 	}
 	return nil
 }
@@ -1307,7 +1508,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))
@@ -1315,12 +1516,37 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	return nil
 }
 
-// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-// For test only.
-func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient := c.getTSOClient()
-	if tsoClient == nil {
-		return nil
+// WithCallerComponent implements the RPCClient interface.
+func (c *client) WithCallerComponent(callerComponent caller.Component) Client {
+	newClient := *c
+	newClient.callerComponent = callerComponent
+	return &newClient
+}
+
+// adjustCallerComponent returns the caller component if it is empty, it
+// is the upper layer of the pd client.
+func adjustCallerComponent(callerComponent caller.Component) caller.Component {
+	callerComponent = caller.Component(strings.TrimSpace(string(callerComponent)))
+	if len(callerComponent) != 0 {
+		return callerComponent
 	}
-	return tsoClient.GetTSOAllocators()
+	for i := range 10 { // limit the loop to 10 iterations to avoid infinite loop
+		callerComponent = caller.GetComponent(i)
+		if !strings.Contains(string(callerComponent), "pd/client") {
+			return callerComponent
+		}
+	}
+	log.Warn("Unknown callerComponent", zap.String("callerComponent", string(callerComponent)))
+	// If the callerComponent is still in pd/client, we set it to empty.
+	return ""
+}
+
+// GetGCInternalController returns the gc.InternalController, which is used for internally controlling the GC states.
+func (c *client) GetGCInternalController(keyspaceID uint32) gc.InternalController {
+	return newGCInternalController(c, keyspaceID)
+}
+
+// GetGCStatesClient returns the gc.GCStatesClient, which is used for accessing the GC states for general purposes.
+func (c *client) GetGCStatesClient(keyspaceID uint32) gc.GCStatesClient {
+	return newGCStatesClient(c, keyspaceID)
 }

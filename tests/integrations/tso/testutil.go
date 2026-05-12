@@ -15,14 +15,15 @@
 package tso
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 const (
 	serverCount                 = 3
 	tsoRequestConcurrencyNumber = 5
-	tsoRequestRound             = 30
+	tsoRequestRound             = 300
 	tsoCount                    = 10
 )
 
@@ -34,7 +35,7 @@ type tsoResponse interface {
 func checkAndReturnTimestampResponse[T tsoResponse](re *require.Assertions, resp T) *pdpb.Timestamp {
 	re.Equal(uint32(tsoCount), resp.GetCount())
 	timestamp := resp.GetTimestamp()
-	re.Greater(timestamp.GetPhysical(), int64(0))
-	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), uint32(tsoCount))
+	re.Positive(timestamp.GetPhysical())
+	re.GreaterOrEqual(uint32(timestamp.GetLogical()), uint32(tsoCount))
 	return timestamp
 }

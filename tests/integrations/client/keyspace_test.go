@@ -15,43 +15,60 @@
 package client_test
 
 import (
+	"context"
 	"fmt"
+	"math"
+	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/keyspace"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 const (
-	testConfig1 = "config_entry_1"
-	testConfig2 = "config_entry_2"
+	testConfig1       = "config_entry_1"
+	testConfig2       = "config_entry_2"
+	testKeyspaceCount = 10
 )
 
-func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start, count int) []*keyspacepb.KeyspaceMeta {
+func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start int) []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	var err error
-	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, testKeyspaceCount)
 	manager := server.GetKeyspaceManager()
-	for i := 0; i < count; i++ {
+	for i := range testKeyspaceCount {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", start+i),
+			Name: fmt.Sprintf("test_keyspace_%d", start+i),
 			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
 			},
-			Now: now,
+			CreateTime: now,
 		})
 		re.NoError(err)
 	}
 	return keyspaces
 }
 
-func (suite *clientTestSuite) TestLoadKeyspace() {
+func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0, 10)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
@@ -60,69 +77,60 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	// Loading non-existing keyspace should result in error.
 	_, err := suite.client.LoadKeyspace(suite.ctx, "non-existing keyspace")
 	re.Error(err)
-	// Loading default keyspace should be successful.
-	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, keyspace.DefaultKeyspaceName)
+	// Loading bootstrap keyspace should be successful.
+	bootstrapKeyspaceName := keyspace.GetBootstrapKeyspaceName()
+	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
+	keyspaceDefault, err := suite.client.LoadKeyspace(suite.ctx, bootstrapKeyspaceName)
 	re.NoError(err)
-	re.Equal(keyspace.DefaultKeyspaceID, keyspaceDefault.GetId())
-	re.Equal(keyspace.DefaultKeyspaceName, keyspaceDefault.GetName())
+	re.Equal(bootstrapKeyspaceID, keyspaceDefault.GetId())
+	re.Equal(bootstrapKeyspaceName, keyspaceDefault.GetName())
 }
 
-func (suite *clientTestSuite) TestWatchKeyspaces() {
+func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
-	initialKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 10, 10)
-	watchChan, err := suite.client.WatchKeyspaces(suite.ctx)
-	re.NoError(err)
-	// First batch of watchChan message should contain all existing keyspaces.
-	initialLoaded := <-watchChan
-	for i := range initialKeyspaces {
-		re.Contains(initialLoaded, initialKeyspaces[i])
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
+	metas := mustMakeTestKeyspaces(re, suite.srv, 20)
+	for _, expected := range metas {
+		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
+		re.NoError(err)
+		re.Equal(expected, loaded)
 	}
-	// Each additional message contains extra put events.
-	additionalKeyspaces := mustMakeTestKeyspaces(re, suite.srv, 30, 10)
+	// Get all keyspaces.
+	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx, 1, math.MaxUint32)
 	re.NoError(err)
-	// Checks that all additional keyspaces are captured by watch channel.
-	for i := 0; i < 10; {
-		loadedKeyspaces := <-watchChan
-		re.NotEmpty(loadedKeyspaces)
-		for j := range loadedKeyspaces {
-			re.Equal(additionalKeyspaces[i+j], loadedKeyspaces[j])
+	if kerneltype.IsNextGen() {
+		// In NextGen, the bootstrap keyspace is SYSTEM, not DEFAULT.
+		// Should have test keyspaces + bootstrap keyspace
+		re.Len(resKeyspaces, len(metas)+1)
+	} else {
+		// In Classic, the bootstrap keyspace is DEFAULT.
+		// Should have test keyspaces
+		re.Len(resKeyspaces, len(metas))
+	}
+	// Check expected keyspaces all in resKeyspaces.
+	for _, expected := range metas {
+		var isExists bool
+		for _, resKeyspace := range resKeyspaces {
+			if expected.GetName() == resKeyspace.GetName() {
+				isExists = true
+				continue
+			}
 		}
-		i += len(loadedKeyspaces)
+		if !isExists {
+			re.Fail("not exists keyspace")
+		}
 	}
-	// Updates to state should also be captured.
-	expected, err := suite.srv.GetKeyspaceManager().UpdateKeyspaceState(initialKeyspaces[0].Name, keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
-	re.NoError(err)
-	loaded := <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
-	// Updates to config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(initialKeyspaces[0].Name, []*keyspace.Mutation{
-		{
-			Op:  keyspace.OpDel,
-			Key: testConfig1,
-		},
-	})
-	re.NoError(err)
-	loaded = <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
-	// Updates to default keyspace's config should also be captured.
-	expected, err = suite.srv.GetKeyspaceManager().UpdateKeyspaceConfig(keyspace.DefaultKeyspaceName, []*keyspace.Mutation{
-		{
-			Op:    keyspace.OpPut,
-			Key:   "config",
-			Value: "value",
-		},
-	})
-	re.NoError(err)
-	loaded = <-watchChan
-	re.Equal([]*keyspacepb.KeyspaceMeta{expected}, loaded)
 }
 
 func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, index int, state keyspacepb.KeyspaceState) *keyspacepb.KeyspaceMeta {
 	manager := server.GetKeyspaceManager()
 	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name:   fmt.Sprintf("test_keyspace%d", index),
-		Config: nil,
-		Now:    0, // Use 0 to indicate unchanged keyspace.
+		Name:       fmt.Sprintf("test_keyspace_%d", index),
+		Config:     nil,
+		CreateTime: 0, // Use 0 to indicate unchanged keyspace.
 	})
 	re.NoError(err)
 	switch state {
@@ -148,7 +156,7 @@ func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, in
 	return meta
 }
 
-func (suite *clientTestSuite) TestUpdateKeyspaceState() {
+func (suite *clientStatelessTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	allStates := []keyspacepb.KeyspaceState{
 		keyspacepb.KeyspaceState_ENABLED,
@@ -185,5 +193,120 @@ func (suite *clientTestSuite) TestUpdateKeyspaceState() {
 			}
 			index++
 		}
+	}
+}
+
+func (s *clientStatefulTestSuite) TestIsKeyspaceUsingKeyspaceLevelGC() {
+	re := s.Require()
+
+	meta, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks1",
+		Config:     nil,
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	// By the time this test is write, only for next-gen deployment we enable keyspace level GC by default.
+	// Update this test when this
+	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks2",
+		Config: map[string]string{
+			keyspace.GCManagementType: keyspace.KeyspaceLevelGC,
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.True(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks3",
+		Config: map[string]string{
+			keyspace.GCManagementType: keyspace.UnifiedGC,
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.False(pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+
+	meta, err = s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: "ks4",
+		Config: map[string]string{
+			keyspace.GCManagementType: "",
+		},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	// In NextGen build, empty gc_management_type is automatically set to "keyspace_level"
+	// In Classic build, empty gc_management_type remains empty and returns false
+	re.Equal(kerneltype.IsNextGen(), pd.IsKeyspaceUsingKeyspaceLevelGC(meta))
+}
+
+func TestProtectedKeyspace(t *testing.T) {
+	re := require.New(t)
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
+	}()
+	const classic = `return(false)`
+	const nextGen = `return(true)`
+
+	cases := []struct {
+		name                  string
+		nextGenFlag           string
+		protectedKeyspaceID   uint32
+		protectedKeyspaceName string
+		gcConfig              string
+	}{
+		{
+			name:                  "legacy_default_keyspace",
+			nextGenFlag:           classic,
+			protectedKeyspaceID:   constant.DefaultKeyspaceID,
+			protectedKeyspaceName: constant.DefaultKeyspaceName,
+			gcConfig:              "",
+		},
+		{
+			name:                  "nextgen_system_keyspace",
+			nextGenFlag:           nextGen,
+			protectedKeyspaceID:   constant.SystemKeyspaceID,
+			protectedKeyspaceName: constant.SystemKeyspaceName,
+			gcConfig:              keyspace.KeyspaceLevelGC,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(_ *testing.T) {
+			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+				conf.Keyspace.WaitRegionSplit = false
+			})
+			re.NoError(err)
+			defer tc.Destroy()
+			pdAddr := tc.GetConfig().GetClientURL()
+			err = tc.RunInitialServers()
+			re.NoError(err)
+			tc.WaitLeader()
+			leaderServer := tc.GetLeaderServer()
+			re.NoError(leaderServer.BootstrapCluster())
+			tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+			re.NoError(err)
+			defer tsoCluster.Destroy()
+			tsoCluster.WaitForDefaultPrimaryServing(re)
+
+			// Test split keyspace
+			kgm := leaderServer.GetServer().GetKeyspaceGroupManager()
+			re.NotNil(kgm)
+			err = kgm.SplitKeyspaceGroupByID(0, 1, []uint32{c.protectedKeyspaceID})
+			re.Error(err)
+			re.Contains(err.Error(), "cannot modify")
+
+			// Test tso forward
+			cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+				leaderServer.GetLeader().GetClientUrls(), pd.SecurityOption{})
+			re.NoError(err)
+			_, _, err = cli.GetTS(ctx)
+			re.NoError(err)
+		})
 	}
 }

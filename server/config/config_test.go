@@ -19,27 +19,37 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/ratelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestSecurity(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	re.False(cfg.Security.RedactInfoLog)
+	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
 }
 
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	tls, err := cfg.Security.ToTLSConfig()
+	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
 }
@@ -78,8 +88,8 @@ func TestReloadUpgrade(t *testing.T) {
 
 	// Simulate an old configuration that only contains 2 fields.
 	type OldConfig struct {
-		Schedule    ScheduleConfig    `toml:"schedule" json:"schedule"`
-		Replication ReplicationConfig `toml:"replication" json:"replication"`
+		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
+		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 	}
 	old := &OldConfig{
 		Schedule:    *opt.GetScheduleConfig(),
@@ -101,7 +111,7 @@ func TestReloadUpgrade2(t *testing.T) {
 
 	// Simulate an old configuration that does not contain ScheduleConfig.
 	type OldConfig struct {
-		Replication ReplicationConfig `toml:"replication" json:"replication"`
+		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 	}
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
@@ -112,7 +122,7 @@ func TestReloadUpgrade2(t *testing.T) {
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	re.Equal("", newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
+	re.Empty(newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
 }
 
 func TestValidation(t *testing.T) {
@@ -120,7 +130,7 @@ func TestValidation(t *testing.T) {
 	cfg := NewConfig()
 	re.NoError(cfg.Adjust(nil, false))
 
-	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
+	cfg.Log.File.Filename = filepath.Join(cfg.DataDir, "test")
 	re.Error(cfg.Validate())
 
 	// check schedule config
@@ -162,13 +172,17 @@ leader-schedule-limit = 0
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
-	flagSet.Parse(nil)
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
+	err := flagSet.Parse(nil)
+	re.NoError(err)
 	cfg := NewConfig()
-	err := cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
 	re.NoError(err)
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 
 	// When invalid, use default values.
@@ -185,6 +199,9 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	re.True(cfg.PreVote)
 	re.Equal("info", cfg.Log.Level)
+	re.Equal(300, cfg.Log.File.MaxSize)
+	re.Equal(0, cfg.Log.File.MaxDays)
+	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
@@ -243,7 +260,33 @@ tso-update-physical-interval = "15s"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+	re.Equal(MaxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+
+	cfgData = `
+[log]
+level = "debug"
+
+[log.file]
+max-size = 100
+max-days = 10
+max-backups = 5
+`
+	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
+	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
+	err = flagSet.Parse(nil)
+	re.NoError(err)
+	cfg = NewConfig()
+	err = cfg.Parse(flagSet)
+	re.NoError(err)
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal("debug", cfg.Log.Level)
+	re.Equal(100, cfg.Log.File.MaxSize)
+	re.Equal(10, cfg.Log.File.MaxDays)
+	re.Equal(5, cfg.Log.File.MaxBackups)
 }
 
 func TestMigrateFlags(t *testing.T) {
@@ -257,7 +300,7 @@ func TestMigrateFlags(t *testing.T) {
 	}
 	cfg, err := load(`
 [pd-server]
-trace-region-flow = false
+flow-round-by-digit = 127
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false
@@ -266,6 +309,7 @@ enable-remove-extra-replica = false
 `)
 	re.NoError(err)
 	re.Equal(math.MaxInt8, cfg.PDServerCfg.FlowRoundByDigit)
+	re.True(cfg.PDServerCfg.EnableGOGCTuner)
 	re.True(cfg.Schedule.EnableReplaceOfflineReplica)
 	re.False(cfg.Schedule.EnableRemoveDownReplica)
 	re.False(cfg.Schedule.EnableMakeUpReplica)
@@ -445,24 +489,60 @@ hot-regions-write-interval= "30m"
 	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
 }
 
+func TestMaxStorePreparingTime(t *testing.T) {
+	re := require.New(t)
+	cfgData := ``
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(48*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "40h"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(40*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "0s"
+`
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(0*time.Second, cfg.Schedule.MaxStorePreparingTime.Duration)
+}
+
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
-	cfg.Adjust(nil, false)
+	err := cfg.Adjust(nil, false)
+	re.NoError(err)
 	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
-	schedule := &ScheduleConfig{}
-	schedule.adjust(emptyConfigMetaData, false)
+	schedule := &sc.ScheduleConfig{}
+	err = schedule.Adjust(emptyConfigMetaData, false)
+	re.NoError(err)
 	re.Equal(schedule, schedule.Clone())
 
-	replication := &ReplicationConfig{}
-	replication.adjust(emptyConfigMetaData)
+	replication := &sc.ReplicationConfig{}
+	err = replication.Adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
-	pdServer.adjust(emptyConfigMetaData)
+	err = pdServer.adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}
@@ -477,4 +557,29 @@ func newTestScheduleOption() (*PersistOptions, error) {
 	}
 	opt := NewPersistOptions(cfg)
 	return opt, nil
+}
+
+func TestRateLimitClone(t *testing.T) {
+	re := require.New(t)
+	cfg := &RateLimitConfig{
+		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	clone := cfg.Clone()
+	clone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 200,
+	}
+	dc := cfg.LimiterConfig["test"]
+	re.Zero(dc.ConcurrencyLimit)
+
+	gCfg := &GRPCRateLimitConfig{
+		EnableRateLimit: defaultEnableGRPCRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	gClone := gCfg.Clone()
+	gClone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 300,
+	}
+	gdc := gCfg.LimiterConfig["test"]
+	re.Zero(gdc.ConcurrencyLimit)
 }

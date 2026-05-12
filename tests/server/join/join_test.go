@@ -16,12 +16,11 @@ package join_test
 
 import (
 	"context"
-	"os"
-	"path"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"
@@ -43,11 +42,11 @@ func TestSimpleJoin(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	pd1 := cluster.GetServer("pd1")
 	client := pd1.GetEtcdClient()
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 1)
 
@@ -56,12 +55,10 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd2.Run()
 	re.NoError(err)
-	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
-	members, err = etcdutil.ListEtcdMembers(client)
+	re.NotEmpty(cluster.WaitLeader())
+	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
-	re.Equal(pd1.GetClusterID(), pd2.GetClusterID())
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -71,12 +68,10 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd3.Run()
 	re.NoError(err)
-	_, err = os.Stat(path.Join(pd3.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
-	members, err = etcdutil.ListEtcdMembers(client)
+	re.NotEmpty(cluster.WaitLeader())
+	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 3)
-	re.Equal(pd1.GetClusterID(), pd3.GetClusterID())
 }
 
 // A failed PD tries to join the previous cluster but it has been deleted
@@ -92,7 +87,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
@@ -105,10 +100,10 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 
 	// The server should not successfully start.
-	res := cluster.RunServer(pd3)
+	res := tests.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }
@@ -125,7 +120,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
@@ -138,10 +133,10 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 
 	// The server should not successfully start.
-	res := cluster.RunServer(pd3)
+	res := tests.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }
@@ -155,7 +150,7 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	// Join the second PD.
 	pd2, err := cluster.Join(ctx)
@@ -164,4 +159,22 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(pd2.Stop())
 	re.NoError(pd2.Destroy())
 	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
+}
+
+// A PD joins itself.
+func TestPDJoinsItself(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Get a server config and modify it to join itself
+	cfg := cluster.GetConfig().InitialServers[0]
+	serverCfg, err := cfg.Generate()
+	re.NoError(err)
+	serverCfg.Join = serverCfg.AdvertiseClientUrls
+	re.Error(join.PrepareJoinCluster(serverCfg))
 }

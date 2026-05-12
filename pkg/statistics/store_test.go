@@ -18,13 +18,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
-func TestFilterUnhealtyStore(t *testing.T) {
+func TestFilterUnhealthyStore(t *testing.T) {
 	re := require.New(t)
 	stats := NewStoresStats()
 	cluster := core.NewBasicCluster()
@@ -35,7 +38,7 @@ func TestFilterUnhealtyStore(t *testing.T) {
 	re.Len(stats.GetStoresLoads(), 5)
 
 	cluster.PutStore(cluster.GetStore(1).Clone(core.SetLastHeartbeatTS(time.Now().Add(-24 * time.Hour))))
-	cluster.PutStore(cluster.GetStore(2).Clone(core.TombstoneStore()))
+	cluster.PutStore(cluster.GetStore(2).Clone(core.SetStoreState(metapb.StoreState_Tombstone)))
 	cluster.DeleteStore(cluster.GetStore(3))
 
 	stats.FilterUnhealthyStore(cluster)
@@ -43,4 +46,28 @@ func TestFilterUnhealtyStore(t *testing.T) {
 	re.Len(loads, 2)
 	re.NotNil(loads[4])
 	re.NotNil(loads[5])
+}
+
+func TestStoreReadCPUUsesTimeMedian(t *testing.T) {
+	re := require.New(t)
+	stats := newRollingStoreStats()
+
+	intervals := []uint64{5, 10, 20, 10, 5}
+	for _, secs := range intervals {
+		stats.Observe(&pdpb.StoreStats{
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: 0,
+				EndTimestamp:   secs,
+			},
+			CpuUsages: []*pdpb.RecordPair{
+				{
+					Key:   "unified-read-pool-0",
+					Value: 100,
+				},
+			},
+		})
+	}
+
+	re.Equal(100.0, stats.GetLoad(utils.StoreReadCPU))
+	re.Equal(100.0, stats.GetInstantLoad(utils.StoreReadCPU))
 }

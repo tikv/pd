@@ -19,11 +19,11 @@ import "github.com/tikv/pd/pkg/utils/syncutil"
 // Cache is an interface for cache system
 type Cache interface {
 	// Put puts an item into cache.
-	Put(key uint64, value interface{})
+	Put(key uint64, value any)
 	// Get retrieves an item from cache.
-	Get(key uint64) (interface{}, bool)
+	Get(key uint64) (any, bool)
 	// Peek reads an item from cache. The action is no considered 'Use'.
-	Peek(key uint64) (interface{}, bool)
+	Peek(key uint64) (any, bool)
 	// Remove eliminates an item from cache.
 	Remove(key uint64)
 	// Elems return all items in cache.
@@ -59,7 +59,7 @@ func newThreadSafeCache(cache Cache) Cache {
 }
 
 // Put puts an item into cache.
-func (c *threadSafeCache) Put(key uint64, value interface{}) {
+func (c *threadSafeCache) Put(key uint64, value any) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.cache.Put(key, value)
@@ -68,14 +68,14 @@ func (c *threadSafeCache) Put(key uint64, value interface{}) {
 // Get retrieves an item from cache.
 // When Get method called, LRU and TwoQueue cache will rearrange entries
 // so we must use write lock.
-func (c *threadSafeCache) Get(key uint64) (interface{}, bool) {
+func (c *threadSafeCache) Get(key uint64) (any, bool) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	return c.cache.Get(key)
 }
 
 // Peek reads an item from cache. The action is no considered 'Use'.
-func (c *threadSafeCache) Peek(key uint64) (interface{}, bool) {
+func (c *threadSafeCache) Peek(key uint64) (any, bool) {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 	return c.cache.Peek(key)

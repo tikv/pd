@@ -16,25 +16,31 @@ package handlers
 
 import (
 	"encoding/json"
+	goerrors "errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
-	"github.com/tikv/pd/server/keyspace"
 )
+
+const managerUninitializedErr = "keyspace manager is not initialized"
 
 // RegisterKeyspace register keyspace related handlers to router paths.
 func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
+	router.POST("/id", CreateKeyspaceByID)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)
 	router.PATCH("/:name/config", UpdateKeyspaceConfig)
@@ -62,18 +68,66 @@ type CreateKeyspaceParams struct {
 func CreateKeyspace(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	createParams := &CreateKeyspaceParams{}
 	err := c.BindJSON(createParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	req := &keyspace.CreateKeyspaceRequest{
-		Name:   createParams.Name,
-		Config: createParams.Config,
-		Now:    time.Now().Unix(),
+		Name:       createParams.Name,
+		Config:     createParams.Config,
+		CreateTime: time.Now().Unix(),
 	}
 	meta, err := manager.CreateKeyspace(req)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
+}
+
+// CreateKeyspaceByIDParams represents parameters needed when creating a new keyspace by ID.
+type CreateKeyspaceByIDParams struct {
+	ID     *uint32           `json:"id"`
+	Name   string            `json:"name"`
+	Config map[string]string `json:"config"`
+}
+
+// CreateKeyspaceByID creates keyspace according to given input.
+//
+//	@Tags		keyspaces
+//	@Summary	Create new keyspace by ID.
+//	@Param		body	body	CreateKeyspaceByIDParams	true	"Create keyspace parameters"
+//	@Produce	json
+//	@Success	200	{object}	KeyspaceMeta
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/keyspaces [post]
+func CreateKeyspaceByID(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+	createParams := &CreateKeyspaceByIDParams{}
+	err := c.BindJSON(createParams)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	req := &keyspace.CreateKeyspaceByIDRequest{
+		ID:         createParams.ID,
+		Name:       createParams.Name,
+		Config:     createParams.Config,
+		CreateTime: time.Now().Unix(),
+	}
+	meta, err := manager.CreateKeyspaceByID(req)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -93,11 +147,29 @@ func CreateKeyspace(c *gin.Context) {
 func LoadKeyspace(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	name := c.Param("name")
 	meta, err := manager.LoadKeyspace(name)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
+	}
+	if value, ok := c.GetQuery("force_refresh_group_id"); ok && value == "true" {
+		groupManager := svr.GetKeyspaceGroupManager()
+		if groupManager == nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, GroupManagerUninitializedErr)
+			return
+		}
+		// keyspace has been checked in LoadKeyspace, so no need to check again.
+		groupID, err := groupManager.GetGroupByKeyspaceID(meta.GetId())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		meta.Config[keyspace.TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(groupID), 10)
 	}
 	c.IndentedJSON(http.StatusOK, &KeyspaceMeta{meta})
 }
@@ -113,12 +185,16 @@ func LoadKeyspace(c *gin.Context) {
 //	@Router		/keyspaces/id/{id} [get]
 func LoadKeyspaceByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, "invalid keyspace id")
 		return
 	}
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	meta, err := manager.LoadKeyspaceByID(uint32(id))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
@@ -129,7 +205,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 
 // parseLoadAllQuery parses LoadAllKeyspaces'/GetKeyspaceGroups' query parameters.
 // page_token:
-// The keyspace/keyspace group id of the scan start. If not set, scan from keyspace/keyspace group with id 1.
+// The keyspace/keyspace group id of the scan start. If not set, scan from keyspace/keyspace group with id 0.
 // It's string of ID of the previous scan result's last element (next_page_token).
 // limit:
 // The maximum number of keyspace metas/keyspace groups to return. If not set, no limit is posed.
@@ -138,7 +214,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err error) {
 	pageToken, set := c.GetQuery("page_token")
 	if !set || pageToken == "" {
-		// If pageToken is empty or unset, then scan from ID of 1.
+		// If pageToken is empty or unset, then scan from ID of 0.
 		scanStart = 0
 	} else {
 		scanStart64, err := strconv.ParseUint(pageToken, 10, 32)
@@ -187,6 +263,10 @@ type LoadAllKeyspacesResponse struct {
 func LoadAllKeyspaces(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	scanStart, scanLimit, err := parseLoadAllQuery(c)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
@@ -229,6 +309,10 @@ func LoadAllKeyspaces(c *gin.Context) {
 // which will both be set to "" if value type is string during binding.
 type UpdateConfigParams struct {
 	Config map[string]*string `json:"config"`
+	// Preconditions specifies prerequisites for updating config, using a JSON-merge-patch-like encoding:
+	// - key -> null means the key must be absent.
+	// - key -> "value" means the key must exist and equal "value".
+	Preconditions map[string]*string `json:"preconditions,omitempty"`
 }
 
 // UpdateKeyspaceConfig updates target keyspace's config.
@@ -242,22 +326,46 @@ type UpdateConfigParams struct {
 //	@Produce	json
 //	@Success	200	{object}	KeyspaceMeta
 //	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	409	{string}	string	"The update conflicts or preconditions are not met."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //
 // Router /keyspaces/{name}/config [patch]
 func UpdateKeyspaceConfig(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
+
 	name := c.Param("name")
 	configParams := &UpdateConfigParams{}
 	err := c.BindJSON(configParams)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	mutations := getMutations(configParams.Config)
-	meta, err := manager.UpdateKeyspaceConfig(name, mutations)
+
+	// Check if the update is supported.
+	for _, mutation := range mutations {
+		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
+			err = errs.ErrUnsupportedOperationInKeyspace
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	meta, err := manager.UpdateKeyspaceConfigWithPreconditions(name, mutations, configParams.Preconditions)
 	if err != nil {
+		if goerrors.Is(err, errs.ErrKeyspaceConfigPreconditionFailed) {
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
+		if goerrors.Is(err, errs.ErrEtcdTxnConflict) {
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -305,11 +413,15 @@ type UpdateStateParam struct {
 func UpdateKeyspaceState(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager := svr.GetKeyspaceManager()
+	if manager == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
+		return
+	}
 	name := c.Param("name")
 	param := &UpdateStateParam{}
 	err := c.BindJSON(param)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
 	targetState, ok := keyspacepb.KeyspaceState_value[strings.ToUpper(param.State)]

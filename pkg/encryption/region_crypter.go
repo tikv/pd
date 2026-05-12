@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -41,7 +42,7 @@ func processRegionKeys(region *metapb.Region, key *encryptionpb.DataKey, iv []by
 }
 
 // EncryptRegion encrypt the region start key and end key, using the current key return from the
-// key manager. The return is an encypted copy of the region, with Encryption meta updated.
+// key manager. The return is an encrypted copy of the region, with Encryption meta updated.
 func EncryptRegion(region *metapb.Region, keyManager KeyManager) (*metapb.Region, error) {
 	if region == nil {
 		return nil, errs.ErrEncryptionEncryptRegion.GenWithStack("trying to encrypt nil region")

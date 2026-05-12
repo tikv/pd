@@ -18,8 +18,10 @@ import (
 	"context"
 
 	"github.com/google/btree"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -28,7 +30,7 @@ type memoryKV struct {
 	tree *btree.BTreeG[memoryKVItem]
 }
 
-// NewMemoryKV returns an in-memory kvBase for testing.
+// NewMemoryKV returns an in-memory kvBase.
 func NewMemoryKV() Base {
 	return &memoryKV{
 		tree: btree.NewG(2, func(i, j memoryKVItem) bool {
@@ -41,10 +43,12 @@ type memoryKVItem struct {
 	key, value string
 }
 
+// Less compares two memoryKVItem.
 func (s *memoryKVItem) Less(than *memoryKVItem) bool {
 	return s.key < than.key
 }
 
+// Load loads the value for the key.
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
@@ -55,7 +59,8 @@ func (kv *memoryKV) Load(key string) (string, error) {
 	return item.value, nil
 }
 
-func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+// LoadRange loads the keys in the range of [key, endKey).
+func (kv *memoryKV) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
 	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
 		rangeLimit, ok := val.(int)
 		if ok && limit > rangeLimit {
@@ -64,8 +69,8 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	})
 	kv.RLock()
 	defer kv.RUnlock()
-	keys := make([]string, 0, limit)
-	values := make([]string, 0, limit)
+	keys = make([]string, 0, limit)
+	values = make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
 		keys = append(keys, item.key)
 		values = append(values, item.value)
@@ -77,6 +82,7 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	return keys, values, nil
 }
 
+// Save saves the key-value pair.
 func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -84,12 +90,18 @@ func (kv *memoryKV) Save(key, value string) error {
 	return nil
 }
 
+// Remove removes the key.
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
 
 	kv.tree.Delete(memoryKVItem{key, ""})
 	return nil
+}
+
+// CreateRawTxn implements kv.Base interface.
+func (*memoryKV) CreateRawTxn() RawTxn {
+	panic("unimplemented")
 }
 
 // memTxn implements kv.Txn.

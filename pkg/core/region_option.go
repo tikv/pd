@@ -16,9 +16,8 @@ package core
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -38,10 +37,15 @@ func WithDownPeers(downPeers []*pdpb.PeerStats) RegionCreateOption {
 
 // WithFlowRoundByDigit set the digit, which use to round to the nearest number
 func WithFlowRoundByDigit(digit int) RegionCreateOption {
-	flowRoundDivisor := uint64(math.Pow10(digit))
+	divisor := GetFlowRoundDivisorByDigit(digit)
 	return func(region *RegionInfo) {
-		region.flowRoundDivisor = flowRoundDivisor
+		region.flowRoundDivisor = divisor
 	}
+}
+
+// GetFlowRoundDivisorByDigit get the flow round divisor by digit
+func GetFlowRoundDivisorByDigit(digit int) uint64 {
+	return uint64(math.Pow10(digit))
 }
 
 // WithPendingPeers sets the pending peers for the region.
@@ -183,6 +187,14 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// WithFlashback set region flashback states.
+func WithFlashback(isInFlashback bool, flashbackTS uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.FlashbackStartTs = flashbackTS
+		region.meta.IsInFlashback = isInFlashback
+	}
+}
+
 // SetCPUUsage sets the CPU usage of the region.
 func SetCPUUsage(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -217,10 +229,19 @@ func WithRemoveStorePeer(storeID uint64) RegionCreateOption {
 	}
 }
 
-// SetBuckets sets the buckets for the region, only use test.
+// SetBuckets sets the buckets for the region, only use test and region syncer client.
 func SetBuckets(buckets *metapb.Buckets) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		// bucket version is the timestamp of tikv report buckets, so it must greater than 0.
+		// otherwise it means this is just avoid marshal panic, we should reset it.
+		if buckets != nil && buckets.GetVersion() > 0 {
+			region.bucketMeta = &metapb.BucketMeta{
+				Version: buckets.GetVersion(),
+				Keys:    buckets.GetKeys(),
+			}
+		} else {
+			region.bucketMeta = nil
+		}
 	}
 }
 
@@ -240,18 +261,23 @@ func SetReadKeys(v uint64) RegionCreateOption {
 
 // SetReadQuery sets the read query for the region, only used for unit test.
 func SetReadQuery(v uint64) RegionCreateOption {
-	q := RandomKindReadQuery(v)
-	return SetQueryStats(q)
+	return func(region *RegionInfo) {
+		resetReadQuery(region.queryStats)
+		region.queryStats = mergeQueryStat(region.queryStats, RandomKindReadQuery(v))
+	}
 }
 
 // SetWrittenQuery sets the write query for the region, only used for unit test.
 func SetWrittenQuery(v uint64) RegionCreateOption {
-	q := RandomKindWriteQuery(v)
-	return SetQueryStats(q)
+	return func(region *RegionInfo) {
+		resetWriteQuery(region.queryStats)
+		region.queryStats = mergeQueryStat(region.queryStats, RandomKindWriteQuery(v))
+	}
 }
 
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
 // This func is only used for unit test.
+// It will cover previous statistic.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.queryStats = v
@@ -260,6 +286,7 @@ func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 
 // AddQueryStats sets the query stats for the region, it will preserve previous statistic.
 // This func is only used for test and simulator.
+// It will preserve previous statistic.
 func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		q := mergeQueryStat(region.queryStats, v)
@@ -271,6 +298,13 @@ func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.approximateSize = v
+	}
+}
+
+// SetApproximateKvSize sets the approximate size for the region.
+func SetApproximateKvSize(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateKvSize = v
 	}
 }
 
@@ -359,6 +393,18 @@ func WithReplacePeerStore(oldStoreID, newStoreID uint64) RegionCreateOption {
 	}
 }
 
+// WithReplaceLeaderStore sets the peer on leaderStoreID as the leader.
+func WithReplaceLeaderStore(leaderStoreID uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		for _, p := range region.GetPeers() {
+			if !IsLearner(p) && p.GetStoreId() == leaderStoreID {
+				region.leader = p
+				return
+			}
+		}
+	}
+}
+
 // WithInterval sets the interval
 func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -366,17 +412,16 @@ func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	}
 }
 
-// SetFromHeartbeat sets if the region info comes from the region heartbeat.
-func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
+// SetSource sets the region info's come from.
+func SetSource(source RegionSource) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.fromHeartbeat = fromHeartbeat
+		region.source = source
 	}
 }
 
 // RandomKindReadQuery returns query stat with random query kind, only used for unit test.
 func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(3) {
+	switch rand.IntN(3) {
 	case 0:
 		return &pdpb.QueryStats{
 			Coprocessor: queryRead,
@@ -396,8 +441,7 @@ func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
 
 // RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
 func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(7) {
+	switch rand.IntN(7) {
 	case 0:
 		return &pdpb.QueryStats{
 			Put: queryWrite,
@@ -453,4 +497,26 @@ func mergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
 	q2.Commit += q1.Commit
 	q2.Rollback += q1.Rollback
 	return q2
+}
+
+func resetReadQuery(q *pdpb.QueryStats) {
+	if q == nil {
+		return
+	}
+	q.Get = 0
+	q.Scan = 0
+	q.Coprocessor = 0
+}
+
+func resetWriteQuery(q *pdpb.QueryStats) {
+	if q == nil {
+		return
+	}
+	q.Put = 0
+	q.Delete = 0
+	q.DeleteRange = 0
+	q.AcquirePessimisticLock = 0
+	q.Rollback = 0
+	q.Prewrite = 0
+	q.Commit = 0
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,61 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package handlers_test
+package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/server/apiv2/handlers"
-	"github.com/tikv/pd/server/keyspace"
+
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	apiv2handlers "github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
 
-const gcSafePointPrefix = "/pd/api/v2/gc/safepoint"
-
 type safePointTestSuite struct {
-	keyspaceTestSuite
+	suite.Suite
+	cleanup func()
+	cluster *tests.TestCluster
+	server  *tests.TestServer
 }
 
 func TestSafePointTestSuite(t *testing.T) {
 	suite.Run(t, new(safePointTestSuite))
 }
 
-func (suite *safePointTestSuite) TestLoadGCSafePoint() {
+func (suite *safePointTestSuite) SetupTest() {
 	re := suite.Require()
-	storage := suite.server.GetServer().GetStorage()
-	re.NoError(storage.SaveGCSafePoint(100))
-
-	defaultSafePoint := mustLoadGCSafePoint(re, suite.server, keyspace.DefaultKeyspaceID)
-	re.Equal(uint32(keyspace.DefaultKeyspaceID), defaultSafePoint.KeyspaceID)
-	re.Equal(uint64(100), defaultSafePoint.SafePoint)
-
-	keyspaces := mustMakeTestKeyspaces(re, suite.server, 1)
-	keyspaceID := keyspaces[0].Id
-	re.NoError(storage.SaveKeyspaceGCSafePoint(strconv.FormatUint(uint64(keyspaceID), 10), 200))
-
-	keyspaceSafePoint := mustLoadGCSafePoint(re, suite.server, keyspaceID)
-	re.Equal(keyspaceID, keyspaceSafePoint.KeyspaceID)
-	re.Equal(uint64(200), keyspaceSafePoint.SafePoint)
+	ctx, cancel := context.WithCancel(context.Background())
+	suite.cleanup = cancel
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	suite.cluster = cluster
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	suite.server = cluster.GetLeaderServer()
+	re.NoError(suite.server.BootstrapCluster())
 }
 
-func mustLoadGCSafePoint(re *require.Assertions, server *tests.TestServer, keyspaceID uint32) *handlers.GCSafePoint {
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+gcSafePointPrefix+"/"+strconv.FormatUint(uint64(keyspaceID), 10), nil)
-	re.NoError(err)
-	httpResp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer httpResp.Body.Close()
-	re.Equal(http.StatusOK, httpResp.StatusCode)
+func (suite *safePointTestSuite) TearDownTest() {
+	suite.cleanup()
+	suite.cluster.Destroy()
+}
 
-	data, err := io.ReadAll(httpResp.Body)
+func (suite *safePointTestSuite) TestLoadGCSafePoint() {
+	re := suite.Require()
+	gcStateManager := suite.server.GetServer().GetGCStateManager()
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 200, time.Now())
 	re.NoError(err)
-	resp := &handlers.GCSafePoint{}
-	re.NoError(json.Unmarshal(data, resp))
-	return resp
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 200)
+	re.NoError(err)
+
+	resp, err := tests.TestDialClient.Get(suite.server.GetAddr() + v2Prefix + "/gc/safepoint/0")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	safePoint := &apiv2handlers.GCSafePoint{}
+	re.NoError(json.Unmarshal(data, safePoint))
+	re.Equal(uint32(0), safePoint.KeyspaceID)
+	re.Equal(uint64(200), safePoint.SafePoint)
 }

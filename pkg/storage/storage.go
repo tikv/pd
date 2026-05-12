@@ -18,13 +18,16 @@ import (
 	"context"
 	"sync/atomic"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.etcd.io/etcd/clientv3"
 )
 
 // Storage is the interface for the backend storage of the PD.
@@ -37,14 +40,15 @@ type Storage interface {
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
-	endpoint.GCSafePointStorage
+	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.KeyspaceGCSafePointStorage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MaintenanceStorage
+	endpoint.AffinityStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -53,28 +57,39 @@ func NewStorageWithMemoryBackend() Storage {
 }
 
 // NewStorageWithEtcdBackend creates a new storage with etcd backend.
-func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage {
-	return newEtcdBackend(client, rootPath)
+func NewStorageWithEtcdBackend(client *clientv3.Client) Storage {
+	return newEtcdBackend(client)
 }
 
-// NewStorageWithLevelDBBackend creates a new storage with LevelDB backend.
-func NewStorageWithLevelDBBackend(
+// NewRegionStorageWithLevelDBBackend will create a specialized storage to
+// store region meta information based on a LevelDB backend.
+func NewRegionStorageWithLevelDBBackend(
 	ctx context.Context,
 	filePath string,
 	ekm *encryption.Manager,
-) (Storage, error) {
-	return newLevelDBBackend(ctx, filePath, ekm)
+) (*RegionStorage, error) {
+	levelDBBackend, err := newLevelDBBackend(ctx, filePath, ekm)
+	if err != nil {
+		return nil, err
+	}
+	return newRegionStorage(levelDBBackend), nil
 }
 
-// TODO: support other KV storage backends like BadgerDB in the future.
+type regionSource int
+
+const (
+	unloaded regionSource = iota
+	fromEtcd
+	fromLeveldb
+)
 
 type coreStorage struct {
 	Storage
 	regionStorage endpoint.RegionStorage
 
-	useRegionStorage int32
-	regionLoaded     bool
-	mu               syncutil.Mutex
+	useRegionStorage atomic.Bool
+	regionLoaded     regionSource
+	mu               syncutil.RWMutex
 }
 
 // NewCoreStorage creates a new core storage with the given default and region storage.
@@ -85,18 +100,18 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 	return &coreStorage{
 		Storage:       defaultStorage,
 		regionStorage: regionStorage,
+		regionLoaded:  unloaded,
 	}
 }
 
-// TryGetLocalRegionStorage gets the local region storage. Returns nil if not present.
-func TryGetLocalRegionStorage(s Storage) endpoint.RegionStorage {
+// RetrieveRegionStorage retrieve the region storage from the given storage.
+// If it's a `coreStorage`, it will return the regionStorage inside, otherwise it will return the original storage.
+func RetrieveRegionStorage(s Storage) endpoint.RegionStorage {
 	switch ps := s.(type) {
 	case *coreStorage:
 		return ps.regionStorage
-	case *levelDBBackend, *memoryStorage:
-		return ps
 	default:
-		return nil
+		return ps
 	}
 }
 
@@ -112,12 +127,12 @@ func TrySwitchRegionStorage(s Storage, useLocalRegionStorage bool) endpoint.Regi
 	if useLocalRegionStorage {
 		// Switch the region storage to regionStorage, all region info will be read/saved by the internal
 		// regionStorage, and in most cases it's LevelDB-backend.
-		atomic.StoreInt32(&ps.useRegionStorage, 1)
+		ps.useRegionStorage.Store(true)
 		return ps.regionStorage
 	}
 	// Switch the region storage to defaultStorage, all region info will be read/saved by the internal
 	// defaultStorage, and in most cases it's etcd-backend.
-	atomic.StoreInt32(&ps.useRegionStorage, 0)
+	ps.useRegionStorage.Store(false)
 	return ps.Storage
 }
 
@@ -129,24 +144,29 @@ func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.Regi
 		return s.LoadRegions(ctx, f)
 	}
 
-	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
-		return ps.Storage.LoadRegions(ctx, f)
-	}
-
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	if !ps.regionLoaded {
+
+	if !ps.useRegionStorage.Load() {
+		err := ps.Storage.LoadRegions(ctx, f)
+		if err == nil {
+			ps.regionLoaded = fromEtcd
+		}
+		return err
+	}
+
+	if ps.regionLoaded == unloaded {
 		if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
 			return err
 		}
-		ps.regionLoaded = true
+		ps.regionLoaded = fromLeveldb
 	}
 	return nil
 }
 
 // LoadRegion loads one region from storage.
 func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
-	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
+	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.LoadRegion(regionID, region)
 	}
 	return ps.Storage.LoadRegion(regionID, region)
@@ -154,7 +174,7 @@ func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bo
 
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
+	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}
 	return ps.Storage.LoadRegions(ctx, f)
@@ -162,7 +182,7 @@ func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.Regi
 
 // SaveRegion saves one region to storage.
 func (ps *coreStorage) SaveRegion(region *metapb.Region) error {
-	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
+	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.SaveRegion(region)
 	}
 	return ps.Storage.SaveRegion(region)
@@ -170,7 +190,7 @@ func (ps *coreStorage) SaveRegion(region *metapb.Region) error {
 
 // DeleteRegion deletes one region from storage.
 func (ps *coreStorage) DeleteRegion(region *metapb.Region) error {
-	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
+	if ps.useRegionStorage.Load() {
 		return ps.regionStorage.DeleteRegion(region)
 	}
 	return ps.Storage.DeleteRegion(region)
@@ -192,4 +212,24 @@ func (ps *coreStorage) Close() error {
 		return ps.regionStorage.Close()
 	}
 	return nil
+}
+
+// AreRegionsLoaded returns whether the regions are loaded.
+func AreRegionsLoaded(s Storage) bool {
+	ps := s.(*coreStorage)
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	if ps.useRegionStorage.Load() {
+		return ps.regionLoaded == fromLeveldb
+	}
+	return ps.regionLoaded == fromEtcd
+}
+
+// IsBootstrapped returns whether the cluster is bootstrapped.
+func IsBootstrapped(s Storage) bool {
+	data, err := s.Load(keypath.ClusterBootstrapTimePath())
+	if err != nil {
+		return false
+	}
+	return data != ""
 }

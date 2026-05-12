@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build with_plugin
+
 package api
 
 import (
@@ -19,9 +21,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
 )
 
@@ -37,32 +39,36 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 	}
 }
 
+// LoadPlugin loads a plugin.
 // FIXME: details of input json body params
-// @Tags     plugin
-// @Summary  Load plugin.
-// @Accept   json
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "Load plugin success."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /plugin [post]
+//
+//	@Tags		plugin
+//	@Summary	Load plugin.
+//	@Accept		json
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"Load plugin success."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/plugin [post]
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, cluster.PluginLoad)
+	h.processPluginCommand(w, r, schedule.PluginLoad)
 }
 
+// UnloadPlugin unloads a plugin.
 // FIXME: details of input json body params
-// @Tags     plugin
-// @Summary  Unload plugin.
-// @Accept   json
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "Load/Unload plugin successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /plugin [delete]
+//
+//	@Tags		plugin
+//	@Summary	Unload plugin.
+//	@Accept		json
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"Load/Unload plugin successfully."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/plugin [delete]
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
-	h.processPluginCommand(w, r, cluster.PluginUnload)
+	h.processPluginCommand(w, r, schedule.PluginUnload)
 }
 
 func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Request, action string) {
@@ -77,14 +83,14 @@ func (h *pluginHandler) processPluginCommand(w http.ResponseWriter, r *http.Requ
 	}
 	var err error
 	switch action {
-	case cluster.PluginLoad:
+	case schedule.PluginLoad:
 		err = h.PluginLoad(path)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		h.rd.JSON(w, http.StatusOK, "Load plugin successfully.")
-	case cluster.PluginUnload:
+	case schedule.PluginUnload:
 		err = h.PluginUnload(path)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())

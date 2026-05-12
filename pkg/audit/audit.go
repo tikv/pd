@@ -17,10 +17,12 @@ package audit
 import (
 	"net/http"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/utils/requestutil"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
 const (
@@ -69,27 +71,29 @@ type Backend interface {
 	ProcessBeforeHandler() bool
 }
 
-// PrometheusHistogramBackend is an implementation of audit.Backend
+// PrometheusBackend is an implementation of audit.Backend
 // and it uses Prometheus histogram data type to implement audit.
 // Note: histogram.WithLabelValues will degrade performance.
 // Please don't use it in the hot path.
-type PrometheusHistogramBackend struct {
+type PrometheusBackend struct {
 	*LabelMatcher
 	*Sequence
 	histogramVec *prometheus.HistogramVec
+	counterVec   *prometheus.CounterVec
 }
 
-// NewPrometheusHistogramBackend returns a PrometheusHistogramBackend
-func NewPrometheusHistogramBackend(histogramVec *prometheus.HistogramVec, before bool) Backend {
-	return &PrometheusHistogramBackend{
+// NewPrometheusBackend returns a PrometheusBackend
+func NewPrometheusBackend(histogramVec *prometheus.HistogramVec, counterVec *prometheus.CounterVec, before bool) Backend {
+	return &PrometheusBackend{
 		LabelMatcher: &LabelMatcher{backendLabel: PrometheusHistogram},
 		Sequence:     &Sequence{before: before},
 		histogramVec: histogramVec,
+		counterVec:   counterVec,
 	}
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool {
+func (b *PrometheusBackend) ProcessHTTPRequest(req *http.Request) bool {
 	requestInfo, ok := requestutil.RequestInfoFrom(req.Context())
 	if !ok {
 		return false
@@ -98,7 +102,12 @@ func (b *PrometheusHistogramBackend) ProcessHTTPRequest(req *http.Request) bool 
 	if !ok {
 		return false
 	}
-	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.Component, requestInfo.IP).Observe(float64(endTime - requestInfo.StartTimeStamp))
+
+	duration := float64(endTime - requestInfo.StartTimeStamp)
+	b.histogramVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP").Observe(duration)
+
+	b.counterVec.WithLabelValues(requestInfo.ServiceLabel, "HTTP", requestInfo.CallerID).Inc()
+
 	return true
 }
 
@@ -118,7 +127,7 @@ func NewLocalLogBackend(before bool) Backend {
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
 		return false

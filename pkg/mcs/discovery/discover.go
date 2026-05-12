@@ -15,14 +15,23 @@
 package discovery
 
 import (
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // Discover is used to get all the service instances of the specified service name.
 func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
-	key := discoveryPath(serviceName) + "/"
-	endKey := clientv3.GetPrefixRangeEnd(key) + "/"
+	key := keypath.ServicePath(serviceName)
+	endKey := clientv3.GetPrefixRangeEnd(key)
 
 	withRange := clientv3.WithRange(endKey)
 	resp, err := etcdutil.EtcdKVGet(cli, key, withRange)
@@ -34,4 +43,34 @@ func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
 		values = append(values, string(item.Value))
 	}
 	return values, nil
+}
+
+// GetMSMembers returns all the members of the specified service name.
+func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
+	switch serviceName {
+	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName, constant.RouterServiceName:
+		servicePath := keypath.ServicePath(serviceName)
+		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
+		if err != nil {
+			return nil, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		}
+		if !resps.Succeeded {
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+
+		var entries []ServiceRegistryEntry
+		for _, resp := range resps.Responses {
+			for _, keyValue := range resp.GetResponseRange().GetKvs() {
+				var entry ServiceRegistryEntry
+				if err = entry.Deserialize(keyValue.Value); err != nil {
+					log.Error("try to deserialize service registry entry failed", zap.String("key", string(keyValue.Key)), zap.Error(err))
+					continue
+				}
+				entries = append(entries, entry)
+			}
+		}
+		return entries, nil
+	}
+
+	return nil, errors.Errorf("unknown service name %s", serviceName)
 }

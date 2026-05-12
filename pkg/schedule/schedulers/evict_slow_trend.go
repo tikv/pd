@@ -15,96 +15,196 @@
 package schedulers
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/core/constant"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	// EvictSlowTrendName is evict leader by slow trend scheduler name.
-	EvictSlowTrendName = "evict-slow-trend-scheduler"
-	// EvictSlowTrendType is evict leader by slow trend scheduler type.
-	EvictSlowTrendType = "evict-slow-trend"
+	alterEpsilon          = 1e-9
+	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
+	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
+	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
+	defaultRecoverySec = 1800 // default gap for recovery, unit: s.
 )
 
-type evictSlowTrendSchedulerConfig struct {
-	storage              endpoint.ConfigStorage
-	evictCandidate       uint64
-	candidateCaptureTime time.Time
+type slowCandidate struct {
+	storeID   uint64
+	captureTS time.Time
+	recoverTS time.Time
+}
 
+type evictSlowTrendSchedulerParam struct {
+	// Duration gap for recovering the candidate, unit: s.
+	RecoverySec uint64 `json:"recovery-duration"`
 	// Only evict one store for now
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
 
-func (conf *evictSlowTrendSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	data, err := schedule.EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveScheduleConfig(name, data)
+type evictSlowTrendSchedulerConfig struct {
+	syncutil.RWMutex
+	schedulerConfig
+	evictSlowTrendSchedulerParam
+
+	cluster *core.BasicCluster
+	// Candidate for eviction in current tick.
+	evictCandidate slowCandidate
+	// Last chosen candidate for eviction.
+	lastEvictCandidate slowCandidate
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getSchedulerName() string {
-	return EvictSlowTrendName
+func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
+	return &evictSlowTrendSchedulerConfig{
+		schedulerConfig:    &baseSchedulerConfig{},
+		evictCandidate:     slowCandidate{},
+		lastEvictCandidate: slowCandidate{},
+		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
+			RecoverySec:   defaultRecoverySec,
+			EvictedStores: make([]uint64, 0),
+		},
+	}
+}
+
+func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerParam {
+	conf.RLock()
+	defer conf.RUnlock()
+	return &evictSlowTrendSchedulerParam{
+		RecoverySec: conf.RecoverySec,
+	}
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictedStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+}
+
+func (*evictSlowTrendSchedulerConfig) getBatch() int {
+	return EvictLeaderBatchSize
+}
+
+func (conf *evictSlowTrendSchedulerConfig) hasEvictedStores() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	return len(conf.EvictedStores) > 0
 }
 
 func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
-	if len(conf.EvictedStores) == 0 {
+	if !conf.hasEvictedStores() {
 		return 0
 	}
+	conf.RLock()
+	defer conf.RUnlock()
+	// If a candidate passes all checks and proved to be slow, it will be
+	// recorded in `conf.EvictStores`, and `conf.lastEvictCandidate` will record
+	// the captured timestamp of this store.
 	return conf.EvictedStores[0]
 }
 
 func (conf *evictSlowTrendSchedulerConfig) candidate() uint64 {
-	return conf.evictCandidate
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.evictCandidate.storeID
+}
+
+func (conf *evictSlowTrendSchedulerConfig) captureTS() time.Time {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.evictCandidate.captureTS
 }
 
 func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
-	return uint64(time.Since(conf.candidateCaptureTime).Seconds())
+	conf.RLock()
+	defer conf.RUnlock()
+	return DurationSinceAsSecs(conf.evictCandidate.captureTS)
+}
+
+func (conf *evictSlowTrendSchedulerConfig) lastCapturedCandidate() *slowCandidate {
+	conf.RLock()
+	defer conf.RUnlock()
+	return &conf.lastEvictCandidate
+}
+
+func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
+	return DurationSinceAsSecs(conf.lastEvictCandidate.captureTS)
+}
+
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
+func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
+	conf.RLock()
+	defer conf.RUnlock()
+	recoverySec := conf.RecoverySec
+	failpoint.Inject("transientRecoveryGap", func() {
+		recoverySec = 0
+	})
+	return conf.lastCandidateCapturedSecs() >= recoverySec
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
-	conf.evictCandidate = id
-	conf.candidateCaptureTime = time.Now()
+	conf.Lock()
+	defer conf.Unlock()
+	conf.evictCandidate = slowCandidate{
+		storeID:   id,
+		captureTS: time.Now(),
+		recoverTS: time.Now(),
+	}
+	if conf.lastEvictCandidate == (slowCandidate{}) {
+		conf.lastEvictCandidate = conf.evictCandidate
+	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) popCandidate() uint64 {
-	id := conf.evictCandidate
-	conf.evictCandidate = 0
+func (conf *evictSlowTrendSchedulerConfig) popCandidate(updLast bool) uint64 {
+	conf.Lock()
+	defer conf.Unlock()
+	id := conf.evictCandidate.storeID
+	if updLast {
+		conf.lastEvictCandidate = conf.evictCandidate
+	}
+	conf.evictCandidate = slowCandidate{}
 	return id
 }
 
-func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
-	conf.EvictedStores = []uint64{id}
-	return conf.Persist()
+func (conf *evictSlowTrendSchedulerConfig) markCandidateRecovered() {
+	conf.Lock()
+	defer conf.Unlock()
+	if conf.lastEvictCandidate != (slowCandidate{}) {
+		conf.lastEvictCandidate.recoverTS = time.Now()
+	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster schedule.Cluster) (oldID uint64, err error) {
+func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.EvictedStores = []uint64{id}
+	return conf.save()
+}
+
+func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
 	oldID = conf.evictedStore()
 	if oldID == 0 {
 		return
@@ -115,28 +215,112 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster schedule.Clus
 		address = store.GetAddress()
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, strconv.FormatUint(oldID, 10)).Set(0)
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.Persist()
+	return oldID, conf.save()
+}
+
+type evictSlowTrendHandler struct {
+	rd     *render.Render
+	config *evictSlowTrendSchedulerConfig
+}
+
+func newEvictSlowTrendHandler(config *evictSlowTrendSchedulerConfig) http.Handler {
+	h := &evictSlowTrendHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	return router
+}
+
+func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
+	if !ok {
+		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'recovery-duration'").Error())
+		return
+	}
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	prevRecoverySec := handler.config.RecoverySec
+	recoverySec := uint64(recoveryDurationGapFloat)
+	handler.config.RecoverySec = recoverySec
+	if err := handler.config.save(); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.RecoverySec = prevRecoverySec
+		return
+	}
+	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoverySec), zap.Uint64("cur", recoverySec))
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
+}
+
+func (handler *evictSlowTrendHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type evictSlowTrendScheduler struct {
 	*BaseScheduler
-	conf *evictSlowTrendSchedulerConfig
+	conf    *evictSlowTrendSchedulerConfig
+	handler http.Handler
 }
 
-func (s *evictSlowTrendScheduler) GetName() string {
-	return EvictSlowTrendName
+// GetNextInterval implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
+	var growthType intervalGrowthType
+	// If it already found a slow node as candidate, the next interval should be shorter
+	// to make the next scheduling as soon as possible. This adjustment will decrease the
+	// response time, as heartbeats from other nodes will be received and updated more quickly.
+	if s.conf.hasEvictedStores() {
+		growthType = zeroGrowth
+	} else {
+		growthType = exponentialGrowth
+	}
+	return intervalGrow(s.GetMinInterval(), MaxScheduleInterval, growthType)
 }
 
-func (s *evictSlowTrendScheduler) GetType() string {
-	return EvictSlowTrendType
+// ServeHTTP implements the http.Handler interface.
+func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowTrendScheduler) Prepare(cluster schedule.Cluster) error {
+// ReloadConfig implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	newCfg := &evictSlowTrendSchedulerConfig{}
+	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+
+	old := make(map[uint64]struct{})
+	for _, id := range s.conf.EvictedStores {
+		old[id] = struct{}{}
+	}
+	new := make(map[uint64]struct{})
+	for _, id := range newCfg.EvictedStores {
+		new[id] = struct{}{}
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
+	s.conf.RecoverySec = newCfg.RecoverySec
+	s.conf.EvictedStores = newCfg.EvictedStores
+	return nil
+}
+
+// PrepareConfig implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
 		return nil
@@ -144,11 +328,12 @@ func (s *evictSlowTrendScheduler) Prepare(cluster schedule.Cluster) error {
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
-func (s *evictSlowTrendScheduler) Cleanup(cluster schedule.Cluster) {
+// CleanConfig implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
-func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster schedule.Cluster, storeID uint64) error {
+func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
 	err := s.conf.setStoreAndPersist(storeID)
 	if err != nil {
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", storeID))
@@ -157,37 +342,41 @@ func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster schedule.Cluster, s
 	return cluster.SlowTrendEvicted(storeID)
 }
 
-func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster schedule.Cluster) {
+func (s *evictSlowTrendScheduler) cleanupEvictLeader(cluster sche.SchedulerCluster) {
 	evictedStoreID, err := s.conf.clearAndPersist(cluster)
 	if err != nil {
 		log.Info("evict-slow-trend-scheduler persist config failed", zap.Uint64("store-id", evictedStoreID))
 	}
 	if evictedStoreID != 0 {
+		// Assertion: evictStoreID == s.conf.LastEvictCandidate.storeID
+		s.conf.markCandidateRecovered()
 		cluster.SlowTrendRecovered(evictedStoreID)
 	}
 }
 
-func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster schedule.Cluster) []*operator.Operator {
+func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
 	store := cluster.GetStore(s.conf.evictedStore())
 	if store == nil {
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
-func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+// IsScheduleAllowed implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictedStore() == 0 {
 		return true
 	}
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
-func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+// Schedule implements the Scheduler interface.
+func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	var ops []*operator.Operator
@@ -197,15 +386,13 @@ func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 		if store == nil || store.IsRemoved() {
 			// Previous slow store had been removed, remove the scheduler and check
 			// slow node next time.
-			log.Info("store evicted by slow trend has been removed",
-				zap.Uint64("store-id", store.GetID()))
-			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:removed").Inc()
-		} else if checkStoreCanRecover(cluster, store) {
-			log.Info("store evicted by slow trend has been recovered",
-				zap.Uint64("store-id", store.GetID()))
-			storeSlowTrendActionStatusGauge.WithLabelValues("evict.stop:recovered").Inc()
+			log.Info("store evicted by slow trend has been removed", zap.Uint64("store-id", store.GetID()))
+			storeSlowTrendActionStatusGauge.WithLabelValues("evict", "stop_removed").Inc()
+		} else if checkStoreCanRecover(cluster, store) && s.conf.readyForRecovery() {
+			log.Info("store evicted by slow trend has been recovered", zap.Uint64("store-id", store.GetID()))
+			storeSlowTrendActionStatusGauge.WithLabelValues("evict", "stop_recovered").Inc()
 		} else {
-			storeSlowTrendActionStatusGauge.WithLabelValues("evict.continue").Inc()
+			storeSlowTrendActionStatusGauge.WithLabelValues("evict", "continue").Inc()
 			return s.scheduleEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
@@ -214,33 +401,32 @@ func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 
 	candFreshCaptured := false
 	if s.conf.candidate() == 0 {
-		candidate := chooseEvictCandidate(cluster)
+		candidate := chooseEvictCandidate(cluster, s.conf.lastCapturedCandidate())
 		if candidate != nil {
-			storeSlowTrendActionStatusGauge.WithLabelValues("cand.captured").Inc()
+			storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "captured").Inc()
 			s.conf.captureCandidate(candidate.GetID())
 			candFreshCaptured = true
 		}
 	} else {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.continue").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "continue").Inc()
 	}
+
 	slowStoreID := s.conf.candidate()
 	if slowStoreID == 0 {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none").Inc()
 		return ops, nil
 	}
 
 	slowStore := cluster.GetStore(slowStoreID)
 	if !candFreshCaptured && checkStoreFasterThanOthers(cluster, slowStore) {
-		s.conf.popCandidate()
-		log.Info("slow store candidate by trend has been cancel",
-			zap.Uint64("store-id", slowStoreID))
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.cancel:too-faster").Inc()
+		s.conf.popCandidate(false)
+		log.Info("slow store candidate by trend has been cancel", zap.Uint64("store-id", slowStoreID))
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "canceled_too_faster").Inc()
 		return ops, nil
 	}
-	if !checkStoresAreUpdated(cluster, slowStore) {
-		log.Info("slow store candidate waiting for other stores to update heartbeats",
-			zap.Uint64("store-id", slowStoreID))
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.wait").Inc()
+	if slowStoreRecordTS := s.conf.captureTS(); !checkStoresAreUpdated(cluster, slowStoreID, slowStoreRecordTS) {
+		log.Info("slow store candidate waiting for other stores to update heartbeats", zap.Uint64("store-id", slowStoreID))
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "wait").Inc()
 		return ops, nil
 	}
 
@@ -248,120 +434,147 @@ func (s *evictSlowTrendScheduler) Schedule(cluster schedule.Cluster, dryRun bool
 	log.Info("detected slow store by trend, start to evict leaders",
 		zap.Uint64("store-id", slowStoreID),
 		zap.Uint64("candidate-captured-secs", candCapturedSecs))
-	storeSlowTrendMiscGauge.WithLabelValues("cand.captured.secs").Set(float64(candCapturedSecs))
-	err := s.prepareEvictLeader(cluster, s.conf.popCandidate())
-	if err != nil {
+	storeSlowTrendMiscGauge.WithLabelValues("candidate", "captured_secs").Set(float64(candCapturedSecs))
+	if err := s.prepareEvictLeader(cluster, s.conf.popCandidate(true)); err != nil {
 		log.Info("prepare for evicting leader by slow trend failed", zap.Error(err), zap.Uint64("store-id", slowStoreID))
-		storeSlowTrendActionStatusGauge.WithLabelValues("evict.prepare.err").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("evict", "prepare_err").Inc()
 		return ops, nil
 	}
-	storeSlowTrendActionStatusGauge.WithLabelValues("evict.start").Inc()
+	storeSlowTrendActionStatusGauge.WithLabelValues("evict", "start").Inc()
 	return s.scheduleEvictLeader(cluster), nil
 }
 
-func newEvictSlowTrendScheduler(opController *schedule.OperatorController, conf *evictSlowTrendSchedulerConfig) schedule.Scheduler {
-	return &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
+	handler := newEvictSlowTrendHandler(conf)
+	sche := &evictSlowTrendScheduler{
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
 		conf:          conf,
+		handler:       handler,
 	}
+	return sche
 }
 
-func chooseEvictCandidate(cluster schedule.Cluster) (slowStore *core.StoreInfo) {
+func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {
+	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
+	failpoint.Inject("mockRaftKV2", func() {
+		isRaftKV2 = true
+	})
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-few").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_too_few").Inc()
 		return
 	}
+
 	var candidates []*core.StoreInfo
 	var affectedStoreCount int
 	for _, store := range stores {
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
-		slowTrend := store.GetSlowTrend()
-		if slowTrend != nil && slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
-			candidates = append(candidates, store)
-			storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-			log.Info("evict-slow-trend-scheduler pre-canptured candidate",
-				zap.Uint64("store-id", store.GetID()),
-				zap.Float64("cause-rate", slowTrend.CauseRate),
-				zap.Float64("result-rate", slowTrend.ResultRate),
-				zap.Float64("cause-value", slowTrend.CauseValue),
-				zap.Float64("result-value", slowTrend.ResultValue))
-		}
-		if slowTrend != nil && slowTrend.ResultRate < -alterEpsilon {
-			affectedStoreCount += 1
+		if slowTrend := store.GetSlowTrend(); slowTrend != nil {
+			if slowTrend.ResultRate < -alterEpsilon {
+				affectedStoreCount += 1
+			}
+			// For the cases of disk io jitters.
+			// Normally, if there exists jitters on disk io or network io, the slow store must have a descending
+			// trend on QPS and ascending trend on duration. So, the slowTrend must match the following pattern.
+			if slowTrend.CauseRate > alterEpsilon && slowTrend.ResultRate < -alterEpsilon {
+				candidates = append(candidates, store)
+				storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "add").Inc()
+				log.Info("evict-slow-trend-scheduler pre-captured candidate",
+					zap.Uint64("store-id", store.GetID()),
+					zap.Float64("cause-rate", slowTrend.CauseRate),
+					zap.Float64("result-rate", slowTrend.ResultRate),
+					zap.Float64("cause-value", slowTrend.CauseValue),
+					zap.Float64("result-value", slowTrend.ResultValue))
+			} else if isRaftKV2 && slowTrend.CauseRate > alterEpsilon {
+				// Meanwhile, if the store was previously experiencing slowness in the `Duration` dimension, it should
+				// re-check whether this node is still encountering network I/O-related jitters. And If this node matches
+				// the last identified candidate, it indicates that the node is still being affected by delays in network I/O,
+				// and consequently, it should be re-designated as slow once more.
+				// Prerequisite: `raft-kv2` engine has the ability to percept the slow trend on network io jitters.
+				// TODO: maybe make it compatible to `raft-kv` later.
+				if lastEvictCandidate != nil && lastEvictCandidate.storeID == store.GetID() && DurationSinceAsSecs(lastEvictCandidate.recoverTS) <= minReCheckDurationGap {
+					candidates = append(candidates, store)
+					storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "add").Inc()
+					log.Info("evict-slow-trend-scheduler pre-captured candidate in raft-kv2 cluster",
+						zap.Uint64("store-id", store.GetID()),
+						zap.Float64("cause-rate", slowTrend.CauseRate),
+						zap.Float64("result-rate", slowTrend.ResultRate),
+						zap.Float64("cause-value", slowTrend.CauseValue),
+						zap.Float64("result-value", slowTrend.ResultValue))
+				}
+			}
 		}
 	}
 	if len(candidates) == 0 {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:no-fit").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_no_fit").Inc()
 		return
 	}
-
 	// TODO: Calculate to judge if one store is way slower than the others
 	if len(candidates) > 1 {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:too-many").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_too_many").Inc()
 		return
 	}
+
 	store := candidates[0]
 
-	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetOpts().GetSlowStoreEvictingAffectedStoreRatioThreshold())
+	affectedStoreThreshold := int(float64(len(stores)) * cluster.GetSchedulerConfig().GetSlowStoreEvictingAffectedStoreRatioThreshold())
 	if affectedStoreCount < affectedStoreThreshold {
 		log.Info("evict-slow-trend-scheduler failed to confirm candidate: it only affect a few stores", zap.Uint64("store-id", store.GetID()))
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:affect-a-few").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_affect_a_few").Inc()
 		return
 	}
 
 	if !checkStoreSlowerThanOthers(cluster, store) {
 		log.Info("evict-slow-trend-scheduler failed to confirm candidate: it's not slower than others", zap.Uint64("store-id", store.GetID()))
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.none:not-slower").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_not_slower").Inc()
 		return
 	}
 
-	storeSlowTrendActionStatusGauge.WithLabelValues("cand.add").Inc()
-	log.Info("evict-slow-trend-scheduler canptured candidate", zap.Uint64("store-id", store.GetID()))
+	storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "add").Inc()
+	log.Info("evict-slow-trend-scheduler captured candidate", zap.Uint64("store-id", store.GetID()))
 	return store
 }
 
-func checkStoresAreUpdated(cluster schedule.Cluster, baseline *core.StoreInfo) bool {
+func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, slowStoreRecordTS time.Time) bool {
 	stores := cluster.GetStores()
 	if len(stores) <= 1 {
 		return false
 	}
 	expected := (len(stores) + 1) / 2
 	updatedStores := 0
-	baselineTS := baseline.GetLastHeartbeatTS()
 	for _, store := range stores {
 		if store.IsRemoved() {
 			updatedStores += 1
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			updatedStores += 1
 			continue
 		}
-		if store.GetID() == baseline.GetID() {
+		if store.GetID() == slowStoreID {
 			updatedStores += 1
 			continue
 		}
-		if baselineTS.Before(store.GetLastHeartbeatTS()) {
+		if slowStoreRecordTS.Compare(store.GetLastHeartbeatTS()) <= 0 {
 			updatedStores += 1
 		}
 	}
-	storeSlowTrendMiscGauge.WithLabelValues("stores.check-updated:count").Set(float64(updatedStores))
-	storeSlowTrendMiscGauge.WithLabelValues("stores.check-updated:expected").Set(float64(expected))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_updated_count").Set(float64(updatedStores))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_updated_expected").Set(float64(expected))
 	return updatedStores >= expected
 }
 
-func checkStoreSlowerThanOthers(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
 	stores := cluster.GetStores()
 	expected := (len(stores)*2 + 1) / 3
 	targetSlowTrend := target.GetSlowTrend()
 	if targetSlowTrend == nil {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.check-slower:no-data").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "check_slower_no_data").Inc()
 		return false
 	}
 	slowerThanStoresNum := 0
@@ -369,7 +582,7 @@ func checkStoreSlowerThanOthers(cluster schedule.Cluster, target *core.StoreInfo
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {
@@ -377,17 +590,17 @@ func checkStoreSlowerThanOthers(cluster schedule.Cluster, target *core.StoreInfo
 		}
 		slowTrend := store.GetSlowTrend()
 		// Use `SlowTrend.ResultValue` at first, but not good, `CauseValue` is better
-		// Greater `CuaseValue` means slower
+		// Greater `CauseValue` means slower
 		if slowTrend != nil && (targetSlowTrend.CauseValue-slowTrend.CauseValue) > alterEpsilon && slowTrend.CauseValue > alterEpsilon {
 			slowerThanStoresNum += 1
 		}
 	}
-	storeSlowTrendMiscGauge.WithLabelValues("store.check-slower:count").Set(float64(slowerThanStoresNum))
-	storeSlowTrendMiscGauge.WithLabelValues("store.check-slower:expected").Set(float64(expected))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_slower_count").Set(float64(slowerThanStoresNum))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_slower_expected").Set(float64(expected))
 	return slowerThanStoresNum >= expected
 }
 
-func checkStoreCanRecover(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreCanRecover(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
 	/*
 		//
 		// This might not be necessary,
@@ -410,12 +623,12 @@ func checkStoreCanRecover(cluster schedule.Cluster, target *core.StoreInfo) bool
 	return checkStoreFasterThanOthers(cluster, target)
 }
 
-func checkStoreFasterThanOthers(cluster schedule.Cluster, target *core.StoreInfo) bool {
+func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.StoreInfo) bool {
 	stores := cluster.GetStores()
 	expected := (len(stores) + 1) / 2
 	targetSlowTrend := target.GetSlowTrend()
 	if targetSlowTrend == nil {
-		storeSlowTrendActionStatusGauge.WithLabelValues("cand.check-faster:no-data").Inc()
+		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "check_faster_no_data").Inc()
 		return false
 	}
 	fasterThanStores := 0
@@ -423,22 +636,25 @@ func checkStoreFasterThanOthers(cluster schedule.Cluster, target *core.StoreInfo
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {
 			continue
 		}
 		slowTrend := store.GetSlowTrend()
-		// Greater `CuaseValue` means slower
+		// Greater `CauseValue` means slower
 		if slowTrend != nil && targetSlowTrend.CauseValue <= slowTrend.CauseValue*1.1 &&
 			slowTrend.CauseValue > alterEpsilon && targetSlowTrend.CauseValue > alterEpsilon {
 			fasterThanStores += 1
 		}
 	}
-	storeSlowTrendMiscGauge.WithLabelValues("store.check-faster:count").Set(float64(fasterThanStores))
-	storeSlowTrendMiscGauge.WithLabelValues("store.check-faster:expected").Set(float64(expected))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_faster_count").Set(float64(fasterThanStores))
+	storeSlowTrendMiscGauge.WithLabelValues("store", "check_faster_expected").Set(float64(expected))
 	return fasterThanStores >= expected
 }
 
-const alterEpsilon = 1e-9
+// DurationSinceAsSecs returns the duration gap since the given startTS, unit: s.
+func DurationSinceAsSecs(startTS time.Time) uint64 {
+	return uint64(time.Since(startTS).Seconds())
+}

@@ -28,11 +28,11 @@ type queryMetric struct {
 	s *server.Server
 }
 
-func newQueryMetric(s *server.Server) *queryMetric {
+func newqueryMetric(s *server.Server) *queryMetric {
 	return &queryMetric{s: s}
 }
 
-func (h *queryMetric) QueryMetric(w http.ResponseWriter, r *http.Request) {
+func (h *queryMetric) queryMetric(w http.ResponseWriter, r *http.Request) {
 	metricAddr := h.s.GetConfig().PDServerCfg.MetricStorage
 	if metricAddr == "" {
 		http.Error(w, "metric storage doesn't set", http.StatusInternalServerError)

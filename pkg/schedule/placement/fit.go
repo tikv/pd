@@ -20,6 +20,7 @@ import (
 	"sort"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -37,6 +38,9 @@ type RegionFit struct {
 
 // Replace return true if the replacement store is fit all constraints and isolation score is not less than the origin.
 func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
+	if dstStore == nil {
+		return false
+	}
 	fit := f.getRuleFitByStoreID(srcStoreID)
 	// check the target store is fit all constraints.
 	if fit == nil {
@@ -90,6 +94,15 @@ func (f *RegionFit) IsSatisfied() bool {
 	return len(f.OrphanPeers) == 0
 }
 
+// ExtraCount return the extra count.
+func (f *RegionFit) ExtraCount() int {
+	desired := 0
+	for _, r := range f.RuleFits {
+		desired += r.Rule.Count
+	}
+	return len(f.regionStores) - desired
+}
+
 // GetRuleFit returns the RuleFit that contains the peer.
 func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	for _, rf := range f.RuleFits {
@@ -105,6 +118,11 @@ func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 // GetRegionStores returns region's stores
 func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
+}
+
+// GetRules returns the rules that are used to fit the region.
+func (f *RegionFit) GetRules() []*Rule {
+	return f.rules
 }
 
 // RuleFit is the result of fitting status of a Rule.
@@ -244,7 +262,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Don't select leader as witness.
 		// 4. Not selected by other rules.
 		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && !(p.isLeader && w.supportWitness && w.rules[index].IsWitness) {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && (!p.isLeader || !w.supportWitness || !w.rules[index].IsWitness) {
 				candidates = append(candidates, p)
 			}
 		}
@@ -302,8 +320,8 @@ func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber uint) []*fitPeer
 	return selected
 }
 
-func unSelectPeers(seleted []*fitPeer) {
-	for _, p := range seleted {
+func unSelectPeers(selected []*fitPeer) {
+	for _, p := range selected {
 		p.selected = false
 	}
 }

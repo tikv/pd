@@ -15,8 +15,15 @@
 package operator
 
 import (
+	"encoding/json"
+	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -64,9 +71,8 @@ func (trk *OpStatusTracker) getTime(s OpStatus) time.Time {
 		return trk.reachTimes[s]
 	} else if trk.current == s {
 		return trk.reachTimes[firstEndStatus]
-	} else {
-		return time.Time{}
 	}
+	return time.Time{}
 }
 
 // To transfer the current status to dst if this transition is valid,
@@ -135,4 +141,69 @@ func (trk *OpStatusTracker) String() string {
 	trk.rw.RLock()
 	defer trk.rw.RUnlock()
 	return OpStatusToString(trk.current)
+}
+
+type opAdditionalInfo struct {
+	syncutil.RWMutex
+	value map[string]string
+}
+
+// SetAdditionalInfo sets additional info with key and value.
+func (o *Operator) SetAdditionalInfo(key string, value string) {
+	o.additionalInfos.Lock()
+	defer o.additionalInfos.Unlock()
+	o.additionalInfos.value[key] = value
+}
+
+// GetAdditionalInfo returns additional info value with key.
+func (o *Operator) GetAdditionalInfo(key string) (string, bool) {
+	o.additionalInfos.RLock()
+	defer o.additionalInfos.RUnlock()
+	val, exist := o.additionalInfos.value[key]
+	return val, exist
+}
+
+// LogAdditionalInfo returns additional info with string
+func (o *Operator) LogAdditionalInfo() string {
+	o.additionalInfos.RLock()
+	defer o.additionalInfos.RUnlock()
+	if len(o.additionalInfos.value) != 0 {
+		additionalInfo, err := json.Marshal(o.additionalInfos.value)
+		if err == nil {
+			return string(additionalInfo)
+		}
+	}
+	return ""
+}
+
+// HasRelatedMergeRegion checks if the operator has a related merge region.
+// All merge operators (OpMerge and OpAffinity) have this info set.
+func (o *Operator) HasRelatedMergeRegion() bool {
+	if o == nil {
+		return false
+	}
+	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	return exist && val != ""
+}
+
+// GetRelatedMergeRegion returns the related merge region ID.
+func (o *Operator) GetRelatedMergeRegion() uint64 {
+	if !o.HasRelatedMergeRegion() {
+		return 0
+	}
+	str, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	if !exist {
+		log.Debug("not found related merge region ID")
+		return 0
+	}
+	relatedID, err := strconv.ParseUint(str, 10, 64)
+	if err != nil {
+		log.Warn("invalid related merge region ID",
+			zap.Uint64("region-id", o.RegionID()),
+			zap.String("operator", o.String()),
+			zap.String("related-merge-region", str),
+			errs.ZapError(err))
+		return 0
+	}
+	return relatedID
 }

@@ -16,8 +16,7 @@ package gctuner
 
 import (
 	"runtime"
-
-	"go.uber.org/atomic"
+	"sync/atomic"
 )
 
 type finalizerCallback func()

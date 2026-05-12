@@ -19,65 +19,57 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-)
-
-const (
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName = "grant-leader-scheduler"
-	// GrantLeaderType is grant leader scheduler type.
-	GrantLeaderType = "grant-leader"
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantLeaderCounter            = schedulerCounter.WithLabelValues(GrantLeaderName, "schedule")
-	grantLeaderNoFollowerCounter  = schedulerCounter.WithLabelValues(GrantLeaderName, "no-follower")
-	grantLeaderNewOperatorCounter = schedulerCounter.WithLabelValues(GrantLeaderName, "new-operator")
 )
 
 type grantLeaderSchedulerConfig struct {
-	mu                syncutil.RWMutex
-	storage           endpoint.ConfigStorage
-	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	cluster           schedule.Cluster
+	syncutil.RWMutex
+	schedulerConfig
+
+	StoreIDWithRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
+	cluster           *core.BasicCluster
+	removeSchedulerCb func(name string) error
 }
 
-func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
+	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err)
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
 		return err
 	}
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	conf.StoreIDWithRanges[id] = ranges
 	return nil
 }
 
-func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
-	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
+func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
+	conf.RLock()
+	defer conf.RUnlock()
+	newStoreIDWithRanges := make(map[uint64][]keyutil.KeyRange)
 	for k, v := range conf.StoreIDWithRanges {
 		newStoreIDWithRanges[k] = v
 	}
@@ -86,24 +78,15 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	}
 }
 
-func (conf *grantLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
-	data, err := schedule.EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveScheduleConfig(name, data)
-}
-
-func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
-	return GrantLeaderName
+func (conf *grantLeaderSchedulerConfig) persist() error {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.save()
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	ranges := conf.StoreIDWithRanges[id]
 	res := make([]string, 0, len(ranges)*2)
 	for index := range ranges {
@@ -113,33 +96,45 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 }
 
 func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last bool) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	_, exists := conf.StoreIDWithRanges[id]
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id)
+		conf.cluster.ResumeLeaderTransfer(id, constant.Out)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
 	return succ, last
 }
 
-func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
-	conf.cluster.PauseLeaderTransfer(id)
+func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []keyutil.KeyRange) {
+	conf.Lock()
+	defer conf.Unlock()
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
+		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+	}
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
-func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
+	conf.RLock()
+	defer conf.RUnlock()
 	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
 		return ranges
 	}
 	return nil
+}
+
+func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]keyutil.KeyRange {
+	conf.RLock()
+	defer conf.RUnlock()
+	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange)
+	for id, ranges := range conf.StoreIDWithRanges {
+		storeIDWithRanges[id] = ranges
+	}
+	return storeIDWithRanges
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -151,8 +146,8 @@ type grantLeaderScheduler struct {
 
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
-func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *grantLeaderSchedulerConfig) schedule.Scheduler {
-	base := NewBaseScheduler(opController)
+func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
+	base := NewBaseScheduler(opController, types.GrantLeaderScheduler, conf)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
 		BaseScheduler: base,
@@ -161,65 +156,75 @@ func newGrantLeaderScheduler(opController *schedule.OperatorController, conf *gr
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *grantLeaderScheduler) GetName() string {
-	return GrantLeaderName
-}
-
-func (s *grantLeaderScheduler) GetType() string {
-	return GrantLeaderType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster schedule.Cluster) error {
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
+// ReloadConfig implements the Scheduler interface.
+func (s *grantLeaderScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	newCfg := &grantLeaderSchedulerConfig{}
+	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.Out, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	return nil
+}
+
+// PrepareConfig implements the Scheduler interface.
+func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+	s.conf.RLock()
+	defer s.conf.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
 			res = err
 		}
 	}
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster schedule.Cluster) {
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
+// CleanConfig implements the Scheduler interface.
+func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+	s.conf.RLock()
+	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, constant.Out)
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+// IsScheduleAllowed implements the Scheduler interface.
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+// Schedule implements the Scheduler interface.
+func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
+	storeIDWithRanges := s.conf.getStoreIDWithRanges()
+	ops := make([]*operator.Operator, 0, len(storeIDWithRanges))
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	for id, ranges := range s.conf.StoreIDWithRanges {
+	for id, ranges := range storeIDWithRanges {
 		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			grantLeaderNoFollowerCounter.Inc()
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(s.GetName(), cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
@@ -237,8 +242,8 @@ type grantLeaderHandler struct {
 	config *grantLeaderSchedulerConfig
 }
 
-func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -248,15 +253,15 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
-		handler.config.mu.RLock()
+		handler.config.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
-				handler.config.mu.RUnlock()
+			if err := handler.config.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
+				handler.config.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		handler.config.mu.RUnlock()
+		handler.config.RUnlock()
 		args = append(args, strconv.FormatUint(id, 10))
 	}
 
@@ -267,22 +272,31 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	err := handler.config.buildWithArgs(args)
 	if err != nil {
-		handler.config.removeStore(id)
+		log.Error("fail to build config", errs.ZapError(err))
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
+		handler.config.Unlock()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.persist()
+	if err != nil {
+		log.Error("fail to persist config", errs.ZapError(err))
+		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
-	conf := handler.config.Clone()
+func (handler *grantLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
-func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -290,18 +304,18 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var resp interface{}
+	var resp any
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
-		err = handler.config.Persist()
+		err = handler.config.persist()
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if last {
-			if err := handler.config.cluster.RemoveScheduler(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(types.GrantLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
@@ -325,8 +339,8 @@ func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.deleteConfig).Methods(http.MethodDelete)
 	return router
 }

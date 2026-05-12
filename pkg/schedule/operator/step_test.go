@@ -18,8 +18,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -28,6 +31,7 @@ import (
 type operatorStepTestSuite struct {
 	suite.Suite
 
+	cancel  context.CancelFunc
 	cluster *mockcluster.Cluster
 }
 
@@ -39,11 +43,13 @@ type testCase struct {
 	Peers           []*metapb.Peer // first is leader
 	ConfVerChanged  uint64
 	IsFinish        bool
-	CheckInProgress func(err error, msgAndArgs ...interface{}) bool
+	CheckInProgress func(err error, msgAndArgs ...any)
 }
 
 func (suite *operatorStepTestSuite) SetupTest() {
-	suite.cluster = mockcluster.NewCluster(context.Background(), mockconfig.NewTestOptions())
+	ctx, cancel := context.WithCancel(context.Background())
+	suite.cancel = cancel
+	suite.cluster = mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	for i := 1; i <= 10; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
@@ -52,7 +58,14 @@ func (suite *operatorStepTestSuite) SetupTest() {
 	suite.cluster.SetStoreDown(10)
 }
 
+func (suite *operatorStepTestSuite) TearDownTest() {
+	if suite.cancel != nil {
+		suite.cancel()
+	}
+}
+
 func (suite *operatorStepTestSuite) TestTransferLeader() {
+	re := suite.Require()
 	step := TransferLeader{FromStore: 1, ToStore: 2}
 	testCases := []testCase{
 		{
@@ -63,7 +76,7 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -73,7 +86,7 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 			},
 			0,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -83,10 +96,10 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 	}
-	suite.check(step, "transfer leader from store 1 to store 2", testCases)
+	suite.check(re, step, "transfer leader from store 1 to store 2", testCases)
 
 	step = TransferLeader{FromStore: 1, ToStore: 9} // 9 is down
 	testCases = []testCase{
@@ -98,13 +111,14 @@ func (suite *operatorStepTestSuite) TestTransferLeader() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
-	suite.check(step, "transfer leader from store 1 to store 9", testCases)
+	suite.check(re, step, "transfer leader from store 1 to store 9", testCases)
 }
 
 func (suite *operatorStepTestSuite) TestAddPeer() {
+	re := suite.Require()
 	step := AddPeer{ToStore: 2, PeerID: 2}
 	testCases := []testCase{
 		{
@@ -113,7 +127,7 @@ func (suite *operatorStepTestSuite) TestAddPeer() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -122,10 +136,10 @@ func (suite *operatorStepTestSuite) TestAddPeer() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 	}
-	suite.check(step, "add peer 2 on store 2", testCases)
+	suite.check(re, step, "add peer 2 on store 2", testCases)
 
 	step = AddPeer{ToStore: 9, PeerID: 9}
 	testCases = []testCase{
@@ -135,13 +149,14 @@ func (suite *operatorStepTestSuite) TestAddPeer() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
-	suite.check(step, "add peer 9 on store 9", testCases)
+	suite.check(re, step, "add peer 9 on store 9", testCases)
 }
 
 func (suite *operatorStepTestSuite) TestAddLearner() {
+	re := suite.Require()
 	step := AddLearner{ToStore: 2, PeerID: 2}
 	testCases := []testCase{
 		{
@@ -150,7 +165,7 @@ func (suite *operatorStepTestSuite) TestAddLearner() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -159,10 +174,10 @@ func (suite *operatorStepTestSuite) TestAddLearner() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 	}
-	suite.check(step, "add learner peer 2 on store 2", testCases)
+	suite.check(re, step, "add learner peer 2 on store 2", testCases)
 
 	step = AddLearner{ToStore: 9, PeerID: 9}
 	testCases = []testCase{
@@ -172,13 +187,14 @@ func (suite *operatorStepTestSuite) TestAddLearner() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
-	suite.check(step, "add learner peer 9 on store 9", testCases)
+	suite.check(re, step, "add learner peer 9 on store 9", testCases)
 }
 
 func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
+	re := suite.Require()
 	cpe := ChangePeerV2Enter{
 		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}, {PeerID: 4, ToStore: 4}},
 		DemoteVoters:    []DemoteVoter{{PeerID: 1, ToStore: 1}, {PeerID: 2, ToStore: 2}},
@@ -193,7 +209,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step
 			[]*metapb.Peer{
@@ -204,7 +220,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			4,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // miss peer id
 			[]*metapb.Peer{
@@ -215,7 +231,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // miss store id
 			[]*metapb.Peer{
@@ -226,7 +242,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // miss peer id
 			[]*metapb.Peer{
@@ -237,7 +253,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // change is not atomic
 			[]*metapb.Peer{
@@ -248,7 +264,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // change is not atomic
 			[]*metapb.Peer{
@@ -259,7 +275,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // there are other peers in the joint state
 			[]*metapb.Peer{
@@ -271,7 +287,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			4,
 			true,
-			suite.Error,
+			re.Error,
 		},
 		{ // there are other peers in the joint state
 			[]*metapb.Peer{
@@ -284,16 +300,17 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Enter() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
 	desc := "use joint consensus, " +
 		"promote learner peer 3 on store 3 to voter, promote learner peer 4 on store 4 to voter, " +
 		"demote voter peer 1 on store 1 to learner, demote voter peer 2 on store 2 to learner"
-	suite.check(cpe, desc, testCases)
+	suite.check(re, cpe, desc, testCases)
 }
 
 func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
+	re := suite.Require()
 	cpe := ChangePeerV2Enter{
 		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}},
 	}
@@ -306,7 +323,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step
 			[]*metapb.Peer{
@@ -316,7 +333,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step (direct)
 			[]*metapb.Peer{
@@ -326,7 +343,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // error role
 			[]*metapb.Peer{
@@ -336,11 +353,11 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
 	desc := "use joint consensus, promote learner peer 3 on store 3 to voter"
-	suite.check(cpe, desc, testCases)
+	suite.check(re, cpe, desc, testCases)
 
 	cpe = ChangePeerV2Enter{
 		DemoteVoters: []DemoteVoter{{PeerID: 3, ToStore: 3}},
@@ -354,7 +371,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step
 			[]*metapb.Peer{
@@ -364,7 +381,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step (direct)
 			[]*metapb.Peer{
@@ -374,7 +391,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // demote and remove peer
 			[]*metapb.Peer{
@@ -383,7 +400,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			1, // correct calculation is required
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // error role
 			[]*metapb.Peer{
@@ -393,14 +410,15 @@ func (suite *operatorStepTestSuite) TestChangePeerV2EnterWithSingleChange() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
 	desc = "use joint consensus, demote voter peer 3 on store 3 to learner"
-	suite.check(cpe, desc, testCases)
+	suite.check(re, cpe, desc, testCases)
 }
 
 func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
+	re := suite.Require()
 	cpl := ChangePeerV2Leave{
 		PromoteLearners: []PromoteLearner{{PeerID: 3, ToStore: 3}, {PeerID: 4, ToStore: 4}},
 		DemoteVoters:    []DemoteVoter{{PeerID: 1, ToStore: 1}, {PeerID: 2, ToStore: 2}},
@@ -415,7 +433,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // after step
 			[]*metapb.Peer{
@@ -426,7 +444,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			4,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 		{ // miss peer id
 			[]*metapb.Peer{
@@ -437,7 +455,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // miss store id
 			[]*metapb.Peer{
@@ -448,7 +466,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // miss peer id
 			[]*metapb.Peer{
@@ -459,7 +477,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // change is not atomic
 			[]*metapb.Peer{
@@ -470,7 +488,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // change is not atomic
 			[]*metapb.Peer{
@@ -481,7 +499,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // there are other peers in the joint state
 			[]*metapb.Peer{
@@ -493,7 +511,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // there are other peers in the joint state
 			[]*metapb.Peer{
@@ -506,7 +524,7 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			4,
 			false,
-			suite.Error,
+			re.Error,
 		},
 		{ // demote leader
 			[]*metapb.Peer{
@@ -517,16 +535,17 @@ func (suite *operatorStepTestSuite) TestChangePeerV2Leave() {
 			},
 			0,
 			false,
-			suite.Error,
+			re.Error,
 		},
 	}
 	desc := "leave joint state, " +
 		"promote learner peer 3 on store 3 to voter, promote learner peer 4 on store 4 to voter, " +
 		"demote voter peer 1 on store 1 to learner, demote voter peer 2 on store 2 to learner"
-	suite.check(cpl, desc, testCases)
+	suite.check(re, cpl, desc, testCases)
 }
 
 func (suite *operatorStepTestSuite) TestSwitchToWitness() {
+	re := suite.Require()
 	step := BecomeWitness{StoreID: 2, PeerID: 2}
 	testCases := []testCase{
 		{
@@ -536,7 +555,7 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -545,7 +564,7 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 			},
 			0,
 			false,
-			suite.NoError,
+			re.NoError,
 		},
 		{
 			[]*metapb.Peer{
@@ -554,19 +573,19 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 			},
 			1,
 			true,
-			suite.NoError,
+			re.NoError,
 		},
 	}
-	suite.check(step, "switch peer 2 on store 2 to witness", testCases)
+	suite.check(re, step, "switch peer 2 on store 2 to witness", testCases)
 }
 
-func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []testCase) {
-	suite.Equal(desc, step.String())
+func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
+	re.Equal(desc, step.String())
 	for _, testCase := range testCases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
-		suite.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
-		suite.Equal(testCase.IsFinish, step.IsFinish(region))
-		err := step.CheckInProgress(suite.cluster, region)
+		re.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
+		re.Equal(testCase.IsFinish, step.IsFinish(region))
+		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region)
 		testCase.CheckInProgress(err)
 		_ = step.GetCmd(region, true)
 
@@ -574,7 +593,7 @@ func (suite *operatorStepTestSuite) check(step OpStep, desc string, testCases []
 			// Ref https://github.com/tikv/pd/issues/5788
 			pendingPeers := region.GetLearners()
 			region = region.Clone(core.WithPendingPeers(pendingPeers))
-			suite.Equal(testCase.IsFinish, step.IsFinish(region))
+			re.Equal(testCase.IsFinish, step.IsFinish(region))
 		}
 	}
 }

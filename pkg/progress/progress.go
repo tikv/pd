@@ -15,166 +15,279 @@
 package progress
 
 import (
-	"container/list"
-	"fmt"
+	"context"
 	"math"
+	"strconv"
 	"time"
 
-	"github.com/tikv/pd/pkg/errs"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-// speedStatisticalWindow is the speed calculation window
-const speedStatisticalWindow = 10 * time.Minute
+const (
+	gcInterval      = 2 * time.Minute
+	expiredDuration = 30 * time.Second
+
+	removingAction  Action = "removing"
+	preparingAction Action = "preparing"
+)
+
+type patrolRegionsDurationGetter interface {
+	GetPatrolRegionsDuration() time.Duration
+}
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
 	syncutil.RWMutex
-	progesses map[string]*progressIndicator
+	progresses                  map[uint64]*progressIndicator
+	completedProgress           map[uint64]*progressIndicator
+	patrolRegionsDurationGetter patrolRegionsDurationGetter
+
+	updateInterval time.Duration
 }
 
 // NewManager creates a new Manager.
-func NewManager() *Manager {
+func NewManager(patrolRegionsDurationGetter patrolRegionsDurationGetter,
+	updateInterval time.Duration) *Manager {
 	return &Manager{
-		progesses: make(map[string]*progressIndicator),
+		progresses:                  make(map[uint64]*progressIndicator),
+		completedProgress:           make(map[uint64]*progressIndicator),
+		patrolRegionsDurationGetter: patrolRegionsDurationGetter,
+		updateInterval:              updateInterval,
 	}
 }
 
-// progressIndicator reflects a specified progress.
-type progressIndicator struct {
-	total     float64
-	remaining float64
-	// We use a fixed interval's history to calculate the latest average speed.
-	history *list.List
-	// We use speedStatisticalWindow / updateInterval to get the windowLengthLimit.
-	// Assume that the windowLengthLimit is 3, the init value is 1. after update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
-	// Then we update it again with 5, the window will become [2, 3, 4, 5].
-	windowLengthLimit int
-	updateInterval    time.Duration
-	lastSpeed         float64
+// Action is the action of the progress.
+type Action string
+
+// Progress is the progress of the online/offline store.
+type Progress struct {
+	Action
+	ProgressPercent float64
+	LeftSecond      float64
+	CurrentSpeed    float64
 }
 
 // Reset resets the progress manager.
 func (m *Manager) Reset() {
+	storesProgressGauge.Reset()
+	storesSpeedGauge.Reset()
+	storesETAGauge.Reset()
+
 	m.Lock()
 	defer m.Unlock()
 
-	m.progesses = make(map[string]*progressIndicator)
+	m.progresses = make(map[uint64]*progressIndicator)
 }
 
-// AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration) (exist bool) {
+// SetPatrolRegionsDurationGetter sets the patrol regions duration getter.
+func (m *Manager) SetPatrolRegionsDurationGetter(getter patrolRegionsDurationGetter) {
 	m.Lock()
 	defer m.Unlock()
-
-	history := list.New()
-	history.PushBack(current)
-	if _, exist = m.progesses[progress]; !exist {
-		m.progesses[progress] = &progressIndicator{
-			total:             total,
-			remaining:         total,
-			history:           history,
-			windowLengthLimit: int(speedStatisticalWindow / updateInterval),
-			updateInterval:    updateInterval,
-		}
-	}
-	return
+	m.patrolRegionsDurationGetter = getter
 }
 
-// UpdateProgress updates the progress if it exists.
-func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool) {
-	m.Lock()
-	defer m.Unlock()
-
-	if p, exist := m.progesses[progress]; exist {
-		p.remaining = remaining
-		if p.total < remaining {
-			p.total = remaining
-		}
-
-		if p.history.Len() > p.windowLengthLimit {
-			p.history.Remove(p.history.Front())
-		}
-		p.history.PushBack(current)
-
-		// It means it just init and we haven't update the progress
-		if p.history.Len() <= 1 {
-			p.lastSpeed = 0
-		} else if isInc {
-			// the value increases, e.g., [1, 2, 3]
-			p.lastSpeed = (p.history.Back().Value.(float64) - p.history.Front().Value.(float64)) /
-				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
-		} else {
-			// the value decreases, e.g., [3, 2, 1]
-			p.lastSpeed = (p.history.Front().Value.(float64) - p.history.Back().Value.(float64)) /
-				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
-		}
-		if p.lastSpeed < 0 {
-			p.lastSpeed = 0
-		}
-	}
+func (m *Manager) addProgress(
+	storeID uint64,
+	action Action,
+	current, total float64,
+) {
+	m.progresses[storeID] = newProgressIndicator(
+		action,
+		current, total,
+		m.updateInterval,
+	)
 }
 
-// UpdateProgressTotal updates the total value of a progress if it exists.
-func (m *Manager) UpdateProgressTotal(progress string, total float64) {
-	m.Lock()
-	defer m.Unlock()
+// GC starts a goroutine to clean up the completed progress.
+func (m *Manager) GC(ctx context.Context) {
+	ticker := time.NewTicker(gcInterval)
+	defer ticker.Stop()
 
-	if p, exist := m.progesses[progress]; exist {
-		p.total = total
-	}
-}
-
-// RemoveProgress removes a progress from manager.
-func (m *Manager) RemoveProgress(progress string) (exist bool) {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, exist = m.progesses[progress]; exist {
-		delete(m.progesses, progress)
-		return
-	}
-	return
-}
-
-// GetProgresses gets progresses according to the filter.
-func (m *Manager) GetProgresses(filter func(p string) bool) []string {
-	m.RLock()
-	defer m.RUnlock()
-
-	processes := []string{}
-	for p := range m.progesses {
-		if filter(p) {
-			processes = append(processes, p)
-		}
-	}
-	return processes
-}
-
-// Status returns the current progress status of a give name.
-func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64, err error) {
-	m.RLock()
-	defer m.RUnlock()
-
-	if p, exist := m.progesses[progress]; exist {
-		process = 1 - p.remaining/p.total
-		if process < 0 {
-			process = 0
-			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
+	for {
+		select {
+		case <-ticker.C:
+			m.gcCompletedProgress()
+		case <-ctx.Done():
 			return
 		}
-		currentSpeed = p.lastSpeed
-		// When the progress is newly added, there is no last speed.
-		if p.lastSpeed == 0 && p.history.Len() <= 1 {
-			currentSpeed = 0
-		}
+	}
+}
 
-		leftSeconds = p.remaining / currentSpeed
-		if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
-			leftSeconds = math.MaxFloat64
+func (m *Manager) gcCompletedProgress() {
+	m.Lock()
+	defer m.Unlock()
+	exactExpiredDuration := expiredDuration
+	failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			var err error
+			exactExpiredDuration, err = time.ParseDuration(s)
+			if err != nil {
+				panic(err)
+			}
 		}
+	})
+	exactExpiredTime := time.Now().Add(-exactExpiredDuration)
+	for storeID, p := range m.completedProgress {
+		if p.completeAt.Before(exactExpiredTime) {
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			delete(m.completedProgress, storeID)
+			storesProgressGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
+			storesSpeedGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
+			storesETAGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
+		}
+	}
+}
+
+func (m *Manager) markProgressAsFinished(storeID uint64) {
+	m.Lock()
+	defer m.Unlock()
+	p, exist := m.progresses[storeID]
+	if !exist {
 		return
 	}
-	err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progress))
-	return
+
+	p.completeAt = time.Now()
+	p.push(p.targetRegionSize)
+	m.completedProgress[storeID] = p
+	delete(m.progresses, storeID)
+}
+
+// UpdateProgress updates the progress of the store.
+func (m *Manager) UpdateProgress(
+	store *core.StoreInfo,
+	currentRegionSize, threshold float64,
+) {
+	if m == nil || store == nil {
+		return
+	}
+	p := m.GetProgressByStoreID(store.GetID())
+	if p != nil && ((p.Action == preparingAction && !store.IsPreparing()) ||
+		(p.Action == removingAction && !store.IsRemoving())) {
+		m.markProgressAsFinished(store.GetID())
+	}
+	var (
+		storeID = store.GetID()
+		action  Action
+		//  targetRegionSize is the total region size that need to be added/deleted.
+		//  - If the store is in preparing state, it represents the total region size
+		//    that need to be added, and it may be updated during the process.
+		//  - If the store is in removing state, it represents the total region size
+		//    that need to be deleted, and it is set in the first time.
+		targetRegionSize float64
+	)
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing:
+		action = preparingAction
+		targetRegionSize = threshold
+	case metapb.NodeState_Removing:
+		action = removingAction
+		m.RLock()
+		p, exist := m.progresses[storeID]
+		if exist && p.Action == removingAction {
+			// currentRegionSize represents the current deleted region size.
+			currentRegionSize = math.Max(0, p.targetRegionSize-currentRegionSize)
+		} else {
+			// targetRegionSize represents the total region size that need to be
+			// deleted. It is set in the first time when the store is in removing state.
+			targetRegionSize = currentRegionSize
+			currentRegionSize = 0
+		}
+		m.RUnlock()
+	default:
+		return
+	}
+
+	m.updateStoreProgress(storeID, action, currentRegionSize, targetRegionSize)
+}
+
+func (m *Manager) updateStoreProgress(
+	storeID uint64,
+	action Action,
+	currentRegionSize, targetRegionSize float64,
+) {
+	m.Lock()
+	defer m.Unlock()
+
+	p, exist := m.progresses[storeID]
+	if !exist || p.Action != action {
+		m.addProgress(storeID, action, currentRegionSize, targetRegionSize)
+		return
+	}
+
+	// The targetRegionSize of the preparing progress may be updated.
+	if p.targetRegionSize < targetRegionSize {
+		p.targetRegionSize = targetRegionSize
+	}
+	if action == removingAction {
+		// If the number of regions is large, each round of PatrolRegion takes a
+		// long time. The regions of the offline store may have not been scanned
+		// during some updateInterval. In this case, if the window is not large
+		// enough, the offline speed will vary greatly, which is not in line
+		// with expectations. Therefore, we adjust the window size based on the
+		// time consumed by PatrolRegion to avoid excessive fluctuations in the
+		// offline speed, which may cause misleading results.
+		p.adjustWindowLength(m.patrolRegionsDurationGetter.GetPatrolRegionsDuration())
+	}
+
+	p.push(currentRegionSize)
+
+	storeLabel := strconv.FormatUint(storeID, 10)
+	// For now, we don't need to record the address of the store. We can record
+	// them when we need it.
+	storesProgressGauge.WithLabelValues("", storeLabel, string(action)).Set(p.ProgressPercent)
+	storesSpeedGauge.WithLabelValues("", storeLabel, string(action)).Set(p.CurrentSpeed)
+	storesETAGauge.WithLabelValues("", storeLabel, string(action)).Set(p.LeftSecond)
+}
+
+// GetProgressByStoreID gets progresses by the store id.
+func (m *Manager) GetProgressByStoreID(storeID uint64) *Progress {
+	m.RLock()
+	defer m.RUnlock()
+
+	p, exist := m.progresses[storeID]
+	if !exist {
+		return nil
+	}
+	// Return a copy to avoid data race when the caller reads fields
+	// after the lock is released while another goroutine may be updating them.
+	progressCopy := *p.Progress
+	return &progressCopy
+}
+
+// GetAverageProgressByAction gets the average progress of all stores
+func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
+	m.RLock()
+	defer m.RUnlock()
+
+	var (
+		totalProgressPercent, totalLeftSeconds, totalCurrentSpeed float64
+		count                                                     int
+	)
+	for _, p := range m.progresses {
+		if p.Action == action {
+			totalProgressPercent += p.ProgressPercent
+			totalLeftSeconds += p.LeftSecond
+			totalCurrentSpeed += p.CurrentSpeed
+			count++
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	if math.IsInf(totalLeftSeconds, 1) {
+		totalLeftSeconds = math.MaxFloat64
+	} else {
+		totalLeftSeconds /= float64(count)
+	}
+
+	return &Progress{
+		Action:          action,
+		ProgressPercent: totalProgressPercent / float64(count),
+		LeftSecond:      totalLeftSeconds,
+		CurrentSpeed:    totalCurrentSpeed / float64(count),
+	}
 }

@@ -15,15 +15,21 @@
 package metricutil
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
+
 func TestCamelCaseToSnakeCase(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	inputs := []struct {
 		name    string
@@ -56,7 +62,9 @@ func TestCamelCaseToSnakeCase(t *testing.T) {
 	}
 }
 
-func TestCoverage(t *testing.T) {
+func TestCoverage(_ *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cfgs := []*MetricConfig{
 		{
 			PushJob:     "j1",
@@ -75,6 +83,6 @@ func TestCoverage(t *testing.T) {
 	}
 
 	for _, cfg := range cfgs {
-		Push(cfg)
+		Push(ctx, cfg)
 	}
 }

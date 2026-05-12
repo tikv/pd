@@ -44,7 +44,7 @@ func WithEndTime(parent context.Context, endTime int64) context.Context {
 	return context.WithValue(parent, endTimeKey, endTime)
 }
 
-// EndTimeFrom returns the value of the excution info key on the ctx
+// EndTimeFrom returns the value of the execution info key on the ctx
 func EndTimeFrom(ctx context.Context) (int64, bool) {
 	info, ok := ctx.Value(endTimeKey).(int64)
 	return info, ok

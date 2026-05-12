@@ -40,66 +40,6 @@ func (a action) String() string {
 	return "unknown"
 }
 
-type scope int
-
-const (
-	// BalanceLeader is the filter type for balance leader.
-	BalanceLeader scope = iota
-	// BalanceRegion is the filter type for balance region.
-	BalanceRegion
-	// BalanceHotRegion is the filter type for hot region.
-	BalanceHotRegion
-	// BalanceWitness is the filter type for balance witness.
-	BalanceWitness
-	// Label is the filter type for replica.
-	Label
-
-	// EvictLeader is the filter type for evict leader.
-	EvictLeader
-	// RegionScatter is the filter type for scatter region.
-	RegionScatter
-	// ReplicaChecker is the filter type for replica.
-	ReplicaChecker
-	// RuleChecker is the filter type for rule.
-	RuleChecker
-
-	// GrantHotLeader is the filter type for grant hot leader.
-	GrantHotLeader
-	// ShuffleHotRegion is the filter type for shuffle hot region.
-	ShuffleHotRegion
-	// ShuffleRegion is the filter type for shuffle region.
-	ShuffleRegion
-	// RandomMerge is the filter type for random merge.
-	RandomMerge
-	scopeLen
-)
-
-var scopes = [scopeLen]string{
-	"balance-leader-scheduler",
-	"balance-region-scheduler",
-	"balance-hot-region-scheduler",
-	"balance-witness-scheduler",
-	"label-scheduler",
-
-	"evict-leader-scheduler",
-	"region-scatter",
-	"replica-checker",
-	"rule-checker",
-
-	"grant-hot-leader-scheduler",
-	"shuffle-region-scheduler",
-	"shuffle-region-scheduler",
-	"random-merge-scheduler",
-}
-
-// String implements fmt.Stringer interface.
-func (s scope) String() string {
-	if s >= scopeLen {
-		return "unknown"
-	}
-	return scopes[s]
-}
-
 type filterType int
 
 const (
@@ -119,6 +59,7 @@ const (
 	storeStateOffline
 	storeStatePauseLeader
 	storeStateSlow
+	storeStateStopping
 	storeStateDisconnected
 	storeStateBusy
 	storeStateExceedRemoveLimit
@@ -148,6 +89,7 @@ var filters = [filtersLen]string{
 	"store-state-offline-filter",
 	"store-state-pause-leader-filter",
 	"store-state-slow-filter",
+	"store-state-stopping-filter",
 	"store-state-disconnect-filter",
 	"store-state-busy-filter",
 	"store-state-exceed-remove-limit-filter",
@@ -171,46 +113,50 @@ func (f filterType) String() string {
 type Counter struct {
 	scope string
 	// record filter counter for each store.
-	// [action][type][sourceID][targetID]count
-	// [source-filter][rule-fit-filter]<1->2><10>
-	counter [][]map[uint64]map[uint64]int
+	// [action][type][storeID]count
+	// source: [source][rule-fit-filter][sourceID]count
+	// target: [target][rule-fit-filter][targetID]count
+	counter [][]map[uint64]int
 }
 
 // NewCounter creates a Counter.
 func NewCounter(scope string) *Counter {
-	counter := make([][]map[uint64]map[uint64]int, actionLen)
+	counter := make([][]map[uint64]int, actionLen)
 	for i := range counter {
-		counter[i] = make([]map[uint64]map[uint64]int, filtersLen)
+		counter[i] = make([]map[uint64]int, filtersLen)
 		for k := range counter[i] {
-			counter[i][k] = make(map[uint64]map[uint64]int)
+			counter[i][k] = make(map[uint64]int)
 		}
 	}
 	return &Counter{counter: counter, scope: scope}
 }
 
+// SetScope sets the scope for the counter.
+func (c *Counter) SetScope(scope string) {
+	c.scope = scope
+}
+
 // Add adds the filter counter.
-func (c *Counter) inc(action action, filterType filterType, sourceID uint64, targetID uint64) {
-	if _, ok := c.counter[action][filterType][sourceID]; !ok {
-		c.counter[action][filterType][sourceID] = make(map[uint64]int)
-	}
-	c.counter[action][filterType][sourceID][targetID]++
+func (c *Counter) inc(action action, filterType filterType, storeID uint64) {
+	c.counter[action][filterType][storeID]++
 }
 
 // Flush flushes the counter to the metrics.
 func (c *Counter) Flush() {
 	for i, actions := range c.counter {
-		actionName := action(i).String()
+		actionType := action(i)
 		for j, counters := range actions {
 			filterName := filterType(j).String()
-			for sourceID, count := range counters {
-				sourceIDStr := strconv.FormatUint(sourceID, 10)
-				for targetID, value := range count {
-					targetIDStr := strconv.FormatUint(targetID, 10)
-					if value > 0 {
-						filterCounter.WithLabelValues(actionName, c.scope, filterName, sourceIDStr, targetIDStr).
-							Add(float64(value))
-						counters[sourceID][targetID] = 0
+			for storeID, value := range counters {
+				if value > 0 {
+					storeIDStr := strconv.FormatUint(storeID, 10)
+					switch actionType {
+					case source:
+						filterSourceCounter.WithLabelValues(c.scope, filterName, storeIDStr).Add(float64(value))
+					case target:
+						filterTargetCounter.WithLabelValues(c.scope, filterName, storeIDStr).Add(float64(value))
 					}
+					counters[storeID] = 0
 				}
 			}
 		}

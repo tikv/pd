@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -18,11 +18,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/elastic/gosigar"
-	"github.com/pingcap/log"
+	sigar "github.com/cloudfoundry/gosigar"
 	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 )
 
 // RequestUnit is the basic unit of the resource request management, which has two types:
@@ -30,11 +30,28 @@ import (
 //   - WRU: write request unit
 type RequestUnit float64
 
+// AccessLocationType defines the network traffic type the request is sent.
+type AccessLocationType byte
+
+const (
+	// AccessUnknown means the access type is unknown because there is not "zone" labels in either
+	// the source or target instance, it is likely the cluster is not cross AZ deployed.
+	AccessUnknown AccessLocationType = iota
+	// AccessLocalZone means the source and target instance are in the same zone.
+	AccessLocalZone
+	// AccessCrossZone means the source and target instance are in different zones.
+	AccessCrossZone
+)
+
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
+	ReplicaNumber() int64
+	StoreID() uint64
+	RequestSize() uint64
+	AccessLocationType() AccessLocationType
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -45,6 +62,7 @@ type ResponseInfo interface {
 	// Succeed is used to tell whether the request is successfully returned.
 	// If not, we need to pay back the WRU cost of the request.
 	Succeed() bool
+	ResponseSize() uint64
 }
 
 // ResourceCalculator is used to calculate the resource consumption of a request.
@@ -63,18 +81,17 @@ type ResourceCalculator interface {
 
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*KVCalculator)(nil)
 
-func newKVCalculator(cfg *Config) *KVCalculator {
-	return &KVCalculator{Config: cfg}
+func newKVCalculator(cfg *RUConfig) *KVCalculator {
+	return &KVCalculator{RUConfig: cfg}
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
-}
+func (*KVCalculator) Trickle(*rmpb.Consumption) {}
 
 // BeforeKVRequest ...
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
@@ -86,14 +103,34 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
-		consumption.RRU += float64(kc.ReadBaseCost)
+		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	}
+	if req.AccessLocationType() == AccessCrossZone {
+		if req.IsWrite() {
+			consumption.WriteCrossAzTrafficBytes += req.RequestSize()
+		} else {
+			consumption.ReadCrossAzTrafficBytes += req.RequestSize()
+		}
 	}
 }
 
 func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
-	consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+	// write request cost need consider the replicas, due to write data will be replicate to all replicas.
+	replicaNums := uint64(req.ReplicaNumber())
+	if replicaNums == 0 {
+		replicaNums = 1
+	}
+	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * float64(replicaNums)
+	// TODO: for a raft group with N replicas, we assume the cross AZ network traffic for raft replication
+	// is: writeBytes * (N - 1). This is not accurate, but the deviation should be small enough.
+	//
+	// NOTE: if the access local type is "unknown", we don't count the write cross AZ traffic,
+	// as it's likely this cluster is not cross-AZ deployed.
+	if req.AccessLocationType() != AccessUnknown {
+		consumption.WriteCrossAzTrafficBytes += req.WriteBytes() * (replicaNums - 1)
+	}
 }
 
 // AfterKVRequest ...
@@ -108,21 +145,41 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	// A write request may also read data, which should be counted into the RRU cost.
 	// This part should be counted even if the request does not succeed.
 	kc.calculateReadCost(consumption, res)
+	calculateCrossAZTraffic(consumption, req, res)
 }
 
 func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
 	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
 
+func calculateCrossAZTraffic(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+	if req.AccessLocationType() == AccessCrossZone {
+		if req.IsWrite() {
+			consumption.WriteCrossAzTrafficBytes += res.ResponseSize()
+		} else {
+			consumption.ReadCrossAzTrafficBytes += res.ResponseSize()
+		}
+	}
+}
+
 func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+	if consumption == nil {
+		return
+	}
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes -= writeBytes
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
@@ -130,69 +187,44 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*SQLCalculator)(nil)
 
-func newSQLCalculator(cfg *Config) *SQLCalculator {
-	return &SQLCalculator{Config: cfg}
+func newSQLCalculator(cfg *RUConfig) *SQLCalculator {
+	return &SQLCalculator{RUConfig: cfg}
 }
 
 // Trickle update sql layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
 	delta := getSQLProcessCPUTime(dsc.isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
 	consumption.SqlLayerCpuTimeMs += delta
 }
 
 // BeforeKVRequest ...
-func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
+func (*SQLCalculator) BeforeKVRequest(*rmpb.Consumption, RequestInfo) {
 }
 
 // AfterKVRequest ...
-func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+func (*SQLCalculator) AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo) {
 }
 
-func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
-	if typ == 0 {
-		return custom.RRU + custom.WRU
+func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
+	if custom == nil {
+		return 0
 	}
-	return 0
-}
-
-func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
-	if typ == 0 {
-		return group.RUSettings.RU
-	}
-	return nil
-}
-
-func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
-	switch typ {
-	case 0:
-		return custom.TotalCpuTimeMs
-	case 1:
-		return custom.ReadBytes
-	case 2:
-		return custom.WriteBytes
-	}
-	return 0
-}
-
-func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
-	switch typ {
-	case 0:
-		return group.RawResourceSettings.Cpu
-	case 1:
-		return group.RawResourceSettings.IoRead
-	case 2:
-		return group.RawResourceSettings.IoWrite
-	}
-	return nil
+	return custom.RRU + custom.WRU
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -201,9 +233,74 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs += custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount += custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
+	custom1.ReadCrossAzTrafficBytes += custom2.ReadCrossAzTrafficBytes
+	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 += custom2.TikvRUV2
+	custom1.TidbRUV2 += custom2.TidbRUV2
+	custom1.TiflashRUV2 += custom2.TiflashRUV2
+}
+
+func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
+	delta := &rmpb.Consumption{}
+	if now.RRU > last.RRU {
+		delta.RRU = now.RRU - last.RRU
+		last.RRU = now.RRU
+	}
+	if now.WRU > last.WRU {
+		delta.WRU = now.WRU - last.WRU
+		last.WRU = now.WRU
+	}
+	if now.ReadBytes > last.ReadBytes {
+		delta.ReadBytes = now.ReadBytes - last.ReadBytes
+		last.ReadBytes = now.ReadBytes
+	}
+	if now.WriteBytes > last.WriteBytes {
+		delta.WriteBytes = now.WriteBytes - last.WriteBytes
+		last.WriteBytes = now.WriteBytes
+	}
+	if now.TotalCpuTimeMs > last.TotalCpuTimeMs {
+		delta.TotalCpuTimeMs = now.TotalCpuTimeMs - last.TotalCpuTimeMs
+		last.TotalCpuTimeMs = now.TotalCpuTimeMs
+	}
+	if now.SqlLayerCpuTimeMs > last.SqlLayerCpuTimeMs {
+		delta.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs - last.SqlLayerCpuTimeMs
+		last.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs
+	}
+	if now.KvReadRpcCount > last.KvReadRpcCount {
+		delta.KvReadRpcCount = now.KvReadRpcCount - last.KvReadRpcCount
+		last.KvReadRpcCount = now.KvReadRpcCount
+	}
+	if now.KvWriteRpcCount > last.KvWriteRpcCount {
+		delta.KvWriteRpcCount = now.KvWriteRpcCount - last.KvWriteRpcCount
+		last.KvWriteRpcCount = now.KvWriteRpcCount
+	}
+	if now.ReadCrossAzTrafficBytes > last.ReadCrossAzTrafficBytes {
+		delta.ReadCrossAzTrafficBytes = now.ReadCrossAzTrafficBytes - last.ReadCrossAzTrafficBytes
+		last.ReadCrossAzTrafficBytes = now.ReadCrossAzTrafficBytes
+	}
+	if now.WriteCrossAzTrafficBytes > last.WriteCrossAzTrafficBytes {
+		delta.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes - last.WriteCrossAzTrafficBytes
+		last.WriteCrossAzTrafficBytes = now.WriteCrossAzTrafficBytes
+	}
+	if now.TikvRUV2 > last.TikvRUV2 {
+		delta.TikvRUV2 = now.TikvRUV2 - last.TikvRUV2
+		last.TikvRUV2 = now.TikvRUV2
+	}
+	if now.TidbRUV2 > last.TidbRUV2 {
+		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
+		last.TidbRUV2 = now.TidbRUV2
+	}
+	if now.TiflashRUV2 > last.TiflashRUV2 {
+		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
+		last.TiflashRUV2 = now.TiflashRUV2
+	}
+	return delta
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
@@ -212,10 +309,19 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs -= custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount -= custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount -= custom2.KvWriteRpcCount
+	custom1.ReadCrossAzTrafficBytes -= custom2.ReadCrossAzTrafficBytes
+	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
+	custom1.TikvRUV2 -= custom2.TikvRUV2
+	custom1.TidbRUV2 -= custom2.TidbRUV2
+	custom1.TiflashRUV2 -= custom2.TiflashRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
-	return custom1.RRU == custom2.RRU && custom1.WRU == custom2.WRU
+	return custom1.RRU == custom2.RRU &&
+		custom1.WRU == custom2.WRU &&
+		custom1.TikvRUV2 == custom2.TikvRUV2 &&
+		custom1.TidbRUV2 == custom2.TidbRUV2 &&
+		custom1.TiflashRUV2 == custom2.TiflashRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.
@@ -228,7 +334,7 @@ func getSQLProcessCPUTime(isSingleGroupByKeyspace bool) float64 {
 
 func getSysProcessCPUTime() float64 {
 	pid := os.Getpid()
-	cpuTime := gosigar.ProcTime{}
+	cpuTime := sigar.ProcTime{}
 	if err := cpuTime.Get(pid); err != nil {
 		log.Error("getCPUTime get pid failed", zap.Error(err))
 	}

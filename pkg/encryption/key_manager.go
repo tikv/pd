@@ -20,15 +20,17 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.uber.org/zap"
 )
 
 const (
@@ -402,7 +404,7 @@ func (m *Manager) rotateKeyIfNeeded(forceUpdate bool) error {
 		}
 		if needRotate {
 			rotated := false
-			for attempt := 0; attempt < keyRotationRetryLimit; attempt += 1 {
+			for range keyRotationRetryLimit {
 				keyID, key, err := NewDataKey(m.method, uint64(m.helper.now().Unix()))
 				if err != nil {
 					return nil
@@ -411,7 +413,7 @@ func (m *Manager) rotateKeyIfNeeded(forceUpdate bool) error {
 					keys.Keys[keyID] = key
 					keys.CurrentKeyId = keyID
 					rotated = true
-					log.Info("ready to create or rotate data encryption key", zap.Uint64("keyID", keyID))
+					log.Info("ready to create or rotate data encryption key", zap.Uint64("key-id", keyID))
 					break
 				}
 				// Duplicated key id. retry.

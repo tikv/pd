@@ -19,15 +19,20 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
-	"go.uber.org/zap"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -42,10 +47,10 @@ const (
 )
 
 type solver struct {
-	*balanceSchedulerPlan
-	schedule.Cluster
+	*plan.BalanceSchedulerPlan
+	sche.SchedulerCluster
 	kind              constant.ScheduleKind
-	opInfluence       operator.OpInfluence
+	opInfluence       *operator.OpInfluence
 	tolerantSizeRatio float64
 	tolerantSource    int64
 	fit               *placement.RegionFit
@@ -54,48 +59,47 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *balanceSchedulerPlan, kind constant.ScheduleKind, cluster schedule.Cluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence) *solver {
 	return &solver{
-		balanceSchedulerPlan: basePlan,
-		Cluster:              cluster,
+		BalanceSchedulerPlan: basePlan,
+		SchedulerCluster:     cluster,
 		kind:                 kind,
 		opInfluence:          opInfluence,
 		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
 	}
 }
 
-func (p *solver) GetOpInfluence(storeID uint64) int64 {
+func (p *solver) getOpInfluence(storeID uint64) int64 {
 	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
 }
 
-func (p *solver) SourceStoreID() uint64 {
-	return p.source.GetID()
+func (p *solver) sourceStoreID() uint64 {
+	return p.Source.GetID()
 }
 
-func (p *solver) SourceMetricLabel() string {
-	return strconv.FormatUint(p.SourceStoreID(), 10)
+func (p *solver) sourceMetricLabel() string {
+	return strconv.FormatUint(p.sourceStoreID(), 10)
 }
 
-func (p *solver) TargetStoreID() uint64 {
-	return p.target.GetID()
+func (p *solver) targetStoreID() uint64 {
+	return p.Target.GetID()
 }
 
-func (p *solver) TargetMetricLabel() string {
-	return strconv.FormatUint(p.TargetStoreID(), 10)
+func (p *solver) targetMetricLabel() string {
+	return strconv.FormatUint(p.targetStoreID(), 10)
 }
 
 func (p *solver) sourceStoreScore(scheduleName string) float64 {
-	sourceID := p.source.GetID()
+	sourceID := p.Source.GetID()
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
-	influence := p.GetOpInfluence(sourceID)
+	influence := p.getOpInfluence(sourceID)
 	if influence > 0 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
 		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
 	}
@@ -103,44 +107,43 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	switch p.kind.Resource {
 	case constant.LeaderKind:
 		sourceDelta := influence - tolerantResource
-		score = p.source.LeaderScore(p.kind.Policy, sourceDelta)
+		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
 		sourceDelta := influence*influenceAmp - tolerantResource
-		score = p.source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
-		score = p.source.WitnessScore(sourceDelta)
+		score = p.Source.WitnessScore(sourceDelta)
 	}
 	return score
 }
 
 func (p *solver) targetStoreScore(scheduleName string) float64 {
-	targetID := p.target.GetID()
+	targetID := p.Target.GetID()
 	// to avoid schedule too much, if A's score less than B and C in small range,
 	// we want that A can be moved in one region not two
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule call back
 	// A->B, A's influence is negative, so A will be target, C may move region to A
-	influence := p.GetOpInfluence(targetID)
+	influence := p.getOpInfluence(targetID)
 	if influence < 0 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
 	}
 	var score float64
 	switch p.kind.Resource {
 	case constant.LeaderKind:
 		targetDelta := influence + tolerantResource
-		score = p.target.LeaderScore(p.kind.Policy, targetDelta)
+		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
 		targetDelta := influence*influenceAmp + tolerantResource
-		score = p.target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
-		score = p.target.WitnessScore(targetDelta)
+		score = p.Target.WitnessScore(targetDelta)
 	}
 	return score
 }
@@ -151,16 +154,16 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	// The reason we use max(regionSize, averageRegionSize) to check is:
 	// 1. prevent moving small regions between stores with close scores, leading to unnecessary balance.
 	// 2. prevent moving huge regions, leading to over balance.
-	sourceID := p.source.GetID()
-	targetID := p.target.GetID()
+	sourceID := p.Source.GetID()
+	targetID := p.Target.GetID()
 	// Make sure after move, source score is still greater than target score.
 	shouldBalance := p.sourceScore > p.targetScore
 
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance "+p.kind.Resource.String(),
-			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
-			zap.Int64("source-size", p.source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
-			zap.Int64("target-size", p.target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
+			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.Region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
+			zap.Int64("source-size", p.Source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
+			zap.Int64("target-size", p.Target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
 			zap.Int64("tolerant-resource", p.getTolerantResource()))
 	}
@@ -181,14 +184,14 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster schedule.Cluster, kind constant.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
-	case *schedule.RangeCluster:
+	case *rangeCluster:
 		// range cluster use a separate configuration
 		tolerantSizeRatio = c.GetTolerantSizeRatio()
 	default:
-		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+		tolerantSizeRatio = cluster.GetSchedulerConfig().GetTolerantSizeRatio()
 	}
 	if kind.Resource == constant.LeaderKind && kind.Policy == constant.ByCount {
 		if tolerantSizeRatio == 0 {
@@ -214,43 +217,45 @@ func adjustTolerantRatio(cluster schedule.Cluster, kind constant.ScheduleKind) f
 	return tolerantSizeRatio
 }
 
-func getKeyRanges(args []string) ([]core.KeyRange, error) {
-	var ranges []core.KeyRange
+func getKeyRanges(args []string) ([]keyutil.KeyRange, error) {
+	var ranges []keyutil.KeyRange
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		args = args[2:]
-		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+		ranges = append(ranges, keyutil.NewKeyRange(startKey, endKey))
 	}
 	if len(ranges) == 0 {
-		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+		return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}, nil
 	}
 	return ranges, nil
 }
 
 type pendingInfluence struct {
 	op                *operator.Operator
-	from, to          uint64
+	froms             []uint64
+	to                uint64
 	origin            statistics.Influence
 	maxZombieDuration time.Duration
 }
 
-func newPendingInfluence(op *operator.Operator, from, to uint64, infl statistics.Influence, maxZombieDur time.Duration) *pendingInfluence {
+func newPendingInfluence(op *operator.Operator, froms []uint64, to uint64, infl statistics.Influence, maxZombieDur time.Duration) *pendingInfluence {
 	return &pendingInfluence{
 		op:                op,
-		from:              from,
+		froms:             froms,
 		to:                to,
 		origin:            infl,
 		maxZombieDuration: maxZombieDur,
 	}
 }
 
+// stLdRate returns a function to get the load rate of the store with the specified dimension.
 func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
 	return func(ld *statistics.StoreLoad) float64 {
 		return ld.Loads[dim]
@@ -258,17 +263,21 @@ func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
 }
 
 func stLdCount(ld *statistics.StoreLoad) float64 {
-	return ld.Count
+	return ld.HotPeerCount
 }
 
 type storeLoadCmp func(ld1, ld2 *statistics.StoreLoad) int
 
+// negLoadCmp returns a cmp that returns the negation of cmps.
 func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		return -cmp(ld1, ld2)
 	}
 }
 
+// sliceLoadCmp returns function with running cmps in order.
+// If the cmp returns 0, which means equal, the next cmp will be used.
+// If all cmps return 0, the two loads are considered equal.
 func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		for _, cmp := range cmps {
@@ -280,12 +289,15 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	}
 }
 
+// stLdRankCmp returns a cmp that compares the two loads with discretized data.
+// For example, if the rank function discretize data by step 10 , the load 11 and 19 will be considered equal.
 func stLdRankCmp(dim func(ld *statistics.StoreLoad) float64, rank func(value float64) int64) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		return rankCmp(dim(ld1), dim(ld2), rank)
 	}
 }
 
+// rankCmp compares the two values with discretized data.
 func rankCmp(a, b float64, rank func(value float64) int64) int {
 	aRk, bRk := rank(a), rank(b)
 	if aRk < bRk {
@@ -298,6 +310,9 @@ func rankCmp(a, b float64, rank func(value float64) int64) int {
 
 type storeLPCmp func(lp1, lp2 *statistics.StoreLoadPred) int
 
+// sliceLPCmp returns function with running cmps in order.
+// If the cmp returns 0, which means equal, the next cmp will be used.
+// If all cmps return 0, the two loads are considered equal.
 func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		for _, cmp := range cmps {
@@ -309,18 +324,21 @@ func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	}
 }
 
+// minLPCmp is a function to select the min load of the store between current and future when comparing.
 func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Min(), lp2.Min())
 	}
 }
 
+// maxLPCmp is a function to select the max load of the store between current and future when comparing.
 func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Max(), lp2.Max())
 	}
 }
 
+// diffCmp is a function to select the diff load of the store between current and future when comparing.
 func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Diff(), lp2.Diff())
@@ -344,7 +362,7 @@ func newRetryQuota() *retryQuota {
 	}
 }
 
-func (q *retryQuota) GetLimit(store *core.StoreInfo) int {
+func (q *retryQuota) getLimit(store *core.StoreInfo) int {
 	id := store.GetID()
 	if limit, ok := q.limits[id]; ok {
 		return limit
@@ -353,19 +371,19 @@ func (q *retryQuota) GetLimit(store *core.StoreInfo) int {
 	return q.initialLimit
 }
 
-func (q *retryQuota) ResetLimit(store *core.StoreInfo) {
+func (q *retryQuota) resetLimit(store *core.StoreInfo) {
 	q.limits[store.GetID()] = q.initialLimit
 }
 
-func (q *retryQuota) Attenuate(store *core.StoreInfo) {
-	newLimit := q.GetLimit(store) / q.attenuation
+func (q *retryQuota) attenuate(store *core.StoreInfo) {
+	newLimit := q.getLimit(store) / q.attenuation
 	if newLimit < q.minLimit {
 		newLimit = q.minLimit
 	}
 	q.limits[store.GetID()] = newLimit
 }
 
-func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
+func (q *retryQuota) gc(keepStores []*core.StoreInfo) {
 	set := make(map[uint64]struct{}, len(keepStores))
 	for _, store := range keepStores {
 		set[store.GetID()] = struct{}{}
@@ -375,4 +393,115 @@ func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
 			delete(q.limits, id)
 		}
 	}
+}
+
+// pauseAndResumeLeaderTransfer checks the old and new store IDs, and pause or resume the leader transfer in or out.
+func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, direction constant.Direction, old, new map[uint64]T) {
+	for id := range old {
+		if _, ok := new[id]; ok {
+			continue
+		}
+		cluster.ResumeLeaderTransfer(id, direction)
+	}
+	for id := range new {
+		if _, ok := old[id]; ok {
+			continue
+		}
+		if err := cluster.PauseLeaderTransfer(id, direction); err != nil {
+			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), zap.String("direction", direction.String()), errs.ZapError(err))
+		}
+	}
+}
+
+// getCountThreshold calculates the count threshold for a given key range and rule.
+func getCountThreshold(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, kr keyutil.KeyRange, rule core.Rule) float64 {
+	start := time.Now()
+	cfg := c.GetSchedulerConfig()
+	if !cfg.IsPlacementRulesEnabled() {
+		var regionCount int
+		var weight float64
+		if rule == core.LeaderScatter {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey)
+			weight = 1
+		} else {
+			regionCount = c.GetRegionCount(kr.StartKey, kr.EndKey) * cfg.GetMaxReplicas()
+			weight = core.GetStoreTopoWeight(store, stores, cfg.GetLocationLabels(), cfg.GetMaxReplicas())
+		}
+
+		return float64(regionCount) * weight
+	}
+
+	keys := c.GetRuleManager().GetSplitKeys(kr.StartKey, kr.EndKey)
+	if len(keys) == 0 {
+		return calculateRangeCount(c, stores, store, kr.StartKey, kr.EndKey, rule)
+	}
+
+	storeRegionCount := 0.0
+	startKey := kr.StartKey
+	for _, key := range keys {
+		endKey := key
+		storeRegionCount += calculateRangeCount(c, stores, store, startKey, endKey, rule)
+		startKey = endKey
+	}
+	// the range from the last split key to the last key
+	storeRegionCount += calculateRangeCount(c, stores, store, startKey, kr.EndKey, rule)
+	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
+	return storeRegionCount
+}
+
+func isSatisfyRole(r core.Rule, role placement.PeerRoleType) bool {
+	switch r {
+	case core.LeaderScatter:
+		return role == placement.Leader || role == placement.Voter
+	case core.LearnerScatter:
+		return role == placement.Learner
+	default:
+		return true
+	}
+}
+
+func calculateRangeCount(c sche.SchedulerCluster, stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte, r core.Rule) float64 {
+	var storeCount float64
+	rules := c.GetRuleManager().GetRulesForApplyRange(startKey, endKey)
+	for _, rule := range rules {
+		if !isSatisfyRole(r, rule.Role) {
+			continue
+		}
+
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			continue
+		}
+
+		var matchStores []*core.StoreInfo
+		for _, s := range stores {
+			if s.IsRemoving() || s.IsRemoved() {
+				continue
+			}
+			if placement.MatchLabelConstraints(s, rule.LabelConstraints) {
+				matchStores = append(matchStores, s)
+			}
+		}
+		if len(matchStores) == 0 {
+			return 0.0
+		}
+		regionCount := c.GetRegionCount(startKey, endKey)
+		var weight float64
+		if r == core.LeaderScatter {
+			weight = 1.0 / float64(len(matchStores))
+		} else {
+			weight = core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
+			regionCount *= rule.Count
+		}
+		storeCount += float64(regionCount) * weight
+		log.Debug("calculate range result",
+			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
+			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
+			zap.Uint64("store-id", store.GetID()),
+			zap.String("rule", rule.String()),
+			zap.Int("region-count", regionCount),
+			zap.Float64("weight", weight),
+			zap.Float64("store-count", storeCount),
+		)
+	}
+	return storeCount
 }

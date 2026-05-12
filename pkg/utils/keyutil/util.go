@@ -40,3 +40,51 @@ func MinKey(a, b []byte) []byte {
 	}
 	return a
 }
+
+// MaxStartKey returns the bigger keys, the empty key is the biggest.
+func MaxStartKey(a, b []byte) []byte {
+	if len(a) == 0 {
+		return a
+	}
+	if len(b) == 0 {
+		return b
+	}
+	return MaxKey(a, b)
+}
+
+// MinEndKey returns the smaller keys, the empty key is the biggest.
+func MinEndKey(a, b []byte) []byte {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	return MinKey(a, b)
+}
+
+type boundary int
+
+const (
+	left boundary = iota
+	right
+)
+
+// less returns true if a < b.
+// If the key is empty and the boundary is right, the keys is infinite.
+func less(a, b []byte, boundary boundary) bool {
+	ret := bytes.Compare(a, b)
+	if ret < 0 {
+		return true
+	}
+	if boundary == right && len(b) == 0 && len(a) > 0 {
+		return true
+	}
+	return false
+}
+
+// Between returns true if startKey < key < endKey.
+// If the key is empty and the boundary is right, the keys is infinite.
+func Between(startKey, endKey, key []byte) bool {
+	return less(startKey, key, left) && less(key, endKey, right)
+}

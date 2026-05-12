@@ -14,7 +14,13 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -45,7 +51,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"address", "store"})
 
 	metadataGauge = prometheus.NewGaugeVec(
@@ -82,12 +88,45 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
 		})
 
+	tsoProxyForwardTimeoutCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_proxy_forward_timeout_total",
+			Help:      "Counter of timeouts when tso proxy forwarding tso requests to tso service.",
+		})
+	tsoForwardStreamCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_forward_stream_total",
+			Help:      "Counter of TSO streams forwarded to the independent TSO service.",
+		})
+
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "server",
 			Name:      "handle_tso_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	tsoBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
+		})
+
+	queryRegionDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "query_region_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of region query requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
@@ -128,29 +167,56 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-
 	serviceAuditHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "service",
 			Name:      "audit_handling_seconds",
-			Help:      "PD server service handling audit",
+			Help:      "PD server service handling performance metrics",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
-	serverMaxProcs = prometheus.NewGauge(
-		prometheus.GaugeOpts{
+		}, []string{"service", "method"})
+
+	serviceAuditCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "service",
-			Name:      "maxprocs",
-			Help:      "The value of GOMAXPROCS.",
+			Name:      "audit_requests_total",
+			Help:      "Total number of service requests for audit",
+		}, []string{"service", "method", "caller_component"})
+
+	apiConcurrencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "api_concurrency",
+			Help:      "Concurrency number of the api.",
+		}, []string{"kind", "api"})
+
+	forwardFailCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_fail_total",
+			Help:      "Counter of forward fail.",
+		}, []string{"request", "type"})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
+
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration("pd", "server")
+
+	regionRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "region_request_cnt",
+			Help:      "Counter of region request.",
+		}, []string{"request", "caller_id", "caller_component", "event"})
 )
 
 func init() {
@@ -161,13 +227,48 @@ func init() {
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
+	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
+	prometheus.MustRegister(tsoForwardStreamCounter)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(tsoBatchSize)
+	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
+	prometheus.MustRegister(serviceAuditCounter)
 	prometheus.MustRegister(bucketReportInterval)
-	prometheus.MustRegister(serverMaxProcs)
+	prometheus.MustRegister(apiConcurrencyGauge)
+	prometheus.MustRegister(forwardFailCounter)
+	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(grpcStreamSendDuration)
+	prometheus.MustRegister(regionRequestCounter)
+}
+
+func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+}
+
+func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+}
+
+func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
+	return grpcutil.NewMetricsStream(stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration, "report-buckets")
+}
+
+func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+}
+
+func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
+}
+
+func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
+	if stream == nil {
+		return stream
+	}
+	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
 }

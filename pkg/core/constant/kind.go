@@ -27,6 +27,21 @@ const (
 	PriorityLevelLen
 )
 
+func (p PriorityLevel) String() string {
+	switch p {
+	case Low:
+		return "low"
+	case Medium:
+		return "medium"
+	case High:
+		return "high"
+	case Urgent:
+		return "urgent"
+	default:
+		return "unknown"
+	}
+}
+
 // ScheduleKind distinguishes resources and schedule policy.
 type ScheduleKind struct {
 	Resource ResourceKind
@@ -51,6 +66,9 @@ const (
 	RegionKind
 	// WitnessKind indicates the witness kind resource
 	WitnessKind
+
+	// ResourceKindLen represents the ResourceKind count
+	ResourceKindLen
 )
 
 func (k ResourceKind) String() string {
@@ -135,5 +153,26 @@ func StringToKeyType(input string) KeyType {
 		return Txn
 	default:
 		panic("invalid key type: " + input)
+	}
+}
+
+// Direction distinguishes different kinds of direction.
+type Direction int
+
+const (
+	// In indicates that the direction is in.
+	In Direction = iota
+	// Out indicates that the direction is out.
+	Out
+)
+
+func (d Direction) String() string {
+	switch d {
+	case In:
+		return "in"
+	case Out:
+		return "out"
+	default:
+		return "unknown"
 	}
 }

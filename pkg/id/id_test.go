@@ -16,21 +16,26 @@ package id
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 const (
-	rootPath   = "/pd"
-	leaderPath = "/pd/leader"
-	allocPath  = "alloc_id"
-	label      = "idalloc"
+	leaderPath = "/pd/0/leader"
 	memberVal  = "member"
 	step       = uint64(500)
 )
@@ -39,53 +44,108 @@ const (
 // share rootPath and member val update their ids concurrently.
 func TestMultipleAllocator(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
 
 	// Put memberValue to leaderPath to simulate an election success.
-	_, err = client.Put(context.Background(), leaderPath, memberVal)
+	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 
+	var i uint64
 	wg := sync.WaitGroup{}
-	for i := 0; i < 3; i++ {
-		iStr := strconv.Itoa(i)
+	fn := func(label label) {
 		wg.Add(1)
-		// All allocators share rootPath and memberVal, but they have different allocPaths, labels and steps.
+		// Different allocators have different labels and steps.
 		allocator := NewAllocator(&AllocatorParams{
-			Client:    client,
-			RootPath:  rootPath,
-			AllocPath: allocPath + iStr,
-			Label:     label + iStr,
-			Member:    memberVal,
-			Step:      step * uint64(i), // allocator 0, 1, 2 should have step size 1000 (default), 500, 1000 respectively.
+			Client: client,
+			Label:  label,
+			Member: memberVal,
+			Step:   step * i, // allocator 0, 1 should have step size 1000 (default), 500 respectively.
 		})
 		go func(re *require.Assertions, allocator Allocator) {
 			defer wg.Done()
 			testAllocator(re, allocator)
 		}(re, allocator)
+		i++
 	}
+	fn(DefaultLabel)
+	fn(KeyspaceLabel)
 	wg.Wait()
 }
 
 // testAllocator sequentially updates given allocator and check if values are expected.
 func testAllocator(re *require.Assertions, allocator Allocator) {
-	startID, err := allocator.Alloc()
+	startID, _, err := allocator.Alloc(1)
 	re.NoError(err)
 	for i := startID + 1; i < startID+step*20; i++ {
-		id, err := allocator.Alloc()
+		id, _, err := allocator.Alloc(1)
 		re.NoError(err)
 		re.Equal(i, id)
 	}
+}
+
+// TestIDAllocationEndValue tests if keyspace allocator hits ErrIDExhausted when trying to allocate into reserved range.
+func TestIDAllocationEndValue(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, err := client.Put(context.Background(), leaderPath, memberVal)
+	re.NoError(err)
+	if kerneltype.IsNextGen() {
+		checkIDAllocationEndValue(t, client, constant.ReservedKeyspaceIDStart-1)
+	} else {
+		checkIDAllocationEndValue(t, client, uint64(constant.MaxValidKeyspaceID))
+	}
+}
+
+func checkIDAllocationEndValue(t *testing.T, client *clientv3.Client, endID uint64) {
+	t.Run("KeyspaceLabel should hit ErrIDExhausted when trying to allocate into unavailable range", func(t *testing.T) {
+		re := require.New(t)
+		for _, step := range []uint64{1, 10, 1024, 1025} {
+			keyspaceAllocator := NewAllocator(&AllocatorParams{
+				Client: client,
+				Label:  KeyspaceLabel,
+				Member: memberVal,
+				Step:   step,
+			})
+			initialBaseValue := endID - step*3
+
+			err := keyspaceAllocator.SetBase(initialBaseValue)
+			re.NoError(err)
+			var lastAllocatedID uint64
+			for {
+				var id uint64
+				id, _, err = keyspaceAllocator.Alloc(1)
+				if err != nil {
+					break
+				}
+				re.GreaterOrEqual(id, lastAllocatedID)
+				lastAllocatedID = id
+			}
+			re.Error(err)
+			re.True(errs.ErrIDExhausted.Equal(err))
+			re.Equal(endID, lastAllocatedID)
+		}
+	})
+
+	t.Run("SetBase should fail if newBase enters unavailable range", func(t *testing.T) {
+		re := require.New(t)
+		keyspaceAllocator := NewAllocator(&AllocatorParams{
+			Client: client,
+			Label:  KeyspaceLabel,
+			Member: memberVal,
+			Step:   step,
+		})
+
+		err := keyspaceAllocator.SetBase(endID - 1)
+		re.NoError(err)
+
+		err = keyspaceAllocator.SetBase(endID)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+
+		err = keyspaceAllocator.SetBase(endID + 10)
+		re.Error(err)
+		re.True(errs.ErrIDExhausted.Equal(err))
+	})
 }
