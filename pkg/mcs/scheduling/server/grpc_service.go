@@ -379,7 +379,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	}
 	region := c.GetRegion(reqRegion.GetId())
 	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
-		c.SendRegionHeartbeatMessage(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
 		return &schedulingpb.AskBatchSplitResponse{
 			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
 		}, nil
@@ -454,6 +454,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		newRegionIDs := recordRegions[:len(recordRegions)-1]
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
+			// Wait until PD observes the source region version advanced by the split.
 			reqRegion.GetRegionEpoch().GetVersion()+1,
 			newRegionIDs,
 		)
