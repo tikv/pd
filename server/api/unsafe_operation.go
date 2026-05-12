@@ -15,13 +15,24 @@
 package api
 
 import (
+	"errors"
+	"math"
 	"net/http"
+	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/pkg/unsaferecovery"
+>>>>>>> 0a479ed850 (pkg/unsaferecovery: optimize empty region overlap checks (#10639))
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
+
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(math.MaxInt64/2) / time.Second)
 
 type unsafeOperationHandler struct {
 	svr *server.Server
@@ -65,21 +76,107 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		}
 	}
 
-	timeout := uint64(600)
-	if rawTimeout, exists := input["timeout"].(float64); exists {
-		timeout = uint64(rawTimeout)
+	timeout, err := parseTimeout(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	if err := rc.GetUnsafeRecoveryController().RemoveFailedStores(stores, timeout, autoDetect); err != nil {
+	planExecutionTimeout, err := parsePlanExecutionTimeout(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	disableParanoidCheck, err := parseDisableParanoidCheck(input)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := rc.GetUnsafeRecoveryController().RemoveFailedStoresWithOptions(stores, timeout, autoDetect, unsaferecovery.RemoveFailedStoresOptions{
+		PlanExecutionTimeout: planExecutionTimeout,
+		DisableParanoidCheck: disableParanoidCheck,
+	}); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
 }
 
+<<<<<<< HEAD
 // @Tags     unsafe
 // @Summary  Show the current status of failed stores removal.
 // @Produce  json
+=======
+func parseTimeout(input map[string]any) (uint64, error) {
+	raw, exists := input["timeout"]
+	if !exists {
+		return 600, nil
+	}
+	rawTimeout, ok := raw.(float64)
+	if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
+		return 0, errors.New("timeout is invalid")
+	}
+	return uint64(rawTimeout), nil
+}
+
+func parsePlanExecutionTimeout(input map[string]any) (time.Duration, error) {
+	raw, exists, err := getAliasedOption(input, "plan-execution-timeout", "plan_execution_timeout")
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil
+	}
+	rawTimeout, ok := raw.(float64)
+	if !ok || rawTimeout <= 0 || rawTimeout != math.Trunc(rawTimeout) || rawTimeout > maxPlanExecutionTimeoutSeconds {
+		return 0, errors.New("plan-execution-timeout is invalid")
+	}
+	return time.Duration(int64(rawTimeout)) * time.Second, nil
+}
+
+func parseDisableParanoidCheck(input map[string]any) (bool, error) {
+	raw, exists, err := getAliasedOption(input, "disable-paranoid-check", "disable_paranoid_check")
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	rawDisableParanoidCheck, ok := raw.(bool)
+	if !ok {
+		return false, errors.New("disable-paranoid-check is invalid")
+	}
+	return rawDisableParanoidCheck, nil
+}
+
+func getAliasedOption(input map[string]any, keys ...string) (any, bool, error) {
+	var (
+		raw   any
+		exist bool
+	)
+	for _, key := range keys {
+		value, ok := input[key]
+		if !ok {
+			continue
+		}
+		if exist {
+			return nil, false, errors.New(keys[0] + " is specified multiple times")
+		}
+		raw = value
+		exist = true
+	}
+	return raw, exist, nil
+}
+
+// GetFailedStoresRemovalStatus gets the current status of failed stores removal.
+//
+//	@Tags		unsafe
+//	@Summary	Show the current status of failed stores removal.
+//	@Produce	json
+//
+>>>>>>> 0a479ed850 (pkg/unsaferecovery: optimize empty region overlap checks (#10639))
 // Success 200 {object} []StageOutput
 // @Router   /admin/unsafe/remove-failed-stores/show [get]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWriter, r *http.Request) {
