@@ -46,7 +46,7 @@ const (
 	RawKeyspaceModePrefix = byte('r')
 	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
 	TxnKeyspaceModePrefix = byte('x')
-	// KeyspacePrefixLen is the encoded keyspace prefix length.
+	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
 	KeyspacePrefixLen = 4
 )
 

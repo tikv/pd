@@ -15,9 +15,11 @@
 package keyspace
 
 import (
+	"context"
 	"encoding/hex"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -26,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -112,6 +116,28 @@ func TestMakeKeyspacePrefix(t *testing.T) {
 			re.Equal(testCase.wantPrefix, MakeKeyspacePrefix(testCase.mode, testCase.id))
 		})
 	}
+}
+
+func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(constant.MaxValidKeyspaceID)))
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+	re.Equal(
+		[][]byte{
+			encodeKey([]byte{'r', 0xff, 0xff, 0xff}),
+			encodeKey([]byte{'s', 0x00, 0x00, 0x00}),
+			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
+			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
+		},
+		regionLabeler.GetSplitKeys(nil, nil),
+	)
 }
 
 func TestValidateName(t *testing.T) {
