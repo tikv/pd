@@ -138,7 +138,8 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		}
 
 		c := s.GetCluster()
-		if c == nil || s.hbStreams == nil {
+		streams := s.hbStreams
+		if c == nil || streams == nil {
 			resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
 			err := server.Send(resp)
 			return errors.WithStack(err)
@@ -154,7 +155,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		if time.Since(lastBind) > time.Minute {
-			s.hbStreams.BindStream(storeID, server)
+			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
 
@@ -244,13 +245,14 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
-	if c == nil || s.metaWatcher == nil {
+	metaWatcher := s.metaWatcher
+	if c == nil || metaWatcher == nil {
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	start := time.Now()
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
-		s.metaWatcher.GetStoreWatcher().ForceLoad()
+		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
 	storeID := request.GetStats().GetStoreId()

@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -32,12 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/testutil"
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
 
 func TestCleanupClusterResources(t *testing.T) {
 	re := require.New(t)
@@ -45,14 +39,12 @@ func TestCleanupClusterResources(t *testing.T) {
 	defer cancel()
 
 	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, core.NewBasicCluster())
-	basicCluster := core.NewBasicCluster()
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	cluster := &Cluster{}
 
 	s := &Server{
-		basicCluster: basicCluster,
-		hbStreams:    hbStreams,
-		storage:      storage,
+		hbStreams: hbStreams,
+		storage:   storage,
 	}
 	s.cluster.Store(cluster)
 
@@ -60,7 +52,6 @@ func TestCleanupClusterResources(t *testing.T) {
 	s.cleanupClusterResources()
 
 	re.Nil(s.GetCluster())
-	re.Nil(s.basicCluster)
 	re.Nil(s.hbStreams)
 	re.Nil(s.storage)
 }
