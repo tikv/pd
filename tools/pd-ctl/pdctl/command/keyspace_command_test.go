@@ -27,22 +27,22 @@ func TestMakeKeyRanges(t *testing.T) {
 	re := require.New(t)
 
 	testCases := []struct {
-		keyspaceID     uint32
-		goldenRawStart string
-		goldenRawEnd   string
-		goldenTxnStart string
-		goldenTxnEnd   string
+		keyspaceID       uint32
+		expectedRawStart string
+		expectedRawEnd   string
+		expectedTxnStart string
+		expectedTxnEnd   string
 	}{
 		{0, "7200000000000000fb", "7200000100000000fb", "7800000000000000fb", "7800000100000000fb"},
 		{1, "7200000100000000fb", "7200000200000000fb", "7800000100000000fb", "7800000200000000fb"},
 		{10, "7200000a00000000fb", "7200000b00000000fb", "7800000a00000000fb", "7800000b00000000fb"},
 		{100, "7200006400000000fb", "7200006500000000fb", "7800006400000000fb", "7800006500000000fb"},
 		{
-			keyspaceID:     constant.MaxValidKeyspaceID,
-			goldenRawStart: "72ffffff00000000fb",
-			goldenRawEnd:   "7300000000000000fb",
-			goldenTxnStart: "78ffffff00000000fb",
-			goldenTxnEnd:   "7900000000000000fb",
+			keyspaceID:       constant.MaxValidKeyspaceID,
+			expectedRawStart: "72ffffff00000000fb",
+			expectedRawEnd:   "7300000000000000fb",
+			expectedTxnStart: "78ffffff00000000fb",
+			expectedTxnEnd:   "7900000000000000fb",
 		},
 	}
 
@@ -64,9 +64,9 @@ func TestMakeKeyRanges(t *testing.T) {
 		re.NotEmpty(txnStart)
 		re.NotEmpty(txnEnd)
 
-		re.Equal(tc.goldenRawStart, rawStart)
-		re.Equal(tc.goldenRawEnd, rawEnd)
-		re.Equal(tc.goldenTxnStart, txnStart)
-		re.Equal(tc.goldenTxnEnd, txnEnd)
+		re.Equal(tc.expectedRawStart, rawStart)
+		re.Equal(tc.expectedRawEnd, rawEnd)
+		re.Equal(tc.expectedTxnStart, txnStart)
+		re.Equal(tc.expectedTxnEnd, txnEnd)
 	}
 }
