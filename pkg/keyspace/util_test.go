@@ -84,6 +84,46 @@ func TestMakeRegionBound(t *testing.T) {
 	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
 }
 
+func TestKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name       string
+		mode       byte
+		id         uint32
+		wantPrefix []byte
+	}{
+		{
+			name:       "raw",
+			mode:       RawKeyspaceModePrefix,
+			id:         0x010203,
+			wantPrefix: []byte{'r', 0x01, 0x02, 0x03},
+		},
+		{
+			name:       "txn",
+			mode:       TxnKeyspaceModePrefix,
+			id:         constant.MaxValidKeyspaceID,
+			wantPrefix: []byte{'x', 0xff, 0xff, 0xff},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(_ *testing.T) {
+			prefix := MakeKeyspacePrefix(testCase.mode, testCase.id)
+			re.Equal(testCase.wantPrefix, prefix)
+			mode, id, ok := ParseKeyspacePrefix(prefix)
+			re.True(ok)
+			re.Equal(testCase.mode, mode)
+			re.Equal(testCase.id, id)
+		})
+	}
+
+	_, _, ok := ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
+	re.False(ok)
+	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
+	re.False(ok)
+}
+
 func TestValidateName(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
