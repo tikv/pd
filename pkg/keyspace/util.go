@@ -100,6 +100,7 @@ func MaskKeyspaceID(id uint32) uint32 {
 //	Upper bound for raw mode: ['r', 'a', 'b', 'c + 1']
 //	Lower bound for txn mode: ['x', 'a', 'b', 'c']
 //	Upper bound for txn mode: ['x', 'a', 'b', 'c + 1']
+//	For the max valid keyspace ID, the upper bound advances the mode byte as an exclusive fencepost.
 //
 // From which it shares the lower bound with keyspace with id ['a', 'b', 'c-1'].
 // And shares upper bound with keyspace with id ['a', 'b', 'c + 1'].

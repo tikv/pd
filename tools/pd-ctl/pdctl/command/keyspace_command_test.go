@@ -33,10 +33,34 @@ func TestMakeKeyRanges(t *testing.T) {
 		expectedTxnStart string
 		expectedTxnEnd   string
 	}{
-		{0, "7200000000000000fb", "7200000100000000fb", "7800000000000000fb", "7800000100000000fb"},
-		{1, "7200000100000000fb", "7200000200000000fb", "7800000100000000fb", "7800000200000000fb"},
-		{10, "7200000a00000000fb", "7200000b00000000fb", "7800000a00000000fb", "7800000b00000000fb"},
-		{100, "7200006400000000fb", "7200006500000000fb", "7800006400000000fb", "7800006500000000fb"},
+		{
+			keyspaceID:       0,
+			expectedRawStart: "7200000000000000fb",
+			expectedRawEnd:   "7200000100000000fb",
+			expectedTxnStart: "7800000000000000fb",
+			expectedTxnEnd:   "7800000100000000fb",
+		},
+		{
+			keyspaceID:       1,
+			expectedRawStart: "7200000100000000fb",
+			expectedRawEnd:   "7200000200000000fb",
+			expectedTxnStart: "7800000100000000fb",
+			expectedTxnEnd:   "7800000200000000fb",
+		},
+		{
+			keyspaceID:       10,
+			expectedRawStart: "7200000a00000000fb",
+			expectedRawEnd:   "7200000b00000000fb",
+			expectedTxnStart: "7800000a00000000fb",
+			expectedTxnEnd:   "7800000b00000000fb",
+		},
+		{
+			keyspaceID:       100,
+			expectedRawStart: "7200006400000000fb",
+			expectedRawEnd:   "7200006500000000fb",
+			expectedTxnStart: "7800006400000000fb",
+			expectedTxnEnd:   "7800006500000000fb",
+		},
 		{
 			keyspaceID:       constant.MaxValidKeyspaceID,
 			expectedRawStart: "72ffffff00000000fb",
