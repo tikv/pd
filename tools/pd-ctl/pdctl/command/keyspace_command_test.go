@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 func TestMakeKeyRanges(t *testing.T) {
@@ -37,7 +38,7 @@ func TestMakeKeyRanges(t *testing.T) {
 		{10, "7200000a00000000fb", "7200000b00000000fb", "7800000a00000000fb", "7800000b00000000fb"},
 		{100, "7200006400000000fb", "7200006500000000fb", "7800006400000000fb", "7800006500000000fb"},
 		{
-			keyspaceID:     16777215, // max valid keyspace ID (2^24 - 1)
+			keyspaceID:     constant.MaxValidKeyspaceID,
 			goldenRawStart: "72ffffff00000000fb",
 			goldenRawEnd:   "7300000000000000fb",
 			goldenTxnStart: "78ffffff00000000fb",
