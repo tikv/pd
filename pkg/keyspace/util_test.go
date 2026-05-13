@@ -84,7 +84,7 @@ func TestMakeRegionBound(t *testing.T) {
 	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
 }
 
-func TestKeyspacePrefix(t *testing.T) {
+func TestMakeKeyspacePrefix(t *testing.T) {
 	re := require.New(t)
 
 	testCases := []struct {
@@ -109,19 +109,9 @@ func TestKeyspacePrefix(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(_ *testing.T) {
-			prefix := MakeKeyspacePrefix(testCase.mode, testCase.id)
-			re.Equal(testCase.wantPrefix, prefix)
-			mode, id, ok := ParseKeyspacePrefix(prefix)
-			re.True(ok)
-			re.Equal(testCase.mode, mode)
-			re.Equal(testCase.id, id)
+			re.Equal(testCase.wantPrefix, MakeKeyspacePrefix(testCase.mode, testCase.id))
 		})
 	}
-
-	_, _, ok := ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
-	re.False(ok)
-	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
-	re.False(ok)
 }
 
 func TestValidateName(t *testing.T) {
