@@ -115,7 +115,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	ch := lease.keepAliveWorker(ctx)
 	select {
 	case <-ch:
-	case <-time.After(2 * time.Second):
+	case <-time.After(2 * lease.getKeepAliveInterval()):
 		re.Fail("timed out waiting for lease keepalive")
 	}
 	re.NoError(lease.Close())

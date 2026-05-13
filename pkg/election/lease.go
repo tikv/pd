@@ -34,8 +34,13 @@ const (
 	revokeLeaseTimeout = time.Second
 	requestTimeout     = etcdutil.DefaultRequestTimeout
 	slowRequestTime    = etcdutil.DefaultSlowRequestTime
-	// leaseKeepAliveInterval is fixed to renew leases frequently regardless of the configured lease timeout.
-	leaseKeepAliveInterval = 500 * time.Millisecond
+	// maxLeaseKeepAliveInterval caps the keepalive cadence at 500ms, decoupling
+	// renewal frequency from the configured lease timeout. etcd's clientv3
+	// keepalive uses TTL/3 with no upper bound; we deviate so that operators who
+	// raise the lease TTL (e.g. to tolerate longer GC pauses) do not also slow
+	// down PD's leader-failover reaction time. PD has only a handful of leases
+	// per cluster, so the extra RPCs at large TTLs are negligible.
+	maxLeaseKeepAliveInterval = 500 * time.Millisecond
 )
 
 // Lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -149,6 +154,17 @@ func (l *Lease) loadExpireTime() time.Time {
 	return expireTime
 }
 
+// getKeepAliveInterval returns the interval used to drive the keepalive ticker.
+// It takes the minimum of `leaseTimeout/3` and `maxLeaseKeepAliveInterval` so the
+// renewal cadence never gets slower as the lease timeout grows.
+func (l *Lease) getKeepAliveInterval() time.Duration {
+	interval := l.leaseTimeout / 3
+	if interval > maxLeaseKeepAliveInterval {
+		return maxLeaseKeepAliveInterval
+	}
+	return interval
+}
+
 // KeepAlive auto renews the lease and update expireTime.
 func (l *Lease) KeepAlive(ctx context.Context) {
 	defer logutil.LogPanic()
@@ -226,14 +242,15 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 func (l *Lease) keepAliveWorker(ctx context.Context) <-chan time.Time {
 	ch := make(chan time.Time)
 
+	interval := l.getKeepAliveInterval()
 	go func() {
 		defer logutil.LogPanic()
-		ticker := time.NewTicker(leaseKeepAliveInterval)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		logger := log.With(zap.String("purpose", l.purpose),
 			zap.Int64("lease-id", int64(l.GetID())),
-			zap.Duration("interval", leaseKeepAliveInterval))
+			zap.Duration("interval", interval))
 		logger.Info("start lease keep alive worker")
 		defer logger.Info("stop lease keep alive worker")
 
@@ -249,7 +266,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context) <-chan time.Time {
 			go func() {
 				defer logutil.LogPanic()
 
-				ctx1, cancel := context.WithTimeout(ctx, leaseKeepAliveInterval)
+				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
 				// Record the start time of the `KeepAliveOnce` request to track the request duration
 				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
@@ -263,7 +280,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context) <-chan time.Time {
 				tickInterval := requestStart.Sub(lastRequestStart)
 				l.metrics.tickInterval.Observe(tickInterval.Seconds())
 				// If the interval is too long, log a warning to indicate the potential runtime schedule delay.
-				if tickInterval > leaseKeepAliveInterval*2 {
+				if tickInterval > interval*2 {
 					logger.Warn("the interval between keeping alive lease is too long",
 						zap.Time("start", start),
 						zap.Time("current-time", requestStart),
