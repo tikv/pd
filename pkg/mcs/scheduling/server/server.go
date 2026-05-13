@@ -92,7 +92,6 @@ type Server struct {
 
 	cfg           *config.Config
 	persistConfig *config.PersistConfig
-	basicCluster  *core.BasicCluster
 
 	// for the primary election of scheduling
 	participant *member.Participant
@@ -426,7 +425,10 @@ func (s *Server) GetCluster() *Cluster {
 
 // GetBasicCluster returns the basic cluster.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
-	return s.basicCluster
+	if cluster := s.GetCluster(); cluster != nil {
+		return cluster.GetBasicCluster()
+	}
+	return nil
 }
 
 // GetCoordinator returns the coordinator.
@@ -506,7 +508,7 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(ctx context.Context) error {
+func (s *Server) startCluster(ctx context.Context) (err error) {
 	basicCluster := core.NewBasicCluster()
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	metaWatcher, configWatcher, err := s.startMetaConfWatcher(ctx, basicCluster, storage)
@@ -515,17 +517,21 @@ func (s *Server) startCluster(ctx context.Context) error {
 	}
 	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
 	cluster, err := NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	defer func() {
+		// make sure the cluster is stopped if any error occurs
+		// if StopBackgroundJobs return false, it means the cluster is not running, so we need to close the context make the
+		// other goroutines exit.
+		if cluster != nil && !cluster.StopBackgroundJobs() {
+			cluster.cancel()
+		}
+	}()
 	if err != nil {
 		hbStreams.Close()
 		configWatcher.Close()
 		metaWatcher.Close()
 		return err
 	}
-	defer func() {
-		if cluster != nil {
-			cluster.StopBackgroundJobs()
-		}
-	}()
+
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err := rule.NewWatcher(ctx, s.GetClient(), storage,
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
@@ -544,7 +550,6 @@ func (s *Server) startCluster(ctx context.Context) error {
 		return err
 	}
 
-	s.basicCluster = basicCluster
 	s.storage = storage
 	s.metaWatcher = metaWatcher
 	s.configWatcher = configWatcher
@@ -608,7 +613,6 @@ func (s *Server) cleanupClusterResources() {
 		s.hbStreams.Close()
 		s.hbStreams = nil
 	}
-	s.basicCluster = nil
 	s.storage = nil
 }
 

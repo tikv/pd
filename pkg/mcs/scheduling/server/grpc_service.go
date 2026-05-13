@@ -138,7 +138,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 
 		c := s.GetCluster()
 		if c == nil || s.hbStreams == nil {
-			resp := &schedulingpb.RegionHeartbeatResponse{Header: notLeaderHeader()}
+			resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
 			err := server.Send(resp)
 			return errors.WithStack(err)
 		}
@@ -244,7 +244,7 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
 	if c == nil || s.metaWatcher == nil {
-		return &schedulingpb.StoreHeartbeatResponse{Header: notLeaderHeader()}, nil
+		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	start := time.Now()
@@ -469,13 +469,6 @@ func notBootstrappedHeader() *schedulingpb.ResponseHeader {
 	return errorHeader(&schedulingpb.Error{
 		Type:    schedulingpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not initialized",
-	})
-}
-
-func notLeaderHeader() *schedulingpb.ResponseHeader {
-	return errorHeader(&schedulingpb.Error{
-		Type:    schedulingpb.ErrorType_INVALID_VALUE,
-		Message: "not leader",
 	})
 }
 

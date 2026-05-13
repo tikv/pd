@@ -132,7 +132,6 @@ func (m *Manager) initialize() error {
 		log.Error("failed to rebuild group-label mapping", zap.Error(err))
 		return err
 	}
-
 	m.startAvailabilityCheckLoop()
 	log.Info("affinity manager initialized", zap.Int("group-count", len(m.groups)))
 	return nil

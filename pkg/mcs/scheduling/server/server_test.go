@@ -99,6 +99,34 @@ func TestStoreHeartbeatReturnsNotBootstrappedWhenMetaWatcherMissing(t *testing.T
 	re.Equal(schedulingpb.ErrorType_NOT_BOOTSTRAPPED, resp.GetHeader().GetError().GetType())
 }
 
+func TestRegionHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	basicCluster := core.NewBasicCluster()
+	basicCluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "store-1"}))
+
+	s := &Server{}
+	s.cluster.Store(&Cluster{BasicCluster: basicCluster})
+	s.hbStreams = nil // Simulate an in-flight heartbeat observing a stale cluster after cleanup has already cleared hbStreams.
+
+	stream := &mockRegionHeartbeatStream{
+		recvs: []*schedulingpb.RegionHeartbeatRequest{
+			{
+				Region: &metapb.Region{
+					Id:    1,
+					Peers: []*metapb.Peer{{Id: 1, StoreId: 1}},
+				},
+				Leader: &metapb.Peer{Id: 1, StoreId: 1},
+			},
+		},
+	}
+
+	re.NotPanics(func() {
+		_ = (&Service{Server: s}).RegionHeartbeat(stream)
+	})
+	re.Nil(s.hbStreams)
+}
+
 type mockRegionHeartbeatStream struct {
 	schedulingpb.Scheduling_RegionHeartbeatServer
 	recvs []*schedulingpb.RegionHeartbeatRequest

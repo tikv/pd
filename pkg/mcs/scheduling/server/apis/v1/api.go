@@ -1657,7 +1657,7 @@ func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
 func getBasicCluster(c *gin.Context, svr *scheserver.Server) (*pdcore.BasicCluster, bool) {
 	basicCluster := svr.GetBasicCluster()
 	if basicCluster == nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotLeader.Error())
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
 		return nil, false
 	}
 	return basicCluster, true
