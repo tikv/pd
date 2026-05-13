@@ -590,6 +590,15 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	downPeers := []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}}
 	pendingPeers := []*metapb.Peer{peers[2]}
+	bucketMeta := &metapb.BucketMeta{
+		Version: 7,
+		Keys:    [][]byte{[]byte("a"), []byte("m"), []byte("b")},
+	}
+	expectedBuckets := &metapb.Buckets{
+		RegionId: 10,
+		Version:  bucketMeta.GetVersion(),
+		Keys:     bucketMeta.GetKeys(),
+	}
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
@@ -604,6 +613,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		ApproximateKeys: 300,
 		Interval:        interval,
 		QueryStats:      queryStats,
+		BucketMeta:      bucketMeta,
 		Term:            1,
 		CpuUsage:        100,
 		CpuStats: &pdpb.CPUStats{
@@ -620,6 +630,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers) &&
+			reflect.DeepEqual(region.GetBuckets(), expectedBuckets) &&
 			region.GetCPUUsage() == 100 && region.GetReadCPUUsage() == 80
 	})
 }
