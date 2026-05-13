@@ -1071,3 +1071,37 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	suite.TearDownTest()
 	suite.TearDownSuite()
 }
+
+func (suite *keyspaceTestSuite) TestChecker() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Id:             10000,
+		Name:           "1",
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	meta = &keyspacepb.KeyspaceMeta{
+		Id:             10001,
+		Name:           "2",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+
+	// keyspace exist check.
+	re.True(suite.manager.KeyspaceExist(10000))
+	re.False(suite.manager.KeyspaceExist(10001))
+	re.False(suite.manager.KeyspaceExist(10002))
+
+	// keyspace id in range check.
+	arr, exist := suite.manager.GetKeyspaceIDInRange(10000, 10010, 1)
+	re.True(exist)
+	re.Equal([]uint32{10000}, arr)
+	arr, exist = suite.manager.GetKeyspaceIDInRange(10005, 10010, 1)
+	re.False(exist)
+	re.Empty(arr)
+}
