@@ -245,64 +245,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		}
 		// do full synchronization
 		if startIndex == 0 {
-			regions := s.server.GetRegions()
-			lastIndex := 0
-			start := time.Now()
-			metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
-			stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
-			leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
-			buckets := make([]*metapb.Buckets, 0, maxSyncRegionBatchSize)
-			for syncedIndex, r := range regions {
-				select {
-				case <-ctx.Done():
-					log.Info("discontinue sending sync region response")
-					failpoint.Inject("noFastExitSync", func() {
-						failpoint.Goto("doSync")
-					})
-					return nil
-				default:
-				}
-				failpoint.Label("doSync")
-				metas = append(metas, r.GetMeta())
-				stats = append(stats, r.GetStat())
-				leader := &metapb.Peer{}
-				if r.GetLeader() != nil {
-					leader = r.GetLeader()
-				}
-				leaders = append(leaders, leader)
-				bucket := &metapb.Buckets{}
-				if r.GetBuckets() != nil {
-					bucket = r.GetBuckets()
-				}
-				buckets = append(buckets, bucket)
-				if len(metas) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
-					continue
-				}
-				resp := &pdpb.SyncRegionResponse{
-					Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-					Regions:       metas,
-					StartIndex:    uint64(lastIndex),
-					RegionStats:   stats,
-					RegionLeaders: leaders,
-					Buckets:       buckets,
-				}
-				if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
-					log.Error("failed to wait rate limit", errs.ZapError(err))
-					return err
-				}
-				lastIndex += len(metas)
-				if err := stream.Send(resp); err != nil {
-					log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
-					return err
-				}
-				metas = metas[:0]
-				stats = stats[:0]
-				leaders = leaders[:0]
-				buckets = buckets[:0]
-			}
-			log.Info("requested server has completed full synchronization with server",
-				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
-			return nil
+			return s.syncFullRegions(ctx, name, stream)
 		}
 		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
 		return nil
@@ -312,6 +255,10 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		zap.Uint64("from-index", startIndex),
 		zap.Uint64("last-index", s.history.getNextIndex()),
 		zap.Int("records-length", len(records)))
+	return s.syncHistoryRecords(startIndex, records, stream)
+}
+
+func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream pdpb.PD_SyncRegionsServer) error {
 	regions := make([]*metapb.Region, len(records))
 	stats := make([]*pdpb.RegionStat, len(records))
 	leaders := make([]*metapb.Peer, len(records))
@@ -339,6 +286,67 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		Buckets:       buckets,
 	}
 	return stream.Send(resp)
+}
+
+func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) error {
+	regions := s.server.GetRegions()
+	lastIndex := 0
+	start := time.Now()
+	metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
+	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
+	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
+	buckets := make([]*metapb.Buckets, 0, maxSyncRegionBatchSize)
+	for syncedIndex, r := range regions {
+		select {
+		case <-ctx.Done():
+			log.Info("discontinue sending sync region response")
+			failpoint.Inject("noFastExitSync", func() {
+				failpoint.Goto("doSync")
+			})
+			return nil
+		default:
+		}
+		failpoint.Label("doSync")
+		metas = append(metas, r.GetMeta())
+		stats = append(stats, r.GetStat())
+		leader := &metapb.Peer{}
+		if r.GetLeader() != nil {
+			leader = r.GetLeader()
+		}
+		leaders = append(leaders, leader)
+		bucket := &metapb.Buckets{}
+		if r.GetBuckets() != nil {
+			bucket = r.GetBuckets()
+		}
+		buckets = append(buckets, bucket)
+		if len(metas) < maxSyncRegionBatchSize && syncedIndex < len(regions)-1 {
+			continue
+		}
+		resp := &pdpb.SyncRegionResponse{
+			Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			Regions:       metas,
+			StartIndex:    uint64(lastIndex),
+			RegionStats:   stats,
+			RegionLeaders: leaders,
+			Buckets:       buckets,
+		}
+		if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
+			log.Error("failed to wait rate limit", errs.ZapError(err))
+			return err
+		}
+		lastIndex += len(metas)
+		if err := stream.Send(resp); err != nil {
+			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+			return err
+		}
+		metas = metas[:0]
+		stats = stats[:0]
+		leaders = leaders[:0]
+		buckets = buckets[:0]
+	}
+	log.Info("requested server has completed full synchronization with server",
+		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
+	return nil
 }
 
 // bindStream binds the established server stream.
