@@ -133,7 +133,9 @@ type RegionBound struct {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
+	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)
 	rawRightBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id+1)
+	txnLeftBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id)
 	txnRightBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id+1)
 	if id == constant.MaxValidKeyspaceID {
 		// The right bound is an exclusive fencepost, not a real keyspace prefix.
@@ -141,9 +143,9 @@ func MakeRegionBound(id uint32) *RegionBound {
 		txnRightBound = []byte{'y', 0, 0, 0}
 	}
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(MakeKeyspacePrefix(RawKeyspaceModePrefix, id)),
+		RawLeftBound:  codec.EncodeBytes(rawLeftBound),
 		RawRightBound: codec.EncodeBytes(rawRightBound),
-		TxnLeftBound:  codec.EncodeBytes(MakeKeyspacePrefix(TxnKeyspaceModePrefix, id)),
+		TxnLeftBound:  codec.EncodeBytes(txnLeftBound),
 		TxnRightBound: codec.EncodeBytes(txnRightBound),
 	}
 }
