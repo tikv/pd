@@ -2131,7 +2131,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	re.Equal(int64(2), executionCount.Load())
 }
 
-func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesDifferentExcludeGCBarriersCallsDoNotShareResult() {
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesDifferentParametersCallsDoNotShareResult() {
 	re := s.Require()
 
 	const keyspaceID = uint32(2)
