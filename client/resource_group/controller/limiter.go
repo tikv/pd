@@ -325,6 +325,20 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.maybeNotify()
 }
 
+// RefundTokens adds tokens back to the limiter.
+//
+// No burst cap is applied here
+func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	if lim.burst < 0 || lim.fillRate == Inf {
+		return
+	}
+	_, tokens := lim.getTokens(now)
+	lim.last = now
+	lim.tokens = tokens + amount
+}
+
 type tokenBucketReconfigureArgs struct {
 	newTokens          float64
 	newFillRate        float64
