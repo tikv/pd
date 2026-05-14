@@ -729,11 +729,10 @@ func (c *Cluster) StartBackgroundJobs() {
 	c.running.Store(true)
 }
 
-// StopBackgroundJobs stops background jobs.
-// It will return false if the cluster isn't running, otherwise it will stop the background jobs and return true.
-func (c *Cluster) StopBackgroundJobs() bool {
+// StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
+func (c *Cluster) StopBackgroundJobs() {
 	if !c.running.Load() {
-		return false
+		return
 	}
 	c.running.Store(false)
 	c.coordinator.Stop()
@@ -742,7 +741,6 @@ func (c *Cluster) StopBackgroundJobs() bool {
 	c.logRunner.Stop()
 	c.cancel()
 	c.wg.Wait()
-	return true
 }
 
 // IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.

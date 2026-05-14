@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
-func TestCleanupClusterResources(t *testing.T) {
+func TestStopCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -45,8 +45,7 @@ func TestCleanupClusterResources(t *testing.T) {
 	s := &Server{}
 	s.cluster.Store(cluster)
 
-	s.cleanupClusterResources(cluster)
-	s.cleanupClusterResources(cluster)
+	s.stopCluster()
 
 	re.Nil(s.GetCluster())
 	re.Nil(cluster.GetHeartbeatStreams())

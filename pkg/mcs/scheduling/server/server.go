@@ -500,45 +500,62 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(ctx context.Context) (err error) {
+func (s *Server) startCluster(ctx context.Context) error {
 	basicCluster := core.NewBasicCluster()
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	metaWatcher, configWatcher, err := s.startMetaConfWatcher(ctx, basicCluster, storage)
+
+	var (
+		hbStreams       *hbstream.HeartbeatStreams
+		configWatcher   *config.Watcher
+		metaWatcher     *meta.Watcher
+		ruleWatcher     *rule.Watcher
+		affinityWatcher *affinity.Watcher
+		err             error
+	)
+	metaWatcher, configWatcher, err = s.startMetaConfWatcher(ctx, basicCluster, storage)
 	if err != nil {
+		configWatcher.Close()
+		metaWatcher.Close()
 		return err
 	}
-	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
 	cluster, err := NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
 	defer func() {
 		// make sure the cluster is stopped if any error occurs
 		// if StopBackgroundJobs return false, it means the cluster is not running, so we need to close the context make the
 		// other goroutines exit.
-		if cluster != nil && !cluster.StopBackgroundJobs() {
-			cluster.cancel()
+		if cluster != nil {
+			cluster.StopBackgroundJobs()
 		}
+		if hbStreams != nil {
+			hbStreams.Close()
+		}
+		if configWatcher != nil {
+			configWatcher.Close()
+		}
+		if metaWatcher != nil {
+			metaWatcher.Close()
+		}
+		if ruleWatcher != nil {
+			ruleWatcher.Close()
+		}
+		if affinityWatcher != nil {
+			affinityWatcher.Close()
+		}
+
 	}()
 	if err != nil {
-		hbStreams.Close()
-		configWatcher.Close()
-		metaWatcher.Close()
 		return err
 	}
 
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
-	ruleWatcher, err := rule.NewWatcher(ctx, s.GetClient(), storage,
+	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), storage,
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
 	if err != nil {
-		hbStreams.Close()
-		configWatcher.Close()
-		metaWatcher.Close()
 		return err
 	}
-	affinityWatcher, err := affinity.NewWatcher(ctx, s.GetClient(), cluster.GetAffinityManager())
+	affinityWatcher, err = affinity.NewWatcher(ctx, s.GetClient(), cluster.GetAffinityManager())
 	if err != nil {
-		ruleWatcher.Close()
-		hbStreams.Close()
-		configWatcher.Close()
-		metaWatcher.Close()
 		return err
 	}
 
@@ -550,11 +567,11 @@ func (s *Server) startCluster(ctx context.Context) (err error) {
 }
 
 func (s *Server) stopCluster() {
-	cluster := s.GetCluster()
-	if cluster != nil {
+	if cluster := s.GetCluster(); cluster != nil {
+		s.cluster.Store((*Cluster)(nil))
 		cluster.StopBackgroundJobs()
+		cluster.cleanupRuntimeResources()
 	}
-	s.cleanupClusterResources(cluster)
 }
 
 func (s *Server) startMetaConfWatcher(
@@ -572,13 +589,6 @@ func (s *Server) startMetaConfWatcher(
 		return nil, nil, err
 	}
 	return metaWatcher, configWatcher, nil
-}
-
-func (s *Server) cleanupClusterResources(cluster *Cluster) {
-	if cluster != nil {
-		cluster.cleanupRuntimeResources()
-	}
-	s.cluster.Store((*Cluster)(nil))
 }
 
 // GetPersistConfig returns the persist config.
