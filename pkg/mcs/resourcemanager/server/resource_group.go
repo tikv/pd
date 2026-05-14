@@ -334,6 +334,7 @@ func (rg *ResourceGroup) RequestRU(
 	}
 	// Then, try to apply the service limit.
 	grantedTokens := tb.GetTokens()
+	groupTrickleTimeMs := trickleTimeMs
 	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
 	serviceLimited := limitedTokens < grantedTokens
 	if serviceLimited {
@@ -359,7 +360,7 @@ func (rg *ResourceGroup) RequestRU(
 	if minTrickleTimeMs > 0 {
 		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
 	}
-	if trickleTimeMs > 0 {
+	if groupTrickleTimeMs > 0 {
 		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, groupCauseLabel)
 	}
 	if serviceLimited || grantedTokens < requiredToken {
@@ -376,7 +377,7 @@ func (rg *ResourceGroup) RequestRU(
 			serviceLimit = sl.getServiceLimit()
 		}
 		overrideFillRate := rg.RUSettings.RU.overrideFillRate
-		log.Info("resource group token request is limited",
+		log.Debug("resource group token request is limited",
 			zap.String("resource-group", rg.Name),
 			zap.String("keyspace-name", keyspaceName),
 			zap.Uint64("client-unique-id", clientUniqueID),

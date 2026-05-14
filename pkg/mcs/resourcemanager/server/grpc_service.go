@@ -231,7 +231,6 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
 			)
-			keyspaceName := s.manager.getKeyspaceNameForMetrics(s.ctx, keyspaceID)
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
@@ -252,6 +251,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			if req.GetIsBackground() {
 				continue
 			}
+			keyspaceName := s.manager.getKeyspaceNameForMetrics(s.ctx, keyspaceID)
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,

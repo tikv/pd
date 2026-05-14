@@ -17,6 +17,7 @@ package server
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -155,6 +156,40 @@ func TestObserveRequestCause(t *testing.T) {
 
 	re.Equal(1.0, testutil.ToFloat64(throttleCounter))
 	re.Equal(1.0, testutil.ToFloat64(trickleCounter))
+}
+
+func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
+	re := require.New(t)
+	groupName := "request_ru_trickle_group"
+	keyspaceName := "request_ru_trickle_keyspace"
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	serviceTrickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
+	groupTrickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
+	now := time.Now()
+	rg := &ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(groupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   100,
+				BurstLimit: 1000,
+			},
+		}),
+	}
+	sl := newServiceLimiter(1, 10, nil)
+	sl.AvailableTokens = 10
+	sl.LastUpdate = now
+
+	tokens := rg.RequestRU(now, 10, 1000, 1, keyspaceName, nil, sl)
+
+	re.NotNil(tokens)
+	re.Equal(10.0, tokens.GetGrantedTokens().GetTokens())
+	re.Equal(int64(1000), tokens.GetTrickleTimeMs())
+	re.Equal(1.0, testutil.ToFloat64(serviceTrickleCounter))
+	re.Zero(testutil.ToFloat64(groupTrickleCounter))
 }
 
 func TestGaugeMetricsSetGroupSlotMetrics(t *testing.T) {

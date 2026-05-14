@@ -42,6 +42,9 @@ const (
 	fillRateLabel             = "fill_rate"
 	burstLimitLabel           = "burst_limit"
 	slotEventLabel            = "event"
+	slotCreatedEventLabel     = "created"
+	slotDeletedEventLabel     = "deleted"
+	slotExpiredEventLabel     = "expired"
 	kindLabel                 = "kind"
 	throttleKindLabel         = "throttling"
 	trickleKindLabel          = "trickle"
@@ -268,7 +271,7 @@ var (
 			Namespace: namespace,
 			Subsystem: serverSubsystem,
 			Name:      "request_cause_total",
-			Help:      "Counter of throttling and trickle causes per resource group.",
+			Help:      "Counter of throttling and trickle contributing causes per resource group.",
 		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, kindLabel, "cause"})
 )
 
@@ -554,9 +557,9 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		overrideBurstLimitGauge:            overrideSettings.WithLabelValues(groupName, keyspaceName, burstLimitLabel),
 		activeSlotCountGauge:               activeSlotCountGauge.WithLabelValues(groupName, keyspaceName),
 		tokenLoanGauge:                     tokenLoanGauge.WithLabelValues(groupName, keyspaceName),
-		slotCreatedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "created"),
-		slotDeletedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "deleted"),
-		slotExpiredCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "expired"),
+		slotCreatedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotCreatedEventLabel),
+		slotDeletedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotDeletedEventLabel),
+		slotExpiredCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotExpiredEventLabel),
 	}
 }
 
@@ -629,9 +632,9 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	activeSlotCountGauge.DeleteLabelValues(groupName, keyspaceName)
 	tokenLoanGauge.DeleteLabelValues(groupName, keyspaceName)
-	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "created")
-	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "deleted")
-	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "expired")
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotCreatedEventLabel)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotDeletedEventLabel)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotExpiredEventLabel)
 	grantedTokensHistogram.DeleteLabelValues(groupName, keyspaceName)
 	trickleDurationHistogram.DeleteLabelValues(groupName, keyspaceName)
 	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
