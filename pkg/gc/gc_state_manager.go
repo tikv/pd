@@ -118,7 +118,8 @@ type GCStateManager struct {
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 
-	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -128,6 +129,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
+		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 }
 
@@ -701,7 +703,15 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (
 // must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
 // started earlier than the current one.
 func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCBarriers bool) (map[uint32]GCState, error) {
-	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
+	if !excludeGCBarriers {
+		return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
+			result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
+			failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
+			return result, err
+		})
+	}
+
+	return m.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
 		result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err

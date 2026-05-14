@@ -2131,6 +2131,128 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	re.Equal(int64(2), executionCount.Load())
 }
 
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesDifferentExcludeGCBarriersCallsDoNotShareResult() {
+	re := s.Require()
+
+	const keyspaceID = uint32(2)
+	_, err := s.manager.SetGCBarrier(keyspaceID, "b1", 25, time.Hour, time.Now())
+	re.NoError(err)
+
+	type result struct {
+		caller            string
+		excludeGCBarriers bool
+		gcStates          map[uint32]GCState
+		err               error
+	}
+
+	runScenario := func(firstExcludeGCBarriers bool) {
+		var executionCount atomic.Int64
+		finishFailpointEnabled := true
+
+		fullExecBefore := s.manager.allKeyspacesGCStatesSingleFlight.ExecCount()
+		excludeExecBefore := s.manager.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.ExecCount()
+
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", "pause"))
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+			executionCount.Add(1)
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart"))
+			if finishFailpointEnabled {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+			}
+		}()
+
+		ch := make(chan result, 3)
+		callOnce := func(caller string, excludeGCBarriers bool) {
+			gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), excludeGCBarriers)
+			ch <- result{
+				caller:            caller,
+				excludeGCBarriers: excludeGCBarriers,
+				gcStates:          gcStates,
+				err:               err,
+			}
+		}
+
+		go callOnce("first", firstExcludeGCBarriers)
+
+		select {
+		case res := <-ch:
+			re.FailNowf("failpoint not taking effect to block the first invocation to GetAllKeyspacesGCStates", "caller: %s, excludeGCBarriers: %v, result: %v, err: %v", res.caller, res.excludeGCBarriers, res.gcStates, res.err)
+		case <-time.After(200 * time.Millisecond):
+		}
+		re.Equal(int64(1), executionCount.Load())
+
+		// The second call uses the other excludeGCBarriers value, so with the
+		// correct implementation it must start a separate execution immediately.
+		go callOnce("second", !firstExcludeGCBarriers)
+
+		// The third call uses the same parameter as the first one. If the two
+		// parameter variants were incorrectly routed to a single OrderedSingleFlight
+		// instance, this third call could be merged into the second call's pending
+		// batch and receive a result for the wrong parameter.
+		go callOnce("third", firstExcludeGCBarriers)
+
+		deadline := time.Now().Add(time.Second)
+		for executionCount.Load() < 2 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		re.Equal(
+			int64(2),
+			executionCount.Load(),
+			"calls with different excludeGCBarriers values should use different OrderedSingleFlight instances",
+		)
+
+		select {
+		case res := <-ch:
+			re.FailNowf("expected all invocations to stay blocked before finish failpoint is released", "caller: %s, excludeGCBarriers: %v, result: %v, err: %v", res.caller, res.excludeGCBarriers, res.gcStates, res.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+		finishFailpointEnabled = false
+
+		fullCallCount := 0
+		excludeCallCount := 0
+		for range 3 {
+			var res result
+			select {
+			case res = <-ch:
+			case <-time.After(time.Second):
+				re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+			}
+			re.NoError(res.err)
+			if res.excludeGCBarriers {
+				excludeCallCount++
+				re.Empty(res.gcStates[keyspaceID].GCBarriers)
+			} else {
+				fullCallCount++
+				re.Len(res.gcStates[keyspaceID].GCBarriers, 1)
+				re.Equal("b1", res.gcStates[keyspaceID].GCBarriers[0].BarrierID)
+				re.Equal(uint64(25), res.gcStates[keyspaceID].GCBarriers[0].BarrierTS)
+			}
+		}
+
+		expectedFullCalls := 1
+		expectedExcludeCalls := 2
+		expectedFullExecs := fullExecBefore + 1
+		expectedExcludeExecs := excludeExecBefore + 2
+		if !firstExcludeGCBarriers {
+			expectedFullCalls = 2
+			expectedExcludeCalls = 1
+			expectedFullExecs = fullExecBefore + 2
+			expectedExcludeExecs = excludeExecBefore + 1
+		}
+		re.Equal(expectedFullCalls, fullCallCount)
+		re.Equal(expectedExcludeCalls, excludeCallCount)
+		re.Equal(expectedFullExecs, s.manager.allKeyspacesGCStatesSingleFlight.ExecCount())
+		re.Equal(expectedExcludeExecs, s.manager.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.ExecCount())
+	}
+
+	runScenario(false)
+	runScenario(true)
+}
+
 func TestGetAllKeysapcesGCStatesOnTooManyKeyspaces(t *testing.T) {
 	re := require.New(t)
 
