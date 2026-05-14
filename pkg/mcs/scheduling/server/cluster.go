@@ -38,7 +38,10 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
@@ -76,7 +79,13 @@ type Cluster struct {
 	regionStats       *statistics.RegionStatistics
 	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
+	resourceMu        sync.RWMutex
 	storage           storage.Storage
+	hbStreams         *hbstream.HeartbeatStreams
+	metaWatcher       *meta.Watcher
+	configWatcher     *config.Watcher
+	ruleWatcher       *rule.Watcher
+	affinityWatcher   *mcsaffinity.Watcher
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -142,6 +151,7 @@ func NewCluster(
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		hbStreams:         hbStreams,
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -262,7 +272,73 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 
 // GetStorage returns the storage.
 func (c *Cluster) GetStorage() storage.Storage {
+	if c == nil {
+		return nil
+	}
+	c.resourceMu.RLock()
+	defer c.resourceMu.RUnlock()
 	return c.storage
+}
+
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
+	if c == nil {
+		return nil
+	}
+	c.resourceMu.RLock()
+	defer c.resourceMu.RUnlock()
+	return c.hbStreams
+}
+
+// GetMetaWatcher returns the meta watcher.
+func (c *Cluster) GetMetaWatcher() *meta.Watcher {
+	if c == nil {
+		return nil
+	}
+	c.resourceMu.RLock()
+	defer c.resourceMu.RUnlock()
+	return c.metaWatcher
+}
+
+// SetRuntimeResources installs the cluster-scoped runtime resources after they are created.
+func (c *Cluster) SetRuntimeResources(
+	metaWatcher *meta.Watcher,
+	configWatcher *config.Watcher,
+	ruleWatcher *rule.Watcher,
+	affinityWatcher *mcsaffinity.Watcher,
+) {
+	c.resourceMu.Lock()
+	defer c.resourceMu.Unlock()
+	c.metaWatcher = metaWatcher
+	c.configWatcher = configWatcher
+	c.ruleWatcher = ruleWatcher
+	c.affinityWatcher = affinityWatcher
+}
+
+func (c *Cluster) cleanupRuntimeResources() {
+	c.resourceMu.Lock()
+	defer c.resourceMu.Unlock()
+	if c.affinityWatcher != nil {
+		c.affinityWatcher.Close()
+		c.affinityWatcher = nil
+	}
+	if c.ruleWatcher != nil {
+		c.ruleWatcher.Close()
+		c.ruleWatcher = nil
+	}
+	if c.metaWatcher != nil {
+		c.metaWatcher.Close()
+		c.metaWatcher = nil
+	}
+	if c.configWatcher != nil {
+		c.configWatcher.Close()
+		c.configWatcher = nil
+	}
+	if c.hbStreams != nil {
+		c.hbStreams.Close()
+		c.hbStreams = nil
+	}
+	c.storage = nil
 }
 
 // GetCheckerConfig returns the checker config.

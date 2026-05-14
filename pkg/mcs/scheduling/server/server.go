@@ -107,15 +107,7 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster   atomic.Value // *Cluster
-	hbStreams *hbstream.HeartbeatStreams
-	storage   *endpoint.StorageEndpoint
-
-	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher   *config.Watcher
-	ruleWatcher     *rule.Watcher
-	metaWatcher     *meta.Watcher
-	affinityWatcher *affinity.Watcher
+	cluster atomic.Value // *Cluster
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -550,12 +542,7 @@ func (s *Server) startCluster(ctx context.Context) (err error) {
 		return err
 	}
 
-	s.storage = storage
-	s.metaWatcher = metaWatcher
-	s.configWatcher = configWatcher
-	s.hbStreams = hbStreams
-	s.ruleWatcher = ruleWatcher
-	s.affinityWatcher = affinityWatcher
+	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
 	s.cluster.Store(cluster)
 	cluster.StartBackgroundJobs()
 	cluster = nil // defer cleanup no longer needed
@@ -567,7 +554,7 @@ func (s *Server) stopCluster() {
 	if cluster != nil {
 		cluster.StopBackgroundJobs()
 	}
-	s.cleanupClusterResources()
+	s.cleanupClusterResources(cluster)
 }
 
 func (s *Server) startMetaConfWatcher(
@@ -587,33 +574,11 @@ func (s *Server) startMetaConfWatcher(
 	return metaWatcher, configWatcher, nil
 }
 
-func (s *Server) stopWatcher() {
-	if s.affinityWatcher != nil {
-		s.affinityWatcher.Close()
-		s.affinityWatcher = nil
+func (s *Server) cleanupClusterResources(cluster *Cluster) {
+	if cluster != nil {
+		cluster.cleanupRuntimeResources()
 	}
-	if s.ruleWatcher != nil {
-		s.ruleWatcher.Close()
-		s.ruleWatcher = nil
-	}
-	if s.metaWatcher != nil {
-		s.metaWatcher.Close()
-		s.metaWatcher = nil
-	}
-	if s.configWatcher != nil {
-		s.configWatcher.Close()
-		s.configWatcher = nil
-	}
-}
-
-func (s *Server) cleanupClusterResources() {
 	s.cluster.Store((*Cluster)(nil))
-	s.stopWatcher()
-	if s.hbStreams != nil {
-		s.hbStreams.Close()
-		s.hbStreams = nil
-	}
-	s.storage = nil
 }
 
 // GetPersistConfig returns the persist config.

@@ -40,27 +40,24 @@ func TestCleanupClusterResources(t *testing.T) {
 
 	hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, core.NewBasicCluster())
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	cluster := &Cluster{}
+	cluster := &Cluster{hbStreams: hbStreams, storage: storage}
 
-	s := &Server{
-		hbStreams: hbStreams,
-		storage:   storage,
-	}
+	s := &Server{}
 	s.cluster.Store(cluster)
 
-	s.cleanupClusterResources()
-	s.cleanupClusterResources()
+	s.cleanupClusterResources(cluster)
+	s.cleanupClusterResources(cluster)
 
 	re.Nil(s.GetCluster())
-	re.Nil(s.hbStreams)
-	re.Nil(s.storage)
+	re.Nil(cluster.GetHeartbeatStreams())
+	re.Nil(cluster.GetStorage())
 }
 
 func TestRegionHeartbeatReturnsNotBootstrappedWhenHeartbeatStreamsMissing(t *testing.T) {
 	re := require.New(t)
 	cluster := &Cluster{BasicCluster: core.NewBasicCluster()}
 	cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: 1, Address: "store-1"}))
-	service := &Service{Server: &Server{service: &Service{}, hbStreams: nil}}
+	service := &Service{Server: &Server{service: &Service{}}}
 	service.service = service
 	service.cluster.Store(cluster)
 
@@ -79,7 +76,7 @@ func TestRegionHeartbeatReturnsNotBootstrappedWhenHeartbeatStreamsMissing(t *tes
 
 func TestStoreHeartbeatReturnsNotBootstrappedWhenMetaWatcherMissing(t *testing.T) {
 	re := require.New(t)
-	service := &Service{Server: &Server{service: &Service{}, metaWatcher: nil}}
+	service := &Service{Server: &Server{service: &Service{}}}
 	service.service = service
 	service.cluster.Store(&Cluster{BasicCluster: core.NewBasicCluster()})
 
@@ -98,7 +95,6 @@ func TestRegionHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
 
 	s := &Server{}
 	s.cluster.Store(&Cluster{BasicCluster: basicCluster})
-	s.hbStreams = nil // Simulate an in-flight heartbeat observing a stale cluster after cleanup has already cleared hbStreams.
 
 	stream := &mockRegionHeartbeatStream{
 		recvs: []*schedulingpb.RegionHeartbeatRequest{
@@ -115,7 +111,31 @@ func TestRegionHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
 	re.NotPanics(func() {
 		_ = (&Service{Server: s}).RegionHeartbeat(stream)
 	})
-	re.Nil(s.hbStreams)
+	re.Nil(s.GetCluster().GetHeartbeatStreams())
+}
+
+func TestStoreHeartbeatDuringCleanupDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	basicCluster := core.NewBasicCluster()
+	s := &Server{}
+	s.cluster.Store(&Cluster{BasicCluster: basicCluster})
+
+	re.NotPanics(func() {
+		_, _ = (&Service{Server: s}).StoreHeartbeat(context.Background(), &schedulingpb.StoreHeartbeatRequest{
+			Stats: &pdpb.StoreStats{StoreId: 1},
+		})
+	})
+	re.Nil(s.GetCluster().GetMetaWatcher())
+}
+
+func TestClusterResourceGettersHandleNilReceiver(t *testing.T) {
+	re := require.New(t)
+
+	var cluster *Cluster
+	re.Nil(cluster.GetHeartbeatStreams())
+	re.Nil(cluster.GetMetaWatcher())
+	re.Nil(cluster.GetStorage())
 }
 
 type mockRegionHeartbeatStream struct {

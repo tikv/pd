@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -138,7 +139,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		}
 
 		c := s.GetCluster()
-		streams := s.hbStreams
+		var streams *hbstream.HeartbeatStreams
+		if c != nil {
+			streams = c.GetHeartbeatStreams()
+		}
 		if c == nil || streams == nil {
 			resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
 			err := server.Send(resp)
@@ -245,7 +249,10 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
-	metaWatcher := s.metaWatcher
+	var metaWatcher *meta.Watcher
+	if c != nil {
+		metaWatcher = c.GetMetaWatcher()
+	}
 	if c == nil || metaWatcher == nil {
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
