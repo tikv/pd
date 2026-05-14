@@ -82,6 +82,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
+<<<<<<< HEAD
 func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage) bool {
 	if syncErr := resp.GetHeader().GetError(); syncErr != nil {
 		s.streamingRunning.Store(false)
@@ -91,6 +92,9 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 			zap.String("error-message", syncErr.GetMessage()))
 		return false
 	}
+=======
+func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage) {
+>>>>>>> 8cabcf154c (syncer: extract region sync helpers (#10672))
 	if s.history.getNextIndex() != resp.GetStartIndex() {
 		log.Warn("server sync index not match the leader",
 			zap.String("server", s.server.Name()),
@@ -141,11 +145,14 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 		saveKV, _, _, _ := regionGuide(cctx, region, origin)
 		overlaps := bc.PutRegion(region)
 
+<<<<<<< HEAD
 		if hasBuckets {
 			if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
 				region.UpdateBuckets(buckets[i], old)
 			}
 		}
+=======
+>>>>>>> 8cabcf154c (syncer: extract region sync helpers (#10672))
 		if saveKV {
 			err = regionStorage.SaveRegion(r)
 		}
@@ -158,7 +165,10 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 	}
 	// mark the client as running status when it finished the first history region sync.
 	s.streamingRunning.Store(true)
+<<<<<<< HEAD
 	return true
+=======
+>>>>>>> 8cabcf154c (syncer: extract region sync helpers (#10672))
 }
 
 // IsRunning returns whether the region syncer client is running.
@@ -255,6 +265,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					break
 				}
+<<<<<<< HEAD
 				if !s.handleRegionSyncResponse(ctx, resp, bc, regionStorage) {
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
@@ -264,6 +275,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					break
 				}
+=======
+				s.handleRegionSyncResponse(ctx, resp, bc, regionStorage)
+>>>>>>> 8cabcf154c (syncer: extract region sync helpers (#10672))
 			}
 		}
 	}()
