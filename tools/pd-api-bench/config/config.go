@@ -31,6 +31,7 @@ type Config struct {
 	configFile string
 	PDAddr     string `toml:"pd" json:"pd"`
 	StatusAddr string `toml:"status" json:"status"`
+	KeyFormat  string `toml:"key-format" json:"key-format"`
 
 	Log      log.Config `toml:"log" json:"log"`
 	Logger   *zap.Logger
@@ -58,6 +59,7 @@ func NewConfig(flagSet *flag.FlagSet) *Config {
 	fs.StringVar(&cfg.PDAddr, "pd", "http://127.0.0.1:2379", "pd address")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status", "127.0.0.1:10081", "status address")
+	fs.StringVar(&cfg.KeyFormat, "key-format", "raw", "lookup key format: raw or table")
 	fs.Int64Var(&cfg.Client, "client", 1, "client number")
 	fs.StringVar(&cfg.CaPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
 	fs.StringVar(&cfg.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
@@ -121,5 +123,8 @@ func (c *Config) InitCoordinator(co *cases.Coordinator) {
 func (c *Config) Adjust() {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = "text"
+	}
+	if len(c.KeyFormat) == 0 {
+		c.KeyFormat = "raw"
 	}
 }

@@ -27,8 +27,10 @@ import (
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/pkg/codec"
 )
 
 var (
@@ -38,9 +40,24 @@ var (
 	totalRegion int
 	totalStore  int
 	storesID    []uint64
+	keyFormat   = "raw"
 )
 
 const defaultKeyLen = 56
+
+// SetKeyFormat configures how pd-api-bench generates lookup keys.
+func SetKeyFormat(format string) error {
+	switch format {
+	case "", "raw", "table":
+		if format == "" {
+			format = "raw"
+		}
+		keyFormat = format
+		return nil
+	default:
+		return fmt.Errorf("unsupported key format %q", format)
+	}
+}
 
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) error {
@@ -153,6 +170,7 @@ var GRPCCaseFnMap = map[string]GRPCCreateFn{
 	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
 	"GetStore":                 newGetStore(),
 	"GetStores":                newGetStores(),
+	"BatchScanRegions":         newBatchScanRegions(),
 	"ScanRegions":              newScanRegions(),
 	"Tso":                      newTso(),
 	"UpdateGCSafePoint":        newUpdateGCSafePoint(),
@@ -223,8 +241,8 @@ func (c *regionsStats) do(ctx context.Context, cli pdHttp.Client) error {
 		upperBound = 1
 	}
 	random := rand.IntN(upperBound)
-	startID := c.regionSample*random*4 + 1
-	endID := c.regionSample*(random+1)*4 + 1
+	startID := generateRegionKeyID(c.regionSample * random)
+	endID := generateRegionKeyID(c.regionSample * (random + 1))
 	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
 		pdHttp.NewKeyRange(generateKeyForSimulator(startID), generateKeyForSimulator(endID)), false)
 	if Debug {
@@ -303,7 +321,7 @@ func newGetRegion() func() GRPCCase {
 }
 
 func (*getRegion) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.IntN(totalRegion)*4 + 1
+	id := generateRegionKeyID(rand.IntN(totalRegion))
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id))
 	if err != nil {
 		return err
@@ -327,7 +345,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 }
 
 func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error {
-	id := rand.IntN(totalRegion)*4 + 1
+	id := generateRegionKeyID(rand.IntN(totalRegion))
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), opt.WithAllowFollowerHandle())
 	if err != nil {
 		return err
@@ -338,6 +356,40 @@ func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error 
 type scanRegions struct {
 	*baseCase
 	regionSample int
+}
+
+type batchScanRegions struct {
+	*baseCase
+	regionSample int
+}
+
+func newBatchScanRegions() func() GRPCCase {
+	return func() GRPCCase {
+		return &batchScanRegions{
+			baseCase: &baseCase{
+				name: "BatchScanRegions",
+				cfg:  newConfig(),
+			},
+			regionSample: 128,
+		}
+	}
+}
+
+func (c *batchScanRegions) unary(ctx context.Context, cli pd.Client) error {
+	upperBound := totalRegion / c.regionSample
+	random := rand.IntN(upperBound)
+	startID := generateRegionKeyID(c.regionSample * random)
+	endID := generateRegionKeyID(c.regionSample * (random + 1))
+	_, err := cli.BatchScanRegions(ctx, []router.KeyRange{
+		{
+			StartKey: generateKeyForSimulator(startID),
+			EndKey:   generateKeyForSimulator(endID),
+		},
+	}, c.regionSample, opt.WithAllowFollowerHandle())
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func newScanRegions() func() GRPCCase {
@@ -355,8 +407,8 @@ func newScanRegions() func() GRPCCase {
 func (c *scanRegions) unary(ctx context.Context, cli pd.Client) error {
 	upperBound := totalRegion / c.regionSample
 	random := rand.IntN(upperBound)
-	startID := c.regionSample*random*4 + 1
-	endID := c.regionSample*(random+1)*4 + 1
+	startID := generateRegionKeyID(c.regionSample * random)
+	endID := generateRegionKeyID(c.regionSample * (random + 1))
 	//nolint:staticcheck
 	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
 	if err != nil {
@@ -436,9 +488,19 @@ func (*getStores) unary(ctx context.Context, cli pd.Client) error {
 }
 
 func generateKeyForSimulator(id int) []byte {
+	if keyFormat == "table" {
+		return codec.GenerateTableKey(int64(id))
+	}
 	k := make([]byte, defaultKeyLen)
 	copy(k, fmt.Sprintf("%010d", id))
 	return k
+}
+
+func generateRegionKeyID(regionIndex int) int {
+	if keyFormat == "table" {
+		return regionIndex
+	}
+	return regionIndex*4 + 1
 }
 
 type getKV struct {

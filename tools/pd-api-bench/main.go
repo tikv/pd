@@ -119,6 +119,9 @@ func main() {
 		log.Error("concurrency == 0, exit")
 		return
 	}
+	if err := cases.SetKeyFormat(cfg.KeyFormat); err != nil {
+		log.Fatal("invalid key format", zap.Error(err))
+	}
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
