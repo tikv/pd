@@ -17,11 +17,13 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -92,12 +94,63 @@ func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := m.s.GetRaftCluster()
 		if rc == nil {
+			rc = m.getFollowerSyncedCluster(r)
+		}
+		if rc == nil {
 			m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 			return
 		}
 		ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.RaftCluster {
+	if r.Method != http.MethodGet ||
+		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" ||
+		!isFollowerSyncedRegionPath(r.URL.Path) ||
+		m.s.GetMember().IsServing() {
+		return nil
+	}
+	rc := m.s.DirectlyGetRaftCluster()
+	if rc == nil || !rc.GetRegionSyncer().IsRunning() {
+		return nil
+	}
+	return rc
+}
+
+func isFollowerSyncedRegionPath(path string) bool {
+	switch {
+	case path == "/pd/api/v1/regions",
+		path == "/pd/api/v1/regions/key",
+		path == "/pd/api/v1/regions/count",
+		path == "/pd/api/v1/regions/check/hist-size",
+		path == "/pd/api/v1/regions/check/hist-keys",
+		path == "/pd/api/v1/regions/range-holes",
+		path == "/pd/api/v1/regions/writeflow",
+		path == "/pd/api/v1/regions/writequery",
+		path == "/pd/api/v1/regions/readflow",
+		path == "/pd/api/v1/regions/readquery",
+		path == "/pd/api/v1/regions/confver",
+		path == "/pd/api/v1/regions/version",
+		path == "/pd/api/v1/regions/size",
+		path == "/pd/api/v1/regions/keys",
+		path == "/pd/api/v1/regions/cpu":
+		return true
+	case hasSinglePathValue(path, "/pd/api/v1/region/id/"),
+		strings.HasPrefix(path, "/pd/api/v1/region/key/"),
+		hasSinglePathValue(path, "/pd/api/v1/regions/store/"),
+		hasSinglePathValue(path, "/pd/api/v1/regions/keyspace/id/"),
+		hasSinglePathValue(path, "/pd/api/v1/regions/sibling/"):
+		return true
+	default:
+		return false
+	}
+}
+
+func hasSinglePathValue(path, prefix string) bool {
+	value, ok := strings.CutPrefix(path, prefix)
+	return ok && value != "" && !strings.Contains(value, "/")
 }
 
 type clusterCtxKey struct{}
