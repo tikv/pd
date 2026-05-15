@@ -16,7 +16,9 @@ package syncer
 
 import (
 	"context"
+	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,10 +86,69 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 }
 
+func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer re.NoError(regionStorage.Close())
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Sync(ctx, stream)
+	}()
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name:       "pd-follower",
+			ClientUrls: []string{"http://127.0.0.1:2379"},
+		},
+	}
+	re.NotNil(<-stream.sendCh)
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == "pd-follower"
+	})
+
+	stream.setSendErr(errors.New("send failed"))
+	syncer.broadcast(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: syncer.history.getNextIndex(),
+	})
+
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		st, ok := status.FromError(syncErr)
+		return ok && st.Code() == codes.Unavailable
+	})
+	re.Empty(syncer.GetAllDownstreamNames())
+}
+
 type mockSyncRegionsServer struct {
-	ctx    context.Context
-	recvCh chan *pdpb.SyncRegionRequest
-	sendCh chan *pdpb.SyncRegionResponse
+	mu      sync.Mutex
+	ctx     context.Context
+	recvCh  chan *pdpb.SyncRegionRequest
+	sendCh  chan *pdpb.SyncRegionResponse
+	sendErr error
 }
 
 func newMockSyncRegionsServer() *mockSyncRegionsServer {
@@ -99,8 +160,20 @@ func newMockSyncRegionsServer() *mockSyncRegionsServer {
 }
 
 func (s *mockSyncRegionsServer) Send(resp *pdpb.SyncRegionResponse) error {
+	s.mu.Lock()
+	err := s.sendErr
+	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	s.sendCh <- resp
 	return nil
+}
+
+func (s *mockSyncRegionsServer) setSendErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sendErr = err
 }
 
 func (s *mockSyncRegionsServer) Recv() (*pdpb.SyncRegionRequest, error) {

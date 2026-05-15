@@ -62,6 +62,25 @@ type ServerStream interface {
 	Send(regions *pdpb.SyncRegionResponse) error
 }
 
+type regionSyncStream struct {
+	stream ServerStream
+	done   chan struct{}
+	once   sync.Once
+}
+
+func newRegionSyncStream(stream ServerStream) *regionSyncStream {
+	return &regionSyncStream{
+		stream: stream,
+		done:   make(chan struct{}),
+	}
+}
+
+func (s *regionSyncStream) close() {
+	s.once.Do(func() {
+		close(s.done)
+	})
+}
+
 // Server is the abstraction of the syncer storage server.
 type Server interface {
 	LoopContext() context.Context
@@ -78,7 +97,7 @@ type Server interface {
 type RegionSyncer struct {
 	mu struct {
 		syncutil.RWMutex
-		streams      map[string]ServerStream
+		streams      map[string]*regionSyncStream
 		clientCtx    context.Context
 		clientCancel context.CancelFunc
 	}
@@ -104,7 +123,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}
-	syncer.mu.streams = make(map[string]ServerStream)
+	syncer.mu.streams = make(map[string]*regionSyncStream)
 	return syncer
 }
 
@@ -132,7 +151,10 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	defer func() {
 		ticker.Stop()
 		s.mu.Lock()
-		s.mu.streams = make(map[string]ServerStream)
+		for _, stream := range s.mu.streams {
+			stream.close()
+		}
+		s.mu.streams = make(map[string]*regionSyncStream)
 		s.mu.Unlock()
 	}()
 
@@ -222,13 +244,15 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 		if err != nil {
 			return err
 		}
-		s.bindStream(request.GetMember().GetName(), stream)
-		defer s.unbindStream(request.GetMember().GetName(), stream)
+		syncStream := s.bindStream(request.GetMember().GetName(), stream)
+		defer s.unbindStream(request.GetMember().GetName(), syncStream)
 		select {
 		case <-ctx.Done():
 			return status.Error(codes.Unavailable, "region syncer stopped")
 		case <-stream.Context().Done():
 			return nil
+		case <-syncStream.done:
+			return status.Error(codes.Unavailable, "region syncer stream closed")
 		}
 	}
 }
@@ -359,18 +383,24 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 }
 
 // bindStream binds the established server stream.
-func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
+func (s *RegionSyncer) bindStream(name string, stream ServerStream) *regionSyncStream {
+	syncStream := newRegionSyncStream(stream)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.mu.streams[name] = stream
+	if oldStream := s.mu.streams[name]; oldStream != nil {
+		oldStream.close()
+	}
+	s.mu.streams[name] = syncStream
+	return syncStream
 }
 
-func (s *RegionSyncer) unbindStream(name string, stream ServerStream) {
+func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.mu.streams[name] == stream {
 		delete(s.mu.streams, name)
 	}
+	stream.close()
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
@@ -391,13 +421,13 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 		}
 
 		wg.Add(1)
-		go func(name string, sender ServerStream) {
+		go func(name string, sender *regionSyncStream) {
 			defer wg.Done()
-			err := sender.Send(regions)
+			err := sender.stream.Send(regions)
 			if err != nil {
 				log.Warn("region syncer send data meet error", zap.String("name", name),
 					errs.ZapError(errs.ErrGRPCSend, err))
-				failed.Store(name, struct{}{})
+				failed.Store(name, sender)
 			}
 		}(name, sender)
 	}
@@ -406,10 +436,14 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 	go func() {
 		wg.Wait()
 		s.mu.Lock()
-		failed.Range(func(key, _ any) bool {
+		failed.Range(func(key, value any) bool {
 			name := key.(string)
-			delete(s.mu.streams, name)
-			log.Info("region syncer delete the stream", zap.String("stream", name))
+			stream := value.(*regionSyncStream)
+			if s.mu.streams[name] == stream {
+				delete(s.mu.streams, name)
+				stream.close()
+				log.Info("region syncer delete the stream", zap.String("stream", name))
+			}
 			return true
 		})
 		s.mu.Unlock()
@@ -435,8 +469,9 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-		if err := sender.Send(resp); err != nil {
+		if err := sender.stream.Send(resp); err != nil {
 			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
 		}
+		sender.close()
 	}
 }
