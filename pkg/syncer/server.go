@@ -23,6 +23,8 @@ import (
 
 	"github.com/docker/go-units"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -221,6 +223,13 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 			return err
 		}
 		s.bindStream(request.GetMember().GetName(), stream)
+		defer s.unbindStream(request.GetMember().GetName(), stream)
+		select {
+		case <-ctx.Done():
+			return status.Error(codes.Unavailable, "region syncer stopped")
+		case <-stream.Context().Done():
+			return nil
+		}
 	}
 }
 
@@ -354,6 +363,14 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mu.streams[name] = stream
+}
+
+func (s *RegionSyncer) unbindStream(name string, stream ServerStream) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.mu.streams[name] == stream {
+		delete(s.mu.streams, name)
+	}
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
