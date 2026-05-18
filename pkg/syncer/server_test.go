@@ -20,6 +20,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -40,7 +41,9 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
-	defer re.NoError(regionStorage.Close())
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
 
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -91,7 +94,9 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
-	defer re.NoError(regionStorage.Close())
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
 
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -143,17 +148,208 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 }
 
+func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Sync(ctx, stream)
+	}()
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name:       "pd-follower",
+			ClientUrls: []string{"http://127.0.0.1:2379"},
+		},
+	}
+	re.NotNil(<-stream.sendCh)
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == "pd-follower"
+	})
+
+	unblockSend := stream.blockSend()
+	closeDone := make(chan struct{})
+	go func() {
+		syncer.closeAllClient()
+		close(closeDone)
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		st, ok := status.FromError(syncErr)
+		return ok && st.Code() == codes.Unavailable
+	})
+	re.Empty(syncer.GetAllDownstreamNames())
+
+	close(unblockSend)
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-closeDone:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.sendTimeout = 10 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Sync(ctx, stream)
+	}()
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name:       "pd-follower",
+			ClientUrls: []string{"http://127.0.0.1:2379"},
+		},
+	}
+	re.NotNil(<-stream.sendCh)
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == "pd-follower"
+	})
+
+	unblockSend := stream.blockSend()
+	broadcastDone := make(chan struct{})
+	go func() {
+		syncer.broadcast(context.Background(), &pdpb.SyncRegionResponse{
+			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			StartIndex: syncer.history.getNextIndex(),
+		})
+		close(broadcastDone)
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-broadcastDone:
+			return true
+		default:
+			return false
+		}
+	})
+
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		st, ok := status.FromError(syncErr)
+		return ok && st.Code() == codes.Unavailable
+	})
+	re.Empty(syncer.GetAllDownstreamNames())
+	close(unblockSend)
+}
+
+func TestSyncExitsWhenContextCanceledBeforeRequest(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := newMockSyncRegionsServer()
+	defer stream.cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Sync(ctx, stream)
+	}()
+
+	cancel()
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		st, ok := status.FromError(syncErr)
+		return ok && st.Code() == codes.Unavailable
+	})
+}
+
 type mockSyncRegionsServer struct {
 	mu      sync.Mutex
 	ctx     context.Context
+	cancel  context.CancelFunc
 	recvCh  chan *pdpb.SyncRegionRequest
 	sendCh  chan *pdpb.SyncRegionResponse
 	sendErr error
+	blockCh chan struct{}
+	blocked chan struct{}
+	once    sync.Once
 }
 
 func newMockSyncRegionsServer() *mockSyncRegionsServer {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &mockSyncRegionsServer{
-		ctx:    context.Background(),
+		ctx:    ctx,
+		cancel: cancel,
 		recvCh: make(chan *pdpb.SyncRegionRequest),
 		sendCh: make(chan *pdpb.SyncRegionResponse, 1),
 	}
@@ -162,9 +358,19 @@ func newMockSyncRegionsServer() *mockSyncRegionsServer {
 func (s *mockSyncRegionsServer) Send(resp *pdpb.SyncRegionResponse) error {
 	s.mu.Lock()
 	err := s.sendErr
+	blockCh := s.blockCh
+	blocked := s.blocked
 	s.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	if blockCh != nil {
+		if blocked != nil {
+			s.once.Do(func() {
+				close(blocked)
+			})
+		}
+		<-blockCh
 	}
 	s.sendCh <- resp
 	return nil
@@ -176,12 +382,40 @@ func (s *mockSyncRegionsServer) setSendErr(err error) {
 	s.sendErr = err
 }
 
-func (s *mockSyncRegionsServer) Recv() (*pdpb.SyncRegionRequest, error) {
-	req, ok := <-s.recvCh
-	if !ok {
-		return nil, io.EOF
+func (s *mockSyncRegionsServer) blockSend() chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.blockCh = make(chan struct{})
+	s.blocked = make(chan struct{})
+	s.once = sync.Once{}
+	return s.blockCh
+}
+
+func (s *mockSyncRegionsServer) isSendBlocked() bool {
+	s.mu.Lock()
+	blocked := s.blocked
+	s.mu.Unlock()
+	if blocked == nil {
+		return false
 	}
-	return req, nil
+	select {
+	case <-blocked:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *mockSyncRegionsServer) Recv() (*pdpb.SyncRegionRequest, error) {
+	select {
+	case <-s.ctx.Done():
+		return nil, s.ctx.Err()
+	case req, ok := <-s.recvCh:
+		if !ok {
+			return nil, io.EOF
+		}
+		return req, nil
+	}
 }
 
 func (*mockSyncRegionsServer) SetHeader(metadata.MD) error {
