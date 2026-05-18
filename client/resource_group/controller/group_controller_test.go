@@ -21,11 +21,13 @@ import (
 	"time"
 
 	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 func counterValue(re *require.Assertions, c interface{ Write(*dto.Metric) error }) float64 {
@@ -415,6 +417,44 @@ func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
 	expectedRefund := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
 	re.InDelta(tokensAfterPreCharge+expectedRefund, tokensAfterSettlement, 1.0,
 		"failed read with paging hint should refund ReadBytesCost*predicted")
+}
+
+func TestDeletePagingLabelsResetsSeries(t *testing.T) {
+	re := require.New(t)
+	// Use a name no other test reuses so we measure only our own series.
+	name := "test-paging-cleanup-rg"
+
+	gmc := initMetrics(name, name)
+	// Push a sample through every paging counter / histogram so each label
+	// series actually exists in the underlying Vec.
+	gmc.observePagingPrecharge(100, 1.0)
+	gmc.observePagingActual(100, 80, 2.0, 0.5)
+	gmc.observePagingNonprecharge(200)
+
+	// Sanity: cached counters are non-zero before cleanup.
+	re.Positive(counterValue(re, gmc.prechargeCounter))
+	re.Positive(counterValue(re, gmc.actualBytesCounter))
+	re.Positive(counterValue(re, gmc.nonprechargeCounter))
+
+	gmc.deletePagingLabels(name)
+
+	// After cleanup, refetching each Vec with the same label must yield a
+	// fresh zero-valued series. Covers every counter declared in
+	// initMetrics so a forgotten DeleteLabelValues in deletePagingLabels
+	// surfaces here. Histogram Vecs share the same Delete semantics on
+	// the Vec interface, so counter coverage transitively validates them.
+	for _, vec := range []*prometheus.CounterVec{
+		metrics.PagingPrechargeCounter,
+		metrics.PagingNonprechargeCounter,
+		metrics.PagingPrechargeBytesCounter,
+		metrics.PagingActualBytesCounter,
+		metrics.PagingNonprechargeActualBytes,
+		metrics.PagingPrechargeRU,
+		metrics.PagingSettlementRU,
+	} {
+		re.Zero(counterValue(re, vec.WithLabelValues(name)),
+			"paging counter series for %q should be cleared by deletePagingLabels", name)
+	}
 }
 
 func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
