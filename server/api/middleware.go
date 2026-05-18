@@ -17,7 +17,6 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -79,15 +78,28 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 type clusterMiddleware struct {
-	s  *server.Server
-	rd *render.Render
+	s                         *server.Server
+	rd                        *render.Render
+	allowFollowerSyncedRegion bool
 }
 
-func newClusterMiddleware(s *server.Server) clusterMiddleware {
-	return clusterMiddleware{
+type clusterMiddlewareOption func(*clusterMiddleware)
+
+func withFollowerSyncedRegion() clusterMiddlewareOption {
+	return func(m *clusterMiddleware) {
+		m.allowFollowerSyncedRegion = true
+	}
+}
+
+func newClusterMiddleware(s *server.Server, opts ...clusterMiddlewareOption) clusterMiddleware {
+	m := clusterMiddleware{
 		s:  s,
 		rd: render.New(render.Options{IndentJSON: true}),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
+	return m
 }
 
 func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
@@ -108,7 +120,7 @@ func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.RaftCluster {
 	if r.Method != http.MethodGet ||
 		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" ||
-		!isFollowerSyncedRegionPath(r.URL.Path) ||
+		!m.allowFollowerSyncedRegion ||
 		m.s.GetMember().IsServing() {
 		return nil
 	}
@@ -117,47 +129,6 @@ func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.Ra
 		return nil
 	}
 	return rc
-}
-
-func isFollowerSyncedRegionPath(path string) bool {
-	switch {
-	// Only allow read-only APIs whose responses are fully backed by the
-	// region cache synchronized to followers.
-	case path == "/pd/api/v1/regions",
-		path == "/pd/api/v1/regions/key",
-		path == "/pd/api/v1/regions/count",
-		path == "/pd/api/v1/regions/check/hist-size",
-		path == "/pd/api/v1/regions/check/hist-keys",
-		path == "/pd/api/v1/regions/range-holes",
-		path == "/pd/api/v1/regions/writeflow",
-		path == "/pd/api/v1/regions/writequery",
-		path == "/pd/api/v1/regions/readflow",
-		path == "/pd/api/v1/regions/readquery",
-		path == "/pd/api/v1/regions/confver",
-		path == "/pd/api/v1/regions/version",
-		path == "/pd/api/v1/regions/size",
-		path == "/pd/api/v1/regions/keys",
-		path == "/pd/api/v1/regions/cpu":
-		return true
-	// Keep the dynamic routes to the exact resource shape registered in
-	// router.go. Other subpaths under these prefixes, such as
-	// /region/id/{id}/labels, need leader-side data and should keep being
-	// forwarded to the leader. /region/key/{key} is matched by prefix because
-	// the encoded key itself may contain slashes.
-	case hasSinglePathValue(path, "/pd/api/v1/region/id/"),
-		strings.HasPrefix(path, "/pd/api/v1/region/key/"),
-		hasSinglePathValue(path, "/pd/api/v1/regions/store/"),
-		hasSinglePathValue(path, "/pd/api/v1/regions/keyspace/id/"),
-		hasSinglePathValue(path, "/pd/api/v1/regions/sibling/"):
-		return true
-	default:
-		return false
-	}
-}
-
-func hasSinglePathValue(path, prefix string) bool {
-	value, ok := strings.CutPrefix(path, prefix)
-	return ok && value != "" && !strings.Contains(value, "/")
 }
 
 type clusterCtxKey struct{}
