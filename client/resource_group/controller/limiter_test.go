@@ -173,6 +173,49 @@ func TestRefundTokens(t *testing.T) {
 	checkTokens(re, limUnlimited, t0, 100)
 }
 
+func TestRefundTokensWakesAcquireRetry(t *testing.T) {
+	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	// fillRate=0 means no natural recovery; acquireTokens retries can only
+	// proceed when RefundTokens (or Reconfigure) explicitly wakes them.
+	lim := NewLimiter(t0, 0, 0, 100, nc)
+
+	ch := lim.GetReconfiguredCh()
+	select {
+	case <-ch:
+		re.Fail("reconfiguredCh should not be closed before RefundTokens")
+	default:
+	}
+
+	lim.RefundTokens(t0, 50)
+
+	select {
+	case <-ch:
+		// expected: refund closes the old channel
+	case <-time.After(100 * time.Millisecond):
+		re.Fail("RefundTokens must close the existing reconfiguredCh to wake acquireTokens retries")
+	}
+
+	// A fresh reconfiguredCh is now in place, distinct and still open.
+	ch2 := lim.GetReconfiguredCh()
+	re.NotSame(&ch, &ch2)
+	select {
+	case <-ch2:
+		re.Fail("recreated reconfiguredCh should be open after RefundTokens")
+	default:
+	}
+
+	// Burstable (burst < 0) is a no-op for refunds; no wake should fire.
+	limUnlimited := NewLimiter(t0, 0, -1, 100, nc)
+	chU := limUnlimited.GetReconfiguredCh()
+	limUnlimited.RefundTokens(t0, 50)
+	select {
+	case <-chU:
+		re.Fail("RefundTokens on burstable limiter must not close reconfiguredCh")
+	default:
+	}
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)
