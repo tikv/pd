@@ -56,6 +56,12 @@ type RequestInfo interface {
 	// pre-charge in BeforeKVRequest and settled symmetrically in
 	// AfterKVRequest. Return 0 to opt out; writes always return 0.
 	PredictedReadBytes() uint64
+	// IsCop reports whether this request targets the coprocessor endpoint
+	// (CmdCop / CmdCopStream). Only coprocessor reads participate in the
+	// paging_* accounting; point gets, batch gets, scans and other
+	// bounded-size reads bypass the paging metrics even though they may
+	// reach this controller through the same RC interceptor.
+	IsCop() bool
 }
 
 // estimatedReadBytes returns the predicted read-bytes hint for read requests.

@@ -660,7 +660,7 @@ func (gc *groupCostController) onResponseImpl(
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
 			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-	} else if !req.IsWrite() {
+	} else if !req.IsWrite() && req.IsCop() {
 		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
 	}
 	if !gc.burstable.Load() {
@@ -698,7 +698,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
 			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-	} else if !req.IsWrite() {
+	} else if !req.IsWrite() && req.IsCop() {
 		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
 	}
 	var waitDuration time.Duration
