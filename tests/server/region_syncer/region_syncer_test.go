@@ -16,6 +16,8 @@ package syncer_test
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -220,15 +222,20 @@ func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
 	re.NoError(rc.HandleRegionHeartbeat(region))
 	waitRegionSynced(re, followerServer, region)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail", `return("`+followerName+`")`))
-	sendFailEnabled := true
+	var sendFailInjected atomic.Bool
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail",
+		func(name string, err *error) {
+			if name == followerName && sendFailInjected.CompareAndSwap(false, true) {
+				*err = errors.New("injected region sync send failure")
+			}
+		},
+	))
 	defer func() {
-		if sendFailEnabled {
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail"))
-		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail"))
 	}()
 	failedRegion := region.Clone(core.WithIncVersion(), core.SetWrittenBytes(100))
 	re.NoError(rc.HandleRegionHeartbeat(failedRegion))
+	testutil.Eventually(re, sendFailInjected.Load)
 
 	testutil.Eventually(re, func() bool {
 		for _, name := range rc.GetRegionSyncer().GetAllDownstreamNames() {
@@ -238,8 +245,6 @@ func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
 		}
 		return true
 	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail"))
-	sendFailEnabled = false
 
 	re.True(cluster.WaitRegionSyncerClientsReady(2))
 	testutil.Eventually(re, followerSyncer.IsRunning)
