@@ -243,14 +243,17 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 		if err != nil {
 			return err
 		}
-		syncStream := s.bindStream(request.GetMember().GetName(), stream)
-		defer s.unbindStream(request.GetMember().GetName(), syncStream)
+		name := request.GetMember().GetName()
+		syncStream := s.bindStream(name, stream)
 		select {
 		case <-ctx.Done():
+			s.unbindStream(name, syncStream)
 			return status.Error(codes.Unavailable, "region syncer stopped")
 		case <-stream.Context().Done():
+			s.unbindStream(name, syncStream)
 			return nil
 		case <-syncStream.done:
+			s.unbindStream(name, syncStream)
 			return status.Error(codes.Unavailable, "region syncer stream closed")
 		}
 	}
