@@ -417,6 +417,32 @@ func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
 		"failed read with paging hint should refund ReadBytesCost*predicted")
 }
 
+func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	// Reads without a paging hint reach onResponseImpl through the same RC
+	// interceptor regardless of cmd type (CmdGet, CmdBatchGet, CmdCop, ...).
+	// Only IsCop()==true requests should land in paging_nonprecharge_*; the
+	// rest must be ignored so the metric keeps its "paging cold-start"
+	// semantics.
+	resp := &TestResponseInfo{readBytes: 1024, succeed: true}
+	nonCop := &TestRequestInfo{isWrite: false, isCop: false}
+	cop := &TestRequestInfo{isWrite: false, isCop: true}
+
+	before := counterValue(re, gc.metrics.nonprechargeCounter)
+
+	_, err := gc.onResponseImpl(nonCop, resp)
+	re.NoError(err)
+	re.InDelta(before, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+		"non-cop reads must not increment paging_nonprecharge_*")
+
+	_, err = gc.onResponseImpl(cop, resp)
+	re.NoError(err)
+	re.InDelta(before+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+		"cop reads without a hint must increment paging_nonprecharge_*")
+}
+
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()

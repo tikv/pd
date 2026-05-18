@@ -28,6 +28,7 @@ type TestRequestInfo struct {
 	storeID            uint64
 	accessType         AccessLocationType
 	predictedReadBytes uint64
+	isCop              bool
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
@@ -74,6 +75,11 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 // PredictedReadBytes implements the RequestInfo interface.
 func (tri *TestRequestInfo) PredictedReadBytes() uint64 {
 	return tri.predictedReadBytes
+}
+
+// IsCop implements the RequestInfo interface.
+func (tri *TestRequestInfo) IsCop() bool {
+	return tri.isCop
 }
 
 // TestResponseInfo is used to test the response info interface.
