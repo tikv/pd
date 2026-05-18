@@ -187,6 +187,81 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/syncRegionChannelFull"))
 }
 
+func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
+	}()
+
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	followerName := cluster.GetFollower()
+	re.NotEmpty(followerName)
+	followerServer := cluster.GetServer(followerName)
+	re.NotNil(followerServer)
+	followerSyncer := followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer()
+	testutil.Eventually(re, followerSyncer.IsRunning)
+
+	rc := leaderServer.GetServer().GetRaftCluster()
+	region := tests.InitRegions(1)[0]
+	re.NoError(rc.HandleRegionHeartbeat(region))
+	waitRegionSynced(re, followerServer, region)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail", `return("`+followerName+`")`))
+	sendFailEnabled := true
+	defer func() {
+		if sendFailEnabled {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail"))
+		}
+	}()
+	failedRegion := region.Clone(core.WithIncVersion(), core.SetWrittenBytes(100))
+	re.NoError(rc.HandleRegionHeartbeat(failedRegion))
+
+	testutil.Eventually(re, func() bool {
+		for _, name := range rc.GetRegionSyncer().GetAllDownstreamNames() {
+			if name == followerName {
+				return false
+			}
+		}
+		return true
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/regionSyncerSendFail"))
+	sendFailEnabled = false
+
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+	testutil.Eventually(re, followerSyncer.IsRunning)
+	waitRegionSynced(re, followerServer, failedRegion)
+
+	nextRegion := failedRegion.Clone(core.WithIncVersion(), core.SetWrittenBytes(200))
+	re.NoError(rc.HandleRegionHeartbeat(nextRegion))
+	waitRegionSynced(re, followerServer, nextRegion)
+}
+
+func waitRegionSynced(re *require.Assertions, followerServer *tests.TestServer, region *core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+		if r == nil {
+			return false
+		}
+		return region.GetMeta().String() == r.GetMeta().String() &&
+			region.GetStat().String() == r.GetStat().String() &&
+			region.GetLeader().String() == r.GetLeader().String()
+	})
+}
+
 func TestFullSyncWithAddMember(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -477,6 +477,15 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 	sender *regionSyncStream,
 	regions *pdpb.SyncRegionResponse,
 ) bool {
+	failpoint.Inject("regionSyncerSendFail", func(val failpoint.Value) {
+		if targetName, ok := val.(string); ok && targetName == name {
+			err := errors.New("injected region sync send failure")
+			log.Warn("region syncer send data meet error", zap.String("name", name),
+				errs.ZapError(errs.ErrGRPCSend, err))
+			failpoint.Return(false)
+		}
+	})
+
 	resultCh := make(chan error, 1)
 	go func() {
 		resultCh <- sender.stream.Send(regions)
