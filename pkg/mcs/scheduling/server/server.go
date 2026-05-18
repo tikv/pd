@@ -520,28 +520,40 @@ func (s *Server) startCluster(ctx context.Context) error {
 	}
 	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
 	cluster, err := NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	am := cluster.GetAffinityManager()
 	defer func() {
-		// make sure the cluster is stopped if any error occurs
-		// if StopBackgroundJobs return false, it means the cluster is not running, so we need to close the context make the
-		// other goroutines exit.
-		if cluster != nil {
-			cluster.StopBackgroundJobs()
+		if cluster == nil {
+			return
 		}
+		// make sure cancel context done when some initialization step failed, to avoid goroutine leak in cluster.
+		if stopped := cluster.StopBackgroundJobs(); !stopped {
+			if cluster.cancel != nil {
+				cluster.cancel()
+				cluster.cancel = nil
+			}
+		}
+		// clean new sources
 		if hbStreams != nil {
 			hbStreams.Close()
+			hbStreams = nil
 		}
 		if configWatcher != nil {
 			configWatcher.Close()
+			configWatcher = nil
 		}
 		if metaWatcher != nil {
 			metaWatcher.Close()
+			metaWatcher = nil
 		}
 		if ruleWatcher != nil {
 			ruleWatcher.Close()
+			ruleWatcher = nil
 		}
 		if affinityWatcher != nil {
 			affinityWatcher.Close()
+			affinityWatcher = nil
 		}
+		storage.Close()
 
 	}()
 	if err != nil {
@@ -554,7 +566,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	affinityWatcher, err = affinity.NewWatcher(ctx, s.GetClient(), cluster.GetAffinityManager())
+	affinityWatcher, err = affinity.NewWatcher(ctx, s.GetClient(), am)
 	if err != nil {
 		return err
 	}
