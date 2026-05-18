@@ -121,6 +121,8 @@ func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.Ra
 
 func isFollowerSyncedRegionPath(path string) bool {
 	switch {
+	// Only allow read-only APIs whose responses are fully backed by the
+	// region cache synchronized to followers.
 	case path == "/pd/api/v1/regions",
 		path == "/pd/api/v1/regions/key",
 		path == "/pd/api/v1/regions/count",
@@ -137,6 +139,11 @@ func isFollowerSyncedRegionPath(path string) bool {
 		path == "/pd/api/v1/regions/keys",
 		path == "/pd/api/v1/regions/cpu":
 		return true
+	// Keep the dynamic routes to the exact resource shape registered in
+	// router.go. Other subpaths under these prefixes, such as
+	// /region/id/{id}/labels, need leader-side data and should keep being
+	// forwarded to the leader. /region/key/{key} is matched by prefix because
+	// the encoded key itself may contain slashes.
 	case hasSinglePathValue(path, "/pd/api/v1/region/id/"),
 		strings.HasPrefix(path, "/pd/api/v1/region/key/"),
 		hasSinglePathValue(path, "/pd/api/v1/regions/store/"),
