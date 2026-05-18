@@ -795,10 +795,10 @@ func metricValue(t *testing.T, metric prometheus.Metric) float64 {
 	pb := &dto.Metric{}
 	require.NoError(t, metric.Write(pb))
 	switch {
-	case pb.Gauge != nil:
-		return pb.Gauge.GetValue()
-	case pb.Counter != nil:
-		return pb.Counter.GetValue()
+	case pb.GetGauge() != nil:
+		return pb.GetGauge().GetValue()
+	case pb.GetCounter() != nil:
+		return pb.GetCounter().GetValue()
 	default:
 		require.FailNow(t, "metric has no gauge or counter")
 		return 0
