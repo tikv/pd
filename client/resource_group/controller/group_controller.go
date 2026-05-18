@@ -754,6 +754,32 @@ func (gc *groupCostController) onResponseWaitImpl(
 	return delta, waitDuration, nil
 }
 
+// onRequestCancelImpl undoes onRequestWaitImpl's pre-charge when the RPC
+// fails before producing any response. It recomputes the BeforeKVRequest
+// delta with the same RequestInfo and the same calculators, then subtracts
+// that delta from per-group consumption and refunds the corresponding
+// tokens to the limiter so speculatively reserved RU is not lost.
+//
+// The per-store snapshot maintained by onRequestWaitImpl is intentionally
+// not rolled back — it is bookkeeping for penalty distribution and will be
+// overwritten by the next OnRequestWait against the same store.
+func (gc *groupCostController) onRequestCancelImpl(info RequestInfo) {
+	delta := &rmpb.Consumption{}
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(delta, info)
+	}
+
+	gc.mu.Lock()
+	sub(gc.mu.consumption, delta)
+	gc.mu.Unlock()
+
+	if !gc.burstable.Load() {
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), v)
+		}
+	}
+}
+
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
