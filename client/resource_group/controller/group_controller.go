@@ -167,6 +167,10 @@ func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64,
 	gmc.settlementRUDelta.Observe(vDelta)
 }
 
+// observePagingNonprecharge counts a coprocessor RPC whose EMA produced no hint
+// (cold-start). Callers must gate the call on RequestInfo.IsCop() && !IsWrite()
+// so the metric stays scoped to coprocessor reads and excludes point gets,
+// batch gets, scans, and other bounded-size reads.
 func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
 	gmc.nonprechargeCounter.Inc()
 	gmc.nonprechargeActualBytes.Add(float64(actual))
