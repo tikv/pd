@@ -54,25 +54,37 @@ var (
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 
-	// PagingPrechargeCounter counts paging read requests that triggered pre-charge (hint > 0).
+	// PagingPrechargeCounter counts coprocessor RPCs that triggered RC paging pre-charge
+	// (PredictedReadBytes hint > 0). Self-gated to coprocessor reads because non-cop callers
+	// never set the hint.
 	PagingPrechargeCounter *prometheus.CounterVec
-	// PagingNonprechargeCounter counts paging read requests that skipped pre-charge (hint absent or zero).
+	// PagingNonprechargeCounter counts coprocessor RPCs that reached the RC interceptor
+	// without a PredictedReadBytes hint (EMA cold-start). Explicitly gated by
+	// RequestInfo.IsCop() so non-cop reads (CmdGet, CmdBatchGet, CmdScan, internal lookups)
+	// do not pollute the metric.
 	PagingNonprechargeCounter *prometheus.CounterVec
 
-	// PagingPrechargeBytesCounter accumulates bytes used as the pre-charge basis (sum of predicted hints).
+	// PagingPrechargeBytesCounter accumulates bytes used as the RC paging pre-charge basis
+	// (sum of predicted hints from coprocessor RPCs).
 	PagingPrechargeBytesCounter *prometheus.CounterVec
-	// PagingActualBytesCounter accumulates actual bytes read by pre-charged paging requests.
+	// PagingActualBytesCounter accumulates actual bytes read by pre-charged coprocessor RPCs.
 	PagingActualBytesCounter *prometheus.CounterVec
-	// PagingNonprechargeActualBytes accumulates actual bytes read by paging requests that skipped pre-charge.
+	// PagingNonprechargeActualBytes accumulates actual bytes read by coprocessor RPCs that
+	// reached the RC interceptor without a hint (EMA cold-start). Same IsCop() gating as
+	// PagingNonprechargeCounter.
 	PagingNonprechargeActualBytes *prometheus.CounterVec
-	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read bytes for pre-charged requests.
+	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read
+	// bytes for pre-charged coprocessor RPCs.
 	PagingPredictionResidualBytes *prometheus.HistogramVec
 
-	// PagingPrechargeRU accumulates RU pre-acquired at BeforeKVRequest for pre-charged paging read requests.
+	// PagingPrechargeRU accumulates RU pre-acquired at BeforeKVRequest for pre-charged
+	// coprocessor RPCs.
 	PagingPrechargeRU *prometheus.CounterVec
-	// PagingSettlementRU accumulates total RU finally consumed by pre-charged paging read requests (base + CPU + bytes cost).
+	// PagingSettlementRU accumulates total RU finally consumed by pre-charged coprocessor RPCs
+	// (base + CPU + bytes cost).
 	PagingSettlementRU *prometheus.CounterVec
-	// PagingSettlementRUDelta records the distribution of per-RPC signed RU delta (settlement_ru - precharge_ru) for pre-charged paging read requests.
+	// PagingSettlementRUDelta records the distribution of per-RPC signed RU delta
+	// (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs.
 	PagingSettlementRUDelta *prometheus.HistogramVec
 )
 
@@ -183,7 +195,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_precharge_total",
-			Help:        "Counter of RC paging pre-charge events (PredictedReadBytes hint present and > 0).",
+			Help:        "Counter of coprocessor RPCs that triggered RC paging pre-charge (PredictedReadBytes hint > 0).",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -192,7 +204,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_total",
-			Help:        "Counter of paging read RPCs where no PredictedReadBytes hint was provided (hint absent or zero). These RPCs skip pre-charge and settle entirely on actual read bytes at response time.",
+			Help:        "Counter of coprocessor RPCs that reached the RC interceptor without a PredictedReadBytes hint (EMA cold-start). Gated on RequestInfo.IsCop() so non-cop reads do not inflate the metric. These RPCs skip pre-charge and settle on actual read bytes only.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -201,7 +213,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_precharge_bytes_total",
-			Help:        "Sum of bytes used as the RC paging pre-charge basis (predicted hint).",
+			Help:        "Sum of bytes used as the RC paging pre-charge basis (predicted hint from coprocessor RPCs).",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -210,7 +222,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging KV requests that were pre-charged.",
+			Help:        "Sum of actual bytes read by pre-charged coprocessor RPCs.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -219,7 +231,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_nonprecharge_actual_bytes_total",
-			Help:        "Sum of actual bytes read by paging RPCs that skipped pre-charge (hint absent or zero). Quantifies read volume settled without pre-charge throttling.",
+			Help:        "Sum of actual bytes read by coprocessor RPCs that reached the RC interceptor without a hint (EMA cold-start; IsCop()-gated). Quantifies read volume settled without pre-charge throttling.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -234,7 +246,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			// leave the prediction above actual. Factor-4 spacing keeps
 			// resolution near zero.
 			Buckets: []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
-			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged paging requests. Shows predictor accuracy.",
+			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Shows predictor accuracy.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -243,7 +255,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_precharge_ru_total",
-			Help:        "Sum of RU pre-acquired at BeforeKVRequest for pre-charged paging read requests (read base cost + ReadBytesCost * predicted_bytes).",
+			Help:        "Sum of RU pre-acquired at BeforeKVRequest for pre-charged coprocessor RPCs (read base cost + ReadBytesCost * predicted_bytes).",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -252,7 +264,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "paging_settlement_ru_total",
-			Help:        "Sum of total RU finally consumed by pre-charged paging read requests (read base cost + CPUMsCost * kv_cpu_ms + ReadBytesCost * actual_bytes). Equals precharge_ru + settlement_ru_delta.",
+			Help:        "Sum of total RU finally consumed by pre-charged coprocessor RPCs (read base cost + CPUMsCost * kv_cpu_ms + ReadBytesCost * actual_bytes). Equals precharge_ru + settlement_ru_delta.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -265,7 +277,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			// Negative => flows through RefundTokens; positive => flows through RemoveTokens / acquireTokens.
 			// Factor-4 spacing over ±1024 RU covers CPU (±tens of RU) plus bytes residuals up to ±64MB.
 			Buckets:     []float64{-1024, -256, -64, -16, -4, -1, -0.25, -0.0625, 0, 0.0625, 0.25, 1, 4, 16, 64, 256, 1024},
-			Help:        "Per-RPC signed settlement RU delta (settlement_ru - precharge_ru) for pre-charged paging read requests. Negative means refund, positive means extra debit.",
+			Help:        "Per-RPC signed settlement RU delta (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs. Negative means refund, positive means extra debit.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 }
