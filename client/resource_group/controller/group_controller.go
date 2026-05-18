@@ -148,6 +148,23 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 	}
 }
 
+// deletePagingLabels removes the per-resource-group paging_* metric series
+// when the group is being deleted or tombstoned, so stale label series do
+// not linger in Prometheus until the process restarts. Keep this list in
+// sync with initMetrics — adding a paging metric there must be paired
+// with a deletion here.
+func (gmc *groupMetricsCollection) deletePagingLabels(name string) {
+	metrics.PagingPrechargeCounter.DeleteLabelValues(name)
+	metrics.PagingNonprechargeCounter.DeleteLabelValues(name)
+	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
+	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
+	metrics.PagingNonprechargeActualBytes.DeleteLabelValues(name)
+	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
+	metrics.PagingPrechargeRU.DeleteLabelValues(name)
+	metrics.PagingSettlementRU.DeleteLabelValues(name)
+	metrics.PagingSettlementRUDelta.DeleteLabelValues(name)
+}
+
 // observePagingPrecharge requires bytesForEst > 0.
 // prechargeRU is the total RU pre-acquired at BeforeKVRequest
 // (base + ReadBytesCost * bytesForEst).
