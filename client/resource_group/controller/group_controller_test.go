@@ -377,6 +377,52 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 		"onResponseImpl should refund excess pre-charged tokens")
 }
 
+func TestOnRequestCancelRefundsPreCharge(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   100000,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+	tokensBefore := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+	gc.mu.Lock()
+	consumptionBefore := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MiB pre-charge
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+		isCop:              true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPrecharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+	gc.mu.Lock()
+	consumptionAfterPrecharge := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+	re.Less(tokensAfterPrecharge, tokensBefore, "sanity: precharge debited the bucket")
+	re.Greater(consumptionAfterPrecharge, consumptionBefore, "sanity: precharge added to consumption")
+
+	// Simulate transport-level RPC failure: no response was produced, so the
+	// settlement path never runs. OnRequestCancel must roll back the
+	// speculative debit.
+	gc.onRequestCancelImpl(req)
+
+	tokensAfterCancel := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+	gc.mu.Lock()
+	consumptionAfterCancel := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+
+	re.InDelta(tokensBefore, tokensAfterCancel, 1.0,
+		"OnRequestCancel must refund every pre-charged token")
+	re.InDelta(consumptionBefore, consumptionAfterCancel, 1e-6,
+		"OnRequestCancel must reverse the consumption recorded by OnRequestWait")
+}
+
 func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
