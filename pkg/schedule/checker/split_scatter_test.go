@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -62,7 +62,7 @@ func TestNewSplitScatterControllerResetsPendingGauge(t *testing.T) {
 	defer cleanup()
 
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
 }
 
 func TestRecordSplitScatterBatchCollectsPendingRegions(t *testing.T) {
@@ -72,7 +72,7 @@ func TestRecordSplitScatterBatchCollectsPendingRegions(t *testing.T) {
 
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101, 102, 103})
 	re.Equal(4, splitScatterPendingCount(controller))
-	re.Equal(float64(4), metricValue(t, splitScatterPendingGauge))
+	re.Equal(float64(4), promtestutil.ToFloat64(splitScatterPendingGauge))
 
 	sourceGroup := splitScatterPendingGroup(t, controller, 100)
 	for _, regionID := range []uint64{101, 102, 103} {
@@ -194,12 +194,12 @@ func TestRecordSplitScatterBatchSkipsWhenDisabled(t *testing.T) {
 
 	tc.SetSplitScatterScheduleLimit(0)
 
-	droppedBefore := metricValue(t, splitScatterPendingDroppedCounter)
+	droppedBefore := promtestutil.ToFloat64(splitScatterPendingDroppedCounter)
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101, 102})
 
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingDroppedCounter)-droppedBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingDroppedCounter)-droppedBefore)
 }
 
 func TestDispatchSplitScatterClearsPendingWhenDisabled(t *testing.T) {
@@ -211,13 +211,13 @@ func TestDispatchSplitScatterClearsPendingWhenDisabled(t *testing.T) {
 	re.Equal(3, splitScatterPendingCount(controller))
 
 	tc.SetSplitScatterScheduleLimit(0)
-	disabledBefore := metricValue(t, splitScatterDispatchDisabledCounter)
+	disabledBefore := promtestutil.ToFloat64(splitScatterDispatchDisabledCounter)
 	controller.dispatchSplitScatterRegions()
 
 	re.Empty(oc.GetOperators())
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchDisabledCounter)-disabledBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchDisabledCounter)-disabledBefore)
 }
 
 func TestDispatchSplitScatterCleansExpiredPendingBeforeEarlyReturn(t *testing.T) {
@@ -261,14 +261,14 @@ func TestDispatchSplitScatterCleansExpiredPendingBeforeEarlyReturn(t *testing.T)
 			expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
 			testCase.setupEarlyReturn(tc, oc)
 
-			expiredBefore := splitScatterPendingExpiredCount(t, "false")
-			counterBefore := metricValue(t, testCase.counter)
+			expiredBefore := splitScatterPendingExpiredCount("false")
+			counterBefore := promtestutil.ToFloat64(testCase.counter)
 			controller.dispatchSplitScatterRegions()
 
 			re.Equal(0, splitScatterPendingCount(controller))
-			re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-			re.Equal(float64(2), splitScatterPendingExpiredCount(t, "false")-expiredBefore)
-			re.Equal(float64(0), metricValue(t, testCase.counter)-counterBefore)
+			re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+			re.Equal(float64(2), splitScatterPendingExpiredCount("false")-expiredBefore)
+			re.Equal(float64(0), promtestutil.ToFloat64(testCase.counter)-counterBefore)
 		})
 	}
 }
@@ -280,15 +280,15 @@ func TestCollectTopPendingDelaysMissingRegions(t *testing.T) {
 
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
 
-	missingBefore := metricValue(t, splitScatterDispatchRegionMissingCounter)
+	missingBefore := promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchRegionMissingCounter)-missingBefore)
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)-missingBefore)
 	pending := splitScatterPending(t, controller, 101)
 	re.True(pending.retryAt.After(time.Now()))
 
 	re.Empty(controller.collectTopPendingSplitScatter(2))
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchRegionMissingCounter)-missingBefore)
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)-missingBefore)
 }
 
 func TestDispatchSplitScatterBacksOffWhenNoCandidates(t *testing.T) {
@@ -331,12 +331,12 @@ func TestDispatchSplitScatterRespectsScheduleDeny(t *testing.T) {
 		Data:     []any{map[string]any{"start_key": "", "end_key": ""}},
 	}))
 
-	counterBefore := metricValue(t, splitScatterDispatchScheduleDisabledCounter)
+	counterBefore := promtestutil.ToFloat64(splitScatterDispatchScheduleDisabledCounter)
 	controller.dispatchSplitScatterRegions()
 
 	re.Empty(oc.GetOperators())
 	re.Equal(2, splitScatterPendingCount(controller))
-	re.Equal(float64(2), metricValue(t, splitScatterDispatchScheduleDisabledCounter)-counterBefore)
+	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterDispatchScheduleDisabledCounter)-counterBefore)
 	for _, regionID := range []uint64{100, 101} {
 		pending := splitScatterPending(t, controller, regionID)
 		re.True(pending.retryAt.After(time.Now()))
@@ -352,11 +352,11 @@ func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
 	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
 	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
 
-	expiredBefore := splitScatterPendingExpiredCount(t, "false")
+	expiredBefore := splitScatterPendingExpiredCount("false")
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(2), splitScatterPendingExpiredCount(t, "false")-expiredBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(2), splitScatterPendingExpiredCount("false")-expiredBefore)
 }
 
 func TestCollectTopPendingMarksAttemptedBeforeExpiration(t *testing.T) {
@@ -368,17 +368,17 @@ func TestCollectTopPendingMarksAttemptedBeforeExpiration(t *testing.T) {
 	putSplitScatterRegion(tc, 101, "m", "", splitScatterReportedCPUUsage)
 	advanceSplitScatterSourceVersion(t, tc)
 
-	attemptedBefore := splitScatterPendingExpiredCount(t, "true")
-	unattemptedBefore := splitScatterPendingExpiredCount(t, "false")
+	attemptedBefore := splitScatterPendingExpiredCount("true")
+	unattemptedBefore := splitScatterPendingExpiredCount("false")
 	re.Len(controller.collectTopPendingSplitScatter(1), 1)
 	expireSplitScatterPendingAt(t, controller, 100, time.Now().Add(-time.Second))
 	expireSplitScatterPendingAt(t, controller, 101, time.Now().Add(-time.Second))
 
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(1), splitScatterPendingExpiredCount(t, "true")-attemptedBefore)
-	re.Equal(float64(1), splitScatterPendingExpiredCount(t, "false")-unattemptedBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(1), splitScatterPendingExpiredCount("true")-attemptedBefore)
+	re.Equal(float64(1), splitScatterPendingExpiredCount("false")-unattemptedBefore)
 }
 
 func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
@@ -388,11 +388,11 @@ func TestRecordSplitScatterBatchRespectsPendingLimit(t *testing.T) {
 
 	fillSplitScatterPending(controller, time.Time{})
 
-	droppedBefore := metricValue(t, splitScatterPendingDroppedCounter)
+	droppedBefore := promtestutil.ToFloat64(splitScatterPendingDroppedCounter)
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
 
 	re.Equal(splitScatterPendingLimit, splitScatterPendingCount(controller))
-	re.Equal(float64(2), metricValue(t, splitScatterPendingDroppedCounter)-droppedBefore)
+	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterPendingDroppedCounter)-droppedBefore)
 	controller.splitScatter.pendingMu.RLock()
 	_, sourceExists := controller.splitScatter.pending[100]
 	_, childExists := controller.splitScatter.pending[101]
@@ -790,24 +790,8 @@ func splitScatterPendingCount(controller *Controller) int {
 	return len(controller.splitScatter.pending)
 }
 
-func metricValue(t *testing.T, metric prometheus.Metric) float64 {
-	t.Helper()
-	pb := &dto.Metric{}
-	require.NoError(t, metric.Write(pb))
-	switch {
-	case pb.GetGauge() != nil:
-		return pb.GetGauge().GetValue()
-	case pb.GetCounter() != nil:
-		return pb.GetCounter().GetValue()
-	default:
-		require.FailNow(t, "metric has no gauge or counter")
-		return 0
-	}
-}
-
-func splitScatterPendingExpiredCount(t *testing.T, attempted string) float64 {
-	t.Helper()
-	return metricValue(t, splitScatterPendingExpiredCounter.WithLabelValues(attempted))
+func splitScatterPendingExpiredCount(attempted string) float64 {
+	return promtestutil.ToFloat64(splitScatterPendingExpiredCounter.WithLabelValues(attempted))
 }
 
 func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uint64) string {
