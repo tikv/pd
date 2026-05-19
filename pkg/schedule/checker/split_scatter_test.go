@@ -62,7 +62,7 @@ func TestNewSplitScatterControllerResetsPendingGauge(t *testing.T) {
 	defer cleanup()
 
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
 }
 
 func TestRecordSplitScatterBatchCollectsPendingRegions(t *testing.T) {
@@ -198,12 +198,12 @@ func TestRecordSplitScatterBatchSkipsWhenDisabled(t *testing.T) {
 
 	tc.SetSplitScatterScheduleLimit(0)
 
-	droppedBefore := metricValue(t, splitScatterPendingDroppedCounter)
+	droppedBefore := promtestutil.ToFloat64(splitScatterPendingDroppedCounter)
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101, 102})
 
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingDroppedCounter)-droppedBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingDroppedCounter)-droppedBefore)
 }
 
 func TestDispatchSplitScatterClearsPendingWhenDisabled(t *testing.T) {
@@ -215,13 +215,13 @@ func TestDispatchSplitScatterClearsPendingWhenDisabled(t *testing.T) {
 	re.Equal(3, splitScatterPendingCount(controller))
 
 	tc.SetSplitScatterScheduleLimit(0)
-	disabledBefore := metricValue(t, splitScatterDispatchDisabledCounter)
+	disabledBefore := promtestutil.ToFloat64(splitScatterDispatchDisabledCounter)
 	controller.dispatchSplitScatterRegions()
 
 	re.Empty(oc.GetOperators())
 	re.Equal(0, splitScatterPendingCount(controller))
-	re.Equal(float64(0), metricValue(t, splitScatterPendingGauge))
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchDisabledCounter)-disabledBefore)
+	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchDisabledCounter)-disabledBefore)
 }
 
 func TestDispatchSplitScatterCleansExpiredPendingBeforeEarlyReturn(t *testing.T) {
@@ -284,15 +284,15 @@ func TestCollectTopPendingDelaysMissingRegions(t *testing.T) {
 
 	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
 
-	missingBefore := metricValue(t, splitScatterDispatchRegionMissingCounter)
+	missingBefore := promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchRegionMissingCounter)-missingBefore)
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)-missingBefore)
 	pending := splitScatterPending(t, controller, 101)
 	re.True(pending.retryAt.After(time.Now()))
 
 	re.Empty(controller.collectTopPendingSplitScatter(2))
-	re.Equal(float64(1), metricValue(t, splitScatterDispatchRegionMissingCounter)-missingBefore)
+	re.Equal(float64(1), promtestutil.ToFloat64(splitScatterDispatchRegionMissingCounter)-missingBefore)
 }
 
 func TestDispatchSplitScatterBacksOffWhenNoCandidates(t *testing.T) {
