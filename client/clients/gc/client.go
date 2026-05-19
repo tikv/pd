@@ -35,6 +35,8 @@ type Client interface {
 }
 
 // GCStatesAPIOptions represents all options for GC states API.
+//
+//nolint:revive
 type GCStatesAPIOptions struct {
 	ExcludeGCBarriers       bool
 	ExcludeGlobalGCBarriers bool
@@ -311,10 +313,14 @@ func NewGCStateWithGCBarriers(keyspaceID uint32, txnSafePoint uint64, gcSafePoin
 	}
 }
 
+// HasGCBarriers returns whether the GCState instance carries GC barriers info. Note that valid GC barriers info
+// can be empty.
 func (s GCState) HasGCBarriers() bool {
 	return s.hasGCBarriers
 }
 
+// GetGCBarriers retrieves GC barriers from the GCState instance, or returns an error if it doesn't carry any GC barrier
+// info.
 func (s GCState) GetGCBarriers() ([]*GCBarrierInfo, error) {
 	if !s.HasGCBarriers() {
 		return nil, errors.New("trying to get GC barriers from GCState that doesn't provide GC barriers info. " +
@@ -349,10 +355,14 @@ func NewClusterGCStatesWithGlobalGCBarriers(gcStates map[uint32]GCState, globalG
 	}
 }
 
+// HasGlobalGCBarriers returns whether the ClusterGCStates instance carries global GC barriers info. Note that valid
+// global GC barriers info can be empty.
 func (s ClusterGCStates) HasGlobalGCBarriers() bool {
 	return s.hasGlobalGCBarriers
 }
 
+// GetGlobalGCBarriers retrieves global GC barriers from the ClusterGCStates instance, or returns an error if it doesn't
+// carry any global GC barrier info.
 func (s ClusterGCStates) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
 	if !s.HasGlobalGCBarriers() {
 		return nil, errors.New("trying to get global GC barriers from ClusterGCStates that doesn't provide global GC barriers info. " +
