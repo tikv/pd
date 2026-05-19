@@ -379,9 +379,6 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceW
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
 	now := time.Now()
-	if c.skipDispatchUntil(now) {
-		return
-	}
 	if c.cleanupExpiredPendingSplitScatter() == 0 {
 		return
 	}
@@ -389,6 +386,9 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 	if limit == 0 {
 		splitScatterDispatchDisabledCounter.Inc()
 		c.clearPendingSplitScatter()
+		return
+	}
+	if c.skipDispatchUntil(now) {
 		return
 	}
 	running := c.opController.OperatorCount(operator.OpSplitScatter)

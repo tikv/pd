@@ -211,6 +211,7 @@ func TestDispatchSplitScatterClearsPendingWhenDisabled(t *testing.T) {
 	re.Equal(3, splitScatterPendingCount(controller))
 
 	tc.SetSplitScatterScheduleLimit(0)
+	setSplitScatterNextDispatchAt(t, controller, time.Now().Add(splitScatterRetryBackoff))
 	disabledBefore := promtestutil.ToFloat64(splitScatterDispatchDisabledCounter)
 	controller.dispatchSplitScatterRegions()
 
