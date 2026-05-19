@@ -605,6 +605,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 
 	affinityManager := tc.GetAffinityManager()
 	checker := newTestAffinityChecker(ctx, tc, opt)
+	re.False(checker.hasAffinityGroups())
 
 	// Create an affinity group with a key range that doesn't include region 1
 	// Region 1 has default key range, so use ["z", "") to exclude it
@@ -615,6 +616,7 @@ func TestAffinityCheckerRegionWithoutGroup(t *testing.T) {
 	}
 	err := createAffinityGroupForTest(affinityManager, group, []byte("z"), []byte(""))
 	re.NoError(err)
+	re.True(checker.hasAffinityGroups())
 
 	// Check should return nil because region 1 is not in the group's key range
 	ops := checker.Check(tc.GetRegion(1))
