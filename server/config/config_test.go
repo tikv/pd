@@ -129,22 +129,23 @@ func TestLeaderLeaseSetPersistAndReload(t *testing.T) {
 }
 
 func TestLeaderLeaseReloadIgnoresNonPositivePersistedValues(t *testing.T) {
-	for _, persistedLease := range []int64{0, -1} {
-		t.Run(fmt.Sprintf("lease-%d", persistedLease), func(t *testing.T) {
-			re := require.New(t)
-			storage := storage.NewStorageWithMemoryBackend()
-			re.NoError(storage.SaveConfig(struct {
-				LeaderLease int64 `json:"lease"`
-			}{LeaderLease: persistedLease}))
+	re := require.New(t)
+	assertReloadKeepsLeaderLeaseForPersistedValue := func(persistedLease int64) {
+		storage := storage.NewStorageWithMemoryBackend()
+		re.NoError(storage.SaveConfig(struct {
+			LeaderLease int64 `json:"lease"`
+		}{LeaderLease: persistedLease}))
 
-			cfg := NewConfig()
-			re.NoError(cfg.Adjust(nil, false))
-			cfg.LeaderLease = 7
-			opt := NewPersistOptions(cfg)
-			re.NoError(opt.Reload(storage))
-			re.Equal(int64(7), opt.GetLeaderLease())
-		})
+		cfg := NewConfig()
+		re.NoError(cfg.Adjust(nil, false))
+		cfg.LeaderLease = 7
+		opt := NewPersistOptions(cfg)
+		re.NoError(opt.Reload(storage))
+		re.Equal(int64(7), opt.GetLeaderLease())
 	}
+
+	assertReloadKeepsLeaderLeaseForPersistedValue(0)
+	assertReloadKeepsLeaderLeaseForPersistedValue(-1)
 }
 
 func TestReloadKeepsCustomLeaderLeaseWhenPersistedConfigMissesLease(t *testing.T) {
@@ -189,45 +190,39 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 		return NewPersistOptions(cfg)
 	}
 
-	t.Run("no persisted config falls back to in-memory", func(_ *testing.T) {
-		st := storage.NewStorageWithMemoryBackend()
-		lease, err := newOpt().LoadPersistedLeaderLease(st)
-		re.NoError(err)
-		re.Equal(inMemoryLease, lease)
-	})
+	st := storage.NewStorageWithMemoryBackend()
+	lease, err := newOpt().LoadPersistedLeaderLease(st)
+	re.NoError(err)
+	re.Equal(inMemoryLease, lease)
 
-	t.Run("valid persisted lease is used", func(_ *testing.T) {
-		st := storage.NewStorageWithMemoryBackend()
-		writer, err := newTestScheduleOption()
-		re.NoError(err)
-		writer.SetLeaderLease(11)
-		re.NoError(writer.Persist(st))
-		lease, err := newOpt().LoadPersistedLeaderLease(st)
-		re.NoError(err)
-		re.Equal(int64(11), lease)
-	})
+	st = storage.NewStorageWithMemoryBackend()
+	writer, err := newTestScheduleOption()
+	re.NoError(err)
+	writer.SetLeaderLease(11)
+	re.NoError(writer.Persist(st))
+	lease, err = newOpt().LoadPersistedLeaderLease(st)
+	re.NoError(err)
+	re.Equal(int64(11), lease)
 
-	t.Run("blob missing lease falls back to in-memory", func(_ *testing.T) {
+	st = storage.NewStorageWithMemoryBackend()
+	re.NoError(st.SaveConfig(struct {
+		Schedule sc.ScheduleConfig `json:"schedule"`
+	}{}))
+	lease, err = newOpt().LoadPersistedLeaderLease(st)
+	re.NoError(err)
+	re.Equal(inMemoryLease, lease)
+
+	assertLoadKeepsLeaderLeaseForPersistedValue := func(persistedLease int64) {
 		st := storage.NewStorageWithMemoryBackend()
 		re.NoError(st.SaveConfig(struct {
-			Schedule sc.ScheduleConfig `json:"schedule"`
-		}{}))
+			LeaderLease int64 `json:"lease"`
+		}{LeaderLease: persistedLease}))
 		lease, err := newOpt().LoadPersistedLeaderLease(st)
 		re.NoError(err)
 		re.Equal(inMemoryLease, lease)
-	})
-
-	for _, persisted := range []int64{0, -1} {
-		t.Run(fmt.Sprintf("non-positive persisted lease %d falls back", persisted), func(_ *testing.T) {
-			st := storage.NewStorageWithMemoryBackend()
-			re.NoError(st.SaveConfig(struct {
-				LeaderLease int64 `json:"lease"`
-			}{LeaderLease: persisted}))
-			lease, err := newOpt().LoadPersistedLeaderLease(st)
-			re.NoError(err)
-			re.Equal(inMemoryLease, lease)
-		})
 	}
+	assertLoadKeepsLeaderLeaseForPersistedValue(0)
+	assertLoadKeepsLeaderLeaseForPersistedValue(-1)
 }
 
 func TestReloadUpgrade(t *testing.T) {
