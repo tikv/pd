@@ -16,8 +16,8 @@ If you're interested in contributing to PD, see [CONTRIBUTING.md](./CONTRIBUTING
 
 ## Build
 
-1. Make sure [*Go*](https://golang.org/) (version 1.23) is installed.
-2. Use `make` to install PD. `pd-server` will be installed in the `bin` directory.
+1. Make sure [*Go*](https://golang.org/) (version 1.25 or later) is installed.
+2. Run `make` (equivalent to `make build`) to build PD. `pd-server`, `pd-ctl`, and `pd-recover` will be produced in the `bin` directory.
 
 ## Usage
 
@@ -44,6 +44,9 @@ Using `curl` to view PD members:
 curl http://${HOST_IP}:2379/pd/api/v1/members
 
 {
+  "header": {
+    "cluster_id": 7637715636087433014
+  },
   "members": [
     {
       "name": "pd",
@@ -55,14 +58,40 @@ curl http://${HOST_IP}:2379/pd/api/v1/members
         "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
-      "binary_version": "v6.1.3",
-      "git_hash": "1a4e975892512a97fb0e5b45c9be69aa76148793"
+      "binary_version": "v8.5.6",
+      "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
     }
-  ]
+  ],
+  "leader": {
+    "name": "pd",
+    "member_id": 15980934438217023866,
+    "peer_urls": [
+      "http://192.168.199.105:2380"
+    ],
+    "client_urls": [
+      "http://192.168.199.105:2379"
+    ],
+    "deploy_path": "/",
+    "binary_version": "v8.5.6",
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
+  },
+  "etcd_leader": {
+    "name": "pd",
+    "member_id": 15980934438217023866,
+    "peer_urls": [
+      "http://192.168.199.105:2380"
+    ],
+    "client_urls": [
+      "http://192.168.199.105:2379"
+    ],
+    "deploy_path": "/",
+    "binary_version": "v8.5.6",
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
+  }
 }
 ```
 
-You can also use [httpie](https://github.com/jkbrzt/httpie) to call the API:
+You can also use [httpie](https://github.com/httpie/cli) to call the API:
 
 ```bash
 http http://${HOST_IP}:2379/pd/api/v1/members
@@ -70,11 +99,14 @@ http http://${HOST_IP}:2379/pd/api/v1/members
 Access-Control-Allow-Headers: accept, content-type, authorization
 Access-Control-Allow-Methods: POST, GET, OPTIONS, PUT, DELETE
 Access-Control-Allow-Origin: *
-Content-Length: 1003
+Content-Length: <length>
 Content-Type: application/json; charset=UTF-8
-Date: Mon, 12 Dec 2022 13:46:33 GMT
+Date: <response-date>
 
 {
+  "header": {
+    "cluster_id": 7637715636087433014
+  },
   "members": [
     {
       "name": "pd",
@@ -86,10 +118,36 @@ Date: Mon, 12 Dec 2022 13:46:33 GMT
         "http://192.168.199.105:2379"
       ],
       "deploy_path": "/",
-      "binary_version": "v6.1.3",
-      "git_hash": "1a4e975892512a97fb0e5b45c9be69aa76148793"
+      "binary_version": "v8.5.6",
+      "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
     }
-  ]
+  ],
+  "leader": {
+    "name": "pd",
+    "member_id": 15980934438217023866,
+    "peer_urls": [
+      "http://192.168.199.105:2380"
+    ],
+    "client_urls": [
+      "http://192.168.199.105:2379"
+    ],
+    "deploy_path": "/",
+    "binary_version": "v8.5.6",
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
+  },
+  "etcd_leader": {
+    "name": "pd",
+    "member_id": 15980934438217023866,
+    "peer_urls": [
+      "http://192.168.199.105:2380"
+    ],
+    "client_urls": [
+      "http://192.168.199.105:2379"
+    ],
+    "deploy_path": "/",
+    "binary_version": "v8.5.6",
+    "git_hash": "21bd0a379e5f9d2be11a92d17645a6ada19f02c1"
+  }
 }
 ```
 
