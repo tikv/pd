@@ -35,6 +35,8 @@ const (
 	RuleChecker CheckerSchedulerType = "rule-checker"
 	// SplitChecker is the name for split checker.
 	SplitChecker CheckerSchedulerType = "split-checker"
+	// SplitScatterChecker is the name for internal split-scatter dispatch.
+	SplitScatterChecker CheckerSchedulerType = "split-scatter-checker"
 
 	// BalanceLeaderScheduler is balance leader scheduler name.
 	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
