@@ -71,6 +71,10 @@ func (*AffinityChecker) Name() string {
 	return types.AffinityChecker.String()
 }
 
+func (c *AffinityChecker) hasAffinityGroups() bool {
+	return c.affinityManager != nil && c.affinityManager.GetAffinityGroupCount() > 0
+}
+
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	affinityCheckerCounter.Inc()
