@@ -371,7 +371,9 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			// It makes sure that two affinity merge operators can be added successfully altogether.
 			return c.affinityChecker.Check(region)
 		}
-		operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		if c.affinityChecker.hasAffinityGroups() {
+			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		}
 		return nil
 	}); len(ops) > 0 {
 		return ops
