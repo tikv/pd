@@ -189,14 +189,14 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 		return NewPersistOptions(cfg)
 	}
 
-	t.Run("no persisted config falls back to in-memory", func(t *testing.T) {
+	t.Run("no persisted config falls back to in-memory", func(_ *testing.T) {
 		st := storage.NewStorageWithMemoryBackend()
 		lease, err := newOpt().LoadPersistedLeaderLease(st)
 		re.NoError(err)
 		re.Equal(inMemoryLease, lease)
 	})
 
-	t.Run("valid persisted lease is used", func(t *testing.T) {
+	t.Run("valid persisted lease is used", func(_ *testing.T) {
 		st := storage.NewStorageWithMemoryBackend()
 		writer, err := newTestScheduleOption()
 		re.NoError(err)
@@ -207,7 +207,7 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 		re.Equal(int64(11), lease)
 	})
 
-	t.Run("blob missing lease falls back to in-memory", func(t *testing.T) {
+	t.Run("blob missing lease falls back to in-memory", func(_ *testing.T) {
 		st := storage.NewStorageWithMemoryBackend()
 		re.NoError(st.SaveConfig(struct {
 			Schedule sc.ScheduleConfig `json:"schedule"`
@@ -218,7 +218,7 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 	})
 
 	for _, persisted := range []int64{0, -1} {
-		t.Run(fmt.Sprintf("non-positive persisted lease %d falls back", persisted), func(t *testing.T) {
+		t.Run(fmt.Sprintf("non-positive persisted lease %d falls back", persisted), func(_ *testing.T) {
 			st := storage.NewStorageWithMemoryBackend()
 			re.NoError(st.SaveConfig(struct {
 				LeaderLease int64 `json:"lease"`
