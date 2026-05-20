@@ -759,11 +759,22 @@ func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions", http.NoBody)
 	re.NoError(err)
-	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "false")
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
+	re.Contains(string(body), "TiKV cluster not bootstrapped")
+
+	req, err = http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(body))
 	var regionsInfo response.RegionsInfo

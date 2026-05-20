@@ -121,7 +121,7 @@ func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.Ra
 	if r.Method != http.MethodGet ||
 		!m.allowFollowerSyncedRegion ||
 		m.s.GetMember().IsServing() ||
-		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" {
+		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) != "true" {
 		return nil
 	}
 	rc := m.s.DirectlyGetRaftCluster()
