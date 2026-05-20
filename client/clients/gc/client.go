@@ -51,6 +51,8 @@ func DefaultGCStatesAPIOptions() GCStatesAPIOptions {
 }
 
 // GCStatesAPIOption is the type of option for GC states API.
+//
+//nolint:revive
 type GCStatesAPIOption func(*GCStatesAPIOptions)
 
 // ExcludeGCBarriers controls whether GetGCState and GetAllKeyspacesGCStates should exclude GC barriers.
