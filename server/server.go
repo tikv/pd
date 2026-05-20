@@ -1359,8 +1359,8 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 
 // SetLeaderLease sets the PD leader lease timeout.
 func (s *Server) SetLeaderLease(lease int64) error {
-	if !config.IsValidLeaderLease(lease) {
-		return errors.Errorf("leader lease must be positive, got %d", lease)
+	if err := config.ValidateLeaderLease(lease); err != nil {
+		return err
 	}
 	old := s.persistOptions.GetLeaderLease()
 	s.persistOptions.SetLeaderLease(lease)
@@ -1757,13 +1757,25 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
-	if err := s.persistOptions.Reload(s.storage); err != nil {
-		log.Warn("failed to reload persisted configuration before campaign",
+	// Only the leader lease has to be refreshed from storage before campaigning,
+	// so that an online update done on a previous leader takes effect on the
+	// next election. The rest of the configuration is still reloaded after the
+	// leadership is kept (reloadConfigFromKV below). A storage error here must
+	// not abort the campaign, otherwise leader election availability would
+	// regress whenever etcd is briefly degraded; fall back to the current
+	// in-memory value.
+	lease, err := s.persistOptions.LoadPersistedLeaderLease(s.storage)
+	if err != nil {
+		lease = s.persistOptions.GetLeaderLease()
+		log.Warn("failed to load persisted leader lease before campaign, fall back to in-memory value",
 			errs.ZapError(err),
+			zap.Int64("leader-lease", lease),
 			zap.String("campaign-leader-name", s.Name()))
-		return
 	}
-	if err := s.member.Campaign(s.ctx, s.persistOptions.GetLeaderLease()); err != nil {
+	// Keep the in-memory value consistent with the lease this server is about
+	// to campaign with, so GetLease()/GetConfig() reflect the effective value.
+	s.persistOptions.SetLeaderLease(lease)
+	if err := s.member.Campaign(s.ctx, lease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign PD leader meets error due to txn conflict, another PD may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))

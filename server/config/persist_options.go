@@ -859,9 +859,44 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	return nil
 }
 
+// LoadPersistedLeaderLease returns the leader lease that should be used for the
+// next campaign. It reads only the persisted leader lease instead of reloading
+// the whole configuration, so it is cheap enough to run on the election path.
+// When the persisted blob carries no valid lease (e.g. a blob written before
+// online lease update was supported), the current in-memory value is returned,
+// preserving the previous campaign behavior. Storage and decode errors are
+// returned to the caller, which decides whether to fall back.
+func (o *PersistOptions) LoadPersistedLeaderLease(storage endpoint.ConfigStorage) (int64, error) {
+	failpoint.Inject("loadLeaderLeaseFail", func() {
+		failpoint.Return(int64(0), errors.New("failpoint: fail to load persisted leader lease"))
+	})
+	cfg := &persistedConfig{Config: &Config{}}
+	isExist, err := storage.LoadConfig(cfg)
+	if err != nil {
+		return 0, err
+	}
+	if isExist && cfg.hasValidLeaderLease() {
+		return cfg.LeaderLease, nil
+	}
+	return o.GetLeaderLease(), nil
+}
+
 // IsValidLeaderLease returns whether the given PD leader lease timeout is valid.
+// It only checks positivity, because it also gates whether a persisted lease
+// should be honored on reload.
 func IsValidLeaderLease(lease int64) bool {
 	return lease > 0
+}
+
+// ValidateLeaderLease validates a leader lease (in seconds) supplied through
+// the online update API. Keep the accepted range aligned with file config
+// behavior: reject explicit non-positive updates, but do not add an online-only
+// upper bound.
+func ValidateLeaderLease(lease int64) error {
+	if !IsValidLeaderLease(lease) {
+		return errors.Errorf("leader lease must be positive, got %d", lease)
+	}
+	return nil
 }
 
 func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {

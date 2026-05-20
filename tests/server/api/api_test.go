@@ -164,6 +164,79 @@ func TestLeaderLeaseConfigAPI(t *testing.T) {
 	}
 }
 
+// TestLeaderLeaseTakesEffectAfterTransfer proves the user-visible behavior:
+// after a leader lease update and a leader change, the new leader and the
+// surviving follower converge to the persisted lease instead of staying on
+// their startup config.
+func TestLeaderLeaseTakesEffectAfterTransfer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const startupLease, updatedLease = int64(5), int64(2)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.LeaderLease = startupLease
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeader := cluster.GetLeaderServer()
+	re.Equal(startupLease, oldLeader.GetServer().GetPersistOptions().GetLeaderLease())
+
+	configURL := oldLeader.GetAddr() + "/pd/api/v1/config"
+	data, err := json.Marshal(map[string]any{"lease": updatedLease})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.StatusOK(re)))
+
+	// Stopping the old leader guarantees a different node wins the next
+	// election, so the assertion below cannot be satisfied by the API call's
+	// in-memory write on the old leader.
+	re.NoError(cluster.GetServer(oldLeaderName).Stop())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(oldLeaderName, newLeaderName)
+
+	for name, srv := range cluster.GetServers() {
+		if name == oldLeaderName {
+			continue // stopped; its frozen state is irrelevant
+		}
+		// newLeaderName picks it up via campaign (LoadPersistedLeaderLease),
+		// the surviving follower via its leaderLoop reloadConfigFromKV.
+		testutil.Eventually(re, func() bool {
+			return srv.GetServer().GetPersistOptions().GetLeaderLease() == updatedLease
+		})
+	}
+}
+
+// TestLeaderLeaseCampaignSurvivesLoadFailure proves the availability guarantee:
+// if reading the persisted leader lease fails right before campaigning (etcd
+// briefly degraded), the election must still succeed using the in-memory
+// value instead of looping forever. Without the fallback, WaitLeader below
+// would never return because campaignLeader would bail out every iteration.
+func TestLeaderLeaseCampaignSurvivesLoadFailure(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/loadLeaderLeaseFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/loadLeaderLeaseFail"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	const startupLease = int64(3)
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.LeaderLease = startupLease
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	re.Equal(startupLease, cluster.GetLeaderServer().GetServer().GetPersistOptions().GetLeaderLease())
+}
+
 type middlewareTestSuite struct {
 	suite.Suite
 	cleanup func()
