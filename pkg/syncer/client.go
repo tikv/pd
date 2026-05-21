@@ -133,6 +133,11 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 		saveKV, _, _, _ := regionGuide(cctx, region, origin)
 		overlaps := bc.PutRegion(region)
 
+		if hasBuckets {
+			if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
+				region.UpdateBuckets(buckets[i], old)
+			}
+		}
 		if saveKV {
 			err = regionStorage.SaveRegion(r)
 		}
@@ -244,77 +249,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					break
 				}
-<<<<<<< HEAD
-				if s.history.getNextIndex() != resp.GetStartIndex() {
-					log.Warn("server sync index not match the leader",
-						zap.String("server", s.server.Name()),
-						zap.Uint64("own", s.history.getNextIndex()),
-						zap.Uint64("leader", resp.GetStartIndex()),
-						zap.Int("records-length", len(resp.GetRegions())))
-					// reset index
-					s.history.resetWithIndex(resp.GetStartIndex())
-				}
-				stats := resp.GetRegionStats()
-				regions := resp.GetRegions()
-				buckets := resp.GetBuckets()
-				regionLeaders := resp.GetRegionLeaders()
-				hasStats := len(stats) == len(regions)
-				hasBuckets := len(buckets) == len(regions)
-				for i, r := range regions {
-					var (
-						region       *core.RegionInfo
-						regionLeader *metapb.Peer
-						opts         = []core.RegionCreateOption{core.SetSource(core.Sync)}
-					)
-					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
-						regionLeader = regionLeaders[i]
-					}
-					if hasStats {
-						opts = append(opts,
-							core.SetWrittenBytes(stats[i].BytesWritten),
-							core.SetWrittenKeys(stats[i].KeysWritten),
-							core.SetReadBytes(stats[i].BytesRead),
-							core.SetReadKeys(stats[i].KeysRead))
-					}
-					if hasBuckets {
-						opts = append(opts, core.SetBuckets(buckets[i]))
-					}
-					region = core.NewRegionInfo(r, regionLeader, opts...)
-
-					origin, _, err := bc.PreCheckPutRegion(region)
-					if err != nil {
-						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
-						continue
-					}
-					cctx := &core.MetaProcessContext{
-						Context:    ctx,
-						TaskRunner: ratelimit.NewSyncRunner(),
-						Tracer:     core.NewNoopHeartbeatProcessTracer(),
-						// no limit for followers.
-					}
-					saveKV, _, _, _ := regionGuide(cctx, region, origin)
-					overlaps := bc.PutRegion(region)
-
-					if hasBuckets {
-						if old := origin.GetBuckets(); buckets[i].GetVersion() > old.GetVersion() {
-							region.UpdateBuckets(buckets[i], old)
-						}
-					}
-					if saveKV {
-						err = regionStorage.SaveRegion(r)
-					}
-					if err == nil {
-						s.history.record(region)
-					}
-					for _, old := range overlaps {
-						_ = regionStorage.DeleteRegion(old.GetMeta())
-					}
-				}
-				// mark the client as running status when it finished the first history region sync.
-				s.streamingRunning.Store(true)
-=======
 				s.handleRegionSyncResponse(ctx, resp, bc, regionStorage)
->>>>>>> 8cabcf154c (syncer: extract region sync helpers (#10672))
 			}
 		}
 	}()
