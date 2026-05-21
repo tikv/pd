@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server/config"
 )
@@ -132,10 +133,10 @@ func TestDeleteFollowerRegionStorageReturnsStorageErrors(t *testing.T) {
 	region := newTestFollowerRegionMeta(21)
 	re.NoError(s.storage.SaveRegion(region))
 	s.storage = &testFollowerRegionStorage{
-		Storage:         s.storage,
-		deleteRegionErr: errTestFollowerRegionStorage,
+		Storage:     s.storage,
+		runInTxnErr: errTestFollowerRegionStorage,
 	}
-	re.ErrorContains(s.deleteFollowerRegionStorage(), "delete follower region from local storage")
+	re.ErrorContains(s.deleteFollowerRegionStorage(), "delete follower regions from local storage")
 
 	s = newTestFollowerRegionResetServer(context.Background())
 	s.storage = &testFollowerRegionStorage{
@@ -194,6 +195,7 @@ type testFollowerRegionStorage struct {
 	loadRegionErr   error
 	deleteRegionErr error
 	loadRangeErr    error
+	runInTxnErr     error
 	loadRangeKeys   []string
 }
 
@@ -219,4 +221,11 @@ func (s *testFollowerRegionStorage) DeleteRegion(region *metapb.Region) error {
 		return s.deleteRegionErr
 	}
 	return s.Storage.DeleteRegion(region)
+}
+
+func (s *testFollowerRegionStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	if s.runInTxnErr != nil {
+		return s.runInTxnErr
+	}
+	return s.Storage.RunInTxn(ctx, f)
 }

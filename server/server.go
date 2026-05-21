@@ -1011,7 +1011,6 @@ func (s *Server) deleteFollowerRegionStorage() error {
 		return errors.New("region storage does not support range scan")
 	}
 
-	var firstErr error
 	startID := uint64(0)
 	endKey := keypath.RegionPath(math.MaxUint64)
 	for {
@@ -1025,28 +1024,36 @@ func (s *Server) deleteFollowerRegionStorage() error {
 		if err != nil {
 			return errors.Wrap(err, "load follower regions from local storage")
 		}
+		var lastRegionID uint64
 		for _, key := range keys {
 			regionID, err := parseRegionIDFromStorageKey(key)
 			if err != nil {
 				return err
 			}
-			meta := &metapb.Region{Id: regionID}
-			if err := s.deleteFollowerRegionMeta(meta); err != nil && firstErr == nil {
-				firstErr = err
-			}
+			lastRegionID = regionID
+		}
+		if err := deleteFollowerRegionStorageKeys(s.ctx, regionKV, keys); err != nil {
+			return errors.Wrap(err, "delete follower regions from local storage")
 		}
 		if len(keys) < endpoint.MaxKVRangeLimit {
-			return firstErr
-		}
-		lastRegionID, err := parseRegionIDFromStorageKey(keys[len(keys)-1])
-		if err != nil {
-			return err
+			return nil
 		}
 		if lastRegionID == math.MaxUint64 {
-			return firstErr
+			return nil
 		}
 		startID = lastRegionID + 1
 	}
+}
+
+func deleteFollowerRegionStorageKeys(ctx context.Context, regionKV kv.Base, keys []string) error {
+	return regionKV.RunInTxn(ctx, func(txn kv.Txn) error {
+		for _, key := range keys {
+			if err := txn.Remove(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Server) deleteFollowerRegionMeta(region *metapb.Region) error {
