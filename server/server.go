@@ -1030,14 +1030,7 @@ func (s *Server) deleteFollowerRegionStorage() error {
 			if err != nil {
 				return err
 			}
-			meta := &metapb.Region{}
-			ok, err := regionStorage.LoadRegion(regionID, meta)
-			if err != nil {
-				return errors.Wrap(err, "load follower region from local storage")
-			}
-			if !ok {
-				continue
-			}
+			meta := &metapb.Region{Id: regionID}
 			if err := s.deleteFollowerRegionMeta(meta); err != nil && firstErr == nil {
 				firstErr = err
 			}

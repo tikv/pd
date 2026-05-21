@@ -101,6 +101,18 @@ func TestDeleteFollowerRegionStorage(t *testing.T) {
 		assertTestFollowerRegionDeleted(re, s, region.GetId())
 	}
 
+	s = newTestFollowerRegionResetServer(context.Background())
+	region := newTestFollowerRegionMeta(12)
+	re.NoError(s.storage.SaveRegion(region))
+	regionStorage := s.storage
+	s.storage = &testFollowerRegionStorage{
+		Storage:       regionStorage,
+		loadRegionErr: errTestFollowerRegionStorage,
+	}
+	re.NoError(s.deleteFollowerRegionStorage())
+	s.storage = regionStorage
+	assertTestFollowerRegionDeleted(re, s, region.GetId())
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	s = newTestFollowerRegionResetServer(ctx)
@@ -117,16 +129,7 @@ func TestDeleteFollowerRegionStorageReturnsStorageErrors(t *testing.T) {
 	re.ErrorContains(s.deleteFollowerRegionStorage(), "load follower regions from local storage")
 
 	s = newTestFollowerRegionResetServer(context.Background())
-	region := newTestFollowerRegionMeta(20)
-	re.NoError(s.storage.SaveRegion(region))
-	s.storage = &testFollowerRegionStorage{
-		Storage:       s.storage,
-		loadRegionErr: errTestFollowerRegionStorage,
-	}
-	re.ErrorContains(s.deleteFollowerRegionStorage(), "load follower region from local storage")
-
-	s = newTestFollowerRegionResetServer(context.Background())
-	region = newTestFollowerRegionMeta(21)
+	region := newTestFollowerRegionMeta(21)
 	re.NoError(s.storage.SaveRegion(region))
 	s.storage = &testFollowerRegionStorage{
 		Storage:         s.storage,
