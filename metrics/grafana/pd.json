@@ -13672,7 +13672,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", container=\"pd\", type=\"sync_index\"}",
+              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"sync_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -13755,7 +13755,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", container=\"pd\", type=\"last_index\"}",
+              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"last_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -13846,14 +13846,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "max(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", container=\"pd\", type=\"last_index\"}) - min(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", container=\"pd\", type=\"sync_index\"})",
+              "expr": "max(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"last_index\"}) - min(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"sync_index\"})",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "index gap",
               "refId": "A"
             },
             {
-              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", container=\"pd\", type=\"history_buffer_size\"}",
+              "expr": "max(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"history_buffer_size\"})",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "history buffer size",
