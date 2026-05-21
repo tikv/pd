@@ -347,6 +347,7 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 		},
 	}
 	re.NotNil(<-stream.sendCh)
+	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
 		return len(names) == 1 && names[0] == "pd-follower"
@@ -400,6 +401,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
+	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
@@ -457,6 +459,7 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
+	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
@@ -530,6 +533,7 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
+	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
@@ -963,6 +967,7 @@ func TestSyncFallsBackToFullSyncWhenHistoryMissing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newMockSyncRegionsServer()
+	blockCh := stream.blockSend()
 	done := make(chan error, 1)
 	go func() {
 		done <- syncer.Sync(ctx, stream)
@@ -976,6 +981,13 @@ func TestSyncFallsBackToFullSyncWhenHistoryMissing(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
+	testutil.Eventually(re, stream.isSendBlocked)
+	syncer.history.record(core.NewRegionInfo(&metapb.Region{
+		Id:          2,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers:       []*metapb.Peer{{Id: 12, StoreId: 1}},
+	}, &metapb.Peer{Id: 12, StoreId: 1}))
+	close(blockCh)
 	var resp *pdpb.SyncRegionResponse
 	select {
 	case resp = <-stream.sendCh:
@@ -988,10 +1000,22 @@ func TestSyncFallsBackToFullSyncWhenHistoryMissing(t *testing.T) {
 	select {
 	case resp = <-stream.sendCh:
 	case <-time.After(3 * time.Second):
-		re.FailNow("expected full sync completion response")
+		re.FailNow("expected full sync catch-up response")
 	}
 	re.Equal(uint64(100), resp.GetStartIndex())
+	re.Len(resp.GetRegions(), 1)
+	re.Equal(uint64(2), resp.GetRegions()[0].GetId())
+	select {
+	case resp = <-stream.sendCh:
+	case <-time.After(3 * time.Second):
+		re.FailNow("expected full sync completion response")
+	}
+	re.Equal(uint64(101), resp.GetStartIndex())
 	re.Empty(resp.GetRegions())
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == "pd-follower"
+	})
 
 	cancel()
 	var syncErr error

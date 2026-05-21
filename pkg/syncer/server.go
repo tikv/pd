@@ -569,11 +569,15 @@ func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*reg
 	defer s.mu.Unlock()
 	startIndex := s.history.getNextIndex()
 	syncStream := newRegionSyncStream(stream, startIndex)
+	s.bindStreamLocked(name, syncStream)
+	return syncStream, startIndex
+}
+
+func (s *RegionSyncer) bindStreamLocked(name string, syncStream *regionSyncStream) {
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 	}
 	s.mu.streams[name] = syncStream
-	return syncStream, startIndex
 }
 
 func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
