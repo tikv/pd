@@ -1032,6 +1032,114 @@ func TestSyncFallsBackToFullSyncWhenHistoryMissing(t *testing.T) {
 	})
 }
 
+func TestFullSyncRestartsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	newRegion := func(regionID, peerID uint64) *core.RegionInfo {
+		return core.NewRegionInfo(&metapb.Region{
+			Id:          regionID,
+			StartKey:    []byte{byte(regionID)},
+			EndKey:      []byte{byte(regionID + 1)},
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			Peers:       []*metapb.Peer{{Id: peerID, StoreId: 1}},
+		}, &metapb.Peer{Id: peerID, StoreId: 1})
+	}
+
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newRegion(1, 11))
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		bc,
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.history = newHistoryBuffer(1, regionStorage)
+	syncer.history.resetWithIndex(100)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	blockCh := stream.blockSend()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.Sync(ctx, stream)
+	}()
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: 1,
+		Member: &pdpb.Member{
+			Name:       "pd-follower",
+			ClientUrls: []string{"http://127.0.0.1:2379"},
+		},
+	}
+	testutil.Eventually(re, stream.isSendBlocked)
+	for _, region := range []*core.RegionInfo{
+		newRegion(2, 12),
+		newRegion(3, 13),
+	} {
+		bc.PutRegion(region)
+		syncer.history.record(region)
+	}
+	close(blockCh)
+
+	var resp *pdpb.SyncRegionResponse
+	select {
+	case resp = <-stream.sendCh:
+	case <-time.After(3 * time.Second):
+		re.FailNow("expected original full sync response")
+	}
+	re.Equal(uint64(0), resp.GetStartIndex())
+	re.Len(resp.GetRegions(), 1)
+	re.Equal(uint64(1), resp.GetRegions()[0].GetId())
+
+	select {
+	case resp = <-stream.sendCh:
+	case <-time.After(3 * time.Second):
+		re.FailNow("expected restarted full sync response")
+	}
+	re.Equal(uint64(0), resp.GetStartIndex())
+	re.Len(resp.GetRegions(), 3)
+	regionIDs := make([]uint64, 0, len(resp.GetRegions()))
+	for _, region := range resp.GetRegions() {
+		regionIDs = append(regionIDs, region.GetId())
+	}
+	re.ElementsMatch([]uint64{1, 2, 3}, regionIDs)
+
+	select {
+	case resp = <-stream.sendCh:
+	case <-time.After(3 * time.Second):
+		re.FailNow("expected full sync completion response")
+	}
+	re.Equal(uint64(102), resp.GetStartIndex())
+	re.Empty(resp.GetRegions())
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == "pd-follower"
+	})
+
+	cancel()
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		st, ok := status.FromError(syncErr)
+		return ok && st.Code() == codes.Unavailable
+	})
+}
+
 func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	re := require.New(t)
 	regionStorage := storage.NewStorageWithMemoryBackend()
