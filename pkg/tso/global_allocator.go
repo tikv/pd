@@ -200,7 +200,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
 	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
 	maxRetryCount := 3
 	for range maxRetryCount {
-		_, err = gta.timestampOracle.UpdateTimestamp(intervalUpdate)
+		err = gta.timestampOracle.UpdateTimestamp()
 		if err == nil {
 			return nil
 		}
