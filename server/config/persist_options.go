@@ -16,7 +16,6 @@ package config
 
 import (
 	"context"
-	"encoding/json"
 	"reflect"
 	"strconv"
 	"sync/atomic"
@@ -774,48 +773,20 @@ type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
 	StoreConfig sc.StoreConfig `json:"store"`
-	// leaseLoaded records whether the persisted etcd blob explicitly included
-	// the top-level "lease" field. Older blobs without that field should not
-	// silently overwrite the startup value with the default-filled lease.
-	leaseLoaded bool
 }
 
-// UnmarshalJSON records whether the persisted blob explicitly contains the
-// leader lease field while preserving the default Config JSON decoding.
-func (cfg *persistedConfig) UnmarshalJSON(data []byte) error {
-	if cfg.Config == nil {
-		cfg.Config = &Config{}
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	_, cfg.leaseLoaded = fields["lease"]
-
-	type persistedConfigAlias persistedConfig
-	return json.Unmarshal(data, (*persistedConfigAlias)(cfg))
-}
-
-func (cfg *persistedConfig) getValidLeaderLease() (int64, bool) {
-	if !cfg.leaseLoaded {
-		return 0, false
-	}
-	return normalizePersistedLeaderLease(cfg.LeaderLease)
-}
-
+// persistedLeaderLease decodes only the leader lease from the persisted config
+// blob, so the election path can read it without reloading everything else.
 type persistedLeaderLease struct {
-	LeaderLease *int64 `json:"lease"`
+	LeaderLease int64 `json:"lease"`
 }
 
-func (cfg *persistedLeaderLease) getValidLeaderLease() (int64, bool) {
-	if cfg.LeaderLease == nil {
-		return 0, false
-	}
-	return normalizePersistedLeaderLease(*cfg.LeaderLease)
-}
-
+// normalizePersistedLeaderLease reports whether a persisted leader lease should
+// be adopted. A non-positive value means no lease was set online (an absent
+// "lease" field decodes to zero), so the caller keeps its in-memory value; a
+// value above the maximum is clamped to it.
 func normalizePersistedLeaderLease(lease int64) (int64, bool) {
-	if !IsValidLeaderLease(lease) {
+	if lease <= 0 {
 		return 0, false
 	}
 	if lease > MaxLeaderLease {
@@ -862,6 +833,10 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err := cfg.Adjust(nil, true); err != nil {
 		return err
 	}
+	// Adjust fills LeaderLease with its default; reset it so a persisted blob
+	// that omits or zeroes "lease" falls back to the in-memory startup value
+	// instead of adopting the default.
+	cfg.LeaderLease = 0
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return err
@@ -877,7 +852,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.keyspace.Store(&cfg.Keyspace)
 		o.microservice.Store(&cfg.Microservice)
-		if lease, ok := cfg.getValidLeaderLease(); ok {
+		if lease, ok := normalizePersistedLeaderLease(cfg.LeaderLease); ok {
 			o.SetLeaderLease(lease)
 		}
 		o.storeConfig.Store(&cfg.StoreConfig)
@@ -903,22 +878,17 @@ func (o *PersistOptions) LoadPersistedLeaderLease(storage endpoint.ConfigStorage
 		return 0, err
 	}
 	if isExist {
-		if lease, ok := cfg.getValidLeaderLease(); ok {
+		if lease, ok := normalizePersistedLeaderLease(cfg.LeaderLease); ok {
 			return lease, nil
 		}
 	}
 	return o.GetLeaderLease(), nil
 }
 
-// IsValidLeaderLease returns whether the given PD leader lease timeout is positive.
-func IsValidLeaderLease(lease int64) bool {
-	return lease > 0
-}
-
 // ValidateLeaderLease validates a leader lease (in seconds) supplied through
 // the online update API.
 func ValidateLeaderLease(lease int64) error {
-	if !IsValidLeaderLease(lease) {
+	if lease <= 0 {
 		return errors.Errorf("leader lease must be positive, got %d", lease)
 	}
 	if lease > MaxLeaderLease {
