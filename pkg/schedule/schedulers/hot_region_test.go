@@ -88,7 +88,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
@@ -97,7 +97,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
@@ -2539,12 +2539,14 @@ func TestCompatibility(t *testing.T) {
 		{utils.ByteDim, utils.KeyDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.5"))
+	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})
+	re.True(hb.(*hotScheduler).conf.lastCPUSupported)
 }
 
 func TestCompatibilityConfig(t *testing.T) {
@@ -2608,6 +2610,12 @@ func TestCompatibilityConfig(t *testing.T) {
 	re.NoError(err)
 	hb, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)
+	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
+		{utils.QueryDim, utils.ByteDim},
+		{utils.QueryDim, utils.KeyDim},
+		{utils.ByteDim, utils.KeyDim},
+	})
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.KeyDim},
