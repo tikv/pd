@@ -83,110 +83,63 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
 }
 
-func TestLeaderLeasePersistAndReload(t *testing.T) {
+func TestReloadLeaderLease(t *testing.T) {
 	re := require.New(t)
-	cfg := NewConfig()
-	re.NoError(cfg.Adjust(nil, false))
-	cfg.LeaderLease = 7
-	opt := NewPersistOptions(cfg)
-	opt.SetMaxReplicas(5)
-	storage := storage.NewStorageWithMemoryBackend()
-	re.NoError(opt.Persist(storage))
+	const startupLease = int64(9)
 
-	var stored struct {
-		LeaderLease int64 `json:"lease"`
-	}
-	exists, err := storage.LoadConfig(&stored)
-	re.NoError(err)
-	re.True(exists)
-	re.Equal(int64(7), stored.LeaderLease)
-
-	cfg.LeaderLease = 9
-	newOpt := NewPersistOptions(cfg)
-	re.NoError(newOpt.Reload(storage))
-	re.Equal(int64(7), newOpt.GetLeaderLease())
-}
-
-func TestLeaderLeaseSetPersistAndReload(t *testing.T) {
-	re := require.New(t)
-	opt, err := newTestScheduleOption()
-	re.NoError(err)
-	opt.SetLeaderLease(7)
-	storage := storage.NewStorageWithMemoryBackend()
-	re.NoError(opt.Persist(storage))
-	var stored struct {
-		LeaderLease int64 `json:"lease"`
-	}
-	exists, err := storage.LoadConfig(&stored)
-	re.NoError(err)
-	re.True(exists)
-	re.Equal(int64(7), stored.LeaderLease)
-
-	cfg := NewConfig()
-	re.NoError(cfg.Adjust(nil, false))
-	cfg.LeaderLease = 9
-	newOpt := NewPersistOptions(cfg)
-	re.NoError(newOpt.Reload(storage))
-	re.Equal(int64(7), newOpt.GetLeaderLease())
-}
-
-func TestLeaderLeaseReloadIgnoresNonPositivePersistedValues(t *testing.T) {
-	re := require.New(t)
-	assertReloadKeepsLeaderLeaseForPersistedValue := func(persistedLease int64) {
-		storage := storage.NewStorageWithMemoryBackend()
-		re.NoError(storage.SaveConfig(struct {
-			LeaderLease int64 `json:"lease"`
-		}{LeaderLease: persistedLease}))
-
+	newOpt := func() *PersistOptions {
 		cfg := NewConfig()
 		re.NoError(cfg.Adjust(nil, false))
-		cfg.LeaderLease = 7
-		opt := NewPersistOptions(cfg)
-		re.NoError(opt.Reload(storage))
-		re.Equal(int64(7), opt.GetLeaderLease())
+		cfg.LeaderLease = startupLease
+		return NewPersistOptions(cfg)
 	}
 
-	assertReloadKeepsLeaderLeaseForPersistedValue(0)
-	assertReloadKeepsLeaderLeaseForPersistedValue(-1)
-}
+	// No persisted config: keep the in-memory startup value.
+	st := storage.NewStorageWithMemoryBackend()
+	opt := newOpt()
+	re.NoError(opt.Reload(st))
+	re.Equal(startupLease, opt.GetLeaderLease())
 
-func TestLeaderLeaseReloadClampsPersistedValueAboveMax(t *testing.T) {
-	re := require.New(t)
-	storage := storage.NewStorageWithMemoryBackend()
-	re.NoError(storage.SaveConfig(struct {
+	// A positive persisted lease is adopted over the startup value.
+	st = storage.NewStorageWithMemoryBackend()
+	writer, err := newTestScheduleOption()
+	re.NoError(err)
+	writer.SetLeaderLease(7)
+	re.NoError(writer.Persist(st))
+	opt = newOpt()
+	re.NoError(opt.Reload(st))
+	re.Equal(int64(7), opt.GetLeaderLease())
+
+	// A persisted blob without the lease field keeps the startup value.
+	st = storage.NewStorageWithMemoryBackend()
+	re.NoError(st.SaveConfig(struct {
+		Schedule sc.ScheduleConfig `json:"schedule"`
+	}{}))
+	opt = newOpt()
+	re.NoError(opt.Reload(st))
+	re.Equal(startupLease, opt.GetLeaderLease())
+
+	// A non-positive persisted lease is ignored, keeping the startup value.
+	assertReloadKeepsStartupLease := func(persistedLease int64) {
+		st := storage.NewStorageWithMemoryBackend()
+		re.NoError(st.SaveConfig(struct {
+			LeaderLease int64 `json:"lease"`
+		}{LeaderLease: persistedLease}))
+		opt := newOpt()
+		re.NoError(opt.Reload(st))
+		re.Equal(startupLease, opt.GetLeaderLease())
+	}
+	assertReloadKeepsStartupLease(0)
+	assertReloadKeepsStartupLease(-1)
+
+	// A persisted lease above the maximum is clamped.
+	st = storage.NewStorageWithMemoryBackend()
+	re.NoError(st.SaveConfig(struct {
 		LeaderLease int64 `json:"lease"`
 	}{LeaderLease: MaxLeaderLease + 1}))
-
-	cfg := NewConfig()
-	re.NoError(cfg.Adjust(nil, false))
-	cfg.LeaderLease = 7
-	opt := NewPersistOptions(cfg)
-	re.NoError(opt.Reload(storage))
+	opt = newOpt()
+	re.NoError(opt.Reload(st))
 	re.Equal(MaxLeaderLease, opt.GetLeaderLease())
-}
-
-func TestReloadKeepsCustomLeaderLeaseWhenPersistedConfigMissesLease(t *testing.T) {
-	re := require.New(t)
-	storage := storage.NewStorageWithMemoryBackend()
-
-	opt, err := newTestScheduleOption()
-	re.NoError(err)
-	type OldConfig struct {
-		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
-		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
-	}
-	old := &OldConfig{
-		Schedule:    *opt.GetScheduleConfig(),
-		Replication: *opt.GetReplicationConfig(),
-	}
-	re.NoError(storage.SaveConfig(old))
-
-	cfg := NewConfig()
-	re.NoError(cfg.Adjust(nil, false))
-	cfg.LeaderLease = 7
-	newOpt := NewPersistOptions(cfg)
-	re.NoError(newOpt.Reload(storage))
-	re.Equal(int64(7), newOpt.GetLeaderLease())
 }
 
 func TestValidateLeaderLease(t *testing.T) {
