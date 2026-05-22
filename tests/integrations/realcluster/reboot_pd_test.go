@@ -21,7 +21,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/pkg/core"
 )
 
 type rebootPDSuite struct {
@@ -47,15 +46,12 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
-	// TiFlash labels include EngineKey, which is managed by TiKV/TiFlash
-	// and cannot be set through the store label API.
+	// TiFlash labels will be ["engine": "tiflash"]
+	// So we need to merge the labels
 	storeLabels := map[string]string{
 		"zone": "zone1",
 	}
 	for _, label := range firstStore.Store.Labels {
-		if label.Key == core.EngineKey {
-			continue
-		}
 		storeLabels[label.Key] = label.Value
 	}
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))

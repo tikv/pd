@@ -953,6 +953,7 @@ func (s *Server) ResetFollowerRegionCache(regionIDs ...uint64) error {
 
 	syncer := s.cluster.GetRegionSyncer()
 	syncer.StopSyncWithLeader()
+	// Keep the follower connected even when the reset returns an error.
 	defer syncer.StartSyncWithLeader(leaderURLs[0])
 
 	var resetErr error
@@ -974,6 +975,8 @@ func (s *Server) ResetFollowerRegionCache(regionIDs ...uint64) error {
 	if err := s.storage.Flush(); err != nil && resetErr == nil {
 		resetErr = errors.Wrap(err, "flush follower region storage")
 	}
+	// Force a full sync after the local reset attempt so the follower can
+	// rebuild any cache entries that were removed before an error happened.
 	syncer.ResetHistoryIndex(0)
 
 	log.Info("reset follower region cache and restart region syncer",
