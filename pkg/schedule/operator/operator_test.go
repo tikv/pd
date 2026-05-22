@@ -475,9 +475,40 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
+		{
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpSplitScatter|OpRegion),
+			expect: OpSplitScatter,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpSplitScatter|OpRegion),
+			expect: OpAdmin,
+		},
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())
+	}
+}
+
+func (suite *operatorTestSuite) TestOpKindValues() {
+	re := suite.Require()
+	testCases := []struct {
+		name string
+		kind OpKind
+		want OpKind
+	}{
+		{"admin", OpAdmin, 1 << 0},
+		{"merge", OpMerge, 1 << 1},
+		{"range", OpRange, 1 << 2},
+		{"replica", OpReplica, 1 << 3},
+		{"split", OpSplit, 1 << 4},
+		{"hot-region", OpHotRegion, 1 << 5},
+		{"region", OpRegion, 1 << 6},
+		{"leader", OpLeader, 1 << 7},
+		{"witness-leader", OpWitnessLeader, 1 << 8},
+		{"witness", OpWitness, 1 << 9},
+		{"split-scatter", OpSplitScatter, 1 << 10},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)
 	}
 }
 

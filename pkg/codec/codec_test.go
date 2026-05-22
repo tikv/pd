@@ -47,3 +47,20 @@ func TestTableID(t *testing.T) {
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
 	re.Equal(int64(0), key.TableID())
 }
+
+func TestGenerateRecordAndIndexKeys(t *testing.T) {
+	re := require.New(t)
+	tableID := int64(42)
+	indexID := int64(7)
+
+	rowKeyPrefix := GenerateRecordKeyPrefix(tableID)
+	rowKey := GenerateRowKey(tableID, 1)
+	re.Equal(rowKeyPrefix, rowKey[:len(rowKeyPrefix)])
+	re.Equal(tableID, EncodeBytes(rowKey).TableID())
+
+	indexKey := GenerateIndexKey(tableID, indexID)
+	_, decodedIndexKey, err := DecodeBytes(EncodeBytes(indexKey))
+	re.NoError(err)
+	re.Equal(indexKey, decodedIndexKey)
+	re.Equal(tableID, EncodeBytes(indexKey).TableID())
+}

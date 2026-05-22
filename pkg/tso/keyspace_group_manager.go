@@ -53,6 +53,8 @@ import (
 )
 
 const (
+	keyspaceGroupPrimaryElectionPurposePrefix = "keyspace group primary election"
+
 	// mergingCheckInterval is the interval for merging check to see if the keyspace groups
 	// merging process could be moved forward.
 	mergingCheckInterval = 5 * time.Second
@@ -62,6 +64,10 @@ const (
 	defaultPrimaryPriorityCheckInterval = 10 * time.Second
 	groupPatrolInterval                 = time.Minute
 )
+
+func keyspaceGroupPrimaryElectionPurpose(groupID uint32) string {
+	return fmt.Sprintf("%s %05d", keyspaceGroupPrimaryElectionPurposePrefix, groupID)
+}
 
 type state struct {
 	syncutil.RWMutex
@@ -757,7 +763,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
 	}
-	participant.InitInfo(p, keypath.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), constant.PrimaryKey, "keyspace group primary election")
+	participant.InitInfo(p, keypath.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), constant.PrimaryKey, keyspaceGroupPrimaryElectionPurpose(group.ID))
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
