@@ -125,7 +125,7 @@ func TestLeaderLeaseConfigAPI(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 	configURL := leader.GetAddr() + "/pd/api/v1/config"
 
-	var cfg map[string]any
+	cfg := map[string]any{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &cfg)
 	re.NoError(err)
 	re.Equal(float64(7), cfg["lease"])
@@ -138,6 +138,7 @@ func TestLeaderLeaseConfigAPI(t *testing.T) {
 	re.NoError(err)
 	re.Equal(int64(10), leader.GetServer().GetPersistOptions().GetLeaderLease())
 
+	cfg = map[string]any{}
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &cfg)
 	re.NoError(err)
 	re.Equal(float64(10), cfg["lease"])
@@ -149,10 +150,10 @@ func TestLeaderLeaseConfigAPI(t *testing.T) {
 			continue
 		}
 		followerConfigURL := s.GetAddr() + "/pd/api/v1/config"
+		cfg = map[string]any{}
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerConfigURL, &cfg)
 		re.NoError(err)
 		re.Equal(float64(10), cfg["lease"])
-		break
 	}
 
 	for _, lease := range []int64{0, -1} {

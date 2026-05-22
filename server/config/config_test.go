@@ -32,6 +32,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -200,6 +201,12 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 	re.NoError(err)
 	writer.SetLeaderLease(11)
 	re.NoError(writer.Persist(st))
+	lease, err = newOpt().LoadPersistedLeaderLease(st)
+	re.NoError(err)
+	re.Equal(int64(11), lease)
+
+	st = storage.NewStorageWithMemoryBackend()
+	re.NoError(st.Save(keypath.ConfigPath(), `{"lease":11,"schedule":1}`))
 	lease, err = newOpt().LoadPersistedLeaderLease(st)
 	re.NoError(err)
 	re.Equal(int64(11), lease)

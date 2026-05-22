@@ -800,6 +800,14 @@ func (cfg *persistedConfig) hasValidLeaderLease() bool {
 	return cfg.leaseLoaded && IsValidLeaderLease(cfg.LeaderLease)
 }
 
+type persistedLeaderLease struct {
+	LeaderLease *int64 `json:"lease"`
+}
+
+func (cfg *persistedLeaderLease) hasValidLeaderLease() bool {
+	return cfg.LeaderLease != nil && IsValidLeaderLease(*cfg.LeaderLease)
+}
+
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
 func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
 	o.GetScheduleConfig().StoreLimitVersion = "v2"
@@ -870,13 +878,13 @@ func (o *PersistOptions) LoadPersistedLeaderLease(storage endpoint.ConfigStorage
 	failpoint.Inject("loadLeaderLeaseFail", func() {
 		failpoint.Return(int64(0), errors.New("failpoint: fail to load persisted leader lease"))
 	})
-	cfg := &persistedConfig{Config: &Config{}}
+	cfg := &persistedLeaderLease{}
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
 		return 0, err
 	}
 	if isExist && cfg.hasValidLeaderLease() {
-		return cfg.LeaderLease, nil
+		return *cfg.LeaderLease, nil
 	}
 	return o.GetLeaderLease(), nil
 }
