@@ -796,16 +796,35 @@ func (cfg *persistedConfig) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*persistedConfigAlias)(cfg))
 }
 
-func (cfg *persistedConfig) hasValidLeaderLease() bool {
-	return cfg.leaseLoaded && IsValidLeaderLease(cfg.LeaderLease)
+func (cfg *persistedConfig) getValidLeaderLease() (int64, bool) {
+	if !cfg.leaseLoaded {
+		return 0, false
+	}
+	return normalizePersistedLeaderLease(cfg.LeaderLease)
 }
 
 type persistedLeaderLease struct {
 	LeaderLease *int64 `json:"lease"`
 }
 
-func (cfg *persistedLeaderLease) hasValidLeaderLease() bool {
-	return cfg.LeaderLease != nil && IsValidLeaderLease(*cfg.LeaderLease)
+func (cfg *persistedLeaderLease) getValidLeaderLease() (int64, bool) {
+	if cfg.LeaderLease == nil {
+		return 0, false
+	}
+	return normalizePersistedLeaderLease(*cfg.LeaderLease)
+}
+
+func normalizePersistedLeaderLease(lease int64) (int64, bool) {
+	if !IsValidLeaderLease(lease) {
+		return 0, false
+	}
+	if lease > MaxLeaderLease {
+		log.Warn("persisted leader lease exceeds max, use max",
+			zap.Int64("leader-lease", lease),
+			zap.Int64("max-leader-lease", MaxLeaderLease))
+		return MaxLeaderLease, true
+	}
+	return lease, true
 }
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
@@ -858,8 +877,8 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.keyspace.Store(&cfg.Keyspace)
 		o.microservice.Store(&cfg.Microservice)
-		if cfg.hasValidLeaderLease() {
-			o.SetLeaderLease(cfg.LeaderLease)
+		if lease, ok := cfg.getValidLeaderLease(); ok {
+			o.SetLeaderLease(lease)
 		}
 		o.storeConfig.Store(&cfg.StoreConfig)
 		o.SetClusterVersion(&cfg.ClusterVersion)
@@ -883,26 +902,27 @@ func (o *PersistOptions) LoadPersistedLeaderLease(storage endpoint.ConfigStorage
 	if err != nil {
 		return 0, err
 	}
-	if isExist && cfg.hasValidLeaderLease() {
-		return *cfg.LeaderLease, nil
+	if isExist {
+		if lease, ok := cfg.getValidLeaderLease(); ok {
+			return lease, nil
+		}
 	}
 	return o.GetLeaderLease(), nil
 }
 
-// IsValidLeaderLease returns whether the given PD leader lease timeout is valid.
-// It only checks positivity, because it also gates whether a persisted lease
-// should be honored on reload.
+// IsValidLeaderLease returns whether the given PD leader lease timeout is positive.
 func IsValidLeaderLease(lease int64) bool {
 	return lease > 0
 }
 
 // ValidateLeaderLease validates a leader lease (in seconds) supplied through
-// the online update API. Keep the accepted range aligned with file config
-// behavior: reject explicit non-positive updates, but do not add an online-only
-// upper bound.
+// the online update API.
 func ValidateLeaderLease(lease int64) error {
 	if !IsValidLeaderLease(lease) {
 		return errors.Errorf("leader lease must be positive, got %d", lease)
+	}
+	if lease > MaxLeaderLease {
+		return errors.Errorf("leader lease must not exceed %d seconds, got %d", MaxLeaderLease, lease)
 	}
 	return nil
 }

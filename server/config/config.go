@@ -175,7 +175,9 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = int64(5)
+	defaultLeaderLease = int64(5)
+	// MaxLeaderLease is the maximum accepted PD leader lease timeout in seconds.
+	MaxLeaderLease                 = int64(60)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
@@ -401,6 +403,14 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
+	if c.LeaderLease > MaxLeaderLease {
+		msg := fmt.Sprintf("leader lease %d exceeds max %d, using %d", c.LeaderLease, MaxLeaderLease, MaxLeaderLease)
+		c.WarningMsgs = append(c.WarningMsgs, msg)
+		log.Warn("leader lease exceeds max, use max",
+			zap.Int64("leader-lease", c.LeaderLease),
+			zap.Int64("max-leader-lease", MaxLeaderLease))
+		c.LeaderLease = MaxLeaderLease
+	}
 	configutil.AdjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 

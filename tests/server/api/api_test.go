@@ -156,12 +156,18 @@ func TestLeaderLeaseConfigAPI(t *testing.T) {
 		re.Equal(float64(10), cfg["lease"])
 	}
 
-	for _, lease := range []int64{0, -1} {
+	data, err = json.Marshal(map[string]any{"lease": config.MaxLeaderLease})
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(config.MaxLeaderLease, leader.GetServer().GetPersistOptions().GetLeaderLease())
+
+	for _, lease := range []int64{0, -1, config.MaxLeaderLease + 1} {
 		data, err = json.Marshal(map[string]any{"lease": lease})
 		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, configURL, data, testutil.Status(re, http.StatusBadRequest))
 		re.NoError(err)
-		re.Equal(int64(10), leader.GetServer().GetPersistOptions().GetLeaderLease())
+		re.Equal(config.MaxLeaderLease, leader.GetServer().GetPersistOptions().GetLeaderLease())
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -149,6 +150,21 @@ func TestLeaderLeaseReloadIgnoresNonPositivePersistedValues(t *testing.T) {
 	assertReloadKeepsLeaderLeaseForPersistedValue(-1)
 }
 
+func TestLeaderLeaseReloadClampsPersistedValueAboveMax(t *testing.T) {
+	re := require.New(t)
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(storage.SaveConfig(struct {
+		LeaderLease int64 `json:"lease"`
+	}{LeaderLease: MaxLeaderLease + 1}))
+
+	cfg := NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	cfg.LeaderLease = 7
+	opt := NewPersistOptions(cfg)
+	re.NoError(opt.Reload(storage))
+	re.Equal(MaxLeaderLease, opt.GetLeaderLease())
+}
+
 func TestReloadKeepsCustomLeaderLeaseWhenPersistedConfigMissesLease(t *testing.T) {
 	re := require.New(t)
 	storage := storage.NewStorageWithMemoryBackend()
@@ -176,8 +192,22 @@ func TestReloadKeepsCustomLeaderLeaseWhenPersistedConfigMissesLease(t *testing.T
 func TestValidateLeaderLease(t *testing.T) {
 	re := require.New(t)
 	re.NoError(ValidateLeaderLease(1))
+	re.NoError(ValidateLeaderLease(MaxLeaderLease))
 	re.Error(ValidateLeaderLease(0))
 	re.Error(ValidateLeaderLease(-1))
+	re.Error(ValidateLeaderLease(MaxLeaderLease + 1))
+}
+
+func TestAdjustClampsLeaderLeaseAboveMax(t *testing.T) {
+	re := require.New(t)
+	cfg := NewConfig()
+	meta, err := toml.Decode(fmt.Sprintf("lease = %d", MaxLeaderLease+1), cfg)
+	re.NoError(err)
+	re.NoError(cfg.Adjust(&meta, false))
+	re.Equal(MaxLeaderLease, cfg.LeaderLease)
+	re.Len(cfg.WarningMsgs, 1)
+	re.Contains(cfg.WarningMsgs[0], "leader lease")
+	re.Contains(cfg.WarningMsgs[0], strconv.FormatInt(MaxLeaderLease+1, 10))
 }
 
 func TestLoadPersistedLeaderLease(t *testing.T) {
@@ -230,6 +260,14 @@ func TestLoadPersistedLeaderLease(t *testing.T) {
 	}
 	assertLoadKeepsLeaderLeaseForPersistedValue(0)
 	assertLoadKeepsLeaderLeaseForPersistedValue(-1)
+
+	st = storage.NewStorageWithMemoryBackend()
+	re.NoError(st.SaveConfig(struct {
+		LeaderLease int64 `json:"lease"`
+	}{LeaderLease: MaxLeaderLease + 1}))
+	lease, err = newOpt().LoadPersistedLeaderLease(st)
+	re.NoError(err)
+	re.Equal(MaxLeaderLease, lease)
 }
 
 func TestReloadUpgrade(t *testing.T) {
