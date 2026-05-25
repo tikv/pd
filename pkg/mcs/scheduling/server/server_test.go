@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestStopCluster(t *testing.T) {
@@ -50,6 +52,47 @@ func TestStopCluster(t *testing.T) {
 	re.Nil(s.GetCluster())
 	re.Nil(cluster.GetHeartbeatStreams())
 	re.Nil(cluster.GetStorage())
+}
+
+// TestMultipleLeaderTermsNoHbStreamGoroutineLeak is a regression test for the
+// production memory leak where each leader→follower transition left behind a
+// leaked hbstream.run() goroutine. The leaked goroutines held a strong GC root
+// to their term's BasicCluster via the storeInformer field, preventing the
+// full region tree (~400 MB/term) from being collected. Four leaked goroutines
+// were confirmed in the follower heap profile (IDs 11227, 1829530, 3823982,
+// 9489109) with a total inuse heap of 1641 MB.
+//
+// The fix: stopCluster() calls cleanupRuntimeResources() which calls
+// hbStreams.Close(). Close() cancels hbStreamCtx and waits (wg.Wait) for
+// run() to exit before returning. The test exploits the LIFO ordering of
+// deferred calls — goleak fires before cancel() — so any goroutine still
+// blocking on ctx.Done() (instead of having been stopped by Close()) is
+// detected as a leak.
+func TestMultipleLeaderTermsNoHbStreamGoroutineLeak(t *testing.T) {
+	// Simulate the server-level root context shared across all leadership terms.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // executes LAST (registered first)
+	// goleak executes FIRST (registered second, LIFO), before cancel().
+	// Goroutines that have not yet exited via Close() are still blocked on
+	// ctx.Done() at this point and will be detected as leaks.
+	defer goleak.VerifyNone(t, testutil.LeakOptions...)
+
+	s := &Server{}
+
+	// Simulate 4 leader→follower transitions on the same server instance,
+	// matching the 4 leaked goroutines observed in the production profile.
+	for range 4 {
+		hbStreams := hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, core.NewBasicCluster())
+		s.cluster.Store(&Cluster{
+			hbStreams: hbStreams,
+			storage:   endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		})
+		s.stopCluster()
+	}
+
+	// After all terms, GetCluster() must return nil so incoming heartbeat
+	// requests are rejected rather than processed by a stale cluster.
+	require.Nil(t, s.GetCluster())
 }
 
 func TestRegionHeartbeatReturnsNotBootstrappedWhenHeartbeatStreamsMissing(t *testing.T) {

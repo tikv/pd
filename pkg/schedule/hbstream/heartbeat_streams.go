@@ -177,6 +177,7 @@ func (s *HeartbeatStreams) run() {
 				}
 			}
 		case <-s.hbStreamCtx.Done():
+			log.Info("heartbeat stream is closed, stop running")
 			return
 		}
 	}

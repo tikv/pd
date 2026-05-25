@@ -514,22 +514,28 @@ func (s *Server) startCluster(ctx context.Context) error {
 	)
 	metaWatcher, configWatcher, err = s.startMetaConfWatcher(ctx, basicCluster, storage)
 	if err != nil {
-		configWatcher.Close()
-		metaWatcher.Close()
+		if configWatcher != nil {
+			configWatcher.Close()
+		}
+		if metaWatcher != nil {
+			metaWatcher.Close()
+		}
 		return err
 	}
 	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
 	cluster, err := NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
-	am := cluster.GetAffinityManager()
+	var initSucceeded bool
 	defer func() {
-		if cluster == nil {
+		if initSucceeded {
 			return
 		}
 		// make sure cancel context done when some initialization step failed, to avoid goroutine leak in cluster.
-		if stopped := cluster.StopBackgroundJobs(); !stopped {
-			if cluster.cancel != nil {
-				cluster.cancel()
-				cluster.cancel = nil
+		if cluster != nil {
+			if stopped := cluster.StopBackgroundJobs(); !stopped {
+				if cluster.cancel != nil {
+					cluster.cancel()
+					cluster.cancel = nil
+				}
 			}
 		}
 		// clean new sources
@@ -554,12 +560,12 @@ func (s *Server) startCluster(ctx context.Context) error {
 			affinityWatcher = nil
 		}
 		storage.Close()
-
 	}()
 	if err != nil {
 		return err
 	}
 
+	am := cluster.GetAffinityManager()
 	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
 	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), storage,
 		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
@@ -574,7 +580,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
 	s.cluster.Store(cluster)
 	cluster.StartBackgroundJobs()
-	cluster = nil // defer cleanup no longer needed
+	initSucceeded = true
 	return nil
 }
 
