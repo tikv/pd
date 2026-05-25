@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -50,14 +51,13 @@ func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
 	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
-func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {
+func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *cctx.Manager[*tsoStream]) bool {
 	// Avoid concurrent updating in the background updating goroutine and active updating in the dispatcher loop when
 	// stream is missing.
 	m.updateConnMu.Lock()
 	defer m.updateConnMu.Unlock()
 
-	_, ok := connectionCtxs.Load(mockStreamURL)
-	if ok {
+	if connectionCtxs.Exist(mockStreamURL) {
 		return true
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -67,7 +67,7 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc s
 	} else {
 		stream = m.createStream(ctx)
 	}
-	connectionCtxs.LoadOrStore(mockStreamURL, &tsoConnectionContext{ctx, cancel, mockStreamURL, stream})
+	connectionCtxs.Store(ctx, cancel, mockStreamURL, stream)
 	return true
 }
 

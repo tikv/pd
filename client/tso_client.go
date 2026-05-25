@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -345,19 +346,9 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 	return nil, ""
 }
 
-// tsoConnectionContext is used to store the context of a TSO stream connection.
-type tsoConnectionContext struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	// Current URL of the stream connection.
-	streamURL string
-	// Current stream to send gRPC requests.
-	stream *tsoStream
-}
-
 // updateConnectionCtxs will choose the proper way to update the connections for the given dc-location.
 // It will return a bool to indicate whether the update is successful.
-func (c *tsoClient) updateConnectionCtxs(ctx context.Context, dc string, connectionCtxs *sync.Map) bool {
+func (c *tsoClient) updateConnectionCtxs(ctx context.Context, dc string, connectionCtxs *cctx.Manager[*tsoStream]) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnectToTSO
 	if c.allowTSOFollowerProxy(dc) {
@@ -377,7 +368,7 @@ func (c *tsoClient) updateConnectionCtxs(ctx context.Context, dc string, connect
 func (c *tsoClient) tryConnectToTSO(
 	ctx context.Context,
 	dc string,
-	connectionCtxs *sync.Map,
+	connectionCtxs *cctx.Manager[*tsoStream],
 ) error {
 	var (
 		networkErrNum  uint64
@@ -385,19 +376,8 @@ func (c *tsoClient) tryConnectToTSO(
 		stream         *tsoStream
 		url            string
 		cc             *grpc.ClientConn
-		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
-			// Only store the `connectionCtx` if it does not exist before.
-			if connectionCtx != nil {
-				connectionCtxs.LoadOrStore(newURL, connectionCtx)
-			}
-			// Remove all other `connectionCtx`s.
-			connectionCtxs.Range(func(url, cc any) bool {
-				if url.(string) != newURL {
-					cc.(*tsoConnectionContext).cancel()
-					connectionCtxs.Delete(url)
-				}
-				return true
-			})
+		updateAndClear = func(newURL string, streamCtx context.Context, streamCancel context.CancelFunc, stream ...*tsoStream) {
+			connectionCtxs.CleanAllAndStore(streamCtx, streamCancel, newURL, stream...)
 		}
 	)
 
@@ -407,9 +387,9 @@ func (c *tsoClient) tryConnectToTSO(
 	for range maxRetryTimes {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
-		if _, ok := connectionCtxs.Load(url); ok {
+		if connectionCtxs.Exist(url) {
 			// Just trigger the clean up of the stale connection contexts.
-			updateAndClear(url, nil)
+			updateAndClear(url, ctx, func() {})
 			return nil
 		}
 		if cc != nil {
@@ -420,7 +400,7 @@ func (c *tsoClient) tryConnectToTSO(
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
 			if stream != nil && err == nil {
-				updateAndClear(url, &tsoConnectionContext{cctx, cancel, url, stream})
+				updateAndClear(url, cctx, cancel, stream)
 				return nil
 			}
 
@@ -465,7 +445,7 @@ func (c *tsoClient) tryConnectToTSO(
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(ctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
-				updateAndClear(backupURL, &tsoConnectionContext{cctx, cancel, backupURL, stream})
+				updateAndClear(backupURL, cctx, cancel, stream)
 				return nil
 			}
 			cancel()
@@ -478,7 +458,7 @@ func (c *tsoClient) checkAllocator(
 	ctx context.Context,
 	forwardCancel context.CancelFunc,
 	dc, forwardedHostTrim, addr, url string,
-	updateAndClear func(newAddr string, connectionCtx *tsoConnectionContext),
+	updateAndClear func(newAddr string, streamCtx context.Context, streamCancel context.CancelFunc, stream ...*tsoStream),
 ) {
 	defer func() {
 		// cancel the forward stream
@@ -511,7 +491,7 @@ func (c *tsoClient) checkAllocator(
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
-					updateAndClear(url, &tsoConnectionContext{cctx, cancel, url, stream})
+					updateAndClear(url, cctx, cancel, stream)
 					return
 				}
 			}
@@ -532,7 +512,7 @@ func (c *tsoClient) checkAllocator(
 func (c *tsoClient) tryConnectToTSOWithProxy(
 	ctx context.Context,
 	dc string,
-	connectionCtxs *sync.Map,
+	connectionCtxs *cctx.Manager[*tsoStream],
 ) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
 	leaderAddr := c.svcDiscovery.GetServingURL()
@@ -541,20 +521,18 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
 	// GC the stale one.
-	connectionCtxs.Range(func(addr, cc any) bool {
-		addrStr := addr.(string)
-		if _, ok := tsoStreamBuilders[addrStr]; !ok {
+	connectionCtxs.GC(func(addr string) bool {
+		if _, ok := tsoStreamBuilders[addr]; !ok {
 			log.Info("[tso] remove the stale tso stream",
 				zap.String("dc", dc),
-				zap.String("addr", addrStr))
-			cc.(*tsoConnectionContext).cancel()
-			connectionCtxs.Delete(addr)
+				zap.String("addr", addr))
+			return true
 		}
-		return true
+		return false
 	})
 	// Update the missing one.
 	for addr, tsoStreamBuilder := range tsoStreamBuilders {
-		if _, ok = connectionCtxs.Load(addr); ok {
+		if connectionCtxs.Exist(addr) {
 			continue
 		}
 		log.Info("[tso] try to create tso stream",
@@ -574,7 +552,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 				addrTrim := trimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			connectionCtxs.Store(addr, &tsoConnectionContext{cctx, cancel, addr, stream})
+			connectionCtxs.Store(cctx, cancel, addr, stream)
 			continue
 		}
 		log.Error("[tso] create the tso stream failed",
