@@ -222,6 +222,7 @@ type client struct {
 	svrUrls         []string
 	pdSvcDiscovery  *pdServiceDiscovery
 	tokenDispatcher *tokenDispatcher
+	regionClient    *regionClient
 
 	// For service mode switching.
 	serviceModeKeeper
@@ -511,6 +512,9 @@ func (c *client) setup() error {
 // Close closes the client.
 func (c *client) Close() {
 	c.cancel()
+	if c.regionClient != nil {
+		c.regionClient.close()
+	}
 	c.wg.Wait()
 
 	c.serviceModeKeeper.close()
@@ -619,6 +623,15 @@ func (c *client) scheduleUpdateTokenConnection() {
 	}
 }
 
+func (c *client) getRegionClient() *regionClient {
+	c.Lock()
+	defer c.Unlock()
+	if c.regionClient == nil {
+		c.regionClient = newRegionClient(c.ctx, c.option, c.pdSvcDiscovery)
+	}
+	return c.regionClient
+}
+
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
@@ -671,6 +684,12 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.option.setTSOClientRPCConcurrency(value)
+	case EnableQueryRegion:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableQueryRegion option, it should be bool")
+		}
+		c.option.setEnableQueryRegion(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -888,8 +907,19 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	return handleRegionResponse(resp), nil
 }
 
-// GetRegion implements the RPCClient interface.
 func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
+	if c.option.getEnableQueryRegion() {
+		region, err := c.getRegionClient().GetRegion(ctx, key, opts...)
+		if err == nil {
+			return region, nil
+		}
+		log.Warn("[pd] query region stream failed, fallback to unary GetRegion", errs.ZapError(err))
+	}
+	return c.getRegionUnary(ctx, key, opts...)
+}
+
+// getRegionUnary implements GetRegion through the unary API.
+func (c *client) getRegionUnary(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -926,8 +956,19 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	return handleRegionResponse(resp), nil
 }
 
-// GetPrevRegion implements the RPCClient interface.
 func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
+	if c.option.getEnableQueryRegion() {
+		region, err := c.getRegionClient().GetPrevRegion(ctx, key, opts...)
+		if err == nil {
+			return region, nil
+		}
+		log.Warn("[pd] query region stream failed, fallback to unary GetPrevRegion", errs.ZapError(err))
+	}
+	return c.getPrevRegionUnary(ctx, key, opts...)
+}
+
+// getPrevRegionUnary implements GetPrevRegion through the unary API.
+func (c *client) getPrevRegionUnary(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -965,8 +1006,19 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	return handleRegionResponse(resp), nil
 }
 
-// GetRegionByID implements the RPCClient interface.
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
+	if c.option.getEnableQueryRegion() {
+		region, err := c.getRegionClient().GetRegionByID(ctx, regionID, opts...)
+		if err == nil {
+			return region, nil
+		}
+		log.Warn("[pd] query region stream failed, fallback to unary GetRegionByID", errs.ZapError(err))
+	}
+	return c.getRegionByIDUnary(ctx, regionID, opts...)
+}
+
+// getRegionByIDUnary implements GetRegionByID through the unary API.
+func (c *client) getRegionByIDUnary(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()

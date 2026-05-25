@@ -714,6 +714,23 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	re.NotNil(r)
 }
 
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionByQueryRegionStream() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithEnableQueryRegion())
+	defer cli.Close()
+	testutil.Eventually(re, func() bool {
+		r, err := cli.GetRegion(context.Background(), []byte("a"))
+		return err == nil && r != nil && r.Meta.GetId() == suite.regionID
+	})
+	testutil.Eventually(re, func() bool {
+		r, err := cli.GetRegionByID(context.Background(), suite.regionID)
+		return err == nil && r != nil && r.Meta.GetId() == suite.regionID
+	})
+}
+
 // case 1: unreachable -> normal
 func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1() {
 	re := suite.Require()

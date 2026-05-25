@@ -29,6 +29,7 @@ const (
 	defaultMaxTSOBatchWaitInterval time.Duration = 0
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
+	defaultEnableQueryRegion                     = false
 	defaultTSOClientRPCConcurrency               = 1
 )
 
@@ -46,6 +47,9 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
+	// EnableQueryRegion is the QueryRegion option.
+	// It is stored as bool.
+	EnableQueryRegion
 
 	dynamicOptionCount
 )
@@ -81,6 +85,7 @@ func newOption() *option {
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
 	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
+	co.dynamicOptions[EnableQueryRegion].Store(defaultEnableQueryRegion)
 	return co
 }
 
@@ -108,6 +113,19 @@ func (o *option) setEnableFollowerHandle(enable bool) {
 // getMaxTSOBatchWaitInterval gets the Follower Handle enable option.
 func (o *option) getEnableFollowerHandle() bool {
 	return o.dynamicOptions[EnableFollowerHandle].Load().(bool)
+}
+
+// setEnableQueryRegion sets the QueryRegion option.
+func (o *option) setEnableQueryRegion(enable bool) {
+	old := o.getEnableQueryRegion()
+	if enable != old {
+		o.dynamicOptions[EnableQueryRegion].Store(enable)
+	}
+}
+
+// getEnableQueryRegion gets the QueryRegion option.
+func (o *option) getEnableQueryRegion() bool {
+	return o.dynamicOptions[EnableQueryRegion].Load().(bool)
 }
 
 // getMaxTSOBatchWaitInterval gets the max TSO batch wait interval option.
@@ -236,6 +254,13 @@ func WithForwardingOption(enableForwarding bool) ClientOption {
 func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
 	return func(c *client) {
 		c.option.useTSOServerProxy = useTSOServerProxy
+	}
+}
+
+// WithEnableQueryRegion enables the QueryRegion streaming client.
+func WithEnableQueryRegion() ClientOption {
+	return func(c *client) {
+		c.option.setEnableQueryRegion(true)
 	}
 }
 
