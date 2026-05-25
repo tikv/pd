@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 )
 
 var (
@@ -27,12 +28,32 @@ var (
 	splitScatterIndexPrefix = []byte("_i")
 )
 
-func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint {
-	_, decoded, err := codec.DecodeBytes(region.GetStartKey())
-	if err != nil || !bytes.HasPrefix(decoded, splitScatterTablePrefix) {
+type splitScatterKeyspaceValidator func(uint32) bool
+
+type splitScatterDecodedKey struct {
+	rawKey         []byte
+	keyspacePrefix []byte
+	keyspaceID     uint32
+}
+
+func (key splitScatterDecodedKey) hasKeyspace() bool {
+	return len(key.keyspacePrefix) > 0
+}
+
+func resolveSplitScatterRangeHintWithKeyspaceValidator(
+	region *core.RegionInfo,
+	validateKeyspace splitScatterKeyspaceValidator,
+) splitScatterRangeHint {
+	decodedKey, err := decodeSplitScatterRegionKey(region.GetStartKey(), validateKeyspace)
+	if err != nil {
 		return splitScatterRangeHint{}
 	}
-	rest := decoded[len(splitScatterTablePrefix):]
+	rawKey := decodedKey.rawKey
+
+	if !bytes.HasPrefix(rawKey, splitScatterTablePrefix) {
+		return splitScatterRangeHint{}
+	}
+	rest := rawKey[len(splitScatterTablePrefix):]
 	rest, tableID, err := codec.DecodeInt(rest)
 	if err != nil {
 		return splitScatterRangeHint{}
@@ -40,8 +61,11 @@ func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint
 
 	tablePrefix := append([]byte(nil), codec.GenerateTableKey(tableID)...)
 	tableGroup := makeSplitScatterTableGroup(tableID)
+	if decodedKey.hasKeyspace() {
+		tableGroup = makeSplitScatterKeyspaceTableGroup(decodedKey.keyspaceID, tableID)
+	}
 	if !bytes.HasPrefix(rest, splitScatterIndexPrefix) {
-		return splitScatterPrefixRangeWithGroup(tablePrefix, tableGroup)
+		return splitScatterPrefixRangeWithKeyspaceGroup(decodedKey.keyspacePrefix, tablePrefix, tableGroup)
 	}
 
 	indexRest := rest[len(splitScatterIndexPrefix):]
@@ -52,7 +76,10 @@ func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint
 
 	indexPrefix := codec.GenerateIndexKey(tableID, indexID)
 	indexGroup := makeSplitScatterIndexGroup(tableID, indexID)
-	indexRange := splitScatterPrefixRangeWithGroup(indexPrefix, indexGroup)
+	if decodedKey.hasKeyspace() {
+		indexGroup = makeSplitScatterKeyspaceIndexGroup(decodedKey.keyspaceID, tableID, indexID)
+	}
+	indexRange := splitScatterPrefixRangeWithKeyspaceGroup(decodedKey.keyspacePrefix, indexPrefix, indexGroup)
 	endKey := region.GetEndKey()
 
 	// We intentionally over-approximate ambiguous table-key ranges. If PD can
@@ -63,9 +90,36 @@ func resolveSplitScatterRangeHint(region *core.RegionInfo) splitScatterRangeHint
 	// Both endKey and indexRange.endKey are MemComparable-encoded, so
 	// bytes.Compare correctly reflects the key ordering.
 	if len(endKey) == 0 || len(indexRange.startKey) == 0 || len(indexRange.endKey) == 0 || bytes.Compare(endKey, indexRange.endKey) > 0 {
-		return splitScatterPrefixRangeWithGroup(tablePrefix, tableGroup)
+		return splitScatterPrefixRangeWithKeyspaceGroup(decodedKey.keyspacePrefix, tablePrefix, tableGroup)
 	}
 	return indexRange
+}
+
+func decodeSplitScatterRegionKey(
+	regionKey []byte,
+	validateKeyspace splitScatterKeyspaceValidator,
+) (splitScatterDecodedKey, error) {
+	_, rawKey, err := codec.DecodeBytes(regionKey)
+	if err != nil {
+		return splitScatterDecodedKey{}, err
+	}
+	decodedKey := splitScatterDecodedKey{rawKey: rawKey}
+	mode, keyspaceID, ok := keyspace.ParseKeyspacePrefix(rawKey)
+	if !ok || mode != keyspace.TxnKeyspaceModePrefix {
+		return decodedKey, nil
+	}
+
+	// Split-scatter range hints are table/index-scoped, so only TiDB txn
+	// keyspace keys from a known keyspace range are decoded. With only a
+	// region key, an API V2 txn prefix can be indistinguishable from a
+	// classic/raw user key that starts with the same bytes.
+	if validateKeyspace == nil || !validateKeyspace(keyspaceID) {
+		return decodedKey, nil
+	}
+	decodedKey.rawKey = rawKey[keyspace.KeyspacePrefixLen:]
+	decodedKey.keyspacePrefix = keyspace.MakeKeyspacePrefix(mode, keyspaceID)
+	decodedKey.keyspaceID = keyspaceID
+	return decodedKey, nil
 }
 
 func splitScatterPrefixRange(rawPrefix []byte) splitScatterRangeHint {
@@ -73,7 +127,11 @@ func splitScatterPrefixRange(rawPrefix []byte) splitScatterRangeHint {
 }
 
 func splitScatterPrefixRangeWithGroup(rawPrefix []byte, scatterGroup string) splitScatterRangeHint {
-	startKey := append([]byte(nil), codec.EncodeBytes(rawPrefix)...)
+	return splitScatterPrefixRangeWithKeyspaceGroup(nil, rawPrefix, scatterGroup)
+}
+
+func splitScatterPrefixRangeWithKeyspaceGroup(keyspacePrefix, rawPrefix []byte, scatterGroup string) splitScatterRangeHint {
+	startKey := codec.EncodeBytes(appendKeyspacePrefix(keyspacePrefix, rawPrefix))
 	endRawPrefix := splitScatterNextPrefix(rawPrefix)
 	if len(endRawPrefix) == 0 {
 		// Current callers use TiDB table/index prefixes, which always start
@@ -84,9 +142,16 @@ func splitScatterPrefixRangeWithGroup(rawPrefix []byte, scatterGroup string) spl
 	}
 	return splitScatterRangeHint{
 		startKey:     startKey,
-		endKey:       append([]byte(nil), codec.EncodeBytes(endRawPrefix)...),
+		endKey:       codec.EncodeBytes(appendKeyspacePrefix(keyspacePrefix, endRawPrefix)),
 		scatterGroup: scatterGroup,
 	}
+}
+
+func appendKeyspacePrefix(keyspacePrefix, rawKey []byte) []byte {
+	key := make([]byte, 0, len(keyspacePrefix)+len(rawKey))
+	key = append(key, keyspacePrefix...)
+	key = append(key, rawKey...)
+	return key
 }
 
 func makeSplitScatterTableGroup(tableID int64) string {
@@ -95,6 +160,14 @@ func makeSplitScatterTableGroup(tableID int64) string {
 
 func makeSplitScatterIndexGroup(tableID, indexID int64) string {
 	return fmt.Sprintf("split-scatter-index-%d-%d", tableID, indexID)
+}
+
+func makeSplitScatterKeyspaceTableGroup(keyspaceID uint32, tableID int64) string {
+	return fmt.Sprintf("split-scatter-keyspace-%d-table-%d", keyspaceID, tableID)
+}
+
+func makeSplitScatterKeyspaceIndexGroup(keyspaceID uint32, tableID, indexID int64) string {
+	return fmt.Sprintf("split-scatter-keyspace-%d-index-%d-%d", keyspaceID, tableID, indexID)
 }
 
 func splitScatterNextPrefix(key []byte) []byte {

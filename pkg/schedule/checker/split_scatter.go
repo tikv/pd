@@ -15,6 +15,7 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -88,6 +90,16 @@ type splitScatterRangeHint struct {
 	startKey     []byte
 	endKey       []byte
 	scatterGroup string
+}
+
+func (c *splitScatterController) hasSplitScatterTxnKeyspaceBounds(keyspaceID uint32) bool {
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
+	return c.hasRegionStartKey(regionBound.TxnLeftBound) && c.hasRegionStartKey(regionBound.TxnRightBound)
+}
+
+func (c *splitScatterController) hasRegionStartKey(key []byte) bool {
+	region := c.cluster.GetRegionByKey(key)
+	return region != nil && bytes.Equal(region.GetStartKey(), key)
 }
 
 func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []splitScatterPendingItem {
@@ -407,7 +419,7 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 			splitScatterDispatchRegionMissingCounter.Inc()
 			continue
 		}
-		rangeHint := resolveSplitScatterRangeHint(region)
+		rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(region, c.hasSplitScatterTxnKeyspaceBounds)
 		scatterGroup := pending.group
 		if rangeHint.scatterGroup != "" {
 			scatterGroup = rangeHint.scatterGroup

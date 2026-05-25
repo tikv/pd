@@ -27,6 +27,8 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -39,6 +41,8 @@ const (
 	splitScatterObservedRegionID      uint64 = 101
 	splitScatterTestTableID           int64  = 42
 	splitScatterTestIndexID           int64  = 7
+	splitScatterTestKeyspaceID        uint32 = 4242
+	splitScatterTestNextGenKeyspaceID uint32 = constant.SystemKeyspaceID
 	splitScatterTestSourceWaitVersion        = uint64(0)
 	// CPU usage is only populated to mimic load-split region heartbeat data.
 	// Current split-scatter dispatch does not rank pending regions by CPU.
@@ -468,6 +472,7 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 		endKey    []byte
 		wantRange splitScatterRangeHint
 		wantGroup string
+		keyspaces []uint32
 	}{
 		{
 			name:      "index region",
@@ -478,31 +483,39 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 		},
 		{
 			name:      "record region",
-			startKey:  newSplitScatterRecordKey(42, "a"),
-			endKey:    newSplitScatterRecordKey(42, "m"),
-			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
-			wantGroup: makeSplitScatterTableGroup(42),
+			startKey:  newSplitScatterRecordKey(splitScatterTestTableID, "a"),
+			endKey:    newSplitScatterRecordKey(splitScatterTestTableID, "m"),
+			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(splitScatterTestTableID)),
+			wantGroup: makeSplitScatterTableGroup(splitScatterTestTableID),
 		},
 		{
 			name:      "bare table boundary",
-			startKey:  newSplitScatterTableBoundaryKey(42),
+			startKey:  newSplitScatterTableBoundaryKey(splitScatterTestTableID),
 			endKey:    newSplitScatterIndexKey("m"),
-			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
-			wantGroup: makeSplitScatterTableGroup(42),
+			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(splitScatterTestTableID)),
+			wantGroup: makeSplitScatterTableGroup(splitScatterTestTableID),
 		},
 		{
 			name:      "cross entity falls back to table",
 			startKey:  newSplitScatterIndexKey("a"),
-			endKey:    newSplitScatterRecordKey(42, "m"),
-			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
-			wantGroup: makeSplitScatterTableGroup(42),
+			endKey:    newSplitScatterRecordKey(splitScatterTestTableID, "m"),
+			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(splitScatterTestTableID)),
+			wantGroup: makeSplitScatterTableGroup(splitScatterTestTableID),
 		},
 		{
 			name:      "cross table uses start table",
-			startKey:  newSplitScatterRecordKey(42, "a"),
-			endKey:    newSplitScatterRecordKey(43, "m"),
-			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(42)),
-			wantGroup: makeSplitScatterTableGroup(42),
+			startKey:  newSplitScatterRecordKey(splitScatterTestTableID, "a"),
+			endKey:    newSplitScatterRecordKey(splitScatterTestTableID+1, "m"),
+			wantRange: splitScatterPrefixRange(codec.GenerateTableKey(splitScatterTestTableID)),
+			wantGroup: makeSplitScatterTableGroup(splitScatterTestTableID),
+		},
+		{
+			name:      "nextgen keyspace index region",
+			startKey:  newSplitScatterKeyspaceIndexKey(splitScatterTestNextGenKeyspaceID, "a"),
+			endKey:    newSplitScatterKeyspaceIndexKey(splitScatterTestNextGenKeyspaceID, "m"),
+			wantRange: splitScatterKeyspacePrefixRange(splitScatterTestNextGenKeyspaceID, splitScatterIndexKeyPrefix()),
+			wantGroup: makeSplitScatterKeyspaceIndexGroup(splitScatterTestNextGenKeyspaceID, splitScatterTestTableID, splitScatterTestIndexID),
+			keyspaces: []uint32{splitScatterTestNextGenKeyspaceID},
 		},
 	}
 
@@ -514,15 +527,72 @@ func TestCollectTopPendingResolvesRangeHint(t *testing.T) {
 
 			controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
 			putSplitScatterRegionWithKeys(tc, testCase.startKey, testCase.endKey, splitScatterReportedCPUUsage)
-			putSplitScatterRegion(tc, 100, "x", "z", splitScatterNoCPUUsage)
+			putSplitScatterRegion(tc, 100, "z", "", splitScatterNoCPUUsage)
 			advanceSplitScatterSourceVersion(t, tc)
 
 			re.Equal(makeSplitScatterGroup(100, 101), splitScatterPendingGroup(t, controller, 101))
 			re.ElementsMatch([]uint64{100, 101}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
-			rangeHint := resolveSplitScatterRangeHint(tc.GetRegion(101))
+			rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(
+				tc.GetRegion(101),
+				splitScatterKeyspaceValidatorFor(testCase.keyspaces...),
+			)
 			re.Equal(testCase.wantRange.startKey, rangeHint.startKey)
 			re.Equal(testCase.wantRange.endKey, rangeHint.endKey)
 			re.Equal(testCase.wantGroup, rangeHint.scatterGroup)
+		})
+	}
+}
+
+func TestResolveSplitScatterRangeHintIgnoresRawLikeKeyspaceKeys(t *testing.T) {
+	re := require.New(t)
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: newSplitScatterRawKeyspaceRecordKey(splitScatterTestKeyspaceID, splitScatterTestTableID, "a"),
+		EndKey:   newSplitScatterRawKeyspaceRecordKey(splitScatterTestKeyspaceID, splitScatterTestTableID, "m"),
+	}, nil)
+
+	rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(
+		region,
+		splitScatterKeyspaceValidatorFor(splitScatterTestKeyspaceID),
+	)
+	re.Equal(splitScatterRangeHint{}, rangeHint)
+}
+
+func TestResolveSplitScatterRangeHintRequiresKnownTxnKeyspaceBounds(t *testing.T) {
+	testCases := []struct {
+		name       string
+		keyspaceID uint32
+	}{
+		{name: "normal keyspace", keyspaceID: splitScatterTestKeyspaceID},
+		{name: "max valid keyspace", keyspaceID: constant.MaxValidKeyspaceID},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			controller, tc, _, cleanup := newTestSplitScatterController(t)
+			defer cleanup()
+
+			startKey := newSplitScatterKeyspaceRecordKey(testCase.keyspaceID, "a")
+			endKey := newSplitScatterKeyspaceRecordKey(testCase.keyspaceID, "m")
+			region := core.NewRegionInfo(&metapb.Region{
+				Id:       1,
+				StartKey: startKey,
+				EndKey:   endKey,
+			}, nil)
+			re.Equal(splitScatterRangeHint{}, resolveSplitScatterRangeHintWithKeyspaceValidator(region, nil))
+
+			regionBound := keyspace.MakeRegionBound(testCase.keyspaceID)
+			putSplitScatterRegionWithKeysByID(tc, 90, regionBound.TxnLeftBound, startKey, splitScatterNoCPUUsage)
+			putSplitScatterRegionWithKeysByID(tc, 91, regionBound.TxnRightBound, nil, splitScatterNoCPUUsage)
+
+			rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(
+				region,
+				controller.splitScatter.hasSplitScatterTxnKeyspaceBounds,
+			)
+			wantRange := splitScatterKeyspacePrefixRange(testCase.keyspaceID, codec.GenerateTableKey(splitScatterTestTableID))
+			wantRange.scatterGroup = makeSplitScatterKeyspaceTableGroup(testCase.keyspaceID, splitScatterTestTableID)
+			re.Equal(wantRange, rangeHint)
 		})
 	}
 }
@@ -542,6 +612,39 @@ func TestDispatchSplitScatterUsesRangeScatterGroup(t *testing.T) {
 	controller.dispatchSplitScatterRegions()
 
 	expectedScatterGroup := makeSplitScatterIndexGroup(splitScatterTestTableID, splitScatterTestIndexID)
+	op := oc.GetOperator(101)
+	re.NotNil(op)
+	opGroup, ok := op.GetAdditionalInfo("group")
+	re.True(ok)
+	re.Equal(expectedScatterGroup, opGroup)
+	opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
+	re.True(ok)
+	re.Equal(batchGroup, opBatchGroup)
+}
+
+func TestDispatchSplitScatterUsesKeyspaceRangeScatterGroup(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
+	startKey := newSplitScatterKeyspaceIndexKey(splitScatterTestKeyspaceID, "a")
+	endKey := newSplitScatterKeyspaceIndexKey(splitScatterTestKeyspaceID, "m")
+	regionBound := keyspace.MakeRegionBound(splitScatterTestKeyspaceID)
+	putSplitScatterRegionWithKeysByID(tc, 90, regionBound.TxnLeftBound, startKey, splitScatterNoCPUUsage)
+	putSplitScatterRegionWithKeysByID(tc, 91, regionBound.TxnRightBound, nil, splitScatterNoCPUUsage)
+	putSplitScatterRegionWithKeysByID(tc, 101, startKey, endKey, splitScatterReportedCPUUsage)
+	advanceSplitScatterRegionVersion(t, tc, 100)
+
+	batchGroup := splitScatterPendingGroup(t, controller, 101)
+
+	controller.dispatchSplitScatterRegions()
+
+	expectedScatterGroup := makeSplitScatterKeyspaceIndexGroup(
+		splitScatterTestKeyspaceID,
+		splitScatterTestTableID,
+		splitScatterTestIndexID,
+	)
 	op := oc.GetOperator(101)
 	re.NotNil(op)
 	opGroup, ok := op.GetAdditionalInfo("group")
@@ -809,6 +912,17 @@ func splitScatterPendingGroup(t *testing.T, controller *Controller, regionID uin
 	return splitScatterPending(t, controller, regionID).group
 }
 
+func splitScatterKeyspaceValidatorFor(keyspaces ...uint32) splitScatterKeyspaceValidator {
+	return func(keyspaceID uint32) bool {
+		for _, validKeyspaceID := range keyspaces {
+			if validKeyspaceID == keyspaceID {
+				return true
+			}
+		}
+		return false
+	}
+}
+
 func splitScatterPending(t *testing.T, controller *Controller, regionID uint64) splitScatterPendingItem {
 	t.Helper()
 	controller.splitScatter.pendingMu.RLock()
@@ -895,10 +1009,28 @@ func splitScatterIndexKeyPrefix() []byte {
 	return codec.GenerateIndexKey(splitScatterTestTableID, splitScatterTestIndexID)
 }
 
+func splitScatterKeyspacePrefixRange(keyspaceID uint32, rawPrefix []byte) splitScatterRangeHint {
+	startKey := newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, rawPrefix)
+	endRawPrefix := splitScatterNextPrefix(rawPrefix)
+	if len(endRawPrefix) == 0 {
+		return splitScatterRangeHint{startKey: startKey}
+	}
+	return splitScatterRangeHint{
+		startKey: startKey,
+		endKey:   newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, endRawPrefix),
+	}
+}
+
 func newSplitScatterIndexKey(suffix string) []byte {
 	key := append([]byte(nil), splitScatterIndexKeyPrefix()...)
 	key = append(key, suffix...)
 	return codec.EncodeBytes(key)
+}
+
+func newSplitScatterKeyspaceIndexKey(keyspaceID uint32, suffix string) []byte {
+	key := append([]byte(nil), splitScatterIndexKeyPrefix()...)
+	key = append(key, suffix...)
+	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, key)
 }
 
 func newSplitScatterRecordKey(tableID int64, suffix string) []byte {
@@ -907,6 +1039,23 @@ func newSplitScatterRecordKey(tableID int64, suffix string) []byte {
 	return codec.EncodeBytes(key)
 }
 
+func newSplitScatterKeyspaceRecordKey(keyspaceID uint32, suffix string) []byte {
+	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(splitScatterTestTableID)...)
+	key = append(key, suffix...)
+	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, key)
+}
+
+func newSplitScatterRawKeyspaceRecordKey(keyspaceID uint32, tableID int64, suffix string) []byte {
+	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(tableID)...)
+	key = append(key, suffix...)
+	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.RawKeyspaceModePrefix, key)
+}
+
 func newSplitScatterTableBoundaryKey(tableID int64) []byte {
 	return codec.EncodeBytes(codec.GenerateTableKey(tableID))
+}
+
+func newSplitScatterKeyspaceKey(keyspaceID uint32, mode byte, rawKey []byte) []byte {
+	key := keyspace.MakeKeyspacePrefix(mode, keyspaceID)
+	return codec.EncodeBytes(append(key, rawKey...))
 }
