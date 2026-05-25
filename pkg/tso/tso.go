@@ -135,6 +135,12 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, conditions ...setTSOCon
 	return overflowedLogical(t.tsoMux.logical)
 }
 
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	ctx, cancel := context.WithTimeout(context.Background(), t.getStorageTimeout())
+	defer cancel()
+	return t.storage.SaveTimestamp(ctx, t.GetTimestampPath(), ts)
+}
+
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
