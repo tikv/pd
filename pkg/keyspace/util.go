@@ -145,6 +145,33 @@ func MaskKeyspaceID(id uint32) uint32 {
 	return id & 0xFF
 }
 
+<<<<<<< HEAD
+=======
+// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
+// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
+func MakeKeyspacePrefix(mode byte, id uint32) []byte {
+	prefix := make([]byte, KeyspacePrefixLen)
+	binary.BigEndian.PutUint32(prefix, id)
+	prefix[0] = mode
+	return prefix
+}
+
+// ParseKeyspacePrefix parses a raw keyspace prefix from key.
+// It returns false for keys that do not start with a known keyspace mode byte.
+func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
+	if len(key) < KeyspacePrefixLen {
+		return 0, 0, false
+	}
+	mode = key[0]
+	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
+		return 0, 0, false
+	}
+	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
+	id = binary.BigEndian.Uint32(idBytes[:])
+	return mode, id, true
+}
+
+>>>>>>> c313b99b43 (checker, keyspace: support split-scatter for MCS keyspaces (#10648))
 // RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
