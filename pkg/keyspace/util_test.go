@@ -122,6 +122,44 @@ func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	)
 }
 
+func TestParseKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name string
+		key  []byte
+		mode byte
+		id   uint32
+	}{
+		{
+			name: "raw",
+			key:  []byte{'r', 0x01, 0x02, 0x03},
+			mode: RawKeyspaceModePrefix,
+			id:   0x010203,
+		},
+		{
+			name: "txn with suffix",
+			key:  []byte{'x', 0xff, 0xff, 0xff, 't'},
+			mode: TxnKeyspaceModePrefix,
+			id:   constant.MaxValidKeyspaceID,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(_ *testing.T) {
+			mode, id, ok := ParseKeyspacePrefix(testCase.key)
+			re.True(ok)
+			re.Equal(testCase.mode, mode)
+			re.Equal(testCase.id, id)
+		})
+	}
+
+	_, _, ok := ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
+	re.False(ok)
+	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
+	re.False(ok)
+}
+
 func TestValidateName(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
