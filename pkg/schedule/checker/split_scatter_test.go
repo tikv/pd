@@ -54,12 +54,12 @@ func (c *Controller) dispatchSplitScatterRegions() {
 	c.splitScatter.dispatchSplitScatterRegions()
 }
 
-func TestNewSplitScatterControllerResetsPendingGauge(t *testing.T) {
+func TestSplitScatterControllerCleanupResetsPendingGauge(t *testing.T) {
 	re := require.New(t)
 	splitScatterPendingGauge.Set(7)
 
 	controller, _, _, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
+	cleanup()
 
 	re.Equal(0, splitScatterPendingCount(controller))
 	re.Equal(float64(0), promtestutil.ToFloat64(splitScatterPendingGauge))
@@ -688,6 +688,7 @@ func newTestSplitScatterController(t *testing.T) (*Controller, *mockcluster.Clus
 	controller := NewController(ctx, tc, tc.GetCheckerConfig(), oc)
 
 	cleanup := func() {
+		controller.splitScatter.clearPendingSplitScatter()
 		stream.Close()
 		cancel()
 	}

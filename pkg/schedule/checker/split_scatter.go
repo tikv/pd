@@ -73,7 +73,6 @@ func newSplitScatterController(
 	opController *operator.Controller,
 	addPendingProcessedRegions func(needCheckLen bool, ids ...uint64),
 ) *splitScatterController {
-	splitScatterPendingGauge.Set(0)
 	return &splitScatterController{
 		cluster:         cluster,
 		opController:    opController,
@@ -283,11 +282,8 @@ func (c *splitScatterController) cleanupExpiredPendingSplitScatter() int {
 func (c *splitScatterController) clearPendingSplitScatter() {
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
-	pendingCount := len(c.pending)
-	if pendingCount > 0 {
-		c.pending = make(map[uint64]splitScatterPendingItem)
-		c.updatePendingGaugeLocked()
-	}
+	c.pending = make(map[uint64]splitScatterPendingItem)
+	c.updatePendingGaugeLocked()
 	c.nextDispatchAt = time.Time{}
 }
 
