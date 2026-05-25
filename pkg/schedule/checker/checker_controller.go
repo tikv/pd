@@ -126,6 +126,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 func (c *Controller) PatrolRegions() {
 	c.patrolRegionContext.init(c.ctx)
 	c.patrolRegionContext.startPatrolRegionWorkers(c)
+	defer c.splitScatter.clearPendingSplitScatter()
 	defer c.patrolRegionContext.stop()
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
