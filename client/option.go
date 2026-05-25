@@ -70,6 +70,7 @@ type option struct {
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
 	enableTSOFollowerProxyCh chan struct{}
+	enableFollowerHandleCh   chan struct{}
 }
 
 // newOption creates a new PD client option with the default values set.
@@ -78,6 +79,7 @@ func newOption() *option {
 		timeout:                  defaultPDTimeout,
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
+		enableFollowerHandleCh:   make(chan struct{}, 1),
 		initMetrics:              true,
 	}
 
@@ -107,6 +109,10 @@ func (o *option) setEnableFollowerHandle(enable bool) {
 	old := o.getEnableFollowerHandle()
 	if enable != old {
 		o.dynamicOptions[EnableFollowerHandle].Store(enable)
+		select {
+		case o.enableFollowerHandleCh <- struct{}{}:
+		default:
+		}
 	}
 }
 

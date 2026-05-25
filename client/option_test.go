@@ -60,6 +60,10 @@ func TestDynamicOptionChange(t *testing.T) {
 
 	expectBool = true
 	o.setEnableFollowerHandle(expectBool)
+	testutil.Eventually(re, func() bool {
+		<-o.enableFollowerHandleCh
+		return true
+	})
 	re.Equal(expectBool, o.getEnableFollowerHandle())
 	expectBool = false
 	o.setEnableFollowerHandle(expectBool)

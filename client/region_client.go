@@ -200,6 +200,9 @@ func (c *regionClient) connectionDaemon() {
 		case <-updaterCtx.Done():
 			log.Info("[region] connection daemon is exiting")
 			return
+		case <-c.option.enableFollowerHandleCh:
+			log.Info("[region] follower handle status changed",
+				zap.Bool("enable", c.option.getEnableFollowerHandle()))
 		case <-updateTicker.C:
 		case <-c.updateConnectionCh:
 		}
