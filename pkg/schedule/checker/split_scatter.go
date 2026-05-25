@@ -63,7 +63,8 @@ type splitScatterController struct {
 	// pending maps a pending region ID to its latest split-scatter batch item.
 	// The item keeps its batch group so stale snapshots cannot mutate a newer
 	// pending entry for the same region.
-	pending map[uint64]splitScatterPendingItem
+	pending        map[uint64]splitScatterPendingItem
+	nextDispatchAt time.Time
 }
 
 func newSplitScatterController(
@@ -111,17 +112,20 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	c.pendingMu.RUnlock()
 
 	candidates := make([]splitScatterPendingItem, 0, len(pendingSnapshot))
+	missingSnapshot := make([]splitScatterPendingItem, 0)
 	for _, pending := range pendingSnapshot {
+		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
+			continue
+		}
 		regionID := pending.regionID
 		region := c.cluster.GetRegion(regionID)
 		if region == nil {
-			continue
-		}
-		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
+			missingSnapshot = append(missingSnapshot, pending)
 			continue
 		}
 		sourceRegion := c.cluster.GetRegion(pending.sourceRegionID)
 		if sourceRegion == nil {
+			missingSnapshot = append(missingSnapshot, pending)
 			continue
 		}
 		sourceVersion := uint64(0)
@@ -162,6 +166,7 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		candidates = selected
 		c.pendingMu.Unlock()
 	}
+	c.delayMissingPendingSplitScatter(missingSnapshot, now)
 
 	if len(expiredSnapshot) > 0 {
 		attemptedExpiredCount := 0
@@ -186,6 +191,30 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		observeSplitScatterPendingExpired(attemptedExpiredCount, unattemptedExpiredCount)
 	}
 	return candidates
+}
+
+func (c *splitScatterController) delayMissingPendingSplitScatter(missing []splitScatterPendingItem, now time.Time) {
+	if len(missing) == 0 {
+		return
+	}
+	missingCount := 0
+	c.pendingMu.Lock()
+	for _, expected := range missing {
+		pending, ok := c.pending[expected.regionID]
+		if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
+			continue
+		}
+		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
+			continue
+		}
+		pending.retryAt = now.Add(splitScatterRetryBackoff)
+		c.pending[expected.regionID] = pending
+		missingCount++
+	}
+	c.pendingMu.Unlock()
+	if missingCount > 0 {
+		splitScatterDispatchRegionMissingCounter.Add(float64(missingCount))
+	}
 }
 
 func (c *splitScatterController) delayPendingSplitScatter(expected splitScatterPendingItem) {
@@ -250,6 +279,26 @@ func (c *splitScatterController) cleanupExpiredPendingSplitScatter() int {
 	return pendingCount
 }
 
+func (c *splitScatterController) clearPendingSplitScatter() {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.pending = make(map[uint64]splitScatterPendingItem)
+	c.updatePendingGaugeLocked()
+	c.nextDispatchAt = time.Time{}
+}
+
+func (c *splitScatterController) skipDispatchUntil(now time.Time) bool {
+	c.pendingMu.RLock()
+	defer c.pendingMu.RUnlock()
+	return !c.nextDispatchAt.IsZero() && now.Before(c.nextDispatchAt)
+}
+
+func (c *splitScatterController) delayNextDispatch(now time.Time) {
+	c.pendingMu.Lock()
+	defer c.pendingMu.Unlock()
+	c.nextDispatchAt = now.Add(splitScatterRetryBackoff)
+}
+
 func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
 	return fmt.Sprintf("split-scatter-%d-%d", sourceRegionID, firstNewRegionID)
 }
@@ -261,6 +310,9 @@ func (c *Controller) RecordSplitScatterBatch(sourceRegionID, sourceWaitVersion u
 
 func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceWaitVersion uint64, newRegionIDs []uint64) {
 	if len(newRegionIDs) == 0 {
+		return
+	}
+	if c.cluster.GetCheckerConfig().GetSplitScatterScheduleLimit() == 0 {
 		return
 	}
 	group := makeSplitScatterGroup(sourceRegionID, newRegionIDs[0])
@@ -317,27 +369,39 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceW
 		expireAt:          expireAt,
 	}
 	c.updatePendingGaugeLocked()
+	c.nextDispatchAt = time.Time{}
 }
 
 func (c *splitScatterController) dispatchSplitScatterRegions() {
+	now := time.Now()
 	if c.cleanupExpiredPendingSplitScatter() == 0 {
 		return
 	}
 	limit := c.cluster.GetCheckerConfig().GetSplitScatterScheduleLimit()
 	if limit == 0 {
 		splitScatterDispatchDisabledCounter.Inc()
+		c.clearPendingSplitScatter()
+		return
+	}
+	if c.skipDispatchUntil(now) {
 		return
 	}
 	running := c.opController.OperatorCount(operator.OpSplitScatter)
 	if running >= limit {
 		splitScatterDispatchScheduleLimitCounter.Inc()
 		operator.IncOperatorLimitCounter(types.SplitScatterChecker, operator.OpSplitScatter)
+		c.delayNextDispatch(now)
 		return
 	}
 	dispatchLimit := int(limit - running)
 	// Dispatch sequentially so operators added for earlier pending items in this pass
 	// are visible to later ScatterInternal calls through the running-operator delta.
-	for _, pending := range c.collectTopPendingSplitScatter(dispatchLimit) {
+	pendingItems := c.collectTopPendingSplitScatter(dispatchLimit)
+	if len(pendingItems) == 0 {
+		c.delayNextDispatch(now)
+		return
+	}
+	for _, pending := range pendingItems {
 		region := c.cluster.GetRegion(pending.regionID)
 		if region == nil {
 			splitScatterDispatchRegionMissingCounter.Inc()
