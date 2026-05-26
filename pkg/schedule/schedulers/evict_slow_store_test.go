@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 const (
@@ -644,7 +645,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// Add regions with leader in store 1
-	for i := range 10000 {
+	for i := range 100000 {
 		tc.AddLeaderRegion(uint64(i), 1, 2)
 	}
 
@@ -669,6 +670,13 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	ops, _ = es.Schedule(tc, false)
 	re.Len(ops, 5)
 
+	es.(*evictSlowStoreScheduler).conf.Batch = maxEvictLeaderBatchSize
+	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
+	testutil.Eventually(re, func() bool {
+		ops, _ = es.Schedule(tc, false)
+		return len(ops) == maxEvictLeaderBatchSize
+	})
+
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
 	})
@@ -690,7 +698,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
-	re.Equal(5, persistValue.Batch)
+	re.Equal(maxEvictLeaderBatchSize, persistValue.Batch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
 
