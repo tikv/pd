@@ -506,16 +506,19 @@ func (c *client) setup() error {
 
 	// Create dispatchers
 	c.createTokenDispatcher()
+	if c.option.getEnableQueryRegion() {
+		c.enableRegionClient()
+	}
+	c.wg.Add(1)
+	go c.regionClientInitializer()
 	return nil
 }
 
 // Close closes the client.
 func (c *client) Close() {
 	c.cancel()
-	if c.regionClient != nil {
-		c.regionClient.close()
-	}
 	c.wg.Wait()
+	c.disableRegionClient()
 
 	c.serviceModeKeeper.close()
 	c.pdSvcDiscovery.Close()
@@ -624,12 +627,61 @@ func (c *client) scheduleUpdateTokenConnection() {
 }
 
 func (c *client) getRegionClient() *regionClient {
-	c.Lock()
-	defer c.Unlock()
-	if c.regionClient == nil {
-		c.regionClient = newRegionClient(c.ctx, c.option, c.pdSvcDiscovery)
-	}
+	c.RLock()
+	defer c.RUnlock()
 	return c.regionClient
+}
+
+func (c *client) regionClientInitializer() {
+	log.Info("[pd] start query region client initializer")
+	defer c.wg.Done()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("[pd] exit query region client initializer")
+			return
+		case <-c.option.enableQueryRegionCh:
+			if c.option.getEnableQueryRegion() {
+				log.Info("[pd] notified to enable the query region client")
+				c.enableRegionClient()
+			} else {
+				log.Info("[pd] notified to disable the query region client")
+				c.disableRegionClient()
+			}
+		}
+	}
+}
+
+func (c *client) enableRegionClient() {
+	c.RLock()
+	if c.regionClient != nil {
+		c.RUnlock()
+		return
+	}
+	c.RUnlock()
+
+	regionClient := newRegionClient(c.ctx, c.option, c.pdSvcDiscovery)
+	c.Lock()
+	if c.regionClient != nil {
+		c.Unlock()
+		regionClient.close()
+		return
+	}
+	c.regionClient = regionClient
+	c.Unlock()
+}
+
+func (c *client) disableRegionClient() {
+	c.Lock()
+	if c.regionClient == nil {
+		c.Unlock()
+		return
+	}
+	regionClient := c.regionClient
+	c.regionClient = nil
+	c.Unlock()
+
+	regionClient.close()
 }
 
 // GetClusterID returns the ClusterID.
@@ -909,11 +961,13 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if c.option.getEnableQueryRegion() {
-		region, err := c.getRegionClient().GetRegion(ctx, key, opts...)
-		if err == nil {
-			return region, nil
+		if regionClient := c.getRegionClient(); regionClient != nil {
+			region, err := regionClient.GetRegion(ctx, key, opts...)
+			if err == nil {
+				return region, nil
+			}
+			log.Warn("[pd] query region stream failed, fallback to unary GetRegion", errs.ZapError(err))
 		}
-		log.Warn("[pd] query region stream failed, fallback to unary GetRegion", errs.ZapError(err))
 	}
 	return c.getRegionUnary(ctx, key, opts...)
 }
@@ -958,11 +1012,13 @@ func (c *client) getRegionUnary(ctx context.Context, key []byte, opts ...GetRegi
 
 func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if c.option.getEnableQueryRegion() {
-		region, err := c.getRegionClient().GetPrevRegion(ctx, key, opts...)
-		if err == nil {
-			return region, nil
+		if regionClient := c.getRegionClient(); regionClient != nil {
+			region, err := regionClient.GetPrevRegion(ctx, key, opts...)
+			if err == nil {
+				return region, nil
+			}
+			log.Warn("[pd] query region stream failed, fallback to unary GetPrevRegion", errs.ZapError(err))
 		}
-		log.Warn("[pd] query region stream failed, fallback to unary GetPrevRegion", errs.ZapError(err))
 	}
 	return c.getPrevRegionUnary(ctx, key, opts...)
 }
@@ -1008,11 +1064,13 @@ func (c *client) getPrevRegionUnary(ctx context.Context, key []byte, opts ...Get
 
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
 	if c.option.getEnableQueryRegion() {
-		region, err := c.getRegionClient().GetRegionByID(ctx, regionID, opts...)
-		if err == nil {
-			return region, nil
+		if regionClient := c.getRegionClient(); regionClient != nil {
+			region, err := regionClient.GetRegionByID(ctx, regionID, opts...)
+			if err == nil {
+				return region, nil
+			}
+			log.Warn("[pd] query region stream failed, fallback to unary GetRegionByID", errs.ZapError(err))
 		}
-		log.Warn("[pd] query region stream failed, fallback to unary GetRegionByID", errs.ZapError(err))
 	}
 	return c.getRegionByIDUnary(ctx, regionID, opts...)
 }

@@ -71,6 +71,7 @@ type option struct {
 
 	enableTSOFollowerProxyCh chan struct{}
 	enableFollowerHandleCh   chan struct{}
+	enableQueryRegionCh      chan struct{}
 }
 
 // newOption creates a new PD client option with the default values set.
@@ -80,6 +81,7 @@ func newOption() *option {
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
 		enableFollowerHandleCh:   make(chan struct{}, 1),
+		enableQueryRegionCh:      make(chan struct{}, 1),
 		initMetrics:              true,
 	}
 
@@ -126,6 +128,10 @@ func (o *option) setEnableQueryRegion(enable bool) {
 	old := o.getEnableQueryRegion()
 	if enable != old {
 		o.dynamicOptions[EnableQueryRegion].Store(enable)
+		select {
+		case o.enableQueryRegionCh <- struct{}{}:
+		default:
+		}
 	}
 }
 

@@ -71,8 +71,22 @@ func TestDynamicOptionChange(t *testing.T) {
 
 	expectBool = true
 	o.setEnableQueryRegion(expectBool)
+	testutil.Eventually(re, func() bool {
+		<-o.enableQueryRegionCh
+		return true
+	})
 	re.Equal(expectBool, o.getEnableQueryRegion())
 	expectBool = false
 	o.setEnableQueryRegion(expectBool)
+	testutil.Eventually(re, func() bool {
+		<-o.enableQueryRegionCh
+		return true
+	})
 	re.Equal(expectBool, o.getEnableQueryRegion())
+	o.setEnableQueryRegion(expectBool)
+	select {
+	case <-o.enableQueryRegionCh:
+		re.Fail("setting the same EnableQueryRegion value should not notify the channel")
+	default:
+	}
 }
