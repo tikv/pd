@@ -57,6 +57,100 @@ func TestHistoryBufferMaxSizeFromMemory(t *testing.T) {
 	}
 }
 
+func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	syncStream, err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
+		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member:     &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}},
+		StartIndex: 0,
+	}, stream)
+	if syncStream != nil {
+		defer syncer.unbindStream("pd-follower", syncStream)
+	}
+
+	re.NoError(err)
+	re.Equal(2, syncer.history.capacity())
+}
+
+func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newHistoryBufferTestRegion(1))
+	syncer := newTestRegionSyncer(t, bc)
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	startIndex := syncer.history.getNextIndex()
+	done := make(chan syncFullRegionsResult, 1)
+	go func() {
+		syncStream, err := syncer.syncFullRegions(context.Background(), "pd-follower", stream)
+		done <- syncFullRegionsResult{syncStream: syncStream, err: err}
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	for i := range 5 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+	records := syncer.history.recordsFrom(startIndex)
+
+	close(unblockSend)
+	fullResp := <-stream.sendCh
+	catchUpResp := <-stream.sendCh
+	result := <-done
+	if result.syncStream != nil {
+		defer syncer.unbindStream("pd-follower", result.syncStream)
+	}
+
+	re.NoError(result.err)
+	re.Len(fullResp.GetRegions(), 1)
+	re.Len(records, 5)
+	re.Equal(startIndex, catchUpResp.GetStartIndex())
+	re.Len(catchUpResp.GetRegions(), 5)
+}
+
+func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newHistoryBufferTestRegion(1))
+	syncer := newTestRegionSyncer(t, bc)
+	syncer.history = newHistoryBufferWithConfig(2, 2, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	done := make(chan syncFullRegionsResult, 1)
+	go func() {
+		syncStream, err := syncer.syncFullRegions(context.Background(), "pd-follower", stream)
+		done <- syncFullRegionsResult{syncStream: syncStream, err: err}
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	for i := range 3 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(200 + i)))
+	}
+
+	close(unblockSend)
+	re.NotNil(<-stream.sendCh)
+	result := <-done
+	if result.syncStream != nil {
+		defer syncer.unbindStream("pd-follower", result.syncStream)
+	}
+
+	re.Error(result.err)
+}
+
+type syncFullRegionsResult struct {
+	syncStream *regionSyncStream
+	err        error
+}
+
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
@@ -374,6 +468,25 @@ func newMockSyncRegionsServer() *mockSyncRegionsServer {
 		recvCh: make(chan *pdpb.SyncRegionRequest),
 		sendCh: make(chan *pdpb.SyncRegionResponse, 1),
 	}
+}
+
+func newTestRegionSyncer(t *testing.T, bc *core.BasicCluster) *RegionSyncer {
+	t.Helper()
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	t.Cleanup(func() {
+		re.NoError(regionStorage.Close())
+	})
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		bc,
+	)
+	return NewRegionSyncer(server)
 }
 
 func (s *mockSyncRegionsServer) Send(resp *pdpb.SyncRegionResponse) error {

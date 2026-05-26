@@ -56,8 +56,10 @@ type historyBuffer struct {
 	observedRequiredWindow uint64
 	// lowWindowRounds counts consecutive shrink checks where the required window stays low.
 	lowWindowRounds int
-	kv              kv.Base
-	flushCount      int
+	// retains tracks full-sync start indexes that must stay replayable until catch-up finishes.
+	retains    map[uint64]int
+	kv         kv.Base
+	flushCount int
 }
 
 func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer {
@@ -123,6 +125,9 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
+	if retainIndex, ok := h.minRetainIndexLocked(); ok && retainIndex <= h.index {
+		h.growForWindowLocked(h.index - retainIndex + 1)
+	}
 	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
@@ -140,6 +145,10 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()
+	return h.recordsFromLocked(index)
+}
+
+func (h *historyBuffer) recordsFromLocked(index uint64) []*core.RegionInfo {
 	var pos int
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos = (h.head + int(index-h.firstIndex())) % h.size
@@ -151,6 +160,63 @@ func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 		records = append(records, h.records[i])
 	}
 	return records
+}
+
+func (h *historyBuffer) observeAndRecordsFrom(index uint64) ([]*core.RegionInfo, uint64) {
+	h.Lock()
+	defer h.Unlock()
+	nextIndex := h.nextIndex()
+	if index != 0 && index < nextIndex {
+		h.observeRequiredWindowLocked(nextIndex - index)
+	}
+	return h.recordsFromLocked(index), nextIndex
+}
+
+func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, uint64, bool) {
+	h.RLock()
+	defer h.RUnlock()
+	nextIndex := h.nextIndex()
+	if index == nextIndex {
+		return nil, nextIndex, true
+	}
+	records := h.recordsFromLocked(index)
+	return records, nextIndex, len(records) == int(nextIndex-index)
+}
+
+func (h *historyBuffer) retainFromCurrent() (uint64, func()) {
+	h.Lock()
+	defer h.Unlock()
+	index := h.nextIndex()
+	if h.retains == nil {
+		h.retains = make(map[uint64]int)
+	}
+	h.retains[index]++
+	return index, func() {
+		h.releaseRetain(index)
+	}
+}
+
+func (h *historyBuffer) releaseRetain(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	count := h.retains[index]
+	if count <= 1 {
+		delete(h.retains, index)
+		return
+	}
+	h.retains[index] = count - 1
+}
+
+func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
+	var min uint64
+	var ok bool
+	for index := range h.retains {
+		if !ok || index < min {
+			min = index
+			ok = true
+		}
+	}
+	return min, ok
 }
 
 func (h *historyBuffer) observeRequiredWindow(window uint64) {
@@ -174,6 +240,11 @@ func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
 func (h *historyBuffer) maybeShrink() {
 	h.Lock()
 	defer h.Unlock()
+	if len(h.retains) > 0 {
+		h.observedRequiredWindow = 0
+		h.lowWindowRounds = 0
+		return
+	}
 	if h.capacity() <= h.baseCapacity {
 		h.observedRequiredWindow = 0
 		h.lowWindowRounds = 0
@@ -190,12 +261,6 @@ func (h *historyBuffer) maybeShrink() {
 		return
 	}
 	target := h.capacity() / 2
-	if h.observedRequiredWindow > 0 {
-		required := normalizeHistoryBufferCapacity(int(h.observedRequiredWindow*2), h.capacityUnit)
-		if required > target {
-			target = required
-		}
-	}
 	if target < h.baseCapacity {
 		target = h.baseCapacity
 	}
@@ -219,6 +284,7 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	h.flushCount = defaultFlushCount
 	h.observedRequiredWindow = 0
 	h.lowWindowRounds = 0
+	h.retains = nil
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
 	}
