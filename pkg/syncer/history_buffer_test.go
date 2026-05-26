@@ -143,60 +143,6 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 	re.Equal("3", s)
 }
 
-func TestHistoryBufferRetainGrowsAndPreservesRecords(t *testing.T) {
-	re := require.New(t)
-	h := newTestHistoryBuffer(8)
-	h.resetWithIndex(100)
-
-	retainer := h.retainFrom(100)
-	defer retainer.release()
-	for i := 1; i <= 3; i++ {
-		h.record(newHistoryBufferTestRegion(uint64(i)))
-	}
-
-	re.Equal(8, h.capacity())
-	re.False(retainer.overflowed())
-	records := h.recordsFrom(100)
-	re.Len(records, 3)
-	for i, record := range records {
-		re.Equal(uint64(i+1), record.GetID())
-	}
-}
-
-func TestHistoryBufferMultipleRetainsKeepEarliestIndex(t *testing.T) {
-	re := require.New(t)
-	h := newTestHistoryBuffer(8)
-	h.resetWithIndex(100)
-
-	first := h.retainFrom(100)
-	defer first.release()
-	second := h.retainFrom(101)
-	defer second.release()
-	for i := 1; i <= 3; i++ {
-		h.record(newHistoryBufferTestRegion(uint64(i)))
-	}
-
-	re.False(first.overflowed())
-	re.False(second.overflowed())
-	records := h.recordsFrom(100)
-	re.Len(records, 3)
-}
-
-func TestHistoryBufferRetainOverflowAtMaxCapacity(t *testing.T) {
-	re := require.New(t)
-	h := newTestHistoryBuffer(4)
-	h.resetWithIndex(100)
-
-	retainer := h.retainFrom(100)
-	defer retainer.release()
-	for i := 1; i <= 5; i++ {
-		h.record(newHistoryBufferTestRegion(uint64(i)))
-	}
-
-	re.Equal(4, h.capacity())
-	re.True(retainer.overflowed())
-}
-
 func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
@@ -206,18 +152,19 @@ func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferShrinksAfterRequiredWindowStaysLow(t *testing.T) {
+func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 	h.observeRequiredWindow(3)
 	re.Equal(8, h.capacity())
+	h.maybeShrink()
 
-	for range historyBufferShrinkRounds + 1 {
+	for range historyBufferShrinkRounds {
 		h.observeRequiredWindow(1)
 		h.maybeShrink()
 	}
 
-	re.Equal(2, h.capacity())
+	re.Equal(4, h.capacity())
 }
 
 func newTestHistoryBuffer(maxCapacity int) *historyBuffer {

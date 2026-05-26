@@ -51,7 +51,7 @@ const (
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
 	historyBufferMemoryStep  = 4 * 1024 * 1024 * 1024
-	maxHistoryBufferBaseSize = 80000
+	maxHistoryBufferSize     = 80000
 )
 
 // ClientStream is the client side of the region syncer.
@@ -121,10 +121,10 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	if regionStorage == nil {
 		return nil
 	}
-	historyBufferSize := historyBufferSizeFromMemory(memory.GetMemTotalIgnoreErr())
+	historyBufferMaxSize := historyBufferMaxSizeFromMemory(memory.GetMemTotalIgnoreErr())
 	syncer := &RegionSyncer{
 		server:      s,
-		history:     newHistoryBuffer(historyBufferSize, regionStorage.(kv.Base)),
+		history:     newHistoryBuffer(defaultHistoryBufferSize, historyBufferMaxSize, regionStorage.(kv.Base)),
 		limit:       ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		sendTimeout: syncerKeepAliveInterval,
 		tlsConfig:   s.GetTLSConfig(),
@@ -133,7 +133,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	return syncer
 }
 
-func historyBufferSizeFromMemory(totalMemory uint64) int {
+func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
 	if totalMemory == 0 {
 		return defaultHistoryBufferSize
 	}
@@ -142,8 +142,8 @@ func historyBufferSizeFromMemory(totalMemory uint64) int {
 		return defaultHistoryBufferSize
 	}
 	size = normalizeHistoryBufferCapacity(size, historyBufferCapacityUnit)
-	if size > maxHistoryBufferBaseSize {
-		return maxHistoryBufferBaseSize
+	if size > maxHistoryBufferSize {
+		return maxHistoryBufferSize
 	}
 	return size
 }
@@ -373,8 +373,6 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 }
 
 func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) error {
-	retainer := s.history.retainFrom(s.history.getNextIndex())
-	defer retainer.release()
 	regions := s.server.GetRegions()
 	lastIndex := 0
 	start := time.Now()
@@ -425,16 +423,10 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
-		if retainer.overflowed() {
-			return errHistoryBufferRetainOverflow
-		}
 		metas = metas[:0]
 		stats = stats[:0]
 		leaders = leaders[:0]
 		buckets = buckets[:0]
-	}
-	if retainer.overflowed() {
-		return errHistoryBufferRetainOverflow
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))

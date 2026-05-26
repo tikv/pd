@@ -19,7 +19,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -32,7 +31,6 @@ const (
 	historyKey                = "historyIndex"
 	defaultFlushCount         = 100
 	historyBufferCapacityUnit = 10000
-	historyBufferGrowFactor   = 8
 	historyBufferShrinkRounds = 3
 )
 
@@ -42,8 +40,6 @@ var (
 	firstIndexGauge = regionSyncerStatus.WithLabelValues("first_index")
 	lastIndexGauge  = regionSyncerStatus.WithLabelValues("last_index")
 )
-
-var errHistoryBufferRetainOverflow = errors.New("history buffer retained range exceeds maximum capacity")
 
 type historyBuffer struct {
 	syncutil.RWMutex
@@ -55,22 +51,14 @@ type historyBuffer struct {
 	baseCapacity           int
 	maxCapacity            int
 	capacityUnit           int
-	retains                map[uint64]uint64
-	nextRetainID           uint64
 	observedRequiredWindow uint64
 	lowWindowRounds        int
 	kv                     kv.Base
 	flushCount             int
 }
 
-type historyRetainer struct {
-	h  *historyBuffer
-	id uint64
-}
-
-func newHistoryBuffer(size int, kv kv.Base) *historyBuffer {
-	baseCapacity := normalizeHistoryBufferCapacity(size, historyBufferCapacityUnit)
-	return newHistoryBufferWithConfig(baseCapacity, baseCapacity*historyBufferGrowFactor, historyBufferCapacityUnit, kv)
+func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer {
+	return newHistoryBufferWithConfig(baseCapacity, maxCapacity, historyBufferCapacityUnit, kv)
 }
 
 func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv kv.Base) *historyBuffer {
@@ -91,7 +79,6 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 		baseCapacity: baseCapacity,
 		maxCapacity:  maxCapacity,
 		capacityUnit: capacityUnit,
-		retains:      make(map[uint64]uint64),
 		kv:           kv,
 		flushCount:   defaultFlushCount,
 	}
@@ -136,13 +123,6 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	if retainIndex, ok := h.minRetainIndexLocked(); ok {
-		window := uint64(0)
-		if h.index+1 > retainIndex {
-			window = h.index + 1 - retainIndex
-		}
-		h.ensureWindowLocked(window)
-	}
 	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
@@ -173,50 +153,6 @@ func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	return records
 }
 
-func (h *historyBuffer) retainFrom(index uint64) *historyRetainer {
-	h.Lock()
-	defer h.Unlock()
-	h.nextRetainID++
-	id := h.nextRetainID
-	h.retains[id] = index
-	window := uint64(0)
-	if h.index > index {
-		window = h.index - index
-	}
-	h.ensureWindowLocked(window)
-	return &historyRetainer{h: h, id: id}
-}
-
-func (r *historyRetainer) release() {
-	if r == nil || r.h == nil {
-		return
-	}
-	r.h.releaseRetain(r.id)
-}
-
-func (r *historyRetainer) overflowed() bool {
-	if r == nil || r.h == nil {
-		return false
-	}
-	return r.h.retainOverflowed(r.id)
-}
-
-func (h *historyBuffer) releaseRetain(id uint64) {
-	h.Lock()
-	defer h.Unlock()
-	delete(h.retains, id)
-}
-
-func (h *historyBuffer) retainOverflowed(id uint64) bool {
-	h.RLock()
-	defer h.RUnlock()
-	index, ok := h.retains[id]
-	if !ok {
-		return false
-	}
-	return index < h.firstIndex()
-}
-
 func (h *historyBuffer) observeRequiredWindow(window uint64) {
 	h.Lock()
 	defer h.Unlock()
@@ -235,7 +171,7 @@ func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
 func (h *historyBuffer) maybeShrink() {
 	h.Lock()
 	defer h.Unlock()
-	if len(h.retains) > 0 || h.capacity() <= h.baseCapacity {
+	if h.capacity() <= h.baseCapacity {
 		h.observedRequiredWindow = 0
 		h.lowWindowRounds = 0
 		return
@@ -250,12 +186,15 @@ func (h *historyBuffer) maybeShrink() {
 		h.observedRequiredWindow = 0
 		return
 	}
-	target := h.baseCapacity
+	target := h.capacity() / 2
 	if h.observedRequiredWindow > 0 {
-		target = normalizeHistoryBufferCapacity(int(h.observedRequiredWindow*2), h.capacityUnit)
-		if target < h.baseCapacity {
-			target = h.baseCapacity
+		required := normalizeHistoryBufferCapacity(int(h.observedRequiredWindow*2), h.capacityUnit)
+		if required > target {
+			target = required
 		}
+	}
+	if target < h.baseCapacity {
+		target = h.baseCapacity
 	}
 	if target < h.capacity() {
 		h.resizeLocked(target)
@@ -275,7 +214,6 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	h.head = 0
 	h.tail = 0
 	h.flushCount = defaultFlushCount
-	h.retains = make(map[uint64]uint64)
 	h.observedRequiredWindow = 0
 	h.lowWindowRounds = 0
 	if h.capacity() > h.baseCapacity {
@@ -316,16 +254,6 @@ func (h *historyBuffer) persist() {
 	if err != nil {
 		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
 	}
-}
-
-func (h *historyBuffer) ensureWindowLocked(window uint64) {
-	if window > h.observedRequiredWindow {
-		h.observedRequiredWindow = window
-	}
-	if window <= uint64(h.capacity()) {
-		return
-	}
-	h.growForWindowLocked(window * 2)
 }
 
 func (h *historyBuffer) growForWindowLocked(window uint64) {
@@ -370,18 +298,4 @@ func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 		return h.records[pos]
 	}
 	return nil
-}
-
-func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
-	var (
-		minIndex uint64
-		ok       bool
-	)
-	for _, index := range h.retains {
-		if !ok || index < minIndex {
-			minIndex = index
-			ok = true
-		}
-	}
-	return minIndex, ok
 }
