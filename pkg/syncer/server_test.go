@@ -112,6 +112,63 @@ func TestFullSyncReturnsErrorWhenRetainedHistoryExceedsMaxCapacity(t *testing.T)
 	})
 }
 
+func TestFullSyncRetainsHistoryWithinMaxCapacity(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	cluster := core.NewBasicCluster()
+	cluster.CheckAndPutRegion(newServerTestRegion(1))
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		cluster,
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.history = newHistoryBufferWithConfig(1, 4, 1, syncer.history.kv)
+	syncer.history.resetWithIndex(100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.syncFullRegions(ctx, "pd-follower", stream)
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	syncer.history.record(newServerTestRegion(2))
+	syncer.history.record(newServerTestRegion(3))
+	close(unblockSend)
+
+	resp := <-stream.sendCh
+	re.Equal(uint64(0), resp.GetStartIndex())
+	re.Len(resp.GetRegions(), 1)
+	re.Equal(uint64(1), resp.GetRegions()[0].GetId())
+
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		select {
+		case syncErr = <-done:
+			return true
+		default:
+			return false
+		}
+	})
+	re.NoError(syncErr)
+	records := syncer.history.recordsFrom(100)
+	re.Len(records, 2)
+	re.Equal(uint64(2), records[0].GetID())
+	re.Equal(uint64(3), records[1].GetID())
+}
+
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
