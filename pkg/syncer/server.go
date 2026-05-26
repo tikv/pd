@@ -601,7 +601,7 @@ func (s *RegionSyncer) closeAllClient() {
 			},
 		}
 		sender.close()
-		if err := sender.stream.Send(resp); err != nil {
+		if err := sender.send(resp); err != nil {
 			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
 		}
 	}
