@@ -22,13 +22,6 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-<<<<<<< HEAD
-=======
-	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
->>>>>>> 089337ae2b (syncer: close failed follower streams (#10685))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -446,15 +439,8 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 		wg.Add(1)
 		go func(name string, sender *regionSyncStream) {
 			defer wg.Done()
-<<<<<<< HEAD
-			err := sender.Send(regions)
-			if err != nil {
-				log.Warn("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
-				failed.Store(name, struct{}{})
-=======
 			if !s.sendRegionSyncResponse(ctx, name, sender, regions) {
 				failed.Store(name, sender)
->>>>>>> 089337ae2b (syncer: close failed follower streams (#10685))
 			}
 		}(name, sender)
 	}
@@ -482,8 +468,6 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 	case <-ctx.Done():
 	}
 }
-<<<<<<< HEAD
-=======
 
 func (s *RegionSyncer) sendRegionSyncResponse(
 	ctx context.Context,
@@ -554,4 +538,3 @@ func (s *RegionSyncer) closeAllClient() {
 		}
 	}
 }
->>>>>>> 089337ae2b (syncer: close failed follower streams (#10685))
