@@ -43,18 +43,21 @@ var (
 
 type historyBuffer struct {
 	syncutil.RWMutex
-	index                  uint64
-	records                []*core.RegionInfo
-	head                   int
-	tail                   int
-	size                   int
-	baseCapacity           int
-	maxCapacity            int
-	capacityUnit           int
+	// index is the next index to assign to a recorded region change.
+	index        uint64
+	records      []*core.RegionInfo
+	head         int // Position of the first valid record in the ring.
+	tail         int // Position where the next record will be written.
+	size         int // Physical ring size; one slot is reserved to distinguish full and empty states.
+	baseCapacity int
+	maxCapacity  int
+	capacityUnit int
+	// observedRequiredWindow is the largest replay window requested since the last shrink check.
 	observedRequiredWindow uint64
-	lowWindowRounds        int
-	kv                     kv.Base
-	flushCount             int
+	// lowWindowRounds counts consecutive shrink checks where the required window stays low.
+	lowWindowRounds int
+	kv              kv.Base
+	flushCount      int
 }
 
 func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer {
@@ -168,6 +171,9 @@ func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
 	}
 }
 
+// maybeShrink gradually reduces capacity after the required replay window
+// remains low for several checks. It shrinks by at most half each time and
+// never below the base capacity.
 func (h *historyBuffer) maybeShrink() {
 	h.Lock()
 	defer h.Unlock()

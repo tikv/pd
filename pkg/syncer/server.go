@@ -45,13 +45,14 @@ import (
 )
 
 const (
-	defaultBucketRate        = 20 * units.MiB // 20MB/s
-	defaultBucketCapacity    = 20 * units.MiB // 20MB
-	maxSyncRegionBatchSize   = 1000
-	syncerKeepAliveInterval  = 10 * time.Second
-	defaultHistoryBufferSize = 10000
-	historyBufferMemoryStep  = 4 * 1024 * 1024 * 1024
-	maxHistoryBufferSize     = 80000
+	defaultBucketRate           = 20 * units.MiB // 20MB/s
+	defaultBucketCapacity       = 20 * units.MiB // 20MB
+	maxSyncRegionBatchSize      = 1000
+	syncerKeepAliveInterval     = 10 * time.Second
+	historyBufferShrinkInterval = 5 * time.Minute
+	defaultHistoryBufferSize    = 10000
+	historyBufferMemoryStep     = 4 * 1024 * 1024 * 1024
+	maxHistoryBufferSize        = 80000
 )
 
 // ClientStream is the client side of the region syncer.
@@ -155,7 +156,8 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	var buckets []*metapb.Buckets
-	ticker := time.NewTicker(syncerKeepAliveInterval)
+	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
+	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
 	processRegion := func(region *core.RegionInfo) {
 		requests = append(requests, region.GetMeta())
@@ -170,7 +172,8 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	}
 
 	defer func() {
-		ticker.Stop()
+		keepAliveTicker.Stop()
+		shrinkTicker.Stop()
 		s.mu.Lock()
 		for _, stream := range s.mu.streams {
 			stream.close()
@@ -210,8 +213,9 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				Buckets:       buckets,
 			}
 			s.broadcast(ctx, regions)
-		case <-ticker.C:
+		case <-shrinkTicker.C:
 			s.history.maybeShrink()
+		case <-keepAliveTicker.C:
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 				StartIndex: s.history.getNextIndex(),
