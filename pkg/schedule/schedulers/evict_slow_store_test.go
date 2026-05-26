@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type evictSlowStoreTestSuite struct {

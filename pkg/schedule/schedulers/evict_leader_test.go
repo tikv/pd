@@ -175,6 +175,14 @@ func TestEvictLeaderBatchLimit(t *testing.T) {
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": 1.5})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
 }
 
 func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
@@ -188,16 +196,35 @@ func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
-			cluster, oc, sl := prepareEvictLeaderBatchScenario(t, tc.maxWaiting)
+			cancel, opt, cluster, oc := prepareSchedulersTest(false)
+			t.Cleanup(cancel)
+			if tc.maxWaiting > 0 {
+				cfg := opt.GetScheduleConfig().Clone()
+				cfg.SchedulerMaxWaitingOperator = uint64(tc.maxWaiting)
+				opt.SetScheduleConfig(cfg)
+			}
 
-			var ops []*operator.Operator
-			testutil.Eventually(re, func() bool {
-				ops, _ = sl.Schedule(cluster, false)
-				return len(ops) == maxEvictLeaderBatchSize
-			})
+			cluster.AddLeaderStore(1, 0)
+			cluster.AddLeaderStore(2, 0)
+			cluster.AddLeaderStore(3, 0)
+			ops := newEvictLeaderOperators(t, cluster, maxEvictLeaderBatchSize)
 			re.Equal(tc.expected, oc.AddWaitingOperator(ops...))
 		})
 	}
+}
+
+func newEvictLeaderOperators(tb testing.TB, cluster *mockcluster.Cluster, count int) []*operator.Operator {
+	tb.Helper()
+	ops := make([]*operator.Operator, 0, count)
+	for i := range count {
+		region := cluster.AddLeaderRegion(uint64(i+1), 1, 2, 3)
+		op, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), cluster, region, 2, []uint64{2, 3}, operator.OpLeader)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		ops = append(ops, op)
+	}
+	return ops
 }
 
 func BenchmarkEvictLeaderScheduleBatch(b *testing.B) {
@@ -205,7 +232,7 @@ func BenchmarkEvictLeaderScheduleBatch(b *testing.B) {
 
 	totalOps := 0
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		ops, _ := sl.Schedule(tc, false)
 		if len(ops) == 0 {
 			b.Fatal("expected evict leader operators")
@@ -232,8 +259,9 @@ func prepareEvictLeaderBatchScenario(tb testing.TB, maxWaiting int) (*mockcluste
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
-	for i := 1; i <= 100000; i++ {
-		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	regionCount := maxEvictLeaderBatchSize * 100
+	for i := range regionCount {
+		tc.AddLeaderRegion(uint64(i+1), 1, 2, 3)
 	}
 
 	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })

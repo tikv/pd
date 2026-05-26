@@ -44,6 +44,12 @@ const (
 	maxEvictLeaderBatchSize = 100
 )
 
+func isValidEvictLeaderBatchSize(batchFloat float64) bool {
+	return batchFloat >= 1 &&
+		batchFloat <= maxEvictLeaderBatchSize &&
+		batchFloat == float64(int(batchFloat))
+}
+
 type evictLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
@@ -418,9 +424,9 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batch := handler.config.getBatch()
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
-		if batchFloat < 1 || batchFloat > maxEvictLeaderBatchSize {
+		if !isValidEvictLeaderBatchSize(batchFloat) {
 			handler.config.resumeLeaderTransferIfExist(id)
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 100]")
+			handler.rd.JSON(w, http.StatusBadRequest, "batch must be an integer in [1, 100]")
 			return
 		}
 		batch = (int)(batchFloat)
