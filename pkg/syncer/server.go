@@ -34,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -49,6 +50,8 @@ const (
 	maxSyncRegionBatchSize   = 1000
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
+	historyBufferMemoryStep  = 4 * 1024 * 1024 * 1024
+	maxHistoryBufferBaseSize = 80000
 )
 
 // ClientStream is the client side of the region syncer.
@@ -118,15 +121,31 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	if regionStorage == nil {
 		return nil
 	}
+	historyBufferSize := historyBufferSizeFromMemory(memory.GetMemTotalIgnoreErr())
 	syncer := &RegionSyncer{
 		server:      s,
-		history:     newHistoryBuffer(defaultHistoryBufferSize, regionStorage.(kv.Base)),
+		history:     newHistoryBuffer(historyBufferSize, regionStorage.(kv.Base)),
 		limit:       ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		sendTimeout: syncerKeepAliveInterval,
 		tlsConfig:   s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]*regionSyncStream)
 	return syncer
+}
+
+func historyBufferSizeFromMemory(totalMemory uint64) int {
+	if totalMemory == 0 {
+		return defaultHistoryBufferSize
+	}
+	size := int(uint64(defaultHistoryBufferSize) * totalMemory / historyBufferMemoryStep)
+	if size < defaultHistoryBufferSize {
+		return defaultHistoryBufferSize
+	}
+	size = normalizeHistoryBufferCapacity(size, historyBufferCapacityUnit)
+	if size > maxHistoryBufferBaseSize {
+		return maxHistoryBufferBaseSize
+	}
+	return size
 }
 
 // RunServer runs the server of the region syncer.
@@ -192,6 +211,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			}
 			s.broadcast(ctx, regions)
 		case <-ticker.C:
+			s.history.maybeShrink()
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 				StartIndex: s.history.getNextIndex(),
@@ -287,6 +307,10 @@ func recvSyncRegionRequest(ctx context.Context, stream pdpb.PD_SyncRegionsServer
 func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
+	nextIndex := s.history.getNextIndex()
+	if startIndex < nextIndex {
+		s.history.observeRequiredWindow(nextIndex - startIndex)
+	}
 	records := s.history.recordsFrom(startIndex)
 	if len(records) == 0 {
 		if s.history.getNextIndex() == startIndex {
@@ -349,6 +373,8 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 }
 
 func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) error {
+	retainer := s.history.retainFrom(s.history.getNextIndex())
+	defer retainer.release()
 	regions := s.server.GetRegions()
 	lastIndex := 0
 	start := time.Now()
@@ -399,10 +425,16 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
+		if retainer.overflowed() {
+			return errHistoryBufferRetainOverflow
+		}
 		metas = metas[:0]
 		stats = stats[:0]
 		leaders = leaders[:0]
 		buckets = buckets[:0]
+	}
+	if retainer.overflowed() {
+		return errHistoryBufferRetainOverflow
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))

@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -35,6 +36,81 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestHistoryBufferSizeFromMemory(t *testing.T) {
+	testCases := []struct {
+		name        string
+		totalMemory uint64
+		expected    int
+	}{
+		{name: "unknown-memory", totalMemory: 0, expected: defaultHistoryBufferSize},
+		{name: "below-step", totalMemory: historyBufferMemoryStep / 2, expected: defaultHistoryBufferSize},
+		{name: "one-step", totalMemory: historyBufferMemoryStep, expected: defaultHistoryBufferSize},
+		{name: "round-to-two-steps", totalMemory: 2 * historyBufferMemoryStep, expected: 2 * defaultHistoryBufferSize},
+		{name: "round-to-four-steps", totalMemory: 3 * historyBufferMemoryStep, expected: 4 * defaultHistoryBufferSize},
+		{name: "clamp-to-max", totalMemory: historyBufferMemoryStep * 100, expected: maxHistoryBufferBaseSize},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.expected, historyBufferSizeFromMemory(testCase.totalMemory))
+		})
+	}
+}
+
+func TestFullSyncReturnsErrorWhenRetainedHistoryExceedsMaxCapacity(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(regionStorage.Close())
+	}()
+
+	cluster := core.NewBasicCluster()
+	cluster.CheckAndPutRegion(newServerTestRegion(1))
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		cluster,
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.history = newHistoryBufferWithConfig(1, 1, 1, syncer.history.kv)
+	syncer.history.resetWithIndex(100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncer.syncFullRegions(ctx, "pd-follower", stream)
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	syncer.history.record(newServerTestRegion(2))
+	syncer.history.record(newServerTestRegion(3))
+	close(unblockSend)
+
+	resp := <-stream.sendCh
+	re.Equal(uint64(0), resp.GetStartIndex())
+	re.Len(resp.GetRegions(), 1)
+	re.Equal(uint64(1), resp.GetRegions()[0].GetId())
+
+	var syncErr error
+	testutil.Eventually(re, func() bool {
+		if syncErr == nil {
+			select {
+			case syncErr = <-done:
+			default:
+				return false
+			}
+		}
+		return errors.Is(syncErr, errHistoryBufferRetainOverflow)
+	})
+}
 
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re := require.New(t)
@@ -438,4 +514,16 @@ func (*mockSyncRegionsServer) SendMsg(any) error {
 
 func (*mockSyncRegionsServer) RecvMsg(any) error {
 	return nil
+}
+
+func newServerTestRegion(regionID uint64) *core.RegionInfo {
+	peer := &metapb.Peer{Id: regionID + 10, StoreId: 1}
+	return core.NewRegionInfo(&metapb.Region{
+		Id: regionID,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{peer},
+	}, peer)
 }
