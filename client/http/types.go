@@ -675,6 +675,17 @@ type KeyspaceGCManagementTypeConfig struct {
 	Config KeyspaceGCManagementType `json:"config"`
 }
 
+// UpdateKeyspaceConfigParams represents parameters needed to modify target keyspace configs.
+// A map of string to string pointer is used to differentiate between json null and "",
+// which will both be set to "" if value type is string during marshaling.
+type UpdateKeyspaceConfigParams struct {
+	Config map[string]*string `json:"config"`
+	// Preconditions specifies prerequisites for updating config, using a JSON-merge-patch-like encoding:
+	// - key -> nil means the key must be absent.
+	// - key -> "value" means the key must exist and equal "value".
+	Preconditions map[string]*string `json:"preconditions,omitempty"`
+}
+
 // tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
 type tempKeyspaceMeta struct {
 	ID             uint32            `json:"id"`

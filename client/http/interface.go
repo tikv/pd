@@ -120,6 +120,8 @@ type Client interface {
 
 	/* Keyspace interface */
 
+	// UpdateKeyspaceConfig patches the keyspace config.
+	UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) error
 	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
 	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a global gc worker to calculate a global gc safe point.
@@ -1143,17 +1145,26 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// UpdateKeyspaceGCManagementType patches the keyspace config.
-func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
-	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
+func (c *client) updateKeyspaceConfig(ctx context.Context, reqName, keyspaceName string, params any) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(params)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(UpdateKeyspaceGCManagementTypeName).
+		WithName(reqName).
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))
+}
+
+// UpdateKeyspaceConfig patches the keyspace config.
+func (c *client) UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) error {
+	return c.updateKeyspaceConfig(ctx, UpdateKeyspaceConfigName, keyspaceName, params)
+}
+
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	return c.updateKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
 }
 
 // GetKeyspaceMetaByName get the given keyspace meta.

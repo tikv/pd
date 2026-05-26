@@ -1033,6 +1033,67 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re.Error(err)
 }
 
+func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
+
+	configKey := "http_client_test_update_keyspace_config"
+	initialValue := "v1"
+	err := client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &initialValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: nil,
+		},
+	})
+	re.NoError(err)
+
+	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	val, ok := keyspaceMetaRes.Config[configKey]
+	re.True(ok)
+	re.Equal(initialValue, val)
+
+	wrongExpected := "wrong"
+	nextValue := "v2"
+	err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &nextValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: &wrongExpected,
+		},
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "409 Conflict")
+	re.Contains(err.Error(), "precondition failed")
+
+	err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: nil,
+		},
+		Preconditions: map[string]*string{
+			configKey: &initialValue,
+		},
+	})
+	re.NoError(err)
+
+	keyspaceMetaRes, err = client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	_, ok = keyspaceMetaRes.Config[configKey]
+	re.False(ok)
+}
+
 func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
 	re := suite.Require()
 	client := suite.client
