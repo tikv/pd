@@ -69,6 +69,37 @@ func TestRegionRequestFinisherMapsMixedBatchAndClonesRegions(t *testing.T) {
 	re.Equal([]byte{byte(101)}, resp.RegionsById[101].Region.StartKey)
 }
 
+func TestRegionRequestFinisherNoDataRace(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	resp := &pdpb.QueryRegionResponse{
+		KeyIdMap:     []uint64{1, 2},
+		PrevKeyIdMap: []uint64{1, 2},
+		RegionsById: map[uint64]*pdpb.RegionResponse{
+			1: newMockQueryRegionResponse(1),
+			2: newMockQueryRegionResponse(2),
+		},
+	}
+	requests := []*regionRequest{
+		{requestCtx: ctx, key: []byte("dummy-key"), done: make(chan error, 1)},
+		{requestCtx: ctx, key: []byte("dummy-key"), done: make(chan error, 1)},
+		{requestCtx: ctx, prevKey: []byte("dummy-prev-key"), done: make(chan error, 1)},
+		{requestCtx: ctx, prevKey: []byte("dummy-prev-key"), done: make(chan error, 1)},
+		{requestCtx: ctx, id: 1, done: make(chan error, 1)},
+		{requestCtx: ctx, id: 2, done: make(chan error, 1)},
+	}
+
+	finisher := regionRequestFinisher(resp)
+	for idx, req := range requests {
+		finisher(idx, req, nil)
+		re.NoError(<-req.done)
+		req.region.Meta.StartKey[0] += byte(idx + 1)
+	}
+	for idx, req := range requests {
+		re.Equal([]byte{byte(req.region.Meta.GetId()) + byte(idx+1)}, req.region.Meta.StartKey)
+	}
+}
+
 func TestRegionRequestFinisherReturnsTimeoutWhenResponseIsNil(t *testing.T) {
 	re := require.New(t)
 	req := &regionRequest{
