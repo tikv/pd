@@ -113,10 +113,12 @@ type GCStateManager struct {
 	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
 	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
 	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
-	mu              syncutil.RWMutex
+	mu              syncutil.CancellableRWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
+
+	gcStateSingleFlightGroup *syncutil.OrderedSingleFlightGroup[uint32, GCState]
 
 	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
@@ -127,6 +129,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		gcMetaStorage:                    store,
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
+		gcStateSingleFlightGroup:         syncutil.NewOrderedSingleFlightGroup[uint32, GCState](),
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 }
@@ -179,7 +182,7 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
-func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+func (m *GCStateManager) CompatibleLoadGCSafePoint(_ context.Context, keyspaceID uint32) (uint64, error) {
 	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return 0, err
@@ -195,14 +198,17 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, e
 // WARNING: This method is only used to manage the GC procedure, and should never be called by code that doesn't
 // have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
 // enabled.
-func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
+func (m *GCStateManager) AdvanceGCSafePoint(ctx context.Context, keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
 	defer m.mu.Unlock()
 
 	return m.advanceGCSafePointImpl(ctx, keyspaceID, target, false)
@@ -212,14 +218,17 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 // current value, it returns the current value without updating it.
 // This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
 // still work.
-func (m *GCStateManager) CompatibleUpdateGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
+func (m *GCStateManager) CompatibleUpdateGCSafePoint(ctx context.Context, keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
 	defer m.mu.Unlock()
 
 	return m.advanceGCSafePointImpl(ctx, keyspaceID, target, true)
@@ -296,14 +305,17 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 // WARNING: This method is only used to manage the GC procedure, and should never be called by code that doesn't
 // have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
 // enabled.
-func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) AdvanceTxnSafePoint(ctx context.Context, keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return AdvanceTxnSafePointResult{}, err
+	}
 	defer m.mu.Unlock()
 
 	return m.advanceTxnSafePointImpl(ctx, keyspaceID, target, now)
@@ -509,7 +521,7 @@ func (*GCStateManager) logAdvancingTxnSafePoint(ctx context.Context, keyspaceID 
 // The given barrierTS must be greater than or equal to the current txn safe point, or an error will be returned.
 //
 // When this function executes successfully, its result is never nil.
-func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
+func (m *GCStateManager) SetGCBarrier(ctx context.Context, keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
 	}
@@ -518,9 +530,12 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	if err != nil {
 		return nil, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer m.mu.Unlock()
 
 	return m.setGCBarrierImpl(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
@@ -574,14 +589,17 @@ func (m *GCStateManager) setGCBarrierImpl(ctx context.Context, keyspaceID uint32
 //
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
-func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
+func (m *GCStateManager) DeleteGCBarrier(ctx context.Context, keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
 		return nil, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer m.mu.Unlock()
 
 	return m.deleteGCBarrierImpl(ctx, keyspaceID, barrierID)
@@ -671,13 +689,28 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 //
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
-func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
-	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, true)
+func (m *GCStateManager) GetGCState(ctx context.Context, keyspaceID uint32) (GCState, error) {
+	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
 		return GCState{}, err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
+
+	return m.gcStateSingleFlightGroup.Do(ctx, keyspaceID, func(execCtx context.Context) (GCState, error) {
+		result, err := m.getGCStateImpl(execCtx, keyspaceID)
+		failpoint.Inject("onGetGCStateFinish", func() {})
+		return result, err
+	})
+}
+
+func (m *GCStateManager) getGCStateImpl(ctx context.Context, keyspaceID uint32) (GCState, error) {
+	failpoint.InjectCall("onGetGCStateStart")
+
+	err := m.mu.RLock(ctx)
+	if err != nil {
+		return GCState{}, err
+	}
+	defer m.mu.RUnlock()
 
 	var result GCState
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
@@ -710,9 +743,12 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
 	mutexLocked := false
-	lock := func() {
-		m.mu.Lock()
+	lock := func() error {
+		if err := m.mu.Lock(ctx); err != nil {
+			return err
+		}
 		mutexLocked = true
+		return nil
 	}
 	unlock := func() {
 		m.mu.Unlock()
@@ -730,7 +766,9 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
-	lock()
+	if err := lock(); err != nil {
+		return nil, err
+	}
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
 		if err1 != nil {
@@ -772,7 +810,9 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 			continue
 		}
 
-		lock()
+		if err := lock(); err != nil {
+			return nil, err
+		}
 		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
 			if err1 != nil {
@@ -791,9 +831,12 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 }
 
 // LoadAllGlobalGCBarriers returns global GC barriers.
-func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+func (m *GCStateManager) LoadAllGlobalGCBarriers(ctx context.Context) ([]*endpoint.GlobalGCBarrier, error) {
+	err := m.mu.RLock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.mu.RUnlock()
 
 	return m.gcMetaStorage.LoadAllGlobalGCBarriers()
 }
@@ -829,14 +872,17 @@ func (m *GCStateManager) LoadAllGlobalGCBarriers() ([]*endpoint.GlobalGCBarrier,
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
 //     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
 //     with the service ID equals to "gc_worker".
-func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(ctx context.Context, keyspaceID uint32, serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	keyspaceID, keyspaceNameForDiag, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
 		return nil, false, err
 	}
-	ctx := addKeyspaceNameToCtx(context.Background(), keyspaceNameForDiag)
+	ctx = addKeyspaceNameToCtx(ctx, keyspaceNameForDiag)
 
-	m.mu.Lock()
+	err = m.mu.Lock(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	defer m.mu.Unlock()
 
 	switch {
@@ -865,9 +911,9 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(keyspaceID uint32, s
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
 	case serviceID == keypath.NativeBRServiceSafePointID && keyspaceID == constant.NullKeyspaceID:
 		if ttl > 0 {
-			_, err = m.setGlobalGCBarrierImpl(context.Background(), serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
+			_, err = m.setGlobalGCBarrierImpl(ctx, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
 		} else {
-			_, err = m.deleteGlobalGCBarrierImpl(context.Background(), serviceID)
+			_, err = m.deleteGlobalGCBarrierImpl(ctx, serviceID)
 		}
 		if err != nil && !errors.Is(err, errs.ErrGlobalGCBarrierTSBehindTxnSafePoint) {
 			return nil, false, err
@@ -972,7 +1018,10 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
 
-	m.mu.Lock()
+	err := m.mu.Lock(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer m.mu.Unlock()
 
 	return m.setGlobalGCBarrierImpl(ctx, barrierID, barrierTS, ttl, now)
@@ -1065,7 +1114,10 @@ func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID st
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
 
-	m.mu.Lock()
+	err := m.mu.Lock(ctx)
+	if err != nil {
+		return nil, err
+	}
 	defer m.mu.Unlock()
 
 	return m.deleteGlobalGCBarrierImpl(ctx, barrierID)

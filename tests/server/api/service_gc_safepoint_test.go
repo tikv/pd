@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -99,12 +100,12 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	}
 	// Skip writing the "gc_worker" one.
 	for _, ssp := range list.ServiceGCSafepoints[:3] {
-		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(context.Background(), constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
 		re.NoError(err)
 	}
-	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	_, err := gcStateManager.AdvanceTxnSafePoint(context.Background(), constant.NullKeyspaceID, 1, now)
 	re.NoError(err)
-	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(context.Background(), constant.NullKeyspaceID, 1)
 	re.NoError(err)
 
 	res, err := tests.TestDialClient.Get(sspURL)
@@ -118,7 +119,7 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
-	state, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
+	state, err := gcStateManager.GetGCState(context.Background(), constant.NullKeyspaceID)
 	re.NoError(err)
 	left := state.GCBarriers
 	leftSsps := make([]*endpoint.ServiceSafePoint, 0, len(left))
