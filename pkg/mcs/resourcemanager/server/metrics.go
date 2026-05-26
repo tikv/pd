@@ -74,6 +74,27 @@ var (
 			Name:      "active_request_unit_sum",
 			Help:      "Counter of the active request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	readRequestUnitRefund = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "read_request_unit_refund_sum",
+			Help:      "Counter of the read request unit refunded for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	writeRequestUnitRefund = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "write_request_unit_refund_sum",
+			Help:      "Counter of the write request unit refunded for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	activeRequestUnitRefund = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "active_request_unit_refund_sum",
+			Help:      "Counter of the active request unit refunded for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	// RUv2 metrics (experimental v2 RU calculation, recording only).
 	requestUnitV2Cost = prometheus.NewCounterVec(
@@ -246,6 +267,9 @@ func init() {
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(activeRequestUnitCost)
+	prometheus.MustRegister(readRequestUnitRefund)
+	prometheus.MustRegister(writeRequestUnitRefund)
+	prometheus.MustRegister(activeRequestUnitRefund)
 	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(tikvRequestUnitV2Cost)
 	prometheus.MustRegister(tidbRequestUnitV2Cost)
@@ -355,6 +379,9 @@ type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
 	ActiveRUMetrics            prometheus.Counter
+	RRURefundMetrics           prometheus.Counter
+	WRURefundMetrics           prometheus.Counter
+	ActiveRURefundMetrics      prometheus.Counter
 	TotalRUV2Metrics           prometheus.Counter
 	TiKVRUV2Metrics            prometheus.Counter
 	TiDBRUV2Metrics            prometheus.Counter
@@ -375,6 +402,9 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		RRURefundMetrics:           readRequestUnitRefund.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WRURefundMetrics:           writeRequestUnitRefund.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ActiveRURefundMetrics:      activeRequestUnitRefund.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TotalRUV2Metrics:           requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiKVRUV2Metrics:            tikvRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiDBRUV2Metrics:            tidbRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -408,17 +438,20 @@ func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *Controll
 	return consumption.RRU + consumption.WRU + calculateSQLRU(consumption, controllerConfig)
 }
 
+func addSignedCounter(value float64, debit, refund prometheus.Counter) {
+	if value > 0 {
+		debit.Add(value)
+	} else if value < 0 {
+		refund.Add(-value)
+	}
+}
+
 func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
-	// RU info.
-	if consumption.RRU > 0 {
-		m.RRUMetrics.Add(consumption.RRU)
-	}
-	if consumption.WRU > 0 {
-		m.WRUMetrics.Add(consumption.WRU)
-	}
-	if activeRU := calculateActiveRU(consumption, controllerConfig, keyspaceID); activeRU > 0 {
-		m.ActiveRUMetrics.Add(activeRU)
-	}
+	// RU info. Counters are monotonic, so refunds are recorded in paired
+	// refund counters and subtracted in PromQL when displaying net RU.
+	addSignedCounter(consumption.RRU, m.RRUMetrics, m.RRURefundMetrics)
+	addSignedCounter(consumption.WRU, m.WRUMetrics, m.WRURefundMetrics)
+	addSignedCounter(calculateActiveRU(consumption, controllerConfig, keyspaceID), m.ActiveRUMetrics, m.ActiveRURefundMetrics)
 	// RUv2 info (experimental).
 	if consumption.TikvRUV2 > 0 {
 		m.TiKVRUV2Metrics.Add(consumption.TikvRUV2)
@@ -525,6 +558,9 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	readRequestUnitRefund.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	writeRequestUnitRefund.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	activeRequestUnitRefund.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)

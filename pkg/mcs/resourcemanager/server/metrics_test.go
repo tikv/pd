@@ -87,6 +87,37 @@ func TestActiveRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
 	re.Equal(float64(31), testutil.ToFloat64(metrics.ActiveRUMetrics))
 }
 
+func TestCounterMetricsRecordsRequestUnitRefund(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "refund-keyspace"
+		groupName    = "refund-group"
+		keyspaceID   = uint32(303)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	metrics.add(&rmpb.Consumption{
+		RRU: 10,
+		WRU: 3,
+	}, &ControllerConfig{}, keyspaceID)
+	metrics.add(&rmpb.Consumption{
+		RRU: -4,
+		WRU: -1,
+	}, &ControllerConfig{}, keyspaceID)
+
+	re.Equal(float64(10), testutil.ToFloat64(metrics.RRUMetrics))
+	re.Equal(float64(4), testutil.ToFloat64(metrics.RRURefundMetrics))
+	re.Equal(float64(3), testutil.ToFloat64(metrics.WRUMetrics))
+	re.Equal(float64(1), testutil.ToFloat64(metrics.WRURefundMetrics))
+	re.Equal(float64(13), testutil.ToFloat64(metrics.ActiveRUMetrics))
+	re.Equal(float64(5), testutil.ToFloat64(metrics.ActiveRURefundMetrics))
+}
+
 func TestMaxPerSecCostTracker(t *testing.T) {
 	re := require.New(t)
 	tracker := newMaxPerSecCostTracker("test", "test", defaultCollectIntervalSec)
