@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -38,12 +37,13 @@ import (
 )
 
 const (
-	splitScatterObservedRegionID      uint64 = 101
-	splitScatterTestTableID           int64  = 42
-	splitScatterTestIndexID           int64  = 7
-	splitScatterTestKeyspaceID        uint32 = 4242
-	splitScatterTestNextGenKeyspaceID uint32 = constant.SystemKeyspaceID
-	splitScatterTestSourceWaitVersion        = uint64(0)
+	splitScatterObservedRegionID       uint64 = 101
+	splitScatterTestTableID            int64  = 42
+	splitScatterTestIndexID            int64  = 7
+	splitScatterTestKeyspaceID         uint32 = 4242
+	splitScatterTestMaxValidKeyspaceID        = uint32(0xFFFFFF)
+	splitScatterTestNextGenKeyspaceID  uint32 = splitScatterTestMaxValidKeyspaceID - 1
+	splitScatterTestSourceWaitVersion         = uint64(0)
 	// CPU usage is only populated to mimic load-split region heartbeat data.
 	// Current split-scatter dispatch does not rank pending regions by CPU.
 	splitScatterNoCPUUsage       uint64 = 0
@@ -114,11 +114,9 @@ func TestCheckSplitScatterRegionsCreatesScatterOperator(t *testing.T) {
 	}
 	re.NotNil(op)
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
-	opGroup, ok := op.GetAdditionalInfo("group")
-	re.True(ok)
+	opGroup := op.GetAdditionalInfo("group")
 	re.Equal(group, opGroup)
-	batchGroup, ok := op.GetAdditionalInfo("batch-group")
-	re.True(ok)
+	batchGroup := op.GetAdditionalInfo("batch-group")
 	re.Equal(group, batchGroup)
 }
 
@@ -564,7 +562,7 @@ func TestResolveSplitScatterRangeHintRequiresKnownTxnKeyspaceBounds(t *testing.T
 		keyspaceID uint32
 	}{
 		{name: "normal keyspace", keyspaceID: splitScatterTestKeyspaceID},
-		{name: "max valid keyspace", keyspaceID: constant.MaxValidKeyspaceID},
+		{name: "max valid keyspace", keyspaceID: splitScatterTestMaxValidKeyspaceID},
 	}
 
 	for _, testCase := range testCases {
@@ -614,11 +612,9 @@ func TestDispatchSplitScatterUsesRangeScatterGroup(t *testing.T) {
 	expectedScatterGroup := makeSplitScatterIndexGroup(splitScatterTestTableID, splitScatterTestIndexID)
 	op := oc.GetOperator(101)
 	re.NotNil(op)
-	opGroup, ok := op.GetAdditionalInfo("group")
-	re.True(ok)
+	opGroup := op.GetAdditionalInfo("group")
 	re.Equal(expectedScatterGroup, opGroup)
-	opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
-	re.True(ok)
+	opBatchGroup := op.GetAdditionalInfo("batch-group")
 	re.Equal(batchGroup, opBatchGroup)
 }
 
@@ -647,11 +643,9 @@ func TestDispatchSplitScatterUsesKeyspaceRangeScatterGroup(t *testing.T) {
 	)
 	op := oc.GetOperator(101)
 	re.NotNil(op)
-	opGroup, ok := op.GetAdditionalInfo("group")
-	re.True(ok)
+	opGroup := op.GetAdditionalInfo("group")
 	re.Equal(expectedScatterGroup, opGroup)
-	opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
-	re.True(ok)
+	opBatchGroup := op.GetAdditionalInfo("batch-group")
 	re.Equal(batchGroup, opBatchGroup)
 }
 
@@ -982,11 +976,9 @@ func requireInternalScatterOpsUseGroups(t *testing.T, oc *operator.Controller, s
 	re.NotEmpty(ops)
 	for _, op := range ops {
 		re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
-		opGroup, ok := op.GetAdditionalInfo("group")
-		re.True(ok)
+		opGroup := op.GetAdditionalInfo("group")
 		re.Equal(scatterGroup, opGroup)
-		opBatchGroup, ok := op.GetAdditionalInfo("batch-group")
-		re.True(ok)
+		opBatchGroup := op.GetAdditionalInfo("batch-group")
 		re.Equal(batchGroup, opBatchGroup)
 	}
 }

@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -58,16 +57,11 @@ type splitScatterPDClient struct {
 	next uint64
 }
 
-func (c *splitScatterPDClient) AllocID(_ context.Context, req *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
-	count := req.GetCount()
-	if count == 0 {
-		count = 1
-	}
-	c.next += uint64(count)
+func (c *splitScatterPDClient) AllocID(_ context.Context, _ *pdpb.AllocIDRequest, _ ...grpc.CallOption) (*pdpb.AllocIDResponse, error) {
+	c.next++
 	return &pdpb.AllocIDResponse{
 		Header: &pdpb.ResponseHeader{},
-		Id:     c.next - 1,
-		Count:  count,
+		Id:     c.next,
 	}, nil
 }
 
@@ -147,7 +141,7 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re := require.New(t)
 
 	svc, cluster, _ := newTestSchedulingServiceForSplit(t)
-	cluster.SwitchPDLeader(&splitScatterPDClient{next: 1000})
+	re.True(cluster.SwitchAPIServerLeader(&splitScatterPDClient{next: 1000}))
 
 	region := newAffinitySplitTestRegion()
 	cluster.PutRegion(region)
@@ -206,13 +200,10 @@ func newTestSchedulingServiceForSplit(
 		basicCluster,
 		hbStreams,
 		make(chan struct{}),
-		http.DefaultClient,
-		"",
 	)
 	re.NoError(err)
 
-	server := &Server{}
-	server.cluster.Store(cluster)
+	server := &Server{cluster: cluster}
 	stream := &captureHeartbeatStream{ch: make(chan core.RegionHeartbeatResponse, 16)}
 	t.Cleanup(hbStreams.Close)
 	return &Service{Server: server}, cluster, stream

@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -392,8 +393,8 @@ func (r *RegionScatterer) applyRunningScatterOpsDelta(state *scatterState, group
 		if op == nil || op.Desc() != InternalScatterOperatorDesc {
 			continue
 		}
-		opGroup, ok := op.GetAdditionalInfo("group")
-		if !ok || opGroup != group {
+		opGroup := op.GetAdditionalInfo("group")
+		if opGroup != group {
 			continue
 		}
 		region := r.cluster.GetRegion(op.RegionID())
@@ -544,9 +545,9 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 	// if the exist operator level is higher than scatter operator level, give up to create new scatter operator new.
 	// otherwise, create new scatter operator to replace the existing one.
 	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
-		val, exist := op.GetAdditionalInfo("group")
+		val := op.GetAdditionalInfo("group")
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
-		if op.Desc() == expectedDesc && exist && val == group {
+		if op.Desc() == expectedDesc && val == group {
 			if !isSameRegionEpoch(op.RegionEpoch(), region.GetRegionEpoch()) {
 				scatterOperatorExistedCounter.Inc()
 				log.Debug("same group scatter operator epoch does not match",
@@ -565,7 +566,6 @@ func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group stri
 			zap.Uint64("region-id", region.GetID()),
 			zap.String("additional-info-group", val),
 			zap.String("operator-des", op.Desc()),
-			zap.Bool("group-exist", exist),
 		)
 		return nil, errors.Errorf("the operator of region %d already exist", region.GetID())
 	}
@@ -795,7 +795,7 @@ func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
 		return false
 	}
 	stateFilter := &filter.StoreStateFilter{ActionScope: r.name, TransferLeader: true}
-	return filter.NewCandidates([]*core.StoreInfo{store}).
+	return filter.NewCandidates(rand.New(rand.NewSource(time.Now().UnixNano())), []*core.StoreInfo{store}).
 		FilterSource(r.cluster.GetSharedConfig(), nil, nil, stateFilter).
 		Len() > 0
 }

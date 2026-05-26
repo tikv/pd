@@ -18,18 +18,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
-
-	"github.com/tikv/pd/pkg/utils/testutil"
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
 
 func TestNewSchedulingAskBatchSplitRequestPreservesReason(t *testing.T) {
 	re := require.New(t)

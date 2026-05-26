@@ -74,8 +74,7 @@ func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 		op := cluster.GetOperatorController().GetOperator(regionID)
 		re.NotNil(op)
 		re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
-		opGroup, ok := op.GetAdditionalInfo("group")
-		re.True(ok)
+		opGroup := op.GetAdditionalInfo("group")
 		if group == "" {
 			group = opGroup
 			re.True(strings.HasPrefix(group, "split-scatter-100-"))
@@ -117,11 +116,9 @@ func TestHandleAskBatchSplitSeedsIndexBaselineForFirstSplitRegion(t *testing.T) 
 	op := cluster.GetOperatorController().GetOperator(splitRegionID)
 	re.NotNil(op)
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
-	opGroup, ok := op.GetAdditionalInfo("group")
-	re.True(ok)
+	opGroup := op.GetAdditionalInfo("group")
 	re.Equal("split-scatter-index-42-7", opGroup)
-	batchGroup, ok := op.GetAdditionalInfo("batch-group")
-	re.True(ok)
+	batchGroup := op.GetAdditionalInfo("batch-group")
 	re.Equal(fmt.Sprintf("split-scatter-100-%d", splitRegionID), batchGroup)
 }
 

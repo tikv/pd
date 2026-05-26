@@ -141,7 +141,7 @@ func TestParseKeyspacePrefix(t *testing.T) {
 			name: "txn with suffix",
 			key:  []byte{'x', 0xff, 0xff, 0xff, 't'},
 			mode: TxnKeyspaceModePrefix,
-			id:   constant.MaxValidKeyspaceID,
+			id:   spaceIDMax,
 		},
 	}
 

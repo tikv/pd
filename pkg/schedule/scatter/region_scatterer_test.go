@@ -767,8 +767,7 @@ func TestSeedGroupDistributionByRange(t *testing.T) {
 	re.Equal(constant.High, op.GetPriorityLevel())
 	re.NotZero(op.Kind() & operator.OpSplitScatter)
 	re.NotZero(op.Kind() & operator.OpRegion)
-	val, exist := op.GetAdditionalInfo("group")
-	re.True(exist)
+	val := op.GetAdditionalInfo("group")
 	re.Equal(group, val)
 }
 
@@ -1406,7 +1405,7 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 	re := require.New(t)
 	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
 	tc := scatterer.cluster.(*mockcluster.Cluster)
-	re.NoError(tc.PauseLeaderTransfer(1, constant.Out))
+	re.NoError(tc.PauseLeaderTransfer(1))
 
 	group := "test-leader-source-filter"
 	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{1: 3, 4: 0, 5: 1}))
@@ -1432,7 +1431,7 @@ func TestInternalScatterKeepsLeaderPeerWhenSourcePausedOut(t *testing.T) {
 		5: 1,
 	})
 	tc := scatterer.cluster.(*mockcluster.Cluster)
-	re.NoError(tc.PauseLeaderTransfer(1, constant.Out))
+	re.NoError(tc.PauseLeaderTransfer(1))
 
 	op, err := scatterer.ScatterInternal(region, "paused-out", []byte(""), []byte(""))
 	re.NoError(err)

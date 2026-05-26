@@ -1636,6 +1636,14 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+// QueryRegion implements gRPC PDServer.
+//
+// release-8.5 has not backported the QueryRegion feature. Keep the new
+// kvproto RPC explicitly unimplemented instead of pulling in unrelated logic.
+func (*GrpcServer) QueryRegion(_ pdpb.PD_QueryRegionServer) error {
+	return status.Error(codes.Unimplemented, "query region is not supported in release-8.5")
+}
+
 // Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
