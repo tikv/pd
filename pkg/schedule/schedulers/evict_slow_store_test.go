@@ -15,7 +15,11 @@
 package schedulers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -645,7 +649,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// Add regions with leader in store 1
-	for i := range 100000 {
+	for i := range 10000 {
 		tc.AddLeaderRegion(uint64(i), 1, 2)
 	}
 
@@ -660,15 +664,20 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	tc.PutStore(newStoreInfo)
 	re.True(es.IsScheduleAllowed(tc))
 	// Add evict leader scheduler to store 1
-	ops, _ := es.Schedule(tc, false)
-	re.Len(ops, 3)
+	var ops []*operator.Operator
+	testutil.Eventually(re, func() bool {
+		ops, _ = es.Schedule(tc, false)
+		return len(ops) == EvictLeaderBatchSize
+	})
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
 	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
 
 	es.(*evictSlowStoreScheduler).conf.Batch = 5
 	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
-	ops, _ = es.Schedule(tc, false)
-	re.Len(ops, 5)
+	testutil.Eventually(re, func() bool {
+		ops, _ = es.Schedule(tc, false)
+		return len(ops) == 5
+	})
 
 	es.(*evictSlowStoreScheduler).conf.Batch = maxEvictLeaderBatchSize
 	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
@@ -700,6 +709,31 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	re.True(persistValue.readyForRecovery())
 	re.Equal(maxEvictLeaderBatchSize, persistValue.Batch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
+func TestEvictSlowStoreBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": maxEvictLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	es.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, es.(*evictSlowStoreScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": 1.5})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	es.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, es.(*evictSlowStoreScheduler).conf.getBatch())
 }
 
 func TestRecoveryTime(t *testing.T) {

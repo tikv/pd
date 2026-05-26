@@ -310,8 +310,8 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	if inputBatch {
-		if batchFloat < 1 || batchFloat > maxEvictLeaderBatchSize {
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 100]")
+		if !isValidEvictLeaderBatchSize(batchFloat) {
+			handler.rd.JSON(w, http.StatusBadRequest, "batch must be an integer in [1, 100]")
 			return
 		}
 	}
