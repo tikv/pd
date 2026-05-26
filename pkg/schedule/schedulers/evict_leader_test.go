@@ -17,12 +17,21 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -136,6 +145,103 @@ func TestBatchEvict(t *testing.T) {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
 	})
+	sl.(*evictLeaderScheduler).conf.Batch = maxEvictLeaderBatchSize
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == maxEvictLeaderBatchSize
+	})
+}
+
+func TestEvictLeaderBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": maxEvictLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": maxEvictLeaderBatchSize + 1})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+}
+
+func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		maxWaiting int
+		expected   int
+	}{
+		{name: "default-waiting-limit", maxWaiting: 0, expected: 5},
+		{name: "batch-sized-waiting-limit", maxWaiting: maxEvictLeaderBatchSize, expected: maxEvictLeaderBatchSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster, oc, sl := prepareEvictLeaderBatchScenario(t, tc.maxWaiting)
+
+			var ops []*operator.Operator
+			testutil.Eventually(re, func() bool {
+				ops, _ = sl.Schedule(cluster, false)
+				return len(ops) == maxEvictLeaderBatchSize
+			})
+			re.Equal(tc.expected, oc.AddWaitingOperator(ops...))
+		})
+	}
+}
+
+func BenchmarkEvictLeaderScheduleBatch(b *testing.B) {
+	tc, _, sl := prepareEvictLeaderBatchScenario(b, 0)
+
+	totalOps := 0
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ops, _ := sl.Schedule(tc, false)
+		if len(ops) == 0 {
+			b.Fatal("expected evict leader operators")
+		}
+		totalOps += len(ops)
+	}
+	elapsed := b.Elapsed().Seconds()
+	b.ReportMetric(float64(totalOps)/elapsed, "ops/s")
+	b.ReportMetric(float64(totalOps)*60/elapsed, "ops/min")
+}
+
+func prepareEvictLeaderBatchScenario(tb testing.TB, maxWaiting int) (*mockcluster.Cluster, *operator.Controller, Scheduler) {
+	restoreLogger := log.ReplaceGlobals(zap.NewNop(), nil)
+	tb.Cleanup(restoreLogger)
+
+	cancel, opt, tc, oc := prepareSchedulersTest(false)
+	tb.Cleanup(cancel)
+	if maxWaiting > 0 {
+		cfg := opt.GetScheduleConfig().Clone()
+		cfg.SchedulerMaxWaitingOperator = uint64(maxWaiting)
+		opt.SetScheduleConfig(cfg)
+	}
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	for i := 1; i <= 100000; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	if err != nil {
+		tb.Fatal(err)
+	}
+	sl.(*evictLeaderScheduler).conf.Batch = maxEvictLeaderBatchSize
+	return tc, oc, sl
 }
 
 func TestEvictLeaderSchedulerCompatibility(t *testing.T) {

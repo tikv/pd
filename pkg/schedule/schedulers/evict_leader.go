@@ -40,8 +40,8 @@ import (
 const (
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
-	EvictLeaderBatchSize = 3
-	lastStoreDeleteInfo  = "The last store has been deleted"
+	EvictLeaderBatchSize    = 3
+	maxEvictLeaderBatchSize = 100
 )
 
 type evictLeaderSchedulerConfig struct {
@@ -227,7 +227,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 		}
 		return resp, err
 	}
-	resp = lastStoreDeleteInfo
+	resp = "The last store has been deleted"
 	return resp, nil
 }
 
@@ -418,9 +418,9 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batch := handler.config.getBatch()
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
-		if batchFloat < 1 || batchFloat > 10 {
+		if batchFloat < 1 || batchFloat > maxEvictLeaderBatchSize {
 			handler.config.resumeLeaderTransferIfExist(id)
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 100]")
 			return
 		}
 		batch = (int)(batchFloat)
