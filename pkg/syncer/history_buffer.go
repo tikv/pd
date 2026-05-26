@@ -72,9 +72,6 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 	}
 	// use an empty space to simplify operation
 	size := baseCapacity + 1
-	if size < 2 {
-		size = 2
-	}
 	records := make([]*core.RegionInfo, size)
 	h := &historyBuffer{
 		records:      records,
