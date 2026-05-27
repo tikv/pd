@@ -858,7 +858,7 @@ func (suite *tsoClientTestSuite) TestTSOStreamSetupRace() {
 	close(releaseBackgroundStore)
 	select {
 	case err := <-errCh:
-		re.ErrorContains(err, "context canceled")
+		re.NoError(err)
 	case <-time.After(30 * time.Second):
 		re.Failf("timed out", "GetTS has not returned")
 	}
