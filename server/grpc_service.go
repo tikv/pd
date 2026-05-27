@@ -97,7 +97,6 @@ var (
 
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
-	pdpb.UnimplementedPDServer
 	*Server
 	schedulingClient             atomic.Value
 	concurrentTSOProxyStreamings atomic.Int32
@@ -1635,6 +1634,14 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		PendingPeers: region.GetPendingPeers(),
 		Buckets:      buckets,
 	}, nil
+}
+
+// QueryRegion implements gRPC PDServer.
+//
+// release-8.5 has not backported the QueryRegion feature. Keep the new
+// kvproto RPC explicitly unimplemented instead of pulling in unrelated logic.
+func (*GrpcServer) QueryRegion(_ pdpb.PD_QueryRegionServer) error {
+	return status.Error(codes.Unimplemented, "query region is not supported in release-8.5")
 }
 
 // Deprecated: use BatchScanRegions instead.
