@@ -280,8 +280,8 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 // Close closes the watcher.
 func (rw *Watcher) Close() {
 	rw.cancel()
+	rw.wg.Wait()
 	if rw.checkerController != nil {
 		rw.checkerController.ClearSuspectKeyRanges()
 	}
-	rw.wg.Wait()
 }
