@@ -299,11 +299,11 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 		}
 		threshold := counter.notify.setupNotificationThreshold
 		cancelCh = resetCounterNotifyLocked(counter)
+		counter.limiter.SetupNotificationThreshold(threshold)
 		counter.notify.mu.Unlock()
 		if cancelCh != nil {
 			close(cancelCh)
 		}
-		counter.limiter.SetupNotificationThreshold(threshold)
 	case <-cancelCh:
 		return
 	case <-ctx.Done():
