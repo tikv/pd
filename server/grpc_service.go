@@ -97,6 +97,7 @@ var (
 
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
+	pdpb.UnimplementedPDServer
 	*Server
 	schedulingClient             atomic.Value
 	concurrentTSOProxyStreamings atomic.Int32
