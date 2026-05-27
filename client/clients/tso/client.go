@@ -344,7 +344,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
 			if stream != nil && err == nil {
+				failpoint.InjectCall("pauseBeforeBackgroundStoreTSOLeaderStream")
 				c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+				failpoint.InjectCall("notifyAfterBackgroundStoreTSOLeaderStream")
 				return nil
 			}
 
