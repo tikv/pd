@@ -96,6 +96,7 @@ func (s *server) GetCluster() sche.SchedulerCluster {
 	cluster := s.Server.GetCluster()
 	if cluster == nil {
 		// Avoid converting a nil *Cluster into a non-nil SchedulerCluster interface.
+		// Otherwise, scheduling APIs can panic before the cluster is bootstrapped.
 		return nil
 	}
 	return cluster
