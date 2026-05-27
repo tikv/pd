@@ -95,6 +95,7 @@ type AffinityGroupsResponse struct {
 func (s *server) GetCluster() sche.SchedulerCluster {
 	cluster := s.Server.GetCluster()
 	if cluster == nil {
+		// Avoid converting a nil *Cluster into a non-nil SchedulerCluster interface.
 		return nil
 	}
 	return cluster
