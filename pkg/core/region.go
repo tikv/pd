@@ -1117,12 +1117,11 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 		// to keep region tree consistent with subtree, we need to drop this update.
 		if tree, ok := r.subRegions[region.GetID()]; ok {
 			r.updateSubTreeStat(origin, region)
-			// overlapTree is the only ref-counted subtree and we repoint its
-			// shared item to region below, so move that one reference from origin
-			// to region. Otherwise a flow-only update leaves the live region stuck
-			// at ref 1 while it is still present in the subtree.
-			origin.DecRef()
-			region.IncRef()
+			// overlapTree is the only ref-counted subtree and the shared item is
+			// repointed to region below, so transfer its reference here. Otherwise
+			// a flow-only update leaves the live region stuck at ref 1 while it is
+			// still present in the subtree.
+			r.overlapTree.updateRef(origin, region)
 			tree.RegionInfo = region
 		}
 		return true
