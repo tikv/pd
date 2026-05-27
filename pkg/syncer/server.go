@@ -162,6 +162,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		select {
 		case <-ctx.Done():
 			log.Info("region syncer has been stopped")
+			s.closeAllClient()
 			return
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
