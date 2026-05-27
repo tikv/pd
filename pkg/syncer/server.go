@@ -347,37 +347,47 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		zap.Uint64("from-index", startIndex),
 		zap.Uint64("last-index", nextIndex),
 		zap.Int("records-length", len(records)))
+	// TODO: Incremental history replay is sent before binding the stream, so
+	// broadcasts produced during this replay are not delivered to this follower.
+	// Handle this existing ordering gap in a follow-up PR together with stream
+	// binding and send-ordering semantics.
 	return nil, s.syncHistoryRecords(startIndex, records, stream)
 }
 
 func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream pdpb.PD_SyncRegionsServer) error {
-	regions := make([]*metapb.Region, len(records))
-	stats := make([]*pdpb.RegionStat, len(records))
-	leaders := make([]*metapb.Peer, len(records))
-	buckets := make([]*metapb.Buckets, len(records))
-	for i, r := range records {
-		regions[i] = r.GetMeta()
-		stats[i] = r.GetStat()
-		leader := &metapb.Peer{}
-		if r.GetLeader() != nil {
-			leader = r.GetLeader()
+	for start := 0; start < len(records); start += maxSyncRegionBatchSize {
+		end := min(start+maxSyncRegionBatchSize, len(records))
+		regions := make([]*metapb.Region, end-start)
+		stats := make([]*pdpb.RegionStat, end-start)
+		leaders := make([]*metapb.Peer, end-start)
+		buckets := make([]*metapb.Buckets, end-start)
+		for i, r := range records[start:end] {
+			regions[i] = r.GetMeta()
+			stats[i] = r.GetStat()
+			leader := &metapb.Peer{}
+			if r.GetLeader() != nil {
+				leader = r.GetLeader()
+			}
+			leaders[i] = leader
+			// bucket should not be nil to avoid grpc marshal panic.
+			buckets[i] = &metapb.Buckets{}
+			if r.GetBuckets() != nil {
+				buckets[i] = r.GetBuckets()
+			}
 		}
-		leaders[i] = leader
-		// bucket should not be nil to avoid grpc marshal panic.
-		buckets[i] = &metapb.Buckets{}
-		if r.GetBuckets() != nil {
-			buckets[i] = r.GetBuckets()
+		resp := &pdpb.SyncRegionResponse{
+			Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			Regions:       regions,
+			StartIndex:    startIndex + uint64(start),
+			RegionStats:   stats,
+			RegionLeaders: leaders,
+			Buckets:       buckets,
+		}
+		if err := stream.Send(resp); err != nil {
+			return err
 		}
 	}
-	resp := &pdpb.SyncRegionResponse{
-		Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		Regions:       regions,
-		StartIndex:    startIndex,
-		RegionStats:   stats,
-		RegionLeaders: leaders,
-		Buckets:       buckets,
-	}
-	return stream.Send(resp)
+	return nil
 }
 
 func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) (*regionSyncStream, error) {

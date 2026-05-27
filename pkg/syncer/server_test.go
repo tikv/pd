@@ -77,6 +77,25 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 	re.Equal(2, syncer.history.capacity())
 }
 
+func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	records := make([]*core.RegionInfo, 0, maxSyncRegionBatchSize+1)
+	for i := range maxSyncRegionBatchSize + 1 {
+		records = append(records, newHistoryBufferTestRegion(uint64(i)))
+	}
+	stream := newMockSyncRegionsServer()
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
+
+	re.NoError(syncer.syncHistoryRecords(10, records, stream))
+	first := <-stream.sendCh
+	second := <-stream.sendCh
+	re.Equal(uint64(10), first.GetStartIndex())
+	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
+	re.Equal(uint64(10+maxSyncRegionBatchSize), second.GetStartIndex())
+	re.Len(second.GetRegions(), 1)
+}
+
 func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
 	re := require.New(t)
 	bc := core.NewBasicCluster()
