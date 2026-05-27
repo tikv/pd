@@ -277,30 +277,37 @@ const (
 	McsEtcdClientPurpose EtcdClientPurpose = "mcs-etcd-client"
 )
 
-func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
+// CreateEtcdClientOpt is an alias of the function that edits clientv3.Config.
+type CreateEtcdClientOpt func(*clientv3.Config)
+
+func newClient(tlsConfig *tls.Config, endpoints []string, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	if len(endpoints) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
 	}
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
+	cfg := clientv3.Config{
 		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
 		DialKeepAliveTime:    defaultDialKeepAliveTime,
 		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	client, err := clientv3.New(cfg)
 	return client, err
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
 	}
-	client, err := newClient(tlsConfig, urls...)
+	client, err := newClient(tlsConfig, urls, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +317,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClien
 		tickerInterval = 100 * time.Millisecond
 	})
 	if enableChecker {
-		initHealthChecker(tickerInterval, tlsConfig, client, purpose)
+		initHealthChecker(tickerInterval, tlsConfig, client, purpose, opts...)
 	}
 
 	return client, err
