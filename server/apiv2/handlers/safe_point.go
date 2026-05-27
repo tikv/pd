@@ -61,7 +61,7 @@ func LoadGCSafePoint(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, managerUninitializedErr)
 		return
 	}
-	gcState, err := manager.GetGCState(uint32(keyspaceID))
+	gcState, err := manager.GetGCState(uint32(keyspaceID), true)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
