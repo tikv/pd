@@ -1212,6 +1212,37 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 	re.Equal(int32(2), region.GetRef())
 }
 
+func TestCntRefAfterFlowOnlyUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx := ContextTODO()
+	regions := NewRegionsInfo()
+
+	// Initial put: the region lives in both the root tree and the subtree, so ref == 2.
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetWrittenBytes(100))
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+
+	// Flow-only heartbeat: same range and peers, only the flow differs. This mirrors
+	// processRegionHeartbeat: a synchronous root tree update plus an async subtree update.
+	flowOnly := region.Clone(SetWrittenBytes(999))
+	re.True(region.rangeEqualsTo(flowOnly))
+	re.True(region.peersEqualTo(flowOnly))
+	_, err := regions.CheckAndPutRootTree(ctx, flowOnly)
+	re.NoError(err)
+	regions.CheckAndPutSubTree(flowOnly)
+
+	// The region is still present in the subtree and is the live cached object,
+	// so its ref must stay at 2 (root tree + overlapTree).
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Same(flowOnly, regions.GetRegion(1))
+	re.Equal(int32(2), flowOnly.GetRef())
+
+	// A redundant subtree update (the origin.GetRef() < 2 repair path) must not break the count.
+	regions.CheckAndPutSubTree(regions.GetRegion(1))
+	re.Equal(int32(2), regions.GetRegion(1).GetRef())
+}
+
 func TestScanRegion(t *testing.T) {
 	var (
 		re                   = require.New(t)
