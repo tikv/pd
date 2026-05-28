@@ -143,38 +143,6 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 	re.Equal("3", s)
 }
 
-func TestMemoryHistoryBuffer(t *testing.T) {
-	re := require.New(t)
-	h := newMemoryHistoryBuffer(2, 10)
-	h.flushCount = 1
-
-	region := core.NewRegionInfo(&metapb.Region{Id: 1}, nil)
-	h.record(region)
-
-	re.Equal(uint64(11), h.getNextIndex())
-	re.Equal(region, h.get(10))
-	re.Nil(h.kv)
-	re.False(h.persistHistoryIndex)
-}
-
-func TestHistoryBufferAdvanceToIndexPreservesNewerRecords(t *testing.T) {
-	re := require.New(t)
-	h := newMemoryHistoryBuffer(4, 10)
-	h.record(newHistoryBufferTestRegion(10))
-	h.record(newHistoryBufferTestRegion(11))
-
-	h.advanceToIndex(11)
-
-	re.Equal(uint64(12), h.getNextIndex())
-	records := h.recordsFrom(11)
-	re.Len(records, 1)
-	re.Equal(uint64(11), records[0].GetID())
-
-	h.advanceToIndex(12)
-	re.Equal(uint64(12), h.getNextIndex())
-	re.Empty(h.recordsFrom(11))
-}
-
 func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re := require.New(t)
 	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())

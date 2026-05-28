@@ -72,7 +72,6 @@ type downstreamSendSignal struct {
 
 type regionSyncStream struct {
 	stream    ServerStream
-	history   *historyBuffer
 	sendMu    sync.Mutex
 	indexMu   syncutil.RWMutex
 	sendIndex uint64
@@ -84,7 +83,6 @@ type regionSyncStream struct {
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
 	return &regionSyncStream{
 		stream:    stream,
-		history:   newMemoryHistoryBuffer(defaultHistoryBufferSize, startIndex),
 		sendIndex: startIndex,
 		notifyCh:  make(chan downstreamSendSignal, 1),
 		done:      make(chan struct{}),
@@ -218,7 +216,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			startIndex := s.history.getNextIndex()
 			processRegion(first)
 		loop:
 			for range maxSyncRegionBatchSize {
@@ -229,11 +226,11 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 					break loop
 				}
 			}
-			s.broadcast(ctx, startIndex, records, false)
+			s.broadcast(ctx, records, false)
 		case <-shrinkTicker.C:
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
-			s.broadcast(ctx, s.history.getNextIndex(), nil, true)
+			s.broadcast(ctx, nil, true)
 		}
 		records = records[:0]
 	}
@@ -501,7 +498,6 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		}
 		syncStream.advanceSendIndex(len(records))
 	}
-	syncStream.history.advanceToIndex(nextIndex)
 	return nil
 }
 
@@ -580,18 +576,18 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		s.mu.RUnlock()
 
 		sendIndex := stream.getSendIndex()
-		firstIndex := stream.history.getFirstIndex()
+		firstIndex := s.history.getFirstIndex()
 		if sendIndex < firstIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
 		}
-		bufferNextIndex := stream.history.getNextIndex()
+		bufferNextIndex := s.history.getNextIndex()
 		if sendIndex > bufferNextIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records index %d exceeds next index %d", sendIndex, bufferNextIndex)
 		}
 		if sendIndex == bufferNextIndex {
 			return sentRecords, nil
 		}
-		records := stream.history.recordsBetween(sendIndex, bufferNextIndex)
+		records := s.history.recordsBetween(sendIndex, bufferNextIndex)
 		if len(records) == 0 {
 			return sentRecords, errors.Errorf("region syncer has no buffered records from index %d to %d", sendIndex, bufferNextIndex)
 		}
@@ -607,54 +603,18 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 	}
 }
 
-func (s *RegionSyncer) broadcast(ctx context.Context, startIndex uint64, records []*core.RegionInfo, keepAlive bool) {
+func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
 	defer logutil.LogPanic()
-	var failed sync.Map
 	s.mu.RLock()
-	for name, sender := range s.mu.streams {
+	for _, sender := range s.mu.streams {
 		if ctx.Err() != nil {
 			break
-		}
-		if !sender.recordBroadcastRecords(startIndex, records) {
-			failed.Store(name, sender)
-			continue
 		}
 		if len(records) != 0 || keepAlive {
 			sender.notify(keepAlive)
 		}
 	}
 	s.mu.RUnlock()
-
-	s.mu.Lock()
-	failed.Range(func(key, value any) bool {
-		name := key.(string)
-		stream := value.(*regionSyncStream)
-		if s.mu.streams[name] == stream {
-			delete(s.mu.streams, name)
-			stream.close()
-			log.Info("region syncer delete the stream", zap.String("stream", name))
-		}
-		return true
-	})
-	s.mu.Unlock()
-}
-
-func (s *regionSyncStream) recordBroadcastRecords(startIndex uint64, records []*core.RegionInfo) bool {
-	if len(records) == 0 {
-		return true
-	}
-	endIndex := startIndex + uint64(len(records))
-	nextIndex := s.history.getNextIndex()
-	if nextIndex >= endIndex {
-		return true
-	}
-	if nextIndex < startIndex {
-		return false
-	}
-	for _, record := range records[nextIndex-startIndex:] {
-		s.history.record(record)
-	}
-	return true
 }
 
 func (s *RegionSyncer) sendRegionSyncResponse(
