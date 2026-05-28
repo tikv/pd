@@ -57,9 +57,10 @@ type historyBuffer struct {
 	// lowWindowRounds counts consecutive shrink checks where the required window stays low.
 	lowWindowRounds int
 	// retains tracks full-sync start indexes that must stay replayable until catch-up finishes.
-	retains    map[uint64]int
-	kv         kv.Base
-	flushCount int
+	retains      map[uint64]int
+	kv           kv.Base
+	persistIndex bool
+	flushCount   int
 }
 
 func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer {
@@ -67,6 +68,16 @@ func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer 
 }
 
 func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv kv.Base) *historyBuffer {
+	h := newHistoryBufferWithConfigAndIndex(baseCapacity, maxCapacity, capacityUnit, 0, kv, true)
+	h.reload()
+	return h
+}
+
+func newMemoryHistoryBuffer(size int, index uint64) *historyBuffer {
+	return newHistoryBufferWithConfigAndIndex(size, size, historyBufferCapacityUnit, index, nil, false)
+}
+
+func newHistoryBufferWithConfigAndIndex(baseCapacity, maxCapacity, capacityUnit int, index uint64, kv kv.Base, persistIndex bool) *historyBuffer {
 	baseCapacity = normalizeHistoryBufferCapacity(baseCapacity, capacityUnit)
 	maxCapacity = normalizeHistoryBufferCapacity(maxCapacity, capacityUnit)
 	if maxCapacity < baseCapacity {
@@ -75,17 +86,17 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 	// use an empty space to simplify operation
 	size := baseCapacity + 1
 	records := make([]*core.RegionInfo, size)
-	h := &historyBuffer{
+	return &historyBuffer{
+		index:        index,
 		records:      records,
 		size:         size,
 		baseCapacity: baseCapacity,
 		maxCapacity:  maxCapacity,
 		capacityUnit: capacityUnit,
 		kv:           kv,
+		persistIndex: persistIndex,
 		flushCount:   defaultFlushCount,
 	}
-	h.reload()
-	return h
 }
 
 func normalizeHistoryBufferCapacity(size, capacityUnit int) int {
@@ -128,13 +139,18 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 	if retainIndex, ok := h.minRetainIndexLocked(); ok && retainIndex <= h.index {
 		h.growForWindowLocked(h.index - retainIndex + 1)
 	}
-	syncIndexGauge.Set(float64(h.index))
+	if h.persistIndex {
+		syncIndexGauge.Set(float64(h.index))
+	}
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
 	if h.tail == h.head {
 		h.head = (h.head + 1) % h.size
 	}
 	h.index++
+	if !h.persistIndex {
+		return
+	}
 	h.flushCount--
 	if h.flushCount <= 0 {
 		h.persist()
@@ -149,27 +165,29 @@ func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 }
 
 func (h *historyBuffer) recordsFromLocked(index uint64) []*core.RegionInfo {
-	var pos int
-	if index < h.nextIndex() && index >= h.firstIndex() {
-		pos = (h.head + int(index-h.firstIndex())) % h.size
-	} else {
-		return nil
-	}
-	records := make([]*core.RegionInfo, 0, h.distanceToTail(pos))
-	for i := pos; i != h.tail; i = (i + 1) % h.size {
-		records = append(records, h.records[i])
-	}
-	return records
+	return h.recordsBetweenLocked(index, h.nextIndex())
 }
 
-func (h *historyBuffer) observeAndRecordsFrom(index uint64) ([]*core.RegionInfo, uint64) {
-	h.Lock()
-	defer h.Unlock()
-	nextIndex := h.nextIndex()
-	if index != 0 && index < nextIndex {
-		h.observeRequiredWindowLocked(nextIndex - index)
+func (h *historyBuffer) recordsBetween(index, endIndex uint64) []*core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
+	return h.recordsBetweenLocked(index, endIndex)
+}
+
+func (h *historyBuffer) recordsBetweenLocked(index, endIndex uint64) []*core.RegionInfo {
+	if endIndex > h.nextIndex() {
+		endIndex = h.nextIndex()
 	}
-	return h.recordsFromLocked(index), nextIndex
+	if index >= endIndex || index < h.firstIndex() || index > h.nextIndex() {
+		return nil
+	}
+	pos := (h.head + int(index-h.firstIndex())) % h.size
+	records := make([]*core.RegionInfo, 0, int(endIndex-index))
+	for i := pos; index < endIndex; i = (i + 1) % h.size {
+		records = append(records, h.records[i])
+		index++
+	}
+	return records
 }
 
 func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, uint64, bool) {
@@ -183,15 +201,18 @@ func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, u
 	return records, nextIndex, len(records) == int(nextIndex-index)
 }
 
-func (h *historyBuffer) retainFromCurrent() (uint64, func()) {
+func (h *historyBuffer) retainFrom(index uint64) func() {
 	h.Lock()
 	defer h.Unlock()
-	index := h.nextIndex()
+	return h.retainLocked(index)
+}
+
+func (h *historyBuffer) retainLocked(index uint64) func() {
 	if h.retains == nil {
 		h.retains = make(map[uint64]int)
 	}
 	h.retains[index]++
-	return index, func() {
+	return func() {
 		h.releaseRetain(index)
 	}
 }
@@ -296,6 +317,12 @@ func (h *historyBuffer) getNextIndex() uint64 {
 	return h.index
 }
 
+func (h *historyBuffer) getFirstIndex() uint64 {
+	h.RLock()
+	defer h.RUnlock()
+	return h.firstIndex()
+}
+
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()
@@ -303,6 +330,9 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 }
 
 func (h *historyBuffer) reload() {
+	if !h.persistIndex {
+		return
+	}
 	v, err := h.kv.Load(historyKey)
 	if err != nil {
 		log.Warn("load history index failed", zap.String("error", err.Error()))
@@ -317,6 +347,9 @@ func (h *historyBuffer) reload() {
 }
 
 func (h *historyBuffer) persist() {
+	if !h.persistIndex {
+		return
+	}
 	firstIndexGauge.Set(float64(h.firstIndex()))
 	lastIndexGauge.Set(float64(h.nextIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
