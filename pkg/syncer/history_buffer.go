@@ -57,10 +57,10 @@ type historyBuffer struct {
 	// lowWindowRounds counts consecutive shrink checks where the required window stays low.
 	lowWindowRounds int
 	// retains tracks full-sync start indexes that must stay replayable until catch-up finishes.
-	retains      map[uint64]int
-	kv           kv.Base
-	persistIndex bool
-	flushCount   int
+	retains             map[uint64]int
+	kv                  kv.Base
+	persistHistoryIndex bool
+	flushCount          int
 }
 
 func newHistoryBuffer(baseCapacity, maxCapacity int, kv kv.Base) *historyBuffer {
@@ -73,11 +73,13 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 	return h
 }
 
+// newMemoryHistoryBuffer creates a process-local buffer with an explicit next index.
+// It does not reload from KV because downstream buffers are not persisted.
 func newMemoryHistoryBuffer(size int, index uint64) *historyBuffer {
 	return newHistoryBufferWithConfigAndIndex(size, size, historyBufferCapacityUnit, index, nil, false)
 }
 
-func newHistoryBufferWithConfigAndIndex(baseCapacity, maxCapacity, capacityUnit int, index uint64, kv kv.Base, persistIndex bool) *historyBuffer {
+func newHistoryBufferWithConfigAndIndex(baseCapacity, maxCapacity, capacityUnit int, index uint64, kv kv.Base, persistHistoryIndex bool) *historyBuffer {
 	baseCapacity = normalizeHistoryBufferCapacity(baseCapacity, capacityUnit)
 	maxCapacity = normalizeHistoryBufferCapacity(maxCapacity, capacityUnit)
 	if maxCapacity < baseCapacity {
@@ -87,15 +89,15 @@ func newHistoryBufferWithConfigAndIndex(baseCapacity, maxCapacity, capacityUnit 
 	size := baseCapacity + 1
 	records := make([]*core.RegionInfo, size)
 	return &historyBuffer{
-		index:        index,
-		records:      records,
-		size:         size,
-		baseCapacity: baseCapacity,
-		maxCapacity:  maxCapacity,
-		capacityUnit: capacityUnit,
-		kv:           kv,
-		persistIndex: persistIndex,
-		flushCount:   defaultFlushCount,
+		index:               index,
+		records:             records,
+		size:                size,
+		baseCapacity:        baseCapacity,
+		maxCapacity:         maxCapacity,
+		capacityUnit:        capacityUnit,
+		kv:                  kv,
+		persistHistoryIndex: persistHistoryIndex,
+		flushCount:          defaultFlushCount,
 	}
 }
 
@@ -139,7 +141,7 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 	if retainIndex, ok := h.minRetainIndexLocked(); ok && retainIndex <= h.index {
 		h.growForWindowLocked(h.index - retainIndex + 1)
 	}
-	if h.persistIndex {
+	if h.persistHistoryIndex {
 		syncIndexGauge.Set(float64(h.index))
 	}
 	h.records[h.tail] = r
@@ -148,7 +150,7 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 		h.head = (h.head + 1) % h.size
 	}
 	h.index++
-	if !h.persistIndex {
+	if !h.persistHistoryIndex {
 		return
 	}
 	h.flushCount--
@@ -298,6 +300,14 @@ func (h *historyBuffer) resetWithIndex(index uint64) {
 	h.resetWithIndexLocked(index)
 }
 
+func (h *historyBuffer) advanceToIndex(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	if h.index <= index {
+		h.resetWithIndexLocked(index)
+	}
+}
+
 func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	h.index = index
 	h.head = 0
@@ -330,7 +340,7 @@ func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 }
 
 func (h *historyBuffer) reload() {
-	if !h.persistIndex {
+	if !h.persistHistoryIndex {
 		return
 	}
 	v, err := h.kv.Load(historyKey)
@@ -347,7 +357,7 @@ func (h *historyBuffer) reload() {
 }
 
 func (h *historyBuffer) persist() {
-	if !h.persistIndex {
+	if !h.persistHistoryIndex {
 		return
 	}
 	firstIndexGauge.Set(float64(h.firstIndex()))

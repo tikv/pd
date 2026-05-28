@@ -278,7 +278,7 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 
 		name := request.GetMember().GetName()
 		syncStream, syncStartIndex := s.bindStreamForSync(name, stream)
-		err = s.syncHistoryRegion(ctx, request, stream, syncStream, syncStartIndex)
+		err = s.syncHistoryRegion(ctx, request, syncStream, syncStartIndex)
 		if err != nil {
 			s.unbindStream(name, syncStream)
 			return err
@@ -326,7 +326,17 @@ func recvSyncRegionRequest(ctx context.Context, stream pdpb.PD_SyncRegionsServer
 func (s *RegionSyncer) syncHistoryRegion(
 	ctx context.Context,
 	request *pdpb.SyncRegionRequest,
-	stream ServerStream,
+	syncStream *regionSyncStream,
+	endIndex uint64,
+) error {
+	syncStream.sendMu.Lock()
+	defer syncStream.sendMu.Unlock()
+	return s.syncHistoryRegionLocked(ctx, request, syncStream, endIndex)
+}
+
+func (s *RegionSyncer) syncHistoryRegionLocked(
+	ctx context.Context,
+	request *pdpb.SyncRegionRequest,
 	syncStream *regionSyncStream,
 	endIndex uint64,
 ) error {
@@ -349,23 +359,23 @@ func (s *RegionSyncer) syncHistoryRegion(
 				RegionLeaders: nil,
 				Buckets:       nil,
 			}
-			return stream.Send(resp)
+			return syncStream.stream.Send(resp)
 		}
 		if startIndex < endIndex {
-			return s.syncFullRegions(ctx, name, stream, syncStream, endIndex)
+			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
 		}
 		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
 		return nil
 	}
 	if len(records) != int(endIndex-startIndex) {
-		return s.syncFullRegions(ctx, name, stream, syncStream, endIndex)
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
 	}
 	log.Info("sync the history regions with server",
 		zap.String("server", name),
 		zap.Uint64("from-index", startIndex),
 		zap.Uint64("last-index", endIndex),
 		zap.Int("records-length", len(records)))
-	return s.syncHistoryRecords(startIndex, records, stream)
+	return s.syncHistoryRecordsLocked(startIndex, records, syncStream)
 }
 
 func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdpb.SyncRegionResponse {
@@ -397,17 +407,29 @@ func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdp
 	}
 }
 
-func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream ServerStream) error {
+func (s *RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
+	stream.sendMu.Lock()
+	defer stream.sendMu.Unlock()
+	return s.syncHistoryRecordsLocked(startIndex, records, stream)
+}
+
+func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
 	for start := 0; start < len(records); start += maxSyncRegionBatchSize {
 		end := min(start+maxSyncRegionBatchSize, len(records))
-		if err := stream.Send(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
+		if err := stream.stream.Send(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream ServerStream, syncStream *regionSyncStream, syncStartIndex uint64) error {
+func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
+	syncStream.sendMu.Lock()
+	defer syncStream.sendMu.Unlock()
+	return s.syncFullRegionsLocked(ctx, name, syncStream, syncStartIndex)
+}
+
+func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
 	releaseRetain := s.history.retainFrom(syncStartIndex)
 	defer releaseRetain()
 	regions := s.server.GetRegions()
@@ -456,7 +478,7 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			return err
 		}
 		lastIndex += len(metas)
-		if err := stream.Send(resp); err != nil {
+		if err := syncStream.stream.Send(resp); err != nil {
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
@@ -474,25 +496,24 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			syncStartIndex, nextIndex)
 	}
 	if len(records) > 0 {
-		if err := s.syncHistoryRecords(syncStartIndex, records, stream); err != nil {
+		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
 			return err
 		}
 		syncStream.advanceSendIndex(len(records))
 	}
-	syncStream.history.resetWithIndex(nextIndex)
+	syncStream.history.advanceToIndex(nextIndex)
 	return nil
 }
 
 func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*regionSyncStream, uint64) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	startIndex := s.history.getNextIndex()
 	syncStream := newRegionSyncStream(stream, startIndex)
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 	}
 	s.mu.streams[name] = syncStream
-	s.mu.Unlock()
-
 	return syncStream, startIndex
 }
 
