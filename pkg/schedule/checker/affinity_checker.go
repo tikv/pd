@@ -100,7 +100,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerUnhealthyRegionCounter.Inc()
 		return nil
 	}
-	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isRealRegion */) {
+	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
 		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
@@ -122,7 +122,7 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity {
 			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
-			if targetRegion == nil || !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isRealRegion */) {
+			if targetRegion == nil || !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */) {
 				c.affinityManager.ExpireAffinityGroup(group.ID)
 				group = c.affinityManager.GetAffinityGroupState(group.ID)
 				needRefetch = true
@@ -389,7 +389,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 		return false
 	}
 
-	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(adjacent, true /* isRealRegion */) {
+	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(adjacent, true /* isExistingRegion */) {
 		affinityMergeCheckerAdjAbnormalReplicaCounter.Inc()
 		return false
 	}
@@ -506,11 +506,11 @@ func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
 // under the current topology and that the matched rule's isolation level is
 // satisfied. This is intentionally stricter than filter.IsRegionReplicated and
 // should not be used as a general replicated-state check.
-func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region *core.RegionInfo, isRealRegion bool) bool {
-	// Get the RegionFit for the given Region. If the Region is not a real existing Region but a virtual target state,
+func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region *core.RegionInfo, isExistingRegion bool) bool {
+	// Get the RegionFit for the given Region. If the Region is not an existing Region but a virtual target state,
 	// use FitRegionWithoutCache to bypass the cache.
 	var fit *placement.RegionFit
-	if isRealRegion {
+	if isExistingRegion {
 		fit = c.ruleManager.FitRegion(c.cluster, region)
 	} else {
 		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)

@@ -2199,6 +2199,45 @@ func TestAffinityCheckerRegionHasBetterLocation(t *testing.T) {
 	re.Nil(ops)
 }
 
+func TestAffinityBestLocationFilteredByTemporarySourceState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := newAffinityTestOptions()
+	opt.SetLocationLabels([]string{"region", "zone", "host"})
+	tc := mockcluster.NewCluster(ctx, opt)
+
+	tc.AddLabelsStore(1, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(3, 0, map[string]string{"region": "r1", "zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(4, 0, map[string]string{"region": "r1", "zone": "z2", "host": "h1"})
+	tc.AddLabelsStore(5, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h1"})
+	tc.AddLabelsStore(6, 0, map[string]string{"region": "r1", "zone": "z3", "host": "h2"})
+
+	checker := newTestAffinityChecker(ctx, tc, opt)
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	region := tc.GetRegion(1)
+
+	fit := checker.ruleManager.FitRegion(tc, region)
+	re.NotNil(fit)
+	re.True(fit.IsSatisfied())
+	re.NotEmpty(fit.RuleFits)
+	strategy := checker.strategy(region, fit.RuleFits[0].Rule, false)
+	oldStoreID, newStoreID, filterByTempState := strategy.getBetterLocation(tc, region, fit, fit.RuleFits[0])
+	re.NotZero(oldStoreID)
+	re.NotZero(newStoreID)
+	re.False(filterByTempState)
+
+	tc.SetStoreBusy(1, true)
+	tc.SetStoreBusy(3, true)
+	oldStoreID, newStoreID, filterByTempState = strategy.getBetterLocation(tc, region, fit, fit.RuleFits[0])
+	re.Zero(oldStoreID)
+	re.Zero(newStoreID)
+	re.True(filterByTempState)
+	re.False(checker.isRegionPlacementRuleSatisfiedWithBestLocation(region, true))
+}
+
 // TestAffinityStrictCheckDivergesFromIsRegionReplicated documents the intended
 // semantic split: affinity scheduling may reject a region that is already
 // placement-rule replicated when a strictly better location still exists.

@@ -191,8 +191,8 @@ func (c *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	}
 	log.Debug("region has more than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 	regionStores := c.cluster.GetRegionStores(region)
-	old := c.strategy(region).SelectStoreToRemove(regionStores)
-	if old == 0 {
+	old, filterByTempState := c.strategy(region).SelectStoreToRemove(regionStores)
+	if old == 0 || filterByTempState {
 		replicaCheckerNoWorstPeerCounter.Inc()
 		c.pendingProcessedRegions.Put(region.GetID(), nil)
 		return nil
@@ -212,8 +212,8 @@ func (c *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 
 	strategy := c.strategy(region)
 	regionStores := c.cluster.GetRegionStores(region)
-	oldStore := strategy.SelectStoreToRemove(regionStores)
-	if oldStore == 0 {
+	oldStore, filterByTempState := strategy.SelectStoreToRemove(regionStores)
+	if oldStore == 0 || filterByTempState {
 		replicaCheckerAllRightCounter.Inc()
 		return nil
 	}
