@@ -90,17 +90,19 @@ func TestUpgrade(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from json(null)
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
 	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from < 5.2
 	config51 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"strict-picking-store":"true","enable-for-tiflash":"true"}`
@@ -110,6 +112,7 @@ func TestUpgrade(t *testing.T) {
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.KeyPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
 	re.Equal("v1", hb.conf.getRankFormulaVersion())
 	// upgrade from < 6.4
 	config54 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"read-priorities":["query","byte"],"write-leader-priorities":["query","byte"],"write-peer-priorities":["byte","key"],"strict-picking-store":"true","enable-for-tiflash":"true","forbid-rw-type":"none"}`
@@ -119,7 +122,64 @@ func TestUpgrade(t *testing.T) {
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
 	re.Equal("v1", hb.conf.getRankFormulaVersion())
+}
+
+func TestReloadConfigKeepsPendingWeightDefault(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	store := storage.NewStorageWithMemoryBackend()
+	data, err := EncodeConfig(map[string]any{
+		"min-hot-byte-rate":          100,
+		"min-hot-key-rate":           10,
+		"min-hot-query-rate":         10,
+		"max-zombie-rounds":          5,
+		"max-peer-number":            1000,
+		"byte-rate-rank-step-ratio":  0.05,
+		"key-rate-rank-step-ratio":   0.05,
+		"query-rate-rank-step-ratio": 0.05,
+		"count-rank-step-ratio":      0.01,
+		"great-dec-ratio":            0.95,
+		"minor-dec-ratio":            0.99,
+		"src-tolerance-ratio":        1.05,
+		"dst-tolerance-ratio":        1.05,
+	})
+	re.NoError(err)
+	re.NoError(store.SaveSchedulerConfig(types.BalanceHotRegionScheduler.String(), data))
+
+	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, store, ConfigJSONDecoder(data))
+	re.NoError(err)
+	hb := sche.(*hotScheduler)
+	hb.conf.MaxZombieRounds = 9
+
+	re.NoError(hb.ReloadConfig())
+	re.Equal(5, hb.conf.MaxZombieRounds)
+	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
+}
+
+func TestCreateSchedulerRejectsPendingWeightBelowOne(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	_, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigJSONDecoder([]byte(`{"pending-weight":0}`)))
+	re.Error(err)
+
+	_, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigJSONDecoder([]byte(`{"pending-weight":0.5}`)))
+	re.Error(err)
+
+	_, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigJSONDecoder([]byte(`{"pending-weight":-1}`)))
+	re.Error(err)
+
+	_, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigJSONDecoder([]byte(`{"pending-weight":1}`)))
+	re.NoError(err)
 }
 
 func TestGCPendingOpInfos(t *testing.T) {
@@ -211,6 +271,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	b := &metapb.Buckets{
 		RegionId:   1,
 		PeriodInMs: 1000,
@@ -1280,6 +1341,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
 
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -2286,6 +2348,14 @@ func TestCompatibility(t *testing.T) {
 		{utils.ByteDim, utils.KeyDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
+	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
+	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
+		{utils.CPUDim, utils.ByteDim},
+		{utils.QueryDim, utils.ByteDim},
+		{utils.ByteDim, utils.KeyDim},
+	})
+	re.True(hb.(*hotScheduler).conf.lastCPUSupported)
 }
 
 func TestCompatibilityConfig(t *testing.T) {
@@ -2391,6 +2461,16 @@ func TestConfigValidation(t *testing.T) {
 	hc.WritePeerPriorities = []string{"query", "byte"}
 	err = hc.validateLocked()
 	re.Error(err)
+	// cpu is not allowed to be set in priorities for write-leader-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WriteLeaderPriorities = []string{"cpu", "byte"}
+	err = hc.validateLocked()
+	re.Error(err)
+	// cpu is not allowed to be set in priorities for write-peer-priorities
+	hc = initHotRegionScheduleConfig()
+	hc.WritePeerPriorities = []string{"cpu", "byte"}
+	err = hc.validateLocked()
+	re.Error(err)
 	// priorities shouldn't be repeated
 	hc.WritePeerPriorities = []string{"byte", "byte"}
 	err = hc.validateLocked()
@@ -2440,6 +2520,23 @@ func TestConfigValidation(t *testing.T) {
 	hc.ForbidRWType = "test"
 	err = hc.validateLocked()
 	re.Error(err)
+
+	hc = initHotRegionScheduleConfig()
+	hc.PendingWeight = 0
+	err = hc.validateLocked()
+	re.Error(err)
+
+	hc.PendingWeight = -1
+	err = hc.validateLocked()
+	re.Error(err)
+
+	hc.PendingWeight = 0.5
+	err = hc.validateLocked()
+	re.Error(err)
+
+	hc.PendingWeight = defaultPendingWeight
+	err = hc.validateLocked()
+	re.NoError(err)
 
 	hc.SplitThresholds = 0
 	err = hc.validateLocked()

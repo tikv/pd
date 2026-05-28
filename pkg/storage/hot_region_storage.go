@@ -80,6 +80,7 @@ type HistoryHotRegion struct {
 	HotRegionType string  `json:"hot_region_type"`
 	HotDegree     int64   `json:"hot_degree"`
 	FlowBytes     float64 `json:"flow_bytes"`
+	FlowCPU       float64 `json:"flow_cpu"`
 	KeyRate       float64 `json:"key_rate"`
 	QueryRate     float64 `json:"query_rate"`
 	StartKey      string  `json:"start_key"`
