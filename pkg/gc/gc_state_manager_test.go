@@ -541,11 +541,41 @@ func (s *gcStateManagerTestSuite) testCompatibleGCSafePointUpdateSequentiallyImp
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithLegacyLoad() {
+	re := s.Require()
+
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
 			return s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 		})
 	}
+
+	// Legacy load must bypass the local cache once this PD node is no longer leader.
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 200, time.Now())
+	re.NoError(err)
+	_, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, 100)
+	re.NoError(err)
+	re.Equal(uint64(100), newGCSafePoint)
+
+	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint(keyspaceID)
+	re.NoError(err)
+	re.Equal(uint64(100), gcSafePoint)
+
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceID)
+	re.True(ok)
+	re.Equal(uint64(100), cachedState.GCSafePoint)
+
+	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.SetGCSafePoint(keyspaceID, 101)
+	})
+	re.NoError(err)
+	oldLeadership := s.manager.nodeLeadership.Load()
+	s.manager.nodeLeadership.Store(0)
+	defer s.manager.nodeLeadership.Store(oldLeadership)
+
+	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
+	re.NoError(err)
+	re.Equal(uint64(101), gcSafePoint)
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {

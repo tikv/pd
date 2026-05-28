@@ -301,8 +301,10 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, e
 		return 0, err
 	}
 
-	if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok {
-		return cachedGCState.GCSafePoint, nil
+	if m.nodeIsLeader() {
+		if cachedGCState, ok := m.gcStateCache.load(keyspaceID); ok {
+			return cachedGCState.GCSafePoint, nil
+		}
 	}
 
 	// No need to acquire the lock as a single-key read operation is atomic.
