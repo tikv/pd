@@ -309,11 +309,9 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'batch'").Error())
 		return
 	}
-	if inputBatch {
-		if !isValidEvictLeaderBatchSize(batchFloat) {
-			handler.rd.JSON(w, http.StatusBadRequest, "batch must be an integer in [1, 100]")
-			return
-		}
+	if inputBatch && !isValidEvictLeaderBatchSize(batchFloat) {
+		handler.rd.JSON(w, http.StatusBadRequest, invalidEvictLeaderBatchSizeMsg)
+		return
 	}
 
 	enableNetworkSlowStore, inputEnableNetworkSlowStore := input["enable-network-slow-store"].(bool)
