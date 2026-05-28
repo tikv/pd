@@ -20,11 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -206,6 +208,312 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	re.NoError(err)
 	re.NotZero(waitTIme)
 	verify()
+}
+
+func TestPredictedReadBytesPreCharge(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+
+	// BeforeKVRequest with a PredictedReadBytes hint should pre-charge
+	// baseCost + predictedReadBytes * ReadBytesCost, regardless of
+	// whether PagingSizeBytes is set. The two are decoupled.
+	pagingSizeBytes := uint64(4 * 1024 * 1024) // protocol-level cap only
+	predictedReadBytes := uint64(256 * 1024)   // learned EMA estimate
+	req := &TestRequestInfo{
+		isWrite:            false,
+		pagingSizeBytes:    pagingSizeBytes,
+		predictedReadBytes: predictedReadBytes,
+	}
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, req)
+
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	hintCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
+	re.InDelta(baseCost+hintCost, precharge.RRU, 1e-6,
+		"BeforeKVRequest should pre-charge based on PredictedReadBytes")
+
+	// AfterKVRequest should subtract the same hint basis, preserving
+	// precharge + settle == baseCost + actualCost.
+	actualReadBytes := uint64(300 * 1024) // close to the prediction
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost-hintCost, settle.RRU, 1e-6,
+		"AfterKVRequest should settle using the same hint basis as BeforeKVRequest")
+
+	totalRRU := precharge.RRU + settle.RRU
+	re.InDelta(baseCost+actualReadCost+cpuCost, totalRRU, 1e-6,
+		"Total RRU across precharge+settle should equal baseCost + actualCost")
+}
+
+func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+
+	// With PagingSizeBytes but no PredictedReadBytes hint, BeforeKVRequest
+	// must NOT pre-charge: the two quantities are decoupled. AfterKVRequest
+	// bills the actual read bytes only.
+	pagingSizeBytes := uint64(4 * 1024 * 1024)
+	reqPagingOnly := &TestRequestInfo{
+		isWrite:         false,
+		pagingSizeBytes: pagingSizeBytes,
+	}
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, reqPagingOnly)
+	re.InDelta(baseCost, precharge.RRU, 1e-6,
+		"PagingSizeBytes alone must not trigger pre-charge")
+
+	actualReadBytes := uint64(2 * 1024 * 1024)
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, reqPagingOnly, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost, settle.RRU, 1e-6,
+		"AfterKVRequest should bill actual read cost only when nothing was pre-charged")
+
+	// Bare request without any hint or paging also pre-charges nothing.
+	reqNone := &TestRequestInfo{isWrite: false}
+	prechargeNone := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(prechargeNone, reqNone)
+	re.InDelta(baseCost, prechargeNone.RRU, 1e-6,
+		"Without hint or paging, BeforeKVRequest should only charge baseCost")
+}
+
+func TestPagingPreChargeTokenRefund(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	// Give the limiter a known amount of tokens with no fill rate for precise measurement.
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(1 * 1024 * 1024)    // 1 MB actual
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	// Pre-charge reserves tokens from the limiter.
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// Response settlement should refund excess tokens.
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// The limiter should have more tokens after settlement than after pre-charge,
+	// because the refund (pre-charge - actual) exceeds the actual read cost.
+	cfg := DefaultRUConfig()
+	preChargeCost := float64(cfg.ReadBytesCost) * float64(predictedReadBytes)
+	actualCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	expectedRefund := preChargeCost - actualCost
+	re.Positive(expectedRefund, "sanity: pre-charge should exceed actual cost")
+
+	re.InDelta(tokensAfterPreCharge+expectedRefund, tokensAfterSettlement, 1.0,
+		"limiter should be refunded the excess pre-charged tokens")
+
+	// Verify net consumption is correct: baseCost + actualReadCost.
+	gc.mu.Lock()
+	netRRU := gc.mu.consumption.RRU
+	gc.mu.Unlock()
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	expectedNetRRU := baseCost + actualCost
+	re.InDelta(expectedNetRRU, netRRU, 1e-6,
+		"net consumption should equal baseCost + actualReadCost")
+}
+
+func TestPagingPreChargeNoRefundWhenActualExceedsEstimate(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(1 * 1024 * 1024) // 1 MB pre-charge
+	actualReadBytes := uint64(4 * 1024 * 1024)    // 4 MB actual (exceeds estimate)
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// Actual exceeds pre-charge, so settlement should consume more tokens (not refund).
+	re.Less(tokensAfterSettlement, tokensAfterPreCharge,
+		"when actual exceeds pre-charge, settlement should consume tokens")
+}
+
+func TestOnResponseImplPagingRefund(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	predictedReadBytes := uint64(4 * 1024 * 1024) // 4 MB pre-charge
+	actualReadBytes := uint64(512 * 1024)         // 512 KB actual
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		succeed:   true,
+	}
+
+	// Pre-charge
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// Settlement via onResponseImpl (non-waiting path)
+	_, err = gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// Should have refunded tokens.
+	re.Greater(tokensAfterSettlement, tokensAfterPreCharge,
+		"onResponseImpl should refund excess pre-charged tokens")
+}
+
+func TestNonprechargeMetricsRecordedWhenHintZero(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	nonprechargeCounter := metrics.PagingNonprechargeCounter.WithLabelValues(gc.name)
+	nonprechargeBytes := metrics.PagingNonprechargeActualBytes.WithLabelValues(gc.name)
+	prechargeCounter := metrics.PagingPrechargeCounter.WithLabelValues(gc.name)
+	actualBytes := metrics.PagingActualBytesCounter.WithLabelValues(gc.name)
+
+	countBefore := testutil.ToFloat64(nonprechargeCounter)
+	bytesBefore := testutil.ToFloat64(nonprechargeBytes)
+	prechargeBefore := testutil.ToFloat64(prechargeCounter)
+	actualBytesBefore := testutil.ToFloat64(actualBytes)
+
+	// Hint=0 read: implements predictedReadBytesProvider but returns 0 ->
+	// BeforeKVRequest skips pre-charge, AfterKVRequest must record
+	// nonprecharge bytes.
+	const readBytesAmount = uint64(256 * 1024)
+	coldReq := &TestRequestInfo{isWrite: false}
+	coldResp := &TestResponseInfo{readBytes: readBytesAmount, succeed: true}
+
+	_, err := gc.onResponseImpl(coldReq, coldResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"hint=0 read should increment nonprecharge counter")
+	re.InDelta(bytesBefore+float64(readBytesAmount),
+		testutil.ToFloat64(nonprechargeBytes), 1e-6,
+		"nonprecharge bytes must equal AfterKVRequest actual read bytes")
+	re.InDelta(prechargeBefore, testutil.ToFloat64(prechargeCounter), 1e-6,
+		"precharge counter must stay unchanged when hint=0")
+	re.InDelta(actualBytesBefore, testutil.ToFloat64(actualBytes), 1e-6,
+		"warm-path actual-bytes counter must stay unchanged when hint=0")
+
+	// Sanity: a hint>0 read should hit the warm path, not the cold path.
+	warmReq := &TestRequestInfo{isWrite: false, predictedReadBytes: 1 * 1024 * 1024}
+	warmResp := &TestResponseInfo{readBytes: readBytesAmount, succeed: true}
+	_, _, _, _, err = gc.onRequestWaitImpl(context.TODO(), warmReq)
+	re.NoError(err)
+	_, err = gc.onResponseImpl(warmReq, warmResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"warm request must not touch nonprecharge counter")
+	re.InDelta(prechargeBefore+1, testutil.ToFloat64(prechargeCounter), 1e-6,
+		"warm request should increment precharge counter")
+
+	// Writes skip both buckets entirely.
+	writeReq := &TestRequestInfo{isWrite: true, writeBytes: 1024}
+	writeResp := &TestResponseInfo{readBytes: 0, succeed: true}
+	_, err = gc.onResponseImpl(writeReq, writeResp)
+	re.NoError(err)
+	re.InDelta(countBefore+1, testutil.ToFloat64(nonprechargeCounter), 1e-6,
+		"write must not touch nonprecharge counter")
+}
+
+func TestPagingPreChargeZeroDelta(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	initialTokens := float64(100000)
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   initialTokens,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	// Set actual read bytes equal to the predicted bytes so the read-bytes
+	// delta is zero. The only settlement cost should be CPU time (which
+	// we set to zero here).
+	predictedReadBytes := uint64(2 * 1024 * 1024)
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	resp := &TestResponseInfo{
+		readBytes: predictedReadBytes, // exact match
+		succeed:   true,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	// With zero CPU cost and exact byte match, settlement delta is zero.
+	// No tokens should be consumed or refunded in the settlement step.
+	re.InDelta(tokensAfterPreCharge, tokensAfterSettlement, 1e-6,
+		"exact byte match should produce zero settlement delta")
 }
 
 func TestResourceGroupThrottledError(t *testing.T) {
