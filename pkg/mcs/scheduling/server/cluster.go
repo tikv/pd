@@ -71,15 +71,17 @@ type Cluster struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	*core.BasicCluster
-	persistConfig     *config.PersistConfig
-	ruleManager       *placement.RuleManager
-	keyRangeManager   *keyrange.Manager
-	labelerManager    *labeler.RegionLabeler
-	affinityManager   *affinity.Manager
-	regionStats       *statistics.RegionStatistics
-	labelStats        *statistics.LabelStatistics
-	hotStat           *statistics.HotStat
-	resourceMu        sync.RWMutex
+	persistConfig   *config.PersistConfig
+	ruleManager     *placement.RuleManager
+	keyRangeManager *keyrange.Manager
+	labelerManager  *labeler.RegionLabeler
+	affinityManager *affinity.Manager
+	regionStats     *statistics.RegionStatistics
+	labelStats      *statistics.LabelStatistics
+	hotStat         *statistics.HotStat
+	// runtimeMu protects the runtime resources which are created after the cluster is created,
+	// and cleaned up before the cluster is closed.
+	runtimeMu         sync.RWMutex
 	storage           storage.Storage
 	hbStreams         *hbstream.HeartbeatStreams
 	metaWatcher       *meta.Watcher
@@ -275,8 +277,8 @@ func (c *Cluster) GetStorage() storage.Storage {
 	if c == nil {
 		return nil
 	}
-	c.resourceMu.RLock()
-	defer c.resourceMu.RUnlock()
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
 	return c.storage
 }
 
@@ -285,8 +287,8 @@ func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	if c == nil {
 		return nil
 	}
-	c.resourceMu.RLock()
-	defer c.resourceMu.RUnlock()
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
 	return c.hbStreams
 }
 
@@ -295,8 +297,8 @@ func (c *Cluster) GetMetaWatcher() *meta.Watcher {
 	if c == nil {
 		return nil
 	}
-	c.resourceMu.RLock()
-	defer c.resourceMu.RUnlock()
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
 	return c.metaWatcher
 }
 
@@ -307,8 +309,8 @@ func (c *Cluster) SetRuntimeResources(
 	ruleWatcher *rule.Watcher,
 	affinityWatcher *mcsaffinity.Watcher,
 ) {
-	c.resourceMu.Lock()
-	defer c.resourceMu.Unlock()
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
 	c.metaWatcher = metaWatcher
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
@@ -316,7 +318,7 @@ func (c *Cluster) SetRuntimeResources(
 }
 
 func (c *Cluster) cleanupRuntimeResources() {
-	c.resourceMu.Lock()
+	c.runtimeMu.Lock()
 	affinityWatcher := c.affinityWatcher
 	ruleWatcher := c.ruleWatcher
 	metaWatcher := c.metaWatcher
@@ -328,7 +330,7 @@ func (c *Cluster) cleanupRuntimeResources() {
 	c.configWatcher = nil
 	c.hbStreams = nil
 	c.storage = nil
-	c.resourceMu.Unlock()
+	c.runtimeMu.Unlock()
 
 	now := time.Now()
 	if affinityWatcher != nil {

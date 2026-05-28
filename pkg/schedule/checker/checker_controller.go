@@ -131,6 +131,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 func (c *Controller) PatrolRegions() {
 	c.patrolRegionContext.init(c.ctx)
 	c.patrolRegionContext.startPatrolRegionWorkers(c)
+	defer c.splitScatter.clearPendingSplitScatter()
 	defer c.patrolRegionContext.stop()
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
@@ -371,7 +372,9 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			// It makes sure that two affinity merge operators can be added successfully altogether.
 			return c.affinityChecker.Check(region)
 		}
-		operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		if c.affinityChecker.hasAffinityGroups() {
+			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		}
 		return nil
 	}); len(ops) > 0 {
 		return ops

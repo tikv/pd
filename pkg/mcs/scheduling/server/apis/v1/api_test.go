@@ -34,8 +34,8 @@ func TestMain(m *testing.M) {
 
 func TestGetAllStoresReturnsNotBootstrappedWhenBasicClusterMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	re := require.New(t)
 
+	re := require.New(t)
 	resp := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(resp)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/stores", nil)

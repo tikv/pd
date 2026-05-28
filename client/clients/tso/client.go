@@ -331,9 +331,8 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
-			cctx, cancel := context.WithCancel(ctx)
 			// Just trigger the clean up of the stale connection contexts.
-			c.conCtxMgr.CleanAllAndStore(cctx, cancel, url)
+			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
 			return nil
 		}
 		if cc != nil {
@@ -344,7 +343,12 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
 			if stream != nil && err == nil {
-				c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+				failpoint.InjectCall("pauseBeforeBackgroundStoreTSOLeaderStream")
+				stored := c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+				failpoint.InjectCall("notifyAfterBackgroundStoreTSOLeaderStream")
+				if !stored {
+					cancel()
+				}
 				return nil
 			}
 
@@ -386,10 +390,13 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			if err == nil {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
 				addr := tlsutil.TrimHTTPPrefix(backupURL)
+				if !c.conCtxMgr.CleanAllAndStore(cctx, cancel, backupURL, stream) {
+					cancel()
+					return nil
+				}
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
-				c.conCtxMgr.CleanAllAndStore(cctx, cancel, backupURL, stream)
 				return nil
 			}
 			cancel()
@@ -434,7 +441,9 @@ func (c *Cli) checkLeader(
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("url", url))
-					c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+					if !c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream) {
+						cancel()
+					}
 					return
 				}
 			}
@@ -488,7 +497,10 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 				addrTrim := tlsutil.TrimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			c.conCtxMgr.Store(cctx, cancel, addr, stream)
+			if !c.conCtxMgr.Store(cctx, cancel, addr, stream) {
+				log.Info("[tso] already exists tso stream", zap.String("addr", addr))
+				cancel()
+			}
 			continue
 		}
 		log.Error("[tso] create the tso stream failed",

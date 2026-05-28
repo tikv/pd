@@ -118,7 +118,8 @@ type GCStateManager struct {
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
 
-	allKeyspacesGCStatesSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	allKeyspacesGCStatesSingleFlight                  *syncutil.OrderedSingleFlight[map[uint32]GCState]
+	allKeyspacesGCStatesExcludeGCBarriersSingleFlight *syncutil.OrderedSingleFlight[map[uint32]GCState]
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
@@ -128,6 +129,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 		cfg:                              cfg,
 		keyspaceManager:                  keyspaceManager,
 		allKeyspacesGCStatesSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
+		allKeyspacesGCStatesExcludeGCBarriersSingleFlight: syncutil.NewOrderedSingleFlight[map[uint32]GCState](),
 	}
 }
 
@@ -632,7 +634,7 @@ func (m *GCStateManager) deleteGCBarrierImpl(ctx context.Context, keyspaceID uin
 // it's running in a in-transaction context.
 // The parameter `keyspaceID` is expected to be either the NullKeyspaceID or the ID of a keyspace that has
 // keyspace-level GC enabled. Otherwise, the result would be undefined.
-func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.GCStateWriteBatch) (GCState, error) {
+func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, excludeGCBarriers bool, _ *endpoint.GCStateWriteBatch) (GCState, error) {
 	result := GCState{
 		KeyspaceID: keyspaceID,
 	}
@@ -653,16 +655,18 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 		return GCState{}, err
 	}
 
-	result.GCBarriers, err = m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
-	if err != nil {
-		return GCState{}, err
-	}
+	if !excludeGCBarriers {
+		result.GCBarriers, err = m.gcMetaStorage.LoadAllGCBarriers(keyspaceID)
+		if err != nil {
+			return GCState{}, err
+		}
 
-	// Remove GC barrier whose barrierID is "gc_worker", which is only exists for providing compatibility with the old
-	// versions.
-	result.GCBarriers = slices.DeleteFunc(result.GCBarriers, func(b *endpoint.GCBarrier) bool {
-		return b.BarrierID == keypath.GCWorkerServiceSafePointID
-	})
+		// Remove GC barrier whose barrierID is "gc_worker", which is only exists for providing compatibility with the old
+		// versions.
+		result.GCBarriers = slices.DeleteFunc(result.GCBarriers, func(b *endpoint.GCBarrier) bool {
+			return b.BarrierID == keypath.GCWorkerServiceSafePointID
+		})
+	}
 
 	return result, nil
 }
@@ -671,7 +675,7 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 //
 // When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 // the NullKeyspace.
-func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
+func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (GCState, error) {
 	keyspaceID, _, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
 		return GCState{}, err
@@ -682,7 +686,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	var result GCState
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
+		result, err1 = m.getGCStateInTransaction(keyspaceID, excludeGCBarriers, wb)
 		return err1
 	})
 
@@ -698,15 +702,23 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 // the caller should NEVER change the content of the returned result and error. It's guaranteed that the returned result
 // must be fetched AFTER the beginning of the current invocation, and it never reuses the result of invocations that
 // started earlier than the current one.
-func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context) (map[uint32]GCState, error) {
-	return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
-		result, err := m.getAllKeyspacesGCStatesImpl(execCtx)
+func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCBarriers bool) (map[uint32]GCState, error) {
+	if !excludeGCBarriers {
+		return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
+			result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
+			failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
+			return result, err
+		})
+	}
+
+	return m.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
+		result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
 	})
 }
 
-func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[uint32]GCState, error) {
+func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context, excludeGCBarriers bool) (map[uint32]GCState, error) {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
 	mutexLocked := false
@@ -732,7 +744,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 	results := make(map[uint32]GCState)
 	lock()
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
+		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, excludeGCBarriers, wb)
 		if err1 != nil {
 			return err1
 		}
@@ -774,7 +786,7 @@ func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context) (map[u
 
 		lock()
 		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
+			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, excludeGCBarriers, wb)
 			if err1 != nil {
 				return err1
 			}

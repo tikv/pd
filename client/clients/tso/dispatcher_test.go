@@ -77,8 +77,7 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	} else {
 		stream = m.createStream(ctx)
 	}
-	m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
-	return true
+	return m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
 }
 
 type testTSODispatcherSuite struct {
