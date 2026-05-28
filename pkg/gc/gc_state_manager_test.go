@@ -2297,6 +2297,44 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointUpdatesWarmCache() {
 	re.Equal(beforeAdvance.miss, afterRead.miss)
 }
 
+func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSmallerTargetKeepsWarmCacheUsable() {
+	re := s.Require()
+	s.ensureMarkedLeader()
+	tracker := s.trackGCStateCacheAccessCounters()
+
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 50, time.Now())
+	re.NoError(err)
+	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 40)
+	re.NoError(err)
+
+	state, err := s.manager.GetGCState(keyspaceID, true)
+	re.NoError(err)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(40), state.GCSafePoint)
+
+	beforeUpdate := tracker.snapshot()
+	oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, 35)
+	re.NoError(err)
+	re.Equal(uint64(40), oldGCSafePoint)
+	re.Equal(uint64(40), newGCSafePoint)
+
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceID)
+	re.True(ok)
+	re.Equal(uint64(50), cachedState.TxnSafePoint)
+	re.Equal(uint64(40), cachedState.GCSafePoint)
+
+	state, err = s.manager.GetGCState(keyspaceID, true)
+	re.NoError(err)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(40), state.GCSafePoint)
+
+	afterRead := tracker.snapshot()
+	re.Equal(beforeUpdate.hit+1, afterRead.hit)
+	re.Equal(beforeUpdate.slowHit, afterRead.slowHit)
+	re.Equal(beforeUpdate.miss, afterRead.miss)
+}
+
 func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable() {
 	re := s.Require()
 	s.ensureMarkedLeader()

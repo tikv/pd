@@ -355,6 +355,10 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 		if err1 != nil {
 			return err1
 		}
+		txnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		if err1 != nil {
+			return err1
+		}
 		if target < oldGCSafePoint {
 			if compatible {
 				// When in compatible mode, trying to update the safe point to a smaller value fails silently, returning
@@ -367,10 +371,6 @@ func (m *GCStateManager) advanceGCSafePointImpl(ctx context.Context, keyspaceID 
 			}
 			// Otherwise, return error to reject the operation explicitly.
 			return errs.ErrDecreasingGCSafePoint.GenWithStackByArgs(oldGCSafePoint, target)
-		}
-		txnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
-		if err1 != nil {
-			return err1
 		}
 		if target > txnSafePoint {
 			return errs.ErrGCSafePointExceedsTxnSafePoint.GenWithStackByArgs(oldGCSafePoint, target, txnSafePoint)
