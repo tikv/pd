@@ -322,7 +322,7 @@ func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 				}
 				return
 			}
-			resp = "The last store has been deleted"
+			resp = lastStoreDeleteInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
 		return

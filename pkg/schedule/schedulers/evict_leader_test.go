@@ -183,6 +183,44 @@ func TestEvictLeaderBatchLimit(t *testing.T) {
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": "abc"})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+}
+
+func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	re.NoError(sl.PrepareConfig(tc))
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+
+	body, err := json.Marshal(map[string]any{"store_id": 1, "batch": "abc"})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+
+	body, err = json.Marshal(map[string]any{"store_id": 2, "batch": "abc"})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.True(tc.GetStore(2).AllowLeaderTransferIn())
 }
 
 func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
