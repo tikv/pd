@@ -60,6 +60,7 @@ func (tikvCollector) getLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWTy
 		loads[utils.ByteDim] = storeLoads[utils.StoreReadBytes]
 		loads[utils.KeyDim] = storeLoads[utils.StoreReadKeys]
 		loads[utils.QueryDim] = storeLoads[utils.StoreReadQuery]
+		loads[utils.CPUDim] = storeLoads[utils.StoreReadCPU]
 	case utils.Write:
 		switch kind {
 		case constant.LeaderKind:
