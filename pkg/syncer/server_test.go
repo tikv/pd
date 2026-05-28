@@ -458,6 +458,54 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 	close(unblockSend)
 }
 
+func TestSendRegionSyncResponseSerializesStreamSendAfterTimeout(t *testing.T) {
+	re := require.New(t)
+	stream := newBlockingSendStream(1)
+	syncStream := newRegionSyncStream(stream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": syncStream,
+	})
+	syncer.sendTimeout = 10 * time.Millisecond
+	syncer.history.resetWithIndex(10)
+	syncer.history.record(newTestRegion(1))
+
+	err := syncer.sendDownstream(context.Background(), "pd2", syncStream, false)
+	re.Error(err)
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	closeSendStarted := make(chan struct{})
+	closeSendDone := make(chan error, 1)
+	go func() {
+		close(closeSendStarted)
+		closeSendDone <- syncStream.send(&pdpb.SyncRegionResponse{
+			Header: &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		})
+	}()
+	<-closeSendStarted
+
+	time.Sleep(20 * time.Millisecond)
+	re.Equal(1, stream.sendCountValue())
+	select {
+	case err := <-closeSendDone:
+		re.NoError(err)
+		re.Fail("close response send should wait for the in-flight send")
+	default:
+	}
+
+	stream.unblockSend()
+	var closeSendErr error
+	testutil.Eventually(re, func() bool {
+		select {
+		case closeSendErr = <-closeSendDone:
+			return true
+		default:
+			return false
+		}
+	})
+	re.NoError(closeSendErr)
+	re.Equal(2, stream.sendCountValue())
+}
+
 func TestSyncExitsWhenContextCanceledBeforeRequest(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
@@ -708,6 +756,12 @@ func (s *blockingSendStream) isSendBlocked() bool {
 
 func (s *blockingSendStream) unblockSend() {
 	close(s.unblock)
+}
+
+func (s *blockingSendStream) sendCountValue() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.sendCount
 }
 
 func (s *blockingSendStream) sentResponses() []*pdpb.SyncRegionResponse {

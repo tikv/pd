@@ -71,13 +71,14 @@ type downstreamSendSignal struct {
 }
 
 type regionSyncStream struct {
-	stream    ServerStream
-	sendMu    sync.Mutex
-	indexMu   syncutil.RWMutex
-	sendIndex uint64
-	notifyCh  chan downstreamSendSignal
-	done      chan struct{}
-	once      sync.Once
+	stream       ServerStream
+	sendMu       sync.Mutex
+	streamSendMu sync.Mutex
+	indexMu      syncutil.RWMutex
+	sendIndex    uint64
+	notifyCh     chan downstreamSendSignal
+	done         chan struct{}
+	once         sync.Once
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
@@ -117,6 +118,12 @@ func (s *regionSyncStream) close() {
 func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
+	return s.sendStream(regions)
+}
+
+func (s *regionSyncStream) sendStream(regions *pdpb.SyncRegionResponse) error {
+	s.streamSendMu.Lock()
+	defer s.streamSendMu.Unlock()
 	return s.stream.Send(regions)
 }
 
@@ -413,7 +420,7 @@ func (s *RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Reg
 func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
 	for start := 0; start < len(records); start += maxSyncRegionBatchSize {
 		end := min(start+maxSyncRegionBatchSize, len(records))
-		if err := stream.stream.Send(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
+		if err := stream.sendStream(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
 			return err
 		}
 	}
@@ -475,7 +482,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			return err
 		}
 		lastIndex += len(metas)
-		if err := syncStream.stream.Send(resp); err != nil {
+		if err := syncStream.sendStream(resp); err != nil {
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
@@ -587,12 +594,13 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		if sendIndex == bufferNextIndex {
 			return sentRecords, nil
 		}
-		records := s.history.recordsBetween(sendIndex, bufferNextIndex)
-		if len(records) == 0 {
-			return sentRecords, errors.Errorf("region syncer has no buffered records from index %d to %d", sendIndex, bufferNextIndex)
+		endIndex := bufferNextIndex
+		if endIndex-sendIndex > uint64(maxSyncRegionBatchSize) {
+			endIndex = sendIndex + uint64(maxSyncRegionBatchSize)
 		}
-		if len(records) > maxSyncRegionBatchSize {
-			records = records[:maxSyncRegionBatchSize]
+		records := s.history.recordsBetween(sendIndex, endIndex)
+		if len(records) == 0 {
+			return sentRecords, errors.Errorf("region syncer has no buffered records from index %d to %d", sendIndex, endIndex)
 		}
 		resp := buildSyncRegionResponse(sendIndex, records)
 		if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
@@ -639,7 +647,7 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- sender.stream.Send(regions)
+		resultCh <- sender.sendStream(regions)
 	}()
 
 	timeout := s.sendTimeout
