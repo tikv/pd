@@ -317,28 +317,38 @@ func (c *Cluster) SetRuntimeResources(
 
 func (c *Cluster) cleanupRuntimeResources() {
 	c.resourceMu.Lock()
-	defer c.resourceMu.Unlock()
-	if c.affinityWatcher != nil {
-		c.affinityWatcher.Close()
-		c.affinityWatcher = nil
-	}
-	if c.ruleWatcher != nil {
-		c.ruleWatcher.Close()
-		c.ruleWatcher = nil
-	}
-	if c.metaWatcher != nil {
-		c.metaWatcher.Close()
-		c.metaWatcher = nil
-	}
-	if c.configWatcher != nil {
-		c.configWatcher.Close()
-		c.configWatcher = nil
-	}
-	if c.hbStreams != nil {
-		c.hbStreams.Close()
-		c.hbStreams = nil
-	}
+	affinityWatcher := c.affinityWatcher
+	ruleWatcher := c.ruleWatcher
+	metaWatcher := c.metaWatcher
+	configWatcher := c.configWatcher
+	hbStreams := c.hbStreams
+	c.affinityWatcher = nil
+	c.ruleWatcher = nil
+	c.metaWatcher = nil
+	c.configWatcher = nil
+	c.hbStreams = nil
 	c.storage = nil
+	c.resourceMu.Unlock()
+
+	now := time.Now()
+	if affinityWatcher != nil {
+		affinityWatcher.Close()
+	}
+	if ruleWatcher != nil {
+		ruleWatcher.Close()
+	}
+	if metaWatcher != nil {
+		metaWatcher.Close()
+	}
+	if configWatcher != nil {
+		configWatcher.Close()
+	}
+	if hbStreams != nil {
+		start := time.Now()
+		hbStreams.Close()
+		log.Info("close stream takes", zap.Duration("cost", time.Since(start)))
+	}
+	log.Info("clean up runtime resources takes", zap.Duration("cost", time.Since(now)))
 }
 
 // GetCheckerConfig returns the checker config.
@@ -731,10 +741,9 @@ func (c *Cluster) StartBackgroundJobs() {
 
 // StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
 func (c *Cluster) StopBackgroundJobs() bool {
-	if !c.running.Load() {
+	if c.running.CompareAndSwap(true, false) {
 		return false
 	}
-	c.running.Store(false)
 	c.coordinator.Stop()
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
