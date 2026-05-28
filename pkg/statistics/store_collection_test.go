@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"math"
 	"strconv"
 	"testing"
 	"time"
@@ -94,10 +95,10 @@ func TestSummaryStoreInfos(t *testing.T) {
 			isTiFlash: false,
 			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
 		}
-		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
-		for i, v := range storeLoads[uint64(storeID)] {
-			storeLoads[uint64(storeID)][i] = v * float64(storeID)
-		}
+		storeLoads[uint64(storeID)] = make([]float64, utils.StoreStatCount)
+		storeLoads[uint64(storeID)][utils.StoreReadBytes] = 1 * float64(storeID)
+		storeLoads[uint64(storeID)][utils.StoreReadKeys] = 2 * float64(storeID)
+		storeLoads[uint64(storeID)][utils.StoreReadQuery] = 5 * float64(storeID)
 	}
 
 	// case 1: put one element into history load
@@ -105,7 +106,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	re.Len(details, 2)
 	re.Empty(details[0].LoadPred.Current.HistoryLoads)
 	re.Empty(details[1].LoadPred.Current.HistoryLoads)
-	expectHistoryLoads := []float64{1, 2, 5}
+	expectHistoryLoads := []float64{1, 2, 5, 0}
 	for _, storeID := range []uint64{1, 3} {
 		loads := storeHistoryLoad.Get(storeID, rw, kind)
 		for i := range loads {
@@ -121,7 +122,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	storeHistoryLoad.sampleDuration = 0
 	for i := 1; i < 10; i++ {
 		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
-		expect := []float64{2, 4, 10}
+		expect := []float64{2, 4, 10, 0}
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
 			re.Len(loads, len(expectHistoryLoads))
@@ -143,5 +144,44 @@ func TestSummaryStoreInfos(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestSummaryStoresLoadByEngineZeroCPUStddev(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Read
+	kind := constant.LeaderKind
+	collector := newTikvCollector()
+
+	storeInfos := map[uint64]*StoreSummaryInfo{}
+	storeLoads := map[uint64][]float64{}
+	storeHotPeers := map[uint64][]*HotPeerStat{}
+	for _, storeID := range []uint64{1, 2} {
+		storeInfos[storeID] = &StoreSummaryInfo{
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{Id: storeID, Address: "mock://tikv" + strconv.FormatUint(storeID, 10)},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
+		}
+		storeLoads[storeID] = make([]float64, utils.StoreStatCount)
+		storeLoads[storeID][utils.StoreReadBytes] = 100 * float64(storeID)
+		storeLoads[storeID][utils.StoreReadKeys] = 10 * float64(storeID)
+		storeLoads[storeID][utils.StoreReadQuery] = 5 * float64(storeID)
+		storeHotPeers[storeID] = []*HotPeerStat{{
+			StoreID:  storeID,
+			RegionID: storeID,
+			Loads:    []float64{1, 1, 1, 0},
+			isLeader: true,
+		}}
+	}
+
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, nil, storeHotPeers, rw, kind, collector)
+	re.Len(details, 2)
+	for _, detail := range details {
+		cpuStddev := detail.LoadPred.Stddev.Loads[utils.CPUDim]
+		re.False(math.IsNaN(cpuStddev))
+		re.False(math.IsInf(cpuStddev, 0))
+		re.Zero(cpuStddev)
+		re.True(detail.IsUniform(utils.CPUDim, 0.1))
 	}
 }
