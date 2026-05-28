@@ -922,7 +922,8 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 				func(_keyspaceID uint32) bool { return true },
 				func(gcState GCState) {
 					result[gcState.KeyspaceID] = gcState
-				})
+				},
+				nil)
 			failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 			return result, err
 		})
@@ -932,27 +933,57 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 	// Note that the invocation with and without `excludeGCBarriers` should go to different singleflights, otherwise
 	// invocation with different parameters may share their results incorrectly.
 	return m.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
-		cachedGCStates := make(map[uint32]GCState)
+		gcStates := make(map[uint32]GCState)
 		if m.nodeIsLeader() {
-			cachedGCStates = m.gcStateCache.cloneAllAsGCStates()
+			gcStates = m.gcStateCache.cloneAllAsGCStates()
 		}
-		err := m.iterateAllKeyspacesGCStates(execCtx, excludeGCBarriers, func(keyspaceID uint32) bool {
-			_, ok := cachedGCStates[keyspaceID]
-			return !ok
-		}, func(gcState GCState) {
-			cachedGCStates[gcState.KeyspaceID] = gcState
-		})
+
+		actualKeyspaces := make(map[uint32]struct{}, len(gcStates))
+
+		err := m.iterateAllKeyspacesGCStates(execCtx, excludeGCBarriers,
+			func(keyspaceID uint32) bool {
+				_, ok := gcStates[keyspaceID]
+				return !ok
+			},
+			func(gcState GCState) {
+				actualKeyspaces[gcState.KeyspaceID] = struct{}{}
+				gcStates[gcState.KeyspaceID] = gcState
+			},
+			func(meta *keyspacepb.KeyspaceMeta) {
+				keyspaceID := constant.NullKeyspaceID
+				if meta != nil {
+					keyspaceID = meta.GetId()
+				}
+				actualKeyspaces[keyspaceID] = struct{}{}
+			})
+
+		// Filter out invalid GC states that may be stale in the cache.
+		keyspacesToRemove := make([]uint32, 0)
+		for keyspaceID := range gcStates {
+			if _, ok := actualKeyspaces[keyspaceID]; !ok {
+				keyspacesToRemove = append(keyspacesToRemove, keyspaceID)
+			}
+		}
+		for _, keyspaceID := range keyspacesToRemove {
+			delete(gcStates, keyspaceID)
+		}
+
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
-		return cachedGCStates, err
+		return gcStates, err
 	})
 }
 
 // iterateAllKeyspacesGCStates iterates GC states of all keyspaces, and calls the given callback on each of them.
+// `keyspacePred` will be used to filter keyspaces to be handled, including the null keyspace.
+// For unfiltered keyspaces, its GCState will be loaded and passed to `cb`; for keyspaces filtered by `keyspacePred`,
+// its keyspace meta (or nil for null keyspace) will be passed to `filteredKeyspaceCb`.
+// Keyspaces not in ENABLED state or keyspaces with keyspace-level GC disabled won't be used to call either callback.
 func (m *GCStateManager) iterateAllKeyspacesGCStates(
 	ctx context.Context,
 	excludeGCBarriers bool,
 	keyspacePred func(keyspaceID uint32) bool,
 	cb func(GCState),
+	filteredKeyspaceCb func(meta *keyspacepb.KeyspaceMeta),
 ) error {
 	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 	failpoint.Inject("iterateAllKeyspacesGCStatesError", func(val failpoint.Value) {
@@ -964,14 +995,14 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 
 	keyspaceIterator := m.keyspaceManager.IterateKeyspaces()
 
-	// Do not guarantee atomicity among different keyspaces here.
-
 	if keyspacePred(constant.NullKeyspaceID) {
 		nullKeyspaceGCState, err := m.getGCStateImpl(constant.NullKeyspaceID, excludeGCBarriers)
 		if err != nil {
 			return err
 		}
 		cb(nullKeyspaceGCState)
+	} else if filteredKeyspaceCb != nil {
+		filteredKeyspaceCb(nil)
 	}
 
 	for {
@@ -989,7 +1020,14 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 			break
 		}
 
-		if !keyspacePred(keyspaceMeta.GetId()) || keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
+		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
+			continue
+		}
+
+		if !keyspacePred(keyspaceMeta.GetId()) {
+			if filteredKeyspaceCb != nil {
+				filteredKeyspaceCb(keyspaceMeta)
+			}
 			continue
 		}
 
