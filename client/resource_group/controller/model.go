@@ -52,6 +52,26 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+	// PredictedReadBytes returns the read-bytes hint used for RC paging
+	// pre-charge in BeforeKVRequest and settled symmetrically in
+	// AfterKVRequest. Return 0 to opt out; writes always return 0.
+	PredictedReadBytes() uint64
+	// IsCop reports whether this request targets the coprocessor endpoint
+	// (CmdCop / CmdCopStream). Only coprocessor reads participate in the
+	// paging_* accounting; point gets, batch gets, scans and other
+	// bounded-size reads bypass the paging metrics even though they may
+	// reach this controller through the same RC interceptor.
+	IsCop() bool
+}
+
+// estimatedReadBytes returns the predicted read-bytes hint for read requests.
+// Writes always return 0 so paging pre-charge / settlement / metrics stay
+// gated to reads.
+func estimatedReadBytes(req RequestInfo) uint64 {
+	if req.IsWrite() {
+		return 0
+	}
+	return req.PredictedReadBytes()
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -104,6 +124,10 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+		// Paging pre-charge
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU += float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	}
 	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
@@ -138,6 +162,10 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	if !req.IsWrite() {
 		// For now, we can only collect the KV CPU cost for a read request.
 		kc.calculateCPUCost(consumption, res)
+		// Paging settlement
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU -= float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	} else if !res.Succeed() {
 		// If the write request is not successfully returned, we need to pay back the WRU cost.
 		kc.payBackWriteCost(consumption, req)

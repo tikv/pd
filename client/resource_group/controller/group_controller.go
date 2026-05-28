@@ -106,6 +106,18 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+
+	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
+	// on the hot path.
+	prechargeCounter        prometheus.Counter
+	prechargeBytesCounter   prometheus.Counter
+	actualBytesCounter      prometheus.Counter
+	predictionResidualBytes prometheus.Observer
+	nonprechargeCounter     prometheus.Counter
+	nonprechargeActualBytes prometheus.Counter
+	prechargeRU             prometheus.Counter
+	settlementRU            prometheus.Counter
+	settlementRUDelta       prometheus.Observer
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -122,7 +134,63 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+
+		prechargeCounter:        metrics.PagingPrechargeCounter.WithLabelValues(name),
+		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
+		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
+		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
+
+		nonprechargeCounter:     metrics.PagingNonprechargeCounter.WithLabelValues(name),
+		nonprechargeActualBytes: metrics.PagingNonprechargeActualBytes.WithLabelValues(name),
+		prechargeRU:             metrics.PagingPrechargeRU.WithLabelValues(name),
+		settlementRU:            metrics.PagingSettlementRU.WithLabelValues(name),
+		settlementRUDelta:       metrics.PagingSettlementRUDelta.WithLabelValues(name),
 	}
+}
+
+// deletePagingLabels removes the per-resource-group paging_* metric series
+// when the group is being deleted or tombstoned, so stale label series do
+// not linger in Prometheus until the process restarts. Keep this list in
+// sync with initMetrics — adding a paging metric there must be paired
+// with a deletion here.
+func (gmc *groupMetricsCollection) deletePagingLabels(name string) {
+	metrics.PagingPrechargeCounter.DeleteLabelValues(name)
+	metrics.PagingNonprechargeCounter.DeleteLabelValues(name)
+	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
+	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
+	metrics.PagingNonprechargeActualBytes.DeleteLabelValues(name)
+	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
+	metrics.PagingPrechargeRU.DeleteLabelValues(name)
+	metrics.PagingSettlementRU.DeleteLabelValues(name)
+	metrics.PagingSettlementRUDelta.DeleteLabelValues(name)
+}
+
+// observePagingPrecharge requires bytesForEst > 0.
+// prechargeRU is the total RU pre-acquired at BeforeKVRequest
+// (base + ReadBytesCost * bytesForEst).
+func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64, prechargeRU float64) {
+	gmc.prechargeCounter.Inc()
+	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+	gmc.prechargeRU.Add(prechargeRU)
+}
+
+// observePagingActual requires predicted > 0.
+// settlementRU is the total RU finally consumed (base + CPU + ReadBytesCost * actual);
+// vDelta is (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
+func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64, settlementRU, vDelta float64) {
+	gmc.actualBytesCounter.Add(float64(actual))
+	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
+	gmc.settlementRU.Add(settlementRU)
+	gmc.settlementRUDelta.Observe(vDelta)
+}
+
+// observePagingNonprecharge counts a coprocessor RPC whose EMA produced no hint
+// (cold-start). Callers must gate the call on RequestInfo.IsCop() && !IsWrite()
+// so the metric stays scoped to coprocessor reads and excludes point gets,
+// batch gets, scans, and other bounded-size reads.
+func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
+	gmc.nonprechargeCounter.Inc()
+	gmc.nonprechargeActualBytes.Add(float64(actual))
 }
 
 type tokenCounter struct {
@@ -576,6 +644,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
 	}
+	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
+		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
+	}
 
 	gc.mu.Lock()
 	// Calculate the penalty of the store
@@ -601,23 +672,30 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
+	count := &rmpb.Consumption{}
+	*count = *delta
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
+	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+	} else if !req.IsWrite() && req.IsCop() {
+		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
+		} else if v < 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			counter.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
 
 	gc.mu.Lock()
-	// Record the consumption of the request
 	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
-	count := &rmpb.Consumption{}
-	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -632,38 +710,74 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	var waitDuration time.Duration
-	if !gc.burstable.Load() {
-		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-		d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-		if err != nil {
-			if errs.ErrClientResourceGroupThrottled.Equal(err) {
-				gc.metrics.failedRequestCounterWithThrottled.Inc()
-				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-			} else {
-				gc.metrics.failedRequestCounterWithOthers.Inc()
-			}
-			return nil, waitDuration, err
-		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
-	}
-
-	gc.mu.Lock()
-	// Record the consumption of the request
-	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
+	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+	} else if !req.IsWrite() && req.IsCop() {
+		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+	}
+	var waitDuration time.Duration
+	if !gc.burstable.Load() {
+		v := getRUValueFromConsumption(delta)
+		if v > 0 {
+			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+			if err != nil {
+				if errs.ErrClientResourceGroupThrottled.Equal(err) {
+					gc.metrics.failedRequestCounterWithThrottled.Inc()
+					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+				} else {
+					gc.metrics.failedRequestCounterWithOthers.Inc()
+				}
+				return nil, waitDuration, err
+			}
+			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+			waitDuration += d
+		} else if v < 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
+		}
+	}
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, delta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
+}
+
+// onRequestCancelImpl undoes onRequestWaitImpl's pre-charge when the RPC
+// fails before producing any response. It recomputes the BeforeKVRequest
+// delta with the same RequestInfo and the same calculators, then subtracts
+// that delta from per-group consumption and refunds the corresponding
+// tokens to the limiter so speculatively reserved RU is not lost.
+//
+// The per-store snapshot maintained by onRequestWaitImpl is intentionally
+// not rolled back — it is bookkeeping for penalty distribution and will be
+// overwritten by the next OnRequestWait against the same store.
+func (gc *groupCostController) onRequestCancelImpl(info RequestInfo) {
+	delta := &rmpb.Consumption{}
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(delta, info)
+	}
+
+	gc.mu.Lock()
+	sub(gc.mu.consumption, delta)
+	gc.mu.Unlock()
+
+	if !gc.burstable.Load() {
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), v)
+		}
+	}
 }
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
