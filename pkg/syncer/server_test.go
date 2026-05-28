@@ -299,6 +299,7 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 		core.NewBasicCluster(),
 	)
 	syncer := NewRegionSyncer(server)
+	syncer.sendTimeout = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newMockSyncRegionsServer()
@@ -342,7 +343,6 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 	})
 	re.Empty(syncer.GetAllDownstreamNames())
 
-	close(unblockSend)
 	testutil.Eventually(re, func() bool {
 		select {
 		case <-closeDone:
@@ -351,6 +351,7 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 			return false
 		}
 	})
+	close(unblockSend)
 }
 
 func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
