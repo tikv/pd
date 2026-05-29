@@ -696,6 +696,22 @@ type tempKeyspaceMeta struct {
 	Config         map[string]string `json:"config"`
 }
 
+func (meta *tempKeyspaceMeta) toPB() (*keyspacepb.KeyspaceMeta, error) {
+	keyspaceState, err := stringToKeyspaceState(meta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	return &keyspacepb.KeyspaceMeta{
+		Name:           meta.Name,
+		Id:             meta.ID,
+		Config:         meta.Config,
+		CreatedAt:      meta.CreatedAt,
+		StateChangedAt: meta.StateChangedAt,
+		State:          keyspaceState,
+	}, nil
+}
+
 func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
 	switch str {
 	case "ENABLED":

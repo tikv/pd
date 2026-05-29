@@ -1048,7 +1048,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
 
 	configKey := "http_client_test_update_keyspace_config"
 	initialValue := "v1"
-	err := client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+	updatedMeta, err := client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
 		Config: map[string]*string{
 			configKey: &initialValue,
 		},
@@ -1057,6 +1057,9 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
 		},
 	})
 	re.NoError(err)
+	re.NotNil(updatedMeta)
+	re.Equal(keyspaceName, updatedMeta.GetName())
+	re.Equal(initialValue, updatedMeta.GetConfig()[configKey])
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
 	re.NoError(err)
@@ -1066,7 +1069,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
 
 	wrongExpected := "wrong"
 	nextValue := "v2"
-	err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+	_, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
 		Config: map[string]*string{
 			configKey: &nextValue,
 		},
@@ -1078,7 +1081,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
 	re.Contains(err.Error(), "409 Conflict")
 	re.Contains(err.Error(), "precondition failed")
 
-	err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+	updatedMeta, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
 		Config: map[string]*string{
 			configKey: nil,
 		},
@@ -1087,6 +1090,9 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
 		},
 	})
 	re.NoError(err)
+	re.NotNil(updatedMeta)
+	_, ok = updatedMeta.Config[configKey]
+	re.False(ok)
 
 	keyspaceMetaRes, err = client.GetKeyspaceMetaByName(ctx, keyspaceName)
 	re.NoError(err)
