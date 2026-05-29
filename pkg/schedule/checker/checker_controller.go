@@ -334,17 +334,8 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		if ops := c.affinityChecker.Check(region); len(ops) > 0 {
 			return ops
 		}
-<<<<<<< HEAD
-	} else {
+	} else if c.affinityChecker.hasAffinityGroups() {
 		operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
-=======
-		if c.affinityChecker.hasAffinityGroups() {
-			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
-		}
-		return nil
-	}); len(ops) > 0 {
-		return ops
->>>>>>> 8e15e39f44 (checker: skip affinity limit metric without groups (#10688))
 	}
 
 	if c.mergeChecker != nil {
