@@ -621,7 +621,6 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-		stream := stream
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
