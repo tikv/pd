@@ -822,6 +822,8 @@ type tokenCounter struct {
 		setupNotificationCh        <-chan time.Time
 		setupNotificationThreshold float64
 		setupNotificationTimer     *time.Timer
+		// cancelCh wakes up handleTokenBucketUpdateEvent when the timer is stopped.
+		cancelCh chan struct{}
 	}
 
 	lastDeadline time.Time
@@ -989,18 +991,27 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 		for _, counter := range gc.run.resourceTokens {
 			counter.notify.mu.Lock()
 			ch := counter.notify.setupNotificationCh
+			cancelCh := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancelCh == nil {
 				continue
 			}
 			select {
 			case <-ch:
 				counter.notify.mu.Lock()
-				counter.notify.setupNotificationTimer = nil
-				counter.notify.setupNotificationCh = nil
+				if counter.notify.setupNotificationCh != ch || counter.notify.cancelCh != cancelCh {
+					counter.notify.mu.Unlock()
+					return
+				}
 				threshold := counter.notify.setupNotificationThreshold
-				counter.notify.mu.Unlock()
+				cancelCh = resetCounterNotifyLocked(counter)
 				counter.limiter.SetupNotificationThreshold(threshold)
+				counter.notify.mu.Unlock()
+				if cancelCh != nil {
+					close(cancelCh)
+				}
+			case <-cancelCh:
+				return
 			case <-ctx.Done():
 				return
 			}
@@ -1010,18 +1021,27 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 		for _, counter := range gc.run.requestUnitTokens {
 			counter.notify.mu.Lock()
 			ch := counter.notify.setupNotificationCh
+			cancelCh := counter.notify.cancelCh
 			counter.notify.mu.Unlock()
-			if ch == nil {
+			if ch == nil || cancelCh == nil {
 				continue
 			}
 			select {
 			case <-ch:
 				counter.notify.mu.Lock()
-				counter.notify.setupNotificationTimer = nil
-				counter.notify.setupNotificationCh = nil
+				if counter.notify.setupNotificationCh != ch || counter.notify.cancelCh != cancelCh {
+					counter.notify.mu.Unlock()
+					return
+				}
 				threshold := counter.notify.setupNotificationThreshold
-				counter.notify.mu.Unlock()
+				cancelCh = resetCounterNotifyLocked(counter)
 				counter.limiter.SetupNotificationThreshold(threshold)
+				counter.notify.mu.Unlock()
+				if cancelCh != nil {
+					close(cancelCh)
+				}
+			case <-cancelCh:
+				return
 			case <-ctx.Done():
 				return
 			}
@@ -1217,6 +1237,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.cancelCh = make(chan struct{})
 		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
@@ -1233,12 +1254,22 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 
 func initCounterNotify(counter *tokenCounter) {
 	counter.notify.mu.Lock()
+	cancelCh := resetCounterNotifyLocked(counter)
+	counter.notify.mu.Unlock()
+	if cancelCh != nil {
+		close(cancelCh)
+	}
+}
+
+func resetCounterNotifyLocked(counter *tokenCounter) chan struct{} {
 	if counter.notify.setupNotificationTimer != nil {
 		counter.notify.setupNotificationTimer.Stop()
-		counter.notify.setupNotificationTimer = nil
-		counter.notify.setupNotificationCh = nil
 	}
-	counter.notify.mu.Unlock()
+	cancelCh := counter.notify.cancelCh
+	counter.notify.setupNotificationTimer = nil
+	counter.notify.setupNotificationCh = nil
+	counter.notify.cancelCh = nil
+	return cancelCh
 }
 
 func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType) *rmpb.TokenBucketRequest {
