@@ -141,9 +141,24 @@ func swapStoreToFirst(stores []*core.StoreInfo, id uint64) {
 }
 
 // SelectStoreToRemove returns the best option to remove from the region.
-// The second return value is true when the returned source is filtered by
-// temporary store state.
-func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) (uint64, bool) {
+func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
+	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
+	level := constant.High
+	if s.fastFailover {
+		level = constant.Urgent
+	}
+	source := filter.NewCandidates(coLocationStores).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
+		KeepTheTopStores(isolationComparer, true).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
+	if source == nil {
+		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
+		return 0
+	}
+	return source.GetID()
+}
+
+func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*core.StoreInfo) (uint64, bool) {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	level := constant.High
 	if s.fastFailover {
@@ -168,7 +183,7 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 
 func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, filterByTempState bool) {
 	ruleStores := getRuleFitStores(cluster, rf)
-	oldStoreID, sourceFilterByTempState := s.SelectStoreToRemove(ruleStores)
+	oldStoreID, sourceFilterByTempState := s.selectStoreToRemoveWithTempState(ruleStores)
 	if oldStoreID == 0 {
 		return 0, 0, false
 	}
