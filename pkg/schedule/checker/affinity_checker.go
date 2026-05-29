@@ -100,15 +100,21 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerUnhealthyRegionCounter.Inc()
 		return nil
 	}
-	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
-		affinityCheckerAbnormalReplicaCounter.Inc()
+
+	if !c.hasAffinityGroups() {
 		return nil
 	}
 
-	// Get the affinity group for this region
+	// Check the affinity group before the heavier best-location gate. Most regions
+	// are not affinity regions.
 	group, isAffinity := c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	if group == nil {
-		// Region doesn't belong to any affinity group
+		// Region doesn't belong to any affinity group.
+		return nil
+	}
+
+	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
+		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
 
