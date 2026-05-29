@@ -1145,7 +1145,7 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-func (c *client) updateKeyspaceConfig(ctx context.Context, reqName, keyspaceName string, params any) (*keyspacepb.KeyspaceMeta, error) {
+func (c *client) patchKeyspaceConfig(ctx context.Context, reqName, keyspaceName string, params any) (*keyspacepb.KeyspaceMeta, error) {
 	var tempMeta tempKeyspaceMeta
 	keyspaceConfigPatchJSON, err := json.Marshal(params)
 	if err != nil {
@@ -1165,12 +1165,12 @@ func (c *client) updateKeyspaceConfig(ctx context.Context, reqName, keyspaceName
 
 // UpdateKeyspaceConfig patches the keyspace config.
 func (c *client) UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error) {
-	return c.updateKeyspaceConfig(ctx, UpdateKeyspaceConfigName, keyspaceName, params)
+	return c.patchKeyspaceConfig(ctx, UpdateKeyspaceConfigName, keyspaceName, params)
 }
 
 // UpdateKeyspaceGCManagementType patches the keyspace config.
 func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
-	_, err := c.updateKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
+	_, err := c.patchKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
 	return err
 }
 
