@@ -139,6 +139,34 @@ func TestReconfig(t *testing.T) {
 	re.Equal(int64(-1), lim.GetBurst())
 }
 
+// TestLastStaysMonotonicOnStaleNow guards against a non-monotonic lim.last:
+// callers capture `now` before taking lim.mu, so under lock contention a
+// mutator can run with a `now` that is already older than lim.last. A raw
+// `lim.last = now` would rewind the clock and make the next getTokens
+// over-accrue tokens. The mutators must keep lim.last monotonic (updateLast),
+// matching reserveN (see issue #8435).
+func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
+
+	// Advance last to t0+10s and leave pool = 100*10 - 10 = 990.
+	r := lim.reserveN(t0.Add(10*time.Second), 10, InfDuration)
+	re.True(r.reserved)
+	_, pool := lim.getTokens(t0.Add(10 * time.Second))
+	re.InDelta(990, pool, 1e-6)
+
+	// A mutator runs with a STALE now (older than last). It must not rewind
+	// last. amount 0 isolates the clock effect.
+	lim.RemoveTokens(t0.Add(9*time.Second), 0)
+
+	// Accrual over t0+10s..t0+11s is 1s*100 = 100, so pool == 1090.
+	// A rewound last (to t0+9s) would over-accrue to 1190.
+	_, pool = lim.getTokens(t0.Add(11 * time.Second))
+	re.InDelta(1090, pool, 1e-6)
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)
