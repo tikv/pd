@@ -155,11 +155,12 @@ func (o *Operator) SetAdditionalInfo(key string, value string) {
 	o.additionalInfos.value[key] = value
 }
 
-// GetAdditionalInfo returns additional info with key.
-func (o *Operator) GetAdditionalInfo(key string) string {
+// GetAdditionalInfo returns additional info value with key.
+func (o *Operator) GetAdditionalInfo(key string) (string, bool) {
 	o.additionalInfos.RLock()
 	defer o.additionalInfos.RUnlock()
-	return o.additionalInfos.value[key]
+	val, exist := o.additionalInfos.value[key]
+	return val, exist
 }
 
 // LogAdditionalInfo returns additional info with string
@@ -178,10 +179,11 @@ func (o *Operator) LogAdditionalInfo() string {
 // HasRelatedMergeRegion checks if the operator has a related merge region.
 // All merge operators (OpMerge and OpAffinity) have this info set.
 func (o *Operator) HasRelatedMergeRegion() bool {
+	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
 	if o == nil {
 		return false
 	}
-	return o.GetAdditionalInfo(string(RelatedMergeRegion)) != ""
+	return exist && val != ""
 }
 
 // GetRelatedMergeRegion returns the related merge region ID.
@@ -189,7 +191,11 @@ func (o *Operator) GetRelatedMergeRegion() uint64 {
 	if !o.HasRelatedMergeRegion() {
 		return 0
 	}
-	str := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	str, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
+	if !exist {
+		log.Debug("not found related merge region ID")
+		return 0
+	}
 	relatedID, err := strconv.ParseUint(str, 10, 64)
 	if err != nil {
 		log.Warn("invalid related merge region ID",
