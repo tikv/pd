@@ -202,7 +202,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	tokens += r.tokens
 
 	// update state
-	r.lim.last = now
+	r.lim.updateLast(now)
 	r.lim.tokens = tokens
 }
 
@@ -320,7 +320,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 		return
 	}
 	_, tokens := lim.getTokens(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
 }
@@ -346,7 +346,7 @@ func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
 		return
 	}
 	_, tokens := lim.getTokens(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens + amount
 	// Mirror Reconfigure: refunded tokens may unblock acquireTokens retry waits.
 	if lim.reconfiguredCh != nil {
@@ -384,11 +384,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Float64("old-notify-threshold", lim.notifyThreshold),
 		zap.Int64("old-burst", lim.burst))
 	if args.newBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.newTokens
 	} else {
 		_, tokens := lim.getTokens(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.newTokens
 	}
 	lim.fillRate = fillRate(args.newFillRate)
