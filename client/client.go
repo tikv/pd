@@ -111,7 +111,6 @@ type RPCClient interface {
 	tso.Client
 	metastorage.Client
 	gc.Client
-	gc.LegacyClientV2
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.

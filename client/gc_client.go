@@ -451,12 +451,12 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 }
 
 // GetSafePointV2 returns the current minimum service GC safe point for the given keyspace.
-func (c *client) GetSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+func (c *client) GetSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, "", 0, 0)
 }
 
-// UpdateServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
-func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+// SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
+func (c *client) SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, ttl, safePoint)
 }
 
