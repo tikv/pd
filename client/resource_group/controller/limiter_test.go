@@ -140,8 +140,14 @@ func TestReconfig(t *testing.T) {
 }
 
 // TestLastStaysMonotonicOnStaleNow guards the assumption used by
-// groupCostController.acquireTokens: callers capture now before entering the
-// limiter, so stale timestamps must not rewind the limiter's logical clock.
+// groupCostController.acquireTokens: a mutator's now is captured before it
+// takes lim.mu, so under concurrency a sibling request on the same per-group
+// limiter can advance lim.last past that now. The stale (backward) now must
+// not rewind the limiter's logical clock.
+//
+// In every sub-case the shared Reserve below plays that concurrent sibling: it
+// advances lim.last to advancedAt, after which each mutator runs with the
+// earlier staleNow.
 func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -159,10 +165,15 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 		},
 		{
 			name: "cancel reservation",
-			mutate: func(_ *Limiter, r *Reservation, staleNow time.Time) {
-				r.CancelAt(staleNow)
+			// The cancelled reservation is the *own* request: it reserved at its
+			// own now (staleNow) before the sibling above advanced lim.last, so
+			// cancelling at staleNow is the realistic stale-now path (a flow
+			// never cancels earlier than its own reserve in a single goroutine).
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				own := lim.Reserve(context.Background(), InfDuration, staleNow, 10)
+				own.CancelAt(staleNow)
 			},
-			expectedPool: 1100,
+			expectedPool: 1090,
 			checkPool:    true,
 		},
 		{
