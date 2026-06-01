@@ -743,7 +743,7 @@ func (c *Cluster) StartBackgroundJobs() {
 
 // StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
 func (c *Cluster) StopBackgroundJobs() bool {
-	if c.running.CompareAndSwap(true, false) {
+	if !c.running.CompareAndSwap(true, false) {
 		return false
 	}
 	c.coordinator.Stop()
