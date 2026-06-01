@@ -71,35 +71,49 @@ type downstreamSendSignal struct {
 }
 
 type regionSyncStream struct {
-	stream       ServerStream
-	sendMu       sync.Mutex
-	streamSendMu sync.Mutex
-	indexMu      syncutil.RWMutex
-	sendIndex    uint64
-	notifyCh     chan downstreamSendSignal
-	done         chan struct{}
-	once         sync.Once
+	stream struct {
+		syncutil.Mutex
+		ServerStream
+	}
+	sendMu syncutil.Mutex
+	index  struct {
+		syncutil.RWMutex
+		sendIndex uint64
+	}
+	notifyCh chan downstreamSendSignal
+	done     chan struct{}
+	once     sync.Once
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
 	return &regionSyncStream{
-		stream:    stream,
-		sendIndex: startIndex,
-		notifyCh:  make(chan downstreamSendSignal, 1),
-		done:      make(chan struct{}),
+		stream: struct {
+			syncutil.Mutex
+			ServerStream
+		}{
+			ServerStream: stream,
+		},
+		index: struct {
+			syncutil.RWMutex
+			sendIndex uint64
+		}{
+			sendIndex: startIndex,
+		},
+		notifyCh: make(chan downstreamSendSignal, 1),
+		done:     make(chan struct{}),
 	}
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.indexMu.RLock()
-	defer s.indexMu.RUnlock()
-	return s.sendIndex
+	s.index.RLock()
+	defer s.index.RUnlock()
+	return s.index.sendIndex
 }
 
 func (s *regionSyncStream) advanceSendIndex(count int) {
-	s.indexMu.Lock()
-	defer s.indexMu.Unlock()
-	s.sendIndex += uint64(count)
+	s.index.Lock()
+	defer s.index.Unlock()
+	s.index.sendIndex += uint64(count)
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -122,8 +136,8 @@ func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
 }
 
 func (s *regionSyncStream) sendStream(regions *pdpb.SyncRegionResponse) error {
-	s.streamSendMu.Lock()
-	defer s.streamSendMu.Unlock()
+	s.stream.Lock()
+	defer s.stream.Unlock()
 	return s.stream.Send(regions)
 }
 
@@ -363,7 +377,7 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 				RegionLeaders: nil,
 				Buckets:       nil,
 			}
-			return syncStream.stream.Send(resp)
+			return syncStream.sendStream(resp)
 		}
 		if startIndex < endIndex {
 			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
