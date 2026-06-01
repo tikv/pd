@@ -163,19 +163,7 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			expectedPool: 1090,
 			checkPool:    true,
 		},
-		{
-			name: "cancel reservation",
-			// The cancelled reservation is the *own* request: it reserved at its
-			// own now (staleNow) before the sibling above advanced lim.last, so
-			// cancelling at staleNow is the realistic stale-now path (a flow
-			// never cancels earlier than its own reserve in a single goroutine).
-			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
-				own := lim.Reserve(context.Background(), InfDuration, staleNow, 10)
-				own.CancelAt(staleNow)
-			},
-			expectedPool: 1090,
-			checkPool:    true,
-		},
+		// CancelAt is covered by TestAcquireTokensCancelKeepsLastMonotonic.
 		{
 			name: "reconfigure",
 			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
