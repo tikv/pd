@@ -1374,8 +1374,9 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 	gc.metrics.runningKVRequestCounter.Inc()
 	defer gc.metrics.runningKVRequestCounter.Dec()
 	var (
-		err error
-		d   time.Duration
+		err            error
+		d              time.Duration
+		reconfiguredCh <-chan struct{}
 	)
 retryLoop:
 	for range gc.mainCfg.WaitRetryTimes {
@@ -1394,6 +1395,7 @@ retryLoop:
 		case rmpb.GroupMode_RUMode:
 			res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
 			for typ, counter := range gc.run.requestUnitTokens {
+				reconfiguredCh = counter.limiter.GetReconfiguredCh()
 				if v := getRUValueFromConsumption(delta, typ); v > 0 {
 					// record the consume token histogram if enable controller debug mode.
 					if enableControllerTraceLog.Load() {
@@ -1412,8 +1414,28 @@ retryLoop:
 			}
 		}
 		gc.metrics.requestRetryCounter.Inc()
-		time.Sleep(gc.mainCfg.WaitRetryInterval)
-		*waitDuration += gc.mainCfg.WaitRetryInterval
+		waitStart := time.Now()
+		waitTimer := time.NewTimer(gc.mainCfg.WaitRetryInterval)
+		select {
+		case <-ctx.Done():
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
+			*waitDuration += time.Since(waitStart)
+			return d, ctx.Err()
+		case <-reconfiguredCh:
+			if !waitTimer.Stop() {
+				select {
+				case <-waitTimer.C:
+				default:
+				}
+			}
+		case <-waitTimer.C:
+		}
+		*waitDuration += time.Since(waitStart)
 	}
 	return d, err
 }
