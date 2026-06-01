@@ -139,32 +139,85 @@ func TestReconfig(t *testing.T) {
 	re.Equal(int64(-1), lim.GetBurst())
 }
 
-// TestLastStaysMonotonicOnStaleNow guards against a non-monotonic lim.last:
-// callers capture `now` before taking lim.mu, so under lock contention a
-// mutator can run with a `now` that is already older than lim.last. A raw
-// `lim.last = now` would rewind the clock and make the next getTokens
-// over-accrue tokens. The mutators must keep lim.last monotonic (updateLast),
-// matching reserveN (see issue #8435).
+// TestLastStaysMonotonicOnStaleNow guards the assumption used by
+// groupCostController.acquireTokens: callers capture now before entering the
+// limiter, so stale timestamps must not rewind the limiter's logical clock.
 func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
-	re := require.New(t)
-	resetTime()
-	nc := make(chan notifyMsg, 1)
-	lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
+	tests := []struct {
+		name         string
+		mutate       func(lim *Limiter, r *Reservation, staleNow time.Time)
+		expectedPool float64
+		checkPool    bool
+	}{
+		{
+			name: "remove tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RemoveTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		{
+			name: "cancel reservation",
+			mutate: func(_ *Limiter, r *Reservation, staleNow time.Time) {
+				r.CancelAt(staleNow)
+			},
+			expectedPool: 1100,
+			checkPool:    true,
+		},
+		{
+			name: "reconfigure",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+				})
+			},
+			expectedPool: 1100,
+			checkPool:    true,
+		},
+		{
+			name: "reconfigure unlimited",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+					newBurst:    -1,
+				})
+			},
+			checkPool: false,
+		},
+	}
 
-	// Advance last to t0+10s and leave pool = 100*10 - 10 = 990.
-	r := lim.reserveN(t0.Add(10*time.Second), 10, InfDuration)
-	re.True(r.reserved)
-	_, pool := lim.getTokens(t0.Add(10 * time.Second))
-	re.InDelta(990, pool, 1e-6)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			resetTime()
+			nc := make(chan notifyMsg, 1)
+			lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
 
-	// A mutator runs with a STALE now (older than last). It must not rewind
-	// last. amount 0 isolates the clock effect.
-	lim.RemoveTokens(t0.Add(9*time.Second), 0)
+			advancedAt := t0.Add(10 * time.Second)
+			staleNow := t0.Add(9 * time.Second)
+			checkAt := t0.Add(11 * time.Second)
 
-	// Accrual over t0+10s..t0+11s is 1s*100 = 100, so pool == 1090.
-	// A rewound last (to t0+9s) would over-accrue to 1190.
-	_, pool = lim.getTokens(t0.Add(11 * time.Second))
-	re.InDelta(1090, pool, 1e-6)
+			// Advance last through the public API to t0+10s and leave pool =
+			// 100*10 - 10 = 990.
+			r := lim.Reserve(context.Background(), InfDuration, advancedAt, 10)
+			re.True(r.reserved)
+			_, pool := lim.getTokens(advancedAt)
+			re.InDelta(990, pool, 1e-6)
+
+			tt.mutate(lim, r, staleNow)
+			re.Equal(advancedAt, lim.last)
+
+			if tt.checkPool {
+				// Accrual over t0+10s..t0+11s is 1s*100 = 100. A rewound
+				// last (to t0+9s) would over-accrue by another 100 tokens.
+				_, pool = lim.getTokens(checkAt)
+				re.InDelta(tt.expectedPool, pool, 1e-6)
+			}
+		})
+	}
 }
 
 func TestNotify(t *testing.T) {
