@@ -207,11 +207,43 @@ func TestInherit(t *testing.T) {
 		if testCase.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
 			origin.approximateSize = int64(testCase.originSize)
+			origin.approximateKeys = 1
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(testCase.size)
+		r.approximateKeys = 1
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
+	}
+
+	// case for approximateKeys
+	keysTestCases := []struct {
+		originExists bool
+		originSize   int64
+		originKeys   int64
+		size         int64
+		keys         int64
+		expectKeys   int64
+	}{
+		{false, 0, 0, 0, 0, 0},
+		{false, 0, 0, 1, 0, 0},
+		{false, 0, 0, 1, 100, 100},
+		{true, 1, 50, 1, 100, 100},
+		{true, 10, 100, 0, 0, 100},
+		{true, 5, 200, 0, 0, 200},
+	}
+	for _, testCase := range keysTestCases {
+		var origin *RegionInfo
+		if testCase.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = testCase.originSize
+			origin.approximateKeys = testCase.originKeys
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = testCase.size
+		r.approximateKeys = testCase.keys
+		r.Inherit(origin, false)
+		re.Equal(testCase.expectKeys, r.approximateKeys)
 	}
 
 	// bucket
