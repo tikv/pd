@@ -65,7 +65,7 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 // Only used for handling `UpdateServiceGCSafePoint` in keyspace context, which is a deprecated usage.
 //
 // 2026.6.1 (pingyu): Make this method public to migrate legacy PD servers which do not support the "new GC API" for multi-tenant usage (e.g. TiCDC nextgen).
-// Should revert to private after the migration is done.
+// Revert to private after the migration is done.
 func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
