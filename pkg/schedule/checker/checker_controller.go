@@ -334,7 +334,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		if ops := c.affinityChecker.Check(region); len(ops) > 0 {
 			return ops
 		}
-	} else {
+	} else if c.affinityChecker.hasAffinityGroups() {
 		operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
 	}
 
