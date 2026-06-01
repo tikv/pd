@@ -139,11 +139,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		}
 
 		c := s.GetCluster()
-		var streams *hbstream.HeartbeatStreams
-		if c != nil {
-			streams = c.GetHeartbeatStreams()
-		}
-		if c == nil || streams == nil {
+		if c == nil {
 			resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
 			err := server.Send(resp)
 			return errors.WithStack(err)
@@ -159,6 +155,12 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		if time.Since(lastBind) > time.Minute {
+			streams := c.GetHeartbeatStreams()
+			if streams == nil {
+				resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
+				err := server.Send(resp)
+				return errors.WithStack(err)
+			}
 			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
