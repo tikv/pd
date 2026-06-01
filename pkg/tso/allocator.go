@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
@@ -96,6 +97,7 @@ func NewAllocator(
 			maxResetTSGap:          cfg.GetMaxResetTSGap,
 			tsoMux:                 &tsoObject{},
 			metrics:                newTSOMetrics(keyspaceGroupIDStr),
+			flight:                 syncutil.NewOrderedSingleFlight[bool](),
 		},
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),
 		logFields: []zap.Field{

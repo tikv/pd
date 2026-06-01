@@ -74,6 +74,8 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+
+	flight *syncutil.OrderedSingleFlight[bool]
 }
 
 func (t *timestampOracle) getStorageTimeout() time.Duration {
@@ -453,13 +455,17 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
-			if overflowed, err := t.updateTimestamp(overflowUpdate); err != nil {
-				log.Warn("update timestamp failed",
-					logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-					zap.Bool("overflowed", overflowed),
-					zap.Error(err))
-				time.Sleep(t.updatePhysicalInterval)
-			} else if overflowed {
+			overflowed, err := t.flight.Do(ctx, func(context.Context) (bool, error) {
+				ret, err := t.updateTimestamp(overflowUpdate)
+				if err != nil {
+					log.Warn("update timestamp failed",
+						logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+						zap.Bool("overflowed", ret),
+						zap.Error(err))
+				}
+				return ret, err
+			})
+			if err != nil || overflowed {
 				time.Sleep(t.updatePhysicalInterval)
 			}
 			continue
