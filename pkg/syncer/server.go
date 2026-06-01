@@ -594,24 +594,19 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 }
 
 func (s *RegionSyncer) closeAllClient() {
-	type streamWithName struct {
-		name   string
-		sender *regionSyncStream
-	}
-
 	s.mu.RLock()
-	streams := make([]streamWithName, 0, len(s.mu.streams))
+	streams := make(map[string]*regionSyncStream, len(s.mu.streams))
 	for name, sender := range s.mu.streams {
-		streams = append(streams, streamWithName{name: name, sender: sender})
+		streams[name] = sender
 	}
 	s.mu.RUnlock()
 
-	for _, stream := range streams {
-		stream.sender.close()
+	for _, sender := range streams {
+		sender.close()
 	}
 
-	var wg sync.WaitGroup
-	for _, stream := range streams {
+	wg := &sync.WaitGroup{}
+	for name, sender := range streams {
 		resp := &pdpb.SyncRegionResponse{
 			Header: &pdpb.ResponseHeader{
 				ClusterId: keypath.ClusterID(),
@@ -622,10 +617,10 @@ func (s *RegionSyncer) closeAllClient() {
 			},
 		}
 		wg.Add(1)
-		go func() {
+		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
 			defer wg.Done()
-			s.sendRegionSyncResponse(context.Background(), stream.name, stream.sender, resp)
-		}()
+			s.sendRegionSyncResponse(context.Background(), name, sender, resp)
+		}(name, sender, resp)
 	}
 	wg.Wait()
 }
