@@ -25,6 +25,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -99,6 +100,7 @@ func TestGenerateTSO(t *testing.T) {
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
 		member:                 &mockElection{},
+		flight:                 syncutil.NewOrderedSingleFlight[bool](),
 	}
 
 	// update physical time interval failed due to reach the lastSavedTime, it needs to save storage first, but this behavior is not allowed.
@@ -130,6 +132,7 @@ func TestCurrentGetTSO(t *testing.T) {
 		maxResetTSGap:          func() time.Duration { return time.Hour },
 		metrics:                newTSOMetrics("test"),
 		member:                 &mockElection{},
+		flight:                 syncutil.NewOrderedSingleFlight[bool](),
 	}
 	runDuration := 10 * time.Second
 	runCtx, runCancel := context.WithTimeout(ctx, runDuration-2*time.Second)
