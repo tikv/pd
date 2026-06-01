@@ -620,7 +620,7 @@ func (s *RegionSyncer) closeAllClient() {
 		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
 			defer logutil.LogPanic()
 			defer wg.Done()
-			s.sendRegionSyncResponse(context.Background(), name, sender, resp)
+			s.sendRegionSyncResponse(s.server.LoopContext(), name, sender, resp)
 		}(name, sender, resp)
 	}
 	wg.Wait()
