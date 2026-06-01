@@ -61,12 +61,9 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	return resp.GetNewSafePoint(), nil
 }
 
-// UpdateServiceSafePointV2 update service safe point for the given keyspace.
+// updateServiceSafePointV2 update service safe point for the given keyspace.
 // Only used for handling `UpdateServiceGCSafePoint` in keyspace context, which is a deprecated usage.
-//
-// 2026.6.1 (pingyu): Make this method public to migrate legacy PD servers which do not support the "new GC API" for multi-tenant usage (e.g. TiCDC nextgen).
-// Revert to private after the migration is done.
-func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -451,4 +448,19 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 		globalGCBarriers = append(globalGCBarriers, pbToGlobalGCBarrierInfo(barrier, start))
 	}
 	return gc.NewClusterGCStatesWithGlobalGCBarriers(gcStates, globalGCBarriers), nil
+}
+
+// GetSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+func (c *client) GetSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	return c.updateServiceSafePointV2(ctx, keyspaceID, "", 0, 0)
+}
+
+// UpdateServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
+func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
+	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, ttl, safePoint)
+}
+
+// DeleteServiceSafePointV2 deletes a service GC safe point for the given keyspace and returns the new minimum safe point.
+func (c *client) DeleteServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string) (uint64, error) {
+	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, -1, 0)
 }
