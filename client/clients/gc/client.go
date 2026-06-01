@@ -378,8 +378,8 @@ func (s ClusterGCStates) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
 // This interface is intentionally not added to RPCClient to avoid misuse or breaking existing stub and mock implementations.
 // Will be removed after the migration is done.
 type LegacyClientV2 interface {
-	// GetSafePointV2 returns the current minimum service GC safe point for the given keyspace.
-	GetSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error)
+	// GetMinServiceSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+	GetMinServiceSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error)
 	// SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
 	SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
 	// DeleteServiceSafePointV2 deletes a service GC safe point for the given keyspace and returns the new minimum safe point.

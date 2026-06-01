@@ -450,12 +450,15 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 	return gc.NewClusterGCStatesWithGlobalGCBarriers(gcStates, globalGCBarriers), nil
 }
 
-// GetSafePointV2 returns the current minimum service GC safe point for the given keyspace.
-func (c *client) GetSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
+// GetMinServiceSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+func (c *client) GetMinServiceSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, "", 0, 0)
 }
 
 // SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
+//
+// NOTE: Must check the returned new minimum safe point.
+// When it is smaller than the input safe point, it means the update is rejected because of the existing safe point exceeding the input safe point.
 func (c *client) SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, ttl, safePoint)
 }
