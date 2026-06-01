@@ -1172,7 +1172,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if c.inner.keyspaceID != constants.NullKeyspaceID {
-		return c.updateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
+		return c.UpdateServiceSafePointV2(ctx, c.inner.keyspaceID, serviceID, ttl, safePoint)
 	}
 
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
