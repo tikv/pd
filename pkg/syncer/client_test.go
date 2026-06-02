@@ -21,13 +21,23 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+<<<<<<< HEAD
 	"github.com/stretchr/testify/require"
+=======
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+>>>>>>> 1877ae55e5 (syncer: handle region sync close responses safely (#10733))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+<<<<<<< HEAD
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+=======
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
+>>>>>>> 1877ae55e5 (syncer: handle region sync close responses safely (#10733))
 )
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -82,4 +92,25 @@ func TestErrorCode(t *testing.T) {
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())
+}
+
+func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer.history.resetWithIndex(10)
+	syncer.streamingRunning.Store(true)
+
+	handled := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: keypath.ClusterID(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: "server stopped, close the region syncer client",
+			},
+		},
+	}, nil, nil)
+
+	re.False(handled)
+	re.Equal(uint64(10), syncer.history.getNextIndex())
+	re.False(syncer.IsRunning())
 }
