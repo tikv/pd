@@ -595,12 +595,18 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 
 func (s *RegionSyncer) closeAllClient() {
 	s.mu.RLock()
-	streams := make([]*regionSyncStream, 0, len(s.mu.streams))
-	for _, sender := range s.mu.streams {
-		streams = append(streams, sender)
+	streams := make(map[string]*regionSyncStream, len(s.mu.streams))
+	for name, sender := range s.mu.streams {
+		streams[name] = sender
 	}
 	s.mu.RUnlock()
+
 	for _, sender := range streams {
+		sender.close()
+	}
+
+	wg := &sync.WaitGroup{}
+	for name, sender := range streams {
 		resp := &pdpb.SyncRegionResponse{
 			Header: &pdpb.ResponseHeader{
 				ClusterId: keypath.ClusterID(),
@@ -610,9 +616,12 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-		sender.close()
-		if err := sender.send(resp); err != nil {
-			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
-		}
+		wg.Add(1)
+		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
+			defer logutil.LogPanic()
+			defer wg.Done()
+			s.sendRegionSyncResponse(s.server.LoopContext(), name, sender, resp)
+		}(name, sender, resp)
 	}
+	wg.Wait()
 }
