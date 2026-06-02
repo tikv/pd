@@ -451,19 +451,28 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 }
 
 // GetMinServiceSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+//
+// The deprecated V2 API has no read-only "get minimum" RPC, so it reuses updateServiceSafePointV2.
+//   - serviceID = "get_min_ssp": Just a placeholder. Must be non-empty to pass the argument validation.
+//   - ttl = 1: to reach the GCStateManager.setGCBarrierImpl.
+//   - safePoint = 0: to make GCStateManager.setGCBarrierImpl return "ErrGCBarrierTSBehindTxnSafePoint", then GCStateManager.CompatibleUpdateServiceGCSafePoint return the TxnSafePoint.
+//     There is a corner case that if current TxnSafePoint is 0, this API will set a GC barrier with safe point 0 and ttl 1, which is low impact (last for 1 second) and do not break correctness.
 func (c *client) GetMinServiceSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error) {
-	return c.updateServiceSafePointV2(ctx, keyspaceID, "", 0, 0)
+	return c.updateServiceSafePointV2(ctx, keyspaceID, "get_min_ssp", 1, 0)
 }
 
 // SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
 //
-// NOTE: Must check the returned new minimum safe point.
-// When it is smaller than the input safe point, it means the update is rejected because of the existing safe point exceeding the input safe point.
+// NOTE: MUST check the returned new `MinSafePoint`.
+// When `MinSafePoint > input safe point`, it means the update is rejected because of the TxnSafePoint (or MinServiceSafePoint from legacy PD servers) already exceeds the input safe point.
 func (c *client) SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, ttl, safePoint)
 }
 
 // DeleteServiceSafePointV2 deletes a service GC safe point for the given keyspace and returns the new minimum safe point.
+// Missing safe point with `serviceID` are no-op success, and return is still the current minimum safe point.
+//
+// * ttl = -1: to reach the GCStateManager.deleteGCBarrierImpl.
 func (c *client) DeleteServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string) (uint64, error) {
 	return c.updateServiceSafePointV2(ctx, keyspaceID, serviceID, -1, 0)
 }
