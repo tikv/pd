@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -159,7 +160,13 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		}
 
 		if time.Since(lastBind) > time.Minute {
-			s.hbStreams.BindStream(storeID, server)
+			streams := c.GetHeartbeatStreams()
+			if streams == nil {
+				resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
+				err := server.Send(resp)
+				return errors.WithStack(err)
+			}
+			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
 		// scheduling service doesn't sync the pd server config, so we use 0 here
@@ -176,14 +183,22 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
+<<<<<<< HEAD
 	if c == nil {
 		// TODO: add metrics
 		log.Info("cluster isn't initialized")
+=======
+	var metaWatcher *meta.Watcher
+	if c != nil {
+		metaWatcher = c.GetMetaWatcher()
+	}
+	if c == nil || metaWatcher == nil {
+>>>>>>> 51b1226c30 (mcs/scheduling: clean primary resources on exit (#10645))
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
-		s.metaWatcher.GetStoreWatcher().ForceLoad()
+		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
 	// TODO: add metrics

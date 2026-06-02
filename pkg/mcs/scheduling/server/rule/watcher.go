@@ -251,4 +251,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 func (rw *Watcher) Close() {
 	rw.cancel()
 	rw.wg.Wait()
+	if rw.checkerController != nil {
+		rw.checkerController.ClearSuspectKeyRanges()
+	}
 }
