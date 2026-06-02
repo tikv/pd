@@ -250,12 +250,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
-<<<<<<< HEAD
-					// Check if the leader is still there to avoid waiting for a `retryInterval`.
-					if s.server.GetLeader() == nil {
-						log.Info("stop synchronizing with leader due to leader stepped down",
-							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
-=======
 					if !s.waitRegionSyncRetryInterval(ctx) {
 						return
 					}
@@ -266,7 +260,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
 					if !s.waitRegionSyncRetryInterval(ctx) {
->>>>>>> 1877ae55e5 (syncer: handle region sync close responses safely (#10733))
 						return
 					}
 					break

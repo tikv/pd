@@ -19,25 +19,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-<<<<<<< HEAD
-	"github.com/stretchr/testify/require"
-=======
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
->>>>>>> 1877ae55e5 (syncer: handle region sync close responses safely (#10733))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-<<<<<<< HEAD
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-=======
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/testutil"
->>>>>>> 1877ae55e5 (syncer: handle region sync close responses safely (#10733))
 )
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -96,7 +90,17 @@ func TestErrorCode(t *testing.T) {
 
 func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 	re := require.New(t)
-	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
 	syncer.history.resetWithIndex(10)
 	syncer.streamingRunning.Store(true)
 
