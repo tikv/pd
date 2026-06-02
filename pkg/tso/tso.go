@@ -450,19 +450,15 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory has been reset")
 		}
 		if overflowedLogical(resp.GetLogical()) {
-			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
-				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-				zap.Reflect("response", resp),
-				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
 			overflowed, err := t.flight.Do(ctx, func(context.Context) (bool, error) {
 				ret, err := t.updateTimestamp(overflowUpdate)
-				if err != nil {
-					log.Warn("update timestamp failed",
-						logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-						zap.Bool("overflowed", ret),
-						zap.Error(err))
-				}
+				log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
+					logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+					zap.Reflect("response", resp),
+					zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow),
+					zap.Bool("overflowed", ret),
+					zap.Error(err))
 				return ret, err
 			})
 			if err != nil || overflowed {

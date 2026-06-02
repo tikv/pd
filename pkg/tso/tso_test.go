@@ -141,7 +141,7 @@ func TestCurrentGetTSO(t *testing.T) {
 	timestampOracle.lastSavedTime.Store(current.Add(runDuration))
 
 	wg := &sync.WaitGroup{}
-	concurrency := 20
+	concurrency := 200
 	errCh := make(chan error, 1)
 	wg.Add(concurrency)
 	changes := atomic.Int32{}
