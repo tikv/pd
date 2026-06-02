@@ -25,7 +25,6 @@ import (
 
 // MetaServiceGroupManager manages external meta-service groups.
 type MetaServiceGroupManager struct {
-	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
 	// metaServiceGroups is the available external meta-service groups.
@@ -35,12 +34,10 @@ type MetaServiceGroupManager struct {
 
 // NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
 func NewMetaServiceGroupManager(
-	ctx context.Context,
 	store endpoint.MetaServiceGroupStorage,
 	metaServiceGroups map[string]string,
 ) *MetaServiceGroupManager {
 	return &MetaServiceGroupManager{
-		ctx:               ctx,
 		store:             store,
 		metaServiceGroups: metaServiceGroups,
 	}
@@ -48,14 +45,14 @@ func NewMetaServiceGroupManager(
 
 // GetAssignmentCounts returns the count of each meta-service group.
 // todo: optimize by caching the counts and watching the changes of meta-service groups.
-func (m *MetaServiceGroupManager) GetAssignmentCounts() (map[string]int, error) {
+func (m *MetaServiceGroupManager) GetAssignmentCounts(ctx context.Context) (map[string]int, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var (
 		err   error
 		count map[string]int
 	)
-	err = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err = m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		count, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
 		return err
 	})
@@ -83,11 +80,11 @@ func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
 
 // SelectGroup returns the meta-service group with the least assigned keyspaces
 // without updating the persisted assignment count.
-func (m *MetaServiceGroupManager) SelectGroup() (string, error) {
+func (m *MetaServiceGroupManager) SelectGroup(ctx context.Context) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var assignedGroup string
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		assignedGroup, err = m.findMinMetaGroup(txn)
 		return err
@@ -100,11 +97,11 @@ func (m *MetaServiceGroupManager) SelectGroup() (string, error) {
 // AssignToGroup increments count of the meta-service group with least assigned keyspaces.
 // It returns the assigned meta-service group and an error if any.
 // only used for testing now, as it doesn't guarantee the atomicity of select and update. UpdateAssignment should be used in production code instead.
-func (m *MetaServiceGroupManager) AssignToGroup(count int) (string, error) {
+func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var assignedGroup string
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		assignedGroup, err = m.findMinMetaGroup(txn)
 		if err != nil {
@@ -133,17 +130,17 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, ne
 
 // UpdateAssignment moves a keyspace from one meta-service group to another.
 // It returns an error if any.
-func (m *MetaServiceGroupManager) UpdateAssignment(oldGroupID, newGroupID string) error {
+func (m *MetaServiceGroupManager) UpdateAssignment(ctx context.Context, oldGroupID, newGroupID string) error {
 	m.RLock()
-	defer m.RUnlock()
 	// Newly assigned meta-service group must be available.
 	if newGroupID != "" && m.metaServiceGroups[newGroupID] == "" {
 		m.RUnlock()
 		return errUnknownMetaServiceGroup
 	}
-	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
 	})
+	m.RUnlock()
 	return err
 }
 

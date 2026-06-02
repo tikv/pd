@@ -923,7 +923,9 @@ func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
 
 // GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
 func (c *KeyspaceConfig) GetPreAlloc() []string {
-	return c.PreAlloc
+	ret := make([]string, len(c.PreAlloc))
+	copy(ret, c.PreAlloc)
+	return ret
 }
 
 // ToWaitRegionSplit returns whether to wait for the region split to complete.

@@ -277,7 +277,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	// assign meta-service group for the new keyspace if meta-service groups exist.
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.SelectGroup()
+		metaServiceGroup, err := manager.mgm.SelectGroup(manager.ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -455,7 +455,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.SelectGroup()
+		metaServiceGroup, err := manager.mgm.SelectGroup(manager.ctx)
 		if err != nil {
 			return nil, err
 		}

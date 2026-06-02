@@ -530,7 +530,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.MetaServiceGroups)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.MetaServiceGroups)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,

@@ -108,7 +108,7 @@ func AddMetaServiceGroups(c *gin.Context) {
 		return
 	}
 
-	assignmentCounts, err := manager.GetAssignmentCounts()
+	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -141,7 +141,7 @@ func GetMetaServiceGroups(c *gin.Context) {
 	}
 
 	groups := manager.GetGroups()
-	assignmentCounts, err := manager.GetAssignmentCounts()
+	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

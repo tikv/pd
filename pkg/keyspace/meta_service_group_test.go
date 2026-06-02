@@ -46,7 +46,7 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups())
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
@@ -55,7 +55,7 @@ func (suite *metaServiceGroupTestSuite) TearDownTest() {
 
 func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
 	re := suite.Require()
-	counts, err := suite.manager.GetAssignmentCounts()
+	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 
 	for grp := range mockMetaServiceGroups() {
@@ -68,7 +68,7 @@ func (suite *metaServiceGroupTestSuite) TestGetAssignmentCountsInitialZero() {
 func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	re := suite.Require()
 	request := 5
-	assigned, err := suite.manager.AssignToGroup(request)
+	assigned, err := suite.manager.AssignToGroup(suite.ctx, request)
 	re.NoError(err)
 	re.NotEmpty(assigned, "expected some non-empty group name")
 
@@ -77,7 +77,7 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	re.True(isValid, "assigned group must be from mockMetaServiceGroups")
 
 	// Verify the chosen group's count increments by 'request'.
-	counts, err := suite.manager.GetAssignmentCounts()
+	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(request, counts[assigned], "chosen group's count should equal the requested increment")
 
@@ -92,19 +92,19 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 	re := suite.Require()
-	err := suite.manager.UpdateAssignment("", "etcd-group-0")
+	err := suite.manager.UpdateAssignment(suite.ctx, "", "etcd-group-0")
 	re.NoError(err)
 
-	counts, err := suite.manager.GetAssignmentCounts()
+	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(1, counts["etcd-group-0"])
 	re.Equal(0, counts["etcd-group-1"])
 	re.Equal(0, counts["etcd-group-2"])
 
-	err = suite.manager.UpdateAssignment("etcd-group-0", "etcd-group-1")
+	err = suite.manager.UpdateAssignment(suite.ctx, "etcd-group-0", "etcd-group-1")
 	re.NoError(err)
 
-	counts, err = suite.manager.GetAssignmentCounts()
+	counts, err = suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts["etcd-group-0"], "expected decremented back to 0")
 	re.Equal(1, counts["etcd-group-1"], "expected incremented to 1")
@@ -113,7 +113,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
 
 func (suite *metaServiceGroupTestSuite) TestUpdateAssignmentUnknownNewGroup() {
 	re := suite.Require()
-	err := suite.manager.UpdateAssignment("", "nonexistent")
+	err := suite.manager.UpdateAssignment(suite.ctx, "", "nonexistent")
 	re.Equal(errUnknownMetaServiceGroup, err)
 }
 
@@ -170,10 +170,10 @@ func (suite *metaServiceGroupTestSuite) TestGetGroupsReturnsCopy() {
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
 	re := suite.Require()
 	// Assign to some existing group
-	assigned, err := suite.manager.AssignToGroup(1)
+	assigned, err := suite.manager.AssignToGroup(suite.ctx, 1)
 	re.NoError(err)
 	re.NotEmpty(assigned, "expected AssignToGroup to return a non-empty group")
-	counts, err := suite.manager.GetAssignmentCounts()
+	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(1, counts[assigned], "assigned group should have count 1")
 
@@ -183,12 +183,12 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	suite.manager.updateGroups(newMap)
 
 	// Move the assignment from the originally assigned group to "etcd-group-3"
-	err = suite.manager.UpdateAssignment(assigned, "etcd-group-3")
+	err = suite.manager.UpdateAssignment(suite.ctx, assigned, "etcd-group-3")
 	re.NoError(err)
 
 	// the original group should have decreased from 1 → 0
 	// "etcd-group-3" should have increased from 0 → 1
-	counts, err = suite.manager.GetAssignmentCounts()
+	counts, err = suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[assigned], "original group should have count 0 after moving assignment")
 	re.Equal(1, counts["etcd-group-3"], "new group should have count 1")
