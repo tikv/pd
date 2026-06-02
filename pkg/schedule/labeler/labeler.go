@@ -34,7 +34,7 @@ import (
 
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
-	storage endpoint.RuleStorage
+	storage endpoint.RegionLabelRuleStorage
 	syncutil.RWMutex
 	labelRules map[string]*LabelRule
 	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
@@ -43,12 +43,11 @@ type RegionLabeler struct {
 }
 
 // NewRegionLabeler creates a Labeler instance.
-func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInterval time.Duration) (*RegionLabeler, error) {
+func NewRegionLabeler(ctx context.Context, storage endpoint.RegionLabelRuleStorage, gcInterval time.Duration) (*RegionLabeler, error) {
 	start := time.Now()
 	defer func() {
 		newRegionLabelerDuration.Observe(time.Since(start).Seconds())
 	}()
-
 	l := &RegionLabeler{
 		storage:    storage,
 		labelRules: make(map[string]*LabelRule),

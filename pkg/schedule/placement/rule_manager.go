@@ -55,7 +55,7 @@ const (
 // It is thread safe.
 type RuleManager struct {
 	ctx     context.Context
-	storage endpoint.RuleStorage
+	storage endpoint.PlacementRuleStorage
 	syncutil.RWMutex
 	initialized bool
 	ruleConfig  *ruleConfig
@@ -69,7 +69,7 @@ type RuleManager struct {
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(ctx context.Context, storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
+func NewRuleManager(ctx context.Context, storage endpoint.PlacementRuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
 	return &RuleManager{
 		ctx:              ctx,
 		storage:          storage,

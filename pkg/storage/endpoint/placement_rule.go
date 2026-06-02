@@ -21,14 +21,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// RuleStorage defines the storage operations on the rule.
-type RuleStorage interface {
+// PlacementRuleStorage defines the storage operations on the rule.
+type PlacementRuleStorage interface {
 	// Load in txn is unnecessary and may cause txn too large.
 	// because scheduling server will load rules from etcd rather than watching.
 	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
 	LoadRuleGroups(f func(k, v string)) error
-	LoadRegionRules(f func(k, v string)) error
 
 	// We need to use txn to avoid concurrent modification.
 	// And it is helpful for the scheduling server to watch the rule.
@@ -36,13 +35,11 @@ type RuleStorage interface {
 	DeleteRule(txn kv.Txn, ruleKey string) error
 	SaveRuleGroup(txn kv.Txn, groupID string, group any) error
 	DeleteRuleGroup(txn kv.Txn, groupID string) error
-	SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error
-	DeleteRegionRule(txn kv.Txn, ruleKey string) error
 
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
-var _ RuleStorage = (*StorageEndpoint)(nil)
+var _ PlacementRuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (*StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
@@ -67,21 +64,6 @@ func (*StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) err
 // DeleteRuleGroup removes a rule group from storage.
 func (*StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
 	return txn.Remove(keypath.RuleGroupIDPath(groupID))
-}
-
-// LoadRegionRules loads region rules from storage.
-func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(keypath.RegionLabelPathPrefix(), f)
-}
-
-// SaveRegionRule saves a region rule to the storage.
-func (*StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
-	return saveJSONInTxn(txn, keypath.RegionLabelKeyPath(ruleKey), rule)
-}
-
-// DeleteRegionRule removes a region rule from storage.
-func (*StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
-	return txn.Remove(keypath.RegionLabelKeyPath(ruleKey))
 }
 
 // LoadRule load a placement rule from storage.

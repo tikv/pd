@@ -113,10 +113,11 @@ type Server struct {
 	storage   *endpoint.StorageEndpoint
 
 	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher   *config.Watcher
-	ruleWatcher     *rule.Watcher
-	metaWatcher     *meta.Watcher
-	affinityWatcher *affinity.Watcher
+	configWatcher          *config.Watcher
+	metaWatcher            *meta.Watcher
+	placementRuleWatcher   *rule.PlacementRuleWatcher
+	regionLabelRuleWatcher *rule.RegionLabelRuleWatcher
+	affinityWatcher        *affinity.Watcher
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -521,9 +522,8 @@ func (s *Server) startCluster(context.Context) error {
 	s.cluster.Store(cluster)
 	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
-	// Start the rule watcher after the cluster is created.
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
+	// Start the rule watchers after the cluster is created.
+	err = s.startRuleWatchers(cluster)
 	if err != nil {
 		return err
 	}
@@ -554,15 +554,34 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	return err
+	return nil
+}
+
+func (s *Server) startRuleWatchers(cluster *Cluster) (err error) {
+	s.placementRuleWatcher, err = rule.NewPlacementRuleWatcher(s.Context(), s.GetClient(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager())
+	if err != nil {
+		return err
+	}
+	s.regionLabelRuleWatcher, err = rule.NewRegionLabelRuleWatcher(s.Context(), s.GetClient(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRegionLabeler())
+	if err != nil {
+		s.placementRuleWatcher.Close()
+		s.placementRuleWatcher = nil
+		return err
+	}
+	return nil
 }
 
 func (s *Server) stopWatcher() {
 	if s.affinityWatcher != nil {
 		s.affinityWatcher.Close()
 	}
-	if s.ruleWatcher != nil {
-		s.ruleWatcher.Close()
+	if s.placementRuleWatcher != nil {
+		s.placementRuleWatcher.Close()
+	}
+	if s.regionLabelRuleWatcher != nil {
+		s.regionLabelRuleWatcher.Close()
 	}
 	if s.metaWatcher != nil {
 		s.metaWatcher.Close()

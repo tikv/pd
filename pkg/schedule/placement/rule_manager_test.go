@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
-func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *RuleManager) {
+func newTestManager(t *testing.T, enableWitness bool) (endpoint.PlacementRuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
