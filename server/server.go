@@ -1061,6 +1061,7 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 		return err
 	}
 	s.keyspaceManager.UpdateConfig(&cfg)
+
 	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
