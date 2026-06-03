@@ -25,13 +25,7 @@ import (
 	"sync"
 	"time"
 
-<<<<<<< HEAD
-=======
-	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
-
 	"github.com/pingcap/failpoint"
->>>>>>> 64def44776 (resource_group/controller: keep lim.last monotonic on token updates (#10745))
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
@@ -331,13 +325,8 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	if lim.burst < 0 || lim.limit == Inf {
 		return
 	}
-<<<<<<< HEAD
 	now, _, tokens := lim.advance(now)
-	lim.last = now
-=======
-	_, tokens := lim.getTokens(now)
 	lim.updateLast(now)
->>>>>>> 64def44776 (resource_group/controller: keep lim.last monotonic on token updates (#10745))
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
 }
@@ -365,29 +354,14 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-<<<<<<< HEAD
 	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", lim.notifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.NewTokens
 	} else {
 		now, _, tokens := lim.advance(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.NewTokens
-=======
-	logControllerTrace("[resource group controller] before reconfigure",
-		zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens),
-		zap.Float64("old-rate", float64(lim.fillRate)),
-		zap.Float64("old-notify-threshold", lim.notifyThreshold),
-		zap.Int64("old-burst", lim.burst))
-	if args.newBurst < 0 {
-		lim.updateLast(now)
-		lim.tokens = args.newTokens
-	} else {
-		_, tokens := lim.getTokens(now)
-		lim.updateLast(now)
-		lim.tokens = tokens + args.newTokens
->>>>>>> 64def44776 (resource_group/controller: keep lim.last monotonic on token updates (#10745))
 	}
 	lim.limit = Limit(args.NewRate)
 	lim.burst = args.NewBurst

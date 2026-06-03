@@ -168,8 +168,8 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			name: "reconfigure",
 			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
 				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
-					newTokens:   10,
-					newFillRate: 100,
+					NewTokens: 10,
+					NewRate:   100,
 				})
 			},
 			expectedPool: 1100,
@@ -179,9 +179,9 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			name: "reconfigure unlimited",
 			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
 				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
-					newTokens:   10,
-					newFillRate: 100,
-					newBurst:    -1,
+					NewTokens: 10,
+					NewRate:   100,
+					NewBurst:  -1,
 				})
 			},
 			checkPool: false,
@@ -202,9 +202,8 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			// Advance last through the public API to t0+10s and leave pool =
 			// 100*10 - 10 = 990.
 			r := lim.Reserve(context.Background(), InfDuration, advancedAt, 10)
-			re.True(r.reserved)
-			_, pool := lim.getTokens(advancedAt)
-			re.InDelta(990, pool, 1e-6)
+			re.True(r.ok)
+			re.InDelta(990, lim.AvailableTokens(advancedAt), 1e-6)
 
 			tt.mutate(lim, r, staleNow)
 			re.Equal(advancedAt, lim.last)
@@ -212,8 +211,7 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			if tt.checkPool {
 				// Accrual over t0+10s..t0+11s is 1s*100 = 100. A rewound
 				// last (to t0+9s) would over-accrue by another 100 tokens.
-				_, pool = lim.getTokens(checkAt)
-				re.InDelta(tt.expectedPool, pool, 1e-6)
+				re.InDelta(tt.expectedPool, lim.AvailableTokens(checkAt), 1e-6)
 			}
 		})
 	}
