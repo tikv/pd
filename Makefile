@@ -67,10 +67,13 @@ ifeq ($(RUN_CI), 1)
 	RELEASE_VERSION := None
 endif
 
+GITHASH := $(shell git rev-parse HEAD)
+GITBRANCH := $(shell git rev-parse --abbrev-ref HEAD)
+
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(RELEASE_VERSION)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(GITHASH)"
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(GITBRANCH)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDEdition=$(PD_EDITION)"
 
 ifneq ($(DASHBOARD), 0)

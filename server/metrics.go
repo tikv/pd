@@ -95,6 +95,13 @@ var (
 			Name:      "tso_proxy_forward_timeout_total",
 			Help:      "Counter of timeouts when tso proxy forwarding tso requests to tso service.",
 		})
+	tsoForwardStreamCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_forward_stream_total",
+			Help:      "Counter of TSO streams forwarded to the independent TSO service.",
+		})
 
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -221,6 +228,7 @@ func init() {
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
+	prometheus.MustRegister(tsoForwardStreamCounter)
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(queryRegionDuration)

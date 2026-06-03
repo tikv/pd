@@ -230,7 +230,7 @@ func (s *gcStateManagerTestSuite) TearDownTest() {
 
 func (s *gcStateManagerTestSuite) checkTxnSafePoint(keyspaceID uint32, expectedTxnSafePoint uint64) {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID)
+	state, err := s.manager.GetGCState(keyspaceID, true)
 	re.NoError(err)
 	re.Equal(expectedTxnSafePoint, state.TxnSafePoint)
 }
@@ -358,7 +358,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointBasic() {
 	re := s.Require()
 
 	checkGCSafePoint := func(keyspaceID uint32, expectedGCSafePoint uint64) {
-		state, err := s.manager.GetGCState(keyspaceID)
+		state, err := s.manager.GetGCState(keyspaceID, true)
 		re.NoError(err)
 		re.Equal(expectedGCSafePoint, state.GCSafePoint)
 	}
@@ -484,7 +484,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWit
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
-			state, err := s.manager.GetGCState(keyspaceID)
+			state, err := s.manager.GetGCState(keyspaceID, true)
 			if err != nil {
 				return 0, err
 			}
@@ -661,7 +661,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 		re.NoError(err)
 		re.True(updated)
 
-		state, err := s.manager.GetGCState(keyspaceID)
+		state, err := s.manager.GetGCState(keyspaceID, false)
 		re.NoError(err)
 		re.Len(state.GCBarriers, 1)
 		re.Equal("svc1", state.GCBarriers[0].BarrierID)
@@ -673,7 +673,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 		re.NoError(err)
 		re.True(updated)
 
-		state, err = s.manager.GetGCState(keyspaceID)
+		state, err = s.manager.GetGCState(keyspaceID, false)
 		re.NoError(err)
 		re.Len(state.GCBarriers, 1)
 		re.Equal("svc1", state.GCBarriers[0].BarrierID)
@@ -685,7 +685,7 @@ func (s *gcStateManagerTestSuite) TestCompatibleServiceGCSafePointRoundingTTL() 
 
 func (s *gcStateManagerTestSuite) getGCBarrier(keyspaceID uint32, barrierID string) *endpoint.GCBarrier {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID)
+	state, err := s.manager.GetGCState(keyspaceID, false)
 	re.NoError(err)
 	idx := slices.IndexFunc(state.GCBarriers, func(b *endpoint.GCBarrier) bool {
 		return b.BarrierID == barrierID
@@ -698,7 +698,7 @@ func (s *gcStateManagerTestSuite) getGCBarrier(keyspaceID uint32, barrierID stri
 
 func (s *gcStateManagerTestSuite) getAllGCBarriers(keyspaceID uint32) []*endpoint.GCBarrier {
 	re := s.Require()
-	state, err := s.manager.GetGCState(keyspaceID)
+	state, err := s.manager.GetGCState(keyspaceID, false)
 	re.NoError(err)
 	return state.GCBarriers
 }
@@ -1733,7 +1733,7 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 	// Check all public methods that accepts keyspaceID are all correctly redirected.
 	testedFunc := []func(keyspaceID uint32) error{
 		func(keyspaceID uint32) error {
-			_, err1 := s.manager.GetGCState(keyspaceID)
+			_, err1 := s.manager.GetGCState(keyspaceID, false)
 			return errors.AddStack(err1)
 		},
 		func(keyspaceID uint32) error {
@@ -1789,14 +1789,14 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 
 	// Check the result of GetAllKeyspaceGCStates and GetGCState are matching.
 	checkAllKeyspaceGCStates := func() {
-		allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
+		allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
 		re.NoError(err)
 		re.Len(allStates, len(s.keyspacePresets.all))
 		for keyspaceID, state := range allStates {
 			if slices.Contains(s.keyspacePresets.manageable, keyspaceID) {
 				re.Equal(keyspaceID, state.KeyspaceID)
 
-				s, err := s.manager.GetGCState(keyspaceID)
+				s, err := s.manager.GetGCState(keyspaceID, false)
 				re.NoError(err)
 				re.Equal(s, state)
 			} else {
@@ -1808,7 +1808,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.manageable {
-		state, err := s.manager.GetGCState(keyspaceID)
+		state, err := s.manager.GetGCState(keyspaceID, false)
 		re.NoError(err)
 		re.Equal(keyspaceID, state.KeyspaceID)
 		if keyspaceID == constant.NullKeyspaceID {
@@ -1822,7 +1822,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range slices.Concat(s.keyspacePresets.unmanageable, s.keyspacePresets.nullSynonyms) {
-		state, err := s.manager.GetGCState(keyspaceID)
+		state, err := s.manager.GetGCState(keyspaceID, false)
 		re.NoError(err)
 		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
 		re.False(state.IsKeyspaceLevel)
@@ -1832,7 +1832,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}
 
 	for _, keyspaceID := range s.keyspacePresets.notExisting {
-		_, err := s.manager.GetGCState(keyspaceID)
+		_, err := s.manager.GetGCState(keyspaceID, false)
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	}
@@ -1859,7 +1859,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	_, err = s.manager.SetGCBarrier(2, "b3", 60, time.Duration(math.MaxInt64), now)
 	re.NoError(err)
 
-	state, err := s.manager.GetGCState(constant.NullKeyspaceID)
+	state, err := s.manager.GetGCState(constant.NullKeyspaceID, false)
 	re.NoError(err)
 	re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
 	re.False(state.IsKeyspaceLevel)
@@ -1870,7 +1870,7 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 		endpoint.NewGCBarrier("b2", 25, ptime(now.Add(time.Hour*2))),
 	}, state.GCBarriers)
 
-	state, err = s.manager.GetGCState(2)
+	state, err = s.manager.GetGCState(2, false)
 	re.NoError(err)
 	re.Equal(uint32(2), state.KeyspaceID)
 	re.True(state.IsKeyspaceLevel)
@@ -1881,7 +1881,47 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 		endpoint.NewGCBarrier("b3", 60, nil),
 	}, state.GCBarriers)
 
+	// Check excluding GC barriers
+	state, err = s.manager.GetGCState(2, true)
+	re.NoError(err)
+	re.Equal(uint32(2), state.KeyspaceID)
+	re.True(state.IsKeyspaceLevel)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(45), state.GCSafePoint)
+	re.Empty(state.GCBarriers)
+
 	checkAllKeyspaceGCStates()
+}
+
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers() {
+	re := s.Require()
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		_, err := s.manager.SetGCBarrier(keyspaceID, fmt.Sprintf("b1-%d", keyspaceID), 25, time.Hour, time.Now())
+		re.NoError(err)
+	}
+
+	allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		state, ok := allStates[keyspaceID]
+		re.True(ok)
+		re.Len(state.GCBarriers, 1)
+		re.Equal(fmt.Sprintf("b1-%d", keyspaceID), state.GCBarriers[0].BarrierID)
+		re.Equal(uint64(25), state.GCBarriers[0].BarrierTS)
+	}
+
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		state, ok := allStates[keyspaceID]
+		re.True(ok)
+		re.Empty(state.GCBarriers)
+	}
 }
 
 func (s *gcStateManagerTestSuite) TestGetAllKeyspacesMaxTxnSafePoint() {
@@ -1986,22 +2026,22 @@ func (s *gcStateManagerTestSuite) testDowngradeCompatibility(keyspaceID uint32) 
 	re.Equal(uint64(25), s.getLegacyGCWorkerServiceSafePoint(keyspaceID).SafePoint)
 
 	// Not visible by GetGCStates or GetAllKeyspacesGCStates.
-	gcState, err := s.manager.GetGCState(keyspaceID)
+	gcState, err := s.manager.GetGCState(keyspaceID, false)
 	re.NoError(err)
 	re.Empty(gcState.GCBarriers)
-	allGCStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
+	allGCStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
 	re.NoError(err)
 	re.Empty(allGCStates[keyspaceID].GCBarriers)
 
 	// And it works correctly when there are other valid GC barriers.
 	_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 40, time.Hour, now)
 	re.NoError(err)
-	gcState, err = s.manager.GetGCState(keyspaceID)
+	gcState, err = s.manager.GetGCState(keyspaceID, false)
 	re.NoError(err)
 	re.Len(gcState.GCBarriers, 1)
 	re.Equal("b1", gcState.GCBarriers[0].BarrierID)
 	re.Equal(uint64(40), gcState.GCBarriers[0].BarrierTS)
-	allGCStates, err = s.manager.GetAllKeyspacesGCStates(context.Background())
+	allGCStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), false)
 	re.NoError(err)
 	re.Len(allGCStates[keyspaceID].GCBarriers, 1)
 	re.Equal("b1", allGCStates[keyspaceID].GCBarriers[0].BarrierID)
@@ -2036,7 +2076,7 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	ch := make(chan result, 10)
 
 	callOnce := func() {
-		gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background())
+		gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
 		ch <- result{gcStates: gcStates, err: err}
 	}
 
@@ -2091,6 +2131,128 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesConcurrentCallShari
 	re.Equal(int64(2), executionCount.Load())
 }
 
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesDifferentParametersCallsDoNotShareResult() {
+	re := s.Require()
+
+	const keyspaceID = uint32(2)
+	_, err := s.manager.SetGCBarrier(keyspaceID, "b1", 25, time.Hour, time.Now())
+	re.NoError(err)
+
+	type result struct {
+		caller            string
+		excludeGCBarriers bool
+		gcStates          map[uint32]GCState
+		err               error
+	}
+
+	runScenario := func(firstExcludeGCBarriers bool) {
+		var executionCount atomic.Int64
+		finishFailpointEnabled := true
+
+		fullExecBefore := s.manager.allKeyspacesGCStatesSingleFlight.ExecCount()
+		excludeExecBefore := s.manager.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.ExecCount()
+
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish", "pause"))
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart", func() {
+			executionCount.Add(1)
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesStart"))
+			if finishFailpointEnabled {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+			}
+		}()
+
+		ch := make(chan result, 3)
+		callOnce := func(caller string, excludeGCBarriers bool) {
+			gcStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), excludeGCBarriers)
+			ch <- result{
+				caller:            caller,
+				excludeGCBarriers: excludeGCBarriers,
+				gcStates:          gcStates,
+				err:               err,
+			}
+		}
+
+		go callOnce("first", firstExcludeGCBarriers)
+
+		select {
+		case res := <-ch:
+			re.FailNowf("failpoint not taking effect to block the first invocation to GetAllKeyspacesGCStates", "caller: %s, excludeGCBarriers: %v, result: %v, err: %v", res.caller, res.excludeGCBarriers, res.gcStates, res.err)
+		case <-time.After(200 * time.Millisecond):
+		}
+		re.Equal(int64(1), executionCount.Load())
+
+		// The second call uses the other excludeGCBarriers value, so with the
+		// correct implementation it must start a separate execution immediately.
+		go callOnce("second", !firstExcludeGCBarriers)
+
+		// The third call uses the same parameter as the first one. If the two
+		// parameter variants were incorrectly routed to a single OrderedSingleFlight
+		// instance, this third call could be merged into the second call's pending
+		// batch and receive a result for the wrong parameter.
+		go callOnce("third", firstExcludeGCBarriers)
+
+		deadline := time.Now().Add(time.Second)
+		for executionCount.Load() < 2 && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		re.Equal(
+			int64(2),
+			executionCount.Load(),
+			"calls with different excludeGCBarriers values should use different OrderedSingleFlight instances",
+		)
+
+		select {
+		case res := <-ch:
+			re.FailNowf("expected all invocations to stay blocked before finish failpoint is released", "caller: %s, excludeGCBarriers: %v, result: %v, err: %v", res.caller, res.excludeGCBarriers, res.gcStates, res.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/onGetAllKeyspacesGCStatesFinish"))
+		finishFailpointEnabled = false
+
+		fullCallCount := 0
+		excludeCallCount := 0
+		for range 3 {
+			var res result
+			select {
+			case res = <-ch:
+			case <-time.After(time.Second):
+				re.FailNow("GetAllKeyspacesGCStates blocked while expected to return")
+			}
+			re.NoError(res.err)
+			if res.excludeGCBarriers {
+				excludeCallCount++
+				re.Empty(res.gcStates[keyspaceID].GCBarriers)
+			} else {
+				fullCallCount++
+				re.Len(res.gcStates[keyspaceID].GCBarriers, 1)
+				re.Equal("b1", res.gcStates[keyspaceID].GCBarriers[0].BarrierID)
+				re.Equal(uint64(25), res.gcStates[keyspaceID].GCBarriers[0].BarrierTS)
+			}
+		}
+
+		expectedFullCalls := 1
+		expectedExcludeCalls := 2
+		expectedFullExecs := fullExecBefore + 1
+		expectedExcludeExecs := excludeExecBefore + 2
+		if !firstExcludeGCBarriers {
+			expectedFullCalls = 2
+			expectedExcludeCalls = 1
+			expectedFullExecs = fullExecBefore + 2
+			expectedExcludeExecs = excludeExecBefore + 1
+		}
+		re.Equal(expectedFullCalls, fullCallCount)
+		re.Equal(expectedExcludeCalls, excludeCallCount)
+		re.Equal(expectedFullExecs, s.manager.allKeyspacesGCStatesSingleFlight.ExecCount())
+		re.Equal(expectedExcludeExecs, s.manager.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.ExecCount())
+	}
+
+	runScenario(false)
+	runScenario(true)
+}
+
 func TestGetAllKeysapcesGCStatesOnTooManyKeyspaces(t *testing.T) {
 	re := require.New(t)
 
@@ -2107,7 +2269,7 @@ func TestGetAllKeysapcesGCStatesOnTooManyKeyspaces(t *testing.T) {
 		clean()
 	}()
 
-	gcStates, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+	gcStates, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), false)
 	re.Len(gcStates, totalKeyspaces+2) // Including the null keyspace, the default keyspace or the system keyspace.
 
 	re.NoError(err)
@@ -2206,14 +2368,14 @@ func benchmarkGetAllKeyspacesGCStatesImpl(b *testing.B, keyspacesCount int, para
 	b.ResetTimer()
 	if parallelism == 0 {
 		for range b.N {
-			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+			_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), false)
 			re.NoError(err)
 		}
 	} else {
 		b.SetParallelism(parallelism)
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background())
+				_, err := gcStateManager.GetAllKeyspacesGCStates(context.Background(), false)
 				re.NoError(err)
 			}
 		})

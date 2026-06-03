@@ -439,6 +439,13 @@ func (m *Manager) CheckAndGetAffinityGroupState(groupID string) (*GroupState, er
 	return state, nil
 }
 
+// GetAffinityGroupCount returns the number of affinity groups.
+func (m *Manager) GetAffinityGroupCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.groups)
+}
+
 // GetAllAffinityGroupStates returns all affinity groups.
 func (m *Manager) GetAllAffinityGroupStates() []*GroupState {
 	m.RLock()
