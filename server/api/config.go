@@ -220,7 +220,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 }
 
 func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Keyspace, key, value)
+	oldCfg := config.Keyspace
+	newCfg := oldCfg.Clone()
+	updated, found, err := jsonutil.AddKeyValue(&newCfg, key, value)
 	if err != nil {
 		return err
 	}
@@ -230,7 +232,7 @@ func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, va
 	}
 
 	if updated {
-		err = h.svr.SetKeyspaceConfig(config.Keyspace)
+		err = h.svr.SetKeyspaceConfig(&oldCfg, newCfg)
 	}
 	return err
 }

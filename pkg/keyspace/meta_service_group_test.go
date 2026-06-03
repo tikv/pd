@@ -90,31 +90,24 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroup() {
 	}
 }
 
-func (suite *metaServiceGroupTestSuite) TestUpdateAssignment() {
+func (suite *metaServiceGroupTestSuite) TestPickGroup() {
 	re := suite.Require()
-	err := suite.manager.UpdateAssignment(suite.ctx, "", "etcd-group-0")
+	assigned, err := suite.manager.PickGroup(suite.ctx)
 	re.NoError(err)
+	re.NotEmpty(assigned, "expected PickGroup to return a non-empty group")
+
+	_, isValid := mockMetaServiceGroups()[assigned]
+	re.True(isValid, "picked group must be from mockMetaServiceGroups")
 
 	counts, err := suite.manager.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
-	re.Equal(1, counts["etcd-group-0"])
-	re.Equal(0, counts["etcd-group-1"])
-	re.Equal(0, counts["etcd-group-2"])
-
-	err = suite.manager.UpdateAssignment(suite.ctx, "etcd-group-0", "etcd-group-1")
-	re.NoError(err)
-
-	counts, err = suite.manager.GetAssignmentCounts(suite.ctx)
-	re.NoError(err)
-	re.Equal(0, counts["etcd-group-0"], "expected decremented back to 0")
-	re.Equal(1, counts["etcd-group-1"], "expected incremented to 1")
-	re.Equal(0, counts["etcd-group-2"], "unchanged")
-}
-
-func (suite *metaServiceGroupTestSuite) TestUpdateAssignmentUnknownNewGroup() {
-	re := suite.Require()
-	err := suite.manager.UpdateAssignment(suite.ctx, "", "nonexistent")
-	re.Equal(errUnknownMetaServiceGroup, err)
+	re.Equal(1, counts[assigned], "picked group's count should be incremented once")
+	for grp := range mockMetaServiceGroups() {
+		if grp == assigned {
+			continue
+		}
+		re.Equal(0, counts[grp], "other groups should remain at 0")
+	}
 }
 
 func (suite *metaServiceGroupTestSuite) TestAttachEndpoints() {
@@ -183,7 +176,9 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 	suite.manager.updateGroups(newMap)
 
 	// Move the assignment from the originally assigned group to "etcd-group-3"
-	err = suite.manager.UpdateAssignment(suite.ctx, assigned, "etcd-group-3")
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.updateAssignmentTxn(txn, assigned, "etcd-group-3")
+	})
 	re.NoError(err)
 
 	// the original group should have decreased from 1 → 0

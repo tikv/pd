@@ -915,9 +915,14 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
-	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
 	cfg := *c
-	cfg.PreAlloc = preAlloc
+	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
+	if c.MetaServiceGroups != nil {
+		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
+		for name, endpoint := range c.MetaServiceGroups {
+			cfg.MetaServiceGroups[name] = endpoint
+		}
+	}
 	return &cfg
 }
 
@@ -945,6 +950,10 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 
 // GetMetaServiceGroups returns the current meta-service-group configuration.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
+	ret := make(map[string]string, len(c.MetaServiceGroups))
+	for name, endpoint := range c.MetaServiceGroups {
+		ret[name] = endpoint
+	}
 	return c.MetaServiceGroups
 }
 

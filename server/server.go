@@ -1046,23 +1046,25 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 }
 
 // SetKeyspaceConfig sets the keyspace config information.
-func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	if err := newCfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetKeyspaceConfig()
-	s.persistOptions.SetKeyspaceConfig(&cfg)
+
+	if !s.persistOptions.CASKeyspaceConfig(oldCfg, newCfg) {
+		return errors.New("update keyspace config failed, because the keyspace config has been changed by other process, please retry")
+	}
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetKeyspaceConfig(old)
+		s.persistOptions.SetKeyspaceConfig(oldCfg)
 		log.Error("failed to update keyspace config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(&cfg)
+	s.keyspaceManager.UpdateConfig(newCfg)
 
-	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 

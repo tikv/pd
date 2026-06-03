@@ -274,18 +274,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	if request.Config != nil {
 		delete(request.Config, MetaServiceGroupAddressesKey)
 	}
-	// assign meta-service group for the new keyspace if meta-service groups exist.
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
-	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.SelectGroup(manager.ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
-	}
 
 	// Get keyspace config.
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
@@ -310,6 +298,18 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
+	}
+	// assign meta-service group for the new keyspace if meta-service groups exist.
+	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	if assignToMetaServiceGroup {
+		metaServiceGroup, err := manager.mgm.PickGroup(manager.ctx)
+		if err != nil {
+			return nil, err
+		}
+		if request.Config == nil {
+			request.Config = make(map[string]string)
+		}
+		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
 	}
 	tracer.OnGetConfigFinished()
 
@@ -455,7 +455,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
 	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.SelectGroup(manager.ctx)
+		metaServiceGroup, err := manager.mgm.PickGroup(manager.ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -485,9 +485,9 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	// Split keyspace region.
 	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
 	if err != nil {
+		idPath := keypath.KeyspaceIDPath(name)
+		metaPath := keypath.KeyspaceMetaPath(id)
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			idPath := keypath.KeyspaceIDPath(name)
-			metaPath := keypath.KeyspaceMetaPath(id)
 			if err := txn.Remove(idPath); err != nil {
 				return err
 			}
@@ -561,13 +561,6 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		if loadedMeta != nil {
 			return errs.ErrKeyspaceExists
-		}
-		if manager.mgm != nil {
-			if groupID := keyspace.GetConfig()[MetaServiceGroupIDKey]; groupID != "" {
-				if err := manager.mgm.updateAssignmentTxn(txn, "", groupID); err != nil {
-					return err
-				}
-			}
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})

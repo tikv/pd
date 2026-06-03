@@ -78,15 +78,16 @@ func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
 	return assignedGroup, nil
 }
 
-// SelectGroup returns the meta-service group with the least assigned keyspaces
+// PickGroup returns the meta-service group with the least assigned keyspaces
 // without updating the persisted assignment count.
-func (m *MetaServiceGroupManager) SelectGroup(ctx context.Context) (string, error) {
+func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
 	var assignedGroup string
 	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		assignedGroup, err = m.findMinMetaGroup(txn)
+		m.updateAssignmentTxn(txn, "", assignedGroup)
 		return err
 	}); err != nil {
 		return "", err
@@ -126,22 +127,6 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, ne
 		}
 	}
 	return nil
-}
-
-// UpdateAssignment moves a keyspace from one meta-service group to another.
-// It returns an error if any.
-func (m *MetaServiceGroupManager) UpdateAssignment(ctx context.Context, oldGroupID, newGroupID string) error {
-	m.RLock()
-	// Newly assigned meta-service group must be available.
-	if newGroupID != "" && m.metaServiceGroups[newGroupID] == "" {
-		m.RUnlock()
-		return errUnknownMetaServiceGroup
-	}
-	err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
-	})
-	m.RUnlock()
-	return err
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.

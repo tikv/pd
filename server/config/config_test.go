@@ -583,3 +583,18 @@ func TestRateLimitClone(t *testing.T) {
 	gdc := gCfg.LimiterConfig["test"]
 	re.Zero(gdc.ConcurrencyLimit)
 }
+
+func TestKeyspaceConfigClone(t *testing.T) {
+	re := require.New(t)
+	cfg := &KeyspaceConfig{
+		PreAlloc:          []string{"keyspace-1"},
+		MetaServiceGroups: map[string]string{"group-1": "http://127.0.0.1:2379"},
+	}
+
+	clone := cfg.Clone()
+	clone.PreAlloc[0] = "keyspace-2"
+	clone.MetaServiceGroups["group-1"] = "http://127.0.0.1:2380"
+
+	re.Equal([]string{"keyspace-1"}, cfg.PreAlloc)
+	re.Equal(map[string]string{"group-1": "http://127.0.0.1:2379"}, cfg.MetaServiceGroups)
+}

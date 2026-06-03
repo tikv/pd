@@ -101,9 +101,10 @@ func AddMetaServiceGroups(c *gin.Context) {
 		newGroups[id] = addresses
 	}
 	// Update persisted pd config.
-	keyspaceCfg := svr.GetConfig().Keyspace
-	keyspaceCfg.MetaServiceGroups = newGroups
-	if err = svr.SetKeyspaceConfig(keyspaceCfg); err != nil {
+	oldCfg := svr.GetConfig().Keyspace
+	newCfg := oldCfg.Clone()
+	newCfg.MetaServiceGroups = newGroups
+	if err = svr.SetKeyspaceConfig(&oldCfg, newCfg); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
