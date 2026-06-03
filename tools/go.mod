@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tools
 
-go 1.25.8
+go 1.25.10
 
 replace (
 	github.com/tikv/pd => ../
