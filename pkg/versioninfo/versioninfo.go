@@ -107,6 +107,9 @@ func IsHotScheduleWithCPUSupported(clusterVersion *semver.Version) bool {
 	if clusterVersion == nil {
 		return false
 	}
+	if kerneltype.IsNextGen() {
+		return true
+	}
 	// TiKV <= 8.5.6 and < 9.0.0-beta.1 do not report CPU usage.
 	if clusterVersion.Major >= 9 {
 		return !clusterVersion.LessThan(*hotScheduleWithCPUv9MinVersion)
