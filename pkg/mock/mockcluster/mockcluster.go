@@ -65,7 +65,7 @@ type Cluster struct {
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
-	regionDownDurations map[uint64]time.Duration
+	regionStats *statistics.RegionStatistics
 }
 
 // NewCluster creates a new Cluster
@@ -81,7 +81,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
-		regionDownDurations:     map[uint64]time.Duration{},
+		regionStats:             statistics.NewRegionStatistics(bc, opts, nil),
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -157,14 +157,14 @@ func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
 }
 
-// GetRegionDownDuration returns the mock down duration for a region, or 0 if not set.
+// GetRegionDownDuration returns how long a region has had down peers.
 func (mc *Cluster) GetRegionDownDuration(regionID uint64) time.Duration {
-	return mc.regionDownDurations[regionID]
+	return mc.regionStats.GetRegionDownDuration(regionID)
 }
 
-// SetRegionDownDuration sets the mock down duration for a region.
-func (mc *Cluster) SetRegionDownDuration(regionID uint64, d time.Duration) {
-	mc.regionDownDurations[regionID] = d
+// HandleRegionHeartbeat processes RegionInfo reports from client.
+func (mc *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) {
+	mc.regionStats.Observe(region, mc.GetStores())
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.

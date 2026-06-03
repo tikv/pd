@@ -37,7 +37,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 func TestRuleCheckerTestSuite(t *testing.T) {
@@ -1515,25 +1517,32 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
 
 func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWhenStoreUp() {
 	re := suite.Require()
-	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
-	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
-	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
-	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
-	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	c := serverconfig.NewConfig()
+	c.Schedule.MaxDownPeerDuration = typeutil.NewDuration(5 * time.Second)
+	opt := serverconfig.NewPersistOptions(c)
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.SwitchWitness))
+	tc.SetEnablePlacementRules(true)
+	rc := NewRuleChecker(suite.ctx, tc, tc.GetRuleManager(), cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 
-	region := suite.cluster.GetRegion(1)
-	re.Nil(suite.rc.Check(region))
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	// Store 3 is UP but peer on store 3 is down.
+	region := tc.GetRegion(1)
+	re.Nil(rc.Check(region))
+
 	r := region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(3), DownSeconds: 600},
 	}))
-	// Default MaxDownPeerDuration is 30min, peer only down for 10min → no replacement.
-	re.Nil(suite.rc.Check(r))
 
-	// Peer has been down 1h, exceeds default 30min MaxDownPeerDuration → should replace.
-	suite.cluster.SetRegionDownDuration(1, 1*time.Hour)
-	op := suite.rc.Check(r)
+	tc.HandleRegionHeartbeat(r)
+	re.Nil(rc.Check(r))
+
+	time.Sleep(5 * time.Second)
+	op := rc.Check(r)
 	re.NotNil(op)
 	re.Contains(op.Desc(), "replace-rule-down-peer")
 }
