@@ -222,7 +222,7 @@ func newKeyspaceGroupMetrics() *keyspaceGroupMetrics {
 		finishMergeSendDuration:          keyspaceGroupOpDuration.WithLabelValues("finish-merge-send"),
 		finishMergeDuration:              keyspaceGroupOpDuration.WithLabelValues("finish-merge"),
 		keyspaceFallbackRejectedCounter:  keyspaceFallbackCounter.WithLabelValues("rejected"),
-		keyspaceFallbackToDefaultCounter: keyspaceFallbackCounter.WithLabelValues("to_default"),
+		keyspaceFallbackToDefaultCounter: keyspaceFallbackCounter.WithLabelValues("fallback-default"),
 	}
 }
 

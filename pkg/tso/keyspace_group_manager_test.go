@@ -1457,6 +1457,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 
 	keyspaceID1 := uint32(100)
 	keyspaceID2 := uint32(200)
+	keyspaceID3 := uint32(300)
+	keyspaceID4 := uint32(400)
 	configuredGroupID := uint32(5)
 
 	allocator, kg, groupID, _, err := mgr.getKeyspaceGroupMetaWithCheck(
@@ -1504,9 +1506,28 @@ func (suite *keyspaceGroupManagerTestSuite) TestCheckKeyspaceGroupFallback() {
 	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 
-	keyspaceID3 := uint32(300)
 	allocator, kg, groupID, _, err = mgr.getKeyspaceGroupMetaWithCheck(
 		keyspaceID3, constant.DefaultKeyspaceGroupID, mgr)
+	re.NoError(err)
+	re.NotNil(allocator)
+	re.NotNil(kg)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
+
+	meta4 := &keyspacepb.KeyspaceMeta{
+		Id:   keyspaceID4,
+		Name: "test_keyspace_4",
+		Config: map[string]string{
+			"tso_keyspace_group_id": strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10),
+		},
+	}
+	err = mgr.storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return mgr.storage.SaveKeyspaceMeta(txn, meta4)
+	})
+	re.NoError(err)
+
+	allocator, kg, groupID, _, err = mgr.getKeyspaceGroupMetaWithCheck(
+		keyspaceID4, constant.DefaultKeyspaceGroupID, mgr)
 	re.NoError(err)
 	re.NotNil(allocator)
 	re.NotNil(kg)

@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -263,45 +264,6 @@ func (s *state) checkGroupMerge(
 	return errs.ErrKeyspaceGroupIsMerging.FastGenByArgs(groupID)
 }
 
-// checkKeyspaceHasConfiguredGroup checks if the keyspace has configured a group in its metadata.
-// This is used to determine if we should allow fallback to default group.
-func checkKeyspaceHasConfiguredGroup(ctx context.Context, storage *endpoint.StorageEndpoint, keyspaceID uint32) bool {
-	// Null keyspace is always allowed to fallback to default group
-	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic
-	if keyspaceID == constant.NullKeyspaceID {
-		log.Debug("null keyspace, allow fallback to default group",
-			zap.Uint32("keyspace-id", keyspaceID))
-		return false
-	}
-
-	// Load keyspace metadata from storage
-	var meta *keyspacepb.KeyspaceMeta
-	var err error
-	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
-		meta, err = storage.LoadKeyspaceMeta(txn, keyspaceID)
-		return err
-	})
-
-	if err != nil || meta == nil {
-		// If can't load or not found, assume no group configured (legacy keyspace)
-		log.Info("[tso] keyspace meta not found or failed to load, assume legacy keyspace",
-			zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
-		return false
-	}
-
-	// Check if Config has TSOKeyspaceGroupIDKey
-	_, hasGroup := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]
-	if hasGroup {
-		log.Info("keyspace has configured group in meta, should not fallback to default group",
-			zap.Uint32("keyspace-id", keyspaceID),
-			zap.String("configured-group-id", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]))
-	} else {
-		log.Info("keyspace has no group configuration in meta, can fallback to default group",
-			zap.Uint32("keyspace-id", keyspaceID))
-	}
-	return hasGroup
-}
-
 // getKeyspaceGroupMetaWithCheck returns the keyspace group meta of the given keyspace.
 // It also checks if the keyspace is served by the given keyspace group. If not, it returns the meta
 // of the keyspace group to which the keyspace currently belongs and returns NotServed (by the given
@@ -348,7 +310,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	// Before fallback to default group, check if the keyspace has configured a group in its metadata.
 	// If it has, don't fallback to avoid incorrect switching when state is inconsistent.
 	if kgm != nil && kgm.checkKeyspaceHasConfiguredGroup(keyspaceID) {
-		log.Debug("[tso] keyspace has configured group but not found in lookup table, skip fallback to default group",
+		log.Debug("tso keyspace has configured group but not found in lookup table, skip fallback to default group",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint32("requested-group-id", keyspaceGroupID))
 		return nil, nil, keyspaceGroupID, s.modRevision, errs.ErrKeyspaceNotAssigned.FastGenByArgs(keyspaceID)
@@ -356,7 +318,7 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 	if kgm != nil && kgm.metrics != nil {
 		kgm.metrics.keyspaceFallbackToDefaultCounter.Inc()
 	}
-	log.Debug("[tso] keyspace not found in any group, fallback to default group",
+	log.Debug("tso keyspace not found in any group, fallback to default group",
 		zap.Uint32("keyspace-id", keyspaceID),
 		zap.Uint32("requested-group-id", keyspaceGroupID))
 	return s.allocators[constant.DefaultKeyspaceGroupID],
@@ -597,17 +559,31 @@ func (kgm *KeyspaceGroupManager) checkKeyspaceHasConfiguredGroup(keyspaceID uint
 
 	if err != nil {
 		// If can't load or not found, assume no group configured (legacy keyspace)
-		log.Info("[tso] keyspace meta not found or failed to load, assume legacy keyspace",
+		log.Info("tso keyspace meta not found or failed to load, assume legacy keyspace",
 			zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
 		return false
 	}
+	if meta == nil {
+		return false
+	}
 
-	// Check if Config has TSOKeyspaceGroupIDKey
-	_, hasGroup := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]
-	if kgm.metrics != nil && hasGroup {
+	configuredGroupID, hasGroup := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]
+	if !hasGroup {
+		return false
+	}
+	groupID, err := strconv.ParseUint(configuredGroupID, 10, 32)
+	if err != nil {
+		log.Warn("failed to parse configured tso keyspace group id, skip fallback to default group",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("configured-group-id", configuredGroupID),
+			zap.Error(err))
+		return true
+	}
+	hasNonDefaultGroup := uint32(groupID) != constant.DefaultKeyspaceGroupID
+	if kgm.metrics != nil && hasNonDefaultGroup {
 		kgm.metrics.keyspaceFallbackRejectedCounter.Inc()
 	}
-	return hasGroup
+	return hasNonDefaultGroup
 }
 
 // InitializeGroupWatchLoop initializes the watch loop monitoring the path for storing keyspace group
