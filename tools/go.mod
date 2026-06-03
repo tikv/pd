@@ -179,7 +179,7 @@ require (
 	github.com/samber/lo v1.37.0 // indirect
 	github.com/sasha-s/go-deadlock v0.3.9 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.3 // indirect
-	github.com/shoenig/go-m1cpu v0.1.5 // indirect
+	github.com/shoenig/go-m1cpu v0.2.1 // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99 // indirect
