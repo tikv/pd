@@ -77,6 +77,30 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestLoadedRegionCheckerNoOverlapHint(t *testing.T) {
+	re := require.New(t)
+	checker := newLoadedRegionChecker(nil)
+
+	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("c")}, nil)
+	re.True(checker.hasNoOverlap(region1))
+	checker.updateMaxEndKey(region1)
+
+	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("d")}, nil)
+	re.False(checker.hasNoOverlap(region2))
+	checker.updateMaxEndKey(region2)
+
+	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("d"), EndKey: []byte("e")}, nil)
+	re.True(checker.hasNoOverlap(region3))
+	checker.updateMaxEndKey(region3)
+
+	region4 := core.NewRegionInfo(&metapb.Region{Id: 4, StartKey: []byte("e")}, nil)
+	re.True(checker.hasNoOverlap(region4))
+	checker.updateMaxEndKey(region4)
+
+	region5 := core.NewRegionInfo(&metapb.Region{Id: 5, StartKey: []byte("f"), EndKey: []byte("g")}, nil)
+	re.False(checker.hasNoOverlap(region5))
+}
+
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

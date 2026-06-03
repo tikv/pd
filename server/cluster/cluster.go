@@ -15,6 +15,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	errorspkg "errors"
@@ -869,7 +870,8 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
+	regionLoader := newLoadedRegionChecker(c)
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, regionLoader.checkAndPut); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -878,6 +880,50 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	)
 
 	return c, nil
+}
+
+type loadedRegionChecker struct {
+	cluster           *RaftCluster
+	hasMaxEndKey      bool
+	maxEndKeyInfinite bool
+	maxEndKey         []byte
+}
+
+func newLoadedRegionChecker(cluster *RaftCluster) *loadedRegionChecker {
+	return &loadedRegionChecker{cluster: cluster}
+}
+
+func (l *loadedRegionChecker) checkAndPut(region *core.RegionInfo) []*core.RegionInfo {
+	noOverlap := l.hasNoOverlap(region)
+	l.updateMaxEndKey(region)
+	if noOverlap {
+		return l.cluster.CheckAndPutRegionNoOverlap(region)
+	}
+	return l.cluster.CheckAndPutRegion(region)
+}
+
+func (l *loadedRegionChecker) hasNoOverlap(region *core.RegionInfo) bool {
+	if !l.hasMaxEndKey {
+		return true
+	}
+	return !l.maxEndKeyInfinite && bytes.Compare(l.maxEndKey, region.GetStartKey()) <= 0
+}
+
+func (l *loadedRegionChecker) updateMaxEndKey(region *core.RegionInfo) {
+	if l.maxEndKeyInfinite {
+		return
+	}
+	endKey := region.GetEndKey()
+	if len(endKey) == 0 {
+		l.hasMaxEndKey = true
+		l.maxEndKeyInfinite = true
+		l.maxEndKey = nil
+		return
+	}
+	if !l.hasMaxEndKey || bytes.Compare(l.maxEndKey, endKey) < 0 {
+		l.hasMaxEndKey = true
+		l.maxEndKey = endKey
+	}
 }
 
 func (c *RaftCluster) runMetricsCollectionJob() {

@@ -1459,6 +1459,64 @@ func TestRegionCount(t *testing.T) {
 	}
 }
 
+func TestTotalRegionCount(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	re.Zero(regions.GetTotalRegionCount())
+
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("c"))
+	region2 := NewTestRegionInfo(2, 1, []byte("c"), []byte("e"))
+	region3 := NewTestRegionInfo(3, 1, []byte("e"), []byte("g"))
+	regions.CheckAndPutRegion(region1)
+	regions.CheckAndPutRegion(region2)
+	regions.CheckAndPutRegion(region3)
+	re.Equal(3, regions.GetTotalRegionCount())
+
+	// Updating an existing region without changing the range should not change the count.
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 2, []byte("c"), []byte("e")))
+	re.Equal(3, regions.GetTotalRegionCount())
+
+	// Adding a region that overlaps two old regions should count as +1 -2.
+	overlaps := regions.CheckAndPutRegion(NewTestRegionInfo(4, 1, []byte("b"), []byte("d")))
+	re.Len(overlaps, 2)
+	re.Equal(2, regions.GetTotalRegionCount())
+
+	regions.RemoveRegion(region3)
+	re.Equal(1, regions.GetTotalRegionCount())
+	regions.RemoveRegion(region3)
+	re.Equal(1, regions.GetTotalRegionCount())
+
+	regions.ResetRegionCache()
+	re.Zero(regions.GetTotalRegionCount())
+}
+
+func TestCheckAndPutRegionNoOverlap(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("c"))
+	overlaps := regions.CheckAndPutRegionNoOverlap(region1)
+	re.Empty(overlaps)
+	re.Equal(1, regions.GetTotalRegionCount())
+	re.Equal(1, regions.TreeLen())
+	re.Equal(1, regions.GetStoreRegionCount(1))
+	re.Equal(int32(2), region1.GetRef())
+
+	region2 := NewTestRegionInfo(2, 1, []byte("c"), []byte("e"))
+	overlaps = regions.CheckAndPutRegionNoOverlap(region2)
+	re.Empty(overlaps)
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Equal(2, regions.TreeLen())
+	re.Equal(2, regions.GetStoreRegionCount(1))
+	re.Equal(int32(2), region2.GetRef())
+
+	// Existing IDs fall back to the normal checked path.
+	regions.CheckAndPutRegionNoOverlap(NewTestRegionInfo(2, 2, []byte("c"), []byte("e")))
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Equal(2, regions.TreeLen())
+}
+
 func TestResetRegionCache(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()

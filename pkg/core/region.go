@@ -1050,6 +1050,7 @@ type RegionsInfo struct {
 	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
+	regionCount  int64                  // lock-free total count for read-only status APIs
 	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
@@ -1107,6 +1108,20 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 		return []*RegionInfo{region}
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
+	r.t.Unlock()
+	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
+}
+
+// CheckAndPutRegionNoOverlap puts a region when the caller has proved it has no range overlap.
+func (r *RegionsInfo) CheckAndPutRegionNoOverlap(region *RegionInfo) []*RegionInfo {
+	r.t.Lock()
+	origin := r.getRegionLocked(region.GetID())
+	if origin != nil {
+		r.t.Unlock()
+		return r.CheckAndPutRegion(region)
+	}
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, true)
 	r.t.Unlock()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
@@ -1255,9 +1270,10 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 }
 
 func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionInfo, region *RegionInfo) {
+	overlapsProvided := overlaps != nil
 	if rangeChanged {
 		// TODO: only perform the remove operation on the overlapped peer.
-		if len(overlaps) == 0 {
+		if !overlapsProvided {
 			// If the range has changed but the overlapped regions are not provided, collect them by `[]*regionItem`.
 			for _, item := range r.getOverlapRegionFromOverlapTreeLocked(region) {
 				r.removeRegionFromSubTreeLocked(item)
@@ -1272,7 +1288,8 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 	// Reinsert the region into all subtrees.
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
-	r.overlapTree.update(item, false)
+	skipOverlapCheck := overlapsProvided && len(overlaps) == 0
+	r.overlapTree.update(item, skipOverlapCheck)
 	// Add leaders and followers.
 	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64) {
 		store, ok := peersMap[storeID]
@@ -1280,7 +1297,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		store.update(item, false)
+		store.update(item, skipOverlapCheck)
 	}
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
@@ -1384,12 +1401,16 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
 		item = &regionItem{RegionInfo: region}
 		r.regions[region.GetID()] = item
+		atomic.AddInt64(&r.regionCount, 1)
 	}
 	var overlaps []*RegionInfo
 	if rangeChanged {
 		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
-			delete(r.regions, old.GetID())
+			if _, ok := r.regions[old.GetID()]; ok {
+				delete(r.regions, old.GetID())
+				atomic.AddInt64(&r.regionCount, -1)
+			}
 		}
 	}
 	// return rangeChanged to prevent duplicated calculation
@@ -1458,7 +1479,10 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	defer r.t.Unlock()
 	// Remove from tree and regions.
 	r.tree.remove(region)
-	delete(r.regions, region.GetID())
+	if _, ok := r.regions[region.GetID()]; ok {
+		delete(r.regions, region.GetID())
+		atomic.AddInt64(&r.regionCount, -1)
+	}
 }
 
 // ResetRegionCache resets the regions info.
@@ -1466,6 +1490,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
+	atomic.StoreInt64(&r.regionCount, 0)
 	r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
@@ -1899,9 +1924,7 @@ func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, le
 
 // GetTotalRegionCount gets the total count of RegionInfo of regionMap
 func (r *RegionsInfo) GetTotalRegionCount() int {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	return len(r.regions)
+	return int(atomic.LoadInt64(&r.regionCount))
 }
 
 // GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
