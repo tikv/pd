@@ -89,7 +89,7 @@ func runReserve(t *testing.T, lim *Limiter, req request, maxReserve time.Duratio
 		t.Errorf("lim.reserveN(t%d, %v, %v) = (t%d, %v) want (t%d, %v)",
 			dSince(req.t), req.n, maxReserve, dSince(r.timeToAct), r.reserved, dSince(req.act), req.ok)
 	}
-	return &r
+	return r
 }
 
 func checkTokens(re *require.Assertions, lim *Limiter, t time.Time, expected float64) {
@@ -299,6 +299,167 @@ func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
 	wg.Wait()
 
 	require.Len(t, wokenUp, numWaiters)
+}
+
+func TestFutureReservationsWithFixedFillRateAreSequenced(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 5000, 0, 0, make(chan notifyMsg, 1))
+
+	const (
+		requestRU  = 1000
+		requestCnt = 10
+	)
+	expectedInterval := time.Duration(float64(time.Second) * requestRU / 5000)
+	var prev time.Time
+	for i := range requestCnt {
+		reservation := lim.reserveN(t0, requestRU, InfDuration)
+		re.True(reservation.reserved)
+		expected := t0.Add(time.Duration(i+1) * expectedInterval)
+		re.Equal(expected, reservation.timeToAct)
+		if i > 0 {
+			re.False(reservation.timeToAct.Before(prev))
+			re.Equal(expectedInterval, reservation.timeToAct.Sub(prev))
+		}
+		prev = reservation.timeToAct
+	}
+}
+
+func TestReconfigureReflowsFutureReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	oldReservations := make([]*Reservation, 3)
+	for i := range oldReservations {
+		oldReservations[i] = lim.Reserve(ctx, InfDuration, t0, 1000)
+		re.True(oldReservations[i].reserved)
+	}
+	re.Equal(t0.Add(10*time.Second), oldReservations[0].timeToAct)
+	re.Equal(t0.Add(20*time.Second), oldReservations[1].timeToAct)
+	re.Equal(t0.Add(30*time.Second), oldReservations[2].timeToAct)
+
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{
+		newTokens:   5000,
+		newFillRate: 1000,
+	})
+
+	for i := range oldReservations {
+		re.Equal(0*time.Second, oldReservations[i].DelayFrom(t1),
+			"existing sleeping reservations should be reflowed after Reconfigure")
+	}
+
+	newReservation := lim.Reserve(ctx, InfDuration, t1, 1000)
+	re.True(newReservation.reserved)
+	re.Equal(t1, newReservation.timeToAct)
+	re.False(newReservation.timeToAct.Before(oldReservations[0].timeToAct),
+		"new reservations must not slip ahead of old sleepers after Reconfigure")
+}
+
+func TestReconfigureWakesFutureReservationWaiter(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reservation := lim.Reserve(ctx, time.Second, now, 1000)
+	re.True(reservation.Reserved())
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := WaitReservations(ctx, now, []*Reservation{reservation})
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	lim.Reconfigure(now.Add(20*time.Millisecond), tokenBucketReconfigureArgs{
+		newTokens:   1000,
+		newFillRate: 1000,
+	})
+
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		re.Fail("reconfigure should reflow and wake the existing future reservation")
+	}
+}
+
+func TestReconfigureKeepsFutureReservationsWithinNewFillRateEnvelope(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 5000, 0, 0, make(chan notifyMsg, 1))
+
+	const (
+		pageRU           = 256
+		reservationCount = 20
+	)
+	ctx := context.Background()
+	oldReservations := make([]*Reservation, reservationCount)
+	for i := range oldReservations {
+		oldReservations[i] = lim.Reserve(ctx, InfDuration, t0, pageRU)
+		re.True(oldReservations[i].reserved)
+	}
+
+	reconfigureAt := t0.Add(50 * time.Millisecond)
+	lim.Reconfigure(reconfigureAt, tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1000,
+		newBurst:    0,
+	})
+
+	reflowedRU := reservedRUInWindow(oldReservations, reconfigureAt, reconfigureAt.Add(time.Second))
+
+	lim.mu.Lock()
+	fillRateAfterReconfigure := lim.fillRate
+	lim.mu.Unlock()
+	re.LessOrEqual(reflowedRU, float64(fillRateAfterReconfigure)+pageRU,
+		"reflow keeps old reservations close to the post-reconfigure envelope")
+}
+
+func TestRemoveTokensReflowsFutureReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	a := lim.Reserve(ctx, InfDuration, t0, 500)
+	b := lim.Reserve(ctx, InfDuration, t0, 500)
+	re.Equal(5*time.Second, a.DelayFrom(t0))
+	re.Equal(10*time.Second, b.DelayFrom(t0))
+
+	lim.RemoveTokens(t1, 500)
+	re.Equal(9*time.Second, a.DelayFrom(t1))
+	re.Equal(14*time.Second, b.DelayFrom(t1))
+}
+
+func TestCancelAtReflowsRemainingFutureReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	a := lim.Reserve(ctx, InfDuration, t0, 500)
+	b := lim.Reserve(ctx, InfDuration, t0, 500)
+	c := lim.Reserve(ctx, InfDuration, t0, 500)
+	re.Equal(5*time.Second, a.DelayFrom(t0))
+	re.Equal(10*time.Second, b.DelayFrom(t0))
+	re.Equal(15*time.Second, c.DelayFrom(t0))
+
+	a.CancelAt(t1)
+	re.Equal(4*time.Second, b.DelayFrom(t1))
+	re.Equal(9*time.Second, c.DelayFrom(t1))
+}
+
+func reservedRUInWindow(reservations []*Reservation, start, end time.Time) float64 {
+	var total float64
+	for _, reservation := range reservations {
+		if !reservation.timeToAct.Before(start) && reservation.timeToAct.Before(end) {
+			total += reservation.tokens
+		}
+	}
+	return total
 }
 
 const testCaseRunTime = 4 * time.Second
