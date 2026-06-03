@@ -386,6 +386,63 @@ func TestReconfigureWakesFutureReservationWaiter(t *testing.T) {
 	}
 }
 
+func TestReconfigureToUnlimitedWakesFutureReservationWaiter(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	reservation := lim.Reserve(ctx, 2*time.Second, now, 1000)
+	re.True(reservation.Reserved())
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := WaitReservations(ctx, now, []*Reservation{reservation})
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	lim.Reconfigure(now.Add(20*time.Millisecond), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 0,
+		newBurst:    -1,
+	})
+
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		re.Fail("unlimited reconfigure should wake the existing future reservation")
+	}
+}
+
+func TestWaitReservationsWakesWhenCurrentBlockerCanceled(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	reservation := lim.Reserve(ctx, 2*time.Second, now, 1000)
+	re.True(reservation.Reserved())
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := WaitReservations(ctx, now, []*Reservation{reservation})
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	reservation.CancelAt(now.Add(20 * time.Millisecond))
+
+	select {
+	case err := <-resultCh:
+		re.Error(err)
+		re.Contains(err.Error(), "reservation canceled")
+	case <-time.After(300 * time.Millisecond):
+		re.Fail("canceling the current blocker should wake WaitReservations")
+	}
+}
+
 func TestReconfigureKeepsFutureReservationsWithinNewFillRateEnvelope(t *testing.T) {
 	re := require.New(t)
 	resetTime()

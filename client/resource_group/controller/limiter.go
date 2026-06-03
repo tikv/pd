@@ -20,9 +20,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"sync"
 	"time"
 
@@ -163,6 +163,8 @@ type Reservation struct {
 	canceled        bool
 }
 
+var errReservationCanceled = errors.New("reservation canceled")
+
 // Reserved returns whether the limiter can provide the requested number of tokens
 // within the maximum wait time. If `reserved` is false, `Delay()` will return
 // `InfDuration`, and `Cancel` does nothing.
@@ -205,7 +207,7 @@ func (r *Reservation) delayFromLocked(now time.Time) time.Duration {
 	return delay
 }
 
-func (r *Reservation) signalUpdateLocked() {
+func (r *Reservation) signalStateChangedLocked() {
 	if r.updateCh == nil {
 		r.updateCh = make(chan struct{})
 		return
@@ -214,18 +216,52 @@ func (r *Reservation) signalUpdateLocked() {
 	r.updateCh = make(chan struct{})
 }
 
-func (r *Reservation) waitSnapshot(now time.Time) (time.Duration, <-chan struct{}, bool, error, time.Duration, fillRate, float64) {
+type reservationWaitSnapshot struct {
+	delay            time.Duration
+	updateCh         <-chan struct{}
+	reserved         bool
+	err              error
+	needWaitDuration time.Duration
+	fillRate         fillRate
+	remainingTokens  float64
+}
+
+func (r *Reservation) waitSnapshot(now time.Time) reservationWaitSnapshot {
 	if r == nil {
-		return 0, nil, true, nil, 0, 0, 0
+		return reservationWaitSnapshot{reserved: true}
 	}
 	if r.lim != nil {
 		r.lim.mu.Lock()
 		defer r.lim.mu.Unlock()
 	}
-	if !r.reserved {
-		return InfDuration, nil, false, r.err, r.needWaitDuration, r.fillRate, r.remainingTokens
+	if r.canceled {
+		return reservationWaitSnapshot{
+			reserved: false,
+			err:      errReservationCanceled,
+		}
 	}
-	return r.delayFromLocked(now), r.updateCh, true, nil, r.needWaitDuration, r.fillRate, r.remainingTokens
+	if !r.reserved {
+		return reservationWaitSnapshot{
+			delay:            InfDuration,
+			reserved:         false,
+			err:              r.err,
+			needWaitDuration: r.needWaitDuration,
+			fillRate:         r.fillRate,
+			remainingTokens:  r.remainingTokens,
+		}
+	}
+	delay := r.delayFromLocked(now)
+	if delay <= 0 {
+		r.releaseFromFutureQueueLocked()
+	}
+	return reservationWaitSnapshot{
+		delay:            delay,
+		updateCh:         r.updateCh,
+		reserved:         true,
+		needWaitDuration: r.needWaitDuration,
+		fillRate:         r.fillRate,
+		remainingTokens:  r.remainingTokens,
+	}
 }
 
 // CancelAt indicates that the reservation holder will not perform the reserved action
@@ -238,11 +274,17 @@ func (r *Reservation) CancelAt(now time.Time) {
 	r.lim.mu.Lock()
 	defer r.lim.mu.Unlock()
 
-	if r.canceled || r.tokens == 0 || r.lim.burst < 0 || r.lim.fillRate == Inf {
+	if r.canceled {
 		return
 	}
 	r.canceled = true
-	r.releaseFromFutureQueueLocked()
+	if r.inFutureQueue {
+		r.signalStateChangedLocked()
+		r.releaseFromFutureQueueLocked()
+	}
+	if r.tokens == 0 || r.lim.burst < 0 || r.lim.fillRate == Inf {
+		return
+	}
 	_, tokens := r.lim.getTokens(now)
 	// calculate new number of tokens
 	tokens += r.tokens
@@ -461,7 +503,7 @@ func (lim *Limiter) cleanupFutureReservationsLocked(now time.Time) {
 	}
 	survivors := lim.futureReservations[:0]
 	for _, reservation := range lim.futureReservations {
-		if reservation == nil || !reservation.inFutureQueue || !reservation.timeToAct.After(now) {
+		if reservation == nil || !reservation.inFutureQueue || reservation.canceled || !reservation.timeToAct.After(now) {
 			if reservation != nil {
 				reservation.inFutureQueue = false
 			}
@@ -477,17 +519,29 @@ func (lim *Limiter) cleanupFutureReservationsLocked(now time.Time) {
 
 func (lim *Limiter) reflowFutureReservationsLocked(now time.Time) {
 	lim.cleanupFutureReservationsLocked(now)
-	if len(lim.futureReservations) == 0 || lim.burst < 0 || lim.fillRate == Inf {
+	if len(lim.futureReservations) == 0 {
+		return
+	}
+	if lim.burst < 0 || lim.fillRate == Inf {
+		for _, reservation := range lim.futureReservations {
+			if reservation == nil || !reservation.inFutureQueue || reservation.canceled {
+				continue
+			}
+			if !reservation.timeToAct.Equal(now) {
+				reservation.timeToAct = now
+				reservation.signalStateChangedLocked()
+			}
+		}
 		return
 	}
 	available := lim.tokens
 	for _, reservation := range lim.futureReservations {
-		if reservation != nil && reservation.inFutureQueue {
+		if reservation != nil && reservation.inFutureQueue && !reservation.canceled {
 			available += reservation.tokens
 		}
 	}
 	for _, reservation := range lim.futureReservations {
-		if reservation == nil || !reservation.inFutureQueue {
+		if reservation == nil || !reservation.inFutureQueue || reservation.canceled {
 			continue
 		}
 		available -= reservation.tokens
@@ -497,7 +551,7 @@ func (lim *Limiter) reflowFutureReservationsLocked(now time.Time) {
 		}
 		if !reservation.timeToAct.Equal(newTimeToAct) {
 			reservation.timeToAct = newTimeToAct
-			reservation.signalUpdateLocked()
+			reservation.signalStateChangedLocked()
 		}
 	}
 }
@@ -665,24 +719,23 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	var waited time.Duration
 	for {
 		longestDelayDuration := time.Duration(0)
-		updateChs := make([]<-chan struct{}, 0, len(reservations))
+		var blockerCh <-chan struct{}
 		for _, res := range reservations {
 			if res == nil {
 				continue
 			}
-			delay, updateCh, reserved, err, needWaitDuration, reservedFillRate, remainingTokens := res.waitSnapshot(logicalNow)
-			if !reserved {
+			snapshot := res.waitSnapshot(logicalNow)
+			if !snapshot.reserved {
 				cancel()
-				if err != nil {
-					return needWaitDuration, err
+				if snapshot.err != nil {
+					return snapshot.needWaitDuration, snapshot.err
 				}
-				return needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(needWaitDuration, reservedFillRate, remainingTokens)
+				return snapshot.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(
+					snapshot.needWaitDuration, snapshot.fillRate, snapshot.remainingTokens)
 			}
-			if delay > longestDelayDuration {
-				longestDelayDuration = delay
-			}
-			if updateCh != nil {
-				updateChs = append(updateChs, updateCh)
+			if snapshot.delay > longestDelayDuration {
+				longestDelayDuration = snapshot.delay
+				blockerCh = snapshot.updateCh
 			}
 		}
 		if longestDelayDuration <= 0 {
@@ -692,20 +745,18 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 
 		t := time.NewTimer(longestDelayDuration)
 		waitStart := time.Now()
-		cases := []reflect.SelectCase{
-			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(t.C)},
-		}
 		ctxDone := ctx.Done()
-		ctxIndex := -1
-		if ctxDone != nil {
-			ctxIndex = len(cases)
-			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctxDone)})
+		ctxCanceled := false
+		select {
+		case <-t.C:
+			// Recheck before proceeding. A concurrent reflow can push the
+			// blocker back while the timer is firing.
+		case <-ctxDone:
+			ctxCanceled = true
+		case <-blockerCh:
+			// The blocker reservation was reflowed or invalidated. Recompute
+			// delays with the updated reservation state.
 		}
-		for _, ch := range updateChs {
-			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)})
-		}
-
-		chosen, _, _ := reflect.Select(cases)
 		if !t.Stop() {
 			select {
 			case <-t.C:
@@ -715,18 +766,11 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 		elapsed := time.Since(waitStart)
 		waited += elapsed
 		logicalNow = logicalNow.Add(elapsed)
-		if chosen == 0 {
-			// We can proceed.
-			release()
-			return waited, nil
-		}
-		if chosen == ctxIndex {
+		if ctxCanceled {
 			// Context was canceled before we could proceed. Cancel the
 			// reservation, which may permit other events to proceed sooner.
 			cancel()
 			return 0, ctx.Err()
 		}
-		// A reservation was reflowed. Recompute the delays with the updated
-		// timeToAct values.
 	}
 }
