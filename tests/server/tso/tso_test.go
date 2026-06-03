@@ -113,6 +113,55 @@ func (s *tsoTestSuite) TestDelaySyncTimestamp() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkDelaySyncTimestamp)
 }
 
+func (s *tsoTestSuite) TestServeBeforeRaftClusterLoaded() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkServeBeforeRaftClusterLoaded)
+}
+
+func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestCluster) {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	leaderServer := cluster.GetLeaderServer()
+	var nextLeaderServer *tests.TestServer
+	for _, s := range cluster.GetServers() {
+		if s.GetConfig().Name != cluster.GetLeader() {
+			nextLeaderServer = s
+		}
+	}
+	re.NotNil(nextLeaderServer)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayCreateRaftCluster", `return(5000)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayCreateRaftCluster"))
+	}()
+
+	re.NoError(leaderServer.ResignLeaderWithRetry())
+	re.True(nextLeaderServer.WaitLeader())
+	re.Nil(nextLeaderServer.GetRaftCluster())
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	defer conn.Close()
+	req := &pdpb.TsoRequest{
+		Header: testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		Count:  1,
+	}
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
+	re.NoError(tsoClient.Send(req))
+	resp, err := tsoClient.Recv()
+	re.NoError(err)
+	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+
+	testutil.Eventually(re, func() bool {
+		return nextLeaderServer.GetRaftCluster() != nil
+	})
+}
+
 func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {
 	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
