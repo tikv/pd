@@ -213,17 +213,21 @@ func TestHandleFullSyncResponseResetsStaleRegions(t *testing.T) {
 			Version: 2,
 		},
 	}
-	re.NoError(rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, err := rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 		StartIndex: 0,
 		Regions:    []*metapb.Region{latestRegion},
-	}, bc, storageWithRegionStorage, state))
+	}, bc, storageWithRegionStorage, state)
+	re.NoError(err)
+	re.True(handled)
 	re.False(rc.IsRunning())
 	re.True(state.fullSyncing)
-	re.NoError(rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, err = rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 		StartIndex: 20,
-	}, bc, storageWithRegionStorage, state))
+	}, bc, storageWithRegionStorage, state)
+	re.NoError(err)
+	re.True(handled)
 
 	re.True(rc.IsRunning())
 	re.False(state.fullSyncing)

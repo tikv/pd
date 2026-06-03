@@ -225,9 +225,9 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 
 	re.NoError(syncer.sendDownstream(context.Background(), "pd-follower", syncStream, false))
 	responses := stream.sentResponses()
-	re.Len(responses, 3)
-	re.Equal(liveStartIndex, responses[2].GetStartIndex())
-	re.Equal([]*metapb.Region{{Id: 102}}, responses[2].GetRegions())
+	re.Len(responses, 4)
+	re.Equal(liveStartIndex, responses[3].GetStartIndex())
+	re.Equal([]*metapb.Region{{Id: 102}}, responses[3].GetRegions())
 	re.Equal(liveStartIndex+1, syncStream.getSendIndex())
 }
 
@@ -1077,6 +1077,7 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	re := require.New(t)
 	syncer := &RegionSyncer{history: newTestHistoryBuffer(defaultHistoryBufferSize)}
+	syncer.history.resetWithIndex(10)
 	first := newTestRegion(1)
 	second := newTestRegion(2)
 	syncer.history.record(first)
@@ -1086,14 +1087,14 @@ func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	request := &pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member:     &pdpb.Member{Name: "pd2"},
-		StartIndex: 0,
+		StartIndex: 10,
 	}
 
 	syncStream := newRegionSyncStream(stream, syncStartIndex)
 	err := syncer.syncHistoryRegion(context.Background(), request, syncStream, syncStartIndex)
 
 	re.NoError(err)
-	re.Equal(uint64(0), stream.lastResponse().GetStartIndex())
+	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
 	re.Equal([]*metapb.Region{{Id: 1}}, stream.lastResponse().GetRegions())
 }
 
