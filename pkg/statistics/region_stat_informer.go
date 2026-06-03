@@ -15,12 +15,17 @@
 package statistics
 
 import (
+	"time"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 // RegionStatInformer provides access to a shared informer of statistics.
 type RegionStatInformer interface {
+	// GetRegionDownDuration returns how long a region has had down peers,
+	// based on PD's own startDownPeerTS tracking. Returns 0 if not tracked.
+	GetRegionDownDuration(regionID uint64) time.Duration
 	GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *HotPeerStat
 	IsRegionHot(region *core.RegionInfo) bool
 	// GetHotPeerStats return the read or write statistics for hot regions.

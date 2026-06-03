@@ -207,6 +207,7 @@ var (
 	ruleCheckerNeedSplitCounter                   = ruleCheckerCounterWithEvent("need-split")
 	ruleCheckerSetCacheCounter                    = ruleCheckerCounterWithEvent("set-cache")
 	ruleCheckerReplaceDownCounter                 = ruleCheckerCounterWithEvent("replace-down")
+	ruleCheckerReplaceDownByDurationCounter       = ruleCheckerCounterWithEvent("replace-down-by-duration")
 	ruleCheckerPromoteWitnessCounter              = ruleCheckerCounterWithEvent("promote-witness")
 	ruleCheckerReplaceOfflineCounter              = ruleCheckerCounterWithEvent("replace-offline")
 	ruleCheckerAddRulePeerCounter                 = ruleCheckerCounterWithEvent("add-rule-peer")
@@ -275,6 +276,7 @@ var (
 	replicaCheckerNoStoreOfflineCounter           = replicaCheckerCounterWithEvent("no-store-offline")
 	replicaCheckerNoStoreDownCounter              = replicaCheckerCounterWithEvent("no-store-down")
 	replicaCheckerReplaceOfflineFailedCounter     = replicaCheckerCounterWithEvent("replace-offline-replica-failed")
+	replicaCheckerReplaceDownByDurationCounter    = replicaCheckerCounterWithEvent("replace-down-by-duration")
 	replicaCheckerReplaceDownFailedCounter        = replicaCheckerCounterWithEvent("replace-down-replica-failed")
 
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")

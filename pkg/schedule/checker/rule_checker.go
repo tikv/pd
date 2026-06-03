@@ -157,6 +157,10 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				ruleCheckerReplaceDownCounter.Inc()
 				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
+			if c.isPeerDownTooLong(region) {
+				ruleCheckerReplaceDownByDurationCounter.Inc()
+				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
+			}
 			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
 			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
@@ -564,6 +568,14 @@ func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 		return false
 	}
 	return store.DownTime() >= c.cluster.GetCheckerConfig().GetMaxStoreDownTime()
+}
+
+func (c *RuleChecker) isPeerDownTooLong(region *core.RegionInfo) bool {
+	downDuration := c.cluster.GetRegionDownDuration(region.GetID())
+	if downDuration <= 0 {
+		return false
+	}
+	return downDuration >= c.cluster.GetCheckerConfig().GetMaxDownPeerDuration()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {

@@ -104,6 +104,7 @@ type SharedConfigProvider interface {
 	GetLowSpaceRatio() float64
 	GetHighSpaceRatio() float64
 	GetMaxStoreDownTime() time.Duration
+	GetMaxDownPeerDuration() time.Duration
 	GetLocationLabels() []string
 	CheckLabelProperty(string, []*metapb.StoreLabel) bool
 	GetClusterVersion() *semver.Version

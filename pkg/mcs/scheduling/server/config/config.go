@@ -336,6 +336,11 @@ func (o *PersistConfig) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
+// GetMaxDownPeerDuration returns the max duration a peer can be down before replacement.
+func (o *PersistConfig) GetMaxDownPeerDuration() time.Duration {
+	return o.GetScheduleConfig().MaxDownPeerDuration.Duration
+}
+
 // GetIsolationLevel returns the isolation label for each region.
 func (o *PersistConfig) GetIsolationLevel() string {
 	return o.GetReplicationConfig().IsolationLevel

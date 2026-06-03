@@ -1513,6 +1513,31 @@ func (suite *ruleCheckerTestSuite) TestFixDownPeerWithNoWitness() {
 	re.Nil(suite.rc.Check(r))
 }
 
+func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWhenStoreUp() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+
+	region := suite.cluster.GetRegion(1)
+	re.Nil(suite.rc.Check(region))
+
+	// Store 3 is UP but peer on store 3 is down.
+	r := region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(3), DownSeconds: 600},
+	}))
+	// Default MaxDownPeerDuration is 1h, peer only down for 10min → no replacement.
+	re.Nil(suite.rc.Check(r))
+
+	// Peer has been down 1h, exceeds default 30min MaxDownPeerDuration → should replace.
+	suite.cluster.SetRegionDownDuration(1, 1*time.Hour)
+	op := suite.rc.Check(r)
+	re.NotNil(op)
+	re.Contains(op.Desc(), "replace-rule-down-peer")
+}
+
 func (suite *ruleCheckerTestSuite) TestFixDownWitnessPeer() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})

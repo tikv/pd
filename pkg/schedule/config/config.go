@@ -79,6 +79,7 @@ const (
 	defaultSwitchWitnessInterval   = time.Hour
 	defaultPatrolRegionInterval    = 10 * time.Millisecond
 	defaultMaxStoreDownTime        = 30 * time.Minute
+	defaultMaxDownPeerDuration     = 30 * time.Minute
 	defaultHotRegionsWriteInterval = 10 * time.Minute
 	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
 	defaultMaxStorePreparingTime = 48 * time.Hour
@@ -199,6 +200,10 @@ type ScheduleConfig struct {
 	// MaxStoreDownTime is the max duration after which
 	// a store will be considered to be down if it hasn't reported heartbeats.
 	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
+	// MaxDownPeerDuration is the max duration a peer can be down before PD replaces it,
+	// even if the store itself is still up (sending heartbeats). This handles scenarios
+	// where a store is in a crash-loop or specific peers are persistently down.
+	MaxDownPeerDuration typeutil.Duration `toml:"max-down-peer-duration" json:"max-down-peer-duration"`
 	// MaxStorePreparingTime is the max duration after which
 	// a store will be considered to be preparing.
 	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
@@ -371,6 +376,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
 	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
 	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
+	configutil.AdjustDuration(&c.MaxDownPeerDuration, defaultMaxDownPeerDuration)
 	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
 	if !meta.IsDefined("max-store-preparing-time") {
 		configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)

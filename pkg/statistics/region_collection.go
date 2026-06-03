@@ -541,3 +541,20 @@ func logDownPeerWithNoDisconnectedStore(region *core.RegionInfo, stores []*core.
 			zap.Uint64("store-id", p.GetPeer().GetStoreId()))
 	}
 }
+
+// GetRegionDownDuration returns how long the region has had down peers,
+// based on PD's own tracking (startDownPeerTS). Returns 0 if the region
+// is not tracked as having down peers.
+func (r *RegionStatistics) GetRegionDownDuration(regionID uint64) time.Duration {
+	r.RLock()
+	defer r.RUnlock()
+	info, ok := r.stats[DownPeer][regionID]
+	if !ok || info == nil {
+		return 0
+	}
+	ts := info.(*RegionInfoWithTS).startDownPeerTS
+	if ts == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(ts, 0))
+}

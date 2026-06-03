@@ -577,6 +577,36 @@ func (suite *replicaCheckerTestSuite) TestFixDownPeer() {
 	re.Nil(rc.Check(region))
 }
 
+func (suite *replicaCheckerTestSuite) TestReplaceDownPeerWhenStoreUp() {
+	re := suite.Require()
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(suite.ctx, opt)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	rc := NewReplicaChecker(tc, tc.GetCheckerConfig(), cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	tc.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	tc.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	tc.AddLabelsStore(4, 1, map[string]string{"zone": "z4"})
+
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	region := tc.GetRegion(1)
+	re.Nil(rc.Check(region))
+
+	// Store 3 is UP but peer on store 3 is down.
+	r := region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(3), DownSeconds: 600},
+	}))
+	// Default MaxDownPeerDuration is 30min, peer only down for 10min → no replacement.
+	re.Nil(rc.Check(r))
+
+	// Peer has been down 1h, exceeds default 30min MaxDownPeerDuration → should replace.
+	tc.SetRegionDownDuration(1, 1*time.Hour)
+	op := rc.Check(r)
+	re.NotNil(op)
+	re.Contains(op.Desc(), "replace-down-replica")
+}
+
 // See issue: https://github.com/tikv/pd/issues/3705
 func (suite *replicaCheckerTestSuite) TestFixOfflinePeer() {
 	re := suite.Require()

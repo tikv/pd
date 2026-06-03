@@ -193,6 +193,14 @@ func (c *Cluster) GetRegionStats() *statistics.RegionStatistics {
 	return c.regionStats
 }
 
+// GetRegionDownDuration returns how long a region has had down peers.
+func (c *Cluster) GetRegionDownDuration(regionID uint64) time.Duration {
+	if c.regionStats == nil {
+		return 0
+	}
+	return c.regionStats.GetRegionDownDuration(regionID)
+}
+
 // GetLabelStats gets label statistics.
 func (c *Cluster) GetLabelStats() *statistics.LabelStatistics {
 	return c.labelStats

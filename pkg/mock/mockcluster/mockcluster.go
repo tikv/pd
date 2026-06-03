@@ -65,6 +65,7 @@ type Cluster struct {
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
+	regionDownDurations map[uint64]time.Duration
 }
 
 // NewCluster creates a new Cluster
@@ -80,6 +81,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
+		regionDownDurations:     map[uint64]time.Duration{},
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -153,6 +155,16 @@ func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())
+}
+
+// GetRegionDownDuration returns the mock down duration for a region, or 0 if not set.
+func (mc *Cluster) GetRegionDownDuration(regionID uint64) time.Duration {
+	return mc.regionDownDurations[regionID]
+}
+
+// SetRegionDownDuration sets the mock down duration for a region.
+func (mc *Cluster) SetRegionDownDuration(regionID uint64, d time.Duration) {
+	mc.regionDownDurations[regionID] = d
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.

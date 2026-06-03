@@ -448,6 +448,11 @@ func (o *PersistOptions) GetMaxStoreDownTime() time.Duration {
 	return o.GetScheduleConfig().MaxStoreDownTime.Duration
 }
 
+// GetMaxDownPeerDuration returns the max duration a peer can be down before replacement.
+func (o *PersistOptions) GetMaxDownPeerDuration() time.Duration {
+	return o.GetScheduleConfig().MaxDownPeerDuration.Duration
+}
+
 // GetMaxStorePreparingTime returns the max preparing time of a store.
 func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
 	return o.GetScheduleConfig().MaxStorePreparingTime.Duration

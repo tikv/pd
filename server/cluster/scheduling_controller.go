@@ -261,6 +261,14 @@ func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKind
 	return sc.hotStat.GetStoresLoads()
 }
 
+// GetRegionDownDuration returns how long a region has had down peers.
+func (sc *schedulingController) GetRegionDownDuration(regionID uint64) time.Duration {
+	if sc.regionStats == nil {
+		return 0
+	}
+	return sc.regionStats.GetRegionDownDuration(regionID)
+}
+
 // IsRegionHot checks if a region is in hot state.
 func (sc *schedulingController) IsRegionHot(region *core.RegionInfo) bool {
 	return sc.hotStat.IsRegionHot(region, sc.opt.GetHotRegionCacheHitsThreshold())
