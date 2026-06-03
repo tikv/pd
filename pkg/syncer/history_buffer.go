@@ -308,6 +308,12 @@ func (h *historyBuffer) getNextIndex() uint64 {
 	return h.index
 }
 
+func (h *historyBuffer) getFirstIndex() uint64 {
+	h.RLock()
+	defer h.RUnlock()
+	return h.firstIndex()
+}
+
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()

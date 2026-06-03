@@ -99,7 +99,7 @@ func TestErrorCode(t *testing.T) {
 
 func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 	re := require.New(t)
-	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer, _ := newTestRegionSyncer(t)
 	syncer.history.resetWithIndex(10)
 	syncer.streamingRunning.Store(true)
 

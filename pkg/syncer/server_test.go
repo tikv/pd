@@ -66,13 +66,9 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 
 	stream := newMockSyncRegionsServer()
 	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
-<<<<<<< HEAD
 	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
-=======
-	syncStream, err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
->>>>>>> 84f5009ce (server: tidy follower region reset tests)
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member:     &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}},
 		StartIndex: 0,
@@ -162,7 +158,7 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 		}, nil)
 		closedBC.PutRegion(region)
 	}
-	closedSyncer := newTestRegionSyncer(t, closedBC)
+	closedSyncer := newTestRegionSyncerWithBasicCluster(t, closedBC)
 	closedSyncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
 	closedSyncer.history.resetWithIndex(10)
 	closedStream := &testServerStream{}
@@ -189,7 +185,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	re := require.New(t)
 	bc := core.NewBasicCluster()
 	bc.PutRegion(newHistoryBufferTestRegion(1))
-	syncer := newTestRegionSyncer(t, bc)
+	syncer := newTestRegionSyncerWithBasicCluster(t, bc)
 	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
 	syncer.history.resetWithIndex(10)
 
@@ -233,7 +229,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	re.Equal(liveStartIndex+1, syncStream.getSendIndex())
 }
 
-func TestSyncFullRegionsRestartsWhenCatchUpHistoryExceedsMax(t *testing.T) {
+func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	re := require.New(t)
 	syncer, bc := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
 	syncer.history = newHistoryBufferWithConfig(1, 1, 1, storage.NewStorageWithMemoryBackend())
@@ -258,34 +254,16 @@ func TestSyncFullRegionsRestartsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	}
 
 	close(unblockSend)
-<<<<<<< HEAD
-	re.NotNil(<-stream.sendCh)
-	re.Error(<-done)
-=======
 	fullResp := <-stream.sendCh
 	re.Equal(uint64(0), fullResp.GetStartIndex())
 	re.Len(fullResp.GetRegions(), 1)
 
-	restartedResp := <-stream.sendCh
-	re.Equal(uint64(0), restartedResp.GetStartIndex())
-	re.Len(restartedResp.GetRegions(), 3)
-
-	completeResp := <-stream.sendCh
-	re.Equal(uint64(102), completeResp.GetStartIndex())
-	re.Empty(completeResp.GetRegions())
-
-	result := <-done
-	if result.syncStream != nil {
-		defer syncer.unbindStream("pd-follower", result.syncStream)
-	}
-
-	re.NoError(result.err)
->>>>>>> 84f5009ce (server: tidy follower region reset tests)
+	re.Equal(codes.ResourceExhausted, status.Code(<-done))
 }
 
 func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 	re := require.New(t)
-	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer := newTestRegionSyncerWithBasicCluster(t, core.NewBasicCluster())
 	syncer.history = newHistoryBufferWithConfig(2, 2, 1, storage.NewStorageWithMemoryBackend())
 	syncer.history.resetWithIndex(10)
 	syncer.history.record(newHistoryBufferTestRegion(10))
@@ -998,7 +976,7 @@ func TestSyncFallsBackToFullSyncWhenHistoryMissing(t *testing.T) {
 	waitTestRegionSyncerUnavailable(re, done)
 }
 
-func TestFullSyncRestartsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T) {
+func TestFullSyncDisconnectsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T) {
 	re := require.New(t)
 	syncer, bc := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
 	syncer.history = newHistoryBufferWithConfig(1, 1, 1, syncer.history.kv)
@@ -1025,22 +1003,9 @@ func TestFullSyncRestartsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T) {
 	re.Len(resp.GetRegions(), 1)
 	re.Equal(uint64(1), resp.GetRegions()[0].GetId())
 
-	resp = mustRecvSyncRegionResponse(t, stream, "expected restarted full sync response")
-	re.Equal(uint64(0), resp.GetStartIndex())
-	re.Len(resp.GetRegions(), 3)
-	regionIDs := make([]uint64, 0, len(resp.GetRegions()))
-	for _, region := range resp.GetRegions() {
-		regionIDs = append(regionIDs, region.GetId())
-	}
-	re.ElementsMatch([]uint64{1, 2, 3}, regionIDs)
-
-	resp = mustRecvSyncRegionResponse(t, stream, "expected full sync completion response")
-	re.Equal(uint64(102), resp.GetStartIndex())
-	re.Empty(resp.GetRegions())
-	waitTestRegionSyncerBound(re, syncer)
-
-	cancel()
-	waitTestRegionSyncerUnavailable(re, done)
+	syncErr := <-done
+	re.Equal(codes.ResourceExhausted, status.Code(syncErr))
+	re.Empty(syncer.GetAllDownstreamNames())
 }
 
 func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
@@ -1082,6 +1047,15 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 
 func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSyncer, *core.BasicCluster) {
 	t.Helper()
+	bc := core.NewBasicCluster()
+	for _, region := range regions {
+		bc.PutRegion(region)
+	}
+	return newTestRegionSyncerWithBasicCluster(t, bc), bc
+}
+
+func newTestRegionSyncerWithBasicCluster(t *testing.T, bc *core.BasicCluster) *RegionSyncer {
+	t.Helper()
 	re := require.New(t)
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
@@ -1090,10 +1064,6 @@ func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSync
 		re.NoError(regionStorage.Close())
 	})
 
-	bc := core.NewBasicCluster()
-	for _, region := range regions {
-		bc.PutRegion(region)
-	}
 	server := mockserver.NewMockServer(
 		context.Background(),
 		nil,
@@ -1101,7 +1071,7 @@ func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSync
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		bc,
 	)
-	return NewRegionSyncer(server), bc
+	return NewRegionSyncer(server)
 }
 
 func newTestSyncRegion(regionID, peerID uint64) *core.RegionInfo {

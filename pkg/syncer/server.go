@@ -543,20 +543,9 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
 	records, nextIndex, ok := s.history.retainedRecordsFrom(syncStartIndex)
 	if !ok {
-<<<<<<< HEAD
 		return status.Errorf(codes.ResourceExhausted,
 			"history records from full sync start index %d to %d are no longer available",
 			syncStartIndex, nextIndex)
-=======
-		s.unbindStream(name, syncStream)
-		syncStream.sendMu.Unlock()
-		log.Warn("region history buffer overflow during full synchronization, restart full synchronization",
-			zap.String("requested-server", name),
-			zap.String("server", s.server.Name()),
-			zap.Uint64("catch-up-index", retainIndex),
-			zap.Uint64("next-index", nextIndex))
-		return s.syncFullRegions(ctx, name, stream)
->>>>>>> 84f5009ce (server: tidy follower region reset tests)
 	}
 	if len(records) > 0 {
 		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
