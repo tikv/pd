@@ -88,6 +88,20 @@ func TestServiceSafePointV2Operations(t *testing.T) {
 	re.Equal(uint64(10), minSafePoint)
 	re.Empty(getGCBarriers())
 
+	for _, ttl := range []int64{0, -1} {
+		minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point", ttl, 20)
+		re.Error(err)
+		re.ErrorContains(err, "invalid ttl")
+		re.Equal(uint64(0), minSafePoint)
+	}
+	re.Empty(getGCBarriers())
+
+	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "_reserved_get_min_ssp", 3600, 20)
+	re.Error(err)
+	re.ErrorContains(err, "reserved for GetMinServiceSafePointV2")
+	re.Equal(uint64(0), minSafePoint)
+	re.Empty(getGCBarriers())
+
 	// The safePoint < minSafePoint is rejected, and the returned minSafePoint is still 10.
 	minSafePoint, err = legacyClientV2.SetServiceSafePointV2(ctx, ks1.Id, "v2-service-safe-point", 3600, 5)
 	re.NoError(err)
