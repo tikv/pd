@@ -117,7 +117,7 @@ func (c *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
-		if c.isPeerDownTooLong(region) {
+		if hasPeerDownTooLong(c.cluster, region) {
 			replicaCheckerReplaceDownByDurationCounter.Inc()
 		} else if store.DownTime() < c.conf.GetMaxStoreDownTime() {
 			continue
@@ -294,10 +294,11 @@ func (c *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 	}
 }
 
-func (c *ReplicaChecker) isPeerDownTooLong(region *core.RegionInfo) bool {
-	downDuration := c.cluster.GetRegionDownDuration(region.GetID())
+// hasPeerDownTooLong checks whether a region has had down peers longer than the configured threshold.
+func hasPeerDownTooLong(cluster sche.CheckerCluster, region *core.RegionInfo) bool {
+	downDuration := cluster.GetRegionDownDuration(region.GetID())
 	if downDuration <= 0 {
 		return false
 	}
-	return downDuration >= c.conf.GetMaxDownPeerDuration()
+	return downDuration >= cluster.GetCheckerConfig().GetMaxDownPeerDuration()
 }

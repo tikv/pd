@@ -157,7 +157,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				ruleCheckerReplaceDownCounter.Inc()
 				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
-			if c.isPeerDownTooLong(region) {
+			if hasPeerDownTooLong(c.cluster, region) {
 				ruleCheckerReplaceDownByDurationCounter.Inc()
 				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
@@ -568,14 +568,6 @@ func (c *RuleChecker) isStoreDownTimeHitMaxDownTime(storeID uint64) bool {
 		return false
 	}
 	return store.DownTime() >= c.cluster.GetCheckerConfig().GetMaxStoreDownTime()
-}
-
-func (c *RuleChecker) isPeerDownTooLong(region *core.RegionInfo) bool {
-	downDuration := c.cluster.GetRegionDownDuration(region.GetID())
-	if downDuration <= 0 {
-		return false
-	}
-	return downDuration >= c.cluster.GetCheckerConfig().GetMaxDownPeerDuration()
 }
 
 func (c *RuleChecker) isOfflinePeer(peer *metapb.Peer) bool {

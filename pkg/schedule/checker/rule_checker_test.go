@@ -1528,7 +1528,7 @@ func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWhenStoreUp() {
 	r := region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
 		{Peer: region.GetStorePeer(3), DownSeconds: 600},
 	}))
-	// Default MaxDownPeerDuration is 1h, peer only down for 10min → no replacement.
+	// Default MaxDownPeerDuration is 30min, peer only down for 10min → no replacement.
 	re.Nil(suite.rc.Check(r))
 
 	// Peer has been down 1h, exceeds default 30min MaxDownPeerDuration → should replace.

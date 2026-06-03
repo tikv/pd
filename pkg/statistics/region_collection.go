@@ -552,9 +552,9 @@ func (r *RegionStatistics) GetRegionDownDuration(regionID uint64) time.Duration 
 	if !ok || info == nil {
 		return 0
 	}
-	ts := info.(*RegionInfoWithTS).startDownPeerTS
-	if ts == 0 {
+	ri, ok := info.(*RegionInfoWithTS)
+	if !ok || ri.startDownPeerTS == 0 {
 		return 0
 	}
-	return time.Since(time.Unix(ts, 0))
+	return time.Since(time.Unix(ri.startDownPeerTS, 0))
 }
