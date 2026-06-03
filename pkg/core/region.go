@@ -249,7 +249,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuStats = h.GetCpuStats()
-		region.cpuUsage = h.CpuUsage
+		region.cpuUsage = h.GetCpuUsage() //nolint:staticcheck
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
