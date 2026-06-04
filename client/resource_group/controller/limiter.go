@@ -158,9 +158,11 @@ type Reservation struct {
 	fillRate        fillRate
 	remainingTokens float64
 	err             error
-	updateCh        chan struct{}
-	inFutureQueue   bool
-	canceled        bool
+	// updateCh is closed (then replaced) whenever reflow changes this reservation's
+	// timeToAct, waking a WaitReservations sleeper so it recomputes the new schedule.
+	updateCh      chan struct{}
+	inFutureQueue bool
+	canceled      bool
 }
 
 var errReservationCanceled = errors.New("reservation canceled")
@@ -216,6 +218,9 @@ func (r *Reservation) signalStateChangedLocked() {
 	r.updateCh = make(chan struct{})
 }
 
+// reservationWaitSnapshot is a lock-free, point-in-time copy of the fields
+// WaitReservations needs, so the caller can sleep on (delay, updateCh) without
+// holding lim.mu while a concurrent reflow may be mutating the reservation.
 type reservationWaitSnapshot struct {
 	delay            time.Duration
 	updateCh         <-chan struct{}
@@ -226,6 +231,9 @@ type reservationWaitSnapshot struct {
 	remainingTokens  float64
 }
 
+// waitSnapshot grabs lim.mu once, copies out the wait-decision fields (and drops
+// the reservation from the future queue if it is already due), so the caller can
+// select on the returned snapshot without holding the lock.
 func (r *Reservation) waitSnapshot(now time.Time) reservationWaitSnapshot {
 	if r == nil {
 		return reservationWaitSnapshot{reserved: true}
