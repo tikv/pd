@@ -653,7 +653,7 @@ func (c *serviceDiscovery) Close() {
 		log.Info("[pd] close service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
-				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 			}
 			c.clientConns.Delete(key)
 			return true
@@ -1119,6 +1119,6 @@ func (c *serviceDiscovery) RemoveClientConn(url string) {
 		return
 	}
 	if err := cc.(*grpc.ClientConn).Close(); err != nil {
-		log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 	}
 }

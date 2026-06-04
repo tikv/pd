@@ -200,7 +200,7 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	}
 	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
 	if err != nil {
-		log.Error("[tso] failed to get tso leader client connection",
+		log.Warn("[tso] failed to get tso leader client connection",
 			zap.String("serving-url", url),
 			errs.ZapError(err),
 		)

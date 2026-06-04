@@ -218,7 +218,7 @@ func (c *tsoServiceDiscovery) Close() {
 
 	c.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+			log.Warn("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
 		c.clientConns.Delete(key)
 		return true
@@ -325,7 +325,7 @@ func (c *tsoServiceDiscovery) RemoveClientConn(url string) {
 		return
 	}
 	if err := cc.(*grpc.ClientConn).Close(); err != nil {
-		log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		log.Warn("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 	}
 }
 

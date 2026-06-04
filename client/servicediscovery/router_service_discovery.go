@@ -111,7 +111,7 @@ func (r *routerServiceDiscovery) RemoveClientConn(url string) {
 		return
 	}
 	if err := cc.(*grpc.ClientConn).Close(); err != nil {
-		log.Error("[router service] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		log.Warn("[router service] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 	}
 }
 
