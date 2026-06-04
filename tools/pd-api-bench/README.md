@@ -23,6 +23,8 @@ The api bench cases we support are as follows:
 2. gRPC
 
     + GetRegion
+    + GetPrevRegion
+    + GetRegionByID
     + GetStore
     + GetStores
     + ScanRegions
@@ -60,6 +62,9 @@ The api bench cases we support are as follows:
 
 -debug
 > print the output of api response for debug
+
+-enable-router-client
+> enable the PD client router client. When enabled, `GetRegion`, `GetPrevRegion`, and `GetRegionByID` use QueryRegion. Set `--enable-router-client=false` to run unary region lookup benchmarks.
 
 ### Run Shell
 
