@@ -894,7 +894,7 @@ func (c *KeyspaceConfig) Validate() error {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
 	}
 	for _, endpoint := range c.MetaServiceGroups {
-		if endpoint == "" {
+		if strings.TrimSpace(endpoint) == "" {
 			return errors.New("[keyspace] meta-service group addresses cannot be empty")
 		}
 	}
@@ -954,7 +954,7 @@ func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 	for name, endpoint := range c.MetaServiceGroups {
 		ret[name] = endpoint
 	}
-	return c.MetaServiceGroups
+	return ret
 }
 
 // SetMetaServiceGroups updates the current meta-service-group configuration.

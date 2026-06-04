@@ -78,8 +78,9 @@ func AddMetaServiceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
-	// Constructs new meta-service groups.
-	currentGroups := manager.GetGroups()
+	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
+	newCfg := oldCfg.Clone()
+	currentGroups := newCfg.GetMetaServiceGroups()
 	newGroups := make(map[string]string, len(currentGroups)+len(requests))
 	for _, request := range requests {
 		if request.ID == "" || request.Addresses == "" {
@@ -100,9 +101,6 @@ func AddMetaServiceGroups(c *gin.Context) {
 	for id, addresses := range currentGroups {
 		newGroups[id] = addresses
 	}
-	// Update persisted pd config.
-	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
-	newCfg := oldCfg.Clone()
 	newCfg.MetaServiceGroups = newGroups
 	if err = svr.SetKeyspaceConfig(oldCfg, newCfg); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())

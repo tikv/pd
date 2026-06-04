@@ -241,6 +241,7 @@ func (manager *Manager) UpdateConfig(cfg Config) {
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
+// todo: make all etcd operators in one txn to make the operation atomic.
 func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspacepb.KeyspaceMeta, error) {
 	tracer := &createKeyspaceTracer{}
 	tracer.Begin()
@@ -393,6 +394,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 }
 
 // CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
+// todo: make all etcd operators in one txn to make the operation atomic.
 func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
 	if request.ID == nil {
 		return nil, errors.New("keyspace id is empty")

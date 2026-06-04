@@ -210,7 +210,7 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 		return h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
 	case "keyspace":
-		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
+		return h.updateKeyspaceConfig(kp[len(kp)-1], value)
 	case "micro-service":
 		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
 	case "controller":
@@ -219,8 +219,8 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value any) error {
-	oldCfg := config.Keyspace
+func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
+	oldCfg := h.svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()
 	updated, found, err := jsonutil.AddKeyValue(&newCfg, key, value)
 	if err != nil {
@@ -232,7 +232,7 @@ func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, va
 	}
 
 	if updated {
-		err = h.svr.SetKeyspaceConfig(&oldCfg, newCfg)
+		err = h.svr.SetKeyspaceConfig(oldCfg, newCfg)
 	}
 	return err
 }
