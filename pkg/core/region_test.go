@@ -1485,6 +1485,35 @@ func TestCheckAndPutRegionNoOverlap(t *testing.T) {
 	re.Equal(2, regions.TreeLen())
 }
 
+func TestCheckAndPutRegionCleansPendingSubTreeOverlap(t *testing.T) {
+	re := require.New(t)
+	ctx := ContextTODO()
+	regions := NewRegionsInfo()
+
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("c"))
+	regions.CheckAndPutRegion(region1)
+	re.Equal(1, regions.GetStoreRegionCount(1))
+
+	// Simulate the split root/subtree update window in region heartbeat:
+	// region1 is removed from the root tree but still exists in the subtree.
+	left := NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
+	overlaps, err := regions.CheckAndPutRootTree(ctx, left)
+	re.NoError(err)
+	re.Len(overlaps, 1)
+	re.Equal(1, regions.GetStoreRegionCount(1))
+	re.Nil(regions.GetRegion(1))
+
+	// The normal checked path sees no root-tree overlap, but it still must scan
+	// and clean the pending subtree overlap from region1.
+	right := NewTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	overlaps = regions.CheckAndPutRegion(right)
+	re.Empty(overlaps)
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Equal(2, regions.TreeLen())
+	re.Equal(1, regions.GetStoreRegionCount(1))
+	re.ElementsMatch([]*RegionInfo{right}, regions.GetStoreRegions(1))
+}
+
 func TestResetRegionCache(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
