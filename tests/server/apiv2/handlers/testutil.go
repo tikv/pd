@@ -356,6 +356,7 @@ func tryAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, r
 	re.NoError(json.Unmarshal(data, &groups))
 	return resp.StatusCode, groups
 }
+
 // MustRemoveKeyspacesFromGroup removes keyspaces from a keyspace group with HTTP API.
 func MustRemoveKeyspacesFromGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32) *endpoint.KeyspaceGroup {
 	params := &handlers.RemoveKeyspacesFromGroupParams{
