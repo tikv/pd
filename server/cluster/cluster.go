@@ -895,11 +895,21 @@ func newLoadedRegionChecker(cluster *RaftCluster) *loadedRegionChecker {
 
 func (l *loadedRegionChecker) checkAndPut(region *core.RegionInfo) []*core.RegionInfo {
 	noOverlap := l.hasNoOverlap(region)
-	l.updateMaxEndKey(region)
+	var overlaps []*core.RegionInfo
 	if noOverlap {
-		return l.cluster.CheckAndPutRegionNoOverlap(region)
+		overlaps = l.cluster.CheckAndPutRegionNoOverlap(region)
+	} else {
+		overlaps = l.cluster.CheckAndPutRegion(region)
 	}
-	return l.cluster.CheckAndPutRegion(region)
+	if !isLoadedRegionRejected(region, overlaps) {
+		l.updateMaxEndKey(region)
+	}
+	return overlaps
+}
+
+func isLoadedRegionRejected(region *core.RegionInfo, overlaps []*core.RegionInfo) bool {
+	// CheckAndPutRegion returns the input region itself when it rejects a stale record.
+	return len(overlaps) == 1 && overlaps[0] == region
 }
 
 func (l *loadedRegionChecker) hasNoOverlap(region *core.RegionInfo) bool {

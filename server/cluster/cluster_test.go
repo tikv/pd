@@ -101,6 +101,30 @@ func TestLoadedRegionCheckerNoOverlapHint(t *testing.T) {
 	re.False(checker.hasNoOverlap(region5))
 }
 
+func TestLoadedRegionCheckerDoesNotAdvanceOnRejectedRegion(t *testing.T) {
+	re := require.New(t)
+	cluster := &RaftCluster{BasicCluster: core.NewBasicCluster()}
+	checker := newLoadedRegionChecker(cluster)
+
+	region1 := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("c"), core.SetRegionVersion(3))
+	re.Empty(checker.checkAndPut(region1))
+	re.Equal([]byte("c"), checker.maxEndKey)
+	re.False(checker.maxEndKeyInfinite)
+
+	staleFullRange := core.NewTestRegionInfo(2, 1, []byte("b"), nil, core.SetRegionVersion(2))
+	overlaps := checker.checkAndPut(staleFullRange)
+	re.Len(overlaps, 1)
+	re.Same(staleFullRange, overlaps[0])
+	re.Nil(cluster.GetRegion(staleFullRange.GetID()))
+	re.Equal([]byte("c"), checker.maxEndKey)
+	re.False(checker.maxEndKeyInfinite)
+
+	nextRegion := core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"))
+	re.True(checker.hasNoOverlap(nextRegion))
+	re.Empty(checker.checkAndPut(nextRegion))
+	re.Same(nextRegion, cluster.GetRegion(nextRegion.GetID()))
+}
+
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
