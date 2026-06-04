@@ -203,6 +203,7 @@ func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uin
 type tokenCounter struct {
 	fillRate uint64
 
+	avgMu sync.Mutex
 	// avgRUPerSec is an exponentially-weighted moving average of the RU
 	// consumption per second; used to estimate the RU requirements for the next
 	// request.
@@ -369,11 +370,12 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
-	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
+	avgRUPerSec, ok := gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption))
+	if !ok {
 		return
 	}
-	gc.metrics.avgRUPerSecGauge.Set(counter.avgRUPerSec)
-	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
+	gc.metrics.avgRUPerSecGauge.Set(avgRUPerSec)
+	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.burstable.Store(isBurstable)
 }
 
@@ -411,18 +413,24 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 	}
 }
 
-func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
-	return calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
+func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) (float64, bool) {
+	counter.avgMu.Lock()
+	defer counter.avgMu.Unlock()
+	ok := calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
+	return counter.avgRUPerSec, ok
 }
 
 func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, delta float64) bool {
 	if delta <= 0 {
 		return false
 	}
+	counter.avgMu.Lock()
 	counter.demandTotalRU += delta
 	ok := calcMovingAvgAt(time.Now(), &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
+	demandRUPerSec := counter.demandRUPerSec
+	counter.avgMu.Unlock()
 	if ok {
-		gc.metrics.demandRUPerSecGauge.Set(counter.demandRUPerSec)
+		gc.metrics.demandRUPerSecGauge.Set(demandRUPerSec)
 	}
 	return ok
 }
@@ -504,7 +512,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		cfg.newTokens = granted
 		cfg.newFillRate = float64(bucket.GetSettings().FillRate)
 		counter.lastDeadline = time.Time{}
-		cfg.newNotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.avgRUPerSec*defaultTargetPeriod.Seconds()) * notifyFraction
+		cfg.newNotifyThreshold = math.Min(granted+counter.limiter.AvailableTokens(gc.run.now), counter.getAvgRUPerSec()*defaultTargetPeriod.Seconds()) * notifyFraction
 		if cfg.newBurst < 0 {
 			cfg.newTokens = float64(counter.fillRate)
 		}
@@ -631,7 +639,7 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 	// `needTokensAmplification` is used to properly amplify a need. The reason is that in the current implementation,
 	// the token returned from the server determines the average consumption speed.
 	// Therefore, when the fillrate of resource group increases, `needTokensAmplification` can enable the client to obtain more tokens.
-	value := counter.avgRUPerSec * gc.run.targetPeriod.Seconds() * needTokensAmplification
+	value := counter.getAvgRUPerSec() * gc.run.targetPeriod.Seconds() * needTokensAmplification
 	value -= counter.limiter.AvailableTokens(gc.run.now)
 	if value < 0 {
 		value = 0
@@ -670,13 +678,15 @@ func (gc *groupCostController) observeComponentConsumption(delta *rmpb.Consumpti
 }
 
 func (gc *groupCostController) logFields(waitDuration time.Duration, err error) []zap.Field {
+	counter := gc.run.requestUnitTokens
+	avgRUPerSec, demandRUPerSec := counter.getAvgStats()
 	fields := []zap.Field{
 		zap.String("resource_group", gc.name),
 		zap.Uint64("client_unique_id", gc.clientUniqueID),
-		zap.Float64("available_tokens", gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())),
-		zap.Float64("fill_rate", gc.run.requestUnitTokens.limiter.GetFillRate()),
-		zap.Float64("avg_ru_per_sec", gc.run.requestUnitTokens.avgRUPerSec),
-		zap.Float64("demand_ru_per_sec", gc.run.requestUnitTokens.demandRUPerSec),
+		zap.Float64("available_tokens", counter.limiter.AvailableTokens(time.Now())),
+		zap.Float64("fill_rate", counter.limiter.GetFillRate()),
+		zap.Float64("avg_ru_per_sec", avgRUPerSec),
+		zap.Float64("demand_ru_per_sec", demandRUPerSec),
 		zap.Bool("throttled", gc.isThrottled.Load()),
 	}
 	if waitDuration > 0 {
@@ -686,6 +696,18 @@ func (gc *groupCostController) logFields(waitDuration time.Duration, err error) 
 		fields = append(fields, zap.Error(err))
 	}
 	return fields
+}
+
+func (counter *tokenCounter) getAvgRUPerSec() float64 {
+	counter.avgMu.Lock()
+	defer counter.avgMu.Unlock()
+	return counter.avgRUPerSec
+}
+
+func (counter *tokenCounter) getAvgStats() (avgRUPerSec, demandRUPerSec float64) {
+	counter.avgMu.Lock()
+	defer counter.avgMu.Unlock()
+	return counter.avgRUPerSec, counter.demandRUPerSec
 }
 
 func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Consumption, waitDuration *time.Duration, allowDebt bool) (time.Duration, error) {

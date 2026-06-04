@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -1208,6 +1209,39 @@ func TestAcquireTokensUpdatesDemandMetricOnThrottle(t *testing.T) {
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 	re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), before)
+}
+
+func TestAcquireTokensDemandStatsConcurrentLogFields(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.mainCfg.LTBMaxWaitDuration = 0
+	gc.mainCfg.WaitRetryTimes = 1
+	gc.mainCfg.WaitRetryInterval = 0
+
+	counter := gc.run.requestUnitTokens
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1,
+		newBurst:    1,
+	})
+	counter.demandAvgLastTime = time.Now().Add(-time.Second)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 100 {
+				waitDuration := time.Duration(0)
+				_, _ = gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 1}, &waitDuration, false)
+				_ = gc.logFields(waitDuration, nil)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
 }
 
 func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
