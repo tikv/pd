@@ -1731,8 +1731,44 @@ func (s *Server) leaderLoop() {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+		// Refuse to campaign until the region syncer has caught up to the
+		// previous leader. Without this gate, a freshly joined follower
+		// whose syncer never produced a populated local store can win
+		// leadership immediately after the leader dies and serve a
+		// partial/empty region set until TiKV heartbeats repopulate it.
+		// `HasAttemptedSync` distinguishes "I was a follower" from "I
+		// started fresh and there is no leader to sync from" (the latter
+		// must be allowed to campaign so the cluster can bootstrap).
+		if !s.canCampaignAsRegionSyncerCaughtUp() {
+			log.Warn("skip campaigning of pd leader: region syncer has not caught up to the previous leader",
+				zap.String("server-name", s.Name()),
+				zap.Uint64("member-id", s.member.ID()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
 		s.campaignLeader()
 	}
+}
+
+// canCampaignAsRegionSyncerCaughtUp returns true when this server is eligible
+// to campaign for PD leadership from a region-syncer correctness standpoint:
+//   - region storage is not in use (regions live in etcd, no syncer needed), or
+//   - the syncer was never started on this process (single-node bootstrap, or
+//     no leader has ever existed to sync from), or
+//   - the syncer has at some point observed that it was caught up to a
+//     leader's history (and thus the local region storage is durable).
+func (s *Server) canCampaignAsRegionSyncerCaughtUp() bool {
+	if !s.persistOptions.IsUseRegionStorage() {
+		return true
+	}
+	syncer := s.cluster.GetRegionSyncer()
+	if syncer == nil {
+		return true
+	}
+	if !syncer.HasAttemptedSync() {
+		return true
+	}
+	return syncer.IsHistorySynced()
 }
 
 func (s *Server) campaignLeader() {

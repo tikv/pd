@@ -120,6 +120,13 @@ type RegionSyncer struct {
 	tlsConfig   *grpcutil.TLSConfig
 	// status when as client
 	streamingRunning atomic.Bool
+	// attempted sync status as client, sticky for the process lifetime.
+	// It is used to distinguish follower from never attempted to sync (e.g., bootstrapp).
+	attemptedSync atomic.Bool
+	// status of the historitcal catch-up as client, sticky for the process lifetime.
+	// set to true once the client has observed that it has completed the historitcal
+	// catch-up/ the local region storage is durably populated.
+	historySynced atomic.Bool
 }
 
 // NewRegionSyncer returns a region syncer that ensures final consistency through the heartbeat,
@@ -138,6 +145,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 		tlsConfig:   s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]*regionSyncStream)
+	syncer.reloadHistorySyncedFromDurableState()
 	return syncer
 }
 
@@ -154,6 +162,22 @@ func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
 		return maxHistoryBufferSize
 	}
 	return size
+}
+
+// This function seeds the in-memory historySynced
+// flag from the persisted historyIndex so a node that previously completed
+// a sync isn't permanently locked out of campaigning after a restart
+// followed by a leader death mid-sync. A non-zero index only ever lands on
+// disk via commit() (after a bulk applied via SaveRegion) or via record()'s
+// flushCount path, so a non-zero index implies the local region storage was
+// populated by a prior successful catch-up — sufficient evidence of durable
+// state without any extra probe. Invoked once from NewRegionSyncer; safe to
+// call before any sync session because nothing else has touched historySynced yet.
+// TODO : this doesn't attempt to fix the gap problem https://github.com/tikv/pd/issues/10668
+func (s *RegionSyncer) reloadHistorySyncedFromDurableState() {
+	if s.history.getNextIndex() > 0 {
+		s.historySynced.Store(true)
+	}
 }
 
 // RunServer runs the server of the region syncer.
@@ -387,6 +411,16 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 			return err
 		}
 	}
+	// End-of-history marker so the follower commits the catch-up records
+	// it just received without waiting for the next keepalive tick.
+	marker := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: startIndex + uint64(len(records)),
+	}
+	if err := stream.Send(marker); err != nil {
+		log.Error("failed to send end-of-history marker", errs.ZapError(errs.ErrGRPCSend, err))
+		return status.Errorf(codes.Internal, "failed to send end-of-history marker: %v", err)
+	}
 	return nil
 }
 
@@ -450,6 +484,20 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
+	// End-of-history marker. An empty-regions response tells the
+	// follower that the bulk transfer of regions finished cleanly, so it can
+	// commit the new history index. A partial bulk transfer cut short by
+	// leader failover deliberately never reaches this point, so the
+	// follower will roll back to its last committed index (0 for a
+	// fresh member) and re-bulk transfer from the next leader.
+	marker := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: uint64(lastIndex),
+	}
+	if err := stream.Send(marker); err != nil {
+		log.Error("failed to send end-of-history marker", errs.ZapError(errs.ErrGRPCSend, err))
+		return nil, status.Errorf(codes.Internal, "failed to send end-of-history marker: %v", err)
+	}
 	syncStream := newRegionSyncStream(stream)
 	syncStream.sendMu.Lock()
 	s.bindRegionSyncStream(name, syncStream)

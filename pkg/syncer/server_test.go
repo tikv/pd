@@ -85,15 +85,22 @@ func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 		records = append(records, newHistoryBufferTestRegion(uint64(i)))
 	}
 	stream := newMockSyncRegionsServer()
-	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
+	// Buffer for the two record batches plus the trailing end-of-history marker
+	// so syncHistoryRecords (called synchronously below) never blocks on Send.
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 3)
 
 	re.NoError(syncer.syncHistoryRecords(10, records, stream))
 	first := <-stream.sendCh
 	second := <-stream.sendCh
+	marker := <-stream.sendCh
 	re.Equal(uint64(10), first.GetStartIndex())
 	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
 	re.Equal(uint64(10+maxSyncRegionBatchSize), second.GetStartIndex())
 	re.Len(second.GetRegions(), 1)
+	// The end-of-history marker carries the next index (start + record count)
+	// and no regions, signalling the follower to commit the catch-up.
+	re.Equal(uint64(10+len(records)), marker.GetStartIndex())
+	re.Empty(marker.GetRegions())
 }
 
 func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
@@ -121,7 +128,11 @@ func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
 
 	close(unblockSend)
 	fullResp := <-stream.sendCh
+	// End-of-history marker after the bulk transfer, before catch-up records.
+	bulkMarker := <-stream.sendCh
 	catchUpResp := <-stream.sendCh
+	// End-of-history marker after the catch-up records.
+	catchUpMarker := <-stream.sendCh
 	result := <-done
 	if result.syncStream != nil {
 		defer syncer.unbindStream("pd-follower", result.syncStream)
@@ -129,9 +140,12 @@ func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
 
 	re.NoError(result.err)
 	re.Len(fullResp.GetRegions(), 1)
+	re.Empty(bulkMarker.GetRegions())
 	re.Len(records, 5)
 	re.Equal(startIndex, catchUpResp.GetStartIndex())
 	re.Len(catchUpResp.GetRegions(), 5)
+	re.Empty(catchUpMarker.GetRegions())
+	re.Equal(startIndex+uint64(len(records)), catchUpMarker.GetStartIndex())
 }
 
 func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
