@@ -67,7 +67,33 @@ func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) (keys, values
 		count++
 	}
 	iter.Release()
+	if err = iter.Error(); err != nil {
+		return nil, nil, errors.WithStack(err)
+	}
 	return keys, values, nil
+}
+
+// LoadRangeValues gets raw values for a given key range.
+func (kv *LevelDBKV) LoadRangeValues(startKey, endKey string, limit int) (values [][]byte, err error) {
+	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+	capacity := limit
+	if capacity < 0 {
+		capacity = 0
+	}
+	values = make([][]byte, 0, capacity)
+	count := 0
+	for iter.Next() {
+		if limit > 0 && count >= limit {
+			break
+		}
+		values = append(values, append([]byte(nil), iter.Value()...))
+		count++
+	}
+	iter.Release()
+	if err = iter.Error(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return values, nil
 }
 
 // Save stores a key-value pair.

@@ -842,6 +842,24 @@ func (s *Server) createRaftCluster() error {
 	return s.cluster.Start(s, false)
 }
 
+func (s *Server) startEmbeddedTSOService() (bool, error) {
+	if s.IsKeyspaceGroupEnabled() || s.tsoAllocator == nil || s.tsoAllocator.IsInitialize() {
+		return false, nil
+	}
+	log.Info("initializing the embedded TSO allocator")
+	if err := s.tsoAllocator.Initialize(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Server) resetEmbeddedTSOService() {
+	if s.IsKeyspaceGroupEnabled() || s.tsoAllocator == nil || !s.tsoAllocator.IsInitialize() {
+		return
+	}
+	s.tsoAllocator.Reset(false)
+}
+
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
@@ -1805,15 +1823,19 @@ func (s *Server) campaignLeader() {
 	callbacksDuration := time.Since(callbacksStart)
 	log.Info("trigger leader callback functions completed", zap.Duration("cost", callbacksDuration))
 
-	// Try to create raft cluster.
-	createRaftClusterStart := time.Now()
-	if err := s.createRaftCluster(); err != nil {
-		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
+	tsoStart := time.Now()
+	embeddedTSOStarted, err := s.startEmbeddedTSOService()
+	if err != nil {
+		log.Warn("failed to start embedded TSO service", errs.ZapError(err), zap.Duration("cost", time.Since(tsoStart)))
 		return
 	}
-	createRaftClusterDuration := time.Since(createRaftClusterStart)
-	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
-	defer s.stopRaftCluster()
+	log.Info("start embedded TSO service completed",
+		zap.Bool("started", embeddedTSOStarted),
+		zap.Duration("cost", time.Since(tsoStart)))
+	if embeddedTSOStarted {
+		defer s.resetEmbeddedTSOService()
+	}
+
 	failpoint.Inject("rebaseErr", func() {
 		failpoint.Return()
 	})
@@ -1824,25 +1846,48 @@ func (s *Server) campaignLeader() {
 	}
 	rebaseDuration := time.Since(rebaseStart)
 	log.Info("sync id from etcd completed", zap.Duration("cost", rebaseDuration))
-	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
+	// PromoteSelf to accept core services, such as TSO. Region-related services
+	// still wait until the raft cluster is fully started below.
 	enableLeaderStart := time.Now()
 	s.member.PromoteSelf()
 	enableLeaderDuration := time.Since(enableLeaderStart)
 	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
+	defer member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	totalDuration := time.Since(leaderReadyStart)
+	CheckPDVersionWithClusterVersion(s.persistOptions)
+	log.Info("PD leader is ready to serve core services",
+		zap.String("leader-name", s.Name()),
+		zap.Duration("total-cost", totalDuration),
+		zap.Duration("cost", enableLeaderDuration))
+
+	failpoint.Inject("delayCreateRaftCluster", func(val failpoint.Value) {
+		if delay, ok := val.(int); ok {
+			timer := time.NewTimer(time.Duration(delay) * time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				failpoint.Return()
+			}
+		}
+	})
+
+	// Try to create raft cluster.
+	createRaftClusterStart := time.Now()
+	if err := s.createRaftCluster(); err != nil {
+		log.Warn("failed to create raft cluster", errs.ZapError(err), zap.Duration("cost", time.Since(createRaftClusterStart)))
+		return
+	}
+	createRaftClusterDuration := time.Since(createRaftClusterStart)
+	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
+	defer s.stopRaftCluster()
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
 		s.member.Resign()
-		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	})
 
-	CheckPDVersionWithClusterVersion(s.persistOptions)
-	log.Info("PD leader is ready to serve",
-		zap.String("leader-name", s.Name()),
-		zap.Duration("total-cost", totalDuration),
-		zap.Duration("cost", enableLeaderDuration))
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 

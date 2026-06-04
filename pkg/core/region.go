@@ -1112,6 +1112,20 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	return overlaps
 }
 
+// CheckAndPutRegionNoOverlap puts a region when the caller has proved it has no range overlap.
+func (r *RegionsInfo) CheckAndPutRegionNoOverlap(region *RegionInfo) []*RegionInfo {
+	r.t.Lock()
+	origin := r.getRegionLocked(region.GetID())
+	if origin != nil {
+		r.t.Unlock()
+		return r.CheckAndPutRegion(region)
+	}
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, true)
+	r.t.Unlock()
+	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	return overlaps
+}
+
 // PutRegion put a region.
 func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 	origin, overlaps, rangeChanged := r.SetRegion(region)
@@ -1255,9 +1269,10 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 }
 
 func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionInfo, region *RegionInfo) {
+	overlapsProvided := overlaps != nil
 	if rangeChanged {
 		// TODO: only perform the remove operation on the overlapped peer.
-		if len(overlaps) == 0 {
+		if !overlapsProvided {
 			// If the range has changed but the overlapped regions are not provided, collect them by `[]*regionItem`.
 			for _, item := range r.getOverlapRegionFromOverlapTreeLocked(region) {
 				r.removeRegionFromSubTreeLocked(item)
@@ -1272,7 +1287,8 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 	// Reinsert the region into all subtrees.
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
-	r.overlapTree.update(item, false)
+	skipOverlapCheck := overlapsProvided && len(overlaps) == 0
+	r.overlapTree.update(item, skipOverlapCheck)
 	// Add leaders and followers.
 	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64) {
 		store, ok := peersMap[storeID]
@@ -1280,7 +1296,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 			store = newRegionTree()
 			peersMap[storeID] = store
 		}
-		store.update(item, false)
+		store.update(item, skipOverlapCheck)
 	}
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
