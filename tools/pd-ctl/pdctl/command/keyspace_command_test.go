@@ -40,17 +40,10 @@ func TestMakeKeyRanges(t *testing.T) {
 
 	for _, tc := range testCases {
 		ranges := keyspace.MakeKeyRanges(tc.keyspaceID)
-		re.Len(ranges, 2, "should have 2 ranges (raw and txn)")
-
-		// Verify raw key range
-		rawRange := ranges[0].(map[string]any)
-		rawStart := rawRange["start_key"].(string)
-		rawEnd := rawRange["end_key"].(string)
-		re.NotEmpty(rawStart)
-		re.NotEmpty(rawEnd)
+		re.Len(ranges, 1, "should have 1 range (txn)")
 
 		// Verify txn key range
-		txnRange := ranges[1].(map[string]any)
+		txnRange := ranges[0].(map[string]any)
 		txnStart := txnRange["start_key"].(string)
 		txnEnd := txnRange["end_key"].(string)
 		re.NotEmpty(txnStart)
@@ -61,14 +54,9 @@ func TestMakeKeyRanges(t *testing.T) {
 		nextKeyspaceIDBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(keyspaceIDBytes, tc.keyspaceID)
 		binary.BigEndian.PutUint32(nextKeyspaceIDBytes, tc.keyspaceID+1)
-
-		expectedRawLeft := codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...))
-		expectedRawRight := codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...))
 		expectedTxnLeft := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
 		expectedTxnRight := codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...))
 
-		re.Equal(hex.EncodeToString(expectedRawLeft), rawStart)
-		re.Equal(hex.EncodeToString(expectedRawRight), rawEnd)
 		re.Equal(hex.EncodeToString(expectedTxnLeft), txnStart)
 		re.Equal(hex.EncodeToString(expectedTxnRight), txnEnd)
 	}

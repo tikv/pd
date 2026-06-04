@@ -145,18 +145,13 @@ func (k KeyType) String() string {
 // StringToKeyType creates a key type with string.
 // It return Table if the input string is empty, since Table is the default key type in most cases.
 func StringToKeyType(input string) KeyType {
-	switch input {
-	case Table.String():
-		return Table
-	case Raw.String():
+	if input == Raw.String() {
 		return Raw
-	case Txn.String():
-		return Txn
-	case "":
-		return Table
-	default:
-		panic("invalid key type: " + input)
 	}
+	if input == Txn.String() {
+		return Txn
+	}
+	return Table
 }
 
 // Direction distinguishes different kinds of direction.

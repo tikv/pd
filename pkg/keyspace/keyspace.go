@@ -582,24 +582,16 @@ func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
 
 func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
 	regionBound := MakeRegionBound(id)
-	switch boundType {
-	case txnRegionBound:
+	if boundType == txnRegionBound {
 		return manager.checkBound(regionBound.TxnLeftBound) &&
 			manager.checkBound(regionBound.TxnRightBound)
-	case rawRegionBound:
-		return manager.checkBound(regionBound.RawLeftBound) &&
-			manager.checkBound(regionBound.RawRightBound)
-	default:
-		return manager.checkBound(regionBound.RawLeftBound) &&
-			manager.checkBound(regionBound.RawRightBound) &&
-			manager.checkBound(regionBound.TxnLeftBound) &&
-			manager.checkBound(regionBound.TxnRightBound)
 	}
+	return manager.checkBound(regionBound.RawLeftBound) && manager.checkBound(regionBound.RawRightBound)
 }
 
 func (manager *Manager) getRegionBoundType() regionBoundType {
 	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
-		return allRegionBound
+		return txnRegionBound
 	}
 	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }

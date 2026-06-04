@@ -150,56 +150,6 @@ func TestMakeLabelRule(t *testing.T) {
 	}{
 		{
 			id:        0,
-			boundType: allRegionBound,
-			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(0),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "0",
-					},
-				},
-				RuleType: labeler.KeyRange,
-				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 1})),
-					},
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
-					},
-				},
-			},
-		},
-		{
-			id:        4242,
-			boundType: allRegionBound,
-			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(4242),
-				Index: 0,
-				Labels: []labeler.RegionLabel{
-					{
-						Key:   regionLabelKey,
-						Value: "4242",
-					},
-				},
-				RuleType: labeler.KeyRange,
-				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
-					},
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
-					},
-				},
-			},
-		},
-		{
-			id:        0,
 			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/0",

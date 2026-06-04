@@ -116,23 +116,16 @@ type RegionBound struct {
 type regionBoundType int
 
 const (
-	allRegionBound regionBoundType = iota
+	txnRegionBound regionBoundType = iota
 	rawRegionBound
-	txnRegionBound
 )
 
 // String returns the string representation of the regionBoundType.
 func (t regionBoundType) String() string {
-	switch t {
-	case allRegionBound:
-		return "all"
-	case rawRegionBound:
+	if t == rawRegionBound {
 		return "raw"
-	case txnRegionBound:
-		return "txn"
-	default:
-		return "unknown"
 	}
+	return "txn"
 }
 
 // keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
@@ -158,26 +151,19 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// MakeKeyRanges encodes keyspace ID to the correct LabelRule data.
+// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
+// only for test use, as it always generates txn region bound.
 func MakeKeyRanges(id uint32) []any {
-	return buildKeyRanges(id, allRegionBound)
+	return buildKeyRanges(id, txnRegionBound)
 }
 
 func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
-	switch boundType {
-	case txnRegionBound:
+	if boundType == txnRegionBound {
 		return []any{
 			map[string]any{
 				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
 				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
-			},
-		}
-	case rawRegionBound:
-		return []any{
-			map[string]any{
-				"start_key": hex.EncodeToString(regionBound.RawLeftBound),
-				"end_key":   hex.EncodeToString(regionBound.RawRightBound),
 			},
 		}
 	}
@@ -185,10 +171,6 @@ func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 		map[string]any{
 			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
 			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
 		},
 	}
 }
@@ -200,7 +182,7 @@ func getRegionLabelID(id uint32) string {
 
 // MakeLabelRule makes the label rule for the given keyspace id.
 func MakeLabelRule(id uint32) *labeler.LabelRule {
-	return buildLabelRule(id, allRegionBound)
+	return buildLabelRule(id, txnRegionBound)
 }
 
 func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {

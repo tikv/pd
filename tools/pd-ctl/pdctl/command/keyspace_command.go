@@ -562,16 +562,6 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		Rules: []*pd.Rule{
 			{
 				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule", keyspaceID),
-				Role:    pd.Voter,
-				// TODO: make replica count configurable
-				Count:            3,
-				StartKeyHex:      keyRanges[0].(map[string]any)["start_key"].(string),
-				EndKeyHex:        keyRanges[0].(map[string]any)["end_key"].(string),
-				LabelConstraints: labelConstraints,
-			},
-			{
-				GroupID: groupID,
 				ID:      fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
