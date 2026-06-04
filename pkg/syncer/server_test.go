@@ -316,7 +316,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 }
 
-func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
+func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
@@ -333,6 +333,7 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 		core.NewBasicCluster(),
 	)
 	syncer := NewRegionSyncer(server)
+	syncer.sendTimeout = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newMockSyncRegionsServer()
@@ -362,6 +363,15 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-closeDone:
+			return true
+		default:
+			return false
+		}
+	})
+
 	var syncErr error
 	testutil.Eventually(re, func() bool {
 		if syncErr == nil {
@@ -377,14 +387,6 @@ func TestCloseAllClientClosesStreamsBeforeSend(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 
 	close(unblockSend)
-	testutil.Eventually(re, func() bool {
-		select {
-		case <-closeDone:
-			return true
-		default:
-			return false
-		}
-	})
 }
 
 func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {

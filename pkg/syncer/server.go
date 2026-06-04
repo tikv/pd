@@ -701,10 +701,15 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 }
 
 func (s *RegionSyncer) closeAllClient() {
+	type namedStream struct {
+		name   string
+		stream *regionSyncStream
+	}
+
 	s.mu.RLock()
-	streams := make([]*regionSyncStream, 0, len(s.mu.streams))
-	for _, sender := range s.mu.streams {
-		streams = append(streams, sender)
+	streams := make([]namedStream, 0, len(s.mu.streams))
+	for name, sender := range s.mu.streams {
+		streams = append(streams, namedStream{name: name, stream: sender})
 	}
 	s.mu.RUnlock()
 	for _, sender := range streams {
@@ -717,9 +722,9 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-		sender.close()
-		if err := sender.send(resp); err != nil {
-			log.Warn("region syncer send close message meet error", errs.ZapError(errs.ErrGRPCSend, err))
+		if !s.sendRegionSyncResponse(context.Background(), sender.name, sender.stream, resp) {
+			log.Warn("region syncer send close message meet error", zap.String("name", sender.name))
 		}
+		sender.stream.close()
 	}
 }
