@@ -135,10 +135,28 @@ func (s *regionSyncStream) close() {
 	})
 }
 
+func (s *regionSyncStream) checkOpen() error {
+	select {
+	case <-s.done:
+		return status.Error(codes.Unavailable, "region syncer stream closed")
+	default:
+		return nil
+	}
+}
+
 func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	return s.sendStream(regions)
+}
+
+func (s *regionSyncStream) sendStreamIfOpen(regions *pdpb.SyncRegionResponse) error {
+	s.stream.Lock()
+	defer s.stream.Unlock()
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
+	return s.stream.Send(regions)
 }
 
 func (s *regionSyncStream) sendStream(regions *pdpb.SyncRegionResponse) error {
@@ -383,7 +401,7 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 				RegionLeaders: nil,
 				Buckets:       nil,
 			}
-			return syncStream.sendStream(resp)
+			return syncStream.sendStreamIfOpen(resp)
 		}
 		if startIndex < endIndex {
 			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
@@ -440,7 +458,7 @@ func (s *RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Reg
 func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
 	for start := 0; start < len(records); start += maxSyncRegionBatchSize {
 		end := min(start+maxSyncRegionBatchSize, len(records))
-		if err := stream.sendStream(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
+		if err := stream.sendStreamIfOpen(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
 			return err
 		}
 	}
@@ -497,12 +515,15 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			RegionLeaders: leaders,
 			Buckets:       buckets,
 		}
+		if err := syncStream.checkOpen(); err != nil {
+			return err
+		}
 		if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
 			log.Error("failed to wait rate limit", errs.ZapError(err))
 			return err
 		}
 		lastIndex += len(metas)
-		if err := syncStream.sendStream(resp); err != nil {
+		if err := syncStream.sendStreamIfOpen(resp); err != nil {
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}

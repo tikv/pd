@@ -95,6 +95,20 @@ func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
 	re.Equal(uint64(10+maxSyncRegionBatchSize), second.GetStartIndex())
 	re.Len(second.GetRegions(), 1)
+
+	closedStream := &testServerStream{}
+	closedSyncStream := newRegionSyncStream(closedStream, 10)
+	closedStream.onSend = func(*pdpb.SyncRegionResponse) {
+		closedSyncStream.close()
+	}
+
+	err := syncer.syncHistoryRecords(10, records, closedSyncStream)
+
+	re.Equal(codes.Unavailable, status.Code(err))
+	responses := closedStream.sentResponses()
+	re.Len(responses, 1)
+	re.Equal(uint64(10), responses[0].GetStartIndex())
+	re.Len(responses[0].GetRegions(), maxSyncRegionBatchSize)
 }
 
 func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
@@ -132,6 +146,34 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	re.Len(catchUpResp.GetRegions(), 5)
 	re.Equal(startIndex+5, syncStream.getSendIndex())
 	re.Equal(startIndex+5, syncer.history.getNextIndex())
+
+	closedBC := core.NewBasicCluster()
+	for i := range maxSyncRegionBatchSize + 1 {
+		startKey := []byte{byte(i >> 8), byte(i)}
+		endIndex := i + 1
+		endKey := []byte{byte(endIndex >> 8), byte(endIndex)}
+		region := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: startKey,
+			EndKey:   endKey,
+		}, nil)
+		closedBC.PutRegion(region)
+	}
+	closedSyncer := newTestRegionSyncer(t, closedBC)
+	closedSyncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	closedSyncer.history.resetWithIndex(10)
+	closedStream := &testServerStream{}
+	closedSyncStream := newRegionSyncStream(closedStream, 10)
+	closedStream.onSend = func(*pdpb.SyncRegionResponse) {
+		closedSyncStream.close()
+	}
+
+	err := closedSyncer.syncFullRegions(context.Background(), "pd-follower", closedSyncStream, 10)
+
+	re.Equal(codes.Unavailable, status.Code(err))
+	closedResponses := closedStream.sentResponses()
+	re.Len(closedResponses, 1)
+	re.Len(closedResponses[0].GetRegions(), maxSyncRegionBatchSize)
 }
 
 func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
@@ -205,6 +247,63 @@ func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	close(unblockSend)
 	re.NotNil(<-stream.sendCh)
 	re.Error(<-done)
+}
+
+func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer.history = newHistoryBufferWithConfig(2, 2, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	syncer.history.record(newHistoryBufferTestRegion(10))
+
+	stream := newMockSyncRegionsServer()
+	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream)
+	defer syncer.unbindStream("pd-follower", syncStream)
+	unblockSend := stream.blockSend()
+	replayDone := make(chan error, 1)
+	go func() {
+		replayDone <- syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
+			Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+			Member:     &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}},
+			StartIndex: 10,
+		}, syncStream, syncStartIndex)
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	liveRecords := []*core.RegionInfo{
+		newHistoryBufferTestRegion(11),
+		newHistoryBufferTestRegion(12),
+		newHistoryBufferTestRegion(13),
+	}
+	for _, record := range liveRecords {
+		syncer.history.record(record)
+	}
+	syncer.broadcast(context.Background(), liveRecords, false)
+	re.Greater(syncer.history.getFirstIndex(), syncStartIndex)
+
+	close(unblockSend)
+	re.NotNil(<-stream.sendCh)
+	re.NoError(<-replayDone)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	senderDone := make(chan struct{})
+	go func() {
+		syncer.runDownstreamSender(ctx, "pd-follower", syncStream)
+		close(senderDone)
+	}()
+
+	testutil.Eventually(re, func() bool {
+		return len(syncer.GetAllDownstreamNames()) == 0
+	})
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-senderDone:
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
@@ -705,6 +804,7 @@ func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 type testServerStream struct {
 	mu        sync.Mutex
 	sendErr   error
+	onSend    func(*pdpb.SyncRegionResponse)
 	responses []*pdpb.SyncRegionResponse
 }
 
@@ -774,11 +874,16 @@ func (s *blockingSendStream) sentResponses() []*pdpb.SyncRegionResponse {
 
 func (s *testServerStream) Send(resp *pdpb.SyncRegionResponse) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.sendErr != nil {
+		s.mu.Unlock()
 		return s.sendErr
 	}
 	s.responses = append(s.responses, resp)
+	onSend := s.onSend
+	s.mu.Unlock()
+	if onSend != nil {
+		onSend(resp)
+	}
 	return nil
 }
 
