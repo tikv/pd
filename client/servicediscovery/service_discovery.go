@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
@@ -253,6 +254,10 @@ func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 // GetClientConn implements ServiceClient.
 func (c *serviceClient) GetClientConn() *grpc.ClientConn {
 	if c == nil {
+		return nil
+	}
+	// If the connection is in Shutdown state, it means the connection is closed and we should not reuse it.
+	if c.conn.GetState() == connectivity.Shutdown {
 		return nil
 	}
 	return c.conn
