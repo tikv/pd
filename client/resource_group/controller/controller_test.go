@@ -346,6 +346,67 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 }
 
+// TestAcquireTokensCancelKeepsLastMonotonic checks that a stale CancelAt does
+// not rewind lim.last, exercised through two concurrent acquireTokens calls
+// pinned by the waitReservationsBeforeSelect failpoint: A reserves
+// (lim.last = now_A) and parks; B advances lim.last to now_B (> now_A); A is
+// then cancelled so CancelAt runs with the stale now_A. lim.last must stay at
+// now_B, not rewind to now_A.
+func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.mainCfg.LTBMaxWaitDuration = 30 * time.Second
+	gc.mainCfg.WaitRetryTimes = 1
+	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+
+	// Throttled bucket: a 10000-RU request reserves with a multi-second delay and
+	// parks in WaitReservations rather than being granted immediately.
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{NewTokens: 0, NewRate: 1000, NewBurst: 0})
+
+	const fp = "github.com/tikv/pd/client/resource_group/controller/waitReservationsBeforeSelect"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall(fp, func() {
+		reached <- struct{}{}
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	// A reserves with a delay and parks at the hook. Only A reaches the hook;
+	// the allowDebt sibling B never enters WaitReservations.
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	resultCh := make(chan error, 1)
+	go func() {
+		var wd time.Duration
+		_, err := gc.acquireTokens(ctxA, &rmpb.Consumption{RRU: 10000}, &wd, false)
+		resultCh <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the request to reserve and park")
+	}
+	tMid := time.Now() // now_A < tMid <= now_B
+
+	// B advances lim.last to now_B via the allowDebt RemoveTokens path.
+	var wd time.Duration
+	_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 1}, &wd, true)
+	re.NoError(err)
+
+	cancelA()
+	close(release)
+	select {
+	case err := <-resultCh:
+		re.Error(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for acquireTokens to return")
+	}
+
+	re.False(counter.limiter.last.Before(tMid), "stale CancelAt rewound lim.last")
+}
+
 // MockResourceGroupProvider is a mock implementation of the ResourceGroupProvider interface.
 type MockResourceGroupProvider struct {
 	mock.Mock

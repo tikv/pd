@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
@@ -207,7 +208,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	tokens += r.tokens
 
 	// update state
-	r.lim.last = now
+	r.lim.updateLast(now)
 	r.lim.tokens = tokens
 }
 
@@ -325,7 +326,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 		return
 	}
 	now, _, tokens := lim.advance(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
 }
@@ -355,11 +356,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	defer lim.mu.Unlock()
 	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", lim.notifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.NewTokens
 	} else {
 		now, _, tokens := lim.advance(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.NewTokens
 	}
 	lim.limit = Limit(args.NewRate)
@@ -547,6 +548,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return 0, nil
 	}
+	failpoint.InjectCall("waitReservationsBeforeSelect")
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 
