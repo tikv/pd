@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package servicediscovery
 
 import (
 	"crypto/tls"
@@ -62,6 +62,9 @@ func (*mockPDServiceDiscovery) GetClusterID() uint64 { return 0 }
 // GetKeyspaceID implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) GetKeyspaceID() uint32 { return 0 }
 
+// SetKeyspaceID implements the ServiceDiscovery interface.
+func (*mockPDServiceDiscovery) SetKeyspaceID(uint32) {}
+
 // GetKeyspaceGroupID implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }
 
@@ -82,6 +85,9 @@ func (*mockPDServiceDiscovery) GetBackupURLs() []string { return nil }
 
 // GetServiceClient implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) GetServiceClient() ServiceClient { return nil }
+
+// GetServiceClientByKind implements the ServiceDiscovery interface.
+func (*mockPDServiceDiscovery) GetServiceClientByKind(APIKind) ServiceClient { return nil }
 
 // GetOrCreateGRPCConn implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
