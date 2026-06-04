@@ -295,7 +295,7 @@ func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (
 }
 
 // GetGCState gets the current GC state.
-func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCState, error) {
+func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOption) (gc.GCState, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -303,11 +303,17 @@ func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCState, error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetGCState.Observe(time.Since(start).Seconds()) }()
 
+	options := gc.DefaultGCStatesAPIOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetGCStateRequest{
-		Header:        c.client.requestHeader(),
-		KeyspaceScope: wrapKeyspaceScope(c.keyspaceID),
+		Header:            c.client.requestHeader(),
+		KeyspaceScope:     wrapKeyspaceScope(c.keyspaceID),
+		ExcludeGcBarriers: options.ExcludeGCBarriers,
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -319,24 +325,23 @@ func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCState, error) {
 	}
 
 	gcState := resp.GetGcState()
-	return pbToGCState(gcState, start), nil
+	return pbToGCState(gcState, start, options.ExcludeGCBarriers), nil
 }
 
-func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time) gc.GCState {
+func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time, excludeGCBarriers bool) gc.GCState {
 	keyspaceID := constants.NullKeyspaceID
 	if pb.KeyspaceScope != nil {
 		keyspaceID = pb.KeyspaceScope.KeyspaceId
 	}
+	if excludeGCBarriers {
+		return gc.NewGCStateWithoutGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint())
+	}
+
 	gcBarriers := make([]*gc.GCBarrierInfo, 0, len(pb.GetGcBarriers()))
 	for _, b := range pb.GetGcBarriers() {
 		gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, reqStartTime))
 	}
-	return gc.GCState{
-		KeyspaceID:   keyspaceID,
-		TxnSafePoint: pb.GetTxnSafePoint(),
-		GCSafePoint:  pb.GetGcSafePoint(),
-		GCBarriers:   gcBarriers,
-	}
+	return gc.NewGCStateWithGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint(), gcBarriers)
 }
 
 // SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
@@ -394,7 +399,7 @@ func (c gcStatesClient) DeleteGlobalGCBarrier(ctx context.Context, barrierID str
 }
 
 // GetAllKeyspacesGCStates gets the GC states from all keyspaces.
-func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.ClusterGCStates, error) {
+func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.GCStatesAPIOption) (gc.ClusterGCStates, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetAllKeyspacesGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -402,10 +407,17 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.Cluster
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllKeyspacesGCStates.Observe(time.Since(start).Seconds()) }()
 
+	options := gc.DefaultGCStatesAPIOptions()
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetAllKeyspacesGCStatesRequest{
-		Header: c.client.requestHeader(),
+		Header:                  c.client.requestHeader(),
+		ExcludeGcBarriers:       options.ExcludeGCBarriers,
+		ExcludeGlobalGcBarriers: options.ExcludeGlobalGCBarriers,
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -417,8 +429,7 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.Cluster
 		return gc.ClusterGCStates{}, err
 	}
 
-	var ret gc.ClusterGCStates
-	ret.GCStates = make(map[uint32]gc.GCState, len(resp.GetGcStates()))
+	gcStates := make(map[uint32]gc.GCState, len(resp.GetGcStates()))
 	for _, state := range resp.GetGcStates() {
 		var keyspaceID uint32
 		if state.KeyspaceScope == nil {
@@ -426,10 +437,15 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context) (gc.Cluster
 		} else {
 			keyspaceID = state.KeyspaceScope.KeyspaceId
 		}
-		ret.GCStates[keyspaceID] = pbToGCState(state, start)
+		gcStates[keyspaceID] = pbToGCState(state, start, options.ExcludeGCBarriers)
 	}
+	if options.ExcludeGlobalGCBarriers {
+		return gc.NewClusterGCStatesWithoutGlobalGCBarriers(gcStates), nil
+	}
+
+	globalGCBarriers := make([]*gc.GlobalGCBarrierInfo, 0, len(resp.GetGlobalGcBarriers()))
 	for _, barrier := range resp.GetGlobalGcBarriers() {
-		ret.GlobalGCBarriers = append(ret.GlobalGCBarriers, pbToGlobalGCBarrierInfo(barrier, start))
+		globalGCBarriers = append(globalGCBarriers, pbToGlobalGCBarrierInfo(barrier, start))
 	}
-	return ret, nil
+	return gc.NewClusterGCStatesWithGlobalGCBarriers(gcStates, globalGCBarriers), nil
 }

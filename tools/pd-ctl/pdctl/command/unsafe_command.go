@@ -16,14 +16,18 @@ package command
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
 
 const unsafePrefix = "pd/api/v1/admin/unsafe"
+
+var maxPlanExecutionTimeoutSeconds = float64(time.Duration(math.MaxInt64/2) / time.Second)
 
 // NewUnsafeCommand returns the unsafe subcommand of rootCmd.
 func NewUnsafeCommand() *cobra.Command {
@@ -43,9 +47,11 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 		Run:   removeFailedStoresCommandFunc,
 	}
 	cmd.PersistentFlags().Float64("timeout", 300, "timeout in seconds")
+	cmd.PersistentFlags().Float64("plan-execution-timeout", 60, "plan execution timeout in seconds before dispatching the plan again")
+	cmd.PersistentFlags().Bool("disable-paranoid-check", false, "disable the empty region overlap paranoid check")
 	cmd.PersistentFlags().Bool("auto-detect", false, `detect failed stores automatically without needing to pass failed store ids, and all stores not in PD stores list are regarded as failed; 
-Note: DO NOT RECOMMEND to use this flag for general use, it's used only for case that PD doesn't have the store information of failed stores after pd-recover;
-Note: Do it with caution to make sure all live stores's heartbeats has been reported PD already, otherwise it may regarded some stores as failed mistakenly.`)
+	Note: DO NOT RECOMMEND to use this flag for general use, it's used only for case that PD doesn't have the store information of failed stores after pd-recover;
+	Note: Do it with caution to make sure all live stores's heartbeats has been reported PD already, otherwise it may regarded some stores as failed mistakenly.`)
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
 	return cmd
 }
@@ -103,7 +109,34 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 		postInput["timeout"] = timeout
 	}
 
+	planExecutionTimeout, err := cmd.Flags().GetFloat64("plan-execution-timeout")
+	if err != nil {
+		cmd.Println(err)
+		return
+	} else if planExecutionTimeout != 60 {
+		if err := validatePlanExecutionTimeoutSeconds(planExecutionTimeout); err != nil {
+			cmd.Println(err)
+			return
+		}
+		postInput["plan-execution-timeout"] = planExecutionTimeout
+	}
+
+	disableParanoidCheck, err := cmd.Flags().GetBool("disable-paranoid-check")
+	if err != nil {
+		cmd.Println(err)
+		return
+	} else if disableParanoidCheck {
+		postInput["disable-paranoid-check"] = disableParanoidCheck
+	}
+
 	postJSON(cmd, prefix, postInput)
+}
+
+func validatePlanExecutionTimeoutSeconds(timeout float64) error {
+	if timeout <= 0 || timeout != math.Trunc(timeout) || timeout > maxPlanExecutionTimeoutSeconds {
+		return fmt.Errorf("plan-execution-timeout must be a positive integer number of seconds no greater than %.0f", maxPlanExecutionTimeoutSeconds)
+	}
+	return nil
 }
 
 func removeFailedStoresShowCommandFunc(cmd *cobra.Command, _ []string) {

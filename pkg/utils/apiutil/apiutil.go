@@ -335,13 +335,18 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
-	if v, ok := input[option].(string); ok {
-		for _, c := range collectors {
-			c(v)
-		}
-		return nil
+	v, exist := input[option]
+	if !exist {
+		return errs.ErrOptionNotExist.FastGenByArgs(option)
 	}
-	return errs.ErrOptionNotExist.FastGenByArgs(option)
+	str, ok := v.(string)
+	if !ok {
+		return errs.ErrOptionTypeInvalid.FastGenByArgs(option)
+	}
+	for _, c := range collectors {
+		c(str)
+	}
+	return nil
 }
 
 // ParseKey is used to parse interface into []byte and string

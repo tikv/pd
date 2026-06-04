@@ -15,27 +15,47 @@
 package command
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 func TestMakeKeyRanges(t *testing.T) {
 	re := require.New(t)
 
 	testCases := []struct {
-		keyspaceID uint32
+		keyspaceID       uint32
+		expectedTxnStart string
+		expectedTxnEnd   string
 	}{
-		{keyspaceID: 0},
-		{keyspaceID: 1},
-		{keyspaceID: 10},
-		{keyspaceID: 100},
-		{keyspaceID: 16777215}, // max valid keyspace ID (2^24 - 1)
+		{
+			keyspaceID:       0,
+			expectedTxnStart: "7800000000000000fb",
+			expectedTxnEnd:   "7800000100000000fb",
+		},
+		{
+			keyspaceID:       1,
+			expectedTxnStart: "7800000100000000fb",
+			expectedTxnEnd:   "7800000200000000fb",
+		},
+		{
+			keyspaceID:       10,
+			expectedTxnStart: "7800000a00000000fb",
+			expectedTxnEnd:   "7800000b00000000fb",
+		},
+		{
+			keyspaceID:       100,
+			expectedTxnStart: "7800006400000000fb",
+			expectedTxnEnd:   "7800006500000000fb",
+		},
+		{
+			keyspaceID:       constant.MaxValidKeyspaceID,
+			expectedTxnStart: "78ffffff00000000fb",
+			expectedTxnEnd:   "7900000000000000fb",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -49,15 +69,7 @@ func TestMakeKeyRanges(t *testing.T) {
 		re.NotEmpty(txnStart)
 		re.NotEmpty(txnEnd)
 
-		// Verify the encoding matches the expected format
-		keyspaceIDBytes := make([]byte, 4)
-		nextKeyspaceIDBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(keyspaceIDBytes, tc.keyspaceID)
-		binary.BigEndian.PutUint32(nextKeyspaceIDBytes, tc.keyspaceID+1)
-		expectedTxnLeft := codec.EncodeBytes(append([]byte{'x'}, keyspaceIDBytes[1:]...))
-		expectedTxnRight := codec.EncodeBytes(append([]byte{'x'}, nextKeyspaceIDBytes[1:]...))
-
-		re.Equal(hex.EncodeToString(expectedTxnLeft), txnStart)
-		re.Equal(hex.EncodeToString(expectedTxnRight), txnEnd)
+		re.Equal(tc.expectedTxnStart, txnStart)
+		re.Equal(tc.expectedTxnEnd, txnEnd)
 	}
 }
