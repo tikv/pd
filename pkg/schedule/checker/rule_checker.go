@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
 
@@ -157,11 +156,6 @@ func (c *RuleChecker) RecordRegionPromoteToNonWitness(regionID uint64) {
 	c.switchWitnessCache.PutWithTTL(regionID, nil, c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())
 }
 
-func (c *RuleChecker) isWitnessEnabled() bool {
-	return versioninfo.IsFeatureSupported(c.cluster.GetCheckerConfig().GetClusterVersion(), versioninfo.SwitchWitness) &&
-		c.cluster.GetCheckerConfig().IsWitnessAllowed()
-}
-
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
@@ -175,7 +169,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
 			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
-			if c.isWitnessEnabled() && core.IsVoter(peer) {
+			if isWitnessEnabled(c.cluster) && core.IsVoter(peer) {
 				if witness, ok := c.hasAvailableWitness(region, peer); ok {
 					ruleCheckerPromoteWitnessCounter.Inc()
 					return operator.CreateNonWitnessPeerOperator("promote-witness-for-down", c.cluster, region, witness)
@@ -197,13 +191,13 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			return op, nil
 		}
 	}
-	return c.fixBetterLocation(region, rf)
+	return c.fixBetterLocation(region, fit, rf)
 }
 
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
-	ruleStores := c.getRuleFitStores(rf)
-	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
+	ruleStores := getRuleFitStores(c.cluster, rf)
+	isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
 	// If the peer to be added is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	store, filterByTempState := c.strategy(c.r, region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
@@ -242,8 +236,13 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 // The peer's store may in Offline or Down, need to be replace.
 func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	var fastFailover bool
+	store := c.cluster.GetStore(peer.StoreId)
+	if store == nil {
+		log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", peer.StoreId))
+		return nil, errNoStoreToReplace
+	}
 	// If the store to which the original peer belongs is TiFlash, the new peer cannot be set to witness, nor can it perform fast failover
-	if c.isWitnessEnabled() && !c.cluster.GetStore(peer.StoreId).IsTiFlash() {
+	if isWitnessEnabled(c.cluster) && !store.IsTiFlash() {
 		// No matter whether witness placement rule is enabled or disabled, when peer's downtime
 		// exceeds the threshold(30min), quickly add a witness to speed up failover, then promoted
 		// to non-witness gradually to improve availability.
@@ -255,14 +254,14 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 	} else {
 		fastFailover = false
 	}
-	ruleStores := c.getRuleFitStores(rf)
-	store, filterByTempState := c.strategy(c.r, region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
-	if store == 0 {
+	ruleStores := getRuleFitStores(c.cluster, rf)
+	storeID, filterByTempState := c.strategy(c.r, region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	if storeID == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
 		return nil, errNoStoreToReplace
 	}
-	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
+	newPeer := &metapb.Peer{StoreId: storeID, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
 	var newLeader *metapb.Peer
 	if region.GetLeader().GetId() == peer.GetId() {
@@ -342,7 +341,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
 		return nil, errPeerCannotBeWitness
 	}
-	if !core.IsWitness(peer) && rf.Rule.IsWitness && c.isWitnessEnabled() {
+	if !core.IsWitness(peer) && rf.Rule.IsWitness && isWitnessEnabled(c.cluster) {
 		c.switchWitnessCache.UpdateTTL(c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())
 		if c.switchWitnessCache.Exists(region.GetID()) {
 			ruleCheckerRecentlyPromoteToNonWitnessCounter.Inc()
@@ -358,7 +357,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			ruleCheckerSetVoterWitnessCounter.Inc()
 		}
 		return operator.CreateWitnessPeerOperator("fix-witness-peer", c.cluster, region, peer)
-	} else if core.IsWitness(peer) && (!rf.Rule.IsWitness || !c.isWitnessEnabled()) {
+	} else if core.IsWitness(peer) && (!rf.Rule.IsWitness || !isWitnessEnabled(c.cluster)) {
 		if core.IsLearner(peer) {
 			ruleCheckerSetLearnerNonWitnessCounter.Inc()
 		} else {
@@ -390,36 +389,23 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	return false
 }
 
-func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	if len(rf.Rule.LocationLabels) == 0 {
 		return nil, nil
 	}
 
-	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
+	isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
 	strategy := c.strategy(c.r, region, rf.Rule, isWitness)
-	ruleStores := c.getRuleFitStores(rf)
-	oldStore := strategy.SelectStoreToRemove(ruleStores)
-	if oldStore == 0 {
-		return nil, nil
-	}
-	var coLocationStores []*core.StoreInfo
-	regionStores := c.cluster.GetRegionStores(region)
-	for _, s := range regionStores {
-		if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
-			coLocationStores = append(coLocationStores, s)
-		}
-	}
-
-	newStore, filterByTempState := strategy.SelectStoreToImprove(coLocationStores, oldStore)
-	if newStore == 0 {
+	oldStoreID, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
+	if newStoreID == 0 {
 		log.Debug("no replacement store", zap.Uint64("region-id", region.GetID()))
 		c.handleFilterState(region, filterByTempState)
 		return nil, nil
 	}
 	ruleCheckerMoveToBetterLocationCounter.Inc()
-	newPeer := &metapb.Peer{StoreId: newStore, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
-	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
+	newPeer := &metapb.Peer{StoreId: newStoreID, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
+	return operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStoreID, newPeer)
 }
 
 func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
@@ -633,16 +619,6 @@ func (c *RuleChecker) strategy(r *rand.Rand, region *core.RegionInfo, rule *plac
 		fastFailover:   fastFailover,
 		r:              r,
 	}
-}
-
-func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo {
-	var stores []*core.StoreInfo
-	for _, p := range rf.Peers {
-		if s := c.cluster.GetStore(p.GetStoreId()); s != nil {
-			stores = append(stores, s)
-		}
-	}
-	return stores
 }
 
 func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
