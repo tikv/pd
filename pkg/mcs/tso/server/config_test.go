@@ -133,7 +133,7 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(*testing.T) {
 			cfg := &Config{
 				AdvertiseListenAddr: tt.advertiseAddr,
 			}
@@ -144,7 +144,7 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 			} else {
 				svr := CreateServer(ctx, cfg)
 				if tt.advertiseAddr == "" {
-					re.Equal("", svr.advertiseListenHost)
+					re.Empty(svr.advertiseListenHost)
 				} else {
 					re.Equal("127.0.0.1:2379", svr.advertiseListenHost)
 				}

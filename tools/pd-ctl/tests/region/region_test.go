@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -561,7 +560,7 @@ func (suite *regionTestSuite) followerDirect(cluster *pdTests.TestCluster) {
 			output, err := tests.ExecuteCommand(cmd, "-u", serverAddr, "region", "100", "--no-forward")
 			re.NoError(err)
 			outputStr := string(output)
-			re.True(strings.Contains(outputStr, "\"id\":100") || strings.Contains(outputStr, "TiKV cluster not bootstrapped"), outputStr)
+			re.Contains(outputStr, "\"id\":100")
 		}
 	}
 }
