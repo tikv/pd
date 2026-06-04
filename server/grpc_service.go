@@ -71,6 +71,7 @@ var (
 	errScatterRegionSend     = forwardFailCounter.WithLabelValues("scatter_region", "send")
 	errSplitRegionsSend      = forwardFailCounter.WithLabelValues("split_regions", "send")
 	errStoreHeartbeatSend    = forwardFailCounter.WithLabelValues("store_heartbeat", "send")
+	errStoreHeartbeatClient  = forwardFailCounter.WithLabelValues("store_heartbeat", "client")
 	errGetOperatorSend       = forwardFailCounter.WithLabelValues("get_operator", "send")
 )
 
@@ -968,6 +969,8 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 					// reset to let it be updated in the next request
 					s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
 				}
+			} else {
+				errStoreHeartbeatClient.Inc()
 			}
 		}
 	}

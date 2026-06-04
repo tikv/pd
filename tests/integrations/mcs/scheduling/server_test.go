@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -355,6 +356,91 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
+}
+
+func (suite *serverTestSuite) TestStoreHeartbeatForwardFailureWithNoSchedulingPrimary() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Put a store so heartbeats can reference it.
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	resp, err := s.PutStore(
+		context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      2,
+				Address: "mock://tikv-2:2",
+				State:   metapb.StoreState_Up,
+				Version: "7.0.0",
+			},
+		},
+	)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+
+	// Wait until PD recognizes scheduling as independent and forwards heartbeats.
+	testutil.Eventually(re, func() bool {
+		_, resp1Err := s.StoreHeartbeat(
+			context.Background(), &pdpb.StoreHeartbeatRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Stats: &pdpb.StoreStats{
+					StoreId:  2,
+					Capacity: 100,
+				},
+			},
+		)
+		return resp1Err == nil
+	})
+
+	// Snapshot the baseline counter value
+	getCounter := func() float64 {
+		mfs, gatherErr := prometheus.DefaultGatherer.Gather()
+		re.NoError(gatherErr)
+		for _, mf := range mfs {
+			if mf.GetName() == "pd_server_forward_fail_total" {
+				for _, m := range mf.GetMetric() {
+					lbls := m.GetLabel()
+					if len(lbls) >= 2 && lbls[0].GetValue() == "store_heartbeat" && lbls[1].GetValue() == "client" {
+						return m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		return 0
+	}
+	baseline := getCounter()
+
+	// Ensure we restore the primary address so the empty primary doesn't leak
+	originalAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
+	re.True(ok)
+	defer suite.pdLeader.GetServer().SetServicePrimaryAddr(constant.SchedulingServiceName, originalAddr)
+
+	// Simulate the bug condition: clear the scheduling primary address
+	// so GetServicePrimaryAddr returns "", mimicking a leader switch where
+	// the primary watcher hasn't caught up.
+	suite.pdLeader.GetServer().SetServicePrimaryAddr(constant.SchedulingServiceName, "")
+
+	// Send a heartbeat — the forward should fail because no primary address.
+	_, err = s.StoreHeartbeat(
+		context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Stats: &pdpb.StoreStats{
+				StoreId:  2,
+				Capacity: 200,
+			},
+		},
+	)
+	re.NoError(err)
+
+	// The failure must be observable: the forward_fail_total counter
+	// with label (store_heartbeat, client) should be incremented.
+	// Before the fix, this counter doesn't exist and the failure is silent.
+	re.Eventually(func() bool {
+		return getCounter() > baseline
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
 func (suite *serverTestSuite) TestSchedulerSync() {
