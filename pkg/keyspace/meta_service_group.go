@@ -86,9 +86,10 @@ func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error)
 	var assignedGroup string
 	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
-		assignedGroup, err = m.findMinMetaGroup(txn)
-		m.updateAssignmentTxn(txn, "", assignedGroup)
-		return err
+		if assignedGroup, err = m.findMinMetaGroup(txn); err != nil {
+			return err
+		}
+		return m.updateAssignmentTxn(txn, "", assignedGroup)
 	}); err != nil {
 		return "", err
 	}
