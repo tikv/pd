@@ -651,6 +651,25 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 	sender *regionSyncStream,
 	regions *pdpb.SyncRegionResponse,
 ) bool {
+	return s.sendRegionSyncResponseWithOptions(ctx, name, sender, regions, true)
+}
+
+func (s *RegionSyncer) sendCloseRegionSyncResponse(
+	ctx context.Context,
+	name string,
+	sender *regionSyncStream,
+	regions *pdpb.SyncRegionResponse,
+) bool {
+	return s.sendRegionSyncResponseWithOptions(ctx, name, sender, regions, false)
+}
+
+func (s *RegionSyncer) sendRegionSyncResponseWithOptions(
+	ctx context.Context,
+	name string,
+	sender *regionSyncStream,
+	regions *pdpb.SyncRegionResponse,
+	watchDone bool,
+) bool {
 	var sendErr error
 	failpoint.InjectCall("regionSyncerSendFail", name, &sendErr)
 	if sendErr != nil {
@@ -659,10 +678,14 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 		return false
 	}
 
-	select {
-	case <-sender.done:
-		return false
-	default:
+	var doneCh <-chan struct{}
+	if watchDone {
+		doneCh = sender.done
+		select {
+		case <-doneCh:
+			return false
+		default:
+		}
 	}
 
 	resultCh := make(chan error, 1)
@@ -690,7 +713,7 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 		log.Warn("region syncer send data canceled", zap.String("name", name),
 			errs.ZapError(errs.ErrGRPCSend, ctx.Err()))
 		return false
-	case <-sender.done:
+	case <-doneCh:
 		log.Warn("region syncer send data canceled because stream is closed", zap.String("name", name))
 		return false
 	case <-timer.C:
@@ -701,18 +724,19 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 }
 
 func (s *RegionSyncer) closeAllClient() {
-	type namedStream struct {
-		name   string
-		stream *regionSyncStream
-	}
-
 	s.mu.RLock()
-	streams := make([]namedStream, 0, len(s.mu.streams))
+	streams := make(map[string]*regionSyncStream, len(s.mu.streams))
 	for name, sender := range s.mu.streams {
-		streams = append(streams, namedStream{name: name, stream: sender})
+		streams[name] = sender
 	}
 	s.mu.RUnlock()
+
 	for _, sender := range streams {
+		sender.close()
+	}
+
+	wg := &sync.WaitGroup{}
+	for name, sender := range streams {
 		resp := &pdpb.SyncRegionResponse{
 			Header: &pdpb.ResponseHeader{
 				ClusterId: keypath.ClusterID(),
@@ -722,9 +746,14 @@ func (s *RegionSyncer) closeAllClient() {
 				},
 			},
 		}
-		if !s.sendRegionSyncResponse(context.Background(), sender.name, sender.stream, resp) {
-			log.Warn("region syncer send close message meet error", zap.String("name", sender.name))
-		}
-		sender.stream.close()
+		wg.Add(1)
+		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
+			defer logutil.LogPanic()
+			defer wg.Done()
+			if !s.sendCloseRegionSyncResponse(s.server.LoopContext(), name, sender, resp) {
+				log.Warn("region syncer send close message meet error", zap.String("name", name))
+			}
+		}(name, sender, resp)
 	}
+	wg.Wait()
 }
