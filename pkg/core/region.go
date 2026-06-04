@@ -1906,8 +1906,16 @@ func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, le
 		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
-// GetTotalRegionCount gets the total count of RegionInfo of regionMap
+// GetTotalRegionCount gets the total count of RegionInfo of regionMap.
 func (r *RegionsInfo) GetTotalRegionCount() int {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	return len(r.regions)
+}
+
+// GetTotalRegionCountAtomic gets the lock-free total count of RegionInfo.
+// It is intended for read-only status APIs where transient in-flight updates are acceptable.
+func (r *RegionsInfo) GetTotalRegionCountAtomic() int {
 	return int(atomic.LoadInt64(&r.regionCount))
 }
 
