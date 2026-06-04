@@ -634,7 +634,7 @@ func TestBroadcastRecordsBusyDownstreamAndDrainsLater(t *testing.T) {
 	re.Equal(uint64(10), activeStream.lastResponse().GetStartIndex())
 	re.Equal(uint64(12), activeSyncStream.getSendIndex())
 	re.Nil(busyStream.lastResponse())
-	re.Equal(uint64(10), busySyncStream.getSendIndex())
+	re.Equal(uint64(10), busySyncStream.getSendIndexLocked())
 	re.Equal(records, syncer.history.recordsFrom(10))
 
 	busySyncStream.sendMu.Unlock()

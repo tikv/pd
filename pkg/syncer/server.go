@@ -66,21 +66,19 @@ type ServerStream interface {
 	Send(regions *pdpb.SyncRegionResponse) error
 }
 
-type downstreamSendSignal struct {
-	keepAlive bool
-}
-
 type regionSyncStream struct {
+	// stream serializes the underlying gRPC Send calls. A timed-out send may
+	// still be blocked after sendMu is released.
 	stream struct {
 		syncutil.Mutex
 		ServerStream
 	}
-	sendMu syncutil.Mutex
-	index  struct {
-		syncutil.RWMutex
+	// sendMu serializes the logical send flow and protects sendIndex.
+	sendMu struct {
+		syncutil.Mutex
 		sendIndex uint64
 	}
-	notifyCh chan downstreamSendSignal
+	notifyCh chan bool
 	done     chan struct{}
 	once     sync.Once
 }
@@ -93,32 +91,40 @@ func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStre
 		}{
 			ServerStream: stream,
 		},
-		index: struct {
-			syncutil.RWMutex
+		sendMu: struct {
+			syncutil.Mutex
 			sendIndex uint64
 		}{
 			sendIndex: startIndex,
 		},
-		notifyCh: make(chan downstreamSendSignal, 1),
+		notifyCh: make(chan bool, 1),
 		done:     make(chan struct{}),
 	}
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.index.RLock()
-	defer s.index.RUnlock()
-	return s.index.sendIndex
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.getSendIndexLocked()
+}
+
+func (s *regionSyncStream) getSendIndexLocked() uint64 {
+	return s.sendMu.sendIndex
 }
 
 func (s *regionSyncStream) advanceSendIndex(count int) {
-	s.index.Lock()
-	defer s.index.Unlock()
-	s.index.sendIndex += uint64(count)
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	s.advanceSendIndexLocked(count)
+}
+
+func (s *regionSyncStream) advanceSendIndexLocked(count int) {
+	s.sendMu.sendIndex += uint64(count)
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
 	select {
-	case s.notifyCh <- downstreamSendSignal{keepAlive: keepAlive}:
+	case s.notifyCh <- keepAlive:
 	default:
 	}
 }
@@ -517,7 +523,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
 			return err
 		}
-		syncStream.advanceSendIndex(len(records))
+		syncStream.advanceSendIndexLocked(len(records))
 	}
 	return nil
 }
@@ -551,8 +557,8 @@ func (s *RegionSyncer) runDownstreamSender(ctx context.Context, name string, str
 			return
 		case <-stream.done:
 			return
-		case signal := <-stream.notifyCh:
-			if err := s.sendDownstream(ctx, name, stream, signal.keepAlive); err != nil {
+		case keepAlive := <-stream.notifyCh:
+			if err := s.sendDownstream(ctx, name, stream, keepAlive); err != nil {
 				log.Warn("region syncer send downstream records meet error",
 					zap.String("name", name), errs.ZapError(errs.ErrGRPCSend, err))
 				s.unbindStream(name, stream)
@@ -574,7 +580,7 @@ func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		StartIndex: stream.getSendIndex(),
+		StartIndex: stream.getSendIndexLocked(),
 	}
 	if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 		return errors.Errorf("send region sync keepalive failed")
@@ -596,7 +602,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		}
 		s.mu.RUnlock()
 
-		sendIndex := stream.getSendIndex()
+		sendIndex := stream.getSendIndexLocked()
 		firstIndex := s.history.getFirstIndex()
 		if sendIndex < firstIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
@@ -620,7 +626,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 			return sentRecords, errors.Errorf("send region sync response failed")
 		}
-		stream.advanceSendIndex(len(records))
+		stream.advanceSendIndexLocked(len(records))
 		sentRecords = true
 	}
 }
