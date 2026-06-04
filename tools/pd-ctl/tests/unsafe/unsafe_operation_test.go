@@ -46,6 +46,9 @@ func TestRemoveFailedStores(t *testing.T) {
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "3600"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--plan-execution-timeout", "600", "--disable-paranoid-check"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
 	args = []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3", "--timeout", "abc"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.Error(err)
