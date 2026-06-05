@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/resource_group/controller"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -139,7 +140,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 	re.NotNil(innerCli)
 	testutil.Eventually(re, func() bool {

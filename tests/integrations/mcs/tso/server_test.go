@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -240,9 +241,9 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 	re.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
-		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	return suite
 }
@@ -261,7 +262,7 @@ func (suite *APIServerForward) ShutDown() {
 	}
 	suite.cluster.Destroy()
 	suite.cancel()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
 func TestForwardTSORelated(t *testing.T) {
@@ -508,9 +509,9 @@ func TestForwardTsoConcurrently(t *testing.T) {
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 	}()
 
 	tc, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
@@ -568,9 +569,9 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 	}()
 
 	tc, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
@@ -582,7 +583,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		var clients []pd.Client
 		for range num {
 			pdClient, err := pd.NewClientWithContext(context.Background(),
-				[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+				[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 			re.NoError(err)
 			re.NotNil(pdClient)
 			clients = append(clients, pdClient)

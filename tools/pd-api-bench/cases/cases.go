@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/opt"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -323,7 +324,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 
 func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), pd.WithAllowFollowerHandle())
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), opt.WithAllowFollowerHandle())
 	if err != nil {
 		return err
 	}
