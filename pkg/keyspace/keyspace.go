@@ -274,6 +274,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 
 	if request.Config != nil {
 		delete(request.Config, MetaServiceGroupAddressesKey)
+		delete(request.Config, TSOKeyspaceGroupIDKey)
 	}
 
 	// Get keyspace config.
@@ -432,6 +433,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	if request.Config != nil {
 		delete(request.Config, MetaServiceGroupAddressesKey)
+		delete(request.Config, TSOKeyspaceGroupIDKey)
 	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
