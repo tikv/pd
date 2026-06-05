@@ -108,27 +108,38 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 	tests := []struct {
 		name          string
 		advertiseAddr string
+		expectedHost  string
 		panic         bool
 	}{
 		{
 			name:          "valid http address",
 			advertiseAddr: "http://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
 			panic:         false,
 		},
 		{
 			name:          "valid https address",
 			advertiseAddr: "https://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+		{
+			name:          "valid address without scheme",
+			advertiseAddr: "localhost:2379",
+			expectedHost:  "localhost:2379",
 			panic:         false,
 		},
 		{
 			name:          "empty address",
 			advertiseAddr: "",
+			expectedHost:  "",
 			panic:         false,
 		},
 		{
-			name:          "address without scheme treated as path not host",
+			name:          "valid IPv4 address without scheme",
 			advertiseAddr: "127.0.0.1:2379",
-			panic:         true,
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
 		},
 	}
 
@@ -143,11 +154,7 @@ func TestGetAdvertiseListenHost(t *testing.T) {
 				}, "expected panic for invalid advertise listen address")
 			} else {
 				svr := CreateServer(ctx, cfg)
-				if tt.advertiseAddr == "" {
-					re.Empty(svr.advertiseListenHost)
-				} else {
-					re.Equal("127.0.0.1:2379", svr.advertiseListenHost)
-				}
+				re.Equal(tt.expectedHost, svr.advertiseListenHost)
 			}
 		})
 	}

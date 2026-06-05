@@ -253,12 +253,12 @@ func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 
 // GetClientConn implements ServiceClient.
 func (c *serviceClient) GetClientConn() *grpc.ClientConn {
-	if c == nil {
+	if c == nil || c.conn == nil {
 		return nil
 	}
 	// If the connection is in Shutdown state, it means the connection is closed and we should not reuse it.
-	if c.conn != nil && c.conn.GetState() == connectivity.Shutdown {
-		c.conn = nil
+	if c.conn.GetState() == connectivity.Shutdown {
+		return nil
 	}
 	return c.conn
 }

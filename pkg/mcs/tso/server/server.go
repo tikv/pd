@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -391,14 +392,25 @@ func (s *Server) startServer() (err error) {
 func CreateServer(ctx context.Context, cfg *Config) *Server {
 	addr := cfg.GetAdvertiseListenAddr()
 	parsed, err := url.Parse(addr)
+	advertiseListenHost := ""
 	if err != nil {
-		panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
+			panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
+		}
+		advertiseListenHost = addr
+	} else {
+		advertiseListenHost = parsed.Host
+		if advertiseListenHost == "" {
+			if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+				advertiseListenHost = addr
+			}
+		}
 	}
 	svr := &Server{
 		BaseServer:          server.NewBaseServer(ctx),
 		DiagnosticsServer:   sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:                 cfg,
-		advertiseListenHost: parsed.Host,
+		advertiseListenHost: advertiseListenHost,
 	}
 	return svr
 }
