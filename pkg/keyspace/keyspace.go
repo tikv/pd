@@ -67,6 +67,9 @@ const (
 	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
 	// in a unified way (managed by the NullKeyspace).
 	UnifiedGC = "unified"
+	// RegionBoundType is the key for region bound type in keyspace config,
+	// which is used to indicate the region bound type of the keyspace.
+	RegionBoundType = "region_bound_type"
 )
 
 // Config is the interface for keyspace config.
@@ -189,7 +192,7 @@ func (manager *Manager) Bootstrap() error {
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	// Split Keyspace Region for default/system keyspace.
-	if err := manager.splitKeyspaceRegion(id, false); err != nil {
+	if err := manager.splitKeyspaceRegion(id, false, manager.getRegionBoundType()); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
@@ -257,6 +260,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 
 	// Get keyspace config.
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	boundType := manager.getRegionBoundType()
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
 		return nil, err
@@ -268,6 +272,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
+		request.Config[RegionBoundType] = boundType.String()
 	}
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
@@ -301,7 +306,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.OnSaveKeyspaceMetaFinished()
 
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
+	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit(), boundType)
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			idPath := keypath.KeyspaceIDPath(request.Name)
@@ -427,7 +432,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		return nil, err
 	}
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit(), manager.getRegionBoundType())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			metaPath := keypath.KeyspaceMetaPath(id)
@@ -499,13 +504,12 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
 	start := time.Now()
-	boundType := manager.getRegionBoundType()
 	keyspaceRule := buildLabelRule(id, boundType)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
@@ -576,8 +580,15 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBound
 }
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
-func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
-	return manager.hasKeyspaceRegionBound(id, manager.getRegionBoundType())
+func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
+	config := meta.GetConfig()
+	val, ok := config[RegionBoundType]
+	// if config does not contain region bound type, we use the default one from manager.
+	if !ok {
+		val = manager.getRegionBoundType().String()
+	}
+	typ := keyTypeStringToRegionBoundType(val)
+	return manager.hasKeyspaceRegionBound(meta.GetId(), typ)
 }
 
 func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {

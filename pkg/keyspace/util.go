@@ -171,6 +171,13 @@ func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
 	return txnRegionBound
 }
 
+func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
+	if keyType == coreconstant.Raw.String() {
+		return rawRegionBound
+	}
+	return txnRegionBound
+}
+
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
 	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)

@@ -566,8 +566,8 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
 				Count:            3,
-				StartKeyHex:      keyRanges[1].(map[string]any)["start_key"].(string),
-				EndKeyHex:        keyRanges[1].(map[string]any)["end_key"].(string),
+				StartKeyHex:      keyRanges[0].(map[string]any)["start_key"].(string),
+				EndKeyHex:        keyRanges[0].(map[string]any)["end_key"].(string),
 				LabelConstraints: labelConstraints,
 			},
 		},

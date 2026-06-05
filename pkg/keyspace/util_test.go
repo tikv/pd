@@ -132,8 +132,6 @@ func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	}
 	re.Equal(
 		[][]byte{
-			encodeKey([]byte{'r', 0xff, 0xff, 0xff}),
-			encodeKey([]byte{'s', 0x00, 0x00, 0x00}),
 			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
 			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
 		},
