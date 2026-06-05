@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -115,7 +116,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	re.True(ok)
-	re.Zero(es2.conf.evictStore())
+	re.Empty(es2.conf.evictedStores())
 
 	// check the value from storage.
 	var persistValue evictSlowStoreSchedulerConfig
@@ -123,7 +124,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	re.NoError(err)
 
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
-	re.Zero(persistValue.evictStore())
+	re.Empty(persistValue.evictedStores())
 	re.True(persistValue.readyForRecovery())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
 }
@@ -601,12 +602,12 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePrepare() {
 	re := suite.Require()
 	es2, ok := suite.es.(*evictSlowStoreScheduler)
 	re.True(ok)
-	re.Zero(es2.conf.evictStore())
+	re.Empty(es2.conf.evictedStores())
 	// prepare with no evict store.
 	suite.es.PrepareConfig(suite.tc)
 
-	es2.conf.setStoreAndPersist(1)
-	re.Equal(uint64(1), es2.conf.evictStore())
+	re.NoError(es2.conf.setEvictedStoresAndPersist([]uint64{1}))
+	re.ElementsMatch([]uint64{1}, es2.conf.evictedStores())
 	re.False(es2.conf.readyForRecovery())
 	// prepare with evict store.
 	suite.es.PrepareConfig(suite.tc)
@@ -677,7 +678,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 
 	es2, ok := es.(*evictSlowStoreScheduler)
 	re.True(ok)
-	re.Zero(es2.conf.evictStore())
+	re.Empty(es2.conf.evictedStores())
 
 	// check the value from storage.
 	var persistValue evictSlowStoreSchedulerConfig
@@ -685,7 +686,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	re.NoError(err)
 
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
-	re.Zero(persistValue.evictStore())
+	re.Empty(persistValue.evictedStores())
 	re.True(persistValue.readyForRecovery())
 	re.Equal(5, persistValue.Batch)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
@@ -729,7 +730,7 @@ func TestRecoveryTime(t *testing.T) {
 	ops, _ := es.Schedule(tc, false)
 	re.NotEmpty(ops)
 	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
-	re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+	re.ElementsMatch([]uint64{1}, es.(*evictSlowStoreScheduler).conf.evictedStores())
 
 	// Store recovers from being slow
 	time.Sleep(recoveryTime)
@@ -744,7 +745,7 @@ func TestRecoveryTime(t *testing.T) {
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)
 		re.Empty(ops)
-		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+		re.ElementsMatch([]uint64{1}, es.(*evictSlowStoreScheduler).conf.evictedStores())
 	}
 
 	// Store is slow again before recovery time is over
@@ -760,7 +761,7 @@ func TestRecoveryTime(t *testing.T) {
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)
 		re.Empty(ops)
-		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+		re.ElementsMatch([]uint64{1}, es.(*evictSlowStoreScheduler).conf.evictedStores())
 	}
 
 	// Store recovers from being slow
@@ -776,7 +777,7 @@ func TestRecoveryTime(t *testing.T) {
 		es.Schedule(tc, false)
 		ops, _ = bs.Schedule(tc, false)
 		re.Empty(ops)
-		re.Equal(uint64(1), es.(*evictSlowStoreScheduler).conf.evictStore())
+		re.ElementsMatch([]uint64{1}, es.(*evictSlowStoreScheduler).conf.evictedStores())
 	}
 
 	// Should now recover
@@ -786,13 +787,13 @@ func TestRecoveryTime(t *testing.T) {
 
 	ops, _ = bs.Schedule(tc, false)
 	re.Empty(ops)
-	re.Empty(es.(*evictSlowStoreScheduler).conf.evictStore())
+	re.Empty(es.(*evictSlowStoreScheduler).conf.evictedStores())
 
 	// Verify persistence
 	var persistValue evictSlowStoreSchedulerConfig
 	err = es.(*evictSlowStoreScheduler).conf.load(&persistValue)
 	re.NoError(err)
-	re.Zero(persistValue.evictStore())
+	re.Empty(persistValue.evictedStores())
 	re.True(persistValue.readyForRecovery())
 }
 
@@ -806,4 +807,412 @@ func TestCalculateAvgScore(t *testing.T) {
 	re.Equal(uint64(5), calculateAvgScore(map[uint64]uint64{1: 2, 2: 5, 3: 8}))
 	// All zeros
 	re.Equal(uint64(0), calculateAvgScore(map[uint64]uint64{1: 0, 2: 0}))
+}
+
+func setStoreSlowScore(tc *mockcluster.Cluster, id uint64, score uint64) {
+	tc.PutStore(tc.GetStore(id).Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = score
+	}))
+}
+
+func createTestEvictSlowStoreScheduler(re *require.Assertions, oc *operator.Controller) Scheduler {
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+	return es
+}
+
+// setGroupEvictionLabels configures the failure-domain labels that enable group eviction.
+func setGroupEvictionLabels(es Scheduler, labels ...string) {
+	es.(*evictSlowStoreScheduler).conf.GroupEvictionLabels = labels
+}
+
+// TestEvictSlowStoreSameZoneGroup: two slow stores sharing a zone are both evicted.
+func TestEvictSlowStoreSameZoneGroup(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Len(ops, 2)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+	re.True(tc.GetStore(1).EvictedAsSlowStore())
+	re.True(tc.GetStore(2).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreCrossZoneNoEvict: slow stores spanning two zones evict nothing.
+func TestEvictSlowStoreCrossZoneNoEvict(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 3, 1, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	// One slow store in z1, another in z2.
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 3, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.False(tc.GetStore(3).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreDefaultNoGroup: with no group-eviction-labels configured, 2+ slow stores
+// fall back to the conservative do-nothing behavior.
+func TestEvictSlowStoreDefaultNoGroup(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	// group-eviction-labels left at its default (empty).
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreMultiLevelMatch: group-eviction-labels "zone,rack"; two stores sharing both
+// zone and rack are evicted together.
+func TestEvictSlowStoreMultiLevelMatch(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "rack": "r2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "rack": "r3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone", "rack")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+}
+
+// TestEvictSlowStoreMultiLevelDiffer: group-eviction-labels "zone,rack"; stores in the same zone
+// but different racks are NOT a single domain, so no group eviction.
+func TestEvictSlowStoreMultiLevelDiffer(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "rack": "r2", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "rack": "r3", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "rack": "r4", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone", "rack")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreMissingLabel: a slow store missing a configured label is never grouped.
+func TestEvictSlowStoreMissingLabel(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"host": "h2"}) // no zone label
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreInsufficientHealthyZones: a topology with too few zones to
+// absorb a zone drain blocks group eviction.
+func TestEvictSlowStoreInsufficientHealthyZones(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Only z1 (slow) and z2 exist; draining z1 leaves a single healthy zone.
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLeaderRegion(1, 1, 3)
+	tc.AddLeaderRegion(2, 2, 3)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreReconcileAndFreeze: while draining a zone, newly-slow same-zone
+// stores are added, but a slow store appearing in another zone freezes expansion.
+func TestEvictSlowStoreReconcileAndFreeze(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z1", "host": "h5"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+	tc.AddLeaderRegion(5, 5, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	// Step 1: only store 1 slow → single-store eviction.
+	setStoreSlowScore(tc, 1, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1}, conf.evictedStores())
+
+	// Step 2: store 2 (same zone) becomes slow → reconcile adds it.
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// Step 3: a store in another zone goes slow → freeze; a new z1 store is NOT added.
+	setStoreSlowScore(tc, 3, 100)
+	setStoreSlowScore(tc, 5, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+	re.False(tc.GetStore(5).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreGroupRecovery: the group is released only once every evicted
+// store has recovered.
+func TestEvictSlowStoreGroupRecovery(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// Only store 1 recovers: the group keeps draining (store 1 stays evicted).
+	setStoreSlowScore(tc, 1, 0)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+	re.True(tc.GetStore(1).EvictedAsSlowStore())
+
+	// Store 2 recovers too: the whole group is released.
+	setStoreSlowScore(tc, 2, 0)
+	es.Schedule(tc, false)
+	re.Empty(conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.False(tc.GetStore(2).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreReconcileInsufficientZones: when a group forms via single-store
+// eviction followed by reconcile, the domain guard must still block expansion if the
+// topology has too few healthy zones to absorb the whole zone being drained.
+func TestEvictSlowStoreReconcileInsufficientZones(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	// Only two zones: z1 (slow) and z2. Draining all of z1 leaves a single healthy zone.
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLeaderRegion(1, 1, 3)
+	tc.AddLeaderRegion(2, 2, 3)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	// Store 1 slow → single-store path evicts it (no domain guard on single-store path,
+	// matching the pre-existing behavior).
+	setStoreSlowScore(tc, 1, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1}, conf.evictedStores())
+
+	// Store 2 (same zone) becomes slow → reconcile must NOT add it because the
+	// topology only has 1 other zone (z2), below minRemainingHealthyDomains=2.
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1}, conf.evictedStores())
+	re.False(tc.GetStore(2).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreRemovedMidDrain: a store that leaves the cluster while being
+// evicted is dropped from the group; the remaining stores keep draining.
+func TestEvictSlowStoreRemovedMidDrain(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// Store 1 is physically removed from the cluster mid-drain.
+	tc.PutStore(tc.GetStore(1).Clone(func(store *core.StoreInfo) {
+		store.GetMeta().NodeState = metapb.NodeState_Removed
+	}))
+
+	// Next cycle: store 1 is dropped from the eviction set; store 2 keeps draining.
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{2}, conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.True(tc.GetStore(2).EvictedAsSlowStore())
+}
+
+// TestEvictSlowStoreGroupIdempotent: repeated reconcile cycles never double-mark a
+// store, so a single recovery fully clears the slow-evicted state.
+func TestEvictSlowStoreGroupIdempotent(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+	}()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setGroupEvictionLabels(es, "zone")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// Several reconcile cycles with no change must not re-mark the stores.
+	for range 5 {
+		es.Schedule(tc, false)
+	}
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+
+	// A single recovery must fully clear the evicted mark (counter back to zero).
+	setStoreSlowScore(tc, 1, 0)
+	setStoreSlowScore(tc, 2, 0)
+	es.Schedule(tc, false)
+	re.Empty(conf.evictedStores())
+	re.False(tc.GetStore(1).EvictedAsSlowStore())
+	re.False(tc.GetStore(2).EvictedAsSlowStore())
 }
