@@ -19,15 +19,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // For issue https://github.com/tikv/pd/issues/3936
@@ -82,4 +86,35 @@ func TestErrorCode(t *testing.T) {
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())
+}
+
+func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.history.resetWithIndex(10)
+	syncer.streamingRunning.Store(true)
+
+	handled := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: keypath.ClusterID(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: "server stopped, close the region syncer client",
+			},
+		},
+	}, nil, nil)
+
+	re.False(handled)
+	re.Equal(uint64(10), syncer.history.getNextIndex())
+	re.False(syncer.IsRunning())
 }
