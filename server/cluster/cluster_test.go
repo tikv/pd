@@ -2594,15 +2594,13 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	return c.setStore(newStore)
 }
 
-func (c *testCluster) addLabelsStore(storeID uint64, leaderCount int, labels map[string]string) error {
+func (c *testCluster) addLabelsStore(storeID uint64, labels map[string]string) error {
 	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
 	for k, v := range labels {
 		storeLabels = append(storeLabels, &metapb.StoreLabel{Key: k, Value: v})
 	}
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID, Labels: storeLabels, NodeState: metapb.NodeState_Serving},
 		core.SetStoreStats(&pdpb.StoreStats{}),
-		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	if err := c.SetStoreLimit(storeID, storelimit.AddPeer, 60); err != nil {
@@ -3534,12 +3532,12 @@ func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(), `{"recovery-duration":0}`)
 
 	// Topology: zone z1 = {1,2,3}, z2 = {4,5}, z3 = {6}. Leaders on the z1 stores.
-	re.NoError(tc.addLabelsStore(1, 6, map[string]string{"zone": "z1"}))
-	re.NoError(tc.addLabelsStore(2, 6, map[string]string{"zone": "z1"}))
-	re.NoError(tc.addLabelsStore(3, 6, map[string]string{"zone": "z1"}))
-	re.NoError(tc.addLabelsStore(10, 6, map[string]string{"zone": "z2"}))
-	re.NoError(tc.addLabelsStore(20, 6, map[string]string{"zone": "z2"}))
-	re.NoError(tc.addLabelsStore(100, 6, map[string]string{"zone": "z3"}))
+	re.NoError(tc.addLabelsStore(1, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(2, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(3, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(10, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(20, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(100, map[string]string{"zone": "z3"}))
 
 	// markSlow feeds a disk slow score through the real store-heartbeat path.
 	var interval uint64
