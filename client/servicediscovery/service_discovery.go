@@ -257,8 +257,8 @@ func (c *serviceClient) GetClientConn() *grpc.ClientConn {
 		return nil
 	}
 	// If the connection is in Shutdown state, it means the connection is closed and we should not reuse it.
-	if c.conn.GetState() == connectivity.Shutdown {
-		return nil
+	if c.conn != nil && c.conn.GetState() == connectivity.Shutdown {
+		c.conn = nil
 	}
 	return c.conn
 }
