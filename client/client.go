@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -137,8 +138,7 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// TSOClient is the TSO client.
-	TSOClient
+	tso.Client
 	metastorage.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
@@ -176,7 +176,7 @@ type serviceModeKeeper struct {
 	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
-	tsoClient       *tsoClient
+	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
 }
 
@@ -188,7 +188,7 @@ func (k *serviceModeKeeper) close() {
 		k.tsoSvcDiscovery.Close()
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		k.tsoClient.close()
+		k.tsoClient.Close()
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 	}
 }
@@ -526,21 +526,21 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
-		newTSOCli          *tsoClient
+		newTSOCli          *tso.Cli
 		newTSOSvcDiscovery sd.ServiceDiscovery
 	)
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		newTSOCli = newTSOClient(c.ctx, c.option,
-			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
+		newTSOCli = tso.NewClient(c.ctx, c.option,
+			c.pdSvcDiscovery, &tso.PDStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, metastorage.Client(c), c.pdSvcDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
-		newTSOCli = newTSOClient(c.ctx, c.option,
-			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
+		newTSOCli = tso.NewClient(c.ctx, c.option,
+			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
 				zap.Strings("svr-urls", c.svrUrls),
@@ -552,11 +552,11 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
 	}
-	newTSOCli.setup()
+	newTSOCli.Setup()
 	// Replace the old TSO client.
 	oldTSOClient := c.tsoClient
 	c.tsoClient = newTSOCli
-	oldTSOClient.close()
+	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
 	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
@@ -569,7 +569,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	}
 }
 
-func (c *client) getTSOClient() *tsoClient {
+func (c *client) getTSOClient() *tso.Cli {
 	c.RLock()
 	defer c.RUnlock()
 	return c.tsoClient
@@ -700,7 +700,7 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 }
 
 // GetTSAsync implements the TSOClient interface.
-func (c *client) GetTSAsync(ctx context.Context) TSFuture {
+func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	defer trace.StartRegion(ctx, "pdclient.GetTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetTSAsync", opentracing.ChildOf(span.Context()))
@@ -713,15 +713,15 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 //
 // Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
 // parameters passed in, this method will default to returning the global TSO.
-func (c *client) GetLocalTSAsync(ctx context.Context, _ string) TSFuture {
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
 
-func (c *client) dispatchTSORequestWithRetry(ctx context.Context) TSFuture {
+func (c *client) dispatchTSORequestWithRetry(ctx context.Context) tso.TSFuture {
 	var (
 		retryable bool
 		err       error
-		req       *tsoRequest
+		req       *tso.Request
 	)
 	for i := range dispatchRetryCount {
 		// Do not delay for the first time.
@@ -734,20 +734,20 @@ func (c *client) dispatchTSORequestWithRetry(ctx context.Context) TSFuture {
 			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 			continue
 		}
-		// Get a new request from the pool if it's nil or not from the current pool.
-		if req == nil || req.pool != tsoClient.tsoReqPool {
-			req = tsoClient.getTSORequest(ctx)
+		// Get a new request from the pool if it's not from the current pool.
+		if !req.IsFrom(tsoClient.GetRequestPool()) {
+			req = tsoClient.GetTSORequest(ctx)
 		}
-		retryable, err = tsoClient.dispatchRequest(req)
+		retryable, err = tsoClient.DispatchRequest(req)
 		if !retryable {
 			break
 		}
 	}
 	if err != nil {
 		if req == nil {
-			return newTSORequestFastFail(err)
+			return tso.NewRequestFastFail(err)
 		}
-		req.tryDone(err)
+		req.TryDone(err)
 	}
 	return req
 }

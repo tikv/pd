@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package batch
 
 import (
 	"context"
@@ -23,26 +23,26 @@ import (
 
 func TestAdjustBestBatchSize(t *testing.T) {
 	re := require.New(t)
-	bc := newBatchController[int](20, nil, nil)
+	bc := NewController[int](20, nil, nil)
 	re.Equal(defaultBestBatchSize, bc.bestBatchSize)
-	bc.adjustBestBatchSize()
+	bc.AdjustBestBatchSize()
 	re.Equal(defaultBestBatchSize-1, bc.bestBatchSize)
 	// Clear the collected requests.
-	bc.finishCollectedRequests(nil, nil)
+	bc.FinishCollectedRequests(nil, nil)
 	// Push 10 requests - do not increase the best batch size.
 	for i := range 10 {
 		bc.pushRequest(i)
 	}
-	bc.adjustBestBatchSize()
+	bc.AdjustBestBatchSize()
 	re.Equal(defaultBestBatchSize-1, bc.bestBatchSize)
-	bc.finishCollectedRequests(nil, nil)
+	bc.FinishCollectedRequests(nil, nil)
 	// Push 15 requests, increase the best batch size.
 	for i := range 15 {
 		bc.pushRequest(i)
 	}
-	bc.adjustBestBatchSize()
+	bc.AdjustBestBatchSize()
 	re.Equal(defaultBestBatchSize, bc.bestBatchSize)
-	bc.finishCollectedRequests(nil, nil)
+	bc.FinishCollectedRequests(nil, nil)
 }
 
 type testRequest struct {
@@ -52,10 +52,10 @@ type testRequest struct {
 
 func TestFinishCollectedRequests(t *testing.T) {
 	re := require.New(t)
-	bc := newBatchController[*testRequest](20, nil, nil)
+	bc := NewController[*testRequest](20, nil, nil)
 	// Finish with zero request count.
 	re.Zero(bc.collectedRequestCount)
-	bc.finishCollectedRequests(nil, nil)
+	bc.FinishCollectedRequests(nil, nil)
 	re.Zero(bc.collectedRequestCount)
 	// Finish with non-zero request count.
 	requests := make([]*testRequest, 10)
@@ -64,14 +64,14 @@ func TestFinishCollectedRequests(t *testing.T) {
 		bc.pushRequest(requests[i])
 	}
 	re.Equal(10, bc.collectedRequestCount)
-	bc.finishCollectedRequests(nil, nil)
+	bc.FinishCollectedRequests(nil, nil)
 	re.Zero(bc.collectedRequestCount)
 	// Finish with custom finisher.
 	for i := range 10 {
 		requests[i] = &testRequest{}
 		bc.pushRequest(requests[i])
 	}
-	bc.finishCollectedRequests(func(idx int, tr *testRequest, err error) {
+	bc.FinishCollectedRequests(func(idx int, tr *testRequest, err error) {
 		tr.idx = idx
 		tr.err = err
 	}, context.Canceled)
