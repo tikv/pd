@@ -41,7 +41,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -584,7 +584,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
@@ -623,7 +623,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 		return false
 	})
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
@@ -653,7 +653,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
@@ -671,7 +671,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	re.Error(err)
 	re.Nil(r)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
 	cli.GetServiceDiscovery().CheckMemberChanged()
 	testutil.Eventually(re, func() bool {
 		r, err = cli.GetRegion(context.Background(), []byte("a"))
@@ -1786,7 +1786,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
 	// make sure back off executed.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/retry/backOffExecute", `return(true)`))
 	leader2 := waitLeaderChange(re, cluster, leader, innerCli.GetServiceDiscovery())
 	re.True(retry.TestBackOffExecute())
 
@@ -1795,7 +1795,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/retry/backOffExecute"))
 }
 
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli sd.ServiceDiscovery) string {
@@ -2019,7 +2019,7 @@ func TestCircuitBreaker(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2029,7 +2029,7 @@ func TestCircuitBreaker(t *testing.T) {
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
@@ -2074,7 +2074,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2090,7 +2090,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	})
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
@@ -2123,7 +2123,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
@@ -2138,7 +2138,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	defer os.RemoveAll(fname)
 	// wait for cooldown
 	time.Sleep(time.Second)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 	// trigger circuit breaker state to be half open
 	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
@@ -2150,7 +2150,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	})
 
 	// The state is half open
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 	// change settings to always closed
 	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
@@ -2160,5 +2160,5 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }

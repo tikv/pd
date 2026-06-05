@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/utils/tsoutil"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
