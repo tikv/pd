@@ -84,6 +84,7 @@ var (
 // TestServer is only for test.
 type TestServer struct {
 	syncutil.RWMutex
+	startMu    sync.Mutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
@@ -142,10 +143,14 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+
 	s.Lock()
 	if s.state != Initial && s.state != Stop {
+		state := s.state
 		s.Unlock()
-		return errors.Errorf("server(state%d) cannot run", s.state)
+		return errors.Errorf("server(state%d) cannot run", state)
 	}
 	// Immediately set state to Starting and unlock
 	s.state = Starting
@@ -158,17 +163,15 @@ func (s *TestServer) Run() error {
 	defer s.Unlock()
 
 	if err != nil {
-		// If the server is destroyed or stopped while Run(), return nil
 		if s.state == Destroy || s.state == Stop {
-			return nil
+			return errors.New("server stopped before reaching running state")
 		}
 		s.state = Stop
 		return err
 	}
-	// Close and return nil if the server is destroyed or stopped
 	if s.state == Destroy || s.state == Stop {
 		s.server.Close()
-		return nil
+		return errors.New("server stopped before reaching running state")
 	}
 	s.state = Running
 	return nil
@@ -180,6 +183,7 @@ func (s *TestServer) Stop() error {
 	defer s.Unlock()
 	if s.state == Starting {
 		s.state = Stop
+		s.server.Close()
 		return nil
 	}
 	if s.state == Running {
@@ -194,10 +198,13 @@ func (s *TestServer) Stop() error {
 func (s *TestServer) Destroy() error {
 	s.Lock()
 	defer s.Unlock()
-	if s.state == Running {
+	if s.state == Running || s.state == Starting {
 		s.server.Close()
 	}
+<<<<<<< Updated upstream
 	// Set state to Destroy before RemoveAll
+=======
+>>>>>>> Stashed changes
 	s.state = Destroy
 	return os.RemoveAll(s.server.GetConfig().DataDir) // removed redundant if err != nil check, linter fix
 }
