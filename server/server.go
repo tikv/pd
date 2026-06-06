@@ -1478,6 +1478,16 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
 
+// GetRegionReadRaftCluster gets Raft cluster when the root region index is ready.
+// It allows key/id/range region read APIs to serve before scheduling-related
+// state is fully started.
+func (s *Server) GetRegionReadRaftCluster() *cluster.RaftCluster {
+	if s.IsClosed() || !s.cluster.IsRegionReadReady() {
+		return nil
+	}
+	return s.cluster
+}
+
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.isKeyspaceGroupEnabled && !s.IsClosed() {

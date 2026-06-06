@@ -94,6 +94,9 @@ type RegionInfo struct {
 	reportBuckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
+	// peersClassified is false when a storage-loaded region is first inserted
+	// into the root tree. Subtree rebuild classifies peers before using them.
+	peersClassified bool
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
@@ -151,11 +154,25 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 	return regionInfo
 }
 
+// NewStorageRegionInfo creates a RegionInfo loaded from persistent storage.
+// Storage load first needs the root key/id/range index; store-scoped subtree
+// state is rebuilt after region read APIs become available.
+func NewStorageRegionInfo(region *metapb.Region) *RegionInfo {
+	return &RegionInfo{
+		meta:   region,
+		source: Storage,
+	}
+}
+
 // classifyVoterAndLearner sorts out voter and learner from peers into different slice.
 func classifyVoterAndLearner(region *RegionInfo) {
-	region.learners = make([]*metapb.Peer, 0, 1)
-	region.voters = make([]*metapb.Peer, 0, len(region.meta.Peers))
-	region.witnesses = make([]*metapb.Peer, 0, 1)
+	region.learners = nil
+	region.witnesses = nil
+	if cap(region.voters) < len(region.meta.Peers) {
+		region.voters = make([]*metapb.Peer, 0, len(region.meta.Peers))
+	} else {
+		region.voters = region.voters[:0]
+	}
 	for _, p := range region.meta.Peers {
 		if IsLearner(p) {
 			region.learners = append(region.learners, p)
@@ -169,6 +186,14 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	sort.Sort(peerSlice(region.learners))
 	sort.Sort(peerSlice(region.voters))
 	sort.Sort(peerSlice(region.witnesses))
+	region.peersClassified = true
+}
+
+func (r *RegionInfo) ensurePeerClassification() {
+	if r == nil || r.peersClassified {
+		return
+	}
+	classifyVoterAndLearner(r)
 }
 
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
@@ -342,12 +367,15 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		reportBuckets:             atomic.LoadPointer(&r.reportBuckets),
 		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 		bucketMeta:                r.bucketMeta,
+		peersClassified:           r.peersClassified,
 	}
 
 	for _, opt := range opts {
 		opt(region)
 	}
-	classifyVoterAndLearner(region)
+	if r.peersClassified {
+		classifyVoterAndLearner(region)
+	}
 	return region
 }
 
@@ -1101,7 +1129,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	}
 	err := check(region, origin, ols)
 	if err != nil {
-		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
+		logStaleRegion(region, origin, err)
 		// return the state region to delete.
 		r.t.Unlock()
 		return []*RegionInfo{region}
@@ -1124,6 +1152,84 @@ func (r *RegionsInfo) CheckAndPutRegionNoOverlap(region *RegionInfo) []*RegionIn
 	r.t.Unlock()
 	r.updateSubTree(region, origin, overlaps, rangeChanged, true)
 	return overlaps
+}
+
+// CheckAndPutRootRegion checks if the region is valid and only updates the root region tree.
+// It is used during startup to make key/id/range region reads available before rebuilding
+// store-scoped subtrees and scheduling statistics.
+func (r *RegionsInfo) CheckAndPutRootRegion(region *RegionInfo) []*RegionInfo {
+	r.t.Lock()
+	origin := r.getRegionLocked(region.GetID())
+	var ols []*RegionInfo
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+	}
+	err := check(region, origin, ols)
+	if err != nil {
+		logStaleRegion(region, origin, err)
+		r.t.Unlock()
+		return []*RegionInfo{region}
+	}
+	_, overlaps, _ := r.setRegionLocked(region, true, ols...)
+	r.t.Unlock()
+	return overlaps
+}
+
+// CheckAndPutRootRegionNoOverlap puts a region into the root tree when the caller has proved
+// it has no range overlap. It does not update store-scoped subtrees.
+func (r *RegionsInfo) CheckAndPutRootRegionNoOverlap(region *RegionInfo) []*RegionInfo {
+	r.t.Lock()
+	origin := r.getRegionLocked(region.GetID())
+	if origin != nil {
+		r.t.Unlock()
+		return r.CheckAndPutRootRegion(region)
+	}
+	_, overlaps, _ := r.setRegionLocked(region, true)
+	r.t.Unlock()
+	return overlaps
+}
+
+// AppendRootRegionNoOverlap appends a region to the root tree when the caller has
+// proved the loaded region has no overlap and is ordered after the current max key.
+func (r *RegionsInfo) AppendRootRegionNoOverlap(region *RegionInfo) bool {
+	r.t.Lock()
+	defer r.t.Unlock()
+	if r.getRegionLocked(region.GetID()) != nil {
+		return false
+	}
+	item := &regionItem{RegionInfo: region}
+	if maxItem, ok := r.tree.tree.Max(); ok && !maxItem.Less(item) {
+		return false
+	}
+	r.tree.append(item)
+	r.regions[region.GetID()] = item
+	return true
+}
+
+// AppendRootRegionNoOverlapHint appends a region to the root tree when the
+// caller has proved the region has no overlap and is ordered after the current
+// max key. It is intended for startup bulk loading from ordered storage records.
+func (r *RegionsInfo) AppendRootRegionNoOverlapHint(region *RegionInfo) bool {
+	r.t.Lock()
+	defer r.t.Unlock()
+	if r.getRegionLocked(region.GetID()) != nil {
+		return false
+	}
+	item := &regionItem{RegionInfo: region}
+	r.tree.append(item)
+	r.regions[region.GetID()] = item
+	return true
+}
+
+// AppendRootRegionNoOverlapUnchecked appends a region to an empty root tree
+// fast path. The caller must guarantee the loaded regions have unique IDs, no
+// range overlap, and monotonically increasing start keys.
+func (r *RegionsInfo) AppendRootRegionNoOverlapUnchecked(region *RegionInfo) {
+	r.t.Lock()
+	defer r.t.Unlock()
+	item := &regionItem{RegionInfo: region}
+	r.tree.append(item)
+	r.regions[region.GetID()] = item
 }
 
 // PutRegion put a region.
@@ -1269,6 +1375,7 @@ func (r *RegionsInfo) preUpdateSubTreeLocked(
 }
 
 func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionInfo, region *RegionInfo, skipOverlapCheck bool) {
+	region.ensurePeerClassification()
 	if rangeChanged {
 		// TODO: only perform the remove operation on the overlapped peer.
 		if !skipOverlapCheck {
@@ -1353,6 +1460,17 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 	}
 
 	return nil
+}
+
+func logStaleRegion(region, origin *RegionInfo, err error) {
+	fields := []zap.Field{errs.ZapError(err)}
+	if region != nil {
+		fields = append(fields, zap.Stringer("region", region.GetMeta()))
+	}
+	if origin != nil {
+		fields = append(fields, zap.Stringer("origin", origin.GetMeta()))
+	}
+	log.Debug("region is stale", fields...)
 }
 
 // SetRegion sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
@@ -1738,27 +1856,26 @@ func sortOutKeyIDMap(
 ) []uint64 {
 	keyIDMap := make([]uint64, len(regions))
 	for idx, region := range regions {
+		// Check if the region has been found.
+		// If the given key is not found in the region tree, set the region to nil.
+		if region == nil {
+			continue
+		}
 		regionID := region.GetMeta().GetId()
 		keyIDMap[idx] = regionID
-		// Check if the region has been found.
 		if regionFound, ok := regionsByID[regionID]; (ok && regionFound != nil) || regionID == 0 {
 			continue
 		}
-		// If the given key is not found in the region tree, set the region to nil.
-		if region == nil {
-			regionsByID[regionID] = nil
-		} else {
-			regionResp := &pdpb.RegionResponse{
-				Region:       region.GetMeta(),
-				Leader:       region.GetLeader(),
-				DownPeers:    region.GetDownPeers(),
-				PendingPeers: region.GetPendingPeers(),
-			}
-			if needBuckets {
-				regionResp.Buckets = region.GetBuckets()
-			}
-			regionsByID[regionID] = regionResp
+		regionResp := &pdpb.RegionResponse{
+			Region:       region.GetMeta(),
+			Leader:       region.GetLeader(),
+			DownPeers:    region.GetDownPeers(),
+			PendingPeers: region.GetPendingPeers(),
 		}
+		if needBuckets {
+			regionResp.Buckets = region.GetBuckets()
+		}
+		regionsByID[regionID] = regionResp
 	}
 	return keyIDMap
 }

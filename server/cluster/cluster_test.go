@@ -83,22 +83,29 @@ func TestLoadedRegionCheckerNoOverlapHint(t *testing.T) {
 
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte("a"), EndKey: []byte("c")}, nil)
 	re.True(checker.hasNoOverlap(region1))
+	re.True(checker.hasMonotonicStartKey(region1))
 	checker.updateMaxEndKey(region1)
 
 	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, StartKey: []byte("b"), EndKey: []byte("d")}, nil)
 	re.False(checker.hasNoOverlap(region2))
+	re.True(checker.hasMonotonicStartKey(region2))
 	checker.updateMaxEndKey(region2)
 
 	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("d"), EndKey: []byte("e")}, nil)
 	re.True(checker.hasNoOverlap(region3))
+	re.True(checker.hasMonotonicStartKey(region3))
 	checker.updateMaxEndKey(region3)
 
 	region4 := core.NewRegionInfo(&metapb.Region{Id: 4, StartKey: []byte("e")}, nil)
 	re.True(checker.hasNoOverlap(region4))
+	re.True(checker.hasMonotonicStartKey(region4))
 	checker.updateMaxEndKey(region4)
 
 	region5 := core.NewRegionInfo(&metapb.Region{Id: 5, StartKey: []byte("f"), EndKey: []byte("g")}, nil)
 	re.False(checker.hasNoOverlap(region5))
+
+	region6 := core.NewRegionInfo(&metapb.Region{Id: 6, StartKey: []byte("d"), EndKey: []byte("e")}, nil)
+	re.False(checker.hasMonotonicStartKey(region6))
 }
 
 func TestLoadedRegionCheckerDoesNotAdvanceOnRejectedRegion(t *testing.T) {
@@ -123,6 +130,36 @@ func TestLoadedRegionCheckerDoesNotAdvanceOnRejectedRegion(t *testing.T) {
 	re.True(checker.hasNoOverlap(nextRegion))
 	re.Empty(checker.checkAndPut(nextRegion))
 	re.Same(nextRegion, cluster.GetRegion(nextRegion.GetID()))
+	re.Same(nextRegion, cluster.GetRegionByKey([]byte("c")))
+	re.Zero(cluster.GetStoreRegionCount(1))
+	re.Equal([]byte("d"), checker.maxEndKey)
+	re.False(checker.maxEndKeyInfinite)
+}
+
+func TestLoadedRegionCheckerEmptyRootFastPath(t *testing.T) {
+	re := require.New(t)
+	cluster := &RaftCluster{BasicCluster: core.NewBasicCluster()}
+	checker := newLoadedRegionChecker(cluster)
+	re.True(checker.emptyRootFastPath)
+
+	region1 := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	re.Empty(checker.checkAndPut(region1))
+	re.True(checker.emptyRootFastPath)
+	re.Equal(1, cluster.GetTotalRegionCount())
+
+	region2 := core.NewTestRegionInfo(2, 1, []byte("b"), []byte("c"))
+	re.Empty(checker.checkAndPut(region2))
+	re.True(checker.emptyRootFastPath)
+	re.Equal(2, cluster.GetTotalRegionCount())
+
+	overlap := core.NewTestRegionInfo(3, 1, []byte("bb"), []byte("d"))
+	overlaps := checker.checkAndPut(overlap)
+	re.Len(overlaps, 1)
+	re.False(checker.emptyRootFastPath)
+
+	nonEmptyCluster := &RaftCluster{BasicCluster: core.NewBasicCluster()}
+	re.Empty(nonEmptyCluster.CheckAndPutRootRegion(region1))
+	re.False(newLoadedRegionChecker(nonEmptyCluster).emptyRootFastPath)
 }
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -4390,6 +4427,78 @@ func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("raft cluster stop blocked on scheduling jobs while holding cluster lock")
 	}
+}
+
+func TestStopCancelsRegionSubTreeRebuildWhileStarting(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	testStorage := storage.NewStorageWithMemoryBackend()
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, testStorage)
+	cluster.tsoAllocator = nil
+
+	re.NoError(testStorage.SaveMeta(&metapb.Cluster{Id: 1}))
+	re.NoError(testStorage.SaveStoreMeta(&metapb.Store{Id: 1}))
+	for i := uint64(1); i <= 3; i++ {
+		re.NoError(testStorage.SaveRegion(&metapb.Region{
+			Id:          i,
+			StartKey:    []byte(fmt.Sprintf("%020d", i)),
+			EndKey:      []byte(fmt.Sprintf("%020d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+			Peers:       []*metapb.Peer{{Id: i + 100, StoreId: 1}},
+		}))
+	}
+	re.NoError(testStorage.Flush())
+
+	rebuildPaused := make(chan struct{})
+	var pauseOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/pauseDuringRegionSubTreeRebuild", func() {
+		pauseOnce.Do(func() {
+			close(rebuildPaused)
+		})
+		<-cluster.ctx.Done()
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/pauseDuringRegionSubTreeRebuild"))
+	}()
+
+	loadDone := make(chan error, 1)
+	go func() {
+		cluster.Lock()
+		defer cluster.Unlock()
+		_, loadErr := cluster.LoadClusterInfo()
+		loadDone <- loadErr
+	}()
+
+	select {
+	case <-rebuildPaused:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for region subtree rebuild to pause")
+	}
+	re.True(cluster.IsRegionReadReady())
+
+	stopDone := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopDone)
+	}()
+
+	select {
+	case loadErr := <-loadDone:
+		re.ErrorIs(loadErr, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for region subtree rebuild cancellation")
+	}
+
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("raft cluster stop blocked while startup held the cluster lock")
+	}
+	re.False(cluster.IsRegionReadReady())
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {

@@ -159,6 +159,7 @@ type RaftCluster struct {
 	serverCtx context.Context
 	ctx       context.Context
 	cancel    context.CancelFunc
+	ctxMu     sync.Mutex
 
 	*core.BasicCluster // cached cluster info
 	member             *member.Member
@@ -167,6 +168,7 @@ type RaftCluster struct {
 	httpClient *http.Client
 
 	running                  bool
+	regionReadReady          atomic.Bool
 	isKeyspaceGroupEnabled   bool
 	tsoDynamicSwitchingState atomic.Int32
 	meta                     *metapb.Cluster
@@ -319,7 +321,7 @@ func (c *RaftCluster) InitCluster(
 	hbstreams *hbstream.HeartbeatStreams,
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
-	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
+	c.ensureClusterContext()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	failpoint.Inject("syncRegionChannelFull", func() {
 		c.changedRegions = make(chan *core.RegionInfo, 100)
@@ -331,6 +333,35 @@ func (c *RaftCluster) InitCluster(
 	c.keyRangeManager = keyrange.NewManager()
 	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
+}
+
+func (c *RaftCluster) initClusterContext() {
+	ctx, cancel := context.WithCancel(c.serverCtx)
+	c.ctxMu.Lock()
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.ctx = ctx
+	c.cancel = cancel
+	c.ctxMu.Unlock()
+}
+
+func (c *RaftCluster) ensureClusterContext() {
+	c.ctxMu.Lock()
+	defer c.ctxMu.Unlock()
+	if c.ctx != nil {
+		return
+	}
+	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
+}
+
+func (c *RaftCluster) cancelClusterContext() {
+	c.ctxMu.Lock()
+	cancel := c.cancel
+	c.ctxMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // Start starts a cluster.
@@ -351,11 +382,22 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
+	c.initClusterContext()
+	c.setRegionReadReady(false)
+	defer func() {
+		if err != nil {
+			c.setRegionReadReady(false)
+		}
+	}()
+
 	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	initClusterStart := time.Now()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		log.Warn("failed to initialize cluster", errs.ZapError(err), zap.Duration("cost", time.Since(initClusterStart)))
+		return err
+	}
+	if err = c.ctx.Err(); err != nil {
 		return err
 	}
 	initClusterDuration := time.Since(initClusterStart)
@@ -878,6 +920,18 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
+	c.setRegionReadReady(true)
+	failpoint.InjectCall("pauseAfterRegionReadReady")
+
+	start = time.Now()
+	if err := c.rebuildRegionSubTree(c.ctx); err != nil {
+		c.setRegionReadReady(false)
+		return nil, err
+	}
+	log.Info("rebuild region subtrees",
+		zap.Int("count", c.GetTotalRegionCount()),
+		zap.Duration("cost", time.Since(start)),
+	)
 
 	return c, nil
 }
@@ -887,24 +941,67 @@ type loadedRegionChecker struct {
 	hasMaxEndKey      bool
 	maxEndKeyInfinite bool
 	maxEndKey         []byte
+	maxStartKey       []byte
+	emptyRootFastPath bool
 }
 
 func newLoadedRegionChecker(cluster *RaftCluster) *loadedRegionChecker {
-	return &loadedRegionChecker{cluster: cluster}
+	return &loadedRegionChecker{
+		cluster:           cluster,
+		emptyRootFastPath: cluster != nil && cluster.GetTotalRegionCount() == 0,
+	}
 }
 
 func (l *loadedRegionChecker) checkAndPut(region *core.RegionInfo) []*core.RegionInfo {
 	noOverlap := l.hasNoOverlap(region)
 	var overlaps []*core.RegionInfo
 	if noOverlap {
-		overlaps = l.cluster.CheckAndPutRegionNoOverlap(region)
+		if l.emptyRootFastPath && l.hasMonotonicStartKey(region) {
+			l.cluster.AppendRootRegionNoOverlapUnchecked(region)
+			l.updateMaxEndKey(region)
+			return nil
+		}
+		l.emptyRootFastPath = false
+		if l.hasMonotonicStartKey(region) && l.cluster.AppendRootRegionNoOverlapHint(region) {
+			l.updateMaxEndKey(region)
+			return nil
+		}
+		if l.cluster.AppendRootRegionNoOverlap(region) {
+			l.updateMaxEndKey(region)
+			return nil
+		}
+		overlaps = l.cluster.CheckAndPutRootRegionNoOverlap(region)
 	} else {
-		overlaps = l.cluster.CheckAndPutRegion(region)
+		l.emptyRootFastPath = false
+		overlaps = l.cluster.CheckAndPutRootRegion(region)
 	}
 	if !isLoadedRegionRejected(region, overlaps) {
 		l.updateMaxEndKey(region)
 	}
 	return overlaps
+}
+
+func (c *RaftCluster) rebuildRegionSubTree(ctx context.Context) error {
+	var err error
+	scanned := 0
+	c.ScanRegionWithIterator(nil, func(region *core.RegionInfo) bool {
+		if scanned%1024 == 0 {
+			if err = ctx.Err(); err != nil {
+				return false
+			}
+		}
+		failpoint.InjectCall("pauseDuringRegionSubTreeRebuild")
+		if err = ctx.Err(); err != nil {
+			return false
+		}
+		c.CheckAndPutSubTree(region)
+		scanned++
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 func isLoadedRegionRejected(region *core.RegionInfo, overlaps []*core.RegionInfo) bool {
@@ -919,7 +1016,14 @@ func (l *loadedRegionChecker) hasNoOverlap(region *core.RegionInfo) bool {
 	return !l.maxEndKeyInfinite && bytes.Compare(l.maxEndKey, region.GetStartKey()) <= 0
 }
 
+func (l *loadedRegionChecker) hasMonotonicStartKey(region *core.RegionInfo) bool {
+	return l.maxStartKey == nil || bytes.Compare(l.maxStartKey, region.GetStartKey()) < 0
+}
+
 func (l *loadedRegionChecker) updateMaxEndKey(region *core.RegionInfo) {
+	if l.maxStartKey == nil || bytes.Compare(l.maxStartKey, region.GetStartKey()) < 0 {
+		l.maxStartKey = region.GetStartKey()
+	}
 	if l.maxEndKeyInfinite {
 		return
 	}
@@ -1017,13 +1121,15 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	var (
-		cancel             context.CancelFunc
 		stopSchedulingJobs bool
 		heartbeatRunner    ratelimit.Runner
 		miscRunner         ratelimit.Runner
 		logRunner          ratelimit.Runner
 		syncRegionRunner   ratelimit.Runner
 	)
+
+	c.setRegionReadReady(false)
+	c.cancelClusterContext()
 
 	c.Lock()
 	// We need to try to stop tso jobs whatever the cluster is running or not.
@@ -1038,7 +1144,6 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	cancel = c.cancel
 	stopSchedulingJobs = !c.IsServiceIndependent(constant.SchedulingServiceName)
 	heartbeatRunner = c.heartbeatRunner
 	miscRunner = c.miscRunner
@@ -1046,9 +1151,6 @@ func (c *RaftCluster) Stop() {
 	syncRegionRunner = c.syncRegionRunner
 	c.Unlock()
 
-	if cancel != nil {
-		cancel()
-	}
 	if stopSchedulingJobs {
 		c.stopSchedulingJobs()
 	}
@@ -1079,6 +1181,15 @@ func (c *RaftCluster) IsRunning() bool {
 	c.RLock()
 	defer c.RUnlock()
 	return c.running
+}
+
+// IsRegionReadReady returns whether the root region index is ready for region read APIs.
+func (c *RaftCluster) IsRegionReadReady() bool {
+	return c.regionReadReady.Load()
+}
+
+func (c *RaftCluster) setRegionReadReady(ready bool) {
+	c.regionReadReady.Store(ready)
 }
 
 // Context returns the context of RaftCluster.

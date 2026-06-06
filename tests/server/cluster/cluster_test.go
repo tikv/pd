@@ -1133,6 +1133,7 @@ func TestLoadClusterInfo(t *testing.T) {
 			StartKey:    []byte(fmt.Sprintf("%20d", i)),
 			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+			Peers:       []*metapb.Peer{{Id: i + 100, StoreId: 1, Role: metapb.PeerRole_Voter}},
 		}
 		regions = append(regions, region)
 	}
@@ -1142,11 +1143,60 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 	re.NoError(testStorage.Flush())
 
+	regionReadReadyPaused := make(chan struct{})
+	resumeAfterRegionReadReady := make(chan struct{})
+	var pauseOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady", func() {
+		pauseOnce.Do(func() {
+			close(regionReadReadyPaused)
+		})
+		<-resumeAfterRegionReadReady
+	}))
+	defer func() {
+		select {
+		case <-resumeAfterRegionReadReady:
+		default:
+			close(resumeAfterRegionReadReady)
+		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady"))
+	}()
+
 	raftCluster = cluster.NewRaftCluster(ctx, svr.GetMember(), basicCluster,
 		testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocator())
 	err = raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	re.NoError(err)
-	raftCluster, err = raftCluster.LoadClusterInfo()
+	type loadClusterInfoResult struct {
+		cluster *cluster.RaftCluster
+		err     error
+	}
+	loadClusterInfoDone := make(chan loadClusterInfoResult, 1)
+	go func() {
+		loadedCluster, loadErr := raftCluster.LoadClusterInfo()
+		loadClusterInfoDone <- loadClusterInfoResult{
+			cluster: loadedCluster,
+			err:     loadErr,
+		}
+	}()
+	select {
+	case <-regionReadReadyPaused:
+	case <-time.After(10 * time.Second):
+		re.FailNow("timed out waiting for region read readiness pause")
+	}
+
+	re.True(raftCluster.IsRegionReadReady())
+	re.Equal(n, raftCluster.GetTotalRegionCount())
+	re.NotNil(raftCluster.GetRegionByKey([]byte(fmt.Sprintf("%20d", 0))))
+	re.Len(raftCluster.ScanRegions(nil, nil, 1), 1)
+	re.Zero(raftCluster.GetStoreRegionCount(1))
+
+	close(resumeAfterRegionReadReady)
+	select {
+	case result := <-loadClusterInfoDone:
+		raftCluster = result.cluster
+		err = result.err
+	case <-time.After(10 * time.Second):
+		re.FailNow("timed out waiting for load cluster info to finish")
+	}
 	re.NoError(err)
 	re.NotNil(raftCluster)
 
@@ -1160,6 +1210,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, region := range raftCluster.GetMetaRegions() {
 		re.Equal(regions[region.GetId()], region)
 	}
+	re.True(raftCluster.IsRegionReadReady())
+	re.Equal(n, raftCluster.GetStoreRegionCount(1))
 
 	m := 20
 	regions = make([]*metapb.Region, 0, n)

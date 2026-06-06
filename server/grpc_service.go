@@ -1580,7 +1580,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		var rc *cluster.RaftCluster
 
 		if s.member.IsServing() {
-			rc = s.GetRaftCluster()
+			rc = s.GetRegionReadRaftCluster()
 			if rc == nil {
 				resp := &pdpb.QueryRegionResponse{
 					Header: grpcutil.NotBootstrappedHeader(),
@@ -2694,7 +2694,7 @@ func (s *GrpcServer) getRaftCluster(isFollower bool) (*cluster.RaftCluster, *pdp
 			return nil, grpcutil.RegionNotFound()
 		}
 	} else {
-		rc = s.GetRaftCluster()
+		rc = s.GetRegionReadRaftCluster()
 		if rc == nil {
 			return nil, grpcutil.NotBootstrappedHeader()
 		}

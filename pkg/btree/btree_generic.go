@@ -449,6 +449,22 @@ func (n *node[T]) maybeSplitChild(i, maxItems int) bool {
 	return true
 }
 
+func (n *node[T]) append(item T, maxItems int) {
+	if len(n.children) == 0 {
+		n.items = append(n.items, item)
+		return
+	}
+	i := len(n.children) - 1
+	if n.maybeSplitChild(i, maxItems) {
+		if !n.items[len(n.items)-1].Less(item) {
+			panic("btree append item is not greater than current max")
+		}
+		i++
+	}
+	n.mutableChild(i).append(item, maxItems)
+	n.indices.addAt(i, 1)
+}
+
 // insert inserts an item into the subtree rooted at this node, making sure
 // no nodes in the subtree exceed maxItems items.  Should an equivalent item be
 // be found/replaced by insert, it will be returned.
@@ -907,6 +923,49 @@ func (t *BTreeG[T]) ReplaceOrInsert(item T) (_ T, _ bool) {
 		t.length++
 	}
 	return out, found
+}
+
+// Append inserts the given item when it is greater than the current max item.
+// It returns false and leaves the tree unchanged when the item is not ordered
+// after the current max item.
+func (t *BTreeG[T]) Append(item T) bool {
+	if t.root == nil {
+		t.root = t.cow.newNode()
+		t.root.items = append(t.root.items, item)
+		t.length++
+		return true
+	}
+	maxItem, ok := t.Max()
+	if !ok {
+		return false
+	}
+	if !maxItem.Less(item) {
+		return false
+	}
+	t.AppendHint(item)
+	return true
+}
+
+// AppendHint inserts an item that the caller has proved is greater than the
+// current max item.
+func (t *BTreeG[T]) AppendHint(item T) {
+	if t.root == nil {
+		t.root = t.cow.newNode()
+		t.root.items = append(t.root.items, item)
+		t.length++
+		return
+	}
+	t.root = t.root.mutableFor(t.cow)
+	if len(t.root.items) >= t.maxItems() {
+		item2, second := t.root.split(t.maxItems() / 2)
+		oldroot := t.root
+		t.root = t.cow.newNode()
+		t.root.items = append(t.root.items, item2)
+		t.root.children = append(t.root.children, oldroot, second)
+		t.root.initSize()
+	}
+	t.root.append(item, t.maxItems())
+	t.length++
 }
 
 // Delete removes an item equal to the passed in item from the tree, returning

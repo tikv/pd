@@ -16,6 +16,9 @@ package tso_test
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +27,10 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -52,6 +57,7 @@ func (s *tsoTestSuite) SetupSuite() {
 	s.updateInterval = config.MaxTSOUpdatePhysicalInterval
 	s.env = tests.NewSchedulingTestEnvironment(s.T(), func(conf *config.Config, _ string) {
 		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: s.updateInterval}
+		conf.PDServerCfg.UseRegionStorage = false
 	})
 	s.env.PDCount = 2
 }
@@ -131,15 +137,40 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	}
 	re.NotNil(nextLeaderServer)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayCreateRaftCluster", `return(5000)`))
+	regionID := uint64(10)
+	region := tests.MustPutRegion(re, cluster, regionID, 1, []byte("a"), []byte("z"))
+	testutil.Eventually(re, func() bool {
+		return leaderServer.GetRaftCluster().GetRegion(regionID) != nil
+	})
+	testutil.Eventually(re, func() bool {
+		loadedRegion := &metapb.Region{}
+		ok, err := leaderServer.GetServer().GetStorage().LoadRegion(regionID, loadedRegion)
+		re.NoError(err)
+		return ok && loadedRegion.GetId() == regionID
+	})
+
+	regionReadReadyPaused := make(chan struct{})
+	resumeAfterRegionReadReady := make(chan struct{})
+	var pauseOnce sync.Once
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayCreateRaftCluster", `return(1000)`))
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady", func() {
+		pauseOnce.Do(func() {
+			close(regionReadReadyPaused)
+		})
+		<-resumeAfterRegionReadReady
+	}))
 	defer func() {
+		select {
+		case <-resumeAfterRegionReadReady:
+		default:
+			close(resumeAfterRegionReadReady)
+		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayCreateRaftCluster"))
 	}()
 
 	re.NoError(leaderServer.ResignLeaderWithRetry())
 	re.True(nextLeaderServer.WaitLeader())
-	re.Nil(nextLeaderServer.GetRaftCluster())
-
 	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	defer conn.Close()
 	req := &pdpb.TsoRequest{
@@ -159,9 +190,64 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
 
+	httpClient := &http.Client{Timeout: time.Second}
+	select {
+	case <-regionReadReadyPaused:
+	case <-time.After(20 * time.Second):
+		re.FailNow("timed out waiting for region read readiness pause")
+	}
+
+	rc := nextLeaderServer.GetServer().DirectlyGetRaftCluster()
+	re.True(rc.IsRegionReadReady())
+
+	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
+	defer regionRPCCancel()
+	regionByIDResp, err := grpcPDClient.GetRegionByID(regionRPCContext, &pdpb.GetRegionByIDRequest{
+		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		RegionId:    regionID,
+		NeedBuckets: true,
+	})
+	re.NoError(err)
+	re.Nil(regionByIDResp.GetHeader().GetError())
+	re.Equal(regionID, regionByIDResp.GetRegion().GetId())
+
+	scanContext, scanCancel := context.WithTimeout(ctx, time.Second)
+	defer scanCancel()
+	scanResp, err := grpcPDClient.ScanRegions(scanContext, &pdpb.ScanRegionsRequest{
+		Header:   testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		StartKey: region.GetStartKey(),
+		EndKey:   region.GetEndKey(),
+		Limit:    1,
+	})
+	re.NoError(err)
+	re.Nil(scanResp.GetHeader().GetError())
+	re.Len(scanResp.GetRegions(), 1)
+	re.Equal(regionID, scanResp.GetRegions()[0].GetRegion().GetId())
+
+	var httpRegion response.RegionInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		fmt.Sprintf("%s/pd/api/v1/region/id/%d", nextLeaderServer.GetAddr(), regionID),
+		&httpRegion))
+	re.Equal(regionID, httpRegion.ID)
+
+	var scannedRegions response.RegionsInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		fmt.Sprintf("%s/pd/api/v1/regions/key?key=a&end_key=z&limit=1", nextLeaderServer.GetAddr()),
+		&scannedRegions))
+	re.Equal(1, scannedRegions.Count)
+	re.Len(scannedRegions.Regions, 1)
+	re.Equal(regionID, scannedRegions.Regions[0].ID)
+
+	var regionCount response.RegionsInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		nextLeaderServer.GetAddr()+"/pd/api/v1/regions/count",
+		&regionCount))
+	re.Equal(rc.GetTotalRegionCount(), regionCount.Count)
+
+	close(resumeAfterRegionReadReady)
 	testutil.Eventually(re, func() bool {
 		return nextLeaderServer.GetRaftCluster() != nil
-	})
+	}, testutil.WithWaitFor(20*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
 
 func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {

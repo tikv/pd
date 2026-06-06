@@ -1485,6 +1485,74 @@ func TestCheckAndPutRegionNoOverlap(t *testing.T) {
 	re.Equal(2, regions.TreeLen())
 }
 
+func TestAppendRootRegionNoOverlap(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("c"))
+	re.True(regions.AppendRootRegionNoOverlap(region1))
+	re.Equal(1, regions.GetTotalRegionCount())
+	re.Equal(1, regions.TreeLen())
+	re.Equal(0, regions.GetStoreRegionCount(1))
+	re.Equal(int32(1), region1.GetRef())
+	re.Same(region1, regions.GetRegion(1))
+	re.Same(region1, regions.GetRegionByKey([]byte("b")))
+
+	region2 := NewTestRegionInfo(2, 1, []byte("c"), []byte("e"))
+	re.True(regions.AppendRootRegionNoOverlap(region2))
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Equal(2, regions.TreeLen())
+	re.Equal(0, regions.GetStoreRegionCount(1))
+	re.Equal(int32(1), region2.GetRef())
+	re.Same(region2, regions.GetRegionByKey([]byte("d")))
+
+	duplicateID := NewTestRegionInfo(2, 1, []byte("e"), []byte("g"))
+	re.False(regions.AppendRootRegionNoOverlap(duplicateID))
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Same(region2, regions.GetRegion(2))
+
+	nonMonotonic := NewTestRegionInfo(3, 1, []byte("b"), []byte("c"))
+	re.False(regions.AppendRootRegionNoOverlap(nonMonotonic))
+	re.Equal(2, regions.GetTotalRegionCount())
+	re.Nil(regions.GetRegion(3))
+
+	region3 := NewTestRegionInfo(3, 1, []byte("e"), []byte("g"))
+	re.True(regions.AppendRootRegionNoOverlapHint(region3))
+	re.Equal(3, regions.GetTotalRegionCount())
+	re.Same(region3, regions.GetRegionByKey([]byte("f")))
+}
+
+func TestStorageRegionInfoDefersPeerClassificationUntilSubTreeUpdate(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	leader := &metapb.Peer{Id: 11, StoreId: 1}
+	learner := &metapb.Peer{Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}
+	region := NewStorageRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
+		Peers:    []*metapb.Peer{leader, learner},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	})
+	re.False(region.peersClassified)
+
+	re.True(regions.AppendRootRegionNoOverlap(region))
+	re.False(region.peersClassified)
+	re.Equal(1, regions.GetTotalRegionCount())
+	re.Equal(0, regions.GetStoreRegionCount(1))
+	re.Equal(0, regions.GetStoreRegionCount(2))
+
+	regions.CheckAndPutSubTree(region)
+	re.True(region.peersClassified)
+	re.Equal(1, regions.GetStoreRegionCount(1))
+	re.Equal(1, regions.GetStoreRegionCount(2))
+	re.Same(region, regions.GetStoreRegions(1)[0])
+	re.Same(region, regions.GetStoreRegions(2)[0])
+}
+
 func TestCheckAndPutRegionCleansPendingSubTreeOverlap(t *testing.T) {
 	re := require.New(t)
 	ctx := ContextTODO()

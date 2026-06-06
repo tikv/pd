@@ -215,6 +215,21 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 	return result
 }
 
+func (t *regionTree) append(item *regionItem) {
+	region := item.RegionInfo
+	t.tree.AppendHint(item)
+	t.totalSize += region.approximateSize
+	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
+	t.totalWriteBytesRate += regionWriteBytesRate
+	t.totalWriteKeysRate += regionWriteKeysRate
+	if !region.LoadedFromStorage() {
+		t.notFromStorageRegionsCnt++
+	}
+	if t.countRef {
+		item.IncRef()
+	}
+}
+
 // updateStat is used to update statistics when RegionInfo is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	t.totalSize += region.approximateSize

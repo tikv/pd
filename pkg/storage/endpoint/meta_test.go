@@ -71,6 +71,29 @@ func TestLoadRegionsWithBytesLoader(t *testing.T) {
 	re.Equal(region, loaded[0].GetMeta())
 }
 
+func TestLoadRegionsReturnsBeforePuttingDecodedBatchOnDecodeError(t *testing.T) {
+	re := require.New(t)
+	loader := &testRegionBytesLoader{Base: kv.NewMemoryKV()}
+	storage := NewStorageEndpoint(loader, nil)
+	for i := uint64(1); i <= minParallelRegionDecodeBatch+1; i++ {
+		region := &metapb.Region{
+			Id:       i,
+			StartKey: []byte{byte(i >> 8), byte(i)},
+			EndKey:   []byte{byte((i + 1) >> 8), byte(i + 1)},
+		}
+		re.NoError(storage.SaveRegion(region))
+	}
+	re.NoError(loader.Save(keypath.RegionPath(2), string([]byte{0xff})))
+
+	var loaded []*core.RegionInfo
+	err := storage.LoadRegions(context.Background(), func(region *core.RegionInfo) []*core.RegionInfo {
+		loaded = append(loaded, region)
+		return nil
+	})
+	re.Error(err)
+	re.Empty(loaded)
+}
+
 func TestLoadRegionsWithLevelDBBytesLoader(t *testing.T) {
 	re := require.New(t)
 	levelDB, err := kv.NewLevelDBKV(t.TempDir())

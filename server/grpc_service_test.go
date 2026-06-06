@@ -15,6 +15,8 @@
 package server
 
 import (
+	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,7 +26,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
@@ -44,6 +52,52 @@ func TestNewSchedulingAskBatchSplitRequestPreservesReason(t *testing.T) {
 	re.Equal(uint64(100), req.GetRegion().GetId())
 	re.Equal(uint32(3), req.GetSplitCount())
 	re.Equal(pdpb.SplitReason_LOAD, req.GetReason())
+}
+
+func TestRegionReadRaftClusterGate(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	cfg := config.NewConfig()
+	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
+	serviceMiddlewareCfg.GRPCRateLimitConfig.EnableRateLimit = false
+	svr := &Server{
+		cfg:                             cfg,
+		persistOptions:                  config.NewPersistOptions(cfg),
+		serviceMiddlewareCfg:            serviceMiddlewareCfg,
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(serviceMiddlewareCfg),
+		member:                          &member.Member{},
+		ctx:                             ctx,
+	}
+	atomic.StoreInt64(&svr.isRunning, 1)
+
+	basicCluster := core.NewBasicCluster()
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("z"))
+	basicCluster.PutRegion(region)
+	svr.cluster = cluster.NewRaftCluster(
+		ctx,
+		svr.GetMember(),
+		basicCluster,
+		storage.NewStorageWithMemoryBackend(),
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	// The root index may already contain the region while startup is still
+	// loading. Region read APIs must wait for the explicit region-read gate
+	// instead of returning a false empty/not-found result.
+	directResp, err := grpcutil.GetRegionByID(basicCluster, &pdpb.GetRegionByIDRequest{
+		RegionId: region.GetID(),
+	}, false)
+	re.NoError(err)
+	re.Equal(region.GetID(), directResp.GetRegion().GetId())
+
+	re.Nil(svr.GetRegionReadRaftCluster())
+	grpcServer := &GrpcServer{Server: svr}
+	rc, header := grpcServer.getRaftCluster(false)
+	re.Nil(rc)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, header.GetError().GetType())
 }
 
 func TestConvertSchedulingHeaderPreservesError(t *testing.T) {

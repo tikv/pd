@@ -17,7 +17,10 @@ package endpoint
 import (
 	"context"
 	"math"
+	"runtime"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -62,6 +65,9 @@ const (
 	MaxLocalKVRangeLimit = 100000
 	// MinKVRangeLimit is the min limit of the number of keys in a range.
 	MinKVRangeLimit = 100
+	// minParallelRegionDecodeBatch is the minimum batch size to decode storage
+	// regions concurrently. Small batches stay serial to avoid worker overhead.
+	minParallelRegionDecodeBatch = 1024
 )
 
 type regionBytesLoader interface {
@@ -203,17 +209,13 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 		default:
 		}
 
-		for _, r := range res {
-			region := &metapb.Region{}
-			if err := region.Unmarshal(r); err != nil {
-				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
-			}
-			if err = encryption.DecryptRegion(region, se.encryptionKeyManager); err != nil {
-				return err
-			}
-
+		regions, err := se.decodeStorageRegions(res)
+		if err != nil {
+			return err
+		}
+		for _, region := range regions {
 			se.nextRegionID = region.GetId() + 1
-			overlaps := f(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
+			overlaps := f(core.NewStorageRegionInfo(region))
 			for _, item := range overlaps {
 				if err := se.DeleteRegion(item.GetMeta()); err != nil {
 					return err
@@ -225,6 +227,68 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			return nil
 		}
 	}
+}
+
+func (se *StorageEndpoint) decodeStorageRegions(values [][]byte) ([]*metapb.Region, error) {
+	if len(values) < minParallelRegionDecodeBatch {
+		regions := make([]*metapb.Region, 0, len(values))
+		for _, value := range values {
+			region, err := se.decodeStorageRegion(value)
+			if err != nil {
+				return nil, err
+			}
+			regions = append(regions, region)
+		}
+		return regions, nil
+	}
+
+	regions := make([]*metapb.Region, len(values))
+	workers := min(runtime.GOMAXPROCS(0), len(values))
+	index := atomic.Int64{}
+	hasErr := atomic.Bool{}
+	var errOnce sync.Once
+	var firstErr error
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for {
+				if hasErr.Load() {
+					return
+				}
+				i := int(index.Add(1)) - 1
+				if i >= len(values) {
+					return
+				}
+				region, err := se.decodeStorageRegion(values[i])
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = err
+						hasErr.Store(true)
+					})
+					return
+				}
+				regions[i] = region
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return regions, nil
+}
+
+func (se *StorageEndpoint) decodeStorageRegion(value []byte) (*metapb.Region, error) {
+	region := &metapb.Region{}
+	if err := region.Unmarshal(value); err != nil {
+		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	if err := encryption.DecryptRegion(region, se.encryptionKeyManager); err != nil {
+		return nil, err
+	}
+	return region, nil
 }
 
 func (se *StorageEndpoint) regionLoadRangeLimit() int {
