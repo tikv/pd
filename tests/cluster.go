@@ -197,16 +197,17 @@ func (s *TestServer) Stop() error {
 // Destroy is used to destroy a TestServer.
 func (s *TestServer) Destroy() error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state == Running || s.state == Starting {
 		s.server.Close()
 	}
-<<<<<<< Updated upstream
-	// Set state to Destroy before RemoveAll
-=======
->>>>>>> Stashed changes
 	s.state = Destroy
-	return os.RemoveAll(s.server.GetConfig().DataDir) // removed redundant if err != nil check, linter fix
+	dataDir := s.server.GetConfig().DataDir
+	s.Unlock()
+
+	// Wait for any in-flight Run() to finish before deleting the data dir.
+	s.startMu.Lock()
+	s.startMu.Unlock()
+	return os.RemoveAll(dataDir)
 }
 
 // ResetPDLeader resigns the leader of the server.
