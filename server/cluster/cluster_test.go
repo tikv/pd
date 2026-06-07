@@ -4504,8 +4504,6 @@ func TestStopCancelsRegionSubTreeRebuildWhileStarting(t *testing.T) {
 }
 
 func TestStartCancelsContextOnAbort(t *testing.T) {
-	re := require.New(t)
-
 	testCases := []struct {
 		name    string
 		value   string
@@ -4524,6 +4522,7 @@ func TestStartCancelsContextOnAbort(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
