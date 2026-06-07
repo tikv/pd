@@ -1465,10 +1465,10 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 func logStaleRegion(region, origin *RegionInfo, err error) {
 	fields := []zap.Field{errs.ZapError(err)}
 	if region != nil {
-		fields = append(fields, zap.Stringer("region", region.GetMeta()))
+		fields = append(fields, logutil.ZapRedactStringer("region", RegionToHexMeta(region.GetMeta())))
 	}
 	if origin != nil {
-		fields = append(fields, zap.Stringer("origin", origin.GetMeta()))
+		fields = append(fields, logutil.ZapRedactStringer("origin", RegionToHexMeta(origin.GetMeta())))
 	}
 	log.Debug("region is stale", fields...)
 }

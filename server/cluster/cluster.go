@@ -384,9 +384,11 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	c.initClusterContext()
 	c.setRegionReadReady(false)
+	started := false
 	defer func() {
-		if err != nil {
+		if !started {
 			c.setRegionReadReady(false)
+			c.cancelClusterContext()
 		}
 	}()
 
@@ -516,6 +518,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()
 	c.running = true
+	started = true
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)

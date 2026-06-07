@@ -44,6 +44,8 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/metering"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -4499,6 +4501,121 @@ func TestStopCancelsRegionSubTreeRebuildWhileStarting(t *testing.T) {
 		t.Fatal("raft cluster stop blocked while startup held the cluster lock")
 	}
 	re.False(cluster.IsRegionReadReady())
+}
+
+func TestStartCancelsContextOnAbort(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{
+			name:    "error",
+			value:   `return(true)`,
+			wantErr: true,
+		},
+		{
+			name:  "early return without running",
+			value: `return(false)`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			_, opt, err := newTestScheduleConfig()
+			re.NoError(err)
+			testStorage := storage.NewStorageWithMemoryBackend()
+			cluster := NewRaftCluster(ctx, nil, core.NewBasicCluster(), testStorage, nil, nil, nil, nil)
+			svr := &testClusterServer{
+				allocator: mockid.NewIDAllocator(),
+				cfg:       config.NewConfig(),
+				opt:       opt,
+				storage:   testStorage,
+				cluster:   cluster,
+				basic:     cluster.BasicCluster,
+			}
+
+			re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/raftClusterReturn", testCase.value))
+			defer func() {
+				re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+			}()
+
+			err = cluster.Start(svr, true)
+			if testCase.wantErr {
+				re.Error(err)
+			} else {
+				re.NoError(err)
+			}
+			re.ErrorIs(cluster.ctx.Err(), context.Canceled)
+			re.False(cluster.IsRegionReadReady())
+		})
+	}
+}
+
+type testClusterServer struct {
+	allocator id.Allocator
+	cfg       *config.Config
+	opt       *config.PersistOptions
+	storage   storage.Storage
+	cluster   *RaftCluster
+	basic     *core.BasicCluster
+}
+
+func (s *testClusterServer) GetAllocator() id.Allocator {
+	return s.allocator
+}
+
+func (s *testClusterServer) GetConfig() *config.Config {
+	return s.cfg
+}
+
+func (s *testClusterServer) GetPersistOptions() *config.PersistOptions {
+	return s.opt
+}
+
+func (s *testClusterServer) GetStorage() storage.Storage {
+	return s.storage
+}
+
+func (*testClusterServer) GetHBStreams() *hbstream.HeartbeatStreams {
+	return nil
+}
+
+func (s *testClusterServer) GetRaftCluster() *RaftCluster {
+	return s.cluster
+}
+
+func (s *testClusterServer) GetBasicCluster() *core.BasicCluster {
+	return s.basic
+}
+
+func (*testClusterServer) GetMembers() ([]*pdpb.Member, error) {
+	return nil, nil
+}
+
+func (*testClusterServer) ReplicateFileToMember(context.Context, *pdpb.Member, string, []byte) error {
+	return nil
+}
+
+func (*testClusterServer) GetKeyspaceManager() *keyspace.Manager {
+	return nil
+}
+
+func (*testClusterServer) GetKeyspaceGroupManager() *keyspace.GroupManager {
+	return nil
+}
+
+func (*testClusterServer) IsKeyspaceGroupEnabled() bool {
+	return false
+}
+
+func (*testClusterServer) GetMeteringWriter() *metering.Writer {
+	return nil
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {
