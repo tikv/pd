@@ -232,6 +232,12 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	}
 
 	re.True(rc.IsRegionReadReady())
+	expectedLeader := region.GetLeader()
+	re.NotNil(expectedLeader)
+	loadedRegion := rc.GetRegion(regionID)
+	re.NotNil(loadedRegion)
+	re.Nil(loadedRegion.GetLeader())
+	assertLeaderForRead(re, expectedLeader, loadedRegion.GetLeaderForRead())
 
 	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
 	defer regionRPCCancel()
@@ -243,6 +249,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NoError(err)
 	re.Nil(regionByIDResp.GetHeader().GetError())
 	re.Equal(regionID, regionByIDResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, regionByIDResp.GetLeader())
 
 	regionByKeyResp, err := grpcPDClient.GetRegion(regionRPCContext, &pdpb.GetRegionRequest{
 		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
@@ -252,6 +259,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NoError(err)
 	re.Nil(regionByKeyResp.GetHeader().GetError())
 	re.Equal(regionID, regionByKeyResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, regionByKeyResp.GetLeader())
 
 	prevRegionResp, err := grpcPDClient.GetPrevRegion(regionRPCContext, &pdpb.GetRegionRequest{
 		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
@@ -261,6 +269,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NoError(err)
 	re.Nil(prevRegionResp.GetHeader().GetError())
 	re.Equal(regionID, prevRegionResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, prevRegionResp.GetLeader())
 
 	scanContext, scanCancel := context.WithTimeout(ctx, time.Second)
 	defer scanCancel()
@@ -274,6 +283,9 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.Nil(scanResp.GetHeader().GetError())
 	re.Len(scanResp.GetRegions(), 1)
 	re.Equal(regionID, scanResp.GetRegions()[0].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, scanResp.GetRegions()[0].GetLeader())
+	re.Len(scanResp.GetLeaders(), 1)
+	assertLeaderForRead(re, expectedLeader, scanResp.GetLeaders()[0])
 
 	batchScanResp, err := grpcPDClient.BatchScanRegions(scanContext, &pdpb.BatchScanRegionsRequest{
 		Header: testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
@@ -287,6 +299,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.Nil(batchScanResp.GetHeader().GetError())
 	re.Len(batchScanResp.GetRegions(), 1)
 	re.Equal(regionID, batchScanResp.GetRegions()[0].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, batchScanResp.GetRegions()[0].GetLeader())
 
 	queryRegionCtx, queryRegionCancel := context.WithTimeout(ctx, time.Second)
 	defer queryRegionCancel()
@@ -302,6 +315,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NoError(err)
 	re.Nil(queryRegionResp.GetHeader().GetError())
 	re.Equal(regionID, queryRegionResp.GetRegionsById()[regionID].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, queryRegionResp.GetRegionsById()[regionID].GetLeader())
 	re.Equal([]uint64{regionID}, queryRegionResp.GetKeyIdMap())
 	re.Equal([]uint64{regionID}, queryRegionResp.GetPrevKeyIdMap())
 	re.NoError(queryRegionClient.CloseSend())
@@ -311,6 +325,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 		fmt.Sprintf("%s/pd/api/v1/region/id/%d", nextLeaderServer.GetAddr(), regionID),
 		&httpRegion))
 	re.Equal(regionID, httpRegion.ID)
+	assertLeaderForRead(re, expectedLeader, httpRegion.Leader.Peer)
 
 	var scannedRegions response.RegionsInfo
 	re.NoError(testutil.ReadGetJSON(re, httpClient,
@@ -319,6 +334,7 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.Equal(1, scannedRegions.Count)
 	re.Len(scannedRegions.Regions, 1)
 	re.Equal(regionID, scannedRegions.Regions[0].ID)
+	assertLeaderForRead(re, expectedLeader, scannedRegions.Regions[0].Leader.Peer)
 
 	var regionCount response.RegionsInfo
 	re.NoError(testutil.ReadGetJSON(re, httpClient,
@@ -330,6 +346,12 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	testutil.Eventually(re, func() bool {
 		return nextLeaderServer.GetRaftCluster() != nil
 	}, testutil.WithWaitFor(20*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func assertLeaderForRead(re *require.Assertions, expected, actual *metapb.Peer) {
+	re.NotNil(actual)
+	re.Equal(expected.GetId(), actual.GetId())
+	re.Equal(expected.GetStoreId(), actual.GetStoreId())
 }
 
 func assertRegionReadsNotBootstrapped(

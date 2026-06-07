@@ -97,6 +97,9 @@ type RegionInfo struct {
 	// peersClassified is false when a storage-loaded region is first inserted
 	// into the root tree. Subtree rebuild classifies peers before using them.
 	peersClassified bool
+	// readLeaderHintEnabled allows storage-loaded regions to expose a transient
+	// leader in read responses while heartbeat has not refreshed runtime fields.
+	readLeaderHintEnabled bool
 	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
 	ref atomic.Int32
 	// bucketMeta is used to store the bucket meta reported by tikv.
@@ -159,8 +162,9 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 // state is rebuilt after region read APIs become available.
 func NewStorageRegionInfo(region *metapb.Region) *RegionInfo {
 	return &RegionInfo{
-		meta:   region,
-		source: Storage,
+		meta:                  region,
+		source:                Storage,
+		readLeaderHintEnabled: true,
 	}
 }
 
@@ -368,6 +372,7 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 		queryStats:                typeutil.DeepClone(r.queryStats, QueryStatsFactory),
 		bucketMeta:                r.bucketMeta,
 		peersClassified:           r.peersClassified,
+		readLeaderHintEnabled:     r.readLeaderHintEnabled,
 	}
 
 	for _, opt := range opts {
@@ -834,6 +839,30 @@ func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
 // GetLeader returns the leader of the region.
 func (r *RegionInfo) GetLeader() *metapb.Peer {
 	return r.leader
+}
+
+// GetLeaderForRead returns the best-effort leader used in region read responses.
+//
+// Storage-loaded regions do not have heartbeat runtime fields yet. Returning a
+// voter as a transient leader keeps router clients from treating all loaded
+// regions as no-leader while the true leader is refreshed by heartbeat or TiKV
+// NotLeader responses.
+func (r *RegionInfo) GetLeaderForRead() *metapb.Peer {
+	if r == nil {
+		return nil
+	}
+	if leader := r.GetLeader(); leader != nil && leader.GetId() != 0 {
+		return leader
+	}
+	if !r.readLeaderHintEnabled {
+		return r.GetLeader()
+	}
+	for _, peer := range r.GetPeers() {
+		if peer != nil && peer.GetId() != 0 && IsVoterOrIncomingVoter(peer) && !IsWitness(peer) {
+			return peer
+		}
+	}
+	return r.GetLeader()
 }
 
 // GetStartKey returns the start key of the region.
@@ -1795,7 +1824,7 @@ func (r *RegionsInfo) QueryRegions(
 			} else {
 				regionResp := &pdpb.RegionResponse{
 					Region:       region.GetMeta(),
-					Leader:       region.GetLeader(),
+					Leader:       region.GetLeaderForRead(),
 					DownPeers:    region.GetDownPeers(),
 					PendingPeers: region.GetPendingPeers(),
 				}
@@ -1868,7 +1897,7 @@ func sortOutKeyIDMap(
 		}
 		regionResp := &pdpb.RegionResponse{
 			Region:       region.GetMeta(),
-			Leader:       region.GetLeader(),
+			Leader:       region.GetLeaderForRead(),
 			DownPeers:    region.GetDownPeers(),
 			PendingPeers: region.GetPendingPeers(),
 		}

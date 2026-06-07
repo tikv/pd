@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -47,6 +48,93 @@ func (suite *clusterSuite) SetupSuite() {
 
 func (suite *clusterSuite) TearDownSuite() {
 	keypath.SetClusterID(suite.oldClusterID)
+}
+
+func (suite *clusterSuite) TestStorageLoadedRegionLeaderForReadResponse() {
+	re := suite.Require()
+	rc := core.NewBasicCluster()
+	region := core.NewStorageRegionInfo(&metapb.Region{
+		Id:       10,
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1, Role: metapb.PeerRole_Learner},
+			{Id: 102, StoreId: 2, IsWitness: true},
+			{Id: 103, StoreId: 3},
+		},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	})
+	re.True(rc.AppendRootRegionNoOverlap(region))
+	re.True(rc.AppendRootRegionNoOverlap(core.NewStorageRegionInfo(&metapb.Region{
+		Id:       11,
+		StartKey: []byte("b"),
+		EndKey:   []byte("c"),
+		Peers: []*metapb.Peer{
+			{Id: 111, StoreId: 4},
+		},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	})))
+	expectedLeader := region.GetPeers()[2]
+
+	regionByKeyResp, err := GetRegion(rc, &pdpb.GetRegionRequest{
+		RegionKey: []byte("a"),
+	}, false)
+	re.NoError(err)
+	re.Nil(regionByKeyResp.GetHeader().GetError())
+	re.Equal(expectedLeader, regionByKeyResp.GetLeader())
+
+	prevRegionResp, err := GetPrevRegion(rc, &pdpb.GetRegionRequest{
+		RegionKey: []byte("b"),
+	}, false)
+	re.NoError(err)
+	re.Nil(prevRegionResp.GetHeader().GetError())
+	re.Equal(expectedLeader, prevRegionResp.GetLeader())
+
+	regionByIDResp, err := GetRegionByID(rc, &pdpb.GetRegionByIDRequest{
+		RegionId: region.GetID(),
+	}, false)
+	re.NoError(err)
+	re.Nil(regionByIDResp.GetHeader().GetError())
+	re.Equal(expectedLeader, regionByIDResp.GetLeader())
+
+	scanResp, err := ScanRegions(rc, &pdpb.ScanRegionsRequest{
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
+		Limit:    1,
+	}, false)
+	re.NoError(err)
+	re.Nil(scanResp.GetHeader().GetError())
+	re.Len(scanResp.GetRegions(), 1)
+	re.Equal(expectedLeader, scanResp.GetRegions()[0].GetLeader())
+	re.Equal(expectedLeader, scanResp.GetLeaders()[0])
+
+	batchScanResp, err := BatchScanRegions(rc, &pdpb.BatchScanRegionsRequest{
+		Ranges: []*pdpb.KeyRange{{
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+		}},
+		Limit: 1,
+	}, false)
+	re.NoError(err)
+	re.Nil(batchScanResp.GetHeader().GetError())
+	re.Len(batchScanResp.GetRegions(), 1)
+	re.Equal(expectedLeader, batchScanResp.GetRegions()[0].GetLeader())
+
+	queryRegionResp := QueryRegion(rc, &pdpb.QueryRegionRequest{
+		Ids:      []uint64{region.GetID()},
+		Keys:     [][]byte{[]byte("a")},
+		PrevKeys: [][]byte{[]byte("b")},
+	})
+	re.Nil(queryRegionResp.GetHeader().GetError())
+	re.Equal(expectedLeader, queryRegionResp.GetRegionsById()[region.GetID()].GetLeader())
+	re.Equal([]uint64{region.GetID()}, queryRegionResp.GetKeyIdMap())
+	re.Equal([]uint64{region.GetID()}, queryRegionResp.GetPrevKeyIdMap())
 }
 
 func (suite *clusterSuite) TestScanRegions() {

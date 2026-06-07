@@ -1553,6 +1553,61 @@ func TestStorageRegionInfoDefersPeerClassificationUntilSubTreeUpdate(t *testing.
 	re.Same(region, regions.GetStoreRegions(2)[0])
 }
 
+func TestStorageRegionInfoLeaderForRead(t *testing.T) {
+	re := require.New(t)
+	newRegionMeta := func() *metapb.Region {
+		return &metapb.Region{
+			Id:       1,
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+			Peers: []*metapb.Peer{
+				{Id: 11, StoreId: 1, Role: metapb.PeerRole_Learner},
+				{Id: 12, StoreId: 2, IsWitness: true},
+				{Id: 13, StoreId: 3},
+				{Id: 14, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
+			},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		}
+	}
+
+	ordinary := NewRegionInfo(newRegionMeta(), nil)
+	re.Nil(ordinary.GetLeader())
+	re.Nil(ordinary.GetLeaderForRead())
+
+	storageLoaded := NewStorageRegionInfo(newRegionMeta())
+	re.Nil(storageLoaded.GetLeader())
+	re.Equal(uint64(13), storageLoaded.GetLeaderForRead().GetId())
+	re.Equal(uint64(3), storageLoaded.GetLeaderForRead().GetStoreId())
+
+	storageLoaded.leader = storageLoaded.GetPeers()[3]
+	re.Equal(uint64(14), storageLoaded.GetLeaderForRead().GetId())
+	storageLoaded.leader = nil
+
+	cloned := storageLoaded.Clone()
+	re.Nil(cloned.GetLeader())
+	re.Equal(uint64(13), cloned.GetLeaderForRead().GetId())
+
+	noAvailableVoter := NewStorageRegionInfo(&metapb.Region{
+		Id:       2,
+		StartKey: []byte("b"),
+		EndKey:   []byte("c"),
+		Peers: []*metapb.Peer{
+			{Id: 21, StoreId: 1, Role: metapb.PeerRole_Learner},
+			{Id: 22, StoreId: 2, IsWitness: true},
+			{StoreId: 3},
+		},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	})
+	re.Nil(noAvailableVoter.GetLeader())
+	re.Nil(noAvailableVoter.GetLeaderForRead())
+}
+
 func TestCheckAndPutRegionCleansPendingSubTreeOverlap(t *testing.T) {
 	re := require.New(t)
 	ctx := ContextTODO()
