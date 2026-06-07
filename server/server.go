@@ -1870,6 +1870,8 @@ func (s *Server) campaignLeader() {
 		zap.Duration("total-cost", totalDuration),
 		zap.Duration("cost", enableLeaderDuration))
 
+	failpoint.InjectCall("pauseBeforeCreateRaftCluster")
+
 	failpoint.Inject("delayCreateRaftCluster", func(val failpoint.Value) {
 		if delay, ok := val.(int); ok {
 			timer := time.NewTimer(time.Duration(delay) * time.Millisecond)

@@ -17,6 +17,7 @@ package tso_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -149,28 +150,46 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 		return ok && loadedRegion.GetId() == regionID
 	})
 
+	beforeCreateRaftClusterPaused := make(chan struct{})
+	resumeBeforeCreateRaftCluster := make(chan struct{})
+	var beforeCreateRaftClusterPauseOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/pauseBeforeCreateRaftCluster", func() {
+		beforeCreateRaftClusterPauseOnce.Do(func() {
+			close(beforeCreateRaftClusterPaused)
+		})
+		<-resumeBeforeCreateRaftCluster
+	}))
 	regionReadReadyPaused := make(chan struct{})
 	resumeAfterRegionReadReady := make(chan struct{})
-	var pauseOnce sync.Once
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayCreateRaftCluster", `return(1000)`))
+	var regionReadReadyPauseOnce sync.Once
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady", func() {
-		pauseOnce.Do(func() {
+		regionReadReadyPauseOnce.Do(func() {
 			close(regionReadReadyPaused)
 		})
 		<-resumeAfterRegionReadReady
 	}))
 	defer func() {
 		select {
+		case <-resumeBeforeCreateRaftCluster:
+		default:
+			close(resumeBeforeCreateRaftCluster)
+		}
+		select {
 		case <-resumeAfterRegionReadReady:
 		default:
 			close(resumeAfterRegionReadReady)
 		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/pauseBeforeCreateRaftCluster"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayCreateRaftCluster"))
 	}()
 
 	re.NoError(leaderServer.ResignLeaderWithRetry())
 	re.True(nextLeaderServer.WaitLeader())
+	select {
+	case <-beforeCreateRaftClusterPaused:
+	case <-time.After(20 * time.Second):
+		re.FailNow("timed out waiting before raft cluster creation")
+	}
 	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
 	defer conn.Close()
 	req := &pdpb.TsoRequest{
@@ -191,13 +210,21 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
 
 	httpClient := &http.Client{Timeout: time.Second}
+	rc := nextLeaderServer.GetServer().DirectlyGetRaftCluster()
+	re.NotNil(rc)
+	re.False(rc.IsRegionReadReady())
+	assertRegionReadsNotBootstrapped(
+		re, ctx, grpcPDClient, httpClient, nextLeaderServer,
+		region.GetStartKey(), region.GetEndKey(), regionID,
+	)
+
+	close(resumeBeforeCreateRaftCluster)
 	select {
 	case <-regionReadReadyPaused:
 	case <-time.After(20 * time.Second):
 		re.FailNow("timed out waiting for region read readiness pause")
 	}
 
-	rc := nextLeaderServer.GetServer().DirectlyGetRaftCluster()
 	re.True(rc.IsRegionReadReady())
 
 	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
@@ -248,6 +275,52 @@ func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestClus
 	testutil.Eventually(re, func() bool {
 		return nextLeaderServer.GetRaftCluster() != nil
 	}, testutil.WithWaitFor(20*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func assertRegionReadsNotBootstrapped(
+	re *require.Assertions,
+	ctx context.Context,
+	grpcPDClient pdpb.PDClient,
+	httpClient *http.Client,
+	svr *tests.TestServer,
+	startKey, endKey []byte,
+	regionID uint64,
+) {
+	requestHeader := testutil.NewRequestHeader(svr.GetClusterID())
+	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
+	defer regionRPCCancel()
+	regionByIDResp, err := grpcPDClient.GetRegionByID(regionRPCContext, &pdpb.GetRegionByIDRequest{
+		Header:   requestHeader,
+		RegionId: regionID,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, regionByIDResp.GetHeader().GetError().GetType())
+
+	scanContext, scanCancel := context.WithTimeout(ctx, time.Second)
+	defer scanCancel()
+	scanResp, err := grpcPDClient.ScanRegions(scanContext, &pdpb.ScanRegionsRequest{
+		Header:   requestHeader,
+		StartKey: startKey,
+		EndKey:   endKey,
+		Limit:    1,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, scanResp.GetHeader().GetError().GetType())
+
+	checkHTTPNotBootstrapped := func(url string) {
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		re.NoError(err)
+		resp, err := httpClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
+		re.Contains(string(body), "not bootstrapped")
+	}
+	checkHTTPNotBootstrapped(fmt.Sprintf("%s/pd/api/v1/region/id/%d", svr.GetAddr(), regionID))
+	checkHTTPNotBootstrapped(fmt.Sprintf("%s/pd/api/v1/regions/key?key=a&end_key=z&limit=1", svr.GetAddr()))
+	checkHTTPNotBootstrapped(svr.GetAddr() + "/pd/api/v1/regions/count")
 }
 
 func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {
