@@ -205,6 +205,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
+	if rmc.PushMetricsAddress != "" && rmc.PushMetricsInterval.Duration <= 0 {
+		log.Warn("push-metrics-address is set but push-metrics-interval is invalid, metrics push disabled")
+		rmc.PushMetricsAddress = ""
+	}
 	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)

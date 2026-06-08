@@ -725,12 +725,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	failpoint.Inject("fastCleanupTicker", func() {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
+
 	pushMetricsTickerC := make(<-chan time.Time)
 	controllerConfig := m.GetControllerConfig()
 	if controllerConfig.PushMetricsAddress != "" && controllerConfig.PushMetricsInterval.Duration > 0 {
 		pushMetricsTicker := time.NewTicker(controllerConfig.PushMetricsInterval.Duration)
-		pushMetricsTickerC = pushMetricsTicker.C
 		defer pushMetricsTicker.Stop()
+		pushMetricsTickerC = pushMetricsTicker.C
 	}
 
 	for {
