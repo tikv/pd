@@ -504,20 +504,6 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
-	// End-of-history marker. An empty-regions response tells the
-	// follower that the bulk transfer of regions finished cleanly, so it can
-	// commit the new history index. A partial bulk transfer cut short by
-	// leader failover deliberately never reaches this point, so the
-	// follower will roll back to its last committed index (0 for a
-	// fresh member) and re-bulk transfer from the next leader.
-	marker := &pdpb.SyncRegionResponse{
-		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		StartIndex: uint64(lastIndex),
-	}
-	if err := stream.Send(marker); err != nil {
-		log.Error("failed to send end-of-history marker", errs.ZapError(errs.ErrGRPCSend, err))
-		return nil, status.Errorf(codes.Internal, "failed to send end-of-history marker: %v", err)
-	}
 	syncStream := newRegionSyncStream(stream)
 	syncStream.sendMu.Lock()
 	s.bindRegionSyncStream(name, syncStream)
@@ -529,11 +515,30 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			"history records from full sync start index %d to %d are no longer available",
 			retainIndex, nextIndex)
 	}
+	// Emit exactly one end-of-history marker, after the retained delta (the
+	// region changes that happened during the bulk transfer) has been replayed,
+	// so the follower commits and flips historySynced only once it is truly
+	// caught up. The marker carries the history index (nextIndex), not the
+	// snapshot row count. A transfer cut short by leader failover never reaches
+	// this point, so the follower rolls back to its last committed index (0 for
+	// a fresh member) and re-syncs from the next leader.
 	if len(records) > 0 {
+		// syncHistoryRecords replays the records and sends the trailing marker.
 		if err := s.syncHistoryRecords(retainIndex, records, stream); err != nil {
 			s.unbindStream(name, syncStream)
 			syncStream.sendMu.Unlock()
 			return nil, err
+		}
+	} else {
+		marker := &pdpb.SyncRegionResponse{
+			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			StartIndex: nextIndex,
+		}
+		if err := stream.Send(marker); err != nil {
+			s.unbindStream(name, syncStream)
+			syncStream.sendMu.Unlock()
+			log.Error("failed to send end-of-history marker", errs.ZapError(errs.ErrGRPCSend, err))
+			return nil, status.Errorf(codes.Internal, "failed to send end-of-history marker: %v", err)
 		}
 	}
 	syncStream.sendMu.Unlock()

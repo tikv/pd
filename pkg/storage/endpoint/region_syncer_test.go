@@ -24,6 +24,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+// newMemStorageEndpoint returns a StorageEndpoint backed by an in-memory KV,
+// for tests that exercise endpoint encode/decode round-trips without etcd.
 func newMemStorageEndpoint() *StorageEndpoint {
 	return NewStorageEndpoint(kv.NewMemoryKV(), nil)
 }

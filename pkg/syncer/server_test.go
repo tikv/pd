@@ -128,10 +128,10 @@ func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
 
 	close(unblockSend)
 	fullResp := <-stream.sendCh
-	// End-of-history marker after the bulk transfer, before catch-up records.
-	bulkMarker := <-stream.sendCh
 	catchUpResp := <-stream.sendCh
-	// End-of-history marker after the catch-up records.
+	// The single end-of-history marker is sent after the catch-up records, and
+	// carries the history index (not the snapshot row count). No marker is sent
+	// after the bulk transfer when there are retained records to replay.
 	catchUpMarker := <-stream.sendCh
 	result := <-done
 	if result.syncStream != nil {
@@ -140,12 +140,51 @@ func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
 
 	re.NoError(result.err)
 	re.Len(fullResp.GetRegions(), 1)
-	re.Empty(bulkMarker.GetRegions())
 	re.Len(records, 5)
 	re.Equal(startIndex, catchUpResp.GetStartIndex())
 	re.Len(catchUpResp.GetRegions(), 5)
 	re.Empty(catchUpMarker.GetRegions())
 	re.Equal(startIndex+uint64(len(records)), catchUpMarker.GetStartIndex())
+}
+
+// TestSyncFullRegionsEmptyCatchUpMarkerUsesHistoryIndex verifies that when a
+// full sync has no retained catch-up records, syncFullRegions emits exactly one
+// end-of-history marker, and that it carries the history index (the leader's
+// nextIndex) rather than the snapshot row count.
+func TestSyncFullRegionsEmptyCatchUpMarkerUsesHistoryIndex(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newHistoryBufferTestRegion(1))
+	syncer := newTestRegionSyncer(t, bc)
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	// History index (10) is deliberately different from the one-region row count.
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	// Buffer the bulk batch + the single trailing marker so the synchronous
+	// call below never blocks on Send.
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 4)
+	retainIndex := syncer.history.getNextIndex()
+
+	syncStream, err := syncer.syncFullRegions(context.Background(), "pd-follower", stream)
+	if syncStream != nil {
+		defer syncer.unbindStream("pd-follower", syncStream)
+	}
+	re.NoError(err)
+
+	bulk := <-stream.sendCh
+	marker := <-stream.sendCh
+	re.Len(bulk.GetRegions(), 1)
+	re.Empty(marker.GetRegions())
+	// The marker carries the history index (10), not the one-region row count.
+	re.Equal(retainIndex, marker.GetStartIndex())
+	re.Equal(uint64(10), marker.GetStartIndex())
+	// Exactly one marker: nothing else was sent.
+	select {
+	case extra := <-stream.sendCh:
+		re.FailNowf("unexpected extra message", "got %+v", extra)
+	default:
+	}
 }
 
 func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
