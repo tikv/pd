@@ -197,9 +197,9 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
-// only for test use, as it always generates txn region bound.
-func MakeKeyRanges(id uint32) []any {
+// MakeTxnKeyRanges encodes keyspace ID to correct LabelRule data.
+// only for test use and pd-ctl, as it always generates txn region bound.
+func MakeTxnKeyRanges(id uint32) []any {
 	return buildKeyRanges(id, txnRegionBound)
 }
 

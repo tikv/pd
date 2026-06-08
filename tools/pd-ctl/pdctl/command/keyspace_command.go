@@ -497,8 +497,8 @@ func newSetPlacementCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "set-placement <keyspace-id> <label-key>=<label-value> [<label-key>=<label-value>...]",
 		Short: "set keyspace placement rules with store label constraints",
-		Long: "Set placement rules for all regions of a keyspace to stores matching the specified labels.\n" +
-			"This creates a placement rule bundle that places the keyspace's regions on stores matching all the label constraints.\n" +
+		Long: "Set placement rules for all txn regions of a keyspace to stores matching the specified labels.\n" +
+			"This creates a placement rule bundle that places the keyspace's txn regions on stores matching all the label constraints.\n" +
 			"Examples:\n" +
 			"  pd-ctl keyspace set-placement 1 zone=east\n" +
 			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd",
@@ -551,8 +551,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	// Generate key ranges for the keyspace
-	keyRanges := keyspace.MakeKeyRanges(keyspaceID32)
-
+	keyRanges := keyspace.MakeTxnKeyRanges(keyspaceID32)
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := &pd.GroupBundle{

@@ -191,8 +191,9 @@ func (manager *Manager) Bootstrap() error {
 }
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
+	boundType := manager.getRegionBoundType()
 	// Split Keyspace Region for default/system keyspace.
-	if err := manager.splitKeyspaceRegion(id, false, manager.getRegionBoundType()); err != nil {
+	if err := manager.splitKeyspaceRegion(id, false, boundType); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
@@ -208,6 +209,8 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if err != nil {
 		return err
 	}
+
+	config[RegionBoundType] = boundType.String()
 	// It is needed to set for system keyspace in next-gen.
 	if id == constant.SystemKeyspaceID {
 		config[GCManagementType] = KeyspaceLevelGC
@@ -396,6 +399,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err != nil {
 		return nil, err
 	}
+	boundType := manager.getRegionBoundType()
 	if len(config) != 0 {
 		if request.Config == nil {
 			request.Config = config
@@ -403,6 +407,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
+		request.Config[RegionBoundType] = boundType.String()
 	}
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
@@ -432,7 +437,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		return nil, err
 	}
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit(), manager.getRegionBoundType())
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit(), boundType)
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			metaPath := keypath.KeyspaceMetaPath(id)
