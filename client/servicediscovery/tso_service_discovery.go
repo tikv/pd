@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -53,10 +53,7 @@ const (
 	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
-var (
-	_ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-	_ TSOEventSource   = (*tsoServiceDiscovery)(nil)
-)
+var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -127,7 +124,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	tsoLeaderUpdatedCb leaderSwitchedCallbackFunc
 
 	checkMembershipCh chan struct{}
 
@@ -344,16 +341,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
-// a primary/secondary configured cluster is switched.
-func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
-
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
-// in a primary/secondary configured cluster is changed.
-func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
-
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -362,6 +351,14 @@ func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderU
 	}
 	c.tsoLeaderUpdatedCb = callback
 }
+
+// AddLeaderSwitchedCallback adds callbacks which will be called when the primary in
+// a primary/secondary configured cluster is switched.
+func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (*tsoServiceDiscovery) AddMembersChangedCallback(func()) {}
 
 // GetServiceClient implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {

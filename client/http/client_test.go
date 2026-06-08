@@ -24,7 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/retry"
 )
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {

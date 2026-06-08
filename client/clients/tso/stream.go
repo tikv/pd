@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package tso
 
 import (
 	"context"
@@ -42,16 +42,18 @@ type tsoStreamBuilderFactory interface {
 	makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder
 }
 
-type pdTSOStreamBuilderFactory struct{}
+// PDStreamBuilderFactory is a factory for building TSO streams to the PD cluster.
+type PDStreamBuilderFactory struct{}
 
-func (*pdTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &pdTSOStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target()}
+func (*PDStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
+	return &pdStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target()}
 }
 
-type tsoTSOStreamBuilderFactory struct{}
+// MSStreamBuilderFactory is a factory for building TSO streams to the microservice cluster.
+type MSStreamBuilderFactory struct{}
 
-func (*tsoTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &tsoTSOStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target()}
+func (*MSStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
+	return &msStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target()}
 }
 
 // TSO Stream Builder
@@ -60,12 +62,12 @@ type tsoStreamBuilder interface {
 	build(context.Context, context.CancelFunc, time.Duration) (*tsoStream, error)
 }
 
-type pdTSOStreamBuilder struct {
+type pdStreamBuilder struct {
 	serverURL string
 	client    pdpb.PDClient
 }
 
-func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
+func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
@@ -77,12 +79,12 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 	return nil, err
 }
 
-type tsoTSOStreamBuilder struct {
+type msStreamBuilder struct {
 	serverURL string
 	client    tsopb.TSOClient
 }
 
-func (b *tsoTSOStreamBuilder) build(
+func (b *msStreamBuilder) build(
 	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
 ) (*tsoStream, error) {
 	done := make(chan struct{})

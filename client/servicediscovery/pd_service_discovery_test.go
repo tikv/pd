@@ -31,9 +31,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/grpcutil"
-	"github.com/tikv/pd/client/utils/testutil"
-	"github.com/tikv/pd/client/utils/tlsutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -398,7 +398,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdServiceDiscovery{option: opt.NewOption()}
+	cli := &pdServiceDiscovery{callbacks: newServiceCallbacks(), option: opt.NewOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
@@ -420,6 +420,7 @@ func TestGRPCDialOption(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
 	cli := &pdServiceDiscovery{
+		callbacks:         newServiceCallbacks(),
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,

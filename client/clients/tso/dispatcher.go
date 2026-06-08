@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package tso
 
 import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
@@ -28,36 +27,18 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/batch"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	"github.com/tikv/pd/client/pkg/deadline"
+	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"github.com/tikv/pd/client/utils/timerutil"
-	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
 )
-
-// deadline is used to control the TS request timeout manually,
-// it will be sent to the `tsDeadlineCh` to be handled by the `watchTSDeadline` goroutine.
-type deadline struct {
-	timer  *time.Timer
-	done   chan struct{}
-	cancel context.CancelFunc
-}
-
-func newTSDeadline(
-	timeout time.Duration,
-	done chan struct{},
-	cancel context.CancelFunc,
-) *deadline {
-	timer := timerutil.GlobalTimerPool.Get(timeout)
-	return &deadline{
-		timer:  timer,
-		done:   done,
-		cancel: cancel,
-	}
-}
 
 type tsoInfo struct {
 	tsoServer           string
@@ -72,7 +53,8 @@ type tsoInfo struct {
 type tsoServiceProvider interface {
 	getOption() *opt.Option
 	getServiceDiscovery() sd.ServiceDiscovery
-	updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool
+	getConnectionCtxMgr() *cctx.Manager[*tsoStream]
+	updateConnectionCtxs(ctx context.Context) bool
 }
 
 const dispatcherCheckRPCConcurrencyInterval = time.Second * 5
@@ -81,12 +63,10 @@ type tsoDispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	provider tsoServiceProvider
-	// URL -> *connectionContext
-	connectionCtxs *sync.Map
-	tsoRequestCh   chan *tsoRequest
-	tsDeadlineCh   chan *deadline
-	latestTSOInfo  atomic.Pointer[tsoInfo]
+	provider        tsoServiceProvider
+	tsoRequestCh    chan *Request
+	deadlineWatcher *deadline.Watcher
+	latestTSOInfo   atomic.Pointer[tsoInfo]
 	// For reusing `*batchController` objects
 	batchBufferPool *sync.Pool
 
@@ -98,8 +78,6 @@ type tsoDispatcher struct {
 	lastCheckConcurrencyTime time.Time
 	tokenCount               int
 	rpcConcurrency           int
-
-	updateConnectionCtxsCh chan struct{}
 }
 
 func newTSODispatcher(
@@ -108,9 +86,9 @@ func newTSODispatcher(
 	provider tsoServiceProvider,
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
-	tsoRequestCh := make(chan *tsoRequest, maxBatchSize*2)
+	tsoRequestCh := make(chan *Request, maxBatchSize*2)
 	failpoint.Inject("shortDispatcherChannel", func() {
-		tsoRequestCh = make(chan *tsoRequest, 1)
+		tsoRequestCh = make(chan *Request, 1)
 	})
 
 	// A large-enough capacity to hold maximum concurrent RPC requests. In our design, the concurrency is at most 16.
@@ -118,63 +96,29 @@ func newTSODispatcher(
 	tokenCh := make(chan struct{}, tokenChCapacity)
 
 	td := &tsoDispatcher{
-		ctx:            dispatcherCtx,
-		cancel:         dispatcherCancel,
-		provider:       provider,
-		connectionCtxs: &sync.Map{},
-		tsoRequestCh:   tsoRequestCh,
-		tsDeadlineCh:   make(chan *deadline, tokenChCapacity),
+		ctx:             dispatcherCtx,
+		cancel:          dispatcherCancel,
+		provider:        provider,
+		tsoRequestCh:    tsoRequestCh,
+		deadlineWatcher: deadline.NewWatcher(dispatcherCtx, tokenChCapacity, "tso"),
 		batchBufferPool: &sync.Pool{
 			New: func() any {
-				return newBatchController[*tsoRequest](
+				return batch.NewController[*Request](
 					maxBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
 					metrics.TSOBestBatchSize,
 				)
 			},
 		},
-		tokenCh:                tokenCh,
-		updateConnectionCtxsCh: make(chan struct{}, 1),
+		tokenCh: tokenCh,
 	}
-	go td.watchTSDeadline()
 	return td
-}
-
-func (td *tsoDispatcher) watchTSDeadline() {
-	log.Info("[tso] start tso deadline watcher")
-	defer log.Info("[tso] exit tso deadline watcher")
-	for {
-		select {
-		case d := <-td.tsDeadlineCh:
-			select {
-			case <-d.timer.C:
-				log.Error("[tso] tso request is canceled due to timeout",
-					errs.ZapError(errs.ErrClientGetTSOTimeout))
-				d.cancel()
-				timerutil.GlobalTimerPool.Put(d.timer)
-			case <-d.done:
-				timerutil.GlobalTimerPool.Put(d.timer)
-			case <-td.ctx.Done():
-				timerutil.GlobalTimerPool.Put(d.timer)
-				return
-			}
-		case <-td.ctx.Done():
-			return
-		}
-	}
-}
-
-func (td *tsoDispatcher) scheduleUpdateConnectionCtxs() {
-	select {
-	case td.updateConnectionCtxsCh <- struct{}{}:
-	default:
-	}
 }
 
 func (td *tsoDispatcher) revokePendingRequests(err error) {
 	for range len(td.tsoRequestCh) {
 		req := <-td.tsoRequestCh
-		req.tryDone(err)
+		req.TryDone(err)
 	}
 }
 
@@ -184,7 +128,7 @@ func (td *tsoDispatcher) close() {
 	td.revokePendingRequests(tsoErr)
 }
 
-func (td *tsoDispatcher) push(request *tsoRequest) {
+func (td *tsoDispatcher) push(request *Request) {
 	td.tsoRequestCh <- request
 }
 
@@ -192,10 +136,10 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	var (
 		ctx                = td.ctx
 		provider           = td.provider
-		svcDiscovery       = provider.getServiceDiscovery()
 		option             = provider.getOption()
-		connectionCtxs     = td.connectionCtxs
-		tsoBatchController *batchController[*tsoRequest]
+		svcDiscovery       = provider.getServiceDiscovery()
+		conCtxMgr          = provider.getConnectionCtxMgr()
+		tsoBatchController *batch.Controller[*Request]
 	)
 
 	log.Info("[tso] tso dispatcher created")
@@ -203,11 +147,8 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	defer func() {
 		log.Info("[tso] exit tso dispatcher")
 		// Cancel all connections.
-		connectionCtxs.Range(func(_, cc any) bool {
-			cc.(*tsoConnectionContext).cancel()
-			return true
-		})
-		if tsoBatchController != nil && tsoBatchController.collectedRequestCount != 0 {
+		conCtxMgr.ReleaseAll()
+		if tsoBatchController != nil && tsoBatchController.GetCollectedRequestCount() != 0 {
 			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
@@ -215,8 +156,6 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		td.revokePendingRequests(tsoErr)
 		wg.Done()
 	}()
-	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
-	go td.connectionCtxsUpdater()
 
 	var (
 		err       error
@@ -245,7 +184,7 @@ tsoBatchLoop:
 
 		// In case error happens, the loop may continue without resetting `tsoBatchController` for retrying.
 		if tsoBatchController == nil {
-			tsoBatchController = td.batchBufferPool.Get().(*batchController[*tsoRequest])
+			tsoBatchController = td.batchBufferPool.Get().(*batch.Controller[*Request])
 		}
 
 		maxBatchWaitInterval := option.GetMaxTSOBatchWaitInterval()
@@ -262,7 +201,7 @@ tsoBatchLoop:
 		// Start to collect the TSO requests.
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
 		// otherwise the upper caller may get blocked on waiting for the results.
-		if err = tsoBatchController.fetchPendingRequests(ctx, td.tsoRequestCh, td.tokenCh, maxBatchWaitInterval); err != nil {
+		if err = tsoBatchController.FetchPendingRequests(ctx, td.tsoRequestCh, td.tokenCh, maxBatchWaitInterval); err != nil {
 			if err == context.Canceled {
 				log.Info("[tso] stop fetching the pending tso requests due to context canceled")
 			} else {
@@ -272,7 +211,7 @@ tsoBatchLoop:
 			return
 		}
 		if maxBatchWaitInterval >= 0 {
-			tsoBatchController.adjustBestBatchSize()
+			tsoBatchController.AdjustBestBatchSize()
 		}
 		// Stop the timer if it's not stopped.
 		if !streamLoopTimer.Stop() {
@@ -287,17 +226,17 @@ tsoBatchLoop:
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
-			connectionCtx := chooseStream(connectionCtxs)
+			connectionCtx := conCtxMgr.GetConnectionCtx()
 			if connectionCtx != nil {
-				streamCtx, cancel, streamURL, stream = connectionCtx.ctx, connectionCtx.cancel, connectionCtx.streamURL, connectionCtx.stream
+				streamCtx, cancel, streamURL, stream = connectionCtx.Ctx, connectionCtx.Cancel, connectionCtx.StreamURL, connectionCtx.Stream
 			}
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[tso] tso stream is not ready")
-				if provider.updateConnectionCtxs(ctx, connectionCtxs) {
+				if provider.updateConnectionCtxs(ctx) {
 					continue streamChoosingLoop
 				}
-				timer := time.NewTimer(retryInterval)
+				timer := time.NewTimer(constants.RetryInterval)
 				select {
 				case <-ctx.Done():
 					// Finish the collected requests if the context is canceled.
@@ -321,8 +260,7 @@ tsoBatchLoop:
 			case <-streamCtx.Done():
 				log.Info("[tso] tso stream is canceled", zap.String("stream-url", streamURL))
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
-				connectionCtxs.Delete(streamURL)
-				cancel()
+				conCtxMgr.Release(streamURL)
 				stream = nil
 				continue
 			default:
@@ -330,7 +268,7 @@ tsoBatchLoop:
 
 			// Check if any error has occurred on this stream when receiving asynchronously.
 			if err = stream.GetRecvError(); err != nil {
-				exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
+				exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
 				stream = nil
 				if exit {
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
@@ -381,7 +319,7 @@ tsoBatchLoop:
 				}
 				batchingTimer.Reset(remainingBatchTime)
 
-				err = tsoBatchController.fetchRequestsWithTimer(ctx, td.tsoRequestCh, batchingTimer)
+				err = tsoBatchController.FetchRequestsWithTimer(ctx, td.tsoRequestCh, batchingTimer)
 				if err != nil {
 					// There should not be other kinds of errors.
 					log.Info("[tso] stop fetching the pending tso requests due to context canceled",
@@ -392,14 +330,11 @@ tsoBatchLoop:
 			}
 		}
 
-		done := make(chan struct{})
-		dl := newTSDeadline(option.Timeout, done, cancel)
-		select {
-		case <-ctx.Done():
+		done := td.deadlineWatcher.Start(ctx, option.Timeout, cancel)
+		if done == nil {
 			// Finish the collected requests if the context is canceled.
 			td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
 			return
-		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
 		err = td.processRequests(stream, tsoBatchController, done)
@@ -415,7 +350,7 @@ tsoBatchLoop:
 			// reused in the next loop safely.
 			tsoBatchController = nil
 		} else {
-			exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
+			exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
 			stream = nil
 			if exit {
 				return
@@ -426,110 +361,44 @@ tsoBatchLoop:
 
 // handleProcessRequestError handles errors occurs when trying to process a TSO RPC request for the dispatcher loop.
 // Returns true if the dispatcher loop is ok to continue. Otherwise, the dispatcher loop should be exited.
-func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retry.Backoffer, streamURL string, streamCancelFunc context.CancelFunc, err error) bool {
+func (td *tsoDispatcher) handleProcessRequestError(
+	ctx context.Context,
+	bo *retry.Backoffer,
+	conCtxMgr *cctx.Manager[*tsoStream],
+	streamURL string,
+	err error,
+) bool {
+	log.Error("[tso] getTS error after processing requests",
+		zap.String("stream-url", streamURL),
+		zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
+
 	select {
 	case <-ctx.Done():
 		return false
 	default:
 	}
 
+	// Release this stream from the manager due to error.
+	conCtxMgr.Release(streamURL)
+	// Update the member list to ensure the latest topology is used before the next batch.
 	svcDiscovery := td.provider.getServiceDiscovery()
-
-	svcDiscovery.ScheduleCheckMemberChanged()
-	log.Error("[tso] getTS error after processing requests",
-		zap.String("stream-url", streamURL),
-		zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
-	// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
-	td.connectionCtxs.Delete(streamURL)
-	streamCancelFunc()
-	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 	if errs.IsLeaderChange(err) {
+		// If the leader changed, we better call `CheckMemberChanged` blockingly to
+		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
-			select {
-			case <-ctx.Done():
-				return false
-			default:
-			}
+			log.Error("[tso] check member changed error after the leader changed", zap.Error(err))
 		}
-		// Because the TSO Follower Proxy could be configured online,
-		// If we change it from on -> off, background updateConnectionCtxs
-		// will cancel the current stream, then the EOF error caused by cancel()
-		// should not trigger the updateConnectionCtxs here.
-		// So we should only call it when the leader changes.
-		td.provider.updateConnectionCtxs(ctx, td.connectionCtxs)
+	} else {
+		// For other errors, we can just schedule a member change check asynchronously.
+		svcDiscovery.ScheduleCheckMemberChanged()
 	}
 
-	return true
-}
-
-// updateConnectionCtxs updates the `connectionCtxs` regularly.
-func (td *tsoDispatcher) connectionCtxsUpdater() {
-	var (
-		ctx            = td.ctx
-		connectionCtxs = td.connectionCtxs
-		provider       = td.provider
-		option         = td.provider.getOption()
-		updateTicker   = &time.Ticker{}
-	)
-
-	log.Info("[tso] start tso connection contexts updater")
-	setNewUpdateTicker := func(interval time.Duration) {
-		if updateTicker.C != nil {
-			updateTicker.Stop()
-		}
-		if interval == 0 {
-			updateTicker = &time.Ticker{}
-		} else {
-			updateTicker = time.NewTicker(interval)
-		}
-	}
-	// If the TSO Follower Proxy is enabled, set the update interval to the member update interval.
-	if option.GetEnableTSOFollowerProxy() {
-		setNewUpdateTicker(sd.MemberUpdateInterval)
-	}
-	// Set to nil before returning to ensure that the existing ticker can be GC.
-	defer setNewUpdateTicker(0)
-
-	for {
-		provider.updateConnectionCtxs(ctx, connectionCtxs)
-		select {
-		case <-ctx.Done():
-			log.Info("[tso] exit tso connection contexts updater")
-			return
-		case <-option.EnableTSOFollowerProxyCh:
-			enableTSOFollowerProxy := option.GetEnableTSOFollowerProxy()
-			log.Info("[tso] tso follower proxy status changed",
-				zap.Bool("enable", enableTSOFollowerProxy))
-			if enableTSOFollowerProxy && updateTicker.C == nil {
-				// Because the TSO Follower Proxy is enabled,
-				// the periodic check needs to be performed.
-				setNewUpdateTicker(sd.MemberUpdateInterval)
-			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
-				// Because the TSO Follower Proxy is disabled,
-				// the periodic check needs to be turned off.
-				setNewUpdateTicker(0)
-			}
-		case <-updateTicker.C:
-			// Triggered periodically when the TSO Follower Proxy is enabled.
-		case <-td.updateConnectionCtxsCh:
-			// Triggered by the leader/follower change.
-		}
-	}
-}
-
-// chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
-// connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
-func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext) {
-	idx := 0
-	connectionCtxs.Range(func(_, cc any) bool {
-		j := rand.Intn(idx + 1)
-		if j < 1 {
-			connectionCtx = cc.(*tsoConnectionContext)
-		}
-		idx++
+	select {
+	case <-ctx.Done():
+		return false
+	default:
 		return true
-	})
-	return connectionCtx
+	}
 }
 
 // processRequests sends the RPC request for the batch. It's guaranteed that after calling this function, requests
@@ -537,11 +406,11 @@ func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext
 // `close(done)` will be called at the same time when finishing the requests.
 // If this function returns a non-nil error, the requests will always be canceled synchronously.
 func (td *tsoDispatcher) processRequests(
-	stream *tsoStream, tbc *batchController[*tsoRequest], done chan struct{},
+	stream *tsoStream, tbc *batch.Controller[*Request], done chan struct{},
 ) error {
 	// `done` must be guaranteed to be eventually called.
 	var (
-		requests     = tbc.getCollectedRequests()
+		requests     = tbc.GetCollectedRequests()
 		traceRegions = make([]*trace.Region, 0, len(requests))
 		spans        = make([]opentracing.Span, 0, len(requests))
 	)
@@ -600,7 +469,7 @@ func (td *tsoDispatcher) processRequests(
 
 	err := stream.processRequests(
 		clusterID, keyspaceID, reqKeyspaceGroupID,
-		count, tbc.extraBatchingStartTime, cb)
+		count, tbc.GetExtraBatchingStartTime(), cb)
 	if err != nil {
 		close(done)
 
@@ -610,25 +479,25 @@ func (td *tsoDispatcher) processRequests(
 	return nil
 }
 
-func tsoRequestFinisher(physical, firstLogical int64, streamID string) finisherFunc[*tsoRequest] {
-	return func(idx int, tsoReq *tsoRequest, err error) {
+func tsoRequestFinisher(physical, firstLogical int64, streamID string) batch.FinisherFunc[*Request] {
+	return func(idx int, tsoReq *Request, err error) {
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
 		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(idx)
 		tsoReq.streamID = streamID
-		tsoReq.tryDone(err)
+		tsoReq.TryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
 	}
 }
 
-func (td *tsoDispatcher) cancelCollectedRequests(tbc *batchController[*tsoRequest], streamID string, err error) {
+func (td *tsoDispatcher) cancelCollectedRequests(tbc *batch.Controller[*Request], streamID string, err error) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisher(0, 0, streamID), err)
+	tbc.FinishCollectedRequests(tsoRequestFinisher(0, 0, streamID), err)
 }
 
-func (td *tsoDispatcher) doneCollectedRequests(tbc *batchController[*tsoRequest], physical, firstLogical int64, streamID string) {
+func (td *tsoDispatcher) doneCollectedRequests(tbc *batch.Controller[*Request], physical, firstLogical int64, streamID string) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisher(physical, firstLogical, streamID), nil)
+	tbc.FinishCollectedRequests(tsoRequestFinisher(physical, firstLogical, streamID), nil)
 }
 
 // checkMonotonicity checks whether the monotonicity of the TSO allocation is violated.
