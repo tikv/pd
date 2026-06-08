@@ -296,6 +296,12 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
+	c.RLock()
+	if c.cluster == nil {
+		c.RUnlock()
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	c.RUnlock()
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
