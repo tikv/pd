@@ -1750,13 +1750,19 @@ func (s *Server) leaderLoop() {
 	}
 }
 
-// canCampaignAsRegionSyncerCaughtUp returns true when this server is eligible
+// This function returns true when this server is eligible
 // to campaign for PD leadership from a region-syncer correctness standpoint:
 //   - region storage is not in use (regions live in etcd, no syncer needed), or
 //   - the syncer was never started on this process (single-node bootstrap, or
 //     no leader has ever existed to sync from), or
 //   - the syncer has at some point observed that it was caught up to a
-//     leader's history (and thus the local region storage is durable).
+//     leader's history (and thus the local region storage is durable), or
+//   - no leader has published any committed regions yet (a fresh or empty
+//     cluster, where there is nothing to be behind on).
+//
+// Otherwise this is a member that has been syncing from a leader that has
+// region data but has not yet confirmed catch-up, so it must wait rather than
+// win leadership with a stale/empty store ahead of its caught-up peers.
 func (s *Server) canCampaignAsRegionSyncerCaughtUp() bool {
 	if !s.persistOptions.IsUseRegionStorage() {
 		return true
@@ -1768,7 +1774,30 @@ func (s *Server) canCampaignAsRegionSyncerCaughtUp() bool {
 	if !syncer.HasAttemptedSync() {
 		return true
 	}
-	return syncer.IsHistorySynced()
+	if syncer.IsHistorySynced() {
+		return true
+	}
+	// Not history-synced this session. Consult the durable region count the
+	// leader published so we neither deadlock the election nor let an empty
+	// member win.
+	committed, err := s.storage.LoadRegionSyncerCommittedRegionCount()
+	if err != nil {
+		// Unknown committed state (e.g. etcd read failed): prefer availability,
+		// the campaign itself still needs quorum to succeed.
+		log.Warn("failed to load committed region count, allowing campaign",
+			zap.String("server-name", s.Name()), errs.ZapError(err))
+		return true
+	}
+	// committed == 0 means a fresh or empty cluster: nothing to be behind on.
+	// Note: the committed value could be reduced to a boolean "cluster has committed regions"
+	// flag. We keep the published region count for now until we are certain the magnitude is
+	// never needed (e.g. for a future tolerance/threshold policy).
+	if committed == 0 {
+		return true
+	}
+	// The cluster has committed regions and this member has not confirmed
+	// catch-up: it is behind, so it must not campaign yet.
+	return false
 }
 
 func (s *Server) campaignLeader() {

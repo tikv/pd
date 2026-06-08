@@ -50,9 +50,13 @@ const (
 	maxSyncRegionBatchSize      = 1000
 	syncerKeepAliveInterval     = 10 * time.Second
 	historyBufferShrinkInterval = 5 * time.Minute
-	defaultHistoryBufferSize    = 10000
-	historyBufferMemoryStep     = 4 * 1024 * 1024 * 1024
-	maxHistoryBufferSize        = 80000
+	// The frequency to check and publish the region count the leader is
+	// serving so that other members can tell whether they are caught up
+	// before campaigning.
+	committedRegionCountInterval = time.Second
+	defaultHistoryBufferSize     = 10000
+	historyBufferMemoryStep      = 4 * 1024 * 1024 * 1024
+	maxHistoryBufferSize         = 80000
 )
 
 // ClientStream is the client side of the region syncer.
@@ -189,6 +193,9 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var buckets []*metapb.Buckets
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
+	committedCountTicker := time.NewTicker(committedRegionCountInterval)
+	// -1 forces an initial publish on the first tick.
+	lastPublishedRegionCount := -1
 
 	processRegion := func(region *core.RegionInfo) {
 		requests = append(requests, region.GetMeta())
@@ -205,6 +212,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	defer func() {
 		keepAliveTicker.Stop()
 		shrinkTicker.Stop()
+		committedCountTicker.Stop()
 		s.mu.Lock()
 		for _, stream := range s.mu.streams {
 			stream.close()
@@ -246,6 +254,18 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			s.broadcast(ctx, regions)
 		case <-shrinkTicker.C:
 			s.history.maybeShrink()
+		case <-committedCountTicker.C:
+			// Publish the region count this leader is serving so that a member
+			// that has not finished a history sync can still decide, after this
+			// leader is gone, whether it is caught up enough to campaign. Only
+			// the leader runs RunServer, so only the leader writes this.
+			if count := s.server.GetBasicCluster().GetTotalRegionCount(); count != lastPublishedRegionCount {
+				if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
+					log.Warn("failed to persist committed region count", errs.ZapError(err))
+				} else {
+					lastPublishedRegionCount = count
+				}
+			}
 		case <-keepAliveTicker.C:
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
