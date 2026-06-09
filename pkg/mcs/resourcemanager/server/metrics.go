@@ -332,14 +332,25 @@ func (m *metrics) getRCUTracker(keyspaceID uint32, keyspaceName, groupName strin
 	return tracker
 }
 
-func (m *metrics) deleteRCUTracker(keyspaceID uint32, groupName string) {
+func (m *metrics) deleteRCUTracker(keyspaceID uint32, keyspaceName, groupName string) {
 	delete(m.rcuTrackerMap, trackerKey{keyspaceID, groupName})
+	requestUnitSumPerSec.DeleteLabelValues(groupName, keyspaceName)
+	requestUnitConsumeRate.DeleteLabelValues(groupName, keyspaceName)
 }
 
 func (m *metrics) flushRCUTracker(keyspaceID uint32, groupName string, fillRate, cpuMsCost float64) {
 	if tracker := m.rcuTrackerMap[trackerKey{keyspaceID, groupName}]; tracker != nil {
 		tracker.flushMetrics(fillRate, cpuMsCost)
 	}
+}
+
+func (m *metrics) hasConsumptionRecord(keyspaceID uint32, groupName string) bool {
+	for r := range m.consumptionRecordMap {
+		if r.keyspaceID == keyspaceID && r.groupName == groupName {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
@@ -390,7 +401,9 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 	m.deleteConsumptionRecord(r)
 	m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
 	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
-	m.deleteRCUTracker(r.keyspaceID, r.groupName)
+	if !m.hasConsumptionRecord(r.keyspaceID, r.groupName) {
+		m.deleteRCUTracker(r.keyspaceID, keyspaceName, r.groupName)
+	}
 }
 
 type counterMetrics struct {
@@ -582,8 +595,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
-	requestUnitSumPerSec.DeleteLabelValues(groupName, keyspaceName)
-	requestUnitConsumeRate.DeleteLabelValues(groupName, keyspaceName)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
@@ -684,6 +695,8 @@ func (t *rcuTracker) flushMetrics(fillRate, cpuMsCost float64) {
 	t.rcuMetrics.Set(rcu)
 	if fillRate > 0 {
 		t.consumeRateMetrics.Set(rcu / fillRate)
+	} else {
+		t.consumeRateMetrics.Set(0)
 	}
 }
 

@@ -147,4 +147,53 @@ func TestRCUTracker(t *testing.T) {
 
 	re.InEpsilon(float64(20), testutil.ToFloat64(tracker.rcuMetrics), 0.01)
 	re.InEpsilon(float64(0.2), testutil.ToFloat64(tracker.consumeRateMetrics), 0.01)
+
+	tracker.collect(&rmpb.Consumption{
+		RRU:            20,
+		WRU:            10,
+		TotalCpuTimeMs: 5,
+	})
+	tracker.lastFlushTime = time.Now().Add(-2 * time.Second)
+	tracker.flushMetrics(0, 2)
+
+	re.InEpsilon(float64(20), testutil.ToFloat64(tracker.rcuMetrics), 0.01)
+	re.Zero(testutil.ToFloat64(tracker.consumeRateMetrics))
+}
+
+func TestCleanupAllMetricsKeepsRCUTrackerForActiveGroup(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "cleanup-rcu-keyspace"
+		groupName    = "cleanup-rcu-group"
+		keyspaceID   = uint32(303)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteLabelValues(keyspaceName, groupName, backgroundTypeLabel)
+		requestUnitSumPerSec.DeleteLabelValues(groupName, keyspaceName)
+		requestUnitConsumeRate.DeleteLabelValues(groupName, keyspaceName)
+	})
+
+	metrics := newMetrics()
+	metrics.getRCUTracker(keyspaceID, keyspaceName, groupName)
+	metrics.insertConsumptionRecord(keyspaceID, groupName, defaultTypeLabel, time.Now())
+	metrics.insertConsumptionRecord(keyspaceID, groupName, backgroundTypeLabel, time.Now())
+
+	metrics.cleanupAllMetrics(consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}, keyspaceName)
+
+	re.Contains(metrics.rcuTrackerMap, trackerKey{keyspaceID: keyspaceID, groupName: groupName})
+
+	metrics.cleanupAllMetrics(consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     backgroundTypeLabel,
+	}, keyspaceName)
+
+	re.NotContains(metrics.rcuTrackerMap, trackerKey{keyspaceID: keyspaceID, groupName: groupName})
 }
