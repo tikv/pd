@@ -465,12 +465,6 @@ func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core
 	return nil
 }
 
-func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
-	syncStream.sendMu.Lock()
-	defer syncStream.sendMu.Unlock()
-	return s.syncFullRegionsLocked(ctx, name, syncStream, syncStartIndex)
-}
-
 func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
 	releaseRetain := s.history.retainFrom(syncStartIndex)
 	defer releaseRetain()

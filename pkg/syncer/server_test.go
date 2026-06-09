@@ -125,7 +125,7 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	unblockSend := stream.blockSend()
 	done := make(chan error, 1)
 	go func() {
-		done <- syncer.syncFullRegions(context.Background(), "pd-follower", syncStream, startIndex)
+		done <- syncFullRegionsForTest(context.Background(), syncer, syncStream, startIndex)
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 
@@ -168,12 +168,18 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 		closedSyncStream.close()
 	}
 
-	err := closedSyncer.syncFullRegions(context.Background(), "pd-follower", closedSyncStream, 10)
+	err := syncFullRegionsForTest(context.Background(), closedSyncer, closedSyncStream, 10)
 
 	re.Equal(codes.Unavailable, status.Code(err))
 	closedResponses := closedStream.sentResponses()
 	re.Len(closedResponses, 1)
 	re.Len(closedResponses[0].GetRegions(), maxSyncRegionBatchSize)
+}
+
+func syncFullRegionsForTest(ctx context.Context, syncer *RegionSyncer, syncStream *regionSyncStream, syncStartIndex uint64) error {
+	syncStream.sendMu.Lock()
+	defer syncStream.sendMu.Unlock()
+	return syncer.syncFullRegionsLocked(ctx, "pd-follower", syncStream, syncStartIndex)
 }
 
 func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
@@ -199,7 +205,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		done <- syncer.syncFullRegions(context.Background(), "pd-follower", syncStream, startIndex)
+		done <- syncFullRegionsForTest(context.Background(), syncer, syncStream, startIndex)
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 
@@ -236,7 +242,7 @@ func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	unblockSend := stream.blockSend()
 	done := make(chan error, 1)
 	go func() {
-		done <- syncer.syncFullRegions(context.Background(), "pd-follower", syncStream, startIndex)
+		done <- syncFullRegionsForTest(context.Background(), syncer, syncStream, startIndex)
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 
