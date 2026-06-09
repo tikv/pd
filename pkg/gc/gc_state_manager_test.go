@@ -2046,11 +2046,15 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 	re.Len(allStates, len(s.keyspacePresets.all)-1)
 	_, ok = allStates[keyspaceID]
 	re.False(ok)
+	_, ok = s.manager.gcStateCache.load(keyspaceID)
+	re.True(ok)
 
 	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
 	re.NoError(err)
 	re.Len(allStates, len(s.keyspacePresets.all)-1)
 	_, ok = allStates[keyspaceID]
+	re.False(ok)
+	_, ok = s.manager.gcStateCache.load(keyspaceID)
 	re.False(ok)
 }
 

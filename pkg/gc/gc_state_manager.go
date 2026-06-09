@@ -968,6 +968,7 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 		}
 		for _, keyspaceID := range keyspacesToRemove {
 			delete(gcStates, keyspaceID)
+			m.gcStateCache.remove(keyspaceID)
 		}
 
 		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
