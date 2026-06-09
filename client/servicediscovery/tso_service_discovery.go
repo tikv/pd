@@ -639,6 +639,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 				ClusterId:       c.clusterID,
 				KeyspaceId:      keyspaceID,
 				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
 			},
 			KeyspaceId:  keyspaceID,
 			ModRevision: modRevision,
@@ -648,7 +649,11 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			err, cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.GetHeader().GetError() != nil {
+	if err := resp.GetHeader().GetError(); err != nil {
+		if strings.Contains(err.GetMessage(), errs.MismatchCalleeIDErr) {
+			// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
+			c.RemoveClientConn(tsoSrvURL)
+		}
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()

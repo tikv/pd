@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
 // TSO Stream Builder Factory
@@ -98,7 +98,7 @@ func (b *msStreamBuilder) build(
 	if err == nil {
 		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{
 			stream:   stream,
-			calleeID: getCalleeID(b.serverURL),
+			calleeID: grpcutil.GetCalleeID(b.serverURL),
 		}), nil
 	}
 	return nil, err
@@ -174,14 +174,6 @@ func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID 
 		Count: uint32(count),
 	}
 	return s.stream.Send(req)
-}
-
-func getCalleeID(serverURL string) string {
-	parsed, err := url.Parse(serverURL)
-	if err != nil || parsed.Host == "" {
-		return serverURL
-	}
-	return parsed.Host
 }
 
 // Recv implements the grpcTSOStreamAdapter interface.

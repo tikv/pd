@@ -230,6 +230,15 @@ func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, er
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {
 		return tsopb.ErrorType_CLUSTER_MISMATCHED, errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
 	}
+	host := s.advertiseListenHost
+	if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+		if calleeID != host {
+			return tsopb.ErrorType_INVALID_VALUE, errors.Errorf(
+				"mismatch callee id, need %s but got %s",
+				s.GetAdvertiseListenAddr(), calleeID,
+			)
+		}
+	}
 	return tsopb.ErrorType_OK, nil
 }
 
