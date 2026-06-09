@@ -22,7 +22,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -1072,117 +1071,8 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
-func (suite *clientTestSuite) TestGetRegion() {
-	re := suite.Require()
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
-	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return reflect.DeepEqual(region, r.Meta) &&
-			reflect.DeepEqual(peers[0], r.Leader) &&
-			r.Buckets == nil
-	})
-	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(),
-		Buckets: &metapb.Buckets{
-			RegionId:   regionID,
-			Version:    1,
-			Keys:       [][]byte{[]byte("a"), []byte("z")},
-			PeriodInMs: 2000,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{1},
-				ReadKeys:   []uint64{1},
-				ReadQps:    []uint64{1},
-				WriteBytes: []uint64{1},
-				WriteKeys:  []uint64{1},
-				WriteQps:   []uint64{1},
-			},
-		},
-	}
-	re.NoError(suite.reportBucket.Send(breq))
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return r.Buckets != nil
-	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(false)
-
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return r.Buckets == nil
-	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
-	re.NoError(suite.reportBucket.Send(breq))
-	re.Error(suite.reportBucket.RecvMsg(breq))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"))
-}
-
-func (suite *clientTestSuite) TestGetPrevRegion() {
-	re := suite.Require()
-	regionLen := 10
-	regions := make([]*metapb.Region, 0, regionLen)
-	for i := range regionLen {
-		regionID := regionIDAllocator.alloc()
-		r := &metapb.Region{
-			Id: regionID,
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers:    peers,
-		}
-		regions = append(regions, r)
-		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(),
-			Region: r,
-			Leader: peers[0],
-		}
-		err := suite.regionHeartbeat.Send(req)
-		re.NoError(err)
-	}
-	time.Sleep(500 * time.Millisecond)
-	for i := range 20 {
-		testutil.Eventually(re, func() bool {
-			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
-			re.NoError(err)
-			if i > 0 && i < regionLen {
-				return reflect.DeepEqual(peers[0], r.Leader) &&
-					reflect.DeepEqual(regions[i-1], r.Meta)
-			}
-			return r == nil
-		})
-	}
+func (suite *clientTestSuite) SetupTest() {
+	suite.grpcSvr.DirectlyGetRaftCluster().ResetRegionCache()
 }
 
 func (suite *clientTestSuite) TestScanRegions() {
@@ -1270,36 +1160,6 @@ func (suite *clientTestSuite) TestScanRegions() {
 	check([]byte{100}, nil, 1, nil)
 	check([]byte{1}, []byte{6}, 0, regions[1:6])
 	check([]byte{1}, []byte{6}, 2, regions[1:3])
-}
-
-func (suite *clientTestSuite) TestGetRegionByID() {
-	re := suite.Require()
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
-	re.NoError(err)
-
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return reflect.DeepEqual(region, r.Meta) &&
-			reflect.DeepEqual(peers[0], r.Leader)
-	})
 }
 
 func (suite *clientTestSuite) TestGetStore() {

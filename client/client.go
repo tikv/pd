@@ -139,12 +139,11 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
 }
 
 func (k *serviceModeKeeper) close() {
@@ -416,6 +415,14 @@ func (c *client) setup() error {
 
 	// Create dispatchers
 	c.createTokenDispatcher()
+
+	// Check if the router client has been enabled.
+	if c.option.GetEnableRouterClient() {
+		c.enableRouterClient()
+	}
+	c.wg.Add(1)
+	go c.routerClientInitializer()
+
 	return nil
 }
 
@@ -583,6 +590,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -748,21 +761,65 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
-func handleRegionResponse(res *pdpb.GetRegionResponse) *router.Region {
-	if res.Region == nil {
-		return nil
+func (c *client) routerClientInitializer() {
+	log.Info("[pd] start router client initializer")
+	defer c.wg.Done()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("[pd] exit router client initializer")
+			return
+		case <-c.option.EnableRouterClientCh:
+			if c.option.GetEnableRouterClient() {
+				log.Info("[pd] notified to enable the router client")
+				c.enableRouterClient()
+			} else {
+				log.Info("[pd] notified to disable the router client")
+				c.disableRouterClient()
+			}
+		}
 	}
+}
 
-	r := &router.Region{
-		Meta:         res.Region,
-		Leader:       res.Leader,
-		PendingPeers: res.PendingPeers,
-		Buckets:      res.Buckets,
+func (c *client) enableRouterClient() {
+	// Check if the router client has been enabled.
+	c.RLock()
+	if c.routerClient != nil {
+		c.RUnlock()
+		return
 	}
-	for _, s := range res.DownPeers {
-		r.DownPeers = append(r.DownPeers, s.Peer)
+	c.RUnlock()
+	// Create a new router client first before acquiring the lock.
+	routerClient := router.NewClient(c.ctx, c.pdSvcDiscovery, c.option)
+	c.Lock()
+	// Double check if the router client has been enabled.
+	if c.routerClient != nil {
+		// Release the lock and close the router client.
+		c.Unlock()
+		routerClient.Close()
+		return
 	}
-	return r
+	c.routerClient = routerClient
+	c.Unlock()
+}
+
+func (c *client) disableRouterClient() {
+	c.Lock()
+	if c.routerClient == nil {
+		c.Unlock()
+		return
+	}
+	routerClient := c.routerClient
+	c.routerClient = nil
+	c.Unlock()
+	// Close the router client after the lock is released.
+	routerClient.Close()
+}
+
+func (c *client) getRouterClient() *router.Cli {
+	c.RLock()
+	defer c.RUnlock()
+	return c.routerClient
 }
 
 // GetRegionFromMember implements the RPCClient interface.
@@ -801,7 +858,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegion implements the RPCClient interface.
@@ -814,6 +871,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -839,7 +900,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if err = c.respForErr(metrics.CmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetPrevRegion implements the RPCClient interface.
@@ -852,6 +913,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -878,7 +943,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if err = c.respForErr(metrics.CmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegionByID implements the RPCClient interface.
@@ -891,6 +956,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -918,7 +987,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // ScanRegions implements the RPCClient interface.
