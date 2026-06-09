@@ -1782,11 +1782,12 @@ func (s *Server) canCampaignAsRegionSyncerCaughtUp() bool {
 	// member win.
 	committed, err := s.storage.LoadRegionSyncerCommittedRegionCount()
 	if err != nil {
-		// Unknown committed state (e.g. etcd read failed): prefer availability,
-		// the campaign itself still needs quorum to succeed.
-		log.Warn("failed to load committed region count, allowing campaign",
+		// Missing state is already handled as committed == 0 by the storage
+		// endpoint. Any real error here means we cannot prove this member is
+		// safe to lead yet, so keep the gate closed.
+		log.Warn("failed to load committed region count, skipping campaign",
 			zap.String("server-name", s.Name()), errs.ZapError(err))
-		return true
+		return false
 	}
 	// committed == 0 means a fresh or empty cluster: nothing to be behind on.
 	// Note: the committed value could be reduced to a boolean "cluster has committed regions"
