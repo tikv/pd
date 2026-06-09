@@ -824,7 +824,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				PushContext(pushCtx)
 			cancel()
 			if err != nil {
-				log.Error("push metrics to Prometheus failed", zap.Error(err))
+				log.Warn("push metrics to Prometheus failed", zap.Error(err))
 			}
 			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 		}
