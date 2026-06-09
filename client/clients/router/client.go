@@ -634,6 +634,7 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 	start := time.Now()
 	err := stream.Send(queryReq)
 	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
 	}
 	metrics.QueryRegionBatchSendLatency.Observe(
