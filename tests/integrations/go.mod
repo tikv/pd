@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tests/integrations
 
-go 1.25.7
+go 1.25.8
 
 replace (
 	github.com/tikv/pd => ../../
