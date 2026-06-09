@@ -342,27 +342,26 @@ func TestPushMetricsConfig(t *testing.T) {
 func TestSyncPushMetricsTicker(t *testing.T) {
 	re := require.New(t)
 
-	ticker, tickerC, current := syncPushMetricsTicker(nil, nil, pushMetricsConfig{}, pushMetricsConfig{
+	current := pushMetricsConfig{}
+	ticker := current.syncPushMetricsTicker(pushMetricsConfig{
 		address:  "127.0.0.1:9091",
 		interval: time.Second,
-	})
+	}, nil)
 	defer func() {
 		if ticker != nil {
 			ticker.Stop()
 		}
 	}()
 	re.NotNil(ticker)
-	re.NotNil(tickerC)
+	re.NotNil(ticker.C)
+	re.NotEqual(pushMetricsConfig{address: "127.0.0.1:9090", interval: time.Second}, current)
+
+	sameTicker := current.syncPushMetricsTicker(current, ticker)
+	re.Same(ticker, sameTicker)
 	re.Equal(pushMetricsConfig{address: "127.0.0.1:9091", interval: time.Second}, current)
 
-	sameTicker, sameTickerC, sameCurrent := syncPushMetricsTicker(ticker, tickerC, current, current)
-	re.Same(ticker, sameTicker)
-	re.Equal(tickerC, sameTickerC)
-	re.Equal(current, sameCurrent)
-
-	ticker, tickerC, current = syncPushMetricsTicker(ticker, tickerC, current, pushMetricsConfig{})
+	ticker = current.syncPushMetricsTicker(pushMetricsConfig{}, ticker)
 	re.Nil(ticker)
-	re.Nil(tickerC)
 	re.Equal(pushMetricsConfig{}, current)
 }
 

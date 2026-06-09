@@ -69,23 +69,22 @@ func getPushMetricsConfig(controllerConfig *ControllerConfig) pushMetricsConfig 
 	}
 }
 
-func syncPushMetricsTicker(
-	ticker *time.Ticker,
-	tickerC <-chan time.Time,
-	current, next pushMetricsConfig,
-) (*time.Ticker, <-chan time.Time, pushMetricsConfig) {
-	if current == next {
-		return ticker, tickerC, current
+func (cfg *pushMetricsConfig) syncPushMetricsTicker(
+	newCfg pushMetricsConfig, ticker *time.Ticker,
+) *time.Ticker {
+	if *cfg == newCfg {
+		return ticker
 	}
+	*cfg = newCfg
 	if ticker != nil {
 		ticker.Stop()
 		ticker = nil
 	}
-	if next.address == "" {
-		return nil, nil, next
+	if newCfg.address == "" {
+		return nil
 	}
-	ticker = time.NewTicker(next.interval)
-	return ticker, ticker.C, next
+	ticker = time.NewTicker(newCfg.interval)
+	return ticker
 }
 
 // Manager is the manager of resource group.
@@ -765,14 +764,17 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	var (
 		pushMetricsTicker  *time.Ticker
 		pushMetricsTickerC <-chan time.Time
-		pushMetricsConfig  pushMetricsConfig
 	)
-	pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
-		pushMetricsTicker,
-		pushMetricsTickerC,
-		pushMetricsConfig,
+	pushMetricsConfig := pushMetricsConfig{}
+	pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
 		getPushMetricsConfig(m.GetControllerConfig()),
+		pushMetricsTicker,
 	)
+	if pushMetricsTicker != nil {
+		pushMetricsTickerC = pushMetricsTicker.C
+	} else {
+		pushMetricsTickerC = make(<-chan time.Time)
+	}
 	defer func() {
 		if pushMetricsTicker != nil {
 			pushMetricsTicker.Stop()
@@ -854,19 +856,20 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					}
 				}
 			}
-			pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
-				pushMetricsTicker,
-				pushMetricsTickerC,
-				pushMetricsConfig,
-				getPushMetricsConfig(m.GetControllerConfig()),
-			)
+			newPushMetricsConfig := getPushMetricsConfig(m.GetControllerConfig())
+			if pushMetricsConfig != newPushMetricsConfig {
+				pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
+					newPushMetricsConfig,
+					pushMetricsTicker,
+				)
+				if pushMetricsTicker != nil {
+					pushMetricsTickerC = pushMetricsTicker.C
+					log.Info("push metrics ticker updated", zap.Duration("interval", pushMetricsConfig.interval))
+				} else {
+					pushMetricsTickerC = make(<-chan time.Time)
+				}
+			}
 		case <-pushMetricsTickerC:
-			pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
-				pushMetricsTicker,
-				pushMetricsTickerC,
-				pushMetricsConfig,
-				getPushMetricsConfig(m.GetControllerConfig()),
-			)
 			if pushMetricsConfig.address == "" {
 				continue
 			}
