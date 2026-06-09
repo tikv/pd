@@ -211,6 +211,48 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
+
+	grantedTokensHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "granted_tokens",
+			Help:      "Histogram of tokens granted per token bucket request.",
+			Buckets:   []float64{0, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000},
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
+	activeSlotCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "active_slot_count",
+			Help:      "Number of active token slots per resource group.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
+	slotEventsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "slot_events_total",
+			Help:      "Counter of slot lifecycle events (created, deleted, expired).",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, "event"})
+
+	tokenLoanGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "token_loan",
+			Help:      "Current total token loan amount (negative tokens in slots) per resource group.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
+	trickleDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "trickle_duration_ms",
+			Help:      "Histogram of trickle duration in milliseconds per token grant.",
+			Buckets:   []float64{0, 100, 500, 1000, 2000, 3000, 4000, 5000, 10000},
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 )
 
 type metrics struct {
@@ -264,6 +306,11 @@ func init() {
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(grantedTokensHistogram)
+	prometheus.MustRegister(activeSlotCountGauge)
+	prometheus.MustRegister(slotEventsCounter)
+	prometheus.MustRegister(tokenLoanGauge)
+	prometheus.MustRegister(trickleDurationHistogram)
 }
 
 func newMetrics() *metrics {
@@ -470,6 +517,13 @@ type gaugeMetrics struct {
 	sampledRequestUnitPerSecGauge      prometheus.Gauge
 	overrideFillRateGauge              prometheus.Gauge
 	overrideBurstLimitGauge            prometheus.Gauge
+	grantedTokensObserver              prometheus.Observer
+	activeSlotCountGauge               prometheus.Gauge
+	slotCreatedCounter                 prometheus.Counter
+	slotDeletedCounter                 prometheus.Counter
+	slotExpiredCounter                 prometheus.Counter
+	tokenLoanGauge                     prometheus.Gauge
+	trickleDurationObserver            prometheus.Observer
 }
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
@@ -481,6 +535,13 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		sampledRequestUnitPerSecGauge:      sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName),
 		overrideFillRateGauge:              overrideSettings.WithLabelValues(groupName, keyspaceName, fillRateLabel),
 		overrideBurstLimitGauge:            overrideSettings.WithLabelValues(groupName, keyspaceName, burstLimitLabel),
+		grantedTokensObserver:              grantedTokensHistogram.WithLabelValues(groupName, keyspaceName),
+		activeSlotCountGauge:               activeSlotCountGauge.WithLabelValues(groupName, keyspaceName),
+		slotCreatedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "created"),
+		slotDeletedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "deleted"),
+		slotExpiredCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, "expired"),
+		tokenLoanGauge:                     tokenLoanGauge.WithLabelValues(groupName, keyspaceName),
+		trickleDurationObserver:            trickleDurationHistogram.WithLabelValues(groupName, keyspaceName),
 	}
 }
 
@@ -543,6 +604,26 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+	grantedTokensHistogram.DeleteLabelValues(groupName, keyspaceName)
+	activeSlotCountGauge.DeleteLabelValues(groupName, keyspaceName)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "created")
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "deleted")
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, "expired")
+	tokenLoanGauge.DeleteLabelValues(groupName, keyspaceName)
+	trickleDurationHistogram.DeleteLabelValues(groupName, keyspaceName)
+}
+
+// observeTokenGrant records granted tokens and trickle duration metrics.
+// It uses global Prometheus metric vectors directly (concurrency-safe) instead
+// of the cached gaugeMetrics map to avoid race conditions from gRPC goroutines.
+func observeTokenGrant(groupName, keyspaceName string, tokens *rmpb.GrantedRUTokenBucket) {
+	if tokens == nil {
+		return
+	}
+	grantedTokensHistogram.WithLabelValues(groupName, keyspaceName).Observe(tokens.GrantedTokens.GetTokens())
+	if tokens.TrickleTimeMs > 0 {
+		trickleDurationHistogram.WithLabelValues(groupName, keyspaceName).Observe(float64(tokens.TrickleTimeMs))
+	}
 }
 
 type maxPerSecCostTracker struct {

@@ -198,6 +198,47 @@ func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLi
 	rg.overrideBurstLimitLocked(burstLimit)
 }
 
+// SlotMetrics holds snapshot data of token slot state for metrics reporting.
+type SlotMetrics struct {
+	SlotCount int
+	TokenLoan float64
+}
+
+// GetSlotMetrics returns a snapshot of the token slot metrics under the group lock.
+func (rg *ResourceGroup) GetSlotMetrics() SlotMetrics {
+	rg.RLock()
+	defer rg.RUnlock()
+	if rg.RUSettings == nil || rg.RUSettings.RU == nil {
+		return SlotMetrics{}
+	}
+	var loan float64
+	for _, slot := range rg.RUSettings.RU.tokenSlots {
+		if slot.curTokenCapacity < 0 {
+			loan += -slot.curTokenCapacity
+		}
+	}
+	return SlotMetrics{
+		SlotCount: len(rg.RUSettings.RU.tokenSlots),
+		TokenLoan: loan,
+	}
+}
+
+// DrainSlotEvents returns the accumulated slot event counts and resets them.
+func (rg *ResourceGroup) DrainSlotEvents() (created, deleted, expired uint64) {
+	rg.Lock()
+	defer rg.Unlock()
+	if rg.RUSettings == nil || rg.RUSettings.RU == nil {
+		return 0, 0, 0
+	}
+	created = rg.RUSettings.RU.slotsCreated
+	deleted = rg.RUSettings.RU.slotsDeleted
+	expired = rg.RUSettings.RU.slotsExpired
+	rg.RUSettings.RU.slotsCreated = 0
+	rg.RUSettings.RU.slotsDeleted = 0
+	rg.RUSettings.RU.slotsExpired = 0
+	return
+}
+
 // PatchSettings patches the resource group settings.
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.

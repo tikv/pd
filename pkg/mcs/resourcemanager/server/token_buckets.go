@@ -195,6 +195,12 @@ type GroupTokenBucketState struct {
 
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
 	settingChanged bool
+
+	// Slot event accumulators for metrics reporting.
+	// These are incremented in balanceSlotTokens() and read+reset in backgroundMetricsFlush().
+	slotsCreated uint64
+	slotsDeleted uint64
+	slotsExpired uint64
 }
 
 func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
@@ -242,6 +248,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 		// Create a new slot if the slot is not exist and the required token is not 0.
 		slot = newTokenSlot(clientUniqueID, now)
 		gtb.tokenSlots[clientUniqueID] = slot
+		gtb.slotsCreated++
 		log.Debug("create resource group slot",
 			zap.String("resource-group-name", gtb.resourceGroupName),
 			zap.Uint64("client-unique-id", clientUniqueID),
@@ -254,6 +261,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	} else if requiredToken == 0 {
 		// Clean up the slot that required 0.
 		if exist {
+			gtb.slotsDeleted++
 			log.Debug("delete resource group slot because required token is 0",
 				zap.String("resource-group-name", gtb.resourceGroupName),
 				zap.Uint64("client-unique-id", clientUniqueID),
@@ -266,6 +274,7 @@ func (gtb *GroupTokenBucket) balanceSlotTokens(
 	for clientUniqueID, slot := range gtb.tokenSlots {
 		if time.Since(slot.lastReqTime) >= slotExpireTimeout {
 			delete(gtb.tokenSlots, clientUniqueID)
+			gtb.slotsExpired++
 			log.Info("delete resource group slot because expire",
 				zap.Time("last-req-time", slot.lastReqTime),
 				zap.Duration("expire-timeout", slotExpireTimeout),
