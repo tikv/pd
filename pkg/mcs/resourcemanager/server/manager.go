@@ -18,10 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/push"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -46,7 +48,44 @@ const (
 	metricsCleanupTimeout     = 20 * time.Minute
 	defaultCollectIntervalSec = 20
 	tickPerSecond             = time.Second
+
+	pushMetricsTimeout = 10 * time.Second
 )
+
+type pushMetricsConfig struct {
+	address  string
+	interval time.Duration
+}
+
+func getPushMetricsConfig(controllerConfig *ControllerConfig) pushMetricsConfig {
+	if controllerConfig == nil ||
+		controllerConfig.PushMetricsAddress == "" ||
+		controllerConfig.PushMetricsInterval.Duration <= 0 {
+		return pushMetricsConfig{}
+	}
+	return pushMetricsConfig{
+		address:  controllerConfig.PushMetricsAddress,
+		interval: controllerConfig.PushMetricsInterval.Duration,
+	}
+}
+
+func (cfg *pushMetricsConfig) syncPushMetricsTicker(
+	newCfg pushMetricsConfig, ticker *time.Ticker,
+) *time.Ticker {
+	if *cfg == newCfg {
+		return ticker
+	}
+	*cfg = newCfg
+	if ticker != nil {
+		ticker.Stop()
+		ticker = nil
+	}
+	if newCfg.address == "" {
+		return nil
+	}
+	ticker = time.NewTicker(newCfg.interval)
+	return ticker
+}
 
 // Manager is the manager of resource group.
 type Manager struct {
@@ -722,6 +761,26 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
 
+	var (
+		pushMetricsTicker  *time.Ticker
+		pushMetricsTickerC <-chan time.Time
+	)
+	pushMetricsConfig := pushMetricsConfig{}
+	pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
+		getPushMetricsConfig(m.GetControllerConfig()),
+		pushMetricsTicker,
+	)
+	if pushMetricsTicker != nil {
+		pushMetricsTickerC = pushMetricsTicker.C
+	} else {
+		pushMetricsTickerC = make(<-chan time.Time)
+	}
+	defer func() {
+		if pushMetricsTicker != nil {
+			pushMetricsTicker.Stop()
+		}
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -797,6 +856,40 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					}
 				}
 			}
+			newPushMetricsConfig := getPushMetricsConfig(m.GetControllerConfig())
+			if pushMetricsConfig != newPushMetricsConfig {
+				pushMetricsTicker = pushMetricsConfig.syncPushMetricsTicker(
+					newPushMetricsConfig,
+					pushMetricsTicker,
+				)
+				if pushMetricsTicker != nil {
+					pushMetricsTickerC = pushMetricsTicker.C
+					log.Info("push metrics ticker updated", zap.Duration("interval", pushMetricsConfig.interval))
+				} else {
+					pushMetricsTickerC = make(<-chan time.Time)
+				}
+			}
+		case <-pushMetricsTickerC:
+			if pushMetricsConfig.address == "" {
+				continue
+			}
+			podName := os.Getenv("HOSTNAME")
+			if podName == "" {
+				podName = "default"
+			}
+			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
+			start := time.Now()
+			err := push.New(pushMetricsConfig.address, "resource_group_svc").
+				Grouping("pod", podName).
+				Collector(readRequestUnitCost).
+				Collector(writeRequestUnitCost).
+				Collector(sqlLayerRequestUnitCost).
+				PushContext(pushCtx)
+			cancel()
+			if err != nil {
+				log.Warn("push metrics to Prometheus failed", zap.Error(err))
+			}
+			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 		}
 	}
 }
