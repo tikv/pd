@@ -451,11 +451,12 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 		}
 		if overflowedLogical(resp.GetLogical()) {
 			t.metrics.logicalOverflowEvent.Inc()
+			overflowResp := resp
 			overflowed, err := t.flight.Do(ctx, func(context.Context) (bool, error) {
 				ret, err := t.updateTimestamp(overflowUpdate)
 				log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
 					logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-					zap.Reflect("response", resp),
+					zap.Reflect("response", overflowResp),
 					zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow),
 					zap.Bool("overflowed", ret),
 					zap.Error(err))
