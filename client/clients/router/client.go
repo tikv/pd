@@ -257,8 +257,16 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		requestCtx := req.requestCtx
 		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
 
+		// If there's an error, pass it to the request
 		if err != nil {
 			req.tryDone(err)
+			return
+		}
+
+		// If resp is nil but no error was provided, it means an abnormal situation occurred
+		// (e.g., timeout, connection issue). We should pass an error to indicate this.
+		if resp == nil {
+			req.tryDone(errs.ErrClientRouterConnectionTimeout)
 			return
 		}
 
@@ -277,7 +285,7 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 			// we need to ensure each region result returned is unique.
 			req.region = convertToRegionCopy(regionResp)
 		}
-		req.tryDone(err)
+		req.tryDone(nil)
 	}
 }
 
@@ -527,7 +535,7 @@ batchLoop:
 			case <-timeoutTimer.C:
 				log.Error("[router] router stream connection is not ready until timeout, abort the batch")
 				c.svcDiscovery.ScheduleCheckMemberChanged()
-				c.batchController.FinishCollectedRequests(requestFinisher(nil), err)
+				c.batchController.FinishCollectedRequests(requestFinisher(nil), errs.ErrClientRouterConnectionTimeout)
 				continue batchLoop
 			default:
 			}
