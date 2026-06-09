@@ -31,7 +31,6 @@ import (
 
 	"github.com/tikv/pd/pkg/maintenance"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
@@ -112,7 +111,7 @@ func GetMaintenanceTasks(c *gin.Context) {
 
 	err := svr.GetStorage().LoadAllMaintenanceTasks(func(k, v string) {
 		// Skip the lock key
-		if k == keypath.MaintenanceTaskPath(endpoint.MaintenanceLockName) {
+		if k == endpoint.MaintenanceLockName {
 			return
 		}
 		task := &endpoint.MaintenanceTask{} // Heap allocation

@@ -49,7 +49,7 @@ func (suite *maintenanceTestSuite) TearDownSuite() {
 }
 
 func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		client := tests.TestDialClient
@@ -223,7 +223,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPI() {
 }
 
 func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		client := tests.TestDialClient
@@ -380,7 +380,7 @@ func (suite *maintenanceTestSuite) TestMaintenanceAPIAtomicOperations() {
 }
 
 func (suite *maintenanceTestSuite) TestMaintenanceAPIMultipleTaskTypes() {
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunTestBasedOnMode(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		client := tests.TestDialClient

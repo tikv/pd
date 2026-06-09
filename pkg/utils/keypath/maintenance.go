@@ -15,15 +15,17 @@
 package keypath
 
 import (
-	"fmt"
+	"path"
 )
+
+const maintenanceTaskPath = "maintenance"
 
 // MaintenanceTaskPath returns the path to save the maintenance task with the given task type.
 func MaintenanceTaskPath(taskType string) string {
-	return fmt.Sprintf(maintenanceTaskPathFormat, ClusterID(), taskType)
+	return path.Join(maintenanceTaskPath, taskType)
 }
 
 // MaintenanceTaskPathPrefix returns the path prefix to save the maintenance tasks.
 func MaintenanceTaskPathPrefix() string {
-	return MaintenanceTaskPath("")
+	return maintenanceTaskPath + "/"
 }

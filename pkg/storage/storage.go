@@ -46,11 +46,8 @@ type Storage interface {
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
-<<<<<<< HEAD
 	endpoint.AffinityStorage
-=======
 	endpoint.MaintenanceStorage
->>>>>>> 01d96415c6 (maintenance: implement PD maintenance endpoints to serialize TiKV maintenance operations (#9478))
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

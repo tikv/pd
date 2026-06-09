@@ -73,11 +73,8 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
-<<<<<<< HEAD
 		command.NewMicroServicesCommand(),
-=======
 		command.NewMaintenanceCommand(),
->>>>>>> 01d96415c6 (maintenance: implement PD maintenance endpoints to serialize TiKV maintenance operations (#9478))
 	)
 
 	return rootCmd
