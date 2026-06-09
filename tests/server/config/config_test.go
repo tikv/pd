@@ -120,6 +120,12 @@ func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestClust
 	testutil.Eventually(re, func() bool {
 		return !leaderServer.GetServer().GetPersistOptions().GetKeyspaceConfig().ToWaitRegionSplit()
 	})
+
+	postData, err = json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
 }
 
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
