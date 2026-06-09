@@ -2979,20 +2979,27 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 	}()
 
 	stopWriteCh := make(chan struct{}, 1)
+	var txnSafePointAlloc atomic.Uint64
 	var wg sync.WaitGroup
 	wg.Add(concurrentWriteThreads)
 	for range concurrentWriteThreads {
 		go func() {
 			defer wg.Done()
-			for i := uint64(1); ; i++ {
+			for {
 				select {
 				case <-stopWriteCh:
 					return
 				default:
 				}
+				nextTxnSafePoint := txnSafePointAlloc.Add(1)
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
-				_, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, i, time.Now())
-				re.NoError(err)
+				_, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, nextTxnSafePoint, time.Now())
+				if err != nil {
+					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) {
+						continue
+					}
+					re.NoError(err)
+				}
 			}
 		}()
 	}
