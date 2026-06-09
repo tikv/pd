@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -318,6 +319,51 @@ func TestManagerControllerConfigSnapshots(t *testing.T) {
 		re.Same(previous, m.controllerConfig)
 		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
 	})
+}
+
+func TestPushMetricsConfig(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(nil))
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+	}))
+	re.Equal(pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+		PushMetricsInterval: typeutil.Duration{
+			Duration: time.Second,
+		},
+	}))
+}
+
+func TestSyncPushMetricsTicker(t *testing.T) {
+	re := require.New(t)
+
+	ticker, tickerC, current := syncPushMetricsTicker(nil, nil, pushMetricsConfig{}, pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	})
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+	re.NotNil(ticker)
+	re.NotNil(tickerC)
+	re.Equal(pushMetricsConfig{address: "127.0.0.1:9091", interval: time.Second}, current)
+
+	sameTicker, sameTickerC, sameCurrent := syncPushMetricsTicker(ticker, tickerC, current, current)
+	re.Same(ticker, sameTicker)
+	re.Equal(tickerC, sameTickerC)
+	re.Equal(current, sameCurrent)
+
+	ticker, tickerC, current = syncPushMetricsTicker(ticker, tickerC, current, pushMetricsConfig{})
+	re.Nil(ticker)
+	re.Nil(tickerC)
+	re.Equal(pushMetricsConfig{}, current)
 }
 
 func TestInitManager(t *testing.T) {

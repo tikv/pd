@@ -52,6 +52,42 @@ const (
 	pushMetricsTimeout = 10 * time.Second
 )
 
+type pushMetricsConfig struct {
+	address  string
+	interval time.Duration
+}
+
+func getPushMetricsConfig(controllerConfig *ControllerConfig) pushMetricsConfig {
+	if controllerConfig == nil ||
+		controllerConfig.PushMetricsAddress == "" ||
+		controllerConfig.PushMetricsInterval.Duration <= 0 {
+		return pushMetricsConfig{}
+	}
+	return pushMetricsConfig{
+		address:  controllerConfig.PushMetricsAddress,
+		interval: controllerConfig.PushMetricsInterval.Duration,
+	}
+}
+
+func syncPushMetricsTicker(
+	ticker *time.Ticker,
+	tickerC <-chan time.Time,
+	current, next pushMetricsConfig,
+) (*time.Ticker, <-chan time.Time, pushMetricsConfig) {
+	if current == next {
+		return ticker, tickerC, current
+	}
+	if ticker != nil {
+		ticker.Stop()
+		ticker = nil
+	}
+	if next.address == "" {
+		return nil, nil, next
+	}
+	ticker = time.NewTicker(next.interval)
+	return ticker, ticker.C, next
+}
+
 // Manager is the manager of resource group.
 type Manager struct {
 	syncutil.RWMutex
@@ -726,13 +762,22 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
 
-	pushMetricsTickerC := make(<-chan time.Time)
-	controllerConfig := m.GetControllerConfig()
-	if controllerConfig.PushMetricsAddress != "" && controllerConfig.PushMetricsInterval.Duration > 0 {
-		pushMetricsTicker := time.NewTicker(controllerConfig.PushMetricsInterval.Duration)
-		defer pushMetricsTicker.Stop()
-		pushMetricsTickerC = pushMetricsTicker.C
-	}
+	var (
+		pushMetricsTicker  *time.Ticker
+		pushMetricsTickerC <-chan time.Time
+		pushMetricsConfig  pushMetricsConfig
+	)
+	pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
+		pushMetricsTicker,
+		pushMetricsTickerC,
+		pushMetricsConfig,
+		getPushMetricsConfig(m.GetControllerConfig()),
+	)
+	defer func() {
+		if pushMetricsTicker != nil {
+			pushMetricsTicker.Stop()
+		}
+	}()
 
 	for {
 		select {
@@ -809,14 +854,29 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					}
 				}
 			}
+			pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
+				pushMetricsTicker,
+				pushMetricsTickerC,
+				pushMetricsConfig,
+				getPushMetricsConfig(m.GetControllerConfig()),
+			)
 		case <-pushMetricsTickerC:
+			pushMetricsTicker, pushMetricsTickerC, pushMetricsConfig = syncPushMetricsTicker(
+				pushMetricsTicker,
+				pushMetricsTickerC,
+				pushMetricsConfig,
+				getPushMetricsConfig(m.GetControllerConfig()),
+			)
+			if pushMetricsConfig.address == "" {
+				continue
+			}
 			podName := os.Getenv("HOSTNAME")
 			if podName == "" {
 				podName = "default"
 			}
 			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
 			start := time.Now()
-			err := push.New(controllerConfig.PushMetricsAddress, "resource_group_svc").
+			err := push.New(pushMetricsConfig.address, "resource_group_svc").
 				Grouping("pod", podName).
 				Collector(readRequestUnitCost).
 				Collector(writeRequestUnitCost).
