@@ -517,21 +517,53 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		suite.T().Skip("skipping test in microservice mode")
 	}
 	re := suite.Require()
-	pdClient := suite.clients[0]
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+	memberID := pdLeader.GetLeader().GetMemberId()
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	// Resign the leader to trigger the rebase error.
-	err := suite.pdLeaderServer.ResignLeaderWithRetry()
-	re.NoError(err)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	failpointsDisabled := false
+	disableFailpoints := func() {
+		if failpointsDisabled {
+			return
+		}
+		failpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	}
+	defer disableFailpoints()
+	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
 	// Trying to get TSO should fail with "not leader" error.
-	_, _, err = pdClient.GetTS(suite.ctx)
-	re.ErrorContains(err, "not leader")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	testutil.Eventually(re, func() bool {
+		_, _, err := pdClient.GetTS(ctx)
+		return err != nil && strings.Contains(err.Error(), "not leader")
+	})
+	disableFailpoints()
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
-		_, _, err := pdClient.GetTS(suite.ctx)
+		_, _, err := pdClient.GetTS(ctx)
 		return err == nil
 	})
 }
