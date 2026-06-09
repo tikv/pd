@@ -297,6 +297,13 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 			// Since the region results may be modified by the requester,
 			// we need to ensure each region result returned is unique.
 			req.region = convertToRegionCopy(regionResp)
+			// NeedBuckets is a batch-wide flag in the QueryRegion request, so the
+			// response may carry buckets for a region even when this particular
+			// request did not ask for them. Drop them here to match the
+			// per-request semantics of the unary GetRegion path.
+			if req.region != nil && !req.options.NeedBuckets {
+				req.region.Buckets = nil
+			}
 		}
 		req.tryDone(nil)
 	}
