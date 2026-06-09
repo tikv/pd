@@ -46,6 +46,7 @@ const (
 	metricsCleanupTimeout     = 20 * time.Minute
 	defaultCollectIntervalSec = 20
 	tickPerSecond             = time.Second
+	rcuMetricsInterval        = 10 * time.Second
 )
 
 // Manager is the manager of resource group.
@@ -718,6 +719,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)
 	defer metricsTicker.Stop()
+	rcuTicker := time.NewTicker(rcuMetricsInterval)
+	defer rcuTicker.Stop()
 	failpoint.Inject("fastCleanupTicker", func() {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
@@ -795,6 +798,21 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					if grt := krgm.getGroupRUTracker(groupName); grt != nil {
 						metrics.setSampledRUPerSec(grt.getRUPerSec())
 					}
+				}
+			}
+		case <-rcuTicker.C:
+			controllerConfig := m.GetControllerConfig()
+			if controllerConfig == nil {
+				continue
+			}
+			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+				for _, group := range krgm.getResourceGroupList(true, true) {
+					m.metrics.flushRCUTracker(
+						krgm.keyspaceID,
+						group.Name,
+						group.getFillRate(),
+						controllerConfig.RequestUnit.CPUMsCost,
+					)
 				}
 			}
 		}
