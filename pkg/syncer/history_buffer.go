@@ -104,6 +104,7 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()
+<<<<<<< HEAD
 	var pos int
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos = (h.head + int(index-h.firstIndex())) % h.size
@@ -117,6 +118,139 @@ func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	return records
 }
 
+=======
+	return h.recordsFromLocked(index)
+}
+
+func (h *historyBuffer) recordsFromLocked(index uint64) []*core.RegionInfo {
+	return h.recordsBetweenLocked(index, h.nextIndex())
+}
+
+func (h *historyBuffer) recordsBetween(index, endIndex uint64) []*core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
+	return h.recordsBetweenLocked(index, endIndex)
+}
+
+func (h *historyBuffer) recordsBetweenLocked(index, endIndex uint64) []*core.RegionInfo {
+	if endIndex > h.nextIndex() {
+		endIndex = h.nextIndex()
+	}
+	if index >= endIndex || index < h.firstIndex() || index > h.nextIndex() {
+		return nil
+	}
+	pos := (h.head + int(index-h.firstIndex())) % h.size
+	records := make([]*core.RegionInfo, 0, int(endIndex-index))
+	for i := pos; index < endIndex; i = (i + 1) % h.size {
+		records = append(records, h.records[i])
+		index++
+	}
+	return records
+}
+
+func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, uint64, bool) {
+	h.RLock()
+	defer h.RUnlock()
+	nextIndex := h.nextIndex()
+	if index == nextIndex {
+		return nil, nextIndex, true
+	}
+	records := h.recordsFromLocked(index)
+	return records, nextIndex, len(records) == int(nextIndex-index)
+}
+
+func (h *historyBuffer) retainFrom(index uint64) func() {
+	h.Lock()
+	defer h.Unlock()
+	return h.retainLocked(index)
+}
+
+func (h *historyBuffer) retainLocked(index uint64) func() {
+	if h.retains == nil {
+		h.retains = make(map[uint64]int)
+	}
+	h.retains[index]++
+	return func() {
+		h.releaseRetain(index)
+	}
+}
+
+func (h *historyBuffer) releaseRetain(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	count := h.retains[index]
+	if count <= 1 {
+		delete(h.retains, index)
+		return
+	}
+	h.retains[index] = count - 1
+}
+
+func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
+	var min uint64
+	var ok bool
+	for index := range h.retains {
+		if !ok || index < min {
+			min = index
+			ok = true
+		}
+	}
+	return min, ok
+}
+
+func (h *historyBuffer) observeRequiredWindow(window uint64) {
+	h.Lock()
+	defer h.Unlock()
+	h.observeRequiredWindowLocked(window)
+}
+
+func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
+	if window > h.observedRequiredWindow {
+		h.observedRequiredWindow = window
+	}
+	if window > uint64(h.capacity()/2) {
+		h.growForWindowLocked(window * 2)
+	}
+}
+
+// maybeShrink gradually reduces capacity after the required replay window
+// remains low for several checks. It shrinks by at most half each time and
+// never below the base capacity.
+func (h *historyBuffer) maybeShrink() {
+	h.Lock()
+	defer h.Unlock()
+	if len(h.retains) > 0 {
+		h.observedRequiredWindow = 0
+		h.lowWindowRounds = 0
+		return
+	}
+	if h.capacity() <= h.baseCapacity {
+		h.observedRequiredWindow = 0
+		h.lowWindowRounds = 0
+		return
+	}
+	if h.observedRequiredWindow > uint64(h.capacity()/4) {
+		h.observedRequiredWindow = 0
+		h.lowWindowRounds = 0
+		return
+	}
+	h.lowWindowRounds++
+	if h.lowWindowRounds < historyBufferShrinkRounds {
+		h.observedRequiredWindow = 0
+		return
+	}
+	target := h.capacity() / 2
+	if target < h.baseCapacity {
+		target = h.baseCapacity
+	}
+	if target < h.capacity() {
+		h.resizeLocked(target)
+	}
+	h.observedRequiredWindow = 0
+	h.lowWindowRounds = 0
+}
+
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 func (h *historyBuffer) resetWithIndex(index uint64) {
 	h.Lock()
 	defer h.Unlock()
@@ -130,6 +264,12 @@ func (h *historyBuffer) getNextIndex() uint64 {
 	h.RLock()
 	defer h.RUnlock()
 	return h.index
+}
+
+func (h *historyBuffer) getFirstIndex() uint64 {
+	h.RLock()
+	defer h.RUnlock()
+	return h.firstIndex()
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {

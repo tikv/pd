@@ -61,15 +61,71 @@ type ServerStream interface {
 }
 
 type regionSyncStream struct {
+<<<<<<< HEAD
 	stream ServerStream
 	done   chan struct{}
 	once   sync.Once
+=======
+	// stream serializes the underlying gRPC Send calls. A timed-out send may
+	// still be blocked after sendMu is released.
+	stream struct {
+		syncutil.Mutex
+		ServerStream
+	}
+	// sendMu serializes the logical send flow and protects sendIndex.
+	sendMu struct {
+		syncutil.Mutex
+		sendIndex uint64
+	}
+	notifyCh chan bool
+	done     chan struct{}
+	once     sync.Once
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 }
 
-func newRegionSyncStream(stream ServerStream) *regionSyncStream {
+func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
 	return &regionSyncStream{
-		stream: stream,
-		done:   make(chan struct{}),
+		stream: struct {
+			syncutil.Mutex
+			ServerStream
+		}{
+			ServerStream: stream,
+		},
+		sendMu: struct {
+			syncutil.Mutex
+			sendIndex uint64
+		}{
+			sendIndex: startIndex,
+		},
+		notifyCh: make(chan bool, 1),
+		done:     make(chan struct{}),
+	}
+}
+
+func (s *regionSyncStream) getSendIndex() uint64 {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.getSendIndexLocked()
+}
+
+func (s *regionSyncStream) getSendIndexLocked() uint64 {
+	return s.sendMu.sendIndex
+}
+
+func (s *regionSyncStream) advanceSendIndex(count int) {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	s.advanceSendIndexLocked(count)
+}
+
+func (s *regionSyncStream) advanceSendIndexLocked(count int) {
+	s.sendMu.sendIndex += uint64(count)
+}
+
+func (s *regionSyncStream) notify(keepAlive bool) {
+	select {
+	case s.notifyCh <- keepAlive:
+	default:
 	}
 }
 
@@ -79,6 +135,39 @@ func (s *regionSyncStream) close() {
 	})
 }
 
+<<<<<<< HEAD
+=======
+func (s *regionSyncStream) checkOpen() error {
+	select {
+	case <-s.done:
+		return status.Error(codes.Unavailable, "region syncer stream closed")
+	default:
+		return nil
+	}
+}
+
+func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.sendStream(regions)
+}
+
+func (s *regionSyncStream) sendStreamIfOpen(regions *pdpb.SyncRegionResponse) error {
+	s.stream.Lock()
+	defer s.stream.Unlock()
+	if err := s.checkOpen(); err != nil {
+		return err
+	}
+	return s.stream.Send(regions)
+}
+
+func (s *regionSyncStream) sendStream(regions *pdpb.SyncRegionResponse) error {
+	s.stream.Lock()
+	defer s.stream.Unlock()
+	return s.stream.Send(regions)
+}
+
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 // Server is the abstraction of the syncer storage server.
 type Server interface {
 	LoopContext() context.Context
@@ -130,22 +219,21 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 // RunServer runs the server of the region syncer.
 // regionNotifier is used to get the changed regions.
 func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
+<<<<<<< HEAD
 	var requests []*metapb.Region
 	var stats []*pdpb.RegionStat
 	var leaders []*metapb.Peer
 	var buckets []*metapb.Buckets
 	ticker := time.NewTicker(syncerKeepAliveInterval)
+=======
+	var records []*core.RegionInfo
+	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
+	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 
 	processRegion := func(region *core.RegionInfo) {
-		requests = append(requests, region.GetMeta())
-		stats = append(stats, region.GetStat())
-		// bucket should not be nil to avoid grpc marshal panic.
-		bucket := &metapb.Buckets{}
-		if b := region.GetBuckets(); b != nil {
-			bucket = b
-		}
-		buckets = append(buckets, bucket)
-		leaders = append(leaders, region.GetLeader())
+		records = append(records, region)
+		s.history.record(region)
 	}
 
 	defer func() {
@@ -168,18 +256,16 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			failpoint.InjectCall("syncRegionChannelFull")
 
 			processRegion(first)
-			startIndex := s.history.getNextIndex()
-			s.history.record(first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
 					processRegion(region)
-					s.history.record(region)
 				default:
 					break loop
 				}
 			}
+<<<<<<< HEAD
 			regions := &pdpb.SyncRegionResponse{
 				Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 				Regions:       requests,
@@ -195,11 +281,15 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				StartIndex: s.history.getNextIndex(),
 			}
 			s.broadcast(ctx, alive)
+=======
+			s.broadcast(ctx, records, false)
+		case <-shrinkTicker.C:
+			s.history.maybeShrink()
+		case <-keepAliveTicker.C:
+			s.broadcast(ctx, nil, true)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 		}
-		requests = requests[:0]
-		stats = stats[:0]
-		leaders = leaders[:0]
-		buckets = buckets[:0]
+		records = records[:0]
 	}
 }
 
@@ -240,12 +330,23 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 			zap.String("requested-server", request.GetMember().GetName()),
 			zap.String("url", request.GetMember().GetClientUrls()[0]))
 
+<<<<<<< HEAD
 		err = s.syncHistoryRegion(ctx, request, stream)
+=======
+		name := request.GetMember().GetName()
+		syncStream, syncStartIndex := s.bindStreamForSync(name, stream)
+		err = s.syncHistoryRegion(ctx, request, syncStream, syncStartIndex)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 		if err != nil {
+			s.unbindStream(name, syncStream)
 			return err
 		}
+<<<<<<< HEAD
 		name := request.GetMember().GetName()
 		syncStream := s.bindStream(name, stream)
+=======
+		go s.runDownstreamSender(ctx, name, syncStream)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 		select {
 		case <-ctx.Done():
 			s.unbindStream(name, syncStream)
@@ -269,7 +370,10 @@ func recvSyncRegionRequest(ctx context.Context, stream pdpb.PD_SyncRegionsServer
 	resultCh := make(chan syncRegionRequestResult, 1)
 	go func() {
 		request, err := stream.Recv()
-		resultCh <- syncRegionRequestResult{request: request, err: err}
+		select {
+		case resultCh <- syncRegionRequestResult{request: request, err: err}:
+		default:
+		}
 	}()
 
 	select {
@@ -282,12 +386,40 @@ func recvSyncRegionRequest(ctx context.Context, stream pdpb.PD_SyncRegionsServer
 	}
 }
 
+<<<<<<< HEAD
 func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.SyncRegionRequest, stream pdpb.PD_SyncRegionsServer) error {
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
 	records := s.history.recordsFrom(startIndex)
 	if len(records) == 0 {
 		if s.history.getNextIndex() == startIndex {
+=======
+func (s *RegionSyncer) syncHistoryRegion(
+	ctx context.Context,
+	request *pdpb.SyncRegionRequest,
+	syncStream *regionSyncStream,
+	endIndex uint64,
+) error {
+	syncStream.sendMu.Lock()
+	defer syncStream.sendMu.Unlock()
+	return s.syncHistoryRegionLocked(ctx, request, syncStream, endIndex)
+}
+
+func (s *RegionSyncer) syncHistoryRegionLocked(
+	ctx context.Context,
+	request *pdpb.SyncRegionRequest,
+	syncStream *regionSyncStream,
+	endIndex uint64,
+) error {
+	startIndex := request.GetStartIndex()
+	name := request.GetMember().GetName()
+	if startIndex != 0 && startIndex < endIndex {
+		s.history.observeRequiredWindow(endIndex - startIndex)
+	}
+	records := s.history.recordsBetween(startIndex, endIndex)
+	if len(records) == 0 {
+		if endIndex == startIndex {
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 			log.Info("requested server has already in sync with server",
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Uint64("last-index", startIndex))
 			// still send a response to follower to show the history region sync.
@@ -299,6 +431,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 				RegionLeaders: nil,
 				Buckets:       nil,
 			}
+<<<<<<< HEAD
 			return stream.Send(resp)
 		}
 		// do full synchronization
@@ -307,16 +440,37 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		}
 		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
 		return nil
+=======
+			return syncStream.sendStreamIfOpen(resp)
+		}
+		if startIndex < endIndex {
+			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+		}
+		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
+		return nil
+	}
+	if len(records) != int(endIndex-startIndex) {
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 	}
 	log.Info("sync the history regions with server",
 		zap.String("server", name),
 		zap.Uint64("from-index", startIndex),
+<<<<<<< HEAD
 		zap.Uint64("last-index", s.history.getNextIndex()),
 		zap.Int("records-length", len(records)))
 	return s.syncHistoryRecords(startIndex, records, stream)
 }
 
 func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream pdpb.PD_SyncRegionsServer) error {
+=======
+		zap.Uint64("last-index", endIndex),
+		zap.Int("records-length", len(records)))
+	return s.syncHistoryRecordsLocked(startIndex, records, syncStream)
+}
+
+func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdpb.SyncRegionResponse {
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 	regions := make([]*metapb.Region, len(records))
 	stats := make([]*pdpb.RegionStat, len(records))
 	leaders := make([]*metapb.Peer, len(records))
@@ -329,10 +483,40 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 			leader = r.GetLeader()
 		}
 		leaders[i] = leader
+<<<<<<< HEAD
 		// bucket should not be nil to avoid grpc marshal panic.
 		buckets[i] = &metapb.Buckets{}
 		if r.GetBuckets() != nil {
 			buckets[i] = r.GetBuckets()
+=======
+		bucket := &metapb.Buckets{}
+		if r.GetBuckets() != nil {
+			bucket = r.GetBuckets()
+		}
+		buckets[i] = bucket
+	}
+	return &pdpb.SyncRegionResponse{
+		Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		Regions:       regions,
+		StartIndex:    startIndex,
+		RegionStats:   stats,
+		RegionLeaders: leaders,
+		Buckets:       buckets,
+	}
+}
+
+func (s *RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
+	stream.sendMu.Lock()
+	defer stream.sendMu.Unlock()
+	return s.syncHistoryRecordsLocked(startIndex, records, stream)
+}
+
+func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core.RegionInfo, stream *regionSyncStream) error {
+	for start := 0; start < len(records); start += maxSyncRegionBatchSize {
+		end := min(start+maxSyncRegionBatchSize, len(records))
+		if err := stream.sendStreamIfOpen(buildSyncRegionResponse(startIndex+uint64(start), records[start:end])); err != nil {
+			return err
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 		}
 	}
 	resp := &pdpb.SyncRegionResponse{
@@ -346,7 +530,13 @@ func (*RegionSyncer) syncHistoryRecords(startIndex uint64, records []*core.Regio
 	return stream.Send(resp)
 }
 
+<<<<<<< HEAD
 func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream pdpb.PD_SyncRegionsServer) error {
+=======
+func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
+	releaseRetain := s.history.retainFrom(syncStartIndex)
+	defer releaseRetain()
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 	regions := s.server.GetRegions()
 	lastIndex := 0
 	start := time.Now()
@@ -388,12 +578,15 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 			RegionLeaders: leaders,
 			Buckets:       buckets,
 		}
+		if err := syncStream.checkOpen(); err != nil {
+			return err
+		}
 		if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
 			log.Error("failed to wait rate limit", errs.ZapError(err))
 			return err
 		}
 		lastIndex += len(metas)
-		if err := stream.Send(resp); err != nil {
+		if err := syncStream.sendStreamIfOpen(resp); err != nil {
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
@@ -404,19 +597,40 @@ func (s *RegionSyncer) syncFullRegions(ctx context.Context, name string, stream 
 	}
 	log.Info("requested server has completed full synchronization with server",
 		zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Duration("cost", time.Since(start)))
+<<<<<<< HEAD
 	return nil
 }
 
 // bindStream binds the established server stream.
 func (s *RegionSyncer) bindStream(name string, stream ServerStream) *regionSyncStream {
 	syncStream := newRegionSyncStream(stream)
+=======
+	records, nextIndex, ok := s.history.retainedRecordsFrom(syncStartIndex)
+	if !ok {
+		return status.Errorf(codes.ResourceExhausted,
+			"history records from full sync start index %d to %d are no longer available",
+			syncStartIndex, nextIndex)
+	}
+	if len(records) > 0 {
+		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
+			return err
+		}
+		syncStream.advanceSendIndexLocked(len(records))
+	}
+	return nil
+}
+
+func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*regionSyncStream, uint64) {
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	startIndex := s.history.getNextIndex()
+	syncStream := newRegionSyncStream(stream, startIndex)
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 	}
 	s.mu.streams[name] = syncStream
-	return syncStream
+	return syncStream, startIndex
 }
 
 func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
@@ -428,54 +642,100 @@ func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
 	stream.close()
 }
 
-func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
-	broadcastDone := make(chan struct{})
-
+func (s *RegionSyncer) runDownstreamSender(ctx context.Context, name string, stream *regionSyncStream) {
 	defer logutil.LogPanic()
-	var (
-		failed sync.Map
-		wg     sync.WaitGroup
-	)
-	s.mu.RLock()
-	for name, sender := range s.mu.streams {
+	for {
 		select {
 		case <-ctx.Done():
-			s.mu.RUnlock()
 			return
-		default:
-		}
-
-		wg.Add(1)
-		go func(name string, sender *regionSyncStream) {
-			defer wg.Done()
-			if !s.sendRegionSyncResponse(ctx, name, sender, regions) {
-				failed.Store(name, sender)
+		case <-stream.done:
+			return
+		case keepAlive := <-stream.notifyCh:
+			if err := s.sendDownstream(ctx, name, stream, keepAlive); err != nil {
+				log.Warn("region syncer send downstream records meet error",
+					zap.String("name", name), errs.ZapError(errs.ErrGRPCSend, err))
+				s.unbindStream(name, stream)
+				return
 			}
-		}(name, sender)
+		}
+	}
+}
+
+func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *regionSyncStream, keepAlive bool) error {
+	stream.sendMu.Lock()
+	defer stream.sendMu.Unlock()
+	sentRecords, err := s.drainDownstreamLocked(ctx, name, stream)
+	if err != nil {
+		return err
+	}
+	if !keepAlive || sentRecords {
+		return nil
+	}
+	resp := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: stream.getSendIndexLocked(),
+	}
+	if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
+		return errors.Errorf("send region sync keepalive failed")
+	}
+	_, err = s.drainDownstreamLocked(ctx, name, stream)
+	return err
+}
+
+func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, stream *regionSyncStream) (bool, error) {
+	sentRecords := false
+	for {
+		if ctx.Err() != nil {
+			return sentRecords, status.Error(codes.Unavailable, "region syncer stopped")
+		}
+		s.mu.RLock()
+		if s.mu.streams[name] != stream {
+			s.mu.RUnlock()
+			return sentRecords, status.Error(codes.Unavailable, "region syncer stream closed")
+		}
+		s.mu.RUnlock()
+
+		sendIndex := stream.getSendIndexLocked()
+		firstIndex := s.history.getFirstIndex()
+		if sendIndex < firstIndex {
+			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
+		}
+		bufferNextIndex := s.history.getNextIndex()
+		if sendIndex > bufferNextIndex {
+			return sentRecords, errors.Errorf("region syncer buffered records index %d exceeds next index %d", sendIndex, bufferNextIndex)
+		}
+		if sendIndex == bufferNextIndex {
+			return sentRecords, nil
+		}
+		endIndex := bufferNextIndex
+		if endIndex-sendIndex > uint64(maxSyncRegionBatchSize) {
+			endIndex = sendIndex + uint64(maxSyncRegionBatchSize)
+		}
+		records := s.history.recordsBetween(sendIndex, endIndex)
+		if len(records) == 0 {
+			return sentRecords, errors.Errorf("region syncer has no buffered records from index %d to %d", sendIndex, endIndex)
+		}
+		resp := buildSyncRegionResponse(sendIndex, records)
+		if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
+			return sentRecords, errors.Errorf("send region sync response failed")
+		}
+		stream.advanceSendIndexLocked(len(records))
+		sentRecords = true
+	}
+}
+
+func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
+	defer logutil.LogPanic()
+	s.mu.RLock()
+	for _, sender := range s.mu.streams {
+		if ctx.Err() != nil {
+			break
+		}
+		if len(records) != 0 || keepAlive {
+			sender.notify(keepAlive)
+		}
 	}
 	s.mu.RUnlock()
-
-	go func() {
-		wg.Wait()
-		s.mu.Lock()
-		failed.Range(func(key, value any) bool {
-			name := key.(string)
-			stream := value.(*regionSyncStream)
-			if s.mu.streams[name] == stream {
-				delete(s.mu.streams, name)
-				stream.close()
-				log.Info("region syncer delete the stream", zap.String("stream", name))
-			}
-			return true
-		})
-		s.mu.Unlock()
-		close(broadcastDone)
-	}()
-
-	select {
-	case <-broadcastDone:
-	case <-ctx.Done():
-	}
 }
 
 func (s *RegionSyncer) sendRegionSyncResponse(
@@ -483,6 +743,25 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 	name string,
 	sender *regionSyncStream,
 	regions *pdpb.SyncRegionResponse,
+) bool {
+	return s.sendRegionSyncResponseWithOptions(ctx, name, sender, regions, true)
+}
+
+func (s *RegionSyncer) sendCloseRegionSyncResponse(
+	ctx context.Context,
+	name string,
+	sender *regionSyncStream,
+	regions *pdpb.SyncRegionResponse,
+) bool {
+	return s.sendRegionSyncResponseWithOptions(ctx, name, sender, regions, false)
+}
+
+func (s *RegionSyncer) sendRegionSyncResponseWithOptions(
+	ctx context.Context,
+	name string,
+	sender *regionSyncStream,
+	regions *pdpb.SyncRegionResponse,
+	watchDone bool,
 ) bool {
 	var sendErr error
 	failpoint.InjectCall("regionSyncerSendFail", name, &sendErr)
@@ -492,9 +771,23 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 		return false
 	}
 
+	var doneCh <-chan struct{}
+	if watchDone {
+		doneCh = sender.done
+		select {
+		case <-doneCh:
+			return false
+		default:
+		}
+	}
+
 	resultCh := make(chan error, 1)
 	go func() {
+<<<<<<< HEAD
 		resultCh <- sender.stream.Send(regions)
+=======
+		resultCh <- sender.sendStream(regions)
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
 	}()
 
 	timeout := s.sendTimeout
@@ -516,6 +809,9 @@ func (s *RegionSyncer) sendRegionSyncResponse(
 		sender.close()
 		log.Warn("region syncer send data canceled", zap.String("name", name),
 			errs.ZapError(errs.ErrGRPCSend, ctx.Err()))
+		return false
+	case <-doneCh:
+		log.Warn("region syncer send data canceled because stream is closed", zap.String("name", name))
 		return false
 	case <-timer.C:
 		sender.close()
@@ -551,7 +847,9 @@ func (s *RegionSyncer) closeAllClient() {
 		go func(name string, sender *regionSyncStream, resp *pdpb.SyncRegionResponse) {
 			defer logutil.LogPanic()
 			defer wg.Done()
-			s.sendRegionSyncResponse(s.server.LoopContext(), name, sender, resp)
+			if !s.sendCloseRegionSyncResponse(s.server.LoopContext(), name, sender, resp) {
+				log.Warn("region syncer send close message meet error", zap.String("name", name))
+			}
 		}(name, sender, resp)
 	}
 	wg.Wait()

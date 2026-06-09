@@ -86,3 +86,77 @@ func TestBufferSize(t *testing.T) {
 	re.Equal(uint64(7), h2.firstIndex())
 	re.Equal(regions[1:], histories)
 }
+<<<<<<< HEAD
+=======
+
+func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
+	re := require.New(t)
+	kvMem := kv.NewMemoryKV()
+	h1 := newHistoryBufferWithConfig(4, 8, 1, kvMem)
+	for i := 1; i <= 3; i++ {
+		h1.record(newHistoryBufferTestRegion(uint64(i)))
+	}
+	re.Equal(3, h1.len())
+	h1.persist()
+
+	h2 := newHistoryBufferWithConfig(4, 8, 1, kvMem)
+	re.Equal(uint64(3), h2.nextIndex())
+	re.Equal(uint64(3), h2.firstIndex())
+	re.Equal(0, h2.len())
+	re.Nil(h2.get(2))
+	s, err := h2.kv.Load(historyKey)
+	re.NoError(err)
+	re.Equal("3", s)
+}
+
+func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+	release := h.retainFrom(10)
+	defer release()
+
+	for i := range 5 {
+		h.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+
+	records, nextIndex, ok := h.retainedRecordsFrom(10)
+	re.True(ok)
+	re.Equal(uint64(15), nextIndex)
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Len(records, 5)
+	re.Equal(8, h.capacity())
+}
+
+func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
+	re := require.New(t)
+	h := newTestHistoryBuffer(8)
+
+	h.observeRequiredWindow(3)
+
+	re.Equal(8, h.capacity())
+}
+
+func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
+	re := require.New(t)
+	h := newTestHistoryBuffer(8)
+	h.observeRequiredWindow(3)
+	re.Equal(8, h.capacity())
+	h.maybeShrink()
+
+	for range historyBufferShrinkRounds {
+		h.observeRequiredWindow(1)
+		h.maybeShrink()
+	}
+
+	re.Equal(4, h.capacity())
+}
+
+func newTestHistoryBuffer(maxCapacity int) *historyBuffer {
+	return newHistoryBufferWithConfig(2, maxCapacity, 1, storage.NewStorageWithMemoryBackend())
+}
+
+func newHistoryBufferTestRegion(regionID uint64) *core.RegionInfo {
+	return core.NewRegionInfo(&metapb.Region{Id: regionID}, nil)
+}
+>>>>>>> 33718ef7ad (syncer: isolate downstream state by stream (#10716))
