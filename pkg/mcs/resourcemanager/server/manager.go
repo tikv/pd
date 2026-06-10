@@ -681,6 +681,19 @@ func (m *Manager) getKeyspaceNameForMetrics(ctx context.Context, id uint32) stri
 	return fmt.Sprintf("keyspace-%d", id)
 }
 
+func (m *Manager) getCachedKeyspaceNameForMetrics(id uint32) string {
+	if id == constant.NullKeyspaceID {
+		return ""
+	}
+	m.RLock()
+	name, ok := m.keyspaceNameLookup[id]
+	m.RUnlock()
+	if ok {
+		return name
+	}
+	return fmt.Sprintf("keyspace-%d", id)
+}
+
 func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
 	m.Lock()
 	defer m.Unlock()

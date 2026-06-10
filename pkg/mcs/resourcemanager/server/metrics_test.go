@@ -208,6 +208,67 @@ func TestRequestMetricsCachedAndCleanedUp(t *testing.T) {
 	re.False(recordExists)
 }
 
+func TestRequestMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID       = uint32(10868)
+		fallbackName     = "keyspace-10868"
+		loadedName       = "loaded-keyspace"
+		groupName        = "request_metrics_label_group"
+		grantedMetric    = "resource_manager_server_granted_tokens"
+		trickleMetric    = "resource_manager_server_trickle_duration_ms"
+		requestCauseName = "resource_manager_server_request_cause_total"
+	)
+	now := time.Now()
+	metrics := newMetrics()
+
+	first := metrics.getRequestMetrics(keyspaceID, fallbackName, groupName, now)
+	first.observe(requestMetricsObservation{
+		grantedTokens:  3,
+		trickleTimeMs:  100,
+		serviceLimited: true,
+		groupTrickled:  true,
+	})
+
+	fallbackLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+	}
+	re.True(hasMetric(grantedMetric, fallbackLabels))
+	re.True(hasMetric(trickleMetric, fallbackLabels))
+	re.True(hasMetric(requestCauseName, map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+		kindLabel:                 throttleKindLabel,
+		"cause":                   serviceLimitCauseLabel,
+	}))
+
+	second := metrics.getRequestMetrics(keyspaceID, loadedName, groupName, now.Add(metricsCleanupInterval+time.Second))
+	re.NotSame(first, second)
+	re.False(hasMetric(grantedMetric, fallbackLabels))
+	re.False(hasMetric(trickleMetric, fallbackLabels))
+	re.False(hasMetric(requestCauseName, map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+		kindLabel:                 throttleKindLabel,
+		"cause":                   serviceLimitCauseLabel,
+	}))
+
+	second.observe(requestMetricsObservation{grantedTokens: 5})
+	loadedLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         loadedName,
+	}
+	re.True(hasMetric(grantedMetric, loadedLabels))
+
+	metrics.cleanupAllMetrics(consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}, loadedName)
+	re.False(hasMetric(grantedMetric, loadedLabels))
+}
+
 func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
 	re := require.New(t)
 	groupName := "request_ru_trickle_group"
@@ -291,6 +352,24 @@ func findHistogramMetric(re *require.Assertions, metricName string, labels map[s
 	}
 	re.FailNow(fmt.Sprintf("metric %s with labels %v not found", metricName, labels))
 	return nil
+}
+
+func hasMetric(metricName string, labels map[string]string) bool {
+	metrics, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return false
+	}
+	for _, mf := range metrics {
+		if mf.GetName() != metricName {
+			continue
+		}
+		for _, metric := range mf.GetMetric() {
+			if matchMetricLabels(metric.GetLabel(), labels) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func matchMetricLabels(actual []*dto.LabelPair, expected map[string]string) bool {

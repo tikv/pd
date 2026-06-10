@@ -409,20 +409,24 @@ func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName s
 	key := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
 	m.mu.RLock()
 	rm := m.requestMetricsMap[key]
-	m.mu.RUnlock()
-	if rm != nil {
+	if rm != nil && rm.matchLabels(keyspaceName, groupName) {
+		m.mu.RUnlock()
 		rm.touchRecord(m, keyspaceID, groupName, now)
 		return rm
 	}
+	m.mu.RUnlock()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rm = m.requestMetricsMap[key]
-	if rm == nil {
+	if rm == nil || !rm.matchLabels(keyspaceName, groupName) {
+		if rm != nil {
+			rm.deleteLabelValues()
+		}
 		rm = newRequestMetrics(keyspaceName, groupName)
-		rm.lastRecordUnix.Store(now.UnixNano())
 		m.requestMetricsMap[key] = rm
 	}
+	rm.lastRecordUnix.Store(now.UnixNano())
 	m.insertConsumptionRecordLocked(keyspaceID, groupName, defaultTypeLabel, now)
 	return rm
 }
@@ -431,9 +435,13 @@ func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruTy
 	m.mu.Lock()
 	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
 	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
-	delete(m.requestMetricsMap, requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName})
+	requestKey := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
+	rm := m.requestMetricsMap[requestKey]
+	delete(m.requestMetricsMap, requestKey)
 	m.mu.Unlock()
+
 	deleteLabelValues(keyspaceName, groupName, ruType)
+	rm.deleteLabelValues()
 }
 
 func (m *metrics) getStaleConsumptionRecords(now time.Time) []consumptionRecordKey {
@@ -587,6 +595,8 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 }
 
 type requestMetrics struct {
+	keyspaceName                string
+	groupName                   string
 	grantedTokensObserver       prometheus.Observer
 	trickleDurationObserver     prometheus.Observer
 	serviceLimitThrottleCounter prometheus.Counter
@@ -607,6 +617,8 @@ type requestMetricsObservation struct {
 
 func newRequestMetrics(keyspaceName, groupName string) *requestMetrics {
 	return &requestMetrics{
+		keyspaceName:                keyspaceName,
+		groupName:                   groupName,
 		grantedTokensObserver:       grantedTokensHistogram.WithLabelValues(groupName, keyspaceName),
 		trickleDurationObserver:     trickleDurationHistogram.WithLabelValues(groupName, keyspaceName),
 		serviceLimitThrottleCounter: requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel),
@@ -614,6 +626,22 @@ func newRequestMetrics(keyspaceName, groupName string) *requestMetrics {
 		serviceLimitTrickleCounter:  requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel),
 		groupTrickleCounter:         requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel),
 	}
+}
+
+func (m *requestMetrics) matchLabels(keyspaceName, groupName string) bool {
+	return m != nil && m.keyspaceName == keyspaceName && m.groupName == groupName
+}
+
+func (m *requestMetrics) deleteLabelValues() {
+	if m == nil {
+		return
+	}
+	grantedTokensHistogram.DeleteLabelValues(m.groupName, m.keyspaceName)
+	trickleDurationHistogram.DeleteLabelValues(m.groupName, m.keyspaceName)
+	requestCauseCounter.DeleteLabelValues(m.groupName, m.keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	requestCauseCounter.DeleteLabelValues(m.groupName, m.keyspaceName, throttleKindLabel, groupCauseLabel)
+	requestCauseCounter.DeleteLabelValues(m.groupName, m.keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
+	requestCauseCounter.DeleteLabelValues(m.groupName, m.keyspaceName, trickleKindLabel, groupCauseLabel)
 }
 
 func (m *requestMetrics) touchRecord(metrics *metrics, keyspaceID uint32, groupName string, now time.Time) {

@@ -675,6 +675,7 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	re.Error(err)
 	re.Empty(name)
 	re.Equal("keyspace-1", m.getKeyspaceNameForMetrics(ctx, 1))
+	re.Equal("keyspace-1", m.getCachedKeyspaceNameForMetrics(1))
 	// Get the keyspace ID by name first, then get the keyspace name by ID.
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1}, "test_keyspace")
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace")
@@ -684,6 +685,8 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	name, err = m.getKeyspaceNameByID(ctx, 1)
 	re.NoError(err)
 	re.Equal("test_keyspace", name)
+	re.Equal("test_keyspace", m.getCachedKeyspaceNameForMetrics(1))
+	re.Empty(m.getCachedKeyspaceNameForMetrics(constant.NullKeyspaceID))
 	// Get the keyspace name by ID first, then get the keyspace ID by name.
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 2}, "test_keyspace_2")
 	name, err = m.getKeyspaceNameByID(ctx, 2)

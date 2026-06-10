@@ -251,7 +251,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			if req.GetIsBackground() {
 				continue
 			}
-			keyspaceName := s.manager.getKeyspaceNameForMetrics(s.ctx, keyspaceID)
+			keyspaceName := s.manager.getCachedKeyspaceNameForMetrics(keyspaceID)
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,
