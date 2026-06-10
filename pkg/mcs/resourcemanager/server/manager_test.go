@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -532,6 +533,62 @@ func TestCleanUpTicker(t *testing.T) {
 	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
 	re.NoError(err)
 	re.Equal("test_keyspace", keyspaceName)
+}
+
+func TestFlushResourceGroupMetricsDrainsLiveSlotEvents(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10867)
+		keyspaceName = "slot_metrics_keyspace"
+		groupName    = "slot_metrics_group"
+	)
+
+	m := prepareManager()
+	m.updateKeyspaceNameLookup(keyspaceID, keyspaceName)
+	t.Cleanup(func() {
+		m.metrics.cleanupAllMetrics(consumptionRecordKey{
+			keyspaceID: keyspaceID,
+			groupName:  groupName,
+			ruType:     defaultTypeLabel,
+		}, keyspaceName)
+	})
+
+	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage)
+	rg := &ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: NewRequestUnitSettings(groupName, &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   100,
+				BurstLimit: 200,
+			},
+		}),
+	}
+	rg.RUSettings.RU.tokenSlots[1] = &tokenSlot{curTokenCapacity: -12.5}
+	rg.RUSettings.RU.slotsCreated = 2
+	rg.RUSettings.RU.slotsDeleted = 1
+	rg.RUSettings.RU.slotsExpired = 3
+	krgm.groups[groupName] = rg
+
+	gm := m.metrics.getGaugeMetrics(keyspaceID, keyspaceName, groupName)
+	m.flushResourceGroupMetrics(context.Background(), krgm)
+
+	re.Equal(1.0, promtestutil.ToFloat64(gm.activeSlotCountGauge))
+	re.Equal(12.5, promtestutil.ToFloat64(gm.tokenLoanGauge))
+	re.Equal(2.0, promtestutil.ToFloat64(gm.slotCreatedCounter))
+	re.Equal(1.0, promtestutil.ToFloat64(gm.slotDeletedCounter))
+	re.Equal(3.0, promtestutil.ToFloat64(gm.slotExpiredCounter))
+
+	created, deleted, expired := rg.DrainSlotEvents()
+	re.Zero(created)
+	re.Zero(deleted)
+	re.Zero(expired)
+
+	m.flushResourceGroupMetrics(context.Background(), krgm)
+
+	re.Equal(2.0, promtestutil.ToFloat64(gm.slotCreatedCounter))
+	re.Equal(1.0, promtestutil.ToFloat64(gm.slotDeletedCounter))
+	re.Equal(3.0, promtestutil.ToFloat64(gm.slotExpiredCounter))
 }
 
 func TestKeyspaceServiceLimit(t *testing.T) {
