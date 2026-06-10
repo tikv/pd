@@ -38,7 +38,10 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
@@ -68,15 +71,23 @@ type Cluster struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	*core.BasicCluster
-	persistConfig     *config.PersistConfig
-	ruleManager       *placement.RuleManager
-	keyRangeManager   *keyrange.Manager
-	labelerManager    *labeler.RegionLabeler
-	affinityManager   *affinity.Manager
-	regionStats       *statistics.RegionStatistics
-	labelStats        *statistics.LabelStatistics
-	hotStat           *statistics.HotStat
+	persistConfig   *config.PersistConfig
+	ruleManager     *placement.RuleManager
+	keyRangeManager *keyrange.Manager
+	labelerManager  *labeler.RegionLabeler
+	affinityManager *affinity.Manager
+	regionStats     *statistics.RegionStatistics
+	labelStats      *statistics.LabelStatistics
+	hotStat         *statistics.HotStat
+	// runtimeMu protects the runtime resources which are created after the cluster is created,
+	// and cleaned up before the cluster is closed.
+	runtimeMu         sync.RWMutex
 	storage           storage.Storage
+	hbStreams         *hbstream.HeartbeatStreams
+	metaWatcher       *meta.Watcher
+	configWatcher     *config.Watcher
+	ruleWatcher       *rule.Watcher
+	affinityWatcher   *mcsaffinity.Watcher
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -142,6 +153,7 @@ func NewCluster(
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		hbStreams:         hbStreams,
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -262,7 +274,83 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 
 // GetStorage returns the storage.
 func (c *Cluster) GetStorage() storage.Storage {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
 	return c.storage
+}
+
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.hbStreams
+}
+
+// GetMetaWatcher returns the meta watcher.
+func (c *Cluster) GetMetaWatcher() *meta.Watcher {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.metaWatcher
+}
+
+// SetRuntimeResources installs the cluster-scoped runtime resources after they are created.
+func (c *Cluster) SetRuntimeResources(
+	metaWatcher *meta.Watcher,
+	configWatcher *config.Watcher,
+	ruleWatcher *rule.Watcher,
+	affinityWatcher *mcsaffinity.Watcher,
+) {
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
+	c.metaWatcher = metaWatcher
+	c.configWatcher = configWatcher
+	c.ruleWatcher = ruleWatcher
+	c.affinityWatcher = affinityWatcher
+}
+
+func (c *Cluster) cleanupRuntimeResources() {
+	c.runtimeMu.Lock()
+	affinityWatcher := c.affinityWatcher
+	ruleWatcher := c.ruleWatcher
+	metaWatcher := c.metaWatcher
+	configWatcher := c.configWatcher
+	hbStreams := c.hbStreams
+	c.affinityWatcher = nil
+	c.ruleWatcher = nil
+	c.metaWatcher = nil
+	c.configWatcher = nil
+	c.hbStreams = nil
+	c.storage = nil
+	c.runtimeMu.Unlock()
+
+	now := time.Now()
+	if affinityWatcher != nil {
+		affinityWatcher.Close()
+	}
+	if ruleWatcher != nil {
+		ruleWatcher.Close()
+	}
+	if metaWatcher != nil {
+		metaWatcher.Close()
+	}
+	if configWatcher != nil {
+		configWatcher.Close()
+	}
+	if hbStreams != nil {
+		start := time.Now()
+		hbStreams.Close()
+		log.Info("close stream takes", zap.Duration("cost", time.Since(start)))
+	}
+	log.Info("clean up runtime resources takes", zap.Duration("cost", time.Since(now)))
 }
 
 // GetCheckerConfig returns the checker config.
@@ -653,18 +741,18 @@ func (c *Cluster) StartBackgroundJobs() {
 	c.running.Store(true)
 }
 
-// StopBackgroundJobs stops background jobs.
-func (c *Cluster) StopBackgroundJobs() {
-	if !c.running.Load() {
-		return
+// StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
+func (c *Cluster) StopBackgroundJobs() bool {
+	if !c.running.CompareAndSwap(true, false) {
+		return false
 	}
-	c.running.Store(false)
 	c.coordinator.Stop()
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
 	c.cancel()
 	c.wg.Wait()
+	return true
 }
 
 // IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.

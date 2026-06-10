@@ -23,6 +23,8 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 // ReplicaStrategy collects some utilities to manipulate region peers. It
@@ -154,4 +156,78 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 		return 0
 	}
 	return source.GetID()
+}
+
+func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*core.StoreInfo) (uint64, bool) {
+	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
+	level := constant.High
+	if s.fastFailover {
+		level = constant.Urgent
+	}
+	sourceCandidate := filter.NewCandidates(coLocationStores).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level}).
+		KeepTheTopStores(isolationComparer, true)
+	if sourceCandidate.Len() == 0 {
+		log.Debug("no removable store", zap.Uint64("region-id", s.region.GetID()))
+		return 0, false
+	}
+	source := filter.NewCandidates(sourceCandidate.Stores).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
+		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
+	if source != nil {
+		return source.GetID(), false
+	}
+	source = sourceCandidate.PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
+	return source.GetID(), true
+}
+
+func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (oldStoreID, newStoreID uint64, filterByTempState bool) {
+	ruleStores := getRuleFitStores(cluster, rf)
+	oldStoreID, sourceFilterByTempState := s.selectStoreToRemoveWithTempState(ruleStores)
+	if oldStoreID == 0 {
+		return 0, 0, false
+	}
+	oldStore := cluster.GetStore(oldStoreID)
+	if oldStore == nil {
+		return 0, 0, false
+	}
+	var coLocationStores []*core.StoreInfo
+	regionStores := cluster.GetRegionStores(region)
+	for _, store := range regionStores {
+		if store.GetLabelValue(core.EngineKey) != oldStore.GetLabelValue(core.EngineKey) {
+			continue
+		}
+		for _, r := range fit.GetRules() {
+			if r.Role != rf.Rule.Role {
+				continue
+			}
+			if placement.MatchLabelConstraints(store, r.LabelConstraints) {
+				coLocationStores = append(coLocationStores, store)
+				break
+			}
+		}
+	}
+	newStoreID, filterByTempState = s.SelectStoreToImprove(coLocationStores, oldStoreID)
+	if sourceFilterByTempState {
+		if newStoreID != 0 || filterByTempState {
+			return 0, 0, true
+		}
+		return 0, 0, false
+	}
+	return
+}
+
+func isWitnessEnabled(cluster sche.CheckerCluster) bool {
+	config := cluster.GetCheckerConfig()
+	return versioninfo.IsFeatureSupported(config.GetClusterVersion(), versioninfo.SwitchWitness) && config.IsWitnessAllowed()
+}
+
+func getRuleFitStores(cluster sche.SharedCluster, rf *placement.RuleFit) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(rf.Peers))
+	for _, p := range rf.Peers {
+		if s := cluster.GetStore(p.GetStoreId()); s != nil {
+			stores = append(stores, s)
+		}
+	}
+	return stores
 }

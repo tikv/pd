@@ -30,6 +30,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
@@ -753,5 +754,112 @@ func checkServiceDiscovery(re *require.Assertions, client pd.Client, urlsLen int
 			urls := tsoDiscovery.(interface{ GetURLs() []string }).GetURLs()
 			re.Len(urls, urlsLen)
 		}
+	}
+}
+
+// Race condition test between TSO request dispatcher and background connection updater
+
+// Connection updater view:
+// 1.1. Builds a stream A for TSO primary upon initialization.
+// 1.2. Store the stream A into connection context manager.
+
+// Request dispatcher view:
+// 2.1. Upon no stream ready, builds a stream B for TSO primary.
+// 2.2. Process the requests via stream B.
+
+// Race timeline:
+// 1.1. Creates stream A but haven't registered it.
+// 2.1. Creates stream B and registers it to the connection context manager.
+// 1.2. Registered stream A and cancelled the context of stream B.
+// 2.2. Observes canceled context of stream B.
+func (suite *tsoClientTestSuite) TestTSOStreamSetupRace() {
+	if !suite.legacy {
+		suite.T().Skip("race is in tryConnectToTSO, which is the non-proxy path")
+	}
+	re := suite.Require()
+
+	const tsoFailpointPrefix = "github.com/tikv/pd/client/clients/tso/"
+
+	backgroundBeforeStore := make(chan struct{})
+	releaseBackgroundStore := make(chan struct{})
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"pauseBeforeBackgroundStoreTSOLeaderStream", func() {
+		log.Info("[tso race] 1.1.1 pause background goroutine before CleanAllAndStore")
+		close(backgroundBeforeStore)
+		<-releaseBackgroundStore
+		log.Info("[tso race] 1.2.1 released pause for CleanAllAndStore")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseBeforeBackgroundStoreTSOLeaderStream"))
+	}()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	pdClient, err := pd.NewClientWithContext(ctx, caller.TestComponent, suite.getBackendEndpoints(), pd.SecurityOption{})
+	re.NoError(err)
+
+	safeClose := func(ch chan struct{}) {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
+	}
+	defer func() {
+		safeClose(releaseBackgroundStore)
+		pdClient.Close()
+		cancel()
+	}()
+
+	waitFor := func(ch <-chan struct{}, desc string) {
+		select {
+		case <-ch:
+			log.Info("[tso race] " + desc)
+		case <-time.After(30 * time.Second):
+			re.Failf("timed out", "timed out waiting for: %s", desc)
+		}
+	}
+	waitFor(backgroundBeforeStore, "1.1.2 background goroutine reaching CleanAllAndStore")
+
+	re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseBeforeBackgroundStoreTSOLeaderStream"))
+
+	requestAttachedToStream := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	defer func() {
+		safeClose(releaseRequest)
+	}()
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"pauseAfterTSORequestAttachedToStream", func() {
+		log.Info("[tso race] 2.1.1 pausing tso request after attached to stream")
+		close(requestAttachedToStream)
+		<-releaseRequest
+		log.Info("[tso race] 2.2.2 tso request released")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "pauseAfterTSORequestAttachedToStream"))
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, _, err := pdClient.GetTS(context.Background())
+		errCh <- err
+	}()
+
+	waitFor(requestAttachedToStream, "2.1.2 request attached to dispatcher's stream")
+
+	re.NoError(failpoint.EnableCall(tsoFailpointPrefix+"notifyAfterBackgroundStoreTSOLeaderStream", func() {
+		log.Info("[tso race] 1.2.2 background goroutine finished CleanAllAndStore")
+		close(releaseRequest)
+		log.Info("[tso race] 2.2.1 releasing pause for TSO request")
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(tsoFailpointPrefix + "notifyAfterBackgroundStoreTSOLeaderStream"))
+	}()
+
+	close(releaseBackgroundStore)
+	select {
+	case err := <-errCh:
+		re.NoError(err)
+	case <-time.After(30 * time.Second):
+		re.Failf("timed out", "GetTS has not returned")
 	}
 }
