@@ -131,12 +131,16 @@ func NewCluster(
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
+		storage.Close()
+		hbStreams.Close()
 		cancel()
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
 	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
 	if err != nil {
+		storage.Close()
+		hbStreams.Close()
 		cancel()
 		return nil, err
 	}
@@ -166,6 +170,8 @@ func NewCluster(
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
 	if err != nil {
+		storage.Close()
+		hbStreams.Close()
 		cancel()
 		return nil, err
 	}
@@ -200,6 +206,9 @@ func (c *Cluster) GetLabelStats() *statistics.LabelStatistics {
 
 // GetBasicCluster returns the basic cluster.
 func (c *Cluster) GetBasicCluster() *core.BasicCluster {
+	if c == nil {
+		return nil
+	}
 	return c.BasicCluster
 }
 
@@ -317,6 +326,11 @@ func (c *Cluster) SetRuntimeResources(
 	c.affinityWatcher = affinityWatcher
 }
 
+func (c *Cluster) stopCluster() {
+	c.StopBackgroundJobs()
+	c.cleanupRuntimeResources()
+}
+
 func (c *Cluster) cleanupRuntimeResources() {
 	c.runtimeMu.Lock()
 	affinityWatcher := c.affinityWatcher
@@ -324,6 +338,7 @@ func (c *Cluster) cleanupRuntimeResources() {
 	metaWatcher := c.metaWatcher
 	configWatcher := c.configWatcher
 	hbStreams := c.hbStreams
+	storage := c.storage
 	c.affinityWatcher = nil
 	c.ruleWatcher = nil
 	c.metaWatcher = nil
@@ -344,6 +359,9 @@ func (c *Cluster) cleanupRuntimeResources() {
 	}
 	if configWatcher != nil {
 		configWatcher.Close()
+	}
+	if storage != nil {
+		storage.Close()
 	}
 	if hbStreams != nil {
 		start := time.Now()
@@ -739,17 +757,19 @@ func (c *Cluster) StartBackgroundJobs() {
 }
 
 // StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
-func (c *Cluster) StopBackgroundJobs() bool {
+func (c *Cluster) StopBackgroundJobs() {
+	// always cancel the context to stop the background jobs, even if the cluster is not running, to avoid goroutine leak.
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if !c.running.CompareAndSwap(true, false) {
-		return false
+		return
 	}
 	c.coordinator.Stop()
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
-	c.cancel()
 	c.wg.Wait()
-	return true
 }
 
 // IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
