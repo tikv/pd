@@ -232,8 +232,16 @@ func (gc *groupCostController) initRunState() {
 	gc.run.now = now
 	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.targetPeriod = defaultTargetPeriod
+	sqlCPUTimeBaseline := getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)
+	initialConsumption := rmpb.Consumption{
+		TotalCpuTimeMs:    sqlCPUTimeBaseline,
+		SqlLayerCpuTimeMs: sqlCPUTimeBaseline,
+	}
+	*gc.mu.consumption = initialConsumption
 	gc.run.consumption = &rmpb.Consumption{}
-	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
+	*gc.run.consumption = initialConsumption
+	gc.run.lastRequestConsumption = &rmpb.Consumption{}
+	*gc.run.lastRequestConsumption = initialConsumption
 
 	isBurstable := true
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
@@ -848,6 +856,7 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
+	gc.observeConsumption(consumption)
 	gc.observeComponentConsumption(consumption)
 }
 

@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -32,6 +33,10 @@ import (
 )
 
 func createTestGroupCostController(re *require.Assertions, name string) *groupCostController {
+	return createTestGroupCostControllerWithConfig(re, name, DefaultRUConfig())
+}
+
+func createTestGroupCostControllerWithConfig(re *require.Assertions, name string, cfg *RUConfig) *groupCostController {
 	group := &rmpb.ResourceGroup{
 		Name:     name,
 		Mode:     rmpb.GroupMode_RUMode,
@@ -49,9 +54,21 @@ func createTestGroupCostController(re *require.Assertions, name string) *groupCo
 	}
 	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, 1001, DefaultRUConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, 1001, cfg, ch1, ch2)
 	re.NoError(err)
 	return gc
+}
+
+func waitForNonZeroProcessCPUTime(re *require.Assertions) {
+	deadline := time.Now().Add(2 * time.Second)
+	var sink uint64
+	for getSQLProcessCPUTime(true) <= 0 && time.Now().Before(deadline) {
+		for i := range 100000 {
+			sink += uint64(i)
+		}
+	}
+	runtime.KeepAlive(sink)
+	re.Greater(getSQLProcessCPUTime(true), 0.0)
 }
 
 func TestGroupControlBurstable(t *testing.T) {
@@ -450,8 +467,9 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	kvBefore := promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name))
 	sqlBefore := promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name))
 
-	gc.observeConsumption(&rmpb.Consumption{RRU: 3, WRU: 5})
 	gc.addRUConsumption(&rmpb.Consumption{
+		RRU:               3,
+		WRU:               5,
 		ReadBytes:         13,
 		WriteBytes:        17,
 		TotalCpuTimeMs:    11,
@@ -464,6 +482,23 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	re.Equal(writeBefore+17, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name)))
 	re.Equal(kvBefore+4, promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name)))
 	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
+}
+
+func TestInitializesSQLCPUConsumptionBaseline(t *testing.T) {
+	re := require.New(t)
+	waitForNonZeroProcessCPUTime(re)
+	cfg := DefaultRUConfig()
+	cfg.isSingleGroupByKeyspace = true
+	gc := createTestGroupCostControllerWithConfig(re, t.Name(), cfg)
+
+	gc.mu.Lock()
+	consumption := *gc.mu.consumption
+	gc.mu.Unlock()
+
+	re.Greater(consumption.SqlLayerCpuTimeMs, 0.0)
+	re.Equal(consumption.SqlLayerCpuTimeMs, consumption.TotalCpuTimeMs)
+	re.Equal(consumption, *gc.run.consumption)
+	re.Equal(consumption, *gc.run.lastRequestConsumption)
 }
 
 func TestModifyTokenCounterUpdatesActualGrantMetric(t *testing.T) {
