@@ -434,7 +434,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							continue
 						}
 						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+						newGC, err := newGroupCostController(group, c.clientUniqueID, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
 								zap.String("name", name), zap.Error(err))
@@ -570,7 +570,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(group, c.clientUniqueID, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
@@ -606,7 +606,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
-	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(defaultGC.getMeta(), c.clientUniqueID, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		log.Warn("[resource group controller] create default resource group cost controller for tombstone failed",
 			zap.String("name", name), zap.Error(err))
@@ -634,6 +634,19 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				metrics.TokenConsumedHistogram.DeleteLabelValues(resourceGroupName)
+				metrics.TokenConsumedByTypeCounter.DeleteLabelValues(resourceGroupName, "rru")
+				metrics.TokenConsumedByTypeCounter.DeleteLabelValues(resourceGroupName, "wru")
+				metrics.TokenBalanceGauge.DeleteLabelValues(resourceGroupName)
+				metrics.FillRateGauge.DeleteLabelValues(resourceGroupName)
+				metrics.BurstLimitGauge.DeleteLabelValues(resourceGroupName)
+				metrics.AvgRUPerSecGauge.DeleteLabelValues(resourceGroupName)
+				metrics.DemandRUPerSecGauge.DeleteLabelValues(resourceGroupName)
+				metrics.ThrottledGauge.DeleteLabelValues(resourceGroupName)
+				metrics.ReadByteCost.DeleteLabelValues(resourceGroupName)
+				metrics.WriteByteCost.DeleteLabelValues(resourceGroupName)
+				metrics.KVCPUCost.DeleteLabelValues(resourceGroupName)
+				metrics.SQLCPUCost.DeleteLabelValues(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -718,7 +731,17 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
-			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
+			groupNames := make([]string, 0, len(req.Requests))
+			for _, request := range req.Requests {
+				groupNames = append(groupNames, request.GetResourceGroupName())
+			}
+			log.Warn(
+				"[resource group controller] slow token bucket request",
+				zap.String("source", source),
+				zap.Duration("cost", time.Since(notifyMsg.startTime)),
+				zap.Uint64("client_unique_id", c.clientUniqueID),
+				zap.Strings("resource_groups", groupNames),
+			)
 		}
 		logControllerTrace("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
