@@ -1353,6 +1353,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		origin *RegionInfo
 	)
 	rangeChanged := true // This Region is new, or its range has changed.
+	regionCountDelta := int64(0)
 
 	if item = r.regions[region.GetID()]; item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
@@ -1385,7 +1386,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
 		item = &regionItem{RegionInfo: region}
 		r.regions[region.GetID()] = item
-		atomic.AddInt64(&r.regionCount, 1)
+		regionCountDelta++
 	}
 	var overlaps []*RegionInfo
 	if rangeChanged {
@@ -1393,9 +1394,12 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		for _, old := range overlaps {
 			if _, ok := r.regions[old.GetID()]; ok {
 				delete(r.regions, old.GetID())
-				atomic.AddInt64(&r.regionCount, -1)
+				regionCountDelta--
 			}
 		}
+	}
+	if regionCountDelta != 0 {
+		atomic.AddInt64(&r.regionCount, regionCountDelta)
 	}
 	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
