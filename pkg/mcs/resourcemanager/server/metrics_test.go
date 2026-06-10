@@ -318,7 +318,9 @@ func TestGaugeMetricsSetGroupSlotMetrics(t *testing.T) {
 			},
 		}),
 	}
-	rg.RUSettings.RU.tokenSlots[1] = &tokenSlot{curTokenCapacity: -12.5}
+	slot := newTokenSlot(1, time.Now())
+	rg.RUSettings.RU.tokenSlots[1] = slot
+	rg.RUSettings.RU.setSlotTokenCapacity(slot, -12.5)
 	rg.RUSettings.RU.slotsCreated = 2
 	rg.RUSettings.RU.slotsDeleted = 1
 	rg.RUSettings.RU.slotsExpired = 3

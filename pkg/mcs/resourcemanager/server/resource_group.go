@@ -211,15 +211,9 @@ func (rg *ResourceGroup) GetSlotMetrics() SlotMetrics {
 	if rg.RUSettings == nil || rg.RUSettings.RU == nil {
 		return SlotMetrics{}
 	}
-	var tokenLoan float64
-	for _, slot := range rg.RUSettings.RU.tokenSlots {
-		if slot.curTokenCapacity < 0 {
-			tokenLoan += -slot.curTokenCapacity
-		}
-	}
 	return SlotMetrics{
 		SlotCount: len(rg.RUSettings.RU.tokenSlots),
-		TokenLoan: tokenLoan,
+		TokenLoan: rg.RUSettings.RU.getTokenLoan(),
 	}
 }
 
