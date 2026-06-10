@@ -125,7 +125,7 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	if retainIndex, ok := h.minRetainIndexLocked(); ok && retainIndex <= h.index {
+	if retainIndex, ok := h.minFullSyncRetainIndexLocked(); ok && retainIndex <= h.index {
 		h.growForWindowLocked(h.index - retainIndex + 1)
 	}
 	syncIndexGauge.Set(float64(h.index))
@@ -212,7 +212,7 @@ func (h *historyBuffer) releaseRetain(index uint64) {
 	h.retains[index] = count - 1
 }
 
-func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
+func (h *historyBuffer) minFullSyncRetainIndexLocked() (uint64, bool) {
 	var min uint64
 	var ok bool
 	for index := range h.retains {
@@ -222,6 +222,56 @@ func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
 		}
 	}
 	return min, ok
+}
+
+// reserveAppendWindowFrom grows the buffer before appending records so that
+// records still needed from index are not overwritten by the append.
+func (h *historyBuffer) reserveAppendWindowFrom(index uint64, appendCount int) {
+	if appendCount <= 0 {
+		return
+	}
+	h.Lock()
+	defer h.Unlock()
+	nextIndex := h.nextIndex() + uint64(appendCount)
+	index = h.oldestRequiredIndexLocked(index, nextIndex)
+	if index < nextIndex {
+		h.observeRequiredWindowLocked(nextIndex - index)
+	}
+}
+
+// observeWindowFrom records the replay window currently required from index.
+func (h *historyBuffer) observeWindowFrom(index, endIndex uint64) {
+	h.Lock()
+	defer h.Unlock()
+	if endIndex > h.nextIndex() {
+		endIndex = h.nextIndex()
+	}
+	index = h.oldestRequiredIndexLocked(index, endIndex)
+	if index < endIndex {
+		h.observeRequiredWindowLocked(endIndex - index)
+	}
+}
+
+func (h *historyBuffer) oldestRequiredIndexLocked(index, nextIndex uint64) uint64 {
+	if index > nextIndex {
+		index = nextIndex
+	}
+	if retainIndex, ok := h.minFullSyncRetainIndexLocked(); ok && retainIndex < index {
+		index = retainIndex
+	}
+	recentIndex := h.baseRequiredIndexLocked(nextIndex)
+	if recentIndex < index {
+		index = recentIndex
+	}
+	return index
+}
+
+func (h *historyBuffer) baseRequiredIndexLocked(nextIndex uint64) uint64 {
+	baseCapacity := uint64(h.baseCapacity)
+	if nextIndex <= baseCapacity {
+		return 0
+	}
+	return nextIndex - baseCapacity
 }
 
 func (h *historyBuffer) observeRequiredWindow(window uint64) {

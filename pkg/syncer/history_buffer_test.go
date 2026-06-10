@@ -162,6 +162,55 @@ func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
+func TestHistoryBufferReserveAppendWindowFromGrowsBeforeOverwrite(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+
+	h.reserveAppendWindowFrom(10, 5)
+	for i := range 5 {
+		h.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Len(h.recordsFrom(10), 5)
+	re.Equal(8, h.capacity())
+}
+
+func TestHistoryBufferObserveWindowFromDoesNotMoveFirstIndex(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+	h.reserveAppendWindowFrom(10, 6)
+	for i := range 6 {
+		h.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+	re.Equal(uint64(10), h.getFirstIndex())
+
+	h.observeWindowFrom(16, 16)
+
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Len(h.recordsFrom(10), 6)
+}
+
+func TestHistoryBufferReserveAppendWindowRespectsActiveFullSyncRetain(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+	release := h.retainFrom(10)
+	defer release()
+
+	h.reserveAppendWindowFrom(12, 6)
+	for i := range 6 {
+		h.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+
+	re.Equal(uint64(10), h.getFirstIndex())
+	records := h.recordsFrom(10)
+	re.Len(records, 6)
+	re.Equal(uint64(100), records[0].GetID())
+}
+
 func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)

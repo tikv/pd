@@ -753,6 +753,56 @@ func TestBroadcastRecordsBusyDownstreamAndDrainsLater(t *testing.T) {
 	re.Equal(uint64(12), busySyncStream.getSendIndex())
 }
 
+func TestReserveHistoryAppendWindowForSlowDownstream(t *testing.T) {
+	re := require.New(t)
+	busyStream := &testServerStream{}
+	busySyncStream := newRegionSyncStream(busyStream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": busySyncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	syncer.reserveHistoryAppendWindowForDownstreams(5)
+	for i := range 5 {
+		syncer.history.record(newTestRegion(uint64(100 + i)))
+	}
+
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+	re.Len(syncer.history.recordsFrom(10), 5)
+	re.Equal(8, syncer.history.capacity())
+}
+
+func TestObserveHistoryWindowForDownstreamsUsesSlowestDownstream(t *testing.T) {
+	re := require.New(t)
+	pd2Stream := &testServerStream{}
+	pd3Stream := &testServerStream{}
+	pd2SyncStream := newRegionSyncStream(pd2Stream, 10)
+	pd3SyncStream := newRegionSyncStream(pd3Stream, 14)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": pd2SyncStream,
+		"pd3": pd3SyncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	syncer.history.reserveAppendWindowFrom(10, 6)
+	for i := range 6 {
+		syncer.history.record(newTestRegion(uint64(100 + i)))
+	}
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+
+	for range historyBufferShrinkRounds {
+		syncer.observeHistoryWindowForDownstreams()
+		syncer.history.maybeShrink()
+	}
+
+	re.Equal(8, syncer.history.capacity())
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+	records := syncer.history.recordsFrom(10)
+	re.Len(records, 6)
+	re.Equal(uint64(100), records[0].GetID())
+}
+
 func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 	re := require.New(t)
 	stream := &testServerStream{}
@@ -782,6 +832,26 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 	re.Len(stream.sentResponses(), 2)
 	re.Equal(uint64(12), stream.lastResponse().GetStartIndex())
 	re.Equal(uint64(13), syncStream.getSendIndex())
+}
+
+func TestDrainDownstreamObservesLiveSyncWindow(t *testing.T) {
+	re := require.New(t)
+	stream := &testServerStream{}
+	syncStream := newRegionSyncStream(stream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": syncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	for i := range 2 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(i + 1)))
+	}
+
+	re.Equal(2, syncer.history.capacity())
+	re.NoError(syncer.sendDownstream(context.Background(), "pd2", syncStream, false))
+
+	re.Equal(4, syncer.history.capacity())
+	re.Equal(uint64(12), syncStream.getSendIndex())
 }
 
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
