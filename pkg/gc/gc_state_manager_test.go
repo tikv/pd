@@ -2021,15 +2021,57 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 	}
 }
 
-func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriersFiltersArchivedCachedState() {
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriersFiltersStaleCachedState() {
 	re := s.Require()
 
-	const keyspaceID = uint32(2)
+	const (
+		keyspaceIDArchived = uint32(2)
+		keyspaceIDUnified  = uint32(3)
+	)
 
-	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+	_, err := s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
+		Op:    keyspace.OpPut,
+		Key:   keyspace.GCManagementType,
+		Value: keyspace.KeyspaceLevelGC,
+	}})
 	re.NoError(err)
 
-	_, ok := s.manager.gcStateCache.load(keyspaceID)
+	_, err = s.manager.AdvanceTxnSafePoint(keyspaceIDUnified, 20, time.Now())
+	re.NoError(err)
+
+	_, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
+	re.True(ok)
+
+	_, err = s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
+		Op:    keyspace.OpPut,
+		Key:   keyspace.GCManagementType,
+		Value: keyspace.UnifiedGC,
+	}})
+	re.NoError(err)
+
+	// The keyspace config change itself does not invalidate GCStateManager's local cache.
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
+	re.True(ok)
+	re.Equal(uint64(20), cachedState.TxnSafePoint)
+
+	allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+	state, ok := allStates[keyspaceIDUnified]
+	re.True(ok)
+	re.False(state.IsKeyspaceLevel)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+	state, ok = allStates[keyspaceIDUnified]
+	re.True(ok)
+	re.False(state.IsKeyspaceLevel)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDUnified)
 	re.True(ok)
 
 	_, err = s.manager.keyspaceManager.UpdateKeyspaceState("ks2", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
@@ -2038,23 +2080,23 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 	re.NoError(err)
 
 	// The keyspace state change itself does not invalidate GCStateManager's local cache.
-	_, ok = s.manager.gcStateCache.load(keyspaceID)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
 	re.True(ok)
 
-	allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), false)
 	re.NoError(err)
 	re.Len(allStates, len(s.keyspacePresets.all)-1)
-	_, ok = allStates[keyspaceID]
+	_, ok = allStates[keyspaceIDArchived]
 	re.False(ok)
-	_, ok = s.manager.gcStateCache.load(keyspaceID)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
 	re.True(ok)
 
 	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
 	re.NoError(err)
 	re.Len(allStates, len(s.keyspacePresets.all)-1)
-	_, ok = allStates[keyspaceID]
+	_, ok = allStates[keyspaceIDArchived]
 	re.False(ok)
-	_, ok = s.manager.gcStateCache.load(keyspaceID)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
 	re.False(ok)
 }
 

@@ -1027,12 +1027,9 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 			continue
 		}
 
-		if !keyspacePred(keyspaceMeta.GetId()) {
-			if filteredKeyspaceCb != nil {
-				filteredKeyspaceCb(keyspaceMeta)
-			}
-			continue
-		}
+		// Workaround: Check unified GC before checking `keyspacePred`. This breaks the semantics of
+		// the function, but it makes sure keyspaces that chagned from keyspace-level GC to unified GC, the invalidated
+		// cached GC states (if any) are always overwritten by the unified GC ones.
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 			gcState := GCState{
@@ -1040,6 +1037,13 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 				IsKeyspaceLevel: false,
 			}
 			cb(gcState)
+			continue
+		}
+
+		if !keyspacePred(keyspaceMeta.GetId()) {
+			if filteredKeyspaceCb != nil {
+				filteredKeyspaceCb(keyspaceMeta)
+			}
 			continue
 		}
 
