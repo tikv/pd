@@ -192,6 +192,7 @@ func TestEvictLeaderBatchLimit(t *testing.T) {
 	resp = httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
 	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
 }
 
@@ -214,6 +215,7 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	resp := httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
 	re.False(tc.GetStore(1).AllowLeaderTransferIn())
 
 	body, err = json.Marshal(map[string]any{"store_id": 2, "batch": "abc"})
@@ -222,6 +224,7 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	resp = httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
 	re.True(tc.GetStore(2).AllowLeaderTransferIn())
 }
 
