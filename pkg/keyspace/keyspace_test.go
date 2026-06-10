@@ -457,6 +457,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
 	delete(updated.Config, UserKindKey)
 	delete(updated.Config, GCManagementType)
+	delete(updated.Config, RegionBoundType)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 
