@@ -929,6 +929,9 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, err
 	}
+	if manager.mgm != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("id", meta.GetId()),
 		zap.String("keyspace-id", meta.GetName()),
@@ -1002,6 +1005,9 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		zap.String("name", meta.GetName()),
 		zap.String("new-state", newState.String()),
 	)
+	if manager.mgm != nil {
+		manager.mgm.AttachEndpoints(meta.GetConfig())
+	}
 	return meta, nil
 }
 

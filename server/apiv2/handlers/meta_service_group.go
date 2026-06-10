@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -83,6 +84,8 @@ func AddMetaServiceGroups(c *gin.Context) {
 	currentGroups := newCfg.GetMetaServiceGroups()
 	newGroups := make(map[string]string, len(currentGroups)+len(requests))
 	for _, request := range requests {
+		request.ID = strings.TrimSpace(request.ID)
+		request.Addresses = strings.TrimSpace(request.Addresses)
 		if request.ID == "" || request.Addresses == "" {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "id and addresses must be non-empty")
 			return

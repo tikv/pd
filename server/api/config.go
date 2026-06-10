@@ -209,6 +209,9 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 	case "cluster-version":
 		return h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
+		// todo:  use apiv2 handlers instead to update keyspace related config,
+		// since the logic is more complex and may involve multiple config items update in one request,
+		// e.g. add/remove meta-service group.
 	case "keyspace":
 		return h.updateKeyspaceConfig(kp[len(kp)-1], value)
 	case "micro-service":
