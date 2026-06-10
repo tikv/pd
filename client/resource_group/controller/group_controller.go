@@ -109,6 +109,7 @@ type groupMetricsCollection struct {
 	consumeTokenHistogram             prometheus.Observer
 	consumeTokenByTypeRRU             prometheus.Counter
 	consumeTokenByTypeWRU             prometheus.Counter
+	actualGrantTokensCounter          prometheus.Counter
 	tokenBalanceGauge                 prometheus.Gauge
 	fillRateGauge                     prometheus.Gauge
 	burstLimitGauge                   prometheus.Gauge
@@ -137,6 +138,7 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 		consumeTokenByTypeRRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "rru"),
 		consumeTokenByTypeWRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "wru"),
+		actualGrantTokensCounter:          metrics.ActualGrantTokensCounter.WithLabelValues(name),
 		tokenBalanceGauge:                 metrics.TokenBalanceGauge.WithLabelValues(name),
 		fillRateGauge:                     metrics.FillRateGauge.WithLabelValues(name),
 		burstLimitGauge:                   metrics.BurstLimitGauge.WithLabelValues(name),
@@ -431,7 +433,9 @@ func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketRespo
 }
 
 func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket *rmpb.TokenBucket, trickleTimeMs int64) {
-	granted := bucket.GetTokens()
+	rawGranted := bucket.GetTokens()
+	gc.observeActualGrant(rawGranted)
+	granted := rawGranted
 	wasThrottled := gc.isThrottled.Load()
 	if !counter.lastDeadline.IsZero() {
 		// If last request came with a trickle duration, we may have RUs that were
@@ -585,6 +589,13 @@ func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
 	if delta.WRU > 0 {
 		gc.metrics.consumeTokenByTypeWRU.Add(delta.WRU)
 	}
+}
+
+func (gc *groupCostController) observeActualGrant(granted float64) {
+	if granted <= 0 {
+		return
+	}
+	gc.metrics.actualGrantTokensCounter.Add(granted)
 }
 
 func (gc *groupCostController) observeComponentConsumption(delta *rmpb.Consumption) {

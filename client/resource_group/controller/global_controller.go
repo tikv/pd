@@ -642,6 +642,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				metrics.BurstLimitGauge.DeleteLabelValues(resourceGroupName)
 				metrics.AvgRUPerSecGauge.DeleteLabelValues(resourceGroupName)
 				metrics.DemandRUPerSecGauge.DeleteLabelValues(resourceGroupName)
+				metrics.ActualGrantTokensCounter.DeleteLabelValues(resourceGroupName)
 				metrics.ThrottledGauge.DeleteLabelValues(resourceGroupName)
 				metrics.ReadByteCost.DeleteLabelValues(resourceGroupName)
 				metrics.WriteByteCost.DeleteLabelValues(resourceGroupName)

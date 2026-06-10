@@ -58,6 +58,8 @@ var (
 	SuccessfulTokenRequestDuration prometheus.Observer
 	// TokenConsumedByTypeCounter tracks RU consumption broken down by RU type (rru/wru).
 	TokenConsumedByTypeCounter *prometheus.CounterVec
+	// ActualGrantTokensCounter tracks RU tokens actually granted by PD per resource group.
+	ActualGrantTokensCounter *prometheus.CounterVec
 	// TokenBalanceGauge exposes the current available token balance per resource group.
 	TokenBalanceGauge *prometheus.GaugeVec
 	// FillRateGauge exposes the current effective fill rate (RU/s) per resource group.
@@ -191,6 +193,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel, typeLabel})
 
+	ActualGrantTokensCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   resourceGroupSubsystem,
+			Name:        "actual_grant_tokens",
+			Help:        "Counter of RU tokens actually granted by PD per resource group.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
 	TokenBalanceGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace:   namespace,
@@ -296,6 +307,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
 	prometheus.MustRegister(TokenConsumedByTypeCounter)
+	prometheus.MustRegister(ActualGrantTokensCounter)
 	prometheus.MustRegister(TokenBalanceGauge)
 	prometheus.MustRegister(FillRateGauge)
 	prometheus.MustRegister(BurstLimitGauge)

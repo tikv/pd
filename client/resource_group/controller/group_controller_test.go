@@ -465,3 +465,23 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	re.Equal(kvBefore+4, promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name)))
 	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
 }
+
+func TestModifyTokenCounterUpdatesActualGrantMetric(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	counter := gc.run.requestUnitTokens
+	gc.run.now = time.Now()
+	counter.lastDeadline = gc.run.now.Add(10 * time.Second)
+	counter.lastRate = 100
+	before := promtestutil.ToFloat64(metrics.ActualGrantTokensCounter.WithLabelValues(gc.name))
+
+	gc.modifyTokenCounter(counter, &rmpb.TokenBucket{
+		Tokens: 250,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   100,
+			BurstLimit: 1000,
+		},
+	}, 0)
+
+	re.Equal(before+250, promtestutil.ToFloat64(metrics.ActualGrantTokensCounter.WithLabelValues(gc.name)))
+}
