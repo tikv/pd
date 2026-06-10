@@ -78,6 +78,7 @@ func NewAllocator(
 	member member.Election,
 	storage endpoint.TSOStorage,
 	cfg Config,
+	checkTSOPrimary bool,
 ) *Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
@@ -88,14 +89,15 @@ func NewAllocator(
 		keyspaceGroupID: keyspaceGroupID,
 		member:          member,
 		timestampOracle: &timestampOracle{
-			keyspaceGroupID:        keyspaceGroupID,
-			member:                 member,
-			storage:                storage,
-			saveInterval:           cfg.GetTSOSaveInterval(),
-			updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
-			maxResetTSGap:          cfg.GetMaxResetTSGap,
-			tsoMux:                 &tsoObject{},
-			metrics:                newTSOMetrics(keyspaceGroupIDStr),
+			keyspaceGroupID:         keyspaceGroupID,
+			member:                  member,
+			storage:                 storage,
+			saveInterval:            cfg.GetTSOSaveInterval(),
+			updatePhysicalInterval:  cfg.GetTSOUpdatePhysicalInterval(),
+			maxResetTSGap:           cfg.GetMaxResetTSGap,
+			tsoMux:                  &tsoObject{},
+			checkTSOPrimary:         checkTSOPrimary,
+			metrics:                 newTSOMetrics(keyspaceGroupIDStr),
 		},
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),
 		logFields: []zap.Field{

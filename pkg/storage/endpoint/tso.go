@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -33,7 +34,7 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(groupID uint32) (time.Time, error)
-	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
+	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership, checkTSOPrimary bool) error
 	DeleteTimestamp(ctx context.Context, groupID uint32) error
 }
 
@@ -68,14 +69,25 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 
 // SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
 // before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
-func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error {
-	logFilds := []zap.Field{
+//
+// When checkTSOPrimary is true (PD service mode), SaveTimestamp atomically checks whether a TSO microservice
+// primary exists. If a TSO primary is detected, the write is rejected to prevent dual writers during a
+// rolling upgrade from PD service mode to API service mode.
+func (se *StorageEndpoint) SaveTimestamp(
+	ctx context.Context,
+	groupID uint32,
+	ts time.Time,
+	leadership *election.Leadership,
+	checkTSOPrimary bool,
+) error {
+	logFields := []zap.Field{
 		zap.Uint32("group-id", groupID),
 		zap.Time("ts", ts),
 		zap.String("leader-key", leadership.GetLeaderKey()),
 		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+		zap.Bool("check-tso-primary", checkTSOPrimary),
 	}
-	log.Debug("saving timestamp to the storage", logFilds...)
+	log.Debug("saving timestamp to the storage", logFields...)
 	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
 	// So we here check whether the leader value is filled to see if the requirement is met.
 	if len(leadership.GetLeaderValue()) == 0 {
@@ -88,8 +100,21 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 			return err
 		}
 		if expected := leadership.GetLeaderValue(); leaderValue != expected {
-			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
+			log.Error("leader value does not match", append(logFields, zap.String("current-leader-value", leaderValue))...)
 			return errors.Errorf("%s due to leader value does not match, current: %s, expected: %s", errs.NotLeaderErr, leaderValue, expected)
+		}
+		// In PD service mode, check if a TSO microservice primary has been elected.
+		// If so, the TSO microservice owns the timeline and this PD must stop
+		// writing to avoid dual writers during a rolling upgrade.
+		if checkTSOPrimary {
+			tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{ServiceName: constant.TSOServiceName})
+			tsoPrimary, err := txn.Load(tsoPrimaryPath)
+			if err != nil {
+				return err
+			}
+			if len(tsoPrimary) != 0 {
+				return errors.Errorf("tso microservice primary exists, PD in PD service mode must yield")
+			}
 		}
 
 		value, err := txn.Load(keypath.TimestampPath(groupID))
@@ -101,7 +126,7 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				log.Error("parse timestamp failed", append(logFilds, zap.String("value", value), zap.Error(err))...)
+				log.Error("parse timestamp failed", append(logFields, zap.String("value", value), zap.Error(err))...)
 				return err
 			}
 		}
