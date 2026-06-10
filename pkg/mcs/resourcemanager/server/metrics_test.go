@@ -123,10 +123,14 @@ func TestObserveTokenGrantRecordsZeroTrickle(t *testing.T) {
 	re := require.New(t)
 	groupName := "observe_token_group"
 	keyspaceName := "observe_token_keyspace"
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
 
-	observeTokenGrant(groupName, keyspaceName, &rmpb.GrantedRUTokenBucket{
-		GrantedTokens: &rmpb.TokenBucket{Tokens: 42},
-		TrickleTimeMs: 0,
+	metrics := newRequestMetrics(keyspaceName, groupName)
+	metrics.observe(requestMetricsObservation{
+		grantedTokens: 42,
+		trickleTimeMs: 0,
 	})
 
 	granted := findHistogramMetric(re, "resource_manager_server_granted_tokens", map[string]string{
@@ -148,14 +152,60 @@ func TestObserveRequestCause(t *testing.T) {
 	re := require.New(t)
 	groupName := "observe_request_group"
 	keyspaceName := "observe_request_keyspace"
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
 	throttleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
 	trickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
+	metrics := newRequestMetrics(keyspaceName, groupName)
 
-	observeRequestCause(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
-	observeRequestCause(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
+	metrics.observe(requestMetricsObservation{serviceLimited: true})
+	metrics.observe(requestMetricsObservation{groupTrickled: true})
 
 	re.Equal(1.0, testutil.ToFloat64(throttleCounter))
 	re.Equal(1.0, testutil.ToFloat64(trickleCounter))
+}
+
+func TestRequestMetricsCachedAndCleanedUp(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10867)
+		keyspaceName = "request_metrics_keyspace"
+		groupName    = "request_metrics_group"
+	)
+	now := time.Now()
+	metrics := newMetrics()
+
+	first := metrics.getRequestMetrics(keyspaceID, keyspaceName, groupName, now)
+	second := metrics.getRequestMetrics(keyspaceID, keyspaceName, groupName, now.Add(time.Second))
+	re.Same(first, second)
+
+	recordKey := consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}
+	metrics.mu.RLock()
+	re.Equal(now, metrics.consumptionRecordMap[recordKey])
+	_, ok := metrics.requestMetricsMap[requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}]
+	metrics.mu.RUnlock()
+	re.True(ok)
+
+	touchTime := now.Add(metricsCleanupInterval + time.Second)
+	third := metrics.getRequestMetrics(keyspaceID, keyspaceName, groupName, touchTime)
+	re.Same(first, third)
+	metrics.mu.RLock()
+	re.Equal(touchTime, metrics.consumptionRecordMap[recordKey])
+	metrics.mu.RUnlock()
+
+	metrics.cleanupAllMetrics(recordKey, keyspaceName)
+
+	metrics.mu.RLock()
+	_, ok = metrics.requestMetricsMap[requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}]
+	_, recordExists := metrics.consumptionRecordMap[recordKey]
+	metrics.mu.RUnlock()
+	re.False(ok)
+	re.False(recordExists)
 }
 
 func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
@@ -182,8 +232,9 @@ func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
 	sl := newServiceLimiter(1, 10, nil)
 	sl.AvailableTokens = 10
 	sl.LastUpdate = now
+	metrics := newRequestMetrics(keyspaceName, groupName)
 
-	tokens := rg.RequestRU(now, 10, 1000, 1, keyspaceName, nil, sl)
+	tokens := rg.RequestRU(now, 10, 1000, 1, keyspaceName, nil, sl, metrics)
 
 	re.NotNil(tokens)
 	re.Equal(10.0, tokens.GetGrantedTokens().GetTokens())

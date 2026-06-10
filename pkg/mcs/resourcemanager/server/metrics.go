@@ -16,6 +16,8 @@ package server
 
 import (
 	"math"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -268,7 +270,8 @@ var (
 )
 
 type metrics struct {
-	// record update time of each resource group
+	mu sync.RWMutex
+	// record update time of each resource group metrics.
 	consumptionRecordMap map[consumptionRecordKey]time.Time
 	// max per sec trackers for each keyspace and resource group.
 	maxPerSecTrackerMap map[trackerKey]*maxPerSecCostTracker
@@ -276,6 +279,8 @@ type metrics struct {
 	counterMetricsMap map[metricsKey]*counterMetrics
 	// cached gauge metrics for each keyspace, resource group and RU type.
 	gaugeMetricsMap map[metricsKey]*gaugeMetrics
+	// cached request metrics for each keyspace and resource group.
+	requestMetricsMap map[requestMetricsKey]*requestMetrics
 }
 
 type consumptionRecordKey struct {
@@ -291,6 +296,11 @@ type metricsKey struct {
 }
 
 type trackerKey struct {
+	keyspaceID uint32
+	groupName  string
+}
+
+type requestMetricsKey struct {
 	keyspaceID uint32
 	groupName  string
 }
@@ -332,11 +342,18 @@ func newMetrics() *metrics {
 		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
 		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
 		gaugeMetricsMap:      make(map[metricsKey]*gaugeMetrics),
+		requestMetricsMap:    make(map[requestMetricsKey]*requestMetrics),
 	}
 }
 
 // insertConsumptionRecord inserts the consumption record.
 func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.insertConsumptionRecordLocked(keyspaceID, groupName, ruType, now)
+}
+
+func (m *metrics) insertConsumptionRecordLocked(keyspaceID uint32, groupName string, ruType string, now time.Time) {
 	key := consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  groupName,
@@ -346,10 +363,14 @@ func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, r
 }
 
 func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.consumptionRecordMap, record)
 }
 
 func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	tracker := m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
 	if tracker == nil {
 		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
@@ -359,10 +380,14 @@ func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName
 }
 
 func (m *metrics) deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
 }
 
 func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	key := metricsKey{keyspaceID, groupName, ruType}
 	if m.counterMetricsMap[key] == nil {
 		m.counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
@@ -371,6 +396,8 @@ func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, 
 }
 
 func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	key := metricsKey{keyspaceID, groupName, ""}
 	if m.gaugeMetricsMap[key] == nil {
 		m.gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
@@ -378,10 +405,47 @@ func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName str
 	return m.gaugeMetricsMap[key]
 }
 
+func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName string, now time.Time) *requestMetrics {
+	key := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
+	m.mu.RLock()
+	rm := m.requestMetricsMap[key]
+	m.mu.RUnlock()
+	if rm != nil {
+		rm.touchRecord(m, keyspaceID, groupName, now)
+		return rm
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rm = m.requestMetricsMap[key]
+	if rm == nil {
+		rm = newRequestMetrics(keyspaceName, groupName)
+		rm.lastRecordUnix.Store(now.UnixNano())
+		m.requestMetricsMap[key] = rm
+	}
+	m.insertConsumptionRecordLocked(keyspaceID, groupName, defaultTypeLabel, now)
+	return rm
+}
+
 func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
+	m.mu.Lock()
 	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
 	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
+	delete(m.requestMetricsMap, requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName})
+	m.mu.Unlock()
 	deleteLabelValues(keyspaceName, groupName, ruType)
+}
+
+func (m *metrics) getStaleConsumptionRecords(now time.Time) []consumptionRecordKey {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	records := make([]consumptionRecordKey, 0)
+	for r, lastTime := range m.consumptionRecordMap {
+		if now.Sub(lastTime) > metricsCleanupTimeout {
+			records = append(records, r)
+		}
+	}
+	return records
 }
 
 func (m *metrics) recordConsumption(
@@ -522,6 +586,67 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 	}
 }
 
+type requestMetrics struct {
+	grantedTokensObserver       prometheus.Observer
+	trickleDurationObserver     prometheus.Observer
+	serviceLimitThrottleCounter prometheus.Counter
+	groupThrottleCounter        prometheus.Counter
+	serviceLimitTrickleCounter  prometheus.Counter
+	groupTrickleCounter         prometheus.Counter
+	lastRecordUnix              atomic.Int64
+}
+
+type requestMetricsObservation struct {
+	grantedTokens   float64
+	trickleTimeMs   int64
+	serviceLimited  bool
+	groupLimited    bool
+	serviceTrickled bool
+	groupTrickled   bool
+}
+
+func newRequestMetrics(keyspaceName, groupName string) *requestMetrics {
+	return &requestMetrics{
+		grantedTokensObserver:       grantedTokensHistogram.WithLabelValues(groupName, keyspaceName),
+		trickleDurationObserver:     trickleDurationHistogram.WithLabelValues(groupName, keyspaceName),
+		serviceLimitThrottleCounter: requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel),
+		groupThrottleCounter:        requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, groupCauseLabel),
+		serviceLimitTrickleCounter:  requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel),
+		groupTrickleCounter:         requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel),
+	}
+}
+
+func (m *requestMetrics) touchRecord(metrics *metrics, keyspaceID uint32, groupName string, now time.Time) {
+	last := m.lastRecordUnix.Load()
+	if now.Sub(time.Unix(0, last)) < metricsCleanupInterval {
+		return
+	}
+	if !m.lastRecordUnix.CompareAndSwap(last, now.UnixNano()) {
+		return
+	}
+	metrics.insertConsumptionRecord(keyspaceID, groupName, defaultTypeLabel, now)
+}
+
+func (m *requestMetrics) observe(observation requestMetricsObservation) {
+	if m == nil {
+		return
+	}
+	m.grantedTokensObserver.Observe(observation.grantedTokens)
+	m.trickleDurationObserver.Observe(float64(observation.trickleTimeMs))
+	if observation.serviceLimited {
+		m.serviceLimitThrottleCounter.Inc()
+	}
+	if observation.groupLimited {
+		m.groupThrottleCounter.Inc()
+	}
+	if observation.serviceTrickled {
+		m.serviceLimitTrickleCounter.Inc()
+	}
+	if observation.groupTrickled {
+		m.groupTrickleCounter.Inc()
+	}
+}
+
 type gaugeMetrics struct {
 	availableRUCounter                 prometheus.Gauge
 	priorityResourceGroupConfigGauge   prometheus.Gauge
@@ -633,18 +758,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
 	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
-}
-
-func observeTokenGrant(groupName, keyspaceName string, tokens *rmpb.GrantedRUTokenBucket) {
-	if tokens == nil || tokens.GrantedTokens == nil {
-		return
-	}
-	grantedTokensHistogram.WithLabelValues(groupName, keyspaceName).Observe(tokens.GrantedTokens.GetTokens())
-	trickleDurationHistogram.WithLabelValues(groupName, keyspaceName).Observe(float64(tokens.GetTrickleTimeMs()))
-}
-
-func observeRequestCause(groupName, keyspaceName, kind, cause string) {
-	requestCauseCounter.WithLabelValues(groupName, keyspaceName, kind, cause).Inc()
 }
 
 type maxPerSecCostTracker struct {

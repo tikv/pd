@@ -317,10 +317,11 @@ func (rg *ResourceGroup) RequestRU(
 	targetPeriodMs, clientUniqueID uint64,
 	keyspaceName string,
 	grt *groupRUTracker, sl *serviceLimiter,
+	metrics *requestMetrics,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
-	defer rg.Unlock()
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
+		rg.Unlock()
 		return nil
 	}
 	// Inject the group RU tracker into the resource group.
@@ -330,6 +331,7 @@ func (rg *ResourceGroup) RequestRU(
 	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
 	if tb == nil {
+		rg.Unlock()
 		return nil
 	}
 	// Then, try to apply the service limit.
@@ -347,70 +349,63 @@ func (rg *ResourceGroup) RequestRU(
 	if trickleTimeMs < minTrickleTimeMs {
 		trickleTimeMs = minTrickleTimeMs
 	}
-	observeTokenGrant(rg.Name, keyspaceName, &rmpb.GrantedRUTokenBucket{
-		GrantedTokens: &rmpb.TokenBucket{Tokens: tb.GetTokens()},
-		TrickleTimeMs: trickleTimeMs,
-	})
-	if serviceLimited {
-		observeRequestCause(rg.Name, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	groupLimited := grantedTokens < requiredToken
+	observation := requestMetricsObservation{
+		grantedTokens:   tb.GetTokens(),
+		trickleTimeMs:   trickleTimeMs,
+		serviceLimited:  serviceLimited,
+		groupLimited:    groupLimited,
+		serviceTrickled: minTrickleTimeMs > 0,
+		groupTrickled:   groupTrickleTimeMs > 0,
 	}
-	if grantedTokens < requiredToken {
-		observeRequestCause(rg.Name, keyspaceName, throttleKindLabel, groupCauseLabel)
+	sampledRUPerSec := 0.0
+	if grt != nil {
+		sampledRUPerSec = grt.getRUPerSec()
 	}
-	if minTrickleTimeMs > 0 {
-		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
+	serviceLimit := 0.0
+	if sl != nil {
+		serviceLimit = sl.getServiceLimit()
 	}
-	if groupTrickleTimeMs > 0 {
-		observeRequestCause(rg.Name, keyspaceName, trickleKindLabel, groupCauseLabel)
-	}
-	if serviceLimited || grantedTokens < requiredToken {
+	overrideFillRate := rg.RUSettings.RU.overrideFillRate
+	result := &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+	rg.Unlock()
+
+	metrics.observe(observation)
+	if observation.serviceLimited || observation.groupLimited {
 		cause := groupCauseLabel
-		if serviceLimited {
+		if observation.serviceLimited {
 			cause = serviceLimitCauseLabel
 		}
-		sampledRUPerSec := 0.0
-		if grt != nil {
-			sampledRUPerSec = grt.getRUPerSec()
-		}
-		serviceLimit := 0.0
-		if sl != nil {
-			serviceLimit = sl.getServiceLimit()
-		}
-		overrideFillRate := rg.RUSettings.RU.overrideFillRate
 		log.Debug("resource group token request is limited",
 			zap.String("resource-group", rg.Name),
 			zap.String("keyspace-name", keyspaceName),
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Float64("required-token", requiredToken),
-			zap.Float64("granted-token", tb.GetTokens()),
-			zap.Int64("trickle-ms", trickleTimeMs),
+			zap.Float64("granted-token", observation.grantedTokens),
+			zap.Int64("trickle-ms", observation.trickleTimeMs),
 			zap.Float64("sampled-ru-per-sec", sampledRUPerSec),
 			zap.Float64("override-fill-rate", overrideFillRate),
 			zap.Float64("service-limit", serviceLimit),
 			zap.String("cause", cause),
 		)
 	}
-	if trickleTimeMs > 0 {
+	if observation.trickleTimeMs > 0 {
 		cause := groupCauseLabel
-		if minTrickleTimeMs > 0 {
+		if observation.serviceTrickled {
 			cause = serviceLimitCauseLabel
-		}
-		serviceLimit := 0.0
-		if sl != nil {
-			serviceLimit = sl.getServiceLimit()
 		}
 		log.Debug("resource group token request is trickled",
 			zap.String("resource-group", rg.Name),
 			zap.String("keyspace-name", keyspaceName),
 			zap.Uint64("client-unique-id", clientUniqueID),
 			zap.Float64("required-token", requiredToken),
-			zap.Float64("granted-token", tb.GetTokens()),
-			zap.Int64("trickle-ms", trickleTimeMs),
+			zap.Float64("granted-token", observation.grantedTokens),
+			zap.Int64("trickle-ms", observation.trickleTimeMs),
 			zap.Float64("service-limit", serviceLimit),
 			zap.String("cause", cause),
 		)
 	}
-	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
+	return result
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
