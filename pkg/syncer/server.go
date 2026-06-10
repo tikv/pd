@@ -236,10 +236,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
-	appendRegion := func(region *core.RegionInfo) {
-		records = append(records, region)
-	}
-
 	defer func() {
 		keepAliveTicker.Stop()
 		shrinkTicker.Stop()
@@ -260,12 +256,12 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			appendRegion(first)
+			records = append(records, first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
-					appendRegion(region)
+					records = append(records, region)
 				default:
 					break loop
 				}
