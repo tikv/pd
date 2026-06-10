@@ -182,7 +182,10 @@ func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...Ke
 	}
 }
 
-func testRawTxn(re *require.Assertions, kv Base) {
+func testRawTxn(re *require.Assertions, kv interface {
+	Base
+	RawTxnCapable
+}) {
 	// Test NotExists condition, putting in transaction.
 	res, err := kv.CreateRawTxn().If(
 		RawTxnCondition{
