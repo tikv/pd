@@ -54,6 +54,16 @@ func TestStopCluster(t *testing.T) {
 	re.Nil(cluster.GetStorage())
 }
 
+func TestGetClusterBeforeStoredDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+	s := &Server{}
+
+	re.NotPanics(func() {
+		re.Nil(s.GetCluster())
+		re.Nil(s.GetBasicCluster())
+	})
+}
+
 // TestMultipleLeaderTermsNoHbStreamGoroutineLeak is a regression test for the
 // production memory leak where each leader→follower transition left behind a
 // leaked hbstream.run() goroutine. The leaked goroutines held a strong GC root
