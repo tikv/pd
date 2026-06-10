@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -432,7 +433,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batchFloat, inputBatch := input["batch"].(float64)
 	if input["batch"] != nil && !inputBatch {
 		handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-		handler.rd.JSON(w, http.StatusBadRequest, errors.New("invalid argument for 'batch'").Error())
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'batch': expected a number, got %T", input["batch"]))
 		return
 	}
 	if inputBatch {

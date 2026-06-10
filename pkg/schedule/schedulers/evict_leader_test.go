@@ -24,8 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -190,6 +188,7 @@ func TestEvictLeaderBatchLimit(t *testing.T) {
 	resp = httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
 	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
 }
 
@@ -204,7 +203,7 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	re.NoError(sl.PrepareConfig(tc))
-	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+	re.False(tc.GetStore(1).AllowLeaderTransfer())
 
 	body, err := json.Marshal(map[string]any{"store_id": 1, "batch": "abc"})
 	re.NoError(err)
@@ -212,7 +211,8 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	resp := httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
-	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.False(tc.GetStore(1).AllowLeaderTransfer())
 
 	body, err = json.Marshal(map[string]any{"store_id": 2, "batch": "abc"})
 	re.NoError(err)
@@ -220,7 +220,8 @@ func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
 	resp = httptest.NewRecorder()
 	sl.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
-	re.True(tc.GetStore(2).AllowLeaderTransferIn())
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.True(tc.GetStore(2).AllowLeaderTransfer())
 }
 
 func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
