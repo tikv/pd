@@ -893,7 +893,10 @@ func (c *KeyspaceConfig) Validate() error {
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
 	}
-	for _, endpoint := range c.MetaServiceGroups {
+	for groupID, endpoint := range c.MetaServiceGroups {
+		if strings.TrimSpace(groupID) == "" {
+			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
 		if strings.TrimSpace(endpoint) == "" {
 			return errors.New("[keyspace] meta-service group addresses cannot be empty")
 		}
