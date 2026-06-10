@@ -670,6 +670,17 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 	return loadedName, nil
 }
 
+func (m *Manager) getKeyspaceNameForMetrics(ctx context.Context, id uint32) string {
+	name, err := m.getKeyspaceNameByID(ctx, id)
+	if err == nil {
+		return name
+	}
+	if id == constant.NullKeyspaceID {
+		return ""
+	}
+	return fmt.Sprintf("keyspace-%d", id)
+}
+
 func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
 	m.Lock()
 	defer m.Unlock()
@@ -732,10 +743,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				continue
 			}
 			keyspaceID := consumptionInfo.keyspaceID
-			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-			if err != nil {
-				continue
-			}
+			keyspaceName := m.getKeyspaceNameForMetrics(ctx, keyspaceID)
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
 			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
@@ -749,10 +757,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
-				if err != nil {
-					continue
-				}
+				keyspaceName := m.getKeyspaceNameForMetrics(ctx, r.keyspaceID)
 				m.metrics.cleanupAllMetrics(r, keyspaceName)
 				m.ruCollector.remove(keyspaceName)
 			}
@@ -779,10 +784,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				// Conciliate the fill rates.
 				krgm.conciliateFillRates()
 				// Record the metrics.
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
-				if err != nil {
-					continue
-				}
+				keyspaceName := m.getKeyspaceNameForMetrics(ctx, krgm.keyspaceID)
 				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
 
 				for _, group := range krgm.getResourceGroupList(true, true) {

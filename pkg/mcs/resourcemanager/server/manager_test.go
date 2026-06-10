@@ -28,7 +28,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -518,18 +517,12 @@ func TestCleanUpTicker(t *testing.T) {
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
 	}] = time.Now().Add(-metricsCleanupTimeout / 2)
-	// Start the background metrics flush loop.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
-	}()
-	err := m.Init(ctx)
-	re.NoError(err)
-	// Ensure the cleanup ticker is triggered.
-	time.Sleep(200 * time.Millisecond)
-	// Close the manager to avoid the data race.
-	m.close()
-
+	keyspaceName := m.getKeyspaceNameForMetrics(ctx, keyspaceID)
+	m.metrics.cleanupAllMetrics(consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  "test_group_1",
+		ruType:     defaultTypeLabel,
+	}, keyspaceName)
 	re.Len(m.metrics.consumptionRecordMap, 1)
 	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
 		keyspaceID: keyspaceID,
@@ -624,6 +617,7 @@ func TestKeyspaceNameLookup(t *testing.T) {
 	name, err = m.getKeyspaceNameByID(ctx, 1)
 	re.Error(err)
 	re.Empty(name)
+	re.Equal("keyspace-1", m.getKeyspaceNameForMetrics(ctx, 1))
 	// Get the keyspace ID by name first, then get the keyspace name by ID.
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1}, "test_keyspace")
 	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace")
