@@ -327,6 +327,23 @@ disable-make-up-replica = false
 	re.Error(err)
 }
 
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
+}
+
 func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
