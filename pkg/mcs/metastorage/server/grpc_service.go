@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
 
@@ -110,8 +111,11 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		case <-s.ctx.Done():
 			return nil
 		case res := <-watchChan:
-			if res.Err() != nil {
-				log.Warn("watch channel failed", zap.Error(res.Err()))
+			failpoint.Inject("watchChannelError", func() {
+				res = clientv3.WatchResponse{CompactRevision: startRevision + 100}
+			})
+			if err := res.Err(); err != nil {
+				log.Warn("watch channel failed", zap.Error(err))
 				var resp meta_storagepb.WatchResponse
 				if startRevision < res.CompactRevision {
 					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
@@ -119,14 +123,14 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 					resp.CompactRevision = res.CompactRevision
 				} else {
 					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
-						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
+						fmt.Sprintf("watch channel meet other error %s.", err.Error()))
 				}
 				if err := server.Send(&resp); err != nil {
 					log.Warn("failed to send watch error response", zap.Error(err))
 					return err
 				}
 				// Err() indicates that this WatchResponse holds a channel-closing error.
-				return res.Err()
+				return err
 			}
 
 			events := make([]*meta_storagepb.Event, len(res.Events))
