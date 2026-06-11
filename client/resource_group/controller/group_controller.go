@@ -599,6 +599,12 @@ func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
 	}
 }
 
+func (gc *groupCostController) observeDemand(delta *rmpb.Consumption) {
+	if v := getRUValueFromConsumption(delta); v > 0 {
+		gc.calcDemandAvg(gc.run.requestUnitTokens, v)
+	}
+}
+
 func (gc *groupCostController) observeActualGrant(granted float64) {
 	if granted <= 0 {
 		return
@@ -664,10 +670,6 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 		err error
 		d   time.Duration
 	)
-	counter := gc.run.requestUnitTokens
-	if v := getRUValueFromConsumption(delta); v > 0 {
-		gc.calcDemandAvg(counter, v)
-	}
 retryLoop:
 	for range gc.mainCfg.WaitRetryTimes {
 		counter := gc.run.requestUnitTokens
@@ -719,6 +721,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	gc.observeDemand(delta)
 
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
@@ -777,6 +780,7 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	gc.observeDemand(delta)
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
@@ -810,6 +814,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	gc.observeDemand(delta)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
@@ -856,6 +861,7 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
+	gc.observeDemand(consumption)
 	gc.observeConsumption(consumption)
 	gc.observeComponentConsumption(consumption)
 }

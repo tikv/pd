@@ -400,7 +400,7 @@ func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
 	re.False(counter.limiter.last.Before(tMid), "stale CancelAt rewound lim.last")
 }
 
-func TestAcquireTokensUpdatesDemandMetricOnThrottle(t *testing.T) {
+func TestOnRequestWaitUpdatesDemandMetricOnThrottle(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
 	gc.mainCfg.LTBMaxWaitDuration = 0
@@ -416,26 +416,77 @@ func TestAcquireTokensUpdatesDemandMetricOnThrottle(t *testing.T) {
 	counter.demandAvgLastTime = time.Now().Add(-time.Second)
 
 	before := promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name))
-	waitDuration := time.Duration(0)
-	_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 100}, &waitDuration, false)
+	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 64 * 1024,
+	})
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 	re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), before)
 }
 
-func TestAcquireTokensDemandStatsConcurrentLogFields(t *testing.T) {
+func TestDemandMetricSamplesConsumptionPaths(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
-	gc.mainCfg.LTBMaxWaitDuration = 0
-	gc.mainCfg.WaitRetryTimes = 1
-	gc.mainCfg.WaitRetryInterval = 0
+	resetDemandMetric := func() {
+		counter := gc.run.requestUnitTokens
+		counter.avgMu.Lock()
+		counter.demandRUPerSec = 0
+		counter.demandRUPerSecLastRU = 0
+		counter.demandTotalRU = 0
+		counter.demandAvgLastTime = time.Now().Add(-time.Second)
+		counter.avgMu.Unlock()
+		gc.metrics.demandRUPerSecGauge.Set(0)
+	}
+	requireDemandObserved := func() {
+		re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), 0.0)
+	}
+
+	resetDemandMetric()
+	_, err := gc.onResponseImpl(&TestRequestInfo{}, &TestResponseInfo{
+		readBytes: 64 * 1024,
+		succeed:   true,
+	})
+	re.NoError(err)
+	requireDemandObserved()
+
+	resetDemandMetric()
+	gc.burstable.Store(true)
+	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 64 * 1024,
+	})
+	re.NoError(err)
+	requireDemandObserved()
+
+	resetDemandMetric()
+	gc.burstable.Store(true)
+	_, _, err = gc.onResponseWaitImpl(context.Background(), &TestRequestInfo{}, &TestResponseInfo{
+		readBytes: 64 * 1024,
+		succeed:   true,
+	})
+	re.NoError(err)
+	requireDemandObserved()
+
+	resetDemandMetric()
+	gc.burstable.Store(false)
+	_, _, err = gc.onResponseWaitImpl(context.Background(), &TestRequestInfo{}, &TestResponseInfo{
+		readBytes: 64 * 1024,
+		succeed:   true,
+	})
+	re.NoError(err)
+	requireDemandObserved()
+
+	resetDemandMetric()
+	gc.addRUConsumption(&rmpb.Consumption{RRU: 3, WRU: 5})
+	requireDemandObserved()
+}
+
+func TestDemandStatsConcurrentLogFields(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
 
 	counter := gc.run.requestUnitTokens
-	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
-		newTokens:   0,
-		newFillRate: 1,
-		newBurst:    1,
-	})
 	counter.demandAvgLastTime = time.Now().Add(-time.Second)
 
 	start := make(chan struct{})
@@ -447,7 +498,7 @@ func TestAcquireTokensDemandStatsConcurrentLogFields(t *testing.T) {
 			<-start
 			for range 100 {
 				waitDuration := time.Duration(0)
-				_, _ = gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 1}, &waitDuration, false)
+				gc.observeDemand(&rmpb.Consumption{RRU: 1})
 				_ = gc.logFields(waitDuration, nil)
 			}
 		}()
