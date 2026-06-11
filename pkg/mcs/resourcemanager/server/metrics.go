@@ -375,6 +375,8 @@ func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName
 	if tracker == nil {
 		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
 		m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}] = tracker
+	} else if !tracker.matchLabels(keyspaceName, groupName) {
+		tracker.rebindLabels(keyspaceName, groupName)
 	}
 	return tracker
 }
@@ -389,20 +391,30 @@ func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := metricsKey{keyspaceID, groupName, ruType}
-	if m.counterMetricsMap[key] == nil {
-		m.counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
+	cm := m.counterMetricsMap[key]
+	if cm == nil || !cm.matchLabels(keyspaceName, groupName, ruType) {
+		if cm != nil {
+			cm.deleteLabelValues()
+		}
+		cm = newCounterMetrics(keyspaceName, groupName, ruType)
+		m.counterMetricsMap[key] = cm
 	}
-	return m.counterMetricsMap[key]
+	return cm
 }
 
 func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	key := metricsKey{keyspaceID, groupName, ""}
-	if m.gaugeMetricsMap[key] == nil {
-		m.gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
+	gm := m.gaugeMetricsMap[key]
+	if gm == nil || !gm.matchLabels(keyspaceName, groupName) {
+		if gm != nil {
+			gm.deleteLabelValues()
+		}
+		gm = newGaugeMetrics(keyspaceName, groupName)
+		m.gaugeMetricsMap[key] = gm
 	}
-	return m.gaugeMetricsMap[key]
+	return gm
 }
 
 func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName string, now time.Time) *requestMetrics {
@@ -485,6 +497,9 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 }
 
 type counterMetrics struct {
+	keyspaceName               string
+	groupName                  string
+	ruLabelType                string
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
 	ActiveRUMetrics            prometheus.Counter
@@ -505,6 +520,9 @@ type counterMetrics struct {
 
 func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetrics {
 	return &counterMetrics{
+		keyspaceName:               keyspaceName,
+		groupName:                  groupName,
+		ruLabelType:                ruLabelType,
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -522,6 +540,32 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 		ReadRequestCountMetrics:    requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName),
 		WriteRequestCountMetrics:   requestCount.WithLabelValues(groupName, groupName, writeTypeLabel, keyspaceName),
 	}
+}
+
+func (m *counterMetrics) matchLabels(keyspaceName, groupName, ruLabelType string) bool {
+	return m != nil && m.keyspaceName == keyspaceName && m.groupName == groupName && m.ruLabelType == ruLabelType
+}
+
+func (m *counterMetrics) deleteLabelValues() {
+	if m == nil {
+		return
+	}
+	readRequestUnitCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	writeRequestUnitCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	activeRequestUnitCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	requestUnitV2Cost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	tikvRequestUnitV2Cost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	tidbRequestUnitV2Cost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	tiflashRequestUnitV2Cost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	sqlLayerRequestUnitCost.DeleteLabelValues(m.groupName, m.groupName, m.keyspaceName)
+	readByteCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	writeByteCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(m.groupName, readTypeLabel, m.keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(m.groupName, writeTypeLabel, m.keyspaceName)
+	kvCPUCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	sqlCPUCost.DeleteLabelValues(m.groupName, m.groupName, m.ruLabelType, m.keyspaceName)
+	requestCount.DeleteLabelValues(m.groupName, m.groupName, readTypeLabel, m.keyspaceName)
+	requestCount.DeleteLabelValues(m.groupName, m.groupName, writeTypeLabel, m.keyspaceName)
 }
 
 func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) float64 {
@@ -677,6 +721,8 @@ func (m *requestMetrics) observe(observation requestMetricsObservation) {
 }
 
 type gaugeMetrics struct {
+	keyspaceName                       string
+	groupName                          string
 	availableRUCounter                 prometheus.Gauge
 	priorityResourceGroupConfigGauge   prometheus.Gauge
 	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
@@ -693,6 +739,8 @@ type gaugeMetrics struct {
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 	return &gaugeMetrics{
+		keyspaceName:                       keyspaceName,
+		groupName:                          groupName,
 		availableRUCounter:                 availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName),
 		priorityResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, priorityLabel, keyspaceName),
 		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
@@ -706,6 +754,28 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		slotDeletedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotDeletedEventLabel),
 		slotExpiredCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotExpiredEventLabel),
 	}
+}
+
+func (m *gaugeMetrics) matchLabels(keyspaceName, groupName string) bool {
+	return m != nil && m.keyspaceName == keyspaceName && m.groupName == groupName
+}
+
+func (m *gaugeMetrics) deleteLabelValues() {
+	if m == nil {
+		return
+	}
+	availableRUCounter.DeleteLabelValues(m.groupName, m.groupName, m.keyspaceName)
+	resourceGroupConfigGauge.DeleteLabelValues(m.groupName, priorityLabel, m.keyspaceName)
+	resourceGroupConfigGauge.DeleteLabelValues(m.groupName, ruPerSecLabel, m.keyspaceName)
+	resourceGroupConfigGauge.DeleteLabelValues(m.groupName, ruCapacityLabel, m.keyspaceName)
+	sampledRequestUnitPerSec.DeleteLabelValues(m.groupName, m.keyspaceName)
+	overrideSettings.DeleteLabelValues(m.groupName, m.keyspaceName, fillRateLabel)
+	overrideSettings.DeleteLabelValues(m.groupName, m.keyspaceName, burstLimitLabel)
+	activeSlotCountGauge.DeleteLabelValues(m.groupName, m.keyspaceName)
+	tokenLoanGauge.DeleteLabelValues(m.groupName, m.keyspaceName)
+	slotEventsCounter.DeleteLabelValues(m.groupName, m.keyspaceName, slotCreatedEventLabel)
+	slotEventsCounter.DeleteLabelValues(m.groupName, m.keyspaceName, slotDeletedEventLabel)
+	slotEventsCounter.DeleteLabelValues(m.groupName, m.keyspaceName, slotExpiredEventLabel)
 }
 
 func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
@@ -812,6 +882,26 @@ func newMaxPerSecCostTracker(keyspaceName, groupName string, flushPeriod int) *m
 		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
 		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
 	}
+}
+
+func (t *maxPerSecCostTracker) matchLabels(keyspaceName, groupName string) bool {
+	return t != nil && t.keyspaceName == keyspaceName && t.groupName == groupName
+}
+
+func (t *maxPerSecCostTracker) deleteLabelValues() {
+	if t == nil {
+		return
+	}
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(t.groupName, t.keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(t.groupName, t.keyspaceName)
+}
+
+func (t *maxPerSecCostTracker) rebindLabels(keyspaceName, groupName string) {
+	t.deleteLabelValues()
+	t.keyspaceName = keyspaceName
+	t.groupName = groupName
+	t.rruMaxMetrics = readRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName)
+	t.wruMaxMetrics = writeRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName)
 }
 
 func (t *maxPerSecCostTracker) collect(consume *rmpb.Consumption) {

@@ -269,6 +269,125 @@ func TestRequestMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T)
 	re.False(hasMetric(grantedMetric, loadedLabels))
 }
 
+func TestCounterMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10869)
+		fallbackName = "keyspace-10869"
+		loadedName   = "loaded-counter-keyspace"
+		groupName    = "counter_metrics_label_group"
+		metricName   = "resource_manager_resource_unit_read_request_unit_sum"
+	)
+	metrics := newMetrics()
+	t.Cleanup(func() {
+		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
+		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+	})
+
+	first := metrics.getCounterMetrics(keyspaceID, fallbackName, groupName, defaultTypeLabel)
+	first.add(&rmpb.Consumption{RRU: 1}, &ControllerConfig{}, keyspaceID)
+	fallbackLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 defaultTypeLabel,
+		keyspaceNameLabel:         fallbackName,
+	}
+	re.True(hasMetric(metricName, fallbackLabels))
+
+	second := metrics.getCounterMetrics(keyspaceID, loadedName, groupName, defaultTypeLabel)
+	re.NotSame(first, second)
+	re.False(hasMetric(metricName, fallbackLabels))
+
+	second.add(&rmpb.Consumption{RRU: 2}, &ControllerConfig{}, keyspaceID)
+	loadedLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 defaultTypeLabel,
+		keyspaceNameLabel:         loadedName,
+	}
+	re.True(hasMetric(metricName, loadedLabels))
+}
+
+func TestGaugeMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10870)
+		fallbackName = "keyspace-10870"
+		loadedName   = "loaded-gauge-keyspace"
+		groupName    = "gauge_metrics_label_group"
+		metricName   = "resource_manager_resource_unit_available_ru"
+	)
+	metrics := newMetrics()
+	t.Cleanup(func() {
+		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
+		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+	})
+
+	first := metrics.getGaugeMetrics(keyspaceID, fallbackName, groupName)
+	first.availableRUCounter.Set(1)
+	fallbackLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+	}
+	re.True(hasMetric(metricName, fallbackLabels))
+
+	second := metrics.getGaugeMetrics(keyspaceID, loadedName, groupName)
+	re.NotSame(first, second)
+	re.False(hasMetric(metricName, fallbackLabels))
+
+	second.availableRUCounter.Set(2)
+	loadedLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         loadedName,
+	}
+	re.True(hasMetric(metricName, loadedLabels))
+}
+
+func TestMaxPerSecTrackerRebindsLabelsWhenKeyspaceNameChanges(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10871)
+		fallbackName = "keyspace-10871"
+		loadedName   = "loaded-tracker-keyspace"
+		groupName    = "tracker_metrics_label_group"
+		metricName   = "resource_manager_resource_unit_read_request_unit_max_per_sec"
+	)
+	metrics := newMetrics()
+	t.Cleanup(func() {
+		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
+		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+	})
+
+	first := metrics.getMaxPerSecTracker(keyspaceID, fallbackName, groupName)
+	first.rruMaxMetrics.Set(1)
+	first.rruSum = 10
+	first.lastRRUSum = 4
+	first.maxPerSecRRU = 6
+	first.cnt = 3
+	fallbackLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+	}
+	re.True(hasMetric(metricName, fallbackLabels))
+
+	second := metrics.getMaxPerSecTracker(keyspaceID, loadedName, groupName)
+	re.Same(first, second)
+	re.Equal(10.0, second.rruSum)
+	re.Equal(4.0, second.lastRRUSum)
+	re.Equal(6.0, second.maxPerSecRRU)
+	re.Equal(3, second.cnt)
+	re.False(hasMetric(metricName, fallbackLabels))
+
+	second.rruMaxMetrics.Set(2)
+	loadedLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         loadedName,
+	}
+	re.True(hasMetric(metricName, loadedLabels))
+}
+
 func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
 	re := require.New(t)
 	groupName := "request_ru_trickle_group"
