@@ -55,7 +55,7 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 	return mockProvider
 }
 
@@ -554,7 +554,7 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 		},
 	}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
@@ -573,9 +573,9 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
 
-	watchConfigChan := make(chan []*meta_storagepb.Event, 1)
+	watchConfigChan := make(chan *metastorage.WatchResponse, 1)
 	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, mock.Anything).Return(watchConfigChan, nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42)
 	re.NoError(err)
@@ -591,11 +591,11 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 		},
 	}
 	val, _ := json.Marshal(configWithPolicy)
-	watchConfigChan <- []*meta_storagepb.Event{
-		{
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
 			Type: meta_storagepb.Event_PUT,
 			Kv:   &meta_storagepb.KeyValue{Value: val},
-		},
+		}},
 	}
 	testutil.Eventually(re, func() bool {
 		return controller.GetRUVersion() == 3
@@ -604,11 +604,11 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	// Case 2: Config without RUVersionPolicy (nil) resets to default
 	configNoPolicy := &Config{}
 	val, _ = json.Marshal(configNoPolicy)
-	watchConfigChan <- []*meta_storagepb.Event{
-		{
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
 			Type: meta_storagepb.Event_PUT,
 			Kv:   &meta_storagepb.KeyValue{Value: val},
-		},
+		}},
 	}
 	testutil.Eventually(re, func() bool {
 		return controller.GetRUVersion() == 1 // Reset to default

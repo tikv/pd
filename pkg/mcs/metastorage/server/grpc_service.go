@@ -101,7 +101,9 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		// if the start revision is less than the given test revision, it means that the watch should compact the data before the start revision.
 		failpoint.Inject("watchChannelError", func(val failpoint.Value) {
 			if rev, ok := val.(int); ok && startRevision <= int64(rev) {
-				s.manager.client.Compact(s.ctx, int64(rev))
+				if _, err := s.manager.client.Compact(s.ctx, int64(rev)); err != nil {
+					log.Warn("compact failed during watch failpoint", zap.Error(err))
+				}
 			}
 		})
 	}

@@ -92,7 +92,7 @@ func (p *watchCountingResourceGroupProvider) Watch(ctx context.Context, key []by
 		opt(&op)
 	}
 	if op.Revision > 0 {
-		if p.firstRevision == 0 && op.Revision > 0 {
+		if p.firstRevision == 0 {
 			p.firstRevision = op.Revision
 		} else if op.Revision == p.firstRevision {
 			p.watchTimes++
