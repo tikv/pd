@@ -22,12 +22,14 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -1502,13 +1504,38 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	// re-connect client as well
 	suite.client = suite.setupPDClient(re)
 	cli = suite.client
+	expectedGroups := normalizeResourceGroupsForSettingsCompare(groups)
 	var newGroups []*rmpb.ResourceGroup
 	testutil.Eventually(re, func() bool {
 		var err error
 		newGroups, err = cli.ListResourceGroups(suite.ctx)
-		return err == nil && reflect.DeepEqual(groups, newGroups)
+		return err == nil && reflect.DeepEqual(expectedGroups, normalizeResourceGroupsForSettingsCompare(newGroups))
 	})
-	re.Equal(groups, newGroups)
+	re.Equal(expectedGroups, normalizeResourceGroupsForSettingsCompare(newGroups))
+}
+
+func normalizeResourceGroupsForSettingsCompare(groups []*rmpb.ResourceGroup) []*rmpb.ResourceGroup {
+	normalized := make([]*rmpb.ResourceGroup, 0, len(groups))
+	for _, group := range groups {
+		cloned := proto.Clone(group).(*rmpb.ResourceGroup)
+		cloned.RUStats = nil
+		resetTokenBucketRuntimeState(cloned.GetRUSettings().GetRU())
+		rawSettings := cloned.GetRawResourceSettings()
+		resetTokenBucketRuntimeState(rawSettings.GetCpu())
+		resetTokenBucketRuntimeState(rawSettings.GetIoRead())
+		resetTokenBucketRuntimeState(rawSettings.GetIoWrite())
+		normalized = append(normalized, cloned)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].GetName() < normalized[j].GetName()
+	})
+	return normalized
+}
+
+func resetTokenBucketRuntimeState(bucket *rmpb.TokenBucket) {
+	if bucket != nil {
+		bucket.Tokens = 0
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {

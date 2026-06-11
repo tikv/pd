@@ -403,7 +403,7 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 	atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
 	m.Unlock()
 
-	m.initReserved()
+	m.initReservedInCache()
 	if err := m.loadServiceLimits(); err != nil {
 		return err
 	}
@@ -700,6 +700,15 @@ func (m *Manager) initReserved() {
 	// Initialize the default resource group respectively for each keyspace if it doesn't exist.
 	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 		krgm.initDefaultResourceGroup()
+	}
+}
+
+func (m *Manager) initReservedInCache() {
+	// Initialize the reserved default group in memory before async loading
+	// without overwriting persisted default group settings.
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, false).ensureReservedDefaultGroupInCache()
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		krgm.ensureReservedDefaultGroupInCache()
 	}
 }
 
