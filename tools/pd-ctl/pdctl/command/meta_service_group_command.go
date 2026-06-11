@@ -35,7 +35,7 @@ func NewMetaServiceGroupCommand() *cobra.Command {
 		Short: "meta-service group commands",
 	}
 	cmd.AddCommand(newListMetaServiceGroupCommand())
-	cmd.AddCommand(newUpdateMetaServiceGroupCommand())
+	cmd.AddCommand(newUpsetMetaServiceGroupCommand())
 	cmd.AddCommand(newDeleteMetaServiceGroupCommand())
 	return cmd
 }
@@ -62,18 +62,18 @@ func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(resp)
 }
 
-func newUpdateMetaServiceGroupCommand() *cobra.Command {
+func newUpsetMetaServiceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "update",
-		Short: "add or update one or more meta-service groups",
-		Run:   newUpdateMetaServiceGroupFunc,
+		Use:   "upset <id>=<addr1,addr2,...> [<id>=<addr1,addr2,...> ...]",
+		Short: "upset one or more meta-service groups",
+		Run:   newUpsetMetaServiceGroupFunc,
 	}
 	r.Flags().StringArrayP(nmGroup, "g", nil, "meta-service group in format id=addr1,addr2,... (for add/update)")
 	_ = r.MarkFlagRequired(nmGroup)
 	return r
 }
 
-func newUpdateMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
+func newUpsetMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 	metaServiceGroups, err := cmd.Flags().GetStringArray("group")
 	if err != nil {
 		cmd.PrintErrln("Failed to read --group flag:", err)

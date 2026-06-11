@@ -15,7 +15,6 @@
 package handlers
 
 import (
-	"maps"
 	"net/http"
 	"sort"
 
@@ -73,24 +72,17 @@ func PatchMetaServiceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-
-	currentGroups := manager.GetGroups()
-	newGroups := make(map[string]string)
-	maps.Copy(newGroups, currentGroups)
-
+	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
+	newCfg := oldCfg.Clone()
 	for id, addresses := range patch {
 		if addresses == nil {
 			// Remove operation
-			delete(newGroups, id)
+			delete(newCfg.MetaServiceGroups, id)
 		} else {
 			// Add or update operation
-			newGroups[id] = *addresses
+			newCfg.MetaServiceGroups[id] = *addresses
 		}
 	}
-
-	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
-	newCfg := oldCfg.Clone()
-	newCfg.MetaServiceGroups = newGroups
 	if err := svr.SetKeyspaceConfig(oldCfg, newCfg); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
