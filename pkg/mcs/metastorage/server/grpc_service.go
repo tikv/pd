@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
@@ -116,7 +117,10 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			return nil
 		case <-s.ctx.Done():
 			return nil
-		case res := <-watchChan:
+		case res, ok := <-watchChan:
+			if !ok {
+				return errors.New("watch channel closed unexpectedly")
+			}
 			if err := res.Err(); err != nil {
 				log.Warn("watch channel failed", zap.Error(err))
 				var resp meta_storagepb.WatchResponse
