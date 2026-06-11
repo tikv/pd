@@ -35,6 +35,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -101,9 +102,9 @@ func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	args := m.Called(ctx, key, opts)
-	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
+	return args.Get(0).(chan *metastorage.WatchResponse), args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {

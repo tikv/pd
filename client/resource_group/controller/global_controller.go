@@ -327,7 +327,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
-		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
+		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
@@ -412,7 +412,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				if resp.CompactRevision > cfgRevision {
+					cfgRevision = resp.CompactRevision
+				}
+				for _, item := range resp.Events {
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -462,7 +465,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				if resp.CompactRevision > cfgRevision {
+					cfgRevision = resp.CompactRevision
+				}
+				for _, item := range resp.Events {
 					cfgRevision = item.Kv.ModRevision
 					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {

@@ -26,9 +26,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	resourcegroupcontroller "github.com/tikv/pd/client/resource_group/controller"
@@ -54,7 +54,7 @@ type watchCountingResourceGroupProvider struct {
 	firstRevision int64
 }
 
-func (p *watchCountingResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (p *watchCountingResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	p.mu.Lock()
 	op := opt.MetaStorageOp{}
 	for _, opt := range opts {

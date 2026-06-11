@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/gc"
-	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
@@ -109,7 +108,6 @@ type RPCClient interface {
 
 	router.Client
 	tso.Client
-	metastorage.Client
 	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
