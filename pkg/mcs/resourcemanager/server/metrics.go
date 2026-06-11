@@ -433,12 +433,13 @@ func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName s
 
 func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
 	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
 	requestKey := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
 	rm := m.requestMetricsMap[requestKey]
 	delete(m.requestMetricsMap, requestKey)
-	m.mu.Unlock()
 
 	deleteLabelValues(keyspaceName, groupName, ruType)
 	rm.deleteLabelValues()
