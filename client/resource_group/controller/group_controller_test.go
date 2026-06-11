@@ -585,6 +585,25 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
 }
 
+func TestAddRUConsumptionIgnoresNilConsumption(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+
+	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection))
+	wruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection))
+	readBefore := promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name))
+	writeBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection))
+
+	re.NotPanics(func() {
+		gc.addRUConsumption(nil)
+	})
+
+	re.Equal(rruBefore, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
+	re.Equal(wruBefore, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection)))
+	re.Equal(readBefore, promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name)))
+	re.Equal(writeBefore, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection)))
+}
+
 func TestFailedWriteConsumptionRecordsRefundMetrics(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())

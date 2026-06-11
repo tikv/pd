@@ -596,6 +596,9 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 }
 
 func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
+	if delta == nil {
+		return
+	}
 	if v := getRUValueFromConsumption(delta); v > 0 {
 		gc.metrics.consumeTokenHistogram.Observe(v)
 	}
