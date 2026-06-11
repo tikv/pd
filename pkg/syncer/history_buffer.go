@@ -226,6 +226,7 @@ func (h *historyBuffer) minFullSyncStartIndexLocked() (uint64, bool) {
 
 // reserveAppendWindowFrom grows the buffer before appending records so that
 // records still needed starting at fromIndex are not overwritten by the append.
+// fromIndex is a caller-provided replay boundary, not state owned by the buffer.
 func (h *historyBuffer) reserveAppendWindowFrom(fromIndex uint64, appendCount int) {
 	if appendCount <= 0 {
 		return

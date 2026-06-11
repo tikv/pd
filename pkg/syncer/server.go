@@ -73,10 +73,11 @@ type regionSyncStream struct {
 		syncutil.Mutex
 		ServerStream
 	}
-	// sendMu serializes the logical send flow and protects sendIndex.
+	// sendIndex records the next history index this stream needs to send.
+	sendIndex atomic.Uint64
+	// sendMu serializes the logical send flow.
 	sendMu struct {
 		syncutil.Mutex
-		sendIndex uint64
 	}
 	notifyCh chan bool
 	done     chan struct{}
@@ -84,42 +85,34 @@ type regionSyncStream struct {
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
-	return &regionSyncStream{
+	s := &regionSyncStream{
 		stream: struct {
 			syncutil.Mutex
 			ServerStream
 		}{
 			ServerStream: stream,
 		},
-		sendMu: struct {
-			syncutil.Mutex
-			sendIndex uint64
-		}{
-			sendIndex: startIndex,
-		},
 		notifyCh: make(chan bool, 1),
 		done:     make(chan struct{}),
 	}
+	s.sendIndex.Store(startIndex)
+	return s
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.getSendIndexLocked()
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) getSendIndexLocked() uint64 {
-	return s.sendMu.sendIndex
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) advanceSendIndex(count int) {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	s.advanceSendIndexLocked(count)
+	s.sendIndex.Add(uint64(count))
 }
 
 func (s *regionSyncStream) advanceSendIndexLocked(count int) {
-	s.sendMu.sendIndex += uint64(count)
+	s.sendIndex.Add(uint64(count))
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -266,10 +259,11 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 					break loop
 				}
 			}
+			s.reserveHistoryForDownstreamSendProgressBeforeAppend(len(records))
 			s.appendHistoryRecords(records)
 			s.notifyDownstreams(ctx, false)
 		case <-shrinkTicker.C:
-			s.observeHistoryWindowForDownstreams()
+			s.observeDownstreamSendWindowBeforeShrink()
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
 			s.notifyDownstreams(ctx, true)
@@ -309,7 +303,7 @@ func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
 	return minIndex, ok
 }
 
-func (s *RegionSyncer) reserveHistoryAppendWindowForDownstreams(appendCount int) {
+func (s *RegionSyncer) reserveHistoryForDownstreamSendProgressBeforeAppend(appendCount int) {
 	minIndex, ok := s.minDownstreamSendIndex()
 	if !ok {
 		return
@@ -318,13 +312,12 @@ func (s *RegionSyncer) reserveHistoryAppendWindowForDownstreams(appendCount int)
 }
 
 func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
-	s.reserveHistoryAppendWindowForDownstreams(len(records))
 	for _, region := range records {
 		s.history.record(region)
 	}
 }
 
-func (s *RegionSyncer) observeHistoryWindowForDownstreams() {
+func (s *RegionSyncer) observeDownstreamSendWindowBeforeShrink() {
 	minIndex, ok := s.minDownstreamSendIndex()
 	if !ok {
 		return
