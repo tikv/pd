@@ -373,6 +373,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 	re.Equal(uint64(3), defaultCfg.Replication.MaxReplicas)
 	re.Equal(typeutil.StringSlice([]string{}), defaultCfg.Replication.LocationLabels)
 	re.Equal(uint64(2048), defaultCfg.Schedule.RegionScheduleLimit)
+	re.Equal(uint64(0), defaultCfg.Schedule.SplitScatterScheduleLimit)
 	re.Equal("", defaultCfg.PDServerCfg.MetricStorage)
 }
 
