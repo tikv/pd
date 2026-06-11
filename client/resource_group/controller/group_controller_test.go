@@ -32,7 +32,11 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-func createTestGroupCostController(re *require.Assertions, name string) *groupCostController {
+func createTestGroupCostController(re *require.Assertions, names ...string) *groupCostController {
+	name := "test"
+	if len(names) > 0 {
+		name = names[0]
+	}
 	return createTestGroupCostControllerWithConfig(re, name, DefaultRUConfig())
 }
 
