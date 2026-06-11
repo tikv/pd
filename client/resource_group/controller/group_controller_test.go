@@ -18,12 +18,13 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -74,12 +75,6 @@ func waitForNonZeroProcessCPUTime(re *require.Assertions) {
 	}
 	runtime.KeepAlive(sink)
 	re.Greater(getSQLProcessCPUTime(true), 0.0)
-}
-
-func histogramSampleCount(re *require.Assertions, metric interface{ Write(*dto.Metric) error }) uint64 {
-	var pb dto.Metric
-	re.NoError(metric.Write(&pb))
-	return pb.GetHistogram().GetSampleCount()
 }
 
 func TestGroupControlBurstable(t *testing.T) {
@@ -706,24 +701,45 @@ func TestObserveConsumptionHistogramRequiresTraceLog(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
 
+	const histogramName = "test_observe_consumption_histogram_requires_trace_log"
+	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    histogramName,
+		Help:    "Test histogram.",
+		Buckets: []float64{1, 3},
+	})
+	gc.metrics.consumeTokenHistogram = histogram
+
 	originalTraceLog := enableControllerTraceLog.Load()
 	enableControllerTraceLog.Store(false)
 	t.Cleanup(func() {
 		enableControllerTraceLog.Store(originalTraceLog)
 	})
 
-	histogram, ok := metrics.TokenConsumedHistogram.WithLabelValues(gc.name).(interface{ Write(*dto.Metric) error })
-	re.True(ok)
-	histogramBefore := histogramSampleCount(re, histogram)
 	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection))
 
 	gc.observeConsumption(&rmpb.Consumption{RRU: 1})
-	re.Equal(histogramBefore, histogramSampleCount(re, histogram))
+	re.NoError(promtestutil.CollectAndCompare(histogram, strings.NewReader(`
+# HELP test_observe_consumption_histogram_requires_trace_log Test histogram.
+# TYPE test_observe_consumption_histogram_requires_trace_log histogram
+test_observe_consumption_histogram_requires_trace_log_bucket{le="1"} 0
+test_observe_consumption_histogram_requires_trace_log_bucket{le="3"} 0
+test_observe_consumption_histogram_requires_trace_log_bucket{le="+Inf"} 0
+test_observe_consumption_histogram_requires_trace_log_sum 0
+test_observe_consumption_histogram_requires_trace_log_count 0
+`), histogramName))
 	re.Equal(rruBefore+1, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
 
 	enableControllerTraceLog.Store(true)
 	gc.observeConsumption(&rmpb.Consumption{RRU: 2})
-	re.Equal(histogramBefore+1, histogramSampleCount(re, histogram))
+	re.NoError(promtestutil.CollectAndCompare(histogram, strings.NewReader(`
+# HELP test_observe_consumption_histogram_requires_trace_log Test histogram.
+# TYPE test_observe_consumption_histogram_requires_trace_log histogram
+test_observe_consumption_histogram_requires_trace_log_bucket{le="1"} 0
+test_observe_consumption_histogram_requires_trace_log_bucket{le="3"} 1
+test_observe_consumption_histogram_requires_trace_log_bucket{le="+Inf"} 1
+test_observe_consumption_histogram_requires_trace_log_sum 2
+test_observe_consumption_histogram_requires_trace_log_count 1
+`), histogramName))
 	re.Equal(rruBefore+3, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
 }
 
