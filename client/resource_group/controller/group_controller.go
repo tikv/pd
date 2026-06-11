@@ -386,12 +386,14 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 	}
 }
 
-func (gc *groupCostController) calcAvgAndDemand(counter *tokenCounter, new float64) (float64, float64, bool, bool) {
+func (gc *groupCostController) calcAvgAndDemand(
+	counter *tokenCounter, new float64,
+) (avgRUPerSec, demandRUPerSec float64, avgOK, demandOK bool) {
 	demandTotalRU := counter.getDemandTotalRU()
 	counter.avgMu.Lock()
 	defer counter.avgMu.Unlock()
-	avgOK := calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
-	demandOK := calcMovingAvgAt(gc.run.now, &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, demandTotalRU)
+	avgOK = calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
+	demandOK = calcMovingAvgAt(gc.run.now, &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, demandTotalRU)
 	return counter.avgRUPerSec, counter.demandRUPerSec, avgOK, demandOK
 }
 
