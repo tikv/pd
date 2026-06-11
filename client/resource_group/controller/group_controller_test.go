@@ -23,6 +23,7 @@ import (
 	"time"
 
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
@@ -73,6 +74,12 @@ func waitForNonZeroProcessCPUTime(re *require.Assertions) {
 	}
 	runtime.KeepAlive(sink)
 	re.Greater(getSQLProcessCPUTime(true), 0.0)
+}
+
+func histogramSampleCount(re *require.Assertions, metric interface{ Write(*dto.Metric) error }) uint64 {
+	var pb dto.Metric
+	re.NoError(metric.Write(&pb))
+	return pb.GetHistogram().GetSampleCount()
 }
 
 func TestGroupControlBurstable(t *testing.T) {
@@ -693,6 +700,31 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	re.Equal(writeBefore+17, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection)))
 	re.Equal(kvBefore+4, promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name)))
 	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
+}
+
+func TestObserveConsumptionHistogramRequiresTraceLog(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+
+	originalTraceLog := enableControllerTraceLog.Load()
+	enableControllerTraceLog.Store(false)
+	t.Cleanup(func() {
+		enableControllerTraceLog.Store(originalTraceLog)
+	})
+
+	histogram, ok := metrics.TokenConsumedHistogram.WithLabelValues(gc.name).(interface{ Write(*dto.Metric) error })
+	re.True(ok)
+	histogramBefore := histogramSampleCount(re, histogram)
+	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection))
+
+	gc.observeConsumption(&rmpb.Consumption{RRU: 1})
+	re.Equal(histogramBefore, histogramSampleCount(re, histogram))
+	re.Equal(rruBefore+1, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
+
+	enableControllerTraceLog.Store(true)
+	gc.observeConsumption(&rmpb.Consumption{RRU: 2})
+	re.Equal(histogramBefore+1, histogramSampleCount(re, histogram))
+	re.Equal(rruBefore+3, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
 }
 
 func TestAddRUConsumptionIgnoresNilConsumption(t *testing.T) {

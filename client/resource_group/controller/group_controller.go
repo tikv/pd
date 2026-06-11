@@ -628,8 +628,10 @@ func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
 	if delta == nil {
 		return
 	}
-	if v := getRUValueFromConsumption(delta); v > 0 {
-		gc.metrics.consumeTokenHistogram.Observe(v)
+	if enableControllerTraceLog.Load() {
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			gc.metrics.consumeTokenHistogram.Observe(v)
+		}
 	}
 	observeCounterDelta(gc.metrics.chargeTokenByTypeRRU, gc.metrics.refundTokenByTypeRRU, delta.RRU)
 	observeCounterDelta(gc.metrics.chargeTokenByTypeWRU, gc.metrics.refundTokenByTypeWRU, delta.WRU)
