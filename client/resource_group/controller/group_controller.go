@@ -179,7 +179,7 @@ type tokenCounter struct {
 	// demand per second sampled before Reserve() throttling takes effect.
 	demandRUPerSec       float64
 	demandRUPerSecLastRU float64
-	demandTotalRU        float64
+	demandTotalRUScaled  atomic.Uint64
 	demandAvgLastTime    time.Time
 
 	notify struct {
@@ -376,10 +376,11 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 }
 
 func (gc *groupCostController) calcAvgAndDemand(counter *tokenCounter, new float64) (float64, float64, bool, bool) {
+	demandTotalRU := counter.getDemandTotalRU()
 	counter.avgMu.Lock()
 	defer counter.avgMu.Unlock()
 	avgOK := calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
-	demandOK := calcMovingAvgAt(gc.run.now, &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
+	demandOK := calcMovingAvgAt(gc.run.now, &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, demandTotalRU)
 	return counter.avgRUPerSec, counter.demandRUPerSec, avgOK, demandOK
 }
 
@@ -387,9 +388,15 @@ func recordDemand(counter *tokenCounter, delta float64) {
 	if delta <= 0 {
 		return
 	}
-	counter.avgMu.Lock()
-	counter.demandTotalRU += delta
-	counter.avgMu.Unlock()
+	counter.addDemandTotalRU(delta)
+}
+
+func (counter *tokenCounter) addDemandTotalRU(delta float64) {
+	counter.demandTotalRUScaled.Add(uint64(delta * demandRUScale))
+}
+
+func (counter *tokenCounter) getDemandTotalRU() float64 {
+	return float64(counter.demandTotalRUScaled.Load()) / demandRUScale
 }
 
 func calcMovingAvgAt(now time.Time, avg *float64, lastRU *float64, lastTime *time.Time, new float64) bool {

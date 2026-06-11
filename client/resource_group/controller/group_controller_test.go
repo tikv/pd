@@ -440,10 +440,10 @@ func TestDemandMetricSamplesConsumptionPaths(t *testing.T) {
 		counter.avgMu.Lock()
 		counter.demandRUPerSec = 0
 		counter.demandRUPerSecLastRU = 0
-		counter.demandTotalRU = 0
 		counter.avgLastTime = now.Add(-time.Second)
 		counter.demandAvgLastTime = now.Add(-time.Second)
 		counter.avgMu.Unlock()
+		counter.demandTotalRUScaled.Store(0)
 		gc.run.now = now
 		gc.metrics.demandRUPerSecGauge.Set(0)
 	}
@@ -530,6 +530,35 @@ func TestDemandMetricDecaysWithoutNewDemand(t *testing.T) {
 	gc.run.now = now
 	gc.updateAvgRequestResourcePerSec()
 	re.Less(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), first)
+}
+
+func TestRecordDemandAccumulatesConcurrently(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	counter := gc.run.requestUnitTokens
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				gc.observeDemand(&rmpb.Consumption{RRU: 1})
+			}
+		}()
+	}
+	wg.Wait()
+
+	re.Equal(16000.0, counter.getDemandTotalRU())
+}
+
+func TestRecordDemandPreservesSubRUDemand(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+
+	gc.observeDemand(&rmpb.Consumption{RRU: 0.25, WRU: 0.5})
+
+	re.Equal(0.75, gc.run.requestUnitTokens.getDemandTotalRU())
 }
 
 func TestDemandStatsConcurrentLogFields(t *testing.T) {
