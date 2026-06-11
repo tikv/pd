@@ -231,6 +231,83 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
+func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	counter := gc.run.requestUnitTokens
+
+	counter.notify.mu.Lock()
+	counter.notify.setupNotificationTimer = time.NewTimer(time.Hour)
+	counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+	counter.notify.setupNotificationThreshold = 1
+	counter.notify.cancelCh = make(chan struct{})
+	counter.notify.mu.Unlock()
+	defer initCounterNotify(counter)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		gc.handleTokenBucketUpdateEvent(ctx)
+		close(done)
+	}()
+
+	require.Never(t, func() bool {
+		return isClosed(done)
+	}, 50*time.Millisecond, 5*time.Millisecond)
+
+	initCounterNotify(counter)
+	require.Eventually(t, func() bool {
+		return isClosed(done)
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestHandleTokenBucketUpdateEventCleansNotifyOnTimer(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	counter := gc.run.requestUnitTokens
+	threshold := 42.0
+
+	counter.notify.mu.Lock()
+	counter.notify.setupNotificationTimer = time.NewTimer(10 * time.Millisecond)
+	counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+	counter.notify.setupNotificationThreshold = threshold
+	counter.notify.cancelCh = make(chan struct{})
+	counter.notify.mu.Unlock()
+	defer initCounterNotify(counter)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		gc.handleTokenBucketUpdateEvent(ctx)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		return isClosed(done)
+	}, time.Second, 10*time.Millisecond)
+
+	counter.notify.mu.Lock()
+	re.Nil(counter.notify.setupNotificationTimer)
+	re.Nil(counter.notify.setupNotificationCh)
+	re.Nil(counter.notify.cancelCh)
+	counter.notify.mu.Unlock()
+
+	counter.limiter.mu.Lock()
+	re.Equal(threshold, counter.limiter.notifyThreshold)
+	counter.limiter.mu.Unlock()
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
 func TestResourceGroupThrottledError(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
