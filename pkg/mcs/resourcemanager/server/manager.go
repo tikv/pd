@@ -767,9 +767,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
 			for _, r := range m.metrics.getStaleConsumptionRecords(time.Now()) {
-				keyspaceName := m.getKeyspaceNameForMetrics(ctx, r.keyspaceID)
-				m.metrics.cleanupAllMetrics(r, keyspaceName)
-				m.ruCollector.remove(keyspaceName)
+				keyspaceName := m.getKeyspaceNameForMetrics(ctx, r.key.keyspaceID)
+				if m.metrics.cleanupStaleMetrics(r, keyspaceName) {
+					m.ruCollector.remove(keyspaceName)
+				}
 			}
 			// Clean up the stale RU trackers.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
@@ -802,7 +803,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 
 func (m *Manager) flushResourceGroupMetrics(ctx context.Context, krgm *keyspaceResourceGroupManager) {
 	keyspaceName := m.getKeyspaceNameForMetrics(ctx, krgm.keyspaceID)
-	setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
+	m.metrics.setOrRemoveServiceLimitMetrics(krgm.keyspaceID, keyspaceName, krgm.getServiceLimiter().getServiceLimit())
 
 	for _, group := range krgm.getMutableResourceGroupList() {
 		groupName := group.Name

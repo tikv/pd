@@ -281,12 +281,19 @@ type metrics struct {
 	gaugeMetricsMap map[metricsKey]*gaugeMetrics
 	// cached request metrics for each keyspace and resource group.
 	requestMetricsMap map[requestMetricsKey]*requestMetrics
+	// cached service limit metric labels for each keyspace.
+	serviceLimitMetricsMap map[uint32]string
 }
 
 type consumptionRecordKey struct {
 	keyspaceID uint32
 	groupName  string
 	ruType     string
+}
+
+type staleConsumptionRecord struct {
+	key        consumptionRecordKey
+	lastUpdate time.Time
 }
 
 type metricsKey struct {
@@ -338,11 +345,12 @@ func init() {
 
 func newMetrics() *metrics {
 	return &metrics{
-		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
-		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
-		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
-		gaugeMetricsMap:      make(map[metricsKey]*gaugeMetrics),
-		requestMetricsMap:    make(map[requestMetricsKey]*requestMetrics),
+		consumptionRecordMap:   make(map[consumptionRecordKey]time.Time),
+		maxPerSecTrackerMap:    make(map[trackerKey]*maxPerSecCostTracker),
+		counterMetricsMap:      make(map[metricsKey]*counterMetrics),
+		gaugeMetricsMap:        make(map[metricsKey]*gaugeMetrics),
+		requestMetricsMap:      make(map[requestMetricsKey]*requestMetrics),
+		serviceLimitMetricsMap: make(map[uint32]string),
 	}
 }
 
@@ -362,12 +370,6 @@ func (m *metrics) insertConsumptionRecordLocked(keyspaceID uint32, groupName str
 	m.consumptionRecordMap[key] = now
 }
 
-func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.consumptionRecordMap, record)
-}
-
 func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -381,19 +383,6 @@ func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName
 	return tracker
 }
 
-func (m *metrics) deleteMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	key := trackerKey{keyspaceID, groupName}
-	tracker := m.maxPerSecTrackerMap[key]
-	delete(m.maxPerSecTrackerMap, key)
-	if tracker != nil {
-		tracker.deleteLabelValues()
-		return
-	}
-	deleteMaxPerSecTrackerLabelValues(keyspaceName, groupName)
-}
-
 func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -401,7 +390,10 @@ func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, 
 	cm := m.counterMetricsMap[key]
 	if cm == nil || !cm.matchLabels(keyspaceName, groupName, ruType) {
 		if cm != nil {
-			cm.deleteLabelValues()
+			cm.deleteTypeLabelValues()
+			if !m.hasOtherCounterMetricsWithLabelsLocked(key, cm.keyspaceName, cm.groupName) {
+				deleteSharedCounterMetricLabelValues(cm.keyspaceName, cm.groupName)
+			}
 		}
 		cm = newCounterMetrics(keyspaceName, groupName, ruType)
 		m.counterMetricsMap[key] = cm
@@ -429,11 +421,14 @@ func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName s
 	m.mu.RLock()
 	rm := m.requestMetricsMap[key]
 	if rm != nil && rm.matchLabels(keyspaceName, groupName) {
+		if !rm.shouldTouchRecord(now) {
+			m.mu.RUnlock()
+			return rm
+		}
 		m.mu.RUnlock()
-		rm.touchRecord(m, keyspaceID, groupName, now)
-		return rm
+	} else {
+		m.mu.RUnlock()
 	}
-	m.mu.RUnlock()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -445,49 +440,94 @@ func (m *metrics) getRequestMetrics(keyspaceID uint32, keyspaceName, groupName s
 		rm = newRequestMetrics(keyspaceName, groupName)
 		m.requestMetricsMap[key] = rm
 	}
-	rm.lastRecordUnix.Store(now.UnixNano())
-	m.insertConsumptionRecordLocked(keyspaceID, groupName, defaultTypeLabel, now)
+	if rm.shouldTouchRecord(now) {
+		rm.lastRecordUnix.Store(now.UnixNano())
+		m.insertConsumptionRecordLocked(keyspaceID, groupName, defaultTypeLabel, now)
+	}
 	return rm
 }
 
-func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+func (m *metrics) deleteMetricsLocked(keyspaceID uint32, keyspaceName, groupName, ruType string, deleteGroupMetrics bool) {
 	counterKey := metricsKey{keyspaceID, groupName, ruType}
 	cm := m.counterMetricsMap[counterKey]
 	delete(m.counterMetricsMap, counterKey)
+	if cm != nil {
+		cm.deleteTypeLabelValues()
+		if !m.hasCounterMetricsWithLabelsLocked(keyspaceID, groupName, cm.keyspaceName, cm.groupName) {
+			deleteSharedCounterMetricLabelValues(cm.keyspaceName, cm.groupName)
+		}
+	} else {
+		deleteTypeCounterMetricLabelValues(keyspaceName, groupName, ruType)
+	}
+
+	deleteRequestMetrics := ruType == defaultTypeLabel
+	if deleteRequestMetrics {
+		m.deleteRequestMetricsLocked(keyspaceID, keyspaceName, groupName)
+	}
+
+	if !deleteGroupMetrics {
+		return
+	}
+	if cm != nil {
+		deleteSharedCounterMetricLabelValues(cm.keyspaceName, cm.groupName)
+	} else {
+		deleteSharedCounterMetricLabelValues(keyspaceName, groupName)
+	}
+	for key, counter := range m.counterMetricsMap {
+		if key.keyspaceID != keyspaceID || key.groupName != groupName {
+			continue
+		}
+		delete(m.counterMetricsMap, key)
+		if counter != nil {
+			counter.deleteLabelValues()
+		} else {
+			deleteCounterMetricLabelValues(keyspaceName, groupName, key.ruType)
+		}
+	}
+
 	gaugeKey := metricsKey{keyspaceID, groupName, ""}
 	gm := m.gaugeMetricsMap[gaugeKey]
 	delete(m.gaugeMetricsMap, gaugeKey)
-	requestKey := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
-	rm := m.requestMetricsMap[requestKey]
-	delete(m.requestMetricsMap, requestKey)
+	tKey := trackerKey{keyspaceID, groupName}
+	tracker := m.maxPerSecTrackerMap[tKey]
+	delete(m.maxPerSecTrackerMap, tKey)
 
-	if cm != nil {
-		cm.deleteLabelValues()
-	} else {
-		deleteCounterMetricLabelValues(keyspaceName, groupName, ruType)
-	}
 	if gm != nil {
 		gm.deleteLabelValues()
 	} else {
 		deleteGaugeMetricLabelValues(keyspaceName, groupName)
 	}
-	if rm != nil {
-		rm.deleteLabelValues()
+	if !deleteRequestMetrics {
+		m.deleteRequestMetricsLocked(keyspaceID, keyspaceName, groupName)
+	}
+	if tracker != nil {
+		tracker.deleteLabelValues()
 	} else {
-		deleteRequestMetricLabelValues(keyspaceName, groupName)
+		deleteMaxPerSecTrackerLabelValues(keyspaceName, groupName)
 	}
 }
 
-func (m *metrics) getStaleConsumptionRecords(now time.Time) []consumptionRecordKey {
+func (m *metrics) deleteRequestMetricsLocked(keyspaceID uint32, keyspaceName, groupName string) {
+	requestKey := requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}
+	rm := m.requestMetricsMap[requestKey]
+	delete(m.requestMetricsMap, requestKey)
+	if rm != nil {
+		rm.deleteLabelValues()
+		return
+	}
+	deleteRequestMetricLabelValues(keyspaceName, groupName)
+}
+
+func (m *metrics) getStaleConsumptionRecords(now time.Time) []staleConsumptionRecord {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	records := make([]consumptionRecordKey, 0)
+	records := make([]staleConsumptionRecord, 0)
 	for r, lastTime := range m.consumptionRecordMap {
 		if now.Sub(lastTime) > metricsCleanupTimeout {
-			records = append(records, r)
+			records = append(records, staleConsumptionRecord{
+				key:        r,
+				lastUpdate: lastTime,
+			})
 		}
 	}
 	return records
@@ -515,9 +555,59 @@ func (m *metrics) recordConsumption(
 }
 
 func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
-	m.deleteConsumptionRecord(r)
-	m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
-	m.deleteMaxPerSecTracker(r.keyspaceID, keyspaceName, r.groupName)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cleanupAllMetricsLocked(r, keyspaceName)
+}
+
+func (m *metrics) cleanupStaleMetrics(r staleConsumptionRecord, keyspaceName string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	lastUpdate, ok := m.consumptionRecordMap[r.key]
+	if !ok || !lastUpdate.Equal(r.lastUpdate) {
+		return false
+	}
+	m.cleanupAllMetricsLocked(r.key, keyspaceName)
+	return true
+}
+
+func (m *metrics) cleanupAllMetricsLocked(r consumptionRecordKey, keyspaceName string) {
+	delete(m.consumptionRecordMap, r)
+	deleteGroupMetrics := !m.hasConsumptionRecordLocked(r.keyspaceID, r.groupName)
+	m.deleteMetricsLocked(r.keyspaceID, keyspaceName, r.groupName, r.ruType, deleteGroupMetrics)
+}
+
+func (m *metrics) hasConsumptionRecordLocked(keyspaceID uint32, groupName string) bool {
+	for r := range m.consumptionRecordMap {
+		if r.keyspaceID == keyspaceID && r.groupName == groupName {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *metrics) hasCounterMetricsWithLabelsLocked(keyspaceID uint32, groupName, keyspaceName, labelGroupName string) bool {
+	for key, counter := range m.counterMetricsMap {
+		if key.keyspaceID != keyspaceID || key.groupName != groupName {
+			continue
+		}
+		if counter != nil && counter.keyspaceName == keyspaceName && counter.groupName == labelGroupName {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *metrics) hasOtherCounterMetricsWithLabelsLocked(excludedKey metricsKey, keyspaceName, labelGroupName string) bool {
+	for key, counter := range m.counterMetricsMap {
+		if key == excludedKey || key.keyspaceID != excludedKey.keyspaceID || key.groupName != excludedKey.groupName {
+			continue
+		}
+		if counter != nil && counter.keyspaceName == keyspaceName && counter.groupName == labelGroupName {
+			return true
+		}
+	}
+	return false
 }
 
 type counterMetrics struct {
@@ -575,6 +665,13 @@ func (m *counterMetrics) deleteLabelValues() {
 		return
 	}
 	deleteCounterMetricLabelValues(m.keyspaceName, m.groupName, m.ruLabelType)
+}
+
+func (m *counterMetrics) deleteTypeLabelValues() {
+	if m == nil {
+		return
+	}
+	deleteTypeCounterMetricLabelValues(m.keyspaceName, m.groupName, m.ruLabelType)
 }
 
 func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) float64 {
@@ -693,15 +790,12 @@ func (m *requestMetrics) deleteLabelValues() {
 	deleteRequestMetricLabelValues(m.keyspaceName, m.groupName)
 }
 
-func (m *requestMetrics) touchRecord(metrics *metrics, keyspaceID uint32, groupName string, now time.Time) {
+func (m *requestMetrics) shouldTouchRecord(now time.Time) bool {
 	last := m.lastRecordUnix.Load()
 	if now.Sub(time.Unix(0, last)) < metricsCleanupInterval {
-		return
+		return false
 	}
-	if !m.lastRecordUnix.CompareAndSwap(last, now.UnixNano()) {
-		return
-	}
-	metrics.insertConsumptionRecord(keyspaceID, groupName, defaultTypeLabel, now)
+	return true
 }
 
 func (m *requestMetrics) observe(observation requestMetricsObservation) {
@@ -809,15 +903,28 @@ func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
 	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
 }
 
-func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
+func (m *metrics) setOrRemoveServiceLimitMetrics(keyspaceID uint32, keyspaceName string, limit float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if oldKeyspaceName, ok := m.serviceLimitMetricsMap[keyspaceID]; ok && oldKeyspaceName != keyspaceName {
+		serviceLimit.DeleteLabelValues(oldKeyspaceName)
+		delete(m.serviceLimitMetricsMap, keyspaceID)
+	}
 	if limit > 0 {
 		serviceLimit.WithLabelValues(keyspaceName).Set(limit)
+		m.serviceLimitMetricsMap[keyspaceID] = keyspaceName
 	} else {
 		serviceLimit.DeleteLabelValues(keyspaceName)
+		delete(m.serviceLimitMetricsMap, keyspaceID)
 	}
 }
 
 func deleteCounterMetricLabelValues(keyspaceName, groupName, ruLabelType string) {
+	deleteTypeCounterMetricLabelValues(keyspaceName, groupName, ruLabelType)
+	deleteSharedCounterMetricLabelValues(keyspaceName, groupName)
+}
+
+func deleteTypeCounterMetricLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
@@ -825,13 +932,16 @@ func deleteCounterMetricLabelValues(keyspaceName, groupName, ruLabelType string)
 	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tiflashRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	crossAZTrafficCost.DeleteLabelValues(groupName, readTypeLabel, keyspaceName)
-	crossAZTrafficCost.DeleteLabelValues(groupName, writeTypeLabel, keyspaceName)
 	kvCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	sqlCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+}
+
+func deleteSharedCounterMetricLabelValues(keyspaceName, groupName string) {
+	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, readTypeLabel, keyspaceName)
+	crossAZTrafficCost.DeleteLabelValues(groupName, writeTypeLabel, keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, writeTypeLabel, keyspaceName)
 }
