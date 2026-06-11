@@ -156,11 +156,11 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsetInvalidInput() {
 	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
 		"--group", "=addr.example.com")
 	re.NoError(err)
-	re.Contains(string(output), "ID cannot be empty")
+	re.Contains(string(output), "(expected id=addr1,addr2,...)")
 
 	// Empty address.
 	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
 		"--group", "group-x=")
 	re.NoError(err)
-	re.Contains(string(output), "address cannot be empty")
+	re.Contains(string(output), "(expected id=addr1,addr2,...)")
 }

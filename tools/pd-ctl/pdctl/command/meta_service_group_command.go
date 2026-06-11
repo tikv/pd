@@ -64,7 +64,7 @@ func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 
 func newUpsetMetaServiceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "upset",
+		Use:   "upset --group <id=addr1,addr2,...> [--group <id=addr1,addr2,...> ...]",
 		Short: "upset one or more meta-service groups",
 		Run:   newUpsetMetaServiceGroupFunc,
 	}

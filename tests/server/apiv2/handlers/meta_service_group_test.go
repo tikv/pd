@@ -167,8 +167,6 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	deletePatch := map[string]*string{
 		"etcd-group-4": nil,
 	}
-	groups = mustAddMetaServiceGroups(re, suite.server, deletePatch)
-	for _, group := range groups {
-		re.NotEqual("etcd-group-4", group.ID, "etcd-group-4 should be deleted")
-	}
+	// can't delete group with assigned keyspaces, so the operation should fail and the group should still exist.
+	mustPatchMetaServiceGroupsFail(re, suite.server, deletePatch)
 }
