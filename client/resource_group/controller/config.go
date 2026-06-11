@@ -30,6 +30,7 @@ const (
 	tokenReserveFraction           = 0.8
 	consumptionsReportingThreshold = 100
 	extendedReportingPeriodFactor  = 4
+	demandRUScale                  = 100
 	// defaultGroupCleanupInterval is the interval to clean up the deleted resource groups in memory.
 	defaultGroupCleanupInterval = 5 * time.Minute
 	// defaultGroupStateUpdateInterval is the interval to update the state of the resource groups.
