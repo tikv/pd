@@ -339,13 +339,15 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
-	avgRUPerSec, ok := gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption))
-	if !ok {
-		return
+	avgRUPerSec, demandRUPerSec, avgOK, demandOK := gc.calcAvgAndDemand(counter, getRUValueFromConsumption(gc.run.consumption))
+	if demandOK {
+		gc.metrics.demandRUPerSecGauge.Set(demandRUPerSec)
 	}
-	gc.metrics.avgRUPerSecGauge.Set(avgRUPerSec)
-	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
-	gc.burstable.Store(isBurstable)
+	if avgOK {
+		gc.metrics.avgRUPerSecGauge.Set(avgRUPerSec)
+		logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
+		gc.burstable.Store(isBurstable)
+	}
 }
 
 func (gc *groupCostController) resetEmergencyTokenAcquisition() {
@@ -373,26 +375,21 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 	}
 }
 
-func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) (float64, bool) {
+func (gc *groupCostController) calcAvgAndDemand(counter *tokenCounter, new float64) (float64, float64, bool, bool) {
 	counter.avgMu.Lock()
 	defer counter.avgMu.Unlock()
-	ok := calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
-	return counter.avgRUPerSec, ok
+	avgOK := calcMovingAvgAt(gc.run.now, &counter.avgRUPerSec, &counter.avgRUPerSecLastRU, &counter.avgLastTime, new)
+	demandOK := calcMovingAvgAt(gc.run.now, &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
+	return counter.avgRUPerSec, counter.demandRUPerSec, avgOK, demandOK
 }
 
-func (gc *groupCostController) calcDemandAvg(counter *tokenCounter, delta float64) bool {
+func recordDemand(counter *tokenCounter, delta float64) {
 	if delta <= 0 {
-		return false
+		return
 	}
 	counter.avgMu.Lock()
 	counter.demandTotalRU += delta
-	ok := calcMovingAvgAt(time.Now(), &counter.demandRUPerSec, &counter.demandRUPerSecLastRU, &counter.demandAvgLastTime, counter.demandTotalRU)
-	demandRUPerSec := counter.demandRUPerSec
 	counter.avgMu.Unlock()
-	if ok {
-		gc.metrics.demandRUPerSecGauge.Set(demandRUPerSec)
-	}
-	return ok
 }
 
 func calcMovingAvgAt(now time.Time, avg *float64, lastRU *float64, lastTime *time.Time, new float64) bool {
@@ -616,7 +613,7 @@ func observeCounterDelta(chargeCounter, refundCounter prometheus.Counter, delta 
 
 func (gc *groupCostController) observeDemand(delta *rmpb.Consumption) {
 	if v := getRUValueFromConsumption(delta); v > 0 {
-		gc.calcDemandAvg(gc.run.requestUnitTokens, v)
+		recordDemand(gc.run.requestUnitTokens, v)
 	}
 }
 

@@ -413,7 +413,10 @@ func TestOnRequestWaitUpdatesDemandMetricOnThrottle(t *testing.T) {
 		newFillRate: 1,
 		newBurst:    1,
 	})
-	counter.demandAvgLastTime = time.Now().Add(-time.Second)
+	now := time.Now()
+	counter.avgLastTime = now.Add(-time.Second)
+	counter.demandAvgLastTime = now.Add(-time.Second)
+	gc.run.now = now
 
 	before := promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name))
 	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), &TestRequestInfo{
@@ -422,6 +425,9 @@ func TestOnRequestWaitUpdatesDemandMetricOnThrottle(t *testing.T) {
 	})
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	re.Equal(before, promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)))
+
+	gc.updateAvgRequestResourcePerSec()
 	re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), before)
 }
 
@@ -429,16 +435,21 @@ func TestDemandMetricSamplesConsumptionPaths(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
 	resetDemandMetric := func() {
+		now := time.Now()
 		counter := gc.run.requestUnitTokens
 		counter.avgMu.Lock()
 		counter.demandRUPerSec = 0
 		counter.demandRUPerSecLastRU = 0
 		counter.demandTotalRU = 0
-		counter.demandAvgLastTime = time.Now().Add(-time.Second)
+		counter.avgLastTime = now.Add(-time.Second)
+		counter.demandAvgLastTime = now.Add(-time.Second)
 		counter.avgMu.Unlock()
+		gc.run.now = now
 		gc.metrics.demandRUPerSecGauge.Set(0)
 	}
 	requireDemandObserved := func() {
+		re.Equal(0.0, promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)))
+		gc.updateAvgRequestResourcePerSec()
 		re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), 0.0)
 	}
 
@@ -480,6 +491,45 @@ func TestDemandMetricSamplesConsumptionPaths(t *testing.T) {
 	resetDemandMetric()
 	gc.addRUConsumption(&rmpb.Consumption{RRU: 3, WRU: 5})
 	requireDemandObserved()
+}
+
+func TestObserveDemandDoesNotUpdateDemandMetricImmediately(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	counter := gc.run.requestUnitTokens
+	now := time.Now()
+	counter.avgLastTime = now.Add(-time.Second)
+	counter.demandAvgLastTime = now.Add(-time.Second)
+	gc.run.now = now
+
+	before := promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name))
+	gc.observeDemand(&rmpb.Consumption{RRU: 100})
+	re.Equal(before, promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)))
+
+	gc.updateAvgRequestResourcePerSec()
+	re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), before)
+}
+
+func TestDemandMetricDecaysWithoutNewDemand(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	counter := gc.run.requestUnitTokens
+
+	now := time.Now()
+	counter.avgLastTime = now.Add(-time.Second)
+	counter.demandAvgLastTime = now.Add(-time.Second)
+	gc.run.now = now
+	gc.observeDemand(&rmpb.Consumption{RRU: 100})
+	gc.updateAvgRequestResourcePerSec()
+	first := promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name))
+	re.Greater(first, 0.0)
+
+	now = now.Add(time.Second)
+	counter.avgLastTime = now.Add(-time.Second)
+	counter.demandAvgLastTime = now.Add(-time.Second)
+	gc.run.now = now
+	gc.updateAvgRequestResourcePerSec()
+	re.Less(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), first)
 }
 
 func TestDemandStatsConcurrentLogFields(t *testing.T) {
