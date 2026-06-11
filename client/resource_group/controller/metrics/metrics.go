@@ -21,7 +21,6 @@ const (
 	requestSubsystem       = "request"
 	tokenRequestSubsystem  = "token_request"
 	resourceGroupSubsystem = "resource_group"
-	resourceUnitSubsystem  = "resource_unit"
 	resourceSubsystem      = "resource"
 
 	// TODO: remove old label in 8.x
@@ -90,7 +89,7 @@ func initMetrics(constLabels prometheus.Labels) {
 	ResourceGroupStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace:   namespace,
-			Subsystem:   "resource_group",
+			Subsystem:   resourceGroupSubsystem,
 			Name:        "status",
 			Help:        "Status of the resource group.",
 			ConstLabels: constLabels,
