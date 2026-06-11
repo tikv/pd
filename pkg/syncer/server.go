@@ -266,16 +266,13 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 					break loop
 				}
 			}
-			s.reserveHistoryAppendWindowForDownstreams(len(records))
-			for _, region := range records {
-				s.history.record(region)
-			}
-			s.broadcast(ctx, records, false)
+			s.appendHistoryRecords(records)
+			s.notifyDownstreams(ctx, false)
 		case <-shrinkTicker.C:
 			s.observeHistoryWindowForDownstreams()
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
-			s.broadcast(ctx, nil, true)
+			s.notifyDownstreams(ctx, true)
 		}
 		records = records[:0]
 	}
@@ -318,6 +315,13 @@ func (s *RegionSyncer) reserveHistoryAppendWindowForDownstreams(appendCount int)
 		return
 	}
 	s.history.reserveAppendWindowFrom(minIndex, appendCount)
+}
+
+func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
+	s.reserveHistoryAppendWindowForDownstreams(len(records))
+	for _, region := range records {
+		s.history.record(region)
+	}
 }
 
 func (s *RegionSyncer) observeHistoryWindowForDownstreams() {
@@ -685,16 +689,14 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 	}
 }
 
-func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
+func (s *RegionSyncer) notifyDownstreams(ctx context.Context, keepAlive bool) {
 	defer logutil.LogPanic()
 	s.mu.RLock()
 	for _, sender := range s.mu.streams {
 		if ctx.Err() != nil {
 			break
 		}
-		if len(records) != 0 || keepAlive {
-			sender.notify(keepAlive)
-		}
+		sender.notify(keepAlive)
 	}
 	s.mu.RUnlock()
 }
