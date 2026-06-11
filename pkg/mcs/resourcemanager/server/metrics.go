@@ -792,10 +792,7 @@ func (m *requestMetrics) deleteLabelValues() {
 
 func (m *requestMetrics) shouldTouchRecord(now time.Time) bool {
 	last := m.lastRecordUnix.Load()
-	if now.Sub(time.Unix(0, last)) < metricsCleanupInterval {
-		return false
-	}
-	return true
+	return now.Sub(time.Unix(0, last)) >= metricsCleanupInterval
 }
 
 func (m *requestMetrics) observe(observation requestMetricsObservation) {
