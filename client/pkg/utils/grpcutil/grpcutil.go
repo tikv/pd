@@ -114,7 +114,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	})
 
 	do = append(do, opt, cbOpt, backoffOpts)
-	cc, err := grpc.DialContext(ctx, u.Host, do...)
+	cc, err := grpc.DialContext(ctx, u.Host, do...) //nolint:staticcheck // grpc.DialContext remains supported throughout grpc 1.x.
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}

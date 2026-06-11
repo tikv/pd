@@ -105,7 +105,7 @@ func (c *client) pdClient() pdpb.PDClient {
 }
 
 func createConn(url string) (*grpc.ClientConn, error) {
-	cc, err := grpc.Dial(strings.TrimPrefix(url, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	cc, err := grpc.Dial(strings.TrimPrefix(url, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck // grpc.Dial remains supported throughout grpc 1.x.
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

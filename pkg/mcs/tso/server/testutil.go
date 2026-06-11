@@ -26,7 +26,7 @@ import (
 
 // MustNewGrpcClient must create a new TSO grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck // grpc.Dial remains supported throughout grpc 1.x.
 	re.NoError(err)
 	return conn, tsopb.NewTSOClient(conn)
 }

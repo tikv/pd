@@ -80,7 +80,7 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 
 // MustNewGrpcClient must create a new PD grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck // grpc.Dial remains supported throughout grpc 1.x.
 	re.NoError(err)
 	return pdpb.NewPDClient(conn)
 }
