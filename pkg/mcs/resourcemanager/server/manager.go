@@ -670,6 +670,30 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 	return loadedName, nil
 }
 
+func (m *Manager) getKeyspaceNameForMetrics(ctx context.Context, id uint32) string {
+	name, err := m.getKeyspaceNameByID(ctx, id)
+	if err == nil {
+		return name
+	}
+	if id == constant.NullKeyspaceID {
+		return ""
+	}
+	return fmt.Sprintf("keyspace-%d", id)
+}
+
+func (m *Manager) getCachedKeyspaceNameForMetrics(id uint32) string {
+	if id == constant.NullKeyspaceID {
+		return ""
+	}
+	m.RLock()
+	name, ok := m.keyspaceNameLookup[id]
+	m.RUnlock()
+	if ok {
+		return name
+	}
+	return fmt.Sprintf("keyspace-%d", id)
+}
+
 func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
 	m.Lock()
 	defer m.Unlock()
@@ -732,10 +756,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				continue
 			}
 			keyspaceID := consumptionInfo.keyspaceID
-			keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceID)
-			if err != nil {
-				continue
-			}
+			keyspaceName := m.getKeyspaceNameForMetrics(ctx, keyspaceID)
 			consumptionInfo.keyspaceName = keyspaceName
 			m.ruCollector.Collect(consumptionInfo)
 			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
@@ -745,16 +766,11 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.metrics.consumptionRecordMap {
-				if time.Since(lastTime) <= metricsCleanupTimeout {
-					continue
+			for _, r := range m.metrics.getStaleConsumptionRecords(time.Now()) {
+				keyspaceName := m.getKeyspaceNameForMetrics(ctx, r.key.keyspaceID)
+				if m.metrics.cleanupStaleMetrics(r, keyspaceName) {
+					m.ruCollector.remove(keyspaceName)
 				}
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, r.keyspaceID)
-				if err != nil {
-					continue
-				}
-				m.metrics.cleanupAllMetrics(r, keyspaceName)
-				m.ruCollector.remove(keyspaceName)
 			}
 			// Clean up the stale RU trackers.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
@@ -779,24 +795,25 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				// Conciliate the fill rates.
 				krgm.conciliateFillRates()
 				// Record the metrics.
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
-				if err != nil {
-					continue
-				}
-				setOrRemoveServiceLimitMetrics(keyspaceName, krgm.getServiceLimiter().getServiceLimit())
-
-				for _, group := range krgm.getResourceGroupList(true, true) {
-					groupName := group.Name
-					// Record the sum of RRU and WRU every second.
-					m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
-					metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
-					metrics.setGroup(group, keyspaceName)
-					// Record the tracked RU per second.
-					if grt := krgm.getGroupRUTracker(groupName); grt != nil {
-						metrics.setSampledRUPerSec(grt.getRUPerSec())
-					}
-				}
+				m.flushResourceGroupMetrics(ctx, krgm)
 			}
+		}
+	}
+}
+
+func (m *Manager) flushResourceGroupMetrics(ctx context.Context, krgm *keyspaceResourceGroupManager) {
+	keyspaceName := m.getKeyspaceNameForMetrics(ctx, krgm.keyspaceID)
+	m.metrics.setOrRemoveServiceLimitMetrics(krgm.keyspaceID, keyspaceName, krgm.getServiceLimiter().getServiceLimit())
+
+	for _, group := range krgm.getMutableResourceGroupList() {
+		groupName := group.Name
+		// Record the sum of RRU and WRU every second.
+		m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
+		metrics := m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName)
+		metrics.setGroup(group, keyspaceName)
+		// Record the tracked RU per second.
+		if grt := krgm.getGroupRUTracker(groupName); grt != nil {
+			metrics.setSampledRUPerSec(grt.getRUPerSec())
 		}
 	}
 }
