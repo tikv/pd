@@ -259,7 +259,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			s.closeAllClient()
 			return
 		case first := <-regionNotifier:
-			failpoint.Call(_curpkg_("syncRegionChannelFull"))
+			failpoint.InjectCall("syncRegionChannelFull")
 
 			processRegion(first)
 		loop:
@@ -479,13 +479,13 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		select {
 		case <-ctx.Done():
 			log.Info("discontinue sending sync region response")
-			if _, _err_ := failpoint.Eval(_curpkg_("noFastExitSync")); _err_ == nil {
-				goto doSync
-			}
+			failpoint.Inject("noFastExitSync", func() {
+				failpoint.Goto("doSync")
+			})
 			return nil
 		default:
 		}
-	doSync:
+		failpoint.Label("doSync")
 		metas = append(metas, r.GetMeta())
 		stats = append(stats, r.GetStat())
 		leader := &metapb.Peer{}
@@ -686,7 +686,7 @@ func (s *RegionSyncer) sendRegionSyncResponseWithOptions(
 	watchDone bool,
 ) bool {
 	var sendErr error
-	failpoint.Call(_curpkg_("regionSyncerSendFail"), name, &sendErr)
+	failpoint.InjectCall("regionSyncerSendFail", name, &sendErr)
 	if sendErr != nil {
 		log.Warn("region syncer send data meet error", zap.String("name", name),
 			errs.ZapError(errs.ErrGRPCSend, sendErr))

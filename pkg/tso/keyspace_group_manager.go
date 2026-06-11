@@ -537,12 +537,12 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
-		if val, _err_ := failpoint.Eval(_curpkg_("SkipKeyspaceWatch")); _err_ == nil {
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
 			if ok && addr == kgm.electionNamePrefix {
-				return nil
+				failpoint.Return(nil)
 			}
-		}
+		})
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -563,12 +563,12 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
 		}
-		if val, _err_ := failpoint.Eval(_curpkg_("SkipKeyspaceWatch")); _err_ == nil {
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
 			if ok && addr == kgm.electionNamePrefix {
-				return nil
+				failpoint.Return(nil)
 			}
-		}
+		})
 		if len(event) > 0 {
 			last := event[len(event)-1]
 			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
@@ -619,9 +619,9 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 
-	if _, _err_ := failpoint.Eval(_curpkg_("fastPrimaryPriorityCheck")); _err_ == nil {
+	failpoint.Inject("fastPrimaryPriorityCheck", func() {
 		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
-	}
+	})
 
 	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
 	defer ticker.Stop()
@@ -743,7 +743,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		kgm.metrics.mergeTargetGauge.Dec()
 	}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("delayBeforeCheckingElectionMember")); _err_ == nil {
+	failpoint.Inject("delayBeforeCheckingElectionMember", func() {
 		if oldAM == nil && (group.IsSplitTarget() || group.IsSplitSource()) {
 			log.Info("INJECTED DELAY before update the keyspace group",
 				zap.Uint32("target-group-id", group.ID),
@@ -751,7 +751,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 				zap.Int("keyspaces-count", len(group.Keyspaces)))
 			time.Sleep(10 * time.Second) // Adjust this to match client query timing
 		}
-	}
+	})
 
 	// If this host is already assigned a replica of this keyspace group, i.e., the member
 	// is already initialized, just update the meta.
@@ -1467,9 +1467,9 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
-	if _, _err_ := failpoint.Eval(_curpkg_("fastGroupSplitPatroller")); _err_ == nil {
+	failpoint.Inject("fastGroupSplitPatroller", func() {
 		patrolInterval = 3 * time.Second
-	}
+	})
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()
 	log.Info("group split patroller is started",
@@ -1543,9 +1543,9 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
-	if _, _err_ := failpoint.Eval(_curpkg_("fastDeletedGroupCleaner")); _err_ == nil {
+	failpoint.Inject("fastDeletedGroupCleaner", func() {
 		patrolInterval = 200 * time.Millisecond
-	}
+	})
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()
 	log.Info("deleted group cleaner is started",

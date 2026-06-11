@@ -554,7 +554,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return 0, nil
 	}
-	failpoint.Call(_curpkg_("waitReservationsBeforeSelect"))
+	failpoint.InjectCall("waitReservationsBeforeSelect")
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 

@@ -77,11 +77,11 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
-	if _, _err_ := failpoint.Eval(_curpkg_("RejectGetRegionByIDWhenAccessLeader")); _err_ == nil {
+	failpoint.Inject("RejectGetRegionByIDWhenAccessLeader", func() {
 		if h.svr.GetMember().IsServing() {
 			regionInfo = nil
 		}
-	}
+	})
 	if regionInfo == nil {
 		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return
@@ -179,10 +179,10 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	regions := rc.GetRegions()
-	if _, _err_ := failpoint.Eval(_curpkg_("slowRequest")); _err_ == nil {
+	failpoint.Inject("slowRequest", func() {
 		// Simulate a slow request.
 		<-time.After(5 * time.Second)
-	}
+	})
 
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {

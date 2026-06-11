@@ -305,7 +305,7 @@ func (s *tsoStream) processRequests(
 	}
 	s.state.Store(prevState)
 
-	failpoint.Call(_curpkg_("pauseAfterTSORequestAttachedToStream"))
+	failpoint.InjectCall("pauseAfterTSORequestAttachedToStream")
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid
@@ -454,17 +454,17 @@ recvLoop:
 // EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
 // this function returns 0.
 func (s *tsoStream) EstimatedRPCLatency() time.Duration {
-	if val, _err_ := failpoint.Eval(_curpkg_("tsoStreamSimulateEstimatedRPCLatency")); _err_ == nil {
+	failpoint.Inject("tsoStreamSimulateEstimatedRPCLatency", func(val failpoint.Value) {
 		if s, ok := val.(string); ok {
 			duration, err := time.ParseDuration(s)
 			if err != nil {
 				panic(err)
 			}
-			return duration
+			failpoint.Return(duration)
 		} else {
 			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
 		}
-	}
+	})
 	latencyUs := s.estimatedLatencyMicros.Load()
 	// Limit it at least 100us
 	if latencyUs < 100 {

@@ -27,10 +27,10 @@ var (
 
 // IsNextGen returns true if the current kernel type is NextGen.
 func IsNextGen() bool {
-	if val, _err_ := failpoint.Eval(_curpkg_("mockNextGenBuildFlag")); _err_ == nil {
+	failpoint.Inject("mockNextGenBuildFlag", func(val failpoint.Value) {
 		if v, ok := val.(bool); ok {
-			return v
+			failpoint.Return(v)
 		}
-	}
+	})
 	return false
 }

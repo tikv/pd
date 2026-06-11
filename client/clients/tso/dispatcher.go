@@ -89,9 +89,9 @@ func newTSODispatcher(
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
 	tsoRequestCh := make(chan *Request, maxBatchSize*2)
-	if _, _err_ := failpoint.Eval(_curpkg_("shortDispatcherChannel")); _err_ == nil {
+	failpoint.Inject("shortDispatcherChannel", func() {
 		tsoRequestCh = make(chan *Request, 1)
-	}
+	})
 
 	// A large-enough capacity to hold maximum concurrent RPC requests. In our design, the concurrency is at most 16.
 	const tokenChCapacity = 64
@@ -274,9 +274,9 @@ tsoBatchLoop:
 		}
 
 		noDelay := false
-		if _, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherConcurrentModeNoDelay")); _err_ == nil {
+		failpoint.Inject("tsoDispatcherConcurrentModeNoDelay", func() {
 			noDelay = true
-		}
+		})
 
 		// If concurrent RPC is enabled, the time for collecting each request batch is expected to be
 		// estimatedRPCDuration / concurrency. Note the time mentioned here is counted from starting trying to collect
@@ -287,7 +287,7 @@ tsoBatchLoop:
 			estimatedLatency := stream.EstimatedRPCLatency()
 			goalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
 
-			if val, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherConcurrentModeAssertDelayDuration")); _err_ == nil {
+			failpoint.Inject("tsoDispatcherConcurrentModeAssertDelayDuration", func(val failpoint.Value) {
 				if s, ok := val.(string); ok {
 					expected, err := time.ParseDuration(s)
 					if err != nil {
@@ -299,7 +299,7 @@ tsoBatchLoop:
 				} else {
 					panic("invalid value for failpoint tsoDispatcherConcurrentModeAssertDelayDuration: expected string")
 				}
-			}
+			})
 
 			waitTimerStart := time.Now()
 			remainingBatchTime := goalBatchTime - waitTimerStart.Sub(currentBatchStartTime)
@@ -573,9 +573,9 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 	immediatelyUpdate := td.rpcConcurrency > 1 && maxBatchWaitInterval > 0
 
 	// Allow always updating for test purpose.
-	if _, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherAlwaysCheckConcurrency")); _err_ == nil {
+	failpoint.Inject("tsoDispatcherAlwaysCheckConcurrency", func() {
 		immediatelyUpdate = true
-	}
+	})
 
 	if !immediatelyUpdate && now.Sub(td.lastCheckConcurrencyTime) < dispatcherCheckRPCConcurrencyInterval {
 		return nil

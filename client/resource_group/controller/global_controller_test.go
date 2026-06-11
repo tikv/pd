@@ -61,9 +61,9 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 
 func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	var err error
-	if _, _err_ := failpoint.Eval(_curpkg_("gerResourceGroupError")); _err_ == nil {
+	failpoint.Inject("gerResourceGroupError", func() {
 		err = errors.New("fake get resource group error")
-	}
+	})
 	if err != nil {
 		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
 	}

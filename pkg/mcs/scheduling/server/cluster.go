@@ -372,9 +372,9 @@ func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	defer cancel()
 	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("allocIDNonBatch")); _err_ == nil {
+	failpoint.Inject("allocIDNonBatch", func() {
 		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
-	}
+	})
 	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()

@@ -159,9 +159,9 @@ func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	recoverySec := conf.RecoverySec
-	if _, _err_ := failpoint.Eval(_curpkg_("transientRecoveryGap")); _err_ == nil {
+	failpoint.Inject("transientRecoveryGap", func() {
 		recoverySec = 0
-	}
+	})
 	return conf.lastCandidateCapturedSecs() >= recoverySec
 }
 
@@ -456,9 +456,9 @@ func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSl
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {
 	isRaftKV2 := cluster.GetStoreConfig().IsRaftKV2()
-	if _, _err_ := failpoint.Eval(_curpkg_("mockRaftKV2")); _err_ == nil {
+	failpoint.Inject("mockRaftKV2", func() {
 		isRaftKV2 = true
-	}
+	})
 	stores := cluster.GetStores()
 	if len(stores) < 3 {
 		storeSlowTrendActionStatusGauge.WithLabelValues("candidate", "none_too_few").Inc()

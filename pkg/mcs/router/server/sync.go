@@ -116,9 +116,9 @@ func (s *RegionSyncer) updatePDMemberLoop() {
 	defer s.wg.Done()
 
 	ticker := time.NewTicker(memberUpdateInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("speedUpMemberLoop")); _err_ == nil {
+	failpoint.Inject("speedUpMemberLoop", func() {
 		ticker.Reset(100 * time.Millisecond)
-	}
+	})
 	defer ticker.Stop()
 	var curLeader uint64
 	for {
@@ -262,9 +262,9 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 		}
 
 		stream, err := s.syncRegion(ctx, conn)
-		if _, _err_ := failpoint.Eval(_curpkg_("disableClientStreaming")); _err_ == nil {
+		failpoint.Inject("disableClientStreaming", func() {
 			err = errors.Errorf("no stream")
-		}
+		})
 		if err != nil {
 			if ev, ok := status.FromError(err); ok {
 				if ev.Code() == codes.Canceled {
@@ -283,9 +283,9 @@ func (s *RegionSyncer) sync(ctx context.Context, leaderAddr string) {
 		log.Info("server starts to synchronize with leader", zap.String("server", s.name), zap.String("leader", leaderAddr), zap.Uint64("request-index", s.nextSyncIndex))
 		for {
 			resp, err := stream.Recv()
-			if _, _err_ := failpoint.Eval(_curpkg_("syncMetError")); _err_ == nil {
+			failpoint.Inject("syncMetError", func() {
 				err = errors.Errorf("sync met error")
-			}
+			})
 			if err == io.EOF {
 				log.Info("region sync with leader meets EOF, stop syncing", zap.String("server", s.name))
 				return

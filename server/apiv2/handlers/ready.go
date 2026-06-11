@@ -163,11 +163,11 @@ func checkLeaderPromotion(_ context.Context, svr *server.Server) error {
 	}
 
 	regionLoaded := storage.AreRegionsLoaded(s)
-	if val, _err_ := failpoint.Eval(_curpkg_("loadRegionSlow")); _err_ == nil {
+	failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
 		if addr, ok := val.(string); ok && svr.GetAddr() == addr {
 			regionLoaded = false
 		}
-	}
+	})
 
 	if !regionLoaded {
 		return errors.New("regions not loaded")
@@ -177,11 +177,11 @@ func checkLeaderPromotion(_ context.Context, svr *server.Server) error {
 
 // checkEtcdSerializableRead checks if a local etcd read is ok.
 func checkEtcdSerializableRead(ctx context.Context, svr *server.Server) error {
-	if val, _err_ := failpoint.Eval(_curpkg_("etcdSerializableReadError")); _err_ == nil {
+	failpoint.Inject("etcdSerializableReadError", func(val failpoint.Value) {
 		if addr, ok := val.(string); ok && addr == svr.GetAddr() {
-			return errors.New("injected serializable read error")
+			failpoint.Return(errors.New("injected serializable read error"))
 		}
-	}
+	})
 	// Ref: https://github.com/etcd-io/etcd/blob/9a5533382d84999e4e79642e1ec0f8bfa9b70ba8/server/etcdserver/api/etcdhttp/health.go#L454
 	etcdServer := svr.GetMember().Etcd().Server
 	_, err := etcdServer.Range(ctx, &etcdserverpb.RangeRequest{KeysOnly: true, Limit: 1, Serializable: true})
@@ -193,11 +193,11 @@ func checkEtcdSerializableRead(ctx context.Context, svr *server.Server) error {
 
 // checkEtcdLinearizableRead checks if there is consensus in the cluster.
 func checkEtcdLinearizableRead(ctx context.Context, svr *server.Server) error {
-	if val, _err_ := failpoint.Eval(_curpkg_("etcdLinearizableReadError")); _err_ == nil {
+	failpoint.Inject("etcdLinearizableReadError", func(val failpoint.Value) {
 		if addr, ok := val.(string); ok && addr == svr.GetAddr() {
-			return errors.New("injected linearizable read error")
+			failpoint.Return(errors.New("injected linearizable read error"))
 		}
-	}
+	})
 	// Ref: https://github.com/etcd-io/etcd/blob/9a5533382d84999e4e79642e1ec0f8bfa9b70ba8/server/etcdserver/api/etcdhttp/health.go#L454
 	etcdServer := svr.GetMember().Etcd().Server
 	_, err := etcdServer.Range(ctx, &etcdserverpb.RangeRequest{KeysOnly: true, Limit: 1, Serializable: false})
@@ -209,11 +209,11 @@ func checkEtcdLinearizableRead(ctx context.Context, svr *server.Server) error {
 
 // checkEtcdDataCorruption checks if there is an active data corruption alarm.
 func checkEtcdDataCorruption(_ context.Context, svr *server.Server) error {
-	if val, _err_ := failpoint.Eval(_curpkg_("etcdDataCorruptionAlarm")); _err_ == nil {
+	failpoint.Inject("etcdDataCorruptionAlarm", func(val failpoint.Value) {
 		if addr, ok := val.(string); ok && addr == svr.GetAddr() {
-			return errors.New("injected data corruption alarm")
+			failpoint.Return(errors.New("injected data corruption alarm"))
 		}
-	}
+	})
 	// Ref: https://github.com/etcd-io/etcd/blob/9a5533382d84999e4e79642e1ec0f8bfa9b70ba8/server/etcdserver/api/etcdhttp/health.go#L284
 	etcdServer := svr.GetMember().Etcd().Server
 	for _, alarm := range etcdServer.Alarms() {
@@ -226,11 +226,11 @@ func checkEtcdDataCorruption(_ context.Context, svr *server.Server) error {
 
 // checkEtcdNonLearner checks if the member is not a learner.
 func checkEtcdNonLearner(_ context.Context, svr *server.Server) error {
-	if val, _err_ := failpoint.Eval(_curpkg_("etcdIsLearner")); _err_ == nil {
+	failpoint.Inject("etcdIsLearner", func(val failpoint.Value) {
 		if addr, ok := val.(string); ok && addr == svr.GetAddr() {
-			return errors.New("injected learner state")
+			failpoint.Return(errors.New("injected learner state"))
 		}
-	}
+	})
 	// Ref: https://github.com/etcd-io/etcd/commit/989c556645115201fdfcb4ba3026867f03709975
 	etcdServer := svr.GetMember().Etcd().Server
 	if etcdServer.IsLearner() {

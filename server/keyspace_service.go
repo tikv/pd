@@ -63,12 +63,12 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("skipKeyspaceRegionCheck")); _err_ == nil {
-		return &keyspacepb.LoadKeyspaceResponse{
+	failpoint.Inject("skipKeyspaceRegionCheck", func() {
+		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
 			Header:   grpcutil.WrapHeader(),
 			Keyspace: meta,
-		}, nil
-	}
+		}, nil)
+	})
 	if !manager.CheckKeyspaceRegionBound(meta.GetId()) {
 		// If the keyspace region is not split yet, we treat it as not found.
 		// To avoid clients using the keyspace before region split is done.

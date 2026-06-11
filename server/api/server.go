@@ -178,9 +178,9 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 		serviceValidator,
 		redirector,
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("enableAddServerNameHeader")); _err_ == nil {
+	failpoint.Inject("enableAddServerNameHeader", func() {
 		middlewares = append(middlewares, addServerNameHeader(svr))
-	}
+	})
 	router.PathPrefix(APIPrefix).Handler(negroni.New(
 		append(middlewares, negroni.Wrap(r))...))
 	return router, group, nil

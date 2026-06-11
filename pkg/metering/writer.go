@@ -231,12 +231,12 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 			attempt++
 			writeCtx, cancel := context.WithTimeout(ctx, flushTimeout)
 			// Inject mock write error for testing, value is the count to encounter error.
-			if val, _err_ := failpoint.Eval(_curpkg_("mockWriteError")); _err_ == nil {
+			failpoint.Inject("mockWriteError", func(val failpoint.Value) {
 				baseDelay = time.Millisecond
 				if val.(int) >= attempt {
 					cancel()
 				}
-			}
+			})
 			// Ensure the context is valid before writing.
 			if writeCtx.Err() != nil {
 				err = writeCtx.Err()
