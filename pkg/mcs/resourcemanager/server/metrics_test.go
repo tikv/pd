@@ -388,6 +388,86 @@ func TestMaxPerSecTrackerRebindsLabelsWhenKeyspaceNameChanges(t *testing.T) {
 	re.True(hasMetric(metricName, loadedLabels))
 }
 
+func TestCleanupAllMetricsDeletesCachedLabelsWhenKeyspaceNameChanges(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID          = uint32(10872)
+		fallbackName        = "keyspace-10872"
+		loadedName          = "loaded-cleanup-keyspace"
+		groupName           = "cleanup_metrics_label_group"
+		readRUMetric        = "resource_manager_resource_unit_read_request_unit_sum"
+		crossAZMetric       = "resource_manager_resource_cross_az_traffic_byte_sum"
+		availableRUMetric   = "resource_manager_resource_unit_available_ru"
+		maxPerSecMetric     = "resource_manager_resource_unit_read_request_unit_max_per_sec"
+		grantedTokensMetric = "resource_manager_server_granted_tokens"
+	)
+	metrics := newMetrics()
+	t.Cleanup(func() {
+		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
+		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+	})
+
+	counterMetrics := metrics.getCounterMetrics(keyspaceID, fallbackName, groupName, defaultTypeLabel)
+	counterMetrics.add(&rmpb.Consumption{
+		RRU:                     1,
+		ReadCrossAzTrafficBytes: 2,
+	}, &ControllerConfig{}, keyspaceID)
+	gaugeMetrics := metrics.getGaugeMetrics(keyspaceID, fallbackName, groupName)
+	gaugeMetrics.availableRUCounter.Set(3)
+	tracker := metrics.getMaxPerSecTracker(keyspaceID, fallbackName, groupName)
+	tracker.rruMaxMetrics.Set(4)
+	requestMetrics := metrics.getRequestMetrics(keyspaceID, fallbackName, groupName, time.Now())
+	requestMetrics.observe(requestMetricsObservation{grantedTokens: 5})
+
+	readRULabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 defaultTypeLabel,
+		keyspaceNameLabel:         fallbackName,
+	}
+	crossAZLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 readTypeLabel,
+		keyspaceNameLabel:         fallbackName,
+	}
+	availableRULabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+	}
+	groupKeyspaceLabels := map[string]string{
+		newResourceGroupNameLabel: groupName,
+		keyspaceNameLabel:         fallbackName,
+	}
+	re.True(hasMetric(readRUMetric, readRULabels))
+	re.True(hasMetric(crossAZMetric, crossAZLabels))
+	re.True(hasMetric(availableRUMetric, availableRULabels))
+	re.True(hasMetric(maxPerSecMetric, groupKeyspaceLabels))
+	re.True(hasMetric(grantedTokensMetric, groupKeyspaceLabels))
+
+	metrics.cleanupAllMetrics(consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}, loadedName)
+
+	re.False(hasMetric(readRUMetric, readRULabels))
+	re.False(hasMetric(crossAZMetric, crossAZLabels))
+	re.False(hasMetric(availableRUMetric, availableRULabels))
+	re.False(hasMetric(maxPerSecMetric, groupKeyspaceLabels))
+	re.False(hasMetric(grantedTokensMetric, groupKeyspaceLabels))
+	metrics.mu.RLock()
+	_, counterExists := metrics.counterMetricsMap[metricsKey{keyspaceID: keyspaceID, groupName: groupName, ruType: defaultTypeLabel}]
+	_, gaugeExists := metrics.gaugeMetricsMap[metricsKey{keyspaceID: keyspaceID, groupName: groupName, ruType: ""}]
+	_, trackerExists := metrics.maxPerSecTrackerMap[trackerKey{keyspaceID: keyspaceID, groupName: groupName}]
+	_, requestExists := metrics.requestMetricsMap[requestMetricsKey{keyspaceID: keyspaceID, groupName: groupName}]
+	metrics.mu.RUnlock()
+	re.False(counterExists)
+	re.False(gaugeExists)
+	re.False(trackerExists)
+	re.False(requestExists)
+}
+
 func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
 	re := require.New(t)
 	groupName := "request_ru_trickle_group"
