@@ -107,8 +107,10 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
-	consumeTokenByTypeRRU             prometheus.Counter
-	consumeTokenByTypeWRU             prometheus.Counter
+	chargeTokenByTypeRRU              prometheus.Counter
+	chargeTokenByTypeWRU              prometheus.Counter
+	refundTokenByTypeRRU              prometheus.Counter
+	refundTokenByTypeWRU              prometheus.Counter
 	actualGrantTokensCounter          prometheus.Counter
 	tokenBalanceGauge                 prometheus.Gauge
 	fillRateGauge                     prometheus.Gauge
@@ -117,10 +119,16 @@ type groupMetricsCollection struct {
 	demandRUPerSecGauge               prometheus.Gauge
 	throttledGauge                    prometheus.Gauge
 	readByteCostCounter               prometheus.Counter
-	writeByteCostCounter              prometheus.Counter
+	chargeWriteByteCostCounter        prometheus.Counter
+	refundWriteByteCostCounter        prometheus.Counter
 	kvCPUCostCounter                  prometheus.Counter
 	sqlCPUCostCounter                 prometheus.Counter
 }
+
+const (
+	chargeDirection = "charge"
+	refundDirection = "refund"
+)
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
 	const (
@@ -136,8 +144,10 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
-		consumeTokenByTypeRRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "rru"),
-		consumeTokenByTypeWRU:             metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "wru"),
+		chargeTokenByTypeRRU:              metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "rru", chargeDirection),
+		chargeTokenByTypeWRU:              metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "wru", chargeDirection),
+		refundTokenByTypeRRU:              metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "rru", refundDirection),
+		refundTokenByTypeWRU:              metrics.TokenConsumedByTypeCounter.WithLabelValues(name, "wru", refundDirection),
 		actualGrantTokensCounter:          metrics.ActualGrantTokensCounter.WithLabelValues(name),
 		tokenBalanceGauge:                 metrics.TokenBalanceGauge.WithLabelValues(name),
 		fillRateGauge:                     metrics.FillRateGauge.WithLabelValues(name),
@@ -146,7 +156,8 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		demandRUPerSecGauge:               metrics.DemandRUPerSecGauge.WithLabelValues(name),
 		throttledGauge:                    metrics.ThrottledGauge.WithLabelValues(name),
 		readByteCostCounter:               metrics.ReadByteCost.WithLabelValues(name),
-		writeByteCostCounter:              metrics.WriteByteCost.WithLabelValues(name),
+		chargeWriteByteCostCounter:        metrics.WriteByteCost.WithLabelValues(name, chargeDirection),
+		refundWriteByteCostCounter:        metrics.WriteByteCost.WithLabelValues(name, refundDirection),
 		kvCPUCostCounter:                  metrics.KVCPUCost.WithLabelValues(name),
 		sqlCPUCostCounter:                 metrics.SQLCPUCost.WithLabelValues(name),
 	}
@@ -591,11 +602,15 @@ func (gc *groupCostController) observeConsumption(delta *rmpb.Consumption) {
 	if v := getRUValueFromConsumption(delta); v > 0 {
 		gc.metrics.consumeTokenHistogram.Observe(v)
 	}
-	if delta.RRU > 0 {
-		gc.metrics.consumeTokenByTypeRRU.Add(delta.RRU)
-	}
-	if delta.WRU > 0 {
-		gc.metrics.consumeTokenByTypeWRU.Add(delta.WRU)
+	observeCounterDelta(gc.metrics.chargeTokenByTypeRRU, gc.metrics.refundTokenByTypeRRU, delta.RRU)
+	observeCounterDelta(gc.metrics.chargeTokenByTypeWRU, gc.metrics.refundTokenByTypeWRU, delta.WRU)
+}
+
+func observeCounterDelta(chargeCounter, refundCounter prometheus.Counter, delta float64) {
+	if delta > 0 {
+		chargeCounter.Add(delta)
+	} else if delta < 0 {
+		refundCounter.Add(-delta)
 	}
 }
 
@@ -619,9 +634,7 @@ func (gc *groupCostController) observeComponentConsumption(delta *rmpb.Consumpti
 	if delta.ReadBytes > 0 {
 		gc.metrics.readByteCostCounter.Add(float64(delta.ReadBytes))
 	}
-	if delta.WriteBytes > 0 {
-		gc.metrics.writeByteCostCounter.Add(float64(delta.WriteBytes))
-	}
+	observeCounterDelta(gc.metrics.chargeWriteByteCostCounter, gc.metrics.refundWriteByteCostCounter, float64(delta.WriteBytes))
 	if delta.SqlLayerCpuTimeMs > 0 {
 		gc.metrics.sqlCPUCostCounter.Add(delta.SqlLayerCpuTimeMs)
 	}

@@ -27,7 +27,8 @@ const (
 	resourceGroupNameLabel    = "name"
 	newResourceGroupNameLabel = "resource_group"
 
-	typeLabel = "type"
+	typeLabel      = "type"
+	directionLabel = "direction"
 )
 
 var (
@@ -55,7 +56,7 @@ var (
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
-	// TokenConsumedByTypeCounter tracks RU consumption broken down by RU type (rru/wru).
+	// TokenConsumedByTypeCounter tracks RU consumption flow broken down by RU type (rru/wru) and direction (charge/refund).
 	TokenConsumedByTypeCounter *prometheus.CounterVec
 	// ActualGrantTokensCounter tracks RU tokens actually granted by PD per resource group.
 	ActualGrantTokensCounter *prometheus.CounterVec
@@ -73,7 +74,7 @@ var (
 	ThrottledGauge *prometheus.GaugeVec
 	// ReadByteCost tracks client-side read bytes per resource group.
 	ReadByteCost *prometheus.CounterVec
-	// WriteByteCost tracks client-side write bytes per resource group.
+	// WriteByteCost tracks client-side write bytes per resource group and direction (charge/refund).
 	WriteByteCost *prometheus.CounterVec
 	// KVCPUCost tracks client-side KV CPU time in milliseconds per resource group.
 	KVCPUCost *prometheus.CounterVec
@@ -188,9 +189,9 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   resourceGroupSubsystem,
 			Name:        "consume_by_type",
-			Help:        "Counter of token consumption broken down by RU type.",
+			Help:        "Counter of token consumption flow broken down by RU type and direction.",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, typeLabel})
+		}, []string{newResourceGroupNameLabel, typeLabel, directionLabel})
 
 	ActualGrantTokensCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -269,9 +270,9 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   resourceSubsystem,
 			Name:        "write_byte_sum",
-			Help:        "Counter of the write byte cost for all resource groups on the client side.",
+			Help:        "Counter of the write byte cost flow for all resource groups on the client side.",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
+		}, []string{newResourceGroupNameLabel, directionLabel})
 
 	KVCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{

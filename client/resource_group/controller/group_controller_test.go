@@ -511,10 +511,10 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re, t.Name())
 
-	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru"))
-	wruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru"))
+	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection))
+	wruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection))
 	readBefore := promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name))
-	writeBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name))
+	writeBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection))
 	kvBefore := promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name))
 	sqlBefore := promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name))
 
@@ -527,12 +527,95 @@ func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
 		SqlLayerCpuTimeMs: 7,
 	})
 
-	re.Equal(rruBefore+3, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru")))
-	re.Equal(wruBefore+5, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru")))
+	re.Equal(rruBefore+3, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru", chargeDirection)))
+	re.Equal(wruBefore+5, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection)))
 	re.Equal(readBefore+13, promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name)))
-	re.Equal(writeBefore+17, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name)))
+	re.Equal(writeBefore+17, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection)))
 	re.Equal(kvBefore+4, promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name)))
 	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
+}
+
+func TestFailedWriteConsumptionRecordsRefundMetrics(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.burstable.Store(true)
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  64 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{succeed: false}
+
+	wruChargeBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection))
+	wruRefundBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection))
+	writeChargeBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection))
+	writeRefundBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection))
+
+	requestDelta, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+
+	responseDelta, err := gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Negative(responseDelta.WRU)
+	re.Negative(responseDelta.WriteBytes)
+
+	re.Equal(wruChargeBefore+requestDelta.WRU, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", chargeDirection)))
+	re.Equal(wruRefundBefore-responseDelta.WRU, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection)))
+	re.Equal(writeChargeBefore+requestDelta.WriteBytes, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, chargeDirection)))
+	re.Equal(writeRefundBefore-responseDelta.WriteBytes, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection)))
+}
+
+func TestSuccessfulWriteConsumptionDoesNotRecordRefundMetrics(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.burstable.Store(true)
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  64 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{succeed: true}
+
+	wruRefundBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection))
+	writeRefundBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection))
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	responseDelta, err := gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Zero(responseDelta.WRU)
+	re.Zero(responseDelta.WriteBytes)
+
+	re.Equal(wruRefundBefore, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection)))
+	re.Equal(writeRefundBefore, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection)))
+}
+
+func TestFailedWriteResponseWaitRecordsRefundMetrics(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.burstable.Store(true)
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  64 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{succeed: false}
+
+	wruRefundBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection))
+	writeRefundBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection))
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+	re.NoError(err)
+	responseDelta, _, err := gc.onResponseWaitImpl(context.Background(), req, resp)
+	re.NoError(err)
+	re.Negative(responseDelta.WRU)
+	re.Negative(responseDelta.WriteBytes)
+
+	re.Equal(wruRefundBefore-responseDelta.WRU, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru", refundDirection)))
+	re.Equal(writeRefundBefore-responseDelta.WriteBytes, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name, refundDirection)))
 }
 
 func TestInitializesSQLCPUConsumptionBaseline(t *testing.T) {
