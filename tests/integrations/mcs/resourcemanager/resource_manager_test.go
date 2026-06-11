@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -634,16 +635,21 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// Make sure the resource group active
-	meta, err = controller.GetResourceGroup(group.Name)
-	re.NotNil(meta)
-	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		meta, err = controller.GetResourceGroup(group.Name)
+		if err != nil || meta == nil {
+			return false
+		}
+		meta = controller.GetActiveResourceGroup(group.Name)
+		return meta != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	modifySettings(group, 30000)
 	resp, err = cli.ModifyResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	testutil.Eventually(re, func() bool {
 		meta = controller.GetActiveResourceGroup(group.Name)
-		return meta.RUSettings.RU.Settings.FillRate == uint64(30000)
+		return meta != nil && meta.RUSettings.RU.Settings.FillRate == uint64(30000)
 	}, testutil.WithTickInterval(100*time.Millisecond))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
 
@@ -1500,8 +1506,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	testutil.Eventually(re, func() bool {
 		var err error
 		newGroups, err = cli.ListResourceGroups(suite.ctx)
-		return err == nil
-	}, testutil.WithWaitFor(time.Second))
+		return err == nil && reflect.DeepEqual(groups, newGroups)
+	})
 	re.Equal(groups, newGroups)
 }
 

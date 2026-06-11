@@ -225,8 +225,8 @@ var (
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: serverSubsystem,
-			Name:      "sync_load_group_counter",
-			Help:      "The number of the sync load group.",
+			Name:      "sync_load_groups_total",
+			Help:      "Total number of resource groups loaded synchronously.",
 		})
 
 	asyncLoadGroupDuration = prometheus.NewHistogram(
@@ -234,7 +234,7 @@ var (
 			Namespace: namespace,
 			Subsystem: serverSubsystem,
 			Name:      "async_load_group_duration_seconds",
-			Help:      "The duration of the async load group.",
+			Help:      "Duration of asynchronous resource group loading in seconds.",
 		})
 )
 

@@ -921,14 +921,14 @@ error = '''
 keyspace not found with name: %s
 '''
 
-["PD:scatter:ErrEmptyRegion"]
-error = '''
-empty region
-'''
-
 ["PD:resourcemanager:ErrResourceGroupsLoading"]
 error = '''
 resource groups are still being loaded, please try again later
+'''
+
+["PD:scatter:ErrEmptyRegion"]
+error = '''
+empty region
 '''
 
 ["PD:schedule:ErrCreateOperator"]

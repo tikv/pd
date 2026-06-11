@@ -555,7 +555,12 @@ func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGr
 		return nil, err
 	}
 	state, err := m.storage.LoadResourceGroupState(keyspaceID, name)
-	if err == nil && state != "" {
+	if err != nil {
+		log.Warn("failed to load resource group state, continuing without state",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.Error(err))
+	} else if state != "" {
 		if err := krgm.setRawStatesIntoResourceGroup(name, state); err != nil {
 			return nil, err
 		}
