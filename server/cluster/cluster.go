@@ -320,9 +320,9 @@ func (c *RaftCluster) InitCluster(
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
-	failpoint.Inject("syncRegionChannelFull", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("syncRegionChannelFull")); _err_ == nil {
 		c.changedRegions = make(chan *core.RegionInfo, 100)
-	})
+	}
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
@@ -373,14 +373,14 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 			c.stopTSOJobsIfNeeded()
 		}
 	}()
-	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("raftClusterReturn")); _err_ == nil {
 		if val, ok := val.(bool); (ok && val) || !ok {
 			err = errors.New("raftClusterReturn")
 		} else {
 			err = nil
 		}
-		failpoint.Return(err)
-	})
+		return err
+	}
 	loadClusterInfoStart := time.Now()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
@@ -552,9 +552,9 @@ func (c *RaftCluster) runServiceCheckJob() {
 	defer c.wg.Done()
 
 	schedulingTicker := time.NewTicker(schedulingServiceCheckInterval)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		schedulingTicker.Reset(time.Millisecond)
-	})
+	}
 	defer schedulingTicker.Stop()
 	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
 	defer tsoTicker.Stop()
@@ -606,14 +606,14 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	}
 	log.Info("closing the embedded TSO allocator")
 	c.tsoAllocator.Reset(false)
-	failpoint.Inject("updateAfterResetTSO", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("updateAfterResetTSO")); _err_ == nil {
 		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
 		}
 		if c.tsoAllocator.IsInitialize() {
 			log.Panic("the tso allocator should be uninitialized after reset")
 		}
-	})
+	}
 }
 
 // startGCTuner
@@ -697,9 +697,9 @@ func (c *RaftCluster) runStoreConfigSync() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	// TODO: After we fix the atomic problem of config, we can remove this failpoint.
-	failpoint.Inject("skipStoreConfigSync", func() {
-		failpoint.Return()
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("skipStoreConfigSync")); _err_ == nil {
+		return
+	}
 
 	var (
 		synced, switchRaftV2Config, needPersist bool
@@ -806,13 +806,13 @@ func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (switchRaft
 // fetchStoreConfigFromTiKV tries to fetch the config from the TiKV store URL.
 func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddress string) (*sc.StoreConfig, error) {
 	cfg := &sc.StoreConfig{}
-	failpoint.Inject("mockFetchStoreConfigFromTiKV", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("mockFetchStoreConfigFromTiKV")); _err_ == nil {
 		if regionMaxSize, ok := val.(string); ok {
 			cfg.RegionMaxSize = regionMaxSize
 			cfg.Engine = sc.RaftstoreV2
 		}
-		failpoint.Return(cfg, nil)
-	})
+		return cfg, nil
+	}
 	if c.httpClient == nil {
 		return nil, errors.New("failed to get store config due to nil client")
 	}
@@ -885,9 +885,9 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		ticker.Reset(time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 
 	for {
@@ -908,9 +908,9 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
 		ticker.Reset(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 
 	for {
@@ -919,7 +919,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 			log.Info("node state check job has been stopped")
 			return
 		case <-ticker.C:
-			failpoint.InjectCall("blockCheckStores")
+			failpoint.Call(_curpkg_("blockCheckStores"))
 			c.checkStores()
 		}
 	}
@@ -1338,15 +1338,15 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		return nil
 	}
-	failpoint.Inject("concurrentRegionHeartbeat", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("concurrentRegionHeartbeat")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
-		failpoint.Inject("decEpoch", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("decEpoch")); _err_ == nil {
 			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
-		})
+		}
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
@@ -1966,9 +1966,9 @@ func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 	case metapb.NodeState_Removing:
 		// If the store is empty, it can be buried.
 		needBury := regionSize == 0
-		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+		if _, _err_ := failpoint.Eval(_curpkg_("doNotBuryStore")); _err_ == nil {
 			needBury = false
-		})
+		}
 		if needBury {
 			if err := c.BuryStoreLocked(storeID, false); err != nil {
 				log.Error("bury store failed",
@@ -2150,9 +2150,9 @@ func (c *RaftCluster) OnStoreVersionChange() {
 	clusterVersion := c.opt.GetClusterVersion()
 	// If the cluster version of PD is less than the minimum version of all stores,
 	// it will update the cluster version.
-	failpoint.Inject("versionChangeConcurrency", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("versionChangeConcurrency")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 	if minVersion == nil || clusterVersion.Equal(*minVersion) {
 		return
 	}

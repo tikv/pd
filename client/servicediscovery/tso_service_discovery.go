@@ -520,11 +520,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 
 		// Inject a failpoint to verify that in TSO MCS mode, we should NOT reach discoverWithLegacyPath
 		// This failpoint is used in tests to ensure proper code path execution
-		failpoint.Inject("assertNotReachLegacyPath", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("assertNotReachLegacyPath")); _err_ == nil {
 			if shouldPanic, ok := val.(bool); ok && shouldPanic {
 				panic("BUG: In TSO MCS mode, should not fallback to discoverWithLegacyPath when TSO server is temporarily unavailable")
 			}
-		})
+		}
 
 		urls, err := c.discoverWithLegacyPath()
 		if err != nil {
@@ -608,12 +608,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	keyspaceID uint32, tsoSrvURL string, timeout time.Duration, modRevision uint64,
 ) (*tsopb.KeyspaceGroup, uint64, error) {
-	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("unexpectedCallOfFindGroupByKeyspaceID")); _err_ == nil {
 		keyspaceToCheck, ok := val.(int)
 		if ok && keyspaceID == uint32(keyspaceToCheck) {
 			panic("findGroupByKeyspaceID is called unexpectedly")
 		}
-	})
+	}
 	ctx, cancel := context.WithTimeout(c.ctx, timeout)
 	defer cancel()
 
@@ -669,12 +669,12 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	c.Lock()
 	defer c.Unlock()
 	t := c.tsoServerDiscovery
-	failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("serverReturnsNoTSOAddrs")); _err_ == nil {
 		if len(t.urls) == 0 {
 			log.Info("[failpoint] injected error: server returns no tso URLs")
 			urls = nil
 		}
-	})
+	}
 
 	if len(urls) == 0 {
 		// There is no error but no tso server url found, which means

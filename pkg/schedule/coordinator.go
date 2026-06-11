@@ -229,9 +229,9 @@ func (c *Coordinator) RunUntilStop() {
 // Run starts coordinator.
 func (c *Coordinator) Run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
-	failpoint.Inject("changeCoordinatorTicker", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("changeCoordinatorTicker")); _err_ == nil {
 		ticker.Reset(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {

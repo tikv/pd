@@ -95,9 +95,9 @@ func (bo *Backoffer) Exec(
 			after.Stop()
 			return errors.Trace(ctx.Err())
 		case <-after.C:
-			failpoint.Inject("backOffExecute", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("backOffExecute")); _err_ == nil {
 				testBackOffExecuteFlag.Store(true)
-			})
+			}
 		}
 		after.Stop()
 		// If the current total time exceeds the maximum total time, return the last error.

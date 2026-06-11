@@ -80,11 +80,24 @@ func (p *watchCountingResourceGroupProvider) getWatchTimes() int {
 func (suite *clientStatelessTestSuite) TestKeyspaceResourceGroupControllerWatchCount() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", "return"))
+
+	minRevision := int64(0)
+	maxRevision := int64(0)
+	for i := range 3 {
+		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
+		re.NoError(err)
+		if i == 0 {
+			minRevision = res.GetHeader().GetRevision()
+		}
+		maxRevision = res.GetHeader().GetRevision()
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", fmt.Sprintf("return(%d)", maxRevision)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/staleRevision", fmt.Sprintf("return(%d)", minRevision)))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/staleRevision"))
 		cancel()
 	}()
 
@@ -97,12 +110,14 @@ func (suite *clientStatelessTestSuite) TestKeyspaceResourceGroupControllerWatchC
 		cancel()
 		re.NoError(controller.Stop())
 	}()
-	time.Sleep(1 * time.Second)
 	for i := range 3 {
-		_, err = suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
+		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
 		re.NoError(err)
+		if i == 0 {
+			minRevision = res.GetHeader().GetRevision()
+		}
+		maxRevision = res.GetHeader().GetRevision()
 	}
-
 	time.Sleep(10 * time.Second)
 	watchTimes := provider.getWatchTimes()
 	suite.T().Log("watchTimes:", watchTimes)

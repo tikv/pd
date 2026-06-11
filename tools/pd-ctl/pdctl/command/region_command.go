@@ -866,9 +866,9 @@ func processSpecialRegions(ctx context.Context, cmd *cobra.Command, specialRegio
 func findMatchingSiblingWithRetry(ctx context.Context, cmd *cobra.Command, region pd.RegionInfo) (*pd.RegionInfo, error) {
 	regionID := uint64(region.ID)
 	delay := mergeRetryDelay
-	failpoint.Inject("fastCheckRegion", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastCheckRegion")); _err_ == nil {
 		delay = time.Millisecond * 100
-	})
+	}
 	ticker := time.NewTicker(delay)
 	defer ticker.Stop()
 	for i := range maxMergeRetries {

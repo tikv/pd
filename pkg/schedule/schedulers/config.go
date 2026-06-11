@@ -50,9 +50,9 @@ func (b *baseSchedulerConfig) init(name string, storage endpoint.ConfigStorage, 
 
 func (b *baseSchedulerConfig) save() error {
 	data, err := EncodeConfig(b.data)
-	failpoint.Inject("persistFail", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
 		err = errors.New("fail to persist")
-	})
+	}
 	if err != nil {
 		return err
 	}

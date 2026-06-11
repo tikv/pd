@@ -209,10 +209,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 		log.Warn("push-metrics-address is set but push-metrics-interval is invalid, metrics push disabled")
 		rmc.PushMetricsAddress = ""
 	}
-	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("enableDegradedModeAndTraceLog")); _err_ == nil {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
-	})
+	}
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of

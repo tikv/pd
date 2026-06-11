@@ -93,9 +93,9 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 
 // Save puts a key-value pair to etcd.
 func (kv *etcdKVBase) Save(key, value string) error {
-	failpoint.Inject("etcdSaveFailed", func() {
-		failpoint.Return(errors.New("save failed"))
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("etcdSaveFailed")); _err_ == nil {
+		return errors.New("save failed")
+	}
 
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
@@ -282,9 +282,9 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
-	failpoint.Inject("slowTxn", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("slowTxn")); _err_ == nil {
 		time.Sleep(10 * time.Second)
-	})
+	}
 	// Using slowLogTxn to commit transaction.
 	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)

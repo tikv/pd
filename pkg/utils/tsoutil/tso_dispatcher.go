@@ -112,10 +112,10 @@ func (s *TSODispatcher) dispatch(
 	}()
 
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
-	failpoint.Inject("canNotCreateForwardStream", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("canNotCreateForwardStream")); _err_ == nil {
 		cancel()
 		err = errors.New("canNotCreateForwardStream")
-	})
+	}
 	if err != nil || forwardStream == nil {
 		log.Error("create tso forwarding stream error",
 			zap.String("forwarded-host", forwardedHost),
@@ -135,10 +135,10 @@ func (s *TSODispatcher) dispatch(
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
 		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
-		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("tsoProxyStreamIdleTimeout")); _err_ == nil {
 			noProxyRequestsTimer.Reset(0)
 			<-tsoQueue.requestCh // consume the request so that the select below results in the idle case
-		})
+		}
 		select {
 		case first := <-tsoQueue.requestCh:
 			pendingTSOReqCount := len(tsoQueue.requestCh) + 1

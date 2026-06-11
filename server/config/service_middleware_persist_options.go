@@ -93,9 +93,9 @@ func (o *ServiceMiddlewarePersistOptions) Persist(storage endpoint.ServiceMiddle
 		GRPCRateLimitConfig: *o.GetGRPCRateLimitConfig(),
 	}
 	err := storage.SaveServiceMiddlewareConfig(cfg)
-	failpoint.Inject("persistServiceMiddlewareFail", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("persistServiceMiddlewareFail")); _err_ == nil {
 		err = errors.New("fail to persist")
-	})
+	}
 	return err
 }
 

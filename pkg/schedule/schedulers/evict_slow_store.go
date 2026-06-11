@@ -233,9 +233,9 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	recoverySec := conf.RecoverySec
-	failpoint.Inject("transientRecoveryGap", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("transientRecoveryGap")); _err_ == nil {
 		recoverySec = 0
-	})
+	}
 	return uint64(time.Since(conf.lastSlowStoreCaptureTS).Seconds()) >= recoverySec
 }
 
@@ -574,9 +574,9 @@ func (s *evictSlowStoreScheduler) tryRecoverNetworkSlowStores(cluster sche.Sched
 		storesStillSlow                 = make([]uint64, 0)
 		storesPrepareToRecover          = make([]uint64, 0)
 	)
-	failpoint.Inject("transientRecoveryGap", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("transientRecoveryGap")); _err_ == nil {
 		recoveryGap = 0
-	})
+	}
 
 	for storeID, startTime := range networkSlowStoreRecoverStartAts {
 		store := cluster.GetStore(storeID)
@@ -650,7 +650,7 @@ func (s *evictSlowStoreScheduler) detectAndHandleNetworkSlowStores(cluster sche.
 			storeID := store.GetID()
 
 			if len(pausedNetworkSlowStores) >= defaultMaxNetworkSlowStore {
-				failpoint.InjectCall("evictSlowStoreTriggerLimit")
+				failpoint.Call(_curpkg_("evictSlowStoreTriggerLimit"))
 				slowStoreTriggerLimitGauge.WithLabelValues(strconv.FormatUint(storeID, 10), string(networkSlowStore)).Inc()
 				s.conf.networkSlowStoreRecoverStartAts[storeID] = nil
 				continue

@@ -245,9 +245,9 @@ func (gc *groupCostController) applyDegradedMode() {
 	var cfg tokenBucketReconfigureArgs
 	cfg.newBurst = int64(counter.fillRate)
 	cfg.newFillRate = float64(counter.fillRate)
-	failpoint.Inject("degradedModeRU", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("degradedModeRU")); _err_ == nil {
 		cfg.newFillRate = 99999999
-	})
+	}
 	counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 	log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name))
 }
@@ -313,18 +313,18 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	failpoint.Inject("acceleratedReportingPeriod", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
 		deltaDuration = 100 * time.Millisecond
-	})
+	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
-	failpoint.Inject("acceleratedSpeedTrend", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedSpeedTrend")); _err_ == nil {
 		if delta > 0 {
 			counter.avgRUPerSec = 1000
 		} else {
 			counter.avgRUPerSec = 0
 		}
-	})
+	}
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
@@ -335,9 +335,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
-	failpoint.Inject("acceleratedReportingPeriod", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
-	})
+	}
 	// Due to `gc.run.lastRequestTime` update operations late in this logic,
 	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
 	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
@@ -447,26 +447,26 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	}
 	// collect request resource
 	selected := gc.run.requestInProgress
-	failpoint.Inject("triggerUpdate", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("triggerUpdate")); _err_ == nil {
 		selected = true
-	})
+	}
 	counter := gc.run.requestUnitTokens
 	switch selectTyp {
 	case periodicReport:
 		selected = selected || gc.shouldReportConsumption()
-		failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("triggerPeriodicReport")); _err_ == nil {
 			selected = gc.name == val.(string)
-		})
+		}
 		fallthrough
 	case lowToken:
 		if counter.limiter.IsLowTokens() {
 			selected = true
 		}
-		failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("triggerLowRUReport")); _err_ == nil {
 			if selectTyp == lowToken {
 				selected = gc.name == val.(string)
 			}
-		})
+		}
 	}
 	request := &rmpb.RequestUnitItem{
 		Type:  rmpb.RequestUnitType_RU,
@@ -590,9 +590,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
-			failpoint.Inject("triggerUpdate", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("triggerUpdate")); _err_ == nil {
 				gc.lowRUNotifyChan <- notifyMsg{}
-			})
+			}
 			return nil, nil, waitDuration, 0, err
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())

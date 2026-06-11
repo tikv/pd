@@ -61,7 +61,7 @@ func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
 func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error) {
 	// Failpoint: return a hardcoded keyspace meta for testing
 	// When enabled, this bypasses the gRPC LoadKeyspace call
-	failpoint.Inject("mockLoadKeyspace", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("mockLoadKeyspace")); _err_ == nil {
 		if enabled, ok := val.(bool); ok && enabled {
 			// Create a hardcoded keyspace meta for keyspace_1
 			now := time.Now().Unix()
@@ -76,9 +76,9 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 					"tso_keyspace_group_id": "1",
 				},
 			}
-			failpoint.Return(mockKeyspaceMeta, nil)
+			return mockKeyspaceMeta, nil
 		}
-	})
+	}
 
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspace", opentracing.ChildOf(span.Context()))

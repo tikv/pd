@@ -501,9 +501,9 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
 func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
-	failpoint.Inject("skipSplitRegion", func() {
-		failpoint.Return(nil)
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("skipSplitRegion")); _err_ == nil {
+		return nil
+	}
 
 	start := time.Now()
 	keyspaceRule := MakeLabelRule(id)
@@ -1227,10 +1227,10 @@ func (it *Iterator) loadBatch() error {
 	var err error
 	it.currentIndex = 0
 	batchSize := IteratorLoadingBatchSize
-	failpoint.Inject("keyspaceIteratorLoadingBatchSize", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("keyspaceIteratorLoadingBatchSize")); _err_ == nil {
 		batchSize = val.(int)
-	})
-	failpoint.InjectCall("keyspaceIteratorOnLoadRange")
+	}
+	failpoint.Call(_curpkg_("keyspaceIteratorOnLoadRange"))
 	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, batchSize)
 	if err != nil {
 		err = errors.AddStack(err)

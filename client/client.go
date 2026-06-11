@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
@@ -108,6 +109,7 @@ type RPCClient interface {
 
 	router.Client
 	tso.Client
+	metastorage.Client
 	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
@@ -558,11 +560,11 @@ const (
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	var retryCount int
 	maxRetries := maxTSORetryTimes
-	failpoint.Inject("mockMaxTSORetryTimes", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("mockMaxTSORetryTimes")); _err_ == nil {
 		if newMax, ok := val.(int); ok {
 			maxRetries = newMax
 		}
-	})
+	}
 
 	for retryCount = range maxRetries {
 		resp := c.GetTSAsync(ctx)
@@ -579,9 +581,9 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 		log.Debug("[pd] get tso failed, retrying",
 			zap.Int("retry-count", retryCount),
 			zap.Error(err))
-		failpoint.Inject("skipRetry", func() {
-			failpoint.Return(physical, logical, err)
-		})
+		if _, _err_ := failpoint.Eval(_curpkg_("skipRetry")); _err_ == nil {
+			return physical, logical, err
+		}
 
 		// If the leader changes, we need to retry.
 		// For the first time, we retry immediately to avoid impacting the latency.
@@ -595,13 +597,13 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 		case <-time.After(interval):
 		}
 	}
-	failpoint.Inject("checkRetry", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("checkRetry")); _err_ == nil {
 		if maxRetry, ok := val.(int); ok {
 			if retryCount >= maxRetry {
-				failpoint.Return(0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry))
+				return 0, 0, errors.Errorf("retry count %d exceeds max retry times %d", retryCount, maxRetry)
 			}
 		}
-	})
+	}
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
@@ -961,9 +963,9 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		resp, err = pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
 	}
 
-	failpoint.Inject("responseNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("responseNil")); _err_ == nil {
 		resp = nil
-	})
+	}
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {

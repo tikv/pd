@@ -187,9 +187,9 @@ func (m *Member) GetLastLeaderUpdatedTime() time.Time {
 // leader should be changed when campaign leader frequently.
 func (m *Member) Campaign(ctx context.Context, leaseTimeout int64) error {
 	m.leadership.AddCampaignTimes()
-	failpoint.Inject("skipCampaignLeaderCheck", func() {
-		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("skipCampaignLeaderCheck")); _err_ == nil {
+		return m.leadership.Campaign(leaseTimeout, m.MemberValue())
+	}
 
 	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {

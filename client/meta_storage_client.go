@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
 
@@ -162,17 +161,14 @@ func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaSto
 		}()
 		for {
 			resp, err := res.Recv()
-			failpoint.Inject("watchStreamError", func() {
-				err = errors.Errorf("fake error")
-			})
 			if err != nil {
 				log.Warn("watch stream closed", zap.Error(err))
 				return
 			}
 			evnets := resp.GetEvents()
 			var compactRevision int64
-			// handler the error in watch response header, which indicates the watch stream will be closed by server.
-			if header := resp.GetHeader(); header.Error.Type == meta_storagepb.ErrorType_DATA_COMPACTED {
+			// If mets the compacted error, it require the client use the higher compact revision to watch again.
+			if header := resp.GetHeader(); header != nil && header.Error != nil && header.Error.Type == meta_storagepb.ErrorType_DATA_COMPACTED {
 				compactRevision = header.GetRevision()
 				log.Warn("watch stream closed due to data compacted",
 					zap.Int64("required watch revision", compactRevision),

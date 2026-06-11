@@ -667,9 +667,9 @@ func (r *RegionInfo) CompareAndSetReportBuckets(buckets *metapb.Buckets) bool {
 			return true
 		}
 	}
-	failpoint.Inject("concurrentBucketHeartbeat", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("concurrentBucketHeartbeat")); _err_ == nil {
 		time.Sleep(500 * time.Millisecond)
-	})
+	}
 	return atomic.CompareAndSwapPointer(&r.reportBuckets, unsafe.Pointer(old), unsafe.Pointer(buckets))
 }
 
@@ -1398,11 +1398,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 // UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
-	failpoint.Inject("UpdateSubTree", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("UpdateSubTree")); _err_ == nil {
 		if origin == nil {
 			time.Sleep(time.Second)
 		}
-	})
+	}
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
