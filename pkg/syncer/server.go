@@ -259,7 +259,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 					break loop
 				}
 			}
-			s.reserveHistoryForDownstreamSendProgressBeforeAppend(len(records))
 			s.appendHistoryRecords(records)
 			s.notifyDownstreams(ctx, false)
 		case <-shrinkTicker.C:
@@ -303,18 +302,13 @@ func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
 	return minIndex, ok
 }
 
-func (s *RegionSyncer) reserveHistoryForDownstreamSendProgressBeforeAppend(appendCount int) {
+func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
 	minIndex, ok := s.minDownstreamSendIndex()
 	if !ok {
+		s.history.recordBatch(records)
 		return
 	}
-	s.history.reserveAppendWindowFrom(minIndex, appendCount)
-}
-
-func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
-	for _, region := range records {
-		s.history.record(region)
-	}
+	s.history.recordBatchFrom(minIndex, records)
 }
 
 func (s *RegionSyncer) observeDownstreamSendWindowBeforeShrink() {

@@ -125,9 +125,38 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	if startIndex, ok := h.minFullSyncStartIndexLocked(); ok && startIndex <= h.index {
-		h.growForWindowLocked(h.index - startIndex + 1)
+	h.reserveAppendWindowFromLocked(h.nextIndex()+1, 1, false)
+	h.recordLocked(r)
+}
+
+func (h *historyBuffer) recordBatch(records []*core.RegionInfo) {
+	if len(records) == 0 {
+		return
 	}
+	h.Lock()
+	defer h.Unlock()
+	h.recordBatchLocked(h.nextIndex()+uint64(len(records)), records, false)
+}
+
+// recordBatchFrom appends records while keeping history replayable from fromIndex.
+// The capacity reservation and append happen under one history lock.
+func (h *historyBuffer) recordBatchFrom(fromIndex uint64, records []*core.RegionInfo) {
+	if len(records) == 0 {
+		return
+	}
+	h.Lock()
+	defer h.Unlock()
+	h.recordBatchLocked(fromIndex, records, true)
+}
+
+func (h *historyBuffer) recordBatchLocked(fromIndex uint64, records []*core.RegionInfo, includeBaseWindow bool) {
+	h.reserveAppendWindowFromLocked(fromIndex, len(records), includeBaseWindow)
+	for _, r := range records {
+		h.recordLocked(r)
+	}
+}
+
+func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
@@ -224,17 +253,9 @@ func (h *historyBuffer) minFullSyncStartIndexLocked() (uint64, bool) {
 	return min, ok
 }
 
-// reserveAppendWindowFrom grows the buffer before appending records so that
-// records still needed starting at fromIndex are not overwritten by the append.
-// fromIndex is a caller-provided replay boundary, not state owned by the buffer.
-func (h *historyBuffer) reserveAppendWindowFrom(fromIndex uint64, appendCount int) {
-	if appendCount <= 0 {
-		return
-	}
-	h.Lock()
-	defer h.Unlock()
+func (h *historyBuffer) reserveAppendWindowFromLocked(fromIndex uint64, appendCount int, includeBaseWindow bool) {
 	nextIndex := h.nextIndex() + uint64(appendCount)
-	fromIndex = h.oldestReplayIndexLocked(fromIndex, nextIndex)
+	fromIndex = h.oldestReplayIndexLocked(fromIndex, nextIndex, includeBaseWindow)
 	if fromIndex < nextIndex {
 		h.observeRequiredWindowLocked(nextIndex - fromIndex)
 	}
@@ -247,7 +268,7 @@ func (h *historyBuffer) observeWindowFrom(fromIndex, endIndex uint64) {
 	if endIndex > h.nextIndex() {
 		endIndex = h.nextIndex()
 	}
-	fromIndex = h.oldestReplayIndexLocked(fromIndex, endIndex)
+	fromIndex = h.oldestReplayIndexLocked(fromIndex, endIndex, true)
 	if fromIndex < endIndex {
 		h.observeRequiredWindowLocked(endIndex - fromIndex)
 	}
@@ -257,19 +278,21 @@ func (h *historyBuffer) observeWindowFrom(fromIndex, endIndex uint64) {
 // The value is derived from active downstream progress, active full sync start
 // indexes, and the base recent replay window. It is not a separate follower
 // state.
-func (h *historyBuffer) oldestReplayIndexLocked(fromIndex, nextIndex uint64) uint64 {
+func (h *historyBuffer) oldestReplayIndexLocked(fromIndex, nextIndex uint64, includeBaseWindow bool) uint64 {
 	if fromIndex > nextIndex {
 		fromIndex = nextIndex
 	}
 	if startIndex, ok := h.minFullSyncStartIndexLocked(); ok && startIndex < fromIndex {
 		fromIndex = startIndex
 	}
-	baseIndex := uint64(0)
-	if baseCapacity := uint64(h.baseCapacity); nextIndex > baseCapacity {
-		baseIndex = nextIndex - baseCapacity
-	}
-	if baseIndex < fromIndex {
-		fromIndex = baseIndex
+	if includeBaseWindow {
+		baseIndex := uint64(0)
+		if baseCapacity := uint64(h.baseCapacity); nextIndex > baseCapacity {
+			baseIndex = nextIndex - baseCapacity
+		}
+		if baseIndex < fromIndex {
+			fromIndex = baseIndex
+		}
 	}
 	return fromIndex
 }

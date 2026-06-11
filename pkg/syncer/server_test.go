@@ -806,7 +806,6 @@ func TestReserveBeforeAppendDoesNotWaitForBusyDownstream(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		syncer.reserveHistoryForDownstreamSendProgressBeforeAppend(len(records))
 		syncer.appendHistoryRecords(records)
 		close(done)
 	}()
@@ -836,10 +835,11 @@ func TestObserveDownstreamSendWindowBeforeShrinkUsesSlowestDownstream(t *testing
 	})
 	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
 	syncer.history.resetWithIndex(10)
-	syncer.history.reserveAppendWindowFrom(10, 6)
+	records := make([]*core.RegionInfo, 0, 6)
 	for i := range 6 {
-		syncer.history.record(newTestRegion(uint64(100 + i)))
+		records = append(records, newTestRegion(uint64(100+i)))
 	}
+	syncer.history.recordBatchFrom(10, records)
 	re.Equal(uint64(10), syncer.history.getFirstIndex())
 
 	for range historyBufferShrinkRounds {
@@ -849,9 +849,9 @@ func TestObserveDownstreamSendWindowBeforeShrinkUsesSlowestDownstream(t *testing
 
 	re.Equal(8, syncer.history.capacity())
 	re.Equal(uint64(10), syncer.history.getFirstIndex())
-	records := syncer.history.recordsFrom(10)
-	re.Len(records, 6)
-	re.Equal(uint64(100), records[0].GetID())
+	historyRecords := syncer.history.recordsFrom(10)
+	re.Len(historyRecords, 6)
+	re.Equal(uint64(100), historyRecords[0].GetID())
 
 	pd2SyncStream.advanceSendIndex(6)
 	pd3SyncStream.advanceSendIndex(2)
