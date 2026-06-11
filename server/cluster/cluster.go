@@ -139,6 +139,7 @@ type Server interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceManager() *keyspace.Manager
 	GetKeyspaceGroupManager() *keyspace.GroupManager
+	GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager
 	IsKeyspaceGroupEnabled() bool
 	GetMeteringWriter() *metering.Writer
 }

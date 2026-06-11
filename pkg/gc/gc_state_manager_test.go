@@ -131,7 +131,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	kgm := keyspace.NewKeyspaceGroupManager(ctx, s, client)
-	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, s, mockcluster.NewCluster(ctx, config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm, nil)
 	gcStateManager = NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
 
 	err = kgm.Bootstrap(ctx)
