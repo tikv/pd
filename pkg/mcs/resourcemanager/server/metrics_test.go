@@ -37,7 +37,7 @@ func TestActiveRequestUnitMetricUsesV1ByDefault(t *testing.T) {
 	)
 
 	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
 	})
 
 	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
@@ -66,7 +66,7 @@ func TestActiveRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
 	)
 
 	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
 	})
 
 	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
@@ -124,7 +124,7 @@ func TestObserveTokenGrantRecordsZeroTrickle(t *testing.T) {
 	groupName := "observe_token_group"
 	keyspaceName := "observe_token_keyspace"
 	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
 	})
 
 	metrics := newRequestMetrics(keyspaceName, groupName)
@@ -153,7 +153,7 @@ func TestObserveRequestCause(t *testing.T) {
 	groupName := "observe_request_group"
 	keyspaceName := "observe_request_keyspace"
 	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
 	})
 	throttleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
 	trickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
@@ -280,8 +280,8 @@ func TestCounterMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T)
 	)
 	metrics := newMetrics()
 	t.Cleanup(func() {
-		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
-		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(fallbackName, groupName)
+		deleteDefaultLabelValuesForTest(loadedName, groupName)
 	})
 
 	first := metrics.getCounterMetrics(keyspaceID, fallbackName, groupName, defaultTypeLabel)
@@ -319,8 +319,8 @@ func TestGaugeMetricsDeletesCreatedLabelsWhenKeyspaceNameChanges(t *testing.T) {
 	)
 	metrics := newMetrics()
 	t.Cleanup(func() {
-		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
-		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(fallbackName, groupName)
+		deleteDefaultLabelValuesForTest(loadedName, groupName)
 	})
 
 	first := metrics.getGaugeMetrics(keyspaceID, fallbackName, groupName)
@@ -356,8 +356,8 @@ func TestMaxPerSecTrackerRebindsLabelsWhenKeyspaceNameChanges(t *testing.T) {
 	)
 	metrics := newMetrics()
 	t.Cleanup(func() {
-		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
-		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(fallbackName, groupName)
+		deleteDefaultLabelValuesForTest(loadedName, groupName)
 	})
 
 	first := metrics.getMaxPerSecTracker(keyspaceID, fallbackName, groupName)
@@ -403,8 +403,8 @@ func TestCleanupAllMetricsDeletesCachedLabelsWhenKeyspaceNameChanges(t *testing.
 	)
 	metrics := newMetrics()
 	t.Cleanup(func() {
-		deleteLabelValues(fallbackName, groupName, defaultTypeLabel)
-		deleteLabelValues(loadedName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(fallbackName, groupName)
+		deleteDefaultLabelValuesForTest(loadedName, groupName)
 	})
 
 	counterMetrics := metrics.getCounterMetrics(keyspaceID, fallbackName, groupName, defaultTypeLabel)
@@ -468,12 +468,50 @@ func TestCleanupAllMetricsDeletesCachedLabelsWhenKeyspaceNameChanges(t *testing.
 	re.False(requestExists)
 }
 
+func TestDeleteCounterMetricLabelValuesUsesRUType(t *testing.T) {
+	re := require.New(t)
+	const (
+		keyspaceID   = uint32(10873)
+		keyspaceName = "counter_cleanup_keyspace"
+		groupName    = "counter_cleanup_group"
+		metricName   = "resource_manager_resource_unit_read_request_unit_sum"
+	)
+	t.Cleanup(func() {
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
+		deleteCounterMetricLabelValues(keyspaceName, groupName, backgroundTypeLabel)
+	})
+
+	defaultMetrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	defaultMetrics.add(&rmpb.Consumption{RRU: 1}, &ControllerConfig{}, keyspaceID)
+	backgroundMetrics := newCounterMetrics(keyspaceName, groupName, backgroundTypeLabel)
+	backgroundMetrics.add(&rmpb.Consumption{RRU: 2}, &ControllerConfig{}, keyspaceID)
+	defaultLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 defaultTypeLabel,
+		keyspaceNameLabel:         keyspaceName,
+	}
+	backgroundLabels := map[string]string{
+		resourceGroupNameLabel:    groupName,
+		newResourceGroupNameLabel: groupName,
+		typeLabel:                 backgroundTypeLabel,
+		keyspaceNameLabel:         keyspaceName,
+	}
+	re.True(hasMetric(metricName, defaultLabels))
+	re.True(hasMetric(metricName, backgroundLabels))
+
+	deleteCounterMetricLabelValues(keyspaceName, groupName, backgroundTypeLabel)
+
+	re.True(hasMetric(metricName, defaultLabels))
+	re.False(hasMetric(metricName, backgroundLabels))
+}
+
 func TestRequestRUSeparatesServiceAndGroupTrickleCause(t *testing.T) {
 	re := require.New(t)
 	groupName := "request_ru_trickle_group"
 	keyspaceName := "request_ru_trickle_keyspace"
 	t.Cleanup(func() {
-		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+		deleteDefaultLabelValuesForTest(keyspaceName, groupName)
 	})
 
 	serviceTrickleCounter := requestCauseCounter.WithLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
@@ -536,6 +574,13 @@ func TestGaugeMetricsSetGroupSlotMetrics(t *testing.T) {
 	re.Zero(created)
 	re.Zero(deleted)
 	re.Zero(expired)
+}
+
+func deleteDefaultLabelValuesForTest(keyspaceName, groupName string) {
+	deleteCounterMetricLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	deleteGaugeMetricLabelValues(keyspaceName, groupName)
+	deleteMaxPerSecTrackerLabelValues(keyspaceName, groupName)
+	deleteRequestMetricLabelValues(keyspaceName, groupName)
 }
 
 func findHistogramMetric(re *require.Assertions, metricName string, labels map[string]string) *dto.Histogram {

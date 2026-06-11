@@ -865,13 +865,6 @@ func deleteRequestMetricLabelValues(keyspaceName, groupName string) {
 	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
 }
 
-func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
-	deleteCounterMetricLabelValues(keyspaceName, groupName, ruLabelType)
-	deleteGaugeMetricLabelValues(keyspaceName, groupName)
-	deleteMaxPerSecTrackerLabelValues(keyspaceName, groupName)
-	deleteRequestMetricLabelValues(keyspaceName, groupName)
-}
-
 type maxPerSecCostTracker struct {
 	keyspaceName  string
 	groupName     string
