@@ -588,7 +588,7 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 		re.NoError(rgController.Stop())
 		cancel()
 	}()
-	re.NotEqual(rgController.GetRUVersion(), controller.RUVersionV2)
+	re.NotEqual(controller.RUVersionV2, rgController.GetRUVersion())
 	config := controller.DefaultConfig()
 	config.RUVersionPolicy = &controller.RUVersionPolicy{
 		Default: controller.RUVersionV1,
