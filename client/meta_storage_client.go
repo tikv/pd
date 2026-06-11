@@ -167,9 +167,9 @@ func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaSto
 			}
 			events := resp.GetEvents()
 			var compactRevision int64
-			// If mets the compacted error, it require the client use the higher compact revision to watch again.
+			// If meets the compacted error, it requires the client to use the higher compact revision to watch again.
 			if header := resp.GetHeader(); header != nil && header.Error != nil && header.Error.Type == meta_storagepb.ErrorType_DATA_COMPACTED {
-				compactRevision = header.GetRevision()
+				compactRevision = resp.GetCompactRevision()
 				log.Info("watch stream closed due to data compacted",
 					zap.Int64("required watch revision", compactRevision),
 					zap.String("err", header.Error.String()))
