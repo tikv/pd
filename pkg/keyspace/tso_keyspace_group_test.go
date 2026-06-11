@@ -298,6 +298,53 @@ func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackOnSaveError(
 	re.Equal([]uint32{222}, storedNew.Keyspaces)
 }
 
+// TestUpdateKeyspaceGroupRollbackRestoresSortedOrder verifies that when
+// saveKeyspaceGroups fails the rollback at line 610 (slices.Sort) correctly
+// restores oldKG.Keyspaces to sorted order.
+// The existing TestUpdateKeyspaceGroupRollbackOnSaveError only uses a single-element
+// oldKG.Keyspaces, so sorting is a no-op there and does not cover this path.
+func (suite *keyspaceGroupTestSuite) TestUpdateKeyspaceGroupRollbackRestoresSortedOrder() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	errorStore := &errorKeyspaceGroupStorage{StorageEndpoint: store}
+	kgm := NewKeyspaceGroupManager(ctx, errorStore, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+
+	// oldKG has multiple keyspaces so that after Remove + append the slice is
+	// temporarily out of order ([100, 300, 222]) and needs Sort to be restored.
+	keyspaceID := uint32(222)
+	keyspaceGroups := []*endpoint.KeyspaceGroup{
+		{
+			ID:        uint32(1),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{100, keyspaceID, 300},
+		},
+		{
+			ID:        uint32(2),
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{10, 500},
+		},
+	}
+	re.NoError(kgm.CreateKeyspaceGroups(keyspaceGroups))
+
+	errorStore.failOnSaveID = 2
+	err := kgm.UpdateKeyspaceGroup("1", "2", endpoint.Standard, endpoint.Standard, keyspaceID)
+	re.ErrorIs(err, errSaveKeyspaceGroup)
+
+	// After rollback oldKG.Keyspaces must be sorted back to [100, 222, 300].
+	// Without the slices.Sort on line 610 it would be [100, 300, 222].
+	oldKG := kgm.groups[endpoint.Standard].Get(1)
+	re.NotNil(oldKG)
+	re.Equal([]uint32{100, keyspaceID, 300}, oldKG.Keyspaces)
+
+	newKG := kgm.groups[endpoint.Standard].Get(2)
+	re.NotNil(newKG)
+	re.Equal([]uint32{10, 500}, newKG.Keyspaces)
+}
+
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re := suite.Require()
 

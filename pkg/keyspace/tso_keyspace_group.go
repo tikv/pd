@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -594,6 +595,7 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	var updateOld, updateNew bool
 	if !slice.Contains(newKG.Keyspaces, keyspaceID) {
 		newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
+		slices.Sort(newKG.Keyspaces)
 		updateNew = true
 	}
 
@@ -606,6 +608,7 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
 		if updateOld {
 			oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+			slices.Sort(oldKG.Keyspaces)
 		}
 		if updateNew {
 			newKG.Keyspaces = slice.Remove(newKG.Keyspaces, keyspaceID)

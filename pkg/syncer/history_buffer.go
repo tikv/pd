@@ -166,27 +166,29 @@ func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 }
 
 func (h *historyBuffer) recordsFromLocked(index uint64) []*core.RegionInfo {
-	var pos int
-	if index < h.nextIndex() && index >= h.firstIndex() {
-		pos = (h.head + int(index-h.firstIndex())) % h.size
-	} else {
-		return nil
-	}
-	records := make([]*core.RegionInfo, 0, h.distanceToTail(pos))
-	for i := pos; i != h.tail; i = (i + 1) % h.size {
-		records = append(records, h.records[i])
-	}
-	return records
+	return h.recordsBetweenLocked(index, h.nextIndex())
 }
 
-func (h *historyBuffer) observeAndRecordsFrom(index uint64) ([]*core.RegionInfo, uint64) {
-	h.Lock()
-	defer h.Unlock()
-	nextIndex := h.nextIndex()
-	if index != 0 && index < nextIndex {
-		h.observeRequiredWindowLocked(nextIndex - index)
+func (h *historyBuffer) recordsBetween(index, endIndex uint64) []*core.RegionInfo {
+	h.RLock()
+	defer h.RUnlock()
+	return h.recordsBetweenLocked(index, endIndex)
+}
+
+func (h *historyBuffer) recordsBetweenLocked(index, endIndex uint64) []*core.RegionInfo {
+	if endIndex > h.nextIndex() {
+		endIndex = h.nextIndex()
 	}
-	return h.recordsFromLocked(index), nextIndex
+	if index >= endIndex || index < h.firstIndex() || index > h.nextIndex() {
+		return nil
+	}
+	pos := (h.head + int(index-h.firstIndex())) % h.size
+	records := make([]*core.RegionInfo, 0, int(endIndex-index))
+	for i := pos; index < endIndex; i = (i + 1) % h.size {
+		records = append(records, h.records[i])
+		index++
+	}
+	return records
 }
 
 func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, uint64, bool) {
@@ -200,15 +202,18 @@ func (h *historyBuffer) retainedRecordsFrom(index uint64) ([]*core.RegionInfo, u
 	return records, nextIndex, len(records) == int(nextIndex-index)
 }
 
-func (h *historyBuffer) retainFromCurrent() (uint64, func()) {
+func (h *historyBuffer) retainFrom(index uint64) func() {
 	h.Lock()
 	defer h.Unlock()
-	index := h.nextIndex()
+	return h.retainLocked(index)
+}
+
+func (h *historyBuffer) retainLocked(index uint64) func() {
 	if h.retains == nil {
 		h.retains = make(map[uint64]int)
 	}
 	h.retains[index]++
-	return index, func() {
+	return func() {
 		h.releaseRetain(index)
 	}
 }
@@ -311,6 +316,12 @@ func (h *historyBuffer) getNextIndex() uint64 {
 	h.RLock()
 	defer h.RUnlock()
 	return h.index
+}
+
+func (h *historyBuffer) getFirstIndex() uint64 {
+	h.RLock()
+	defer h.RUnlock()
+	return h.firstIndex()
 }
 
 func (h *historyBuffer) get(index uint64) *core.RegionInfo {

@@ -109,7 +109,15 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
-func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage) {
+func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage) bool {
+	if syncErr := resp.GetHeader().GetError(); syncErr != nil {
+		s.streamingRunning.Store(false)
+		log.Warn("region sync with leader received error response",
+			zap.String("server", s.server.Name()),
+			zap.String("error-type", syncErr.GetType().String()),
+			zap.String("error-message", syncErr.GetMessage()))
+		return false
+	}
 	if s.history.getNextIndex() != resp.GetStartIndex() {
 		log.Warn("server sync index not match the leader",
 			zap.String("server", s.server.Name()),
@@ -192,6 +200,7 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 	}
 	// mark the client as running status when it finished the first history region sync.
 	s.streamingRunning.Store(true)
+	return true
 }
 
 // IsRunning returns whether the region syncer client is running.
@@ -289,23 +298,38 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
-					// Check if the leader is still there to avoid waiting for a `retryInterval`.
-					if s.server.GetLeader() == nil {
-						log.Warn("stop synchronizing with leader due to leader stepped down",
-							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+					if !s.waitRegionSyncRetryInterval(ctx) {
 						return
-					}
-					select {
-					case <-ctx.Done():
-						log.Info("stop synchronizing with leader due to context canceled",
-							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
-						return
-					case <-time.After(retryInterval):
 					}
 					break
 				}
-				s.handleRegionSyncResponse(ctx, resp, bc, regionStorage)
+				if !s.handleRegionSyncResponse(ctx, resp, bc, regionStorage) {
+					if err = stream.CloseSend(); err != nil {
+						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+					}
+					if !s.waitRegionSyncRetryInterval(ctx) {
+						return
+					}
+					break
+				}
 			}
 		}
 	}()
+}
+
+func (s *RegionSyncer) waitRegionSyncRetryInterval(ctx context.Context) bool {
+	// Check if the leader is still there to avoid waiting for a `retryInterval`.
+	if s.server.GetLeader() == nil {
+		log.Warn("stop synchronizing with leader due to leader stepped down",
+			zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		log.Info("stop synchronizing with leader due to context canceled",
+			zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
+		return false
+	case <-time.After(retryInterval):
+		return true
+	}
 }

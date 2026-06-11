@@ -143,6 +143,25 @@ func TestHistoryBufferPersistsNextIndexOnly(t *testing.T) {
 	re.Equal("3", s)
 }
 
+func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+	release := h.retainFrom(10)
+	defer release()
+
+	for i := range 5 {
+		h.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+
+	records, nextIndex, ok := h.retainedRecordsFrom(10)
+	re.True(ok)
+	re.Equal(uint64(15), nextIndex)
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Len(records, 5)
+	re.Equal(8, h.capacity())
+}
+
 func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
