@@ -359,6 +359,17 @@ func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, 
 	return groups
 }
 
+func mustPatchMetaServiceGroupsFail(re *require.Assertions, server *tests.TestServer, patch map[string]*string) {
+	data, err := json.Marshal(patch)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+}
+
 // MustRemoveKeyspacesFromGroup removes keyspaces from a keyspace group with HTTP API.
 func MustRemoveKeyspacesFromGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32) *endpoint.KeyspaceGroup {
 	params := &handlers.RemoveKeyspacesFromGroupParams{

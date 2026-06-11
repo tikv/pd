@@ -157,12 +157,18 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	}
 	re.True(found, "etcd-group-1 should exist after modify")
 
-	// Delete etcd-group-2
-	deletePatch := map[string]*string{
+	// Deleting a group with assigned keyspaces should be rejected.
+	rejectPatch := map[string]*string{
 		"etcd-group-2": nil,
+	}
+	mustPatchMetaServiceGroupsFail(re, suite.server, rejectPatch)
+
+	// Delete etcd-group-4 which has no assigned keyspaces.
+	deletePatch := map[string]*string{
+		"etcd-group-4": nil,
 	}
 	groups = mustAddMetaServiceGroups(re, suite.server, deletePatch)
 	for _, group := range groups {
-		re.NotEqual("etcd-group-2", group.ID, "etcd-group-2 should be deleted")
+		re.NotEqual("etcd-group-4", group.ID, "etcd-group-4 should be deleted")
 	}
 }
