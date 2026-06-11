@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
@@ -1517,7 +1516,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 func normalizeResourceGroupsForSettingsCompare(groups []*rmpb.ResourceGroup) []*rmpb.ResourceGroup {
 	normalized := make([]*rmpb.ResourceGroup, 0, len(groups))
 	for _, group := range groups {
-		cloned := proto.Clone(group).(*rmpb.ResourceGroup)
+		cloned := typeutil.DeepClone(group, func() *rmpb.ResourceGroup {
+			return &rmpb.ResourceGroup{}
+		})
 		cloned.RUStats = nil
 		resetTokenBucketRuntimeState(cloned.GetRUSettings().GetRU())
 		rawSettings := cloned.GetRawResourceSettings()
