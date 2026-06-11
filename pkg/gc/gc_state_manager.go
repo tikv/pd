@@ -706,20 +706,20 @@ func (m *GCStateManager) GetAllKeyspacesGCStates(ctx context.Context, excludeGCB
 	if !excludeGCBarriers {
 		return m.allKeyspacesGCStatesSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
 			result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
-			failpoint.Eval(_curpkg_("onGetAllKeyspacesGCStatesFinish"))
+			failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 			return result, err
 		})
 	}
 
 	return m.allKeyspacesGCStatesExcludeGCBarriersSingleFlight.Do(ctx, func(execCtx context.Context) (map[uint32]GCState, error) {
 		result, err := m.getAllKeyspacesGCStatesImpl(execCtx, excludeGCBarriers)
-		failpoint.Eval(_curpkg_("onGetAllKeyspacesGCStatesFinish"))
+		failpoint.Inject("onGetAllKeyspacesGCStatesFinish", func() {})
 		return result, err
 	})
 }
 
 func (m *GCStateManager) getAllKeyspacesGCStatesImpl(ctx context.Context, excludeGCBarriers bool) (map[uint32]GCState, error) {
-	failpoint.Call(_curpkg_("onGetAllKeyspacesGCStatesStart"))
+	failpoint.InjectCall("onGetAllKeyspacesGCStatesStart")
 
 	mutexLocked := false
 	lock := func() {

@@ -121,7 +121,7 @@ func (m *Manager) gcCompletedProgress() {
 	m.Lock()
 	defer m.Unlock()
 	exactExpiredDuration := expiredDuration
-	if val, _err_ := failpoint.Eval(_curpkg_("gcExpiredTime")); _err_ == nil {
+	failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
 		if s, ok := val.(string); ok {
 			var err error
 			exactExpiredDuration, err = time.ParseDuration(s)
@@ -129,7 +129,7 @@ func (m *Manager) gcCompletedProgress() {
 				panic(err)
 			}
 		}
-	}
+	})
 	exactExpiredTime := time.Now().Add(-exactExpiredDuration)
 	for storeID, p := range m.completedProgress {
 		if p.completeAt.Before(exactExpiredTime) {

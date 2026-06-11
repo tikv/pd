@@ -116,10 +116,10 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 
 // ListEtcdMembers returns a list of internal etcd members.
 func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	if val, _err_ := failpoint.Eval(_curpkg_("SlowEtcdMemberList")); _err_ == nil {
+	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
-	}
+	})
 	newCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	// After the etcd server is upgraded to v3.5.x, the MemberList API will return the member list in a linearizable way by default.
 	// It is introduced by https://github.com/etcd-io/etcd/pull/11639
@@ -151,10 +151,10 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 	defer cancel()
 
 	start := time.Now()
-	if val, _err_ := failpoint.Eval(_curpkg_("SlowEtcdKVGet")); _err_ == nil {
+	failpoint.Inject("SlowEtcdKVGet", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
-	}
+	})
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -192,9 +192,9 @@ func writeKeyToFile(file, key, op string) error {
 // IsHealthy checks if the etcd is healthy.
 func IsHealthy(ctx context.Context, client *clientv3.Client) bool {
 	timeout := DefaultRequestTimeout
-	if _, _err_ := failpoint.Eval(_curpkg_("fastTick")); _err_ == nil {
+	failpoint.Inject("fastTick", func() {
 		timeout = 100 * time.Millisecond
-	}
+	})
 	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
 	defer cancel()
 	_, err := client.Get(ctx, healthyPath)
@@ -306,9 +306,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClien
 	}
 
 	tickerInterval := defaultDialKeepAliveTime
-	if _, _err_ := failpoint.Eval(_curpkg_("fastTick")); _err_ == nil {
+	failpoint.Inject("fastTick", func() {
 		tickerInterval = 100 * time.Millisecond
-	}
+	})
 	if enableChecker {
 		initHealthChecker(tickerInterval, tlsConfig, client, purpose)
 	}
@@ -447,9 +447,9 @@ func (lw *LoopWatcher) StartWatchLoop() {
 					zap.Error(err))
 				watchStartRevision = nextRevision
 				time.Sleep(lw.watchChangeRetryInterval)
-				if _, _err_ := failpoint.Eval(_curpkg_("updateClient")); _err_ == nil {
+				failpoint.Inject("updateClient", func() {
 					lw.client = <-lw.updateClientCh
-				}
+				})
 			}
 		}
 	}()
@@ -463,12 +463,12 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	ticker := time.NewTicker(defaultEtcdRetryInterval)
 	defer ticker.Stop()
 	for i := range lw.loadRetryTimes {
-		if val, _err_ := failpoint.Eval(_curpkg_("loadTemporaryFail")); _err_ == nil {
+		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
-				continue
+				failpoint.Continue()
 			}
-		}
+		})
 		watchStartRevision, err = lw.load(ctx)
 		if err == nil {
 			break
@@ -571,11 +571,11 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				continue
 			}
 		case wresp := <-watchChan:
-			if _, _err_ := failpoint.Eval(_curpkg_("watchChanBlock")); _err_ == nil {
+			failpoint.Inject("watchChanBlock", func() {
 				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
 				// So we discard these responses when the failpoint is injected.
-				goto watchChanLoop
-			}
+				failpoint.Goto("watchChanLoop")
+			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision in watch loop",
@@ -652,11 +652,11 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		default:
 		}
 		resp, err := EtcdKVGet(lw.client, startKey, opts...)
-		if _, _err_ := failpoint.Eval(_curpkg_("meetEtcdError")); _err_ == nil {
+		failpoint.Inject("meetEtcdError", func() {
 			if limit > minLoadBatchSize {
 				err = errors.New(codes.ResourceExhausted.String())
 			}
-		}
+		})
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))

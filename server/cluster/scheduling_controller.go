@@ -150,9 +150,9 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 	defer sc.wg.Done()
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("highFrequencyClusterJobs")); _err_ == nil {
+	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Reset(time.Millisecond)
-	}
+	})
 	defer ticker.Stop()
 
 	for {

@@ -139,9 +139,9 @@ func (m *Manager) ObserveAvailableRegion(region *core.RegionInfo, group *GroupSt
 func (m *Manager) startAvailabilityCheckLoop() {
 	interval := defaultAvailabilityCheckInterval
 	ticker := time.NewTicker(interval)
-	if _, _err_ := failpoint.Eval(_curpkg_("changeAvailabilityCheckInterval")); _err_ == nil {
+	failpoint.Inject("changeAvailabilityCheckInterval", func() {
 		ticker.Reset(100 * time.Millisecond)
-	}
+	})
 	go func() {
 		defer logutil.LogPanic()
 		defer ticker.Stop()

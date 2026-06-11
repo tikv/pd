@@ -165,9 +165,9 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedAllocNodes")); _err_ == nil {
+	failpoint.Inject("acceleratedAllocNodes", func() {
 		ticker.Reset(time.Millisecond * 100)
-	}
+	})
 	defer ticker.Stop()
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
@@ -376,15 +376,15 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
-	if val, _err_ := failpoint.Eval(_curpkg_("assignToSpecificKeyspaceGroup")); _err_ == nil {
+	failpoint.Inject("assignToSpecificKeyspaceGroup", func(val failpoint.Value) {
 		if groupID, ok := val.(int); ok {
 			config := map[string]string{
 				UserKindKey:           userKind.String(),
 				TSOKeyspaceGroupIDKey: strconv.Itoa(groupID),
 			}
-			return config, nil
+			failpoint.Return(config, nil)
 		}
-	}
+	})
 
 	if m == nil {
 		return map[string]string{}, nil
@@ -510,12 +510,12 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 		return err
 	}
 
-	if val, _err_ := failpoint.Eval(_curpkg_("externalAllocNode")); _err_ == nil {
+	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
 		failpointOnce.Do(func() {
 			addrs := val.(string)
 			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
 		})
-	}
+	})
 	m.Lock()
 	defer m.Unlock()
 	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)
@@ -796,7 +796,7 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 	m.Lock()
 	defer m.Unlock()
 
-	failpoint.Eval(_curpkg_("pauseFinishSplitBeforeTxn"))
+	failpoint.Inject("pauseFinishSplitBeforeTxn", nil)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
 		// Load the split target keyspace group first.

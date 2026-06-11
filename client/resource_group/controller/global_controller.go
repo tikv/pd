@@ -312,15 +312,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
 		defer emergencyTokenAcquisitionTicker.Stop()
 
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCleanup")); _err_ == nil {
+		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Reset(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
 			stateUpdateTicker.Reset(200 * time.Millisecond)
-		}
-		if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
-		}
+		})
 
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
@@ -328,12 +328,12 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
 
-		if val, _err_ := failpoint.Eval(_curpkg_("staleRevision")); _err_ == nil {
+		failpoint.Inject("staleRevision", func(val failpoint.Value) {
 			if rev, ok := val.(int); ok {
 				cfgRevision = int64(rev)
 				log.Info("failpoint set cfg revision", zap.Int64("cfgRevision", cfgRevision))
 			}
-		}
+		})
 		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
@@ -370,9 +370,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
-						if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
-						}
+						})
 					}
 				}
 				if watchConfigChannel == nil {
@@ -406,17 +406,17 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
 			case resp, ok := <-watchMetaChannel:
-				if _, _err_ := failpoint.Eval(_curpkg_("disableWatch")); _err_ == nil {
+				failpoint.Inject("disableWatch", func() {
 					if c.ruConfig.isSingleGroupByKeyspace {
 						panic("disableWatch")
 					}
-				}
+				})
 				if !ok {
 					watchMetaChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
-					if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
-					}
+					})
 					continue
 				}
 				for _, item := range resp.Events {
@@ -464,9 +464,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if !ok {
 					watchConfigChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
-					if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
-					}
+					})
 					continue
 				}
 				if resp.CompactRevision > cfgRevision {

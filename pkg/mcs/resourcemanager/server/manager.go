@@ -633,9 +633,9 @@ func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*Re
 func (m *Manager) persistLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(persistLoopInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("fastPersist")); _err_ == nil {
+	failpoint.Inject("fastPersist", func() {
 		ticker.Reset(100 * time.Millisecond)
-	}
+	})
 	defer ticker.Stop()
 	for {
 		select {
@@ -757,9 +757,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer cleanUpTicker.Stop()
 	metricsTicker := time.NewTicker(tickPerSecond)
 	defer metricsTicker.Stop()
-	if _, _err_ := failpoint.Eval(_curpkg_("fastCleanupTicker")); _err_ == nil {
+	failpoint.Inject("fastCleanupTicker", func() {
 		cleanUpTicker.Reset(100 * time.Millisecond)
-	}
+	})
 
 	var (
 		pushMetricsTicker  *time.Ticker

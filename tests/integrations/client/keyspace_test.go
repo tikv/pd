@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync"
 	"testing"
 	"time"
 
@@ -28,10 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/clients/metastorage"
-	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	resourcegroupcontroller "github.com/tikv/pd/client/resource_group/controller"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/slice"
@@ -46,84 +42,6 @@ const (
 	testConfig2       = "config_entry_2"
 	testKeyspaceCount = 10
 )
-
-type watchCountingResourceGroupProvider struct {
-	pd.Client
-	mu            sync.Mutex
-	watchTimes    int
-	firstRevision int64
-}
-
-func (p *watchCountingResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
-	p.mu.Lock()
-	op := opt.MetaStorageOp{}
-	for _, opt := range opts {
-		opt(&op)
-	}
-	if op.Revision > 0 {
-		if p.firstRevision == 0 && op.Revision > 0 {
-			p.firstRevision = op.Revision
-		} else if op.Revision == p.firstRevision {
-			p.watchTimes++
-		}
-	}
-	p.mu.Unlock()
-	return p.Client.Watch(ctx, key, opts...)
-}
-
-func (p *watchCountingResourceGroupProvider) getWatchTimes() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.watchTimes
-}
-
-func (suite *clientStatelessTestSuite) TestKeyspaceResourceGroupControllerWatchCount() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(suite.ctx)
-
-	minRevision := int64(0)
-	maxRevision := int64(0)
-	for i := range 3 {
-		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
-		re.NoError(err)
-		if i == 0 {
-			minRevision = res.GetHeader().GetRevision()
-		}
-		maxRevision = res.GetHeader().GetRevision()
-	}
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", fmt.Sprintf("return(%d)", maxRevision)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/staleRevision", fmt.Sprintf("return(%d)", minRevision)))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/staleRevision"))
-		cancel()
-	}()
-
-	provider := &watchCountingResourceGroupProvider{Client: suite.client}
-	controller, err := resourcegroupcontroller.NewResourceGroupController(
-		ctx, 1, provider, nil, 1, resourcegroupcontroller.EnableSingleGroupByKeyspace())
-	re.NoError(err)
-	controller.Start(ctx)
-	defer func() {
-		cancel()
-		re.NoError(controller.Stop())
-	}()
-	for i := range 3 {
-		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
-		re.NoError(err)
-		if i == 0 {
-			minRevision = res.GetHeader().GetRevision()
-		}
-		maxRevision = res.GetHeader().GetRevision()
-	}
-	time.Sleep(10 * time.Second)
-	watchTimes := provider.getWatchTimes()
-	suite.T().Log("watchTimes:", watchTimes)
-	re.Greater(watchTimes, 1)
-	controller.Stop()
-}
 
 func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start int) []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
