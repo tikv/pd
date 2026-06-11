@@ -17,6 +17,7 @@ package handlers
 import (
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -71,6 +72,29 @@ func PatchMetaServiceGroups(c *gin.Context) {
 	if err := c.BindJSON(&patch); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
+	}
+	for id, addresses := range patch {
+		if strings.TrimSpace(id) == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "group ID cannot be empty or whitespace-only")
+			return
+		}
+		if addresses != nil && strings.TrimSpace(*addresses) == "" {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
+			return
+		}
+	}
+	// Check that groups to be deleted have no assigned keyspaces.
+	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	for id, addresses := range patch {
+		if addresses == nil && assignmentCounts[id] > 0 {
+			c.AbortWithStatusJSON(http.StatusBadRequest,
+				"cannot delete meta-service group with assigned keyspaces: "+id)
+			return
+		}
 	}
 	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()

@@ -64,7 +64,7 @@ func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 
 func newUpsetMetaServiceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "upset <id>=<addr1,addr2,...> [<id>=<addr1,addr2,...> ...]",
+		Use:   "upset",
 		Short: "upset one or more meta-service groups",
 		Run:   newUpsetMetaServiceGroupFunc,
 	}
@@ -91,8 +91,17 @@ func newUpsetMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 			cmd.PrintErrf("Invalid --group format: %q (expected id=addr1,addr2,...)", group)
 			return
 		}
+		id := strings.TrimSpace(parts[0])
+		if id == "" {
+			cmd.PrintErrf("Invalid --group: ID cannot be empty in %q", group)
+			return
+		}
 		addr := strings.TrimSpace(parts[1])
-		patch[strings.TrimSpace(parts[0])] = &addr
+		if addr == "" {
+			cmd.PrintErrf("Invalid --group: address cannot be empty in %q", group)
+			return
+		}
+		patch[id] = &addr
 	}
 	body, err := json.Marshal(patch)
 	if err != nil {
@@ -121,7 +130,12 @@ func newDeleteMetaServiceGroupCommand() *cobra.Command {
 func newDeleteMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 	patch := make(map[string]*string)
 	for _, id := range args {
-		patch[strings.TrimSpace(id)] = nil
+		trimmedID := strings.TrimSpace(id)
+		if trimmedID == "" {
+			cmd.PrintErrf("Invalid ID: cannot be empty or whitespace-only")
+			return
+		}
+		patch[trimmedID] = nil
 	}
 	body, err := json.Marshal(patch)
 	if err != nil {
