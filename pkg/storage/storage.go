@@ -47,6 +47,7 @@ type Storage interface {
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
 	endpoint.AffinityStorage
+	endpoint.MaintenanceStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.

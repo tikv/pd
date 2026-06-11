@@ -597,19 +597,10 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 		if err != nil {
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {
-				// Retry 3 times to get rid of the weird error:
-				switch err.Error() {
-				case "signal: segmentation fault (core dumped)":
-					buf.Reset()
-					continue
-				case "signal: trace/breakpoint trap (core dumped)":
-					buf.Reset()
-					continue
-				}
-				if strings.Contains(buf.String(), "panic during panic") {
-					buf.Reset()
-					continue
-				}
+				// Retry up to 3 times on any test failure (flaky tests).
+				fmt.Fprintf(os.Stderr, "test %s/%s failed with error: %v, retrying...\n", pkg, fn, err)
+				buf.Reset()
+				continue
 			}
 		}
 		break

@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2413,6 +2414,26 @@ func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	return c.setStore(newStore)
 }
 
+func (c *testCluster) addLabelsStore(storeID uint64, labels map[string]string) error {
+	storeLabels := make([]*metapb.StoreLabel, 0, len(labels))
+	for k, v := range labels {
+		storeLabels = append(storeLabels, &metapb.StoreLabel{Key: k, Value: v})
+	}
+	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID, Labels: storeLabels, NodeState: metapb.NodeState_Serving},
+		core.SetStoreStats(&pdpb.StoreStats{}),
+		core.SetLastHeartbeatTS(time.Now()),
+	)
+	if err := c.SetStoreLimit(storeID, storelimit.AddPeer, 60); err != nil {
+		return err
+	}
+	if err := c.SetStoreLimit(storeID, storelimit.RemovePeer, 60); err != nil {
+		return err
+	}
+	c.Lock()
+	defer c.Unlock()
+	return c.setStore(newStore)
+}
+
 func (c *testCluster) setStoreDown(storeID uint64) error {
 	store := c.GetStore(storeID)
 	newStore := store.Clone(
@@ -3280,6 +3301,108 @@ func TestAddScheduler(t *testing.T) {
 	region3 = waitTransferLeader(re, stream, region3, 1)
 	re.NoError(dispatchHeartbeat(co, region3, stream))
 	waitNoResponse(re, stream)
+}
+
+// updateSchedulerConfig reconfigures a running scheduler in place through its HTTP config
+// handler — the same path pd-ctl and the API use — and asserts the update was accepted.
+func updateSchedulerConfig(re *require.Assertions, controller *schedulers.Controller, name, config string) {
+	handler := controller.GetSchedulerHandlers()[name]
+	re.NotNil(handler)
+	req := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(config))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	re.Equal(http.StatusOK, recorder.Code)
+}
+
+// TestEvictSlowStoreGroupEviction is an end-to-end test driving the real coordinator:
+// when several stores in the same failure domain (zone) report a high disk slow score and
+// evict-slow-store is configured with group-eviction-labels, the scheduler evicts leaders
+// from all of them, leaves other zones untouched, and releases the whole group on recovery.
+func TestEvictSlowStoreGroupEviction(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
+	defer cleanup()
+	controller := co.GetSchedulersController()
+
+	// Reconfigure the already-running evict-slow-store scheduler in place
+	// with instant recovery (recovery-duration:0) so the test need not wait out the window.
+	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(), `{"recovery-duration":0}`)
+
+	// Topology: zone z1 = {1,2,3}, z2 = {4,5}, z3 = {6}. Leaders on the z1 stores.
+	re.NoError(tc.addLabelsStore(1, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(2, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(3, map[string]string{"zone": "z1"}))
+	re.NoError(tc.addLabelsStore(10, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(20, map[string]string{"zone": "z2"}))
+	re.NoError(tc.addLabelsStore(100, map[string]string{"zone": "z3"}))
+
+	// markSlow feeds a disk slow score through the real store-heartbeat path.
+	var interval uint64
+	markSlow := func(storeID, score uint64) {
+		interval += 10
+		req := &pdpb.StoreHeartbeatRequest{Stats: &pdpb.StoreStats{
+			StoreId:     storeID,
+			Capacity:    100 * units.GiB,
+			Available:   50 * units.GiB,
+			RegionCount: 1,
+			PeerStats:   []*pdpb.PeerStat{},
+			Interval:    &pdpb.TimeInterval{StartTimestamp: interval - 10, EndTimestamp: interval},
+			SlowScore:   score,
+		}}
+		re.NoError(tc.HandleStoreHeartbeat(req, &pdpb.StoreHeartbeatResponse{}))
+	}
+
+	// one node in zone 1 becomes slow
+	markSlow(1, 100)
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore()
+	})
+	// second node in zone 1 becomes slow
+	markSlow(2, 100)
+	re.Never(func() bool { // default behavior
+		return tc.GetStore(2).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+
+	// enabling group-eviction
+	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
+		`{"group-eviction-labels":"zone", "recovery-duration":0}`)
+	// now second store gets evicted as well
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore() && tc.GetStore(2).EvictedAsSlowStore()
+	})
+
+	// a node outside the first zone becomes slow
+	markSlow(10, 100)
+	// then node in the first zone becomes slow
+	markSlow(3, 100)
+	re.Never(func() bool { // default behavior
+		return tc.GetStore(10).EvictedAsSlowStore() || tc.GetStore(3).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+
+	// a node outside the first zone recovers
+	markSlow(10, 0)
+	// third node in the first zone is evicted
+	testutil.Eventually(re, func() bool {
+		return tc.GetStore(1).EvictedAsSlowStore() && tc.GetStore(2).EvictedAsSlowStore() && tc.GetStore(3).EvictedAsSlowStore()
+	})
+
+	// Stores in other zones are never evicted.
+	re.False(tc.GetStore(10).EvictedAsSlowStore())
+	re.False(tc.GetStore(20).EvictedAsSlowStore())
+	re.False(tc.GetStore(100).EvictedAsSlowStore())
+
+	// A full groups should recover before leaders are back
+	markSlow(1, 0)
+	re.Never(func() bool { // default behavior
+		return !tc.GetStore(1).EvictedAsSlowStore()
+	}, time.Second, time.Millisecond*100)
+	// the rest is recovered
+	markSlow(2, 0)
+	markSlow(3, 0)
+	testutil.Eventually(re, func() bool {
+		return !tc.GetStore(1).EvictedAsSlowStore() && !tc.GetStore(2).EvictedAsSlowStore() && !tc.GetStore(3).EvictedAsSlowStore()
+	})
 }
 
 func TestPersistScheduler(t *testing.T) {

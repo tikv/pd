@@ -29,4 +29,9 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
 	// natefinch/lumberjack#56, It's a goroutine leak bug. Another ignore option PR https://github.com/pingcap/tidb/pull/27405/
 	goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
+	// AllocatorManager.saveTimestamp uses context.Background() with a 4s timeout, so the etcd
+	// retry goroutine and the wg.Wait() blocking it may still be alive when goleak checks after
+	// test teardown. They exit on their own once the context expires.
+	goleak.IgnoreTopFunction("go.etcd.io/etcd/client/v3.waitRetryBackoff"),
+	goleak.IgnoreTopFunction("sync.runtime_SemacquireWaitGroup"),
 }
