@@ -1742,15 +1742,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 		cli := forwardCli.getClient()
 		if cli != nil {
-			req := &schedulingpb.AskBatchSplitRequest{
-				Header: &schedulingpb.RequestHeader{
-					ClusterId: request.GetHeader().GetClusterId(),
-					SenderId:  request.GetHeader().GetSenderId(),
-				},
-				Region:     request.GetRegion(),
-				SplitCount: request.GetSplitCount(),
-			}
-			resp, err := cli.AskBatchSplit(ctx, req)
+			resp, err := cli.AskBatchSplit(ctx, newSchedulingAskBatchSplitRequest(request))
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
@@ -2214,6 +2206,18 @@ func convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOp
 		Desc:     resp.GetDesc(),
 		Kind:     resp.GetKind(),
 		Status:   resp.GetStatus(),
+	}
+}
+
+func newSchedulingAskBatchSplitRequest(request *pdpb.AskBatchSplitRequest) *schedulingpb.AskBatchSplitRequest {
+	return &schedulingpb.AskBatchSplitRequest{
+		Header: &schedulingpb.RequestHeader{
+			ClusterId: request.GetHeader().GetClusterId(),
+			SenderId:  request.GetHeader().GetSenderId(),
+		},
+		Region:     request.GetRegion(),
+		SplitCount: request.GetSplitCount(),
+		Reason:     request.GetReason(),
 	}
 }
 
