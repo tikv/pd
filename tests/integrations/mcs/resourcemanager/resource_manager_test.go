@@ -829,12 +829,12 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				wreq := cas.tcs[i].makeWriteRequest()
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
-				startTime := time.Now()
-				_, _, _, _, err := rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				_, _, waitDuration, _, err := rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				re.NoError(err)
-				_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				sum += waitDuration
+				_, _, waitDuration, _, err = rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				re.NoError(err)
-				sum += time.Since(startTime)
+				sum += waitDuration
 				_, err = rgsController.OnResponse(cas.resourceGroupName, rreq, rres)
 				re.NoError(err)
 				_, err = rgsController.OnResponse(cas.resourceGroupName, wreq, wres)
@@ -977,12 +977,12 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				wreq := cas.tcs[i].makeWriteRequest()
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
-				startTime := time.Now()
-				_, _, _, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				_, _, waitDuration, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 				re.NoError(err)
-				_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+				sum += waitDuration
+				_, _, waitDuration, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
 				re.NoError(err)
-				sum += time.Since(startTime)
+				sum += waitDuration
 				_, err = controller.OnResponse(resourceGroupName, rreq, rres)
 				re.NoError(err)
 				_, err = controller.OnResponse(resourceGroupName, wreq, wres)
