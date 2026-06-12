@@ -168,10 +168,28 @@ func TestDispatchSplitScatterUsesRequestWaitVersionWhenCacheLags(t *testing.T) {
 	re.Equal(2, splitScatterPendingCount(controller))
 
 	advanceSplitScatterRegionVersion(t, tc, 100)
+	tc.PutRegion(tc.GetRegion(101).Clone(core.SetRegionVersion(6)))
 	setSplitScatterNextDispatchAt(t, controller, time.Now().Add(-time.Second))
 	controller.dispatchSplitScatterRegions()
 
 	re.NotNil(oc.GetOperator(101))
+}
+
+func TestCollectTopPendingDeletesStaleRegionEpoch(t *testing.T) {
+	re := require.New(t)
+	controller, tc, _, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, 1, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "", splitScatterReportedCPUUsage)
+	advanceSplitScatterSourceVersion(t, tc)
+	advanceSplitScatterRegionVersion(t, tc, 101)
+	re.ElementsMatch([]uint64{100, 101}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
+
+	advanceSplitScatterRegionVersion(t, tc, 101)
+
+	re.ElementsMatch([]uint64{100}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
+	re.False(splitScatterPendingMaybe(controller, 101))
 }
 
 func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
@@ -930,6 +948,13 @@ func splitScatterPending(t *testing.T, controller *Controller, regionID uint64) 
 	pending, ok := controller.splitScatter.pending[regionID]
 	require.True(t, ok)
 	return pending
+}
+
+func splitScatterPendingMaybe(controller *Controller, regionID uint64) bool {
+	controller.splitScatter.pendingMu.RLock()
+	defer controller.splitScatter.pendingMu.RUnlock()
+	_, ok := controller.splitScatter.pending[regionID]
+	return ok
 }
 
 func splitScatterObservedPending(t *testing.T, controller *Controller) splitScatterPendingItem {
