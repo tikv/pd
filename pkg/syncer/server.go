@@ -266,6 +266,19 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	committedCountTicker := time.NewTicker(committedRegionCountInterval)
 	// -1 forces an initial publish on the first tick.
 	lastPublishedRegionCount := -1
+	publishCommittedRegionCount := func() {
+		if count := s.server.GetBasicCluster().GetTotalRegionCount(); count != lastPublishedRegionCount {
+			if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
+				log.Warn("failed to persist committed region count", errs.ZapError(err))
+			} else {
+				lastPublishedRegionCount = count
+			}
+		}
+	}
+	// Publish the region count immediately to minimize the poissibility of a leader dies
+	// immediately and a new campaign gate misclassifies an unsynced follower as
+	// already caught up.
+	publishCommittedRegionCount()
 
 	processRegion := func(region *core.RegionInfo) {
 		records = append(records, region)
@@ -311,13 +324,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			// that has not finished a history sync can still decide, after this
 			// leader is gone, whether it is caught up enough to campaign. Only
 			// the leader runs RunServer, so only the leader writes this.
-			if count := s.server.GetBasicCluster().GetTotalRegionCount(); count != lastPublishedRegionCount {
-				if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
-					log.Warn("failed to persist committed region count", errs.ZapError(err))
-				} else {
-					lastPublishedRegionCount = count
-				}
-			}
+			publishCommittedRegionCount()
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
 		}
@@ -506,7 +513,10 @@ func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core
 			return err
 		}
 	}
-	return nil
+	return stream.sendStreamIfOpen(&pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: startIndex + uint64(len(records)),
+	})
 }
 
 func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
@@ -583,6 +593,14 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			return err
 		}
 		syncStream.advanceSendIndexLocked(len(records))
+	} else {
+		// End-of-history marker after the full-sync catch-up: an empty-regions
+		if err := syncStream.sendStreamIfOpen(&pdpb.SyncRegionResponse{
+			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			StartIndex: nextIndex,
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
