@@ -308,7 +308,7 @@ func TestQPS(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("concurrency=%d,reserveN=%d,limit=%d", tc.concurrency, tc.reserveN, tc.ruPerSec), func(t *testing.T) {
 			qps, ruSec, waitTime := testQPSCase(tc.concurrency, tc.reserveN, tc.ruPerSec)
-			t.Log(fmt.Printf("QPS: %.2f, RU: %.2f, new request need wait  %s\n", qps, ruSec, waitTime))
+			t.Logf("QPS: %.2f, RU: %.2f, new request need wait %s", qps, ruSec, waitTime)
 			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)-ruSec), float64(100)*float64(tc.reserveN))
 			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
 		})
@@ -381,7 +381,11 @@ func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
 	require.Len(t, wokenUp, numWaiters)
 }
 
-const testCaseRunTime = 4 * time.Second
+const (
+	testCaseRunTime  = 4 * time.Second
+	qpsWarmupTime    = time.Second
+	qpsMeasureWindow = testCaseRunTime - qpsWarmupTime
+)
 
 func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru float64, needWait time.Duration) {
 	nc := make(chan notifyMsg, 1)
@@ -390,7 +394,6 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 
 	var wg sync.WaitGroup
 	var totalRequests int64
-	start := time.Now()
 
 	for range concurrency {
 		wg.Add(1)
@@ -413,27 +416,21 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 			}
 		}()
 	}
-	var vQPS atomic.Value
-	var wait time.Duration
-	ch := make(chan struct{})
-	go func() {
-		var windowRequests int64
-		for {
-			elapsed := time.Since(start)
-			if elapsed >= testCaseRunTime {
-				close(ch)
-				break
-			}
-			windowRequests = atomic.SwapInt64(&totalRequests, 0)
-			vQPS.Store(float64(windowRequests))
-			r := lim.Reserve(ctx, 30*time.Second, time.Now(), float64(reserveN))
-			wait = r.Delay()
-			time.Sleep(1 * time.Second)
-		}
-	}()
-	<-ch
+
+	// Ignore the initial bucket burst and measure steady-state throughput over a
+	// longer window, which is less sensitive to scheduler jitter than a single
+	// 1-second sample.
+	time.Sleep(qpsWarmupTime)
+	atomic.StoreInt64(&totalRequests, 0)
+	start := time.Now()
+	time.Sleep(qpsMeasureWindow)
+	completed := atomic.LoadInt64(&totalRequests)
+	elapsed := time.Since(start)
+
+	r := lim.Reserve(context.Background(), 30*time.Second, time.Now(), float64(reserveN))
+	needWait = r.Delay()
 	cancel()
 	wg.Wait()
-	qps = vQPS.Load().(float64)
-	return qps, qps * float64(reserveN), wait
+	qps = float64(completed) / elapsed.Seconds()
+	return qps, qps * float64(reserveN), needWait
 }

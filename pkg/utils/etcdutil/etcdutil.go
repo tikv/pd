@@ -115,7 +115,8 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
-func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+// When linearizable is false, the member list is served from the local member data.
+func ListEtcdMembers(ctx context.Context, client *clientv3.Client, linearizable bool) (*clientv3.MemberListResponse, error) {
 	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
@@ -126,7 +127,7 @@ func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.Me
 	// If Linearizable is set to false, the member list will be returned with server's local data.
 	// If Linearizable is set to true, it is served with linearizable guarantee. If the server is disconnected from quorum, `MemberList` call will fail.
 	c := clientv3.RetryClusterClient(client)
-	resp, err := c.MemberList(newCtx, &etcdserverpb.MemberListRequest{Linearizable: false})
+	resp, err := c.MemberList(newCtx, &etcdserverpb.MemberListRequest{Linearizable: linearizable})
 	cancel()
 	if err != nil {
 		return (*clientv3.MemberListResponse)(resp), errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()

@@ -122,15 +122,18 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 	defer client.Close()
 
-	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
+	// The preflight join check must work even when the cluster temporarily lacks quorum,
+	// for example after a previous MemberAdd succeeded but the new PD failed to start.
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client, false)
 	if err != nil {
 		return err
 	}
 
+	originMembers := listResp.Members
 	existed := false
 	joinedFailedToStart := false
 	advertisePeerURLs := strings.Split(cfg.AdvertisePeerUrls, ",")
-	for _, m := range listResp.Members {
+	for _, m := range originMembers {
 		if len(m.Name) == 0 {
 			if slice.EqualWithoutOrder(m.PeerURLs, advertisePeerURLs) {
 				log.Warn("the PD is already in the cluster but previously failed to start after join", zap.Any("member", m))
@@ -178,8 +181,13 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		listSucc bool
 	)
 
+	// The cluster may temporarily lose quorum after adding the second member to a
+	// single-node cluster, or when reusing a member that was added previously but
+	// never finished starting. In those cases, use the local member list instead.
+	linearizable := !joinedFailedToStart && len(originMembers) > 1
+
 	for range listMemberRetryTimes {
-		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client, linearizable)
 		if err != nil {
 			return err
 		}

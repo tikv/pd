@@ -55,8 +55,8 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 //	@Success	200	{object}	pdpb.GetMembersResponse
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/members [get]
-func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
-	members, err := getMembers(h.svr)
+func (h *memberHandler) GetMembers(w http.ResponseWriter, r *http.Request) {
+	members, err := getMembers(r.Context(), h.svr)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -64,10 +64,10 @@ func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
+func getMembers(ctx context.Context, svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	grpcServer := &server.GrpcServer{Server: svr}
-	members, err := grpcServer.GetMembers(context.Background(), req)
+	members, err := grpcServer.GetMembers(ctx, req)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -121,7 +121,7 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
-	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
+	listResp, err := etcdutil.ListEtcdMembers(r.Context(), client, true)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -202,7 +202,7 @@ func (h *memberHandler) DeleteMemberByID(w http.ResponseWriter, r *http.Request)
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := getMembers(h.svr)
+	members, membersErr := getMembers(r.Context(), h.svr)
 	if membersErr != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return
