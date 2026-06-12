@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -33,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -65,6 +67,7 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 
 	stream := newMockSyncRegionsServer()
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
 	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
@@ -222,9 +225,9 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 
 	re.NoError(syncer.sendDownstream(context.Background(), "pd-follower", syncStream, false))
 	responses := stream.sentResponses()
-	re.Len(responses, 3)
-	re.Equal(liveStartIndex, responses[2].GetStartIndex())
-	re.Equal([]*metapb.Region{{Id: 102}}, responses[2].GetRegions())
+	re.Len(responses, 4)
+	re.Equal(liveStartIndex, responses[3].GetStartIndex())
+	re.Equal([]*metapb.Region{{Id: 102}}, responses[3].GetRegions())
 	re.Equal(liveStartIndex+1, syncStream.getSendIndex())
 }
 
@@ -310,6 +313,293 @@ func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 			return false
 		}
 	})
+}
+
+type testSyncRegionsServer struct {
+	grpc.ServerStream
+	responses []*pdpb.SyncRegionResponse
+	onSend    func(resp *pdpb.SyncRegionResponse)
+}
+
+func (s *testSyncRegionsServer) Send(resp *pdpb.SyncRegionResponse) error {
+	s.responses = append(s.responses, resp)
+	if s.onSend != nil {
+		s.onSend(resp)
+	}
+	return nil
+}
+
+func (*testSyncRegionsServer) Recv() (*pdpb.SyncRegionRequest, error) {
+	return nil, nil
+}
+
+func syncHistoryRegionForTest(
+	ctx context.Context,
+	syncer *RegionSyncer,
+	req *pdpb.SyncRegionRequest,
+	stream ServerStream,
+) (*regionSyncStream, error) {
+	syncStream, syncStartIndex := syncer.bindStreamForSync(req.GetMember().GetName(), stream)
+	if err := syncer.syncHistoryRegion(ctx, req, syncStream, syncStartIndex); err != nil {
+		syncer.unbindStream(req.GetMember().GetName(), syncStream)
+		return nil, err
+	}
+	return syncStream, nil
+}
+
+func TestSyncHistoryRegionFallsBackToFullSyncWhenHistoryGapIsTooLarge(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	for i := range 3 {
+		bc.PutRegion(core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		}, nil))
+	}
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		bc,
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(2, 2, 1, kv.NewMemoryKV())
+	for i := range 4 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+	re.Equal(uint64(2), rc.history.getFirstIndex())
+
+	stream := &testSyncRegionsServer{}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: 1,
+	}
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 2)
+	re.Equal(uint64(0), stream.responses[0].GetStartIndex())
+	re.Len(stream.responses[0].GetRegions(), 3)
+	re.Equal(uint64(4), stream.responses[1].GetStartIndex())
+	re.Empty(stream.responses[1].GetRegions())
+}
+
+func TestSyncHistoryRegionFallsBackToFullSyncWhenRequestedIndexIsZero(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	for i := range 3 {
+		bc.PutRegion(core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		}, nil))
+	}
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		bc,
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(4, 4, 1, kv.NewMemoryKV())
+	for i := range 2 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+
+	stream := &testSyncRegionsServer{}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: 0,
+	}
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 2)
+	re.Equal(uint64(0), stream.responses[0].GetStartIndex())
+	re.Len(stream.responses[0].GetRegions(), 3)
+	re.Equal(uint64(2), stream.responses[1].GetStartIndex())
+	re.Empty(stream.responses[1].GetRegions())
+}
+
+func TestSyncHistoryRegionFallsBackToFullSyncWhenRequestedIndexIsAhead(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte{0},
+		EndKey:   []byte{1},
+	}, nil))
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		bc,
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(2, 2, 1, kv.NewMemoryKV())
+	for i := range 2 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+
+	stream := &testSyncRegionsServer{}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: rc.history.getNextIndex() + 1,
+	}
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 2)
+	re.Equal(uint64(0), stream.responses[0].GetStartIndex())
+	re.Len(stream.responses[0].GetRegions(), 1)
+	re.Equal(uint64(2), stream.responses[1].GetStartIndex())
+	re.Empty(stream.responses[1].GetRegions())
+}
+
+func TestSyncHistoryRegionSendsIncrementalRecords(t *testing.T) {
+	re := require.New(t)
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		core.NewBasicCluster(),
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(2, 2, 1, kv.NewMemoryKV())
+	for i := range 4 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+	re.Equal(uint64(2), rc.history.getFirstIndex())
+
+	stream := &testSyncRegionsServer{}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: rc.history.getFirstIndex(),
+	}
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 1)
+	re.Equal(uint64(2), stream.responses[0].GetStartIndex())
+	re.Len(stream.responses[0].GetRegions(), 2)
+}
+
+func TestSyncHistoryRegionSendsInSyncResponse(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	for i := range 3 {
+		bc.PutRegion(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 1)}, nil))
+	}
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		bc,
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(2, 2, 1, kv.NewMemoryKV())
+	for i := range 4 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+
+	stream := &testSyncRegionsServer{}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: rc.history.getNextIndex(),
+	}
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 1)
+	re.Equal(uint64(4), stream.responses[0].GetStartIndex())
+	re.Empty(stream.responses[0].GetRegions())
+}
+
+func TestSyncFullRegionsCatchesUpHistoryBeforeBindingStream(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte{0},
+		EndKey:   []byte{1},
+	}, nil))
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewStorageWithMemoryBackend(),
+		bc,
+	)
+	rc := NewRegionSyncer(server)
+	rc.history = newHistoryBufferWithConfig(4, 4, 1, kv.NewMemoryKV())
+	for i := range 6 {
+		rc.history.record(core.NewRegionInfo(&metapb.Region{Id: uint64(i + 10)}, nil))
+	}
+	stream := &testSyncRegionsServer{}
+	stream.onSend = func(resp *pdpb.SyncRegionResponse) {
+		if len(resp.GetRegions()) == 1 && resp.GetRegions()[0].GetId() == 1 {
+			rc.history.record(core.NewRegionInfo(&metapb.Region{
+				Id:       2,
+				StartKey: []byte{1},
+				EndKey:   []byte{2},
+			}, nil))
+			stream.onSend = nil
+		}
+	}
+	req := &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name: "pd-follower",
+		},
+		StartIndex: 1,
+	}
+
+	syncStream, err := syncHistoryRegionForTest(context.Background(), rc, req, stream)
+	re.NoError(err)
+	re.NotNil(syncStream)
+	defer rc.unbindStream("pd-follower", syncStream)
+	re.Len(stream.responses, 3)
+	re.Equal(uint64(0), stream.responses[0].GetStartIndex())
+	re.Len(stream.responses[0].GetRegions(), 1)
+	re.Equal(uint64(6), stream.responses[1].GetStartIndex())
+	re.Len(stream.responses[1].GetRegions(), 1)
+	re.Equal(uint64(7), stream.responses[2].GetStartIndex())
+	re.Empty(stream.responses[2].GetRegions())
+	re.ElementsMatch([]string{"pd-follower"}, rc.GetAllDownstreamNames())
 }
 
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
@@ -787,6 +1077,7 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	re := require.New(t)
 	syncer := &RegionSyncer{history: newTestHistoryBuffer(defaultHistoryBufferSize)}
+	syncer.history.resetWithIndex(10)
 	first := newTestRegion(1)
 	second := newTestRegion(2)
 	syncer.history.record(first)
@@ -796,14 +1087,14 @@ func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	request := &pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member:     &pdpb.Member{Name: "pd2"},
-		StartIndex: 0,
+		StartIndex: 10,
 	}
 
 	syncStream := newRegionSyncStream(stream, syncStartIndex)
 	err := syncer.syncHistoryRegion(context.Background(), request, syncStream, syncStartIndex)
 
 	re.NoError(err)
-	re.Equal(uint64(0), stream.lastResponse().GetStartIndex())
+	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
 	re.Equal([]*metapb.Region{{Id: 1}}, stream.lastResponse().GetRegions())
 }
 

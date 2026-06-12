@@ -293,6 +293,7 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
 	}
+	h.persist()
 }
 
 func (h *historyBuffer) getNextIndex() uint64 {

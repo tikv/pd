@@ -384,11 +384,27 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 ) error {
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
+	if startIndex == 0 {
+		log.Warn("requested server needs full synchronization",
+			zap.String("requested-server", name),
+			zap.String("server", s.server.Name()))
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+	}
 	if startIndex != 0 && startIndex < endIndex {
 		s.history.observeRequiredWindow(endIndex - startIndex)
 	}
 	records := s.history.recordsBetween(startIndex, endIndex)
 	if len(records) == 0 {
+		firstIndex := s.history.getFirstIndex()
+		if startIndex < firstIndex || startIndex > endIndex {
+			log.Warn("requested server cannot catch up with history buffer, trigger full synchronization",
+				zap.String("requested-server", name),
+				zap.String("server", s.server.Name()),
+				zap.Uint64("request-index", startIndex),
+				zap.Uint64("first-index", firstIndex),
+				zap.Uint64("last-index", endIndex))
+			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+		}
 		if endIndex == startIndex {
 			log.Info("requested server has already in sync with server",
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Uint64("last-index", startIndex))
@@ -471,6 +487,16 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 	regions := s.server.GetRegions()
 	lastIndex := 0
 	start := time.Now()
+	if len(regions) == 0 && syncStartIndex != 0 {
+		resp := &pdpb.SyncRegionResponse{
+			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			StartIndex: 0,
+		}
+		if err := syncStream.sendStreamIfOpen(resp); err != nil {
+			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+			return err
+		}
+	}
 	metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
 	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
@@ -539,6 +565,14 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			return err
 		}
 		syncStream.advanceSendIndexLocked(len(records))
+	}
+	resp := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: nextIndex,
+	}
+	if err := syncStream.sendStreamIfOpen(resp); err != nil {
+		log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
+		return err
 	}
 	return nil
 }

@@ -103,7 +103,8 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 	syncer.streamingRunning.Store(true)
 
-	handled := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	state := &regionSyncState{syncingHistory: true}
+	handled, err := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header: &pdpb.ResponseHeader{
 			ClusterId: keypath.ClusterID(),
 			Error: &pdpb.Error{
@@ -111,9 +112,138 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 				Message: "server stopped, close the region syncer client",
 			},
 		},
-	}, nil, nil)
+	}, nil, nil, state)
 
+	re.NoError(err)
 	re.False(handled)
 	re.Equal(uint64(10), syncer.history.getNextIndex())
 	re.False(syncer.IsRunning())
+}
+
+func TestResetRegionCacheAndStorage(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(rs.Close())
+	}()
+	storageWithRegionStorage := storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs)
+	storage.TrySwitchRegionStorage(storageWithRegionStorage, true)
+	bc := core.NewBasicCluster()
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storageWithRegionStorage,
+		bc,
+	)
+	for i := range 2 {
+		region := &metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		re.NoError(storageWithRegionStorage.SaveRegion(region))
+		bc.PutRegion(core.NewRegionInfo(region, nil))
+	}
+	re.NoError(storageWithRegionStorage.Flush())
+
+	rc := NewRegionSyncer(server)
+	re.NoError(rc.resetRegionCacheAndStorage(context.Background(), bc, storageWithRegionStorage))
+	re.Empty(bc.GetRegions())
+	for i := range 2 {
+		region := &metapb.Region{}
+		ok, err := storageWithRegionStorage.LoadRegion(uint64(i+1), region)
+		re.NoError(err)
+		re.False(ok)
+	}
+}
+
+func TestHandleFullSyncResponseResetsStaleRegions(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	defer func() {
+		re.NoError(rs.Close())
+	}()
+	storageWithRegionStorage := storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs)
+	storage.TrySwitchRegionStorage(storageWithRegionStorage, true)
+	bc := core.NewBasicCluster()
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storageWithRegionStorage,
+		bc,
+	)
+	staleRegion1 := &metapb.Region{
+		Id:       1,
+		StartKey: []byte{0},
+		EndKey:   []byte{1},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
+	staleRegion2 := &metapb.Region{
+		Id:       2,
+		StartKey: []byte{1},
+		EndKey:   []byte{2},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+	}
+	for _, region := range []*metapb.Region{staleRegion1, staleRegion2} {
+		re.NoError(storageWithRegionStorage.SaveRegion(region))
+		bc.PutRegion(core.NewRegionInfo(region, nil))
+	}
+
+	rc := NewRegionSyncer(server)
+	rc.history.resetWithIndex(10)
+	state := &regionSyncState{syncingHistory: true}
+	latestRegion := &metapb.Region{
+		Id:       1,
+		StartKey: []byte{0},
+		EndKey:   []byte{1},
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 2,
+		},
+	}
+	handled, err := rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: 0,
+		Regions:    []*metapb.Region{latestRegion},
+	}, bc, storageWithRegionStorage, state)
+	re.NoError(err)
+	re.True(handled)
+	re.False(rc.IsRunning())
+	re.True(state.fullSyncing)
+	handled, err = rc.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: 20,
+	}, bc, storageWithRegionStorage, state)
+	re.NoError(err)
+	re.True(handled)
+
+	re.True(rc.IsRunning())
+	re.False(state.fullSyncing)
+	re.False(state.syncingHistory)
+	re.Equal(uint64(20), rc.history.getNextIndex())
+	historyIndex, err := rs.Load(historyKey)
+	re.NoError(err)
+	re.Equal("20", historyIndex)
+	re.Len(bc.GetRegions(), 1)
+	re.Equal(uint64(2), bc.GetRegion(1).GetRegionEpoch().GetVersion())
+	storedRegion := &metapb.Region{}
+	ok, err := storageWithRegionStorage.LoadRegion(1, storedRegion)
+	re.NoError(err)
+	re.True(ok)
+	re.Equal(uint64(2), storedRegion.GetRegionEpoch().GetVersion())
+	ok, err = storageWithRegionStorage.LoadRegion(2, storedRegion)
+	re.NoError(err)
+	re.False(ok)
 }
