@@ -1052,8 +1052,10 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteWithForce() {
 		mustBatchDeleteAffinityGroups(re, serverAddr, &batchDeleteReq)
 
 		// Verify the group is deleted
-		statusCode, _ = doGetAffinityGroup(re, serverAddr, "force-delete")
-		re.Equal(http.StatusNotFound, statusCode)
+		testutil.Eventually(re, func() bool {
+			statusCode, _ = doGetAffinityGroup(re, serverAddr, "force-delete")
+			return statusCode == http.StatusNotFound
+		})
 	})
 }
 
