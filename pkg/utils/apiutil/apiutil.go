@@ -55,7 +55,7 @@ const (
 
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
-	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD locally.
 	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle" // #nosec G101
 	// XForwardedForHeader is used to mark the client IP.
 	XForwardedForHeader = "X-Forwarded-For"
