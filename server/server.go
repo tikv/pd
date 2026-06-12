@@ -112,6 +112,16 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	// regionSyncerCampaignGrace bounds how long a member will refuse to campaign
+	// without a leader in the cluster because its region syncer has not caught up.
+	// This prevents a permanently leaderless cluster (the gate's circular dependency:
+	// a follower cannot finish syncing once the leader it would sync from is
+	// gone).
+	// It is set to the floor of the lost-PD-leader re-election timeout
+	// (randomTimeout in leaderLoop, whose minimum is lostPDLeaderMaxTimeoutSecs
+	// seconds plus lostPDLeaderReElectionFactor*ElectionInterval).
+	regionSyncerCampaignGrace = lostPDLeaderMaxTimeoutSecs * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1665,6 +1675,12 @@ func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
+	// gateBlockedSince records when this server first got blocked from
+	// campaigning by the region-syncer gate while leaderless; it bounds that
+	// wait via regionSyncerCampaignGrace. Reset whenever a leader exists or we
+	// proceed to campaign.
+	var gateBlockedSince time.Time
+
 	for {
 		if s.IsClosed() {
 			log.Info("server is closed, return PD leader loop")
@@ -1684,6 +1700,9 @@ func (s *Server) leaderLoop() {
 			continue
 		}
 		if leader != nil {
+			// A leader exists to (re)sync from, so the gate's leaderless grace
+			// no longer applies; reset it.
+			gateBlockedSince = time.Time{}
 			err := s.reloadConfigFromKV()
 			if err != nil {
 				log.Error("reload config failed", errs.ZapError(err))
@@ -1740,12 +1759,27 @@ func (s *Server) leaderLoop() {
 		// started fresh and there is no leader to sync from" (the latter
 		// must be allowed to campaign so the cluster can bootstrap).
 		if !s.canCampaignAsRegionSyncerCaughtUp() {
-			log.Warn("skip campaigning of pd leader: region syncer has not caught up to the previous leader",
+			if gateBlockedSince.IsZero() {
+				gateBlockedSince = time.Now()
+			}
+			if blocked := time.Since(gateBlockedSince); blocked < regionSyncerCampaignGrace {
+				log.Warn("skip campaigning of pd leader: region syncer has not caught up to the previous leader",
+					zap.String("server-name", s.Name()),
+					zap.Uint64("member-id", s.member.ID()),
+					zap.Duration("blocked-for", blocked))
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			// Leaderless past the grace window with no caught-up member taking
+			// over: campaign anyway to restore availability rather than stay
+			// blocked forever. Any region gap on the new leader is repopulated
+			// by TiKV heartbeats.
+			log.Warn("region syncer has not caught up but campaign grace elapsed; campaigning to avoid a leaderless cluster",
 				zap.String("server-name", s.Name()),
-				zap.Uint64("member-id", s.member.ID()))
-			time.Sleep(200 * time.Millisecond)
-			continue
+				zap.Uint64("member-id", s.member.ID()),
+				zap.Duration("grace", regionSyncerCampaignGrace))
 		}
+		gateBlockedSince = time.Time{}
 		s.campaignLeader()
 	}
 }
