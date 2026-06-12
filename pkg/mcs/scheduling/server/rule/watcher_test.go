@@ -98,6 +98,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
+	ops := make([]clientv3.Op, 0, etcdutil.MaxEtcdTxnOps)
 	for i := 1; i < rulesNum+1; i++ {
 		rule := &labeler.LabelRule{
 			ID:       "test_" + strconv.Itoa(i),
@@ -108,7 +109,15 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		value, err := json.Marshal(rule)
 		re.NoError(err)
 		key := keypath.RegionLabelKeyPath(rule.ID)
-		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
+		ops = append(ops, clientv3.OpPut(key, string(value)))
+		if len(ops) == etcdutil.MaxEtcdTxnOps {
+			_, err = client.Txn(ctx).Then(ops...).Commit()
+			re.NoError(err)
+			ops = ops[:0]
+		}
+	}
+	if len(ops) > 0 {
+		_, err = client.Txn(ctx).Then(ops...).Commit()
 		re.NoError(err)
 	}
 
