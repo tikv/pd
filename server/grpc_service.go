@@ -2496,7 +2496,10 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			return nil
 		case <-s.Context().Done():
 			return nil
-		case res := <-watchChan:
+		case res, ok := <-watchChan:
+			if !ok {
+				return errors.New("watch channel closed unexpectedly")
+			}
 			if res.Err() != nil {
 				var resp pdpb.WatchGlobalConfigResponse
 				if revision < res.CompactRevision {
