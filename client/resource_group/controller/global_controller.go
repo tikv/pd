@@ -429,7 +429,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							continue
 						}
 						// If the resource group is marked as tombstone before, re-create the resource group controller.
-						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+						newGC, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, c.GetRUVersion)
 						if err != nil {
 							log.Warn("[resource group controller] re-create resource group cost controller for tombstone failed",
 								zap.String("name", name), zap.Error(err))
@@ -565,7 +565,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, c.GetRUVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +601,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 		return
 	}
 	// Create a default resource group controller for the tombstone resource group independently.
-	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err := newGroupCostController(defaultGC.getMeta(), c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan, c.GetRUVersion)
 	if err != nil {
 		log.Warn("[resource group controller] create default resource group cost controller for tombstone failed",
 			zap.String("name", name), zap.Error(err))
@@ -812,7 +812,8 @@ func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, c
 
 // ReportRUV2Consumption is used to report the experimental v2 RU consumption
 // split by engine (TiKV, TiDB, TiFlash).
-// RUv2 is only recorded for observation purposes without actual token deduction.
+// When this keyspace uses RUv2, the reported value is also deducted from the
+// local token bucket as debt.
 func (c *ResourceGroupsController) ReportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
 	gc, ok := c.loadGroupController(resourceGroupName)
 	if !ok {
