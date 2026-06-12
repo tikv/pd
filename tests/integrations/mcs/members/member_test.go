@@ -471,30 +471,39 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 // a keyspace_group_id field and routes the transfer to the correct keyspace group.
 func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	}()
 
-	// Create keyspace group 1 and assign all tso nodes as members.
+	// Create keyspace group 1 without members first, then use AllocNodes so that
+	// TSO nodes discover the group via etcd watch and elect a primary.
 	const testGroupID = uint32(1)
-	var memberAddrs []endpoint.KeyspaceGroupMember
-	for addr := range suite.tsoNodes {
-		memberAddrs = append(memberAddrs, endpoint.KeyspaceGroupMember{Address: addr})
-	}
 	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
 				ID:       testGroupID,
 				UserKind: endpoint.Standard.String(),
-				Members:  memberAddrs,
 			},
 		},
 	})
 
-	// Wait until the group is loaded and has a primary on one of the tso nodes.
+	// Allocate nodes for the group via PD's AllocNodes API so TSO nodes can
+	// discover their membership through etcd and start campaigning for primary.
+	allocBody, err := json.Marshal(&handlers.AllocNodesForKeyspaceGroupParams{
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
+	})
+	re.NoError(err)
+	allocReq, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("%s/pd/api/v2/tso/keyspace-groups/%d/alloc", suite.backendEndpoints, testGroupID),
+		bytes.NewBuffer(allocBody))
+	re.NoError(err)
+	allocResp, err := tests.TestDialClient.Do(allocReq)
+	re.NoError(err)
+	re.Equal(http.StatusOK, allocResp.StatusCode)
+	allocResp.Body.Close()
+
+	// Wait until the group is loaded on a TSO node and has elected a primary.
 	var groupPrimary string
 	testutil.Eventually(re, func() bool {
 		for _, s := range suite.tsoNodes {
@@ -506,7 +515,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 			}
 		}
 		return false
-	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 	re.NotEmpty(groupPrimary)
 
 	// Transfer primary within keyspace group 1 (random resign — new_primary left empty).
