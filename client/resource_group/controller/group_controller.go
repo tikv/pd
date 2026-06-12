@@ -716,7 +716,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
-	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+	bytesForEst := estimatedReadBytes(req)
+	if bytesForEst > 0 {
 		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
 			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	} else if !req.IsWrite() && req.IsCop() {
@@ -726,19 +727,27 @@ func (gc *groupCostController) onResponseWaitImpl(
 	if !gc.burstable.Load() {
 		v := getRUValueFromConsumption(delta)
 		if v > 0 {
-			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-			if err != nil {
-				if errs.ErrClientResourceGroupThrottled.Equal(err) {
-					gc.metrics.failedRequestCounterWithThrottled.Inc()
-					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-				} else {
-					gc.metrics.failedRequestCounterWithOthers.Inc()
+			if bytesForEst > 0 {
+				// The precharged request has already consumed TiKV resources.
+				// Debit any positive settlement delta immediately so future
+				// requests observe the debt instead of queueing this completed
+				// request for response-side admission.
+				gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+			} else {
+				allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+				d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+				if err != nil {
+					if errs.ErrClientResourceGroupThrottled.Equal(err) {
+						gc.metrics.failedRequestCounterWithThrottled.Inc()
+						gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+					} else {
+						gc.metrics.failedRequestCounterWithOthers.Inc()
+					}
+					return nil, waitDuration, err
 				}
-				return nil, waitDuration, err
+				gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+				waitDuration += d
 			}
-			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-			waitDuration += d
 		} else if v < 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)

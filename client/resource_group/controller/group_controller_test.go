@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -340,6 +340,49 @@ func TestPagingPreChargeNoRefundWhenActualExceedsEstimate(t *testing.T) {
 
 	re.Less(tokensAfterSettlement, tokensAfterPreCharge,
 		"when actual exceeds pre-charge, settlement should consume tokens")
+}
+
+func TestOnResponseWaitPrechargedPositiveSettlementDebitsImmediately(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.mainCfg.WaitRetryTimes = 1
+	gc.mainCfg.WaitRetryInterval = time.Millisecond
+	gc.mainCfg.LTBMaxWaitDuration = time.Millisecond
+
+	limiter := gc.run.requestUnitTokens.limiter
+	limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+	limiter.RemoveTokens(time.Now(), limiter.AvailableTokens(time.Now()))
+	gc.isThrottled.Store(true)
+
+	req := &TestRequestInfo{
+		isWrite:            false,
+		predictedReadBytes: 16 * 1024 * 1024,
+		isCop:              true,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 20 * 1024 * 1024,
+		succeed:   true,
+	}
+	settlementDelta := &rmpb.Consumption{}
+	for _, calc := range gc.calculators {
+		calc.AfterKVRequest(settlementDelta, req, resp)
+	}
+	re.Greater(getRUValueFromConsumption(settlementDelta), float64(0))
+	re.GreaterOrEqual(settlementDelta.ReadBytes+settlementDelta.WriteBytes, float64(bigRequestThreshold))
+	re.True(gc.isThrottled.Load())
+
+	tokensBefore := limiter.AvailableTokens(time.Now())
+	_, waitDuration, err := gc.onResponseWaitImpl(context.Background(), req, resp)
+	re.NoError(err)
+	re.Zero(waitDuration)
+
+	tokensAfter := limiter.AvailableTokens(time.Now())
+	re.Less(tokensAfter, tokensBefore,
+		"precharged positive settlement should be debited immediately")
 }
 
 func TestOnResponseImplPagingRefund(t *testing.T) {
