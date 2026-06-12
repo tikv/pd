@@ -109,7 +109,7 @@ func (tc *TestSchedulingCluster) GetPrimaryServer() *scheduling.Server {
 	return nil
 }
 
-// WaitForPrimaryServing waits for one of servers being elected to be the primary/leader of the given keyspace.
+// WaitForPrimaryServing waits for one of servers being elected to be the primary.
 func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *scheduling.Server {
 	var primary *scheduling.Server
 	testutil.Eventually(re, func() bool {
