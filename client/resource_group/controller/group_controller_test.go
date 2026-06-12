@@ -17,20 +17,23 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-func createTestGroupCostController(re *require.Assertions) *groupCostController {
+func createTestGroupCostController(re *require.Assertions, name string) *groupCostController {
 	group := &rmpb.ResourceGroup{
-		Name:     "test",
+		Name:     name,
 		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 1,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
@@ -46,26 +49,28 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, 1001, DefaultRUConfig(), ch1, ch2)
 	re.NoError(err)
 	return gc
 }
 
 func TestGroupControlBurstable(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	args := tokenBucketReconfigureArgs{
 		newFillRate: 1000,
 		newBurst:    -1,
 	}
 	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), args)
+	gc.run.now = time.Now()
+	gc.run.requestUnitTokens.avgLastTime = gc.run.now.Add(-time.Second)
 	gc.updateAvgRequestResourcePerSec()
 	re.True(gc.burstable.Load())
 }
 
 func TestRequestAndResponseConsumption(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	testCases := []struct {
 		req  *TestRequestInfo
 		resp *TestResponseInfo
@@ -172,7 +177,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 
 func TestOnResponseWaitConsumption(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 
 	req := &TestRequestInfo{
 		isWrite: false,
@@ -211,7 +216,7 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	counter := gc.run.requestUnitTokens
 
 	counter.notify.mu.Lock()
@@ -242,7 +247,7 @@ func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 
 func TestHandleTokenBucketUpdateEventCleansNotifyOnTimer(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	counter := gc.run.requestUnitTokens
 	threshold := 42.0
 
@@ -288,7 +293,7 @@ func isClosed(ch <-chan struct{}) bool {
 
 func TestResourceGroupThrottledError(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	req := &TestRequestInfo{
 		isWrite:    true,
 		writeBytes: 10000000,
@@ -317,7 +322,7 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	cfg := DefaultRUConfig()
 	cfg.WaitRetryInterval = 5 * time.Second
 	cfg.WaitRetryTimes = 3
-	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
+	gc, err := newGroupCostController(group, 1001, cfg, notifyCh, make(chan *groupCostController, 1))
 	re.NoError(err)
 
 	// Set fillRate=0 so reservation always fails with InfDuration,
@@ -368,7 +373,7 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 
 func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	// Short retry interval so the test runs fast.
 	gc.mainCfg.WaitRetryInterval = 50 * time.Millisecond
 	gc.mainCfg.WaitRetryTimes = 3
@@ -402,7 +407,7 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 // now_B, not rewind to now_A.
 func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
 	re := require.New(t)
-	gc := createTestGroupCostController(re)
+	gc := createTestGroupCostController(re, t.Name())
 	gc.mainCfg.LTBMaxWaitDuration = 30 * time.Second
 	gc.mainCfg.WaitRetryTimes = 1
 	counter := gc.run.requestUnitTokens
@@ -453,4 +458,87 @@ func TestAcquireTokensCancelKeepsLastMonotonic(t *testing.T) {
 	}
 
 	re.False(counter.limiter.last.Before(tMid), "stale CancelAt rewound lim.last")
+}
+
+func TestAcquireTokensUpdatesDemandMetricOnThrottle(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.mainCfg.LTBMaxWaitDuration = 0
+	gc.mainCfg.WaitRetryTimes = 1
+	gc.mainCfg.WaitRetryInterval = 0
+
+	counter := gc.run.requestUnitTokens
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1,
+		newBurst:    1,
+	})
+	counter.demandAvgLastTime = time.Now().Add(-time.Second)
+
+	before := promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name))
+	waitDuration := time.Duration(0)
+	_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 100}, &waitDuration, false)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	re.Greater(promtestutil.ToFloat64(metrics.DemandRUPerSecGauge.WithLabelValues(gc.name)), before)
+}
+
+func TestAcquireTokensDemandStatsConcurrentLogFields(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+	gc.mainCfg.LTBMaxWaitDuration = 0
+	gc.mainCfg.WaitRetryTimes = 1
+	gc.mainCfg.WaitRetryInterval = 0
+
+	counter := gc.run.requestUnitTokens
+	counter.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1,
+		newBurst:    1,
+	})
+	counter.demandAvgLastTime = time.Now().Add(-time.Second)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for range 100 {
+				waitDuration := time.Duration(0)
+				_, _ = gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 1}, &waitDuration, false)
+				_ = gc.logFields(waitDuration, nil)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+}
+
+func TestObserveConsumptionAndComponentMetrics(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re, t.Name())
+
+	rruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru"))
+	wruBefore := promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru"))
+	readBefore := promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name))
+	writeBefore := promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name))
+	kvBefore := promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name))
+	sqlBefore := promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name))
+
+	gc.observeConsumption(&rmpb.Consumption{RRU: 3, WRU: 5})
+	gc.addRUConsumption(&rmpb.Consumption{
+		ReadBytes:         13,
+		WriteBytes:        17,
+		TotalCpuTimeMs:    11,
+		SqlLayerCpuTimeMs: 7,
+	})
+
+	re.Equal(rruBefore+3, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "rru")))
+	re.Equal(wruBefore+5, promtestutil.ToFloat64(metrics.TokenConsumedByTypeCounter.WithLabelValues(gc.name, "wru")))
+	re.Equal(readBefore+13, promtestutil.ToFloat64(metrics.ReadByteCost.WithLabelValues(gc.name)))
+	re.Equal(writeBefore+17, promtestutil.ToFloat64(metrics.WriteByteCost.WithLabelValues(gc.name)))
+	re.Equal(kvBefore+4, promtestutil.ToFloat64(metrics.KVCPUCost.WithLabelValues(gc.name)))
+	re.Equal(sqlBefore+7, promtestutil.ToFloat64(metrics.SQLCPUCost.WithLabelValues(gc.name)))
 }
