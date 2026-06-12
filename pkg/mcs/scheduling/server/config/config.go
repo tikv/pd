@@ -693,6 +693,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
 }
 
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (o *PersistConfig) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	return o.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
