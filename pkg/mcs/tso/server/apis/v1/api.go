@@ -293,21 +293,33 @@ func getConfig(c *gin.Context) {
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    new_primary body   string  false "new primary name"
+// @Param    new_primary        body  string  false  "new primary name"
+// @Param    keyspace_group_id  body  integer false  "keyspace group ID (default: 0)"
 // @Success  200  string  string
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	var input map[string]string
+	var input struct {
+		NewPrimary      string  `json:"new_primary"`
+		KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
+	}
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// We only support default keyspace group now.
-	newPrimary, keyspaceGroupID := "", constant.DefaultKeyspaceGroupID
-	if v, ok := input["new_primary"]; ok {
-		newPrimary = v
+	keyspaceGroupID := constant.DefaultKeyspaceGroupID
+	if input.KeyspaceGroupID != nil {
+		keyspaceGroupID = *input.KeyspaceGroupID
+	}
+
+	kgm := svr.GetKeyspaceGroupManager()
+	keyspaceGroups := kgm.GetKeyspaceGroups()
+	group, ok := keyspaceGroups[keyspaceGroupID]
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusBadRequest,
+			fmt.Sprintf("keyspace group %d not found on this tso node", keyspaceGroupID))
+		return
 	}
 
 	allocator, err := svr.GetTSOAllocator(keyspaceGroupID)
@@ -317,14 +329,13 @@ func transferPrimary(c *gin.Context) {
 	}
 
 	// only members of specific group are valid primary candidates.
-	group := svr.GetKeyspaceGroupManager().GetKeyspaceGroups()[keyspaceGroupID]
 	memberMap := make(map[string]bool, len(group.Members))
 	for _, member := range group.Members {
 		memberMap[member.Address] = true
 	}
 
 	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetExpectedPrimaryLease(),
-		mcs.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
+		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
