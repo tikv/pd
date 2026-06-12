@@ -237,6 +237,10 @@ func getHealth(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
+	if allocator == nil {
+		c.String(http.StatusNotFound, "allocator not found")
+		return
+	}
 	if allocator.GetMember().(*member.Participant).IsPrimaryElected() {
 		c.String(http.StatusOK, "ok")
 		return
