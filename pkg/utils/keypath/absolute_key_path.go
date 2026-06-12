@@ -91,6 +91,10 @@ const (
 	storePathFormat                = "/pd/%d/raft/s/%020d"                    // "/pd/{cluster_id}/raft/s/{store_id}"
 	minResolvedTSPathFormat        = "/pd/%d/raft/min_resolved_ts"            // "/pd/{cluster_id}/raft/min_resolved_ts"
 	externalTimestampPathFormat    = "/pd/%d/raft/external_timestamp"         // "/pd/{cluster_id}/raft/external_timestamp"
+	// regionSyncerCommittedRegionCountPathFormat holds the region count the
+	// current leader is serving, published so other members can tell whether
+	// they are caught up before campaigning for PD leadership.
+	regionSyncerCommittedRegionCountPathFormat = "/pd/%d/raft/region_syncer_committed_region_count" // "/pd/{cluster_id}/raft/region_syncer_committed_region_count"
 
 	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
 	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
@@ -202,6 +206,12 @@ func MinResolvedTSPath() string {
 // ExternalTimestampPath returns the external timestamp path.
 func ExternalTimestampPath() string {
 	return fmt.Sprintf(externalTimestampPathFormat, ClusterID())
+}
+
+// RegionSyncerCommittedRegionCountPath returns the path that stores the region
+// count the current leader is serving.
+func RegionSyncerCommittedRegionCountPath() string {
+	return fmt.Sprintf(regionSyncerCommittedRegionCountPathFormat, ClusterID())
 }
 
 // RecoveringMarkPath returns the path to save the recovering mark.

@@ -142,6 +142,23 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 	}
 }
 
+// recordNoPersist is like record but does not advance the on-disk
+// historyIndex. The syncer client uses it during a historical catch-up
+// so that a partially-received bulk does not commit a non-zero index; if
+// the catch-up is interrupted (leader failover, process crash), the next
+// sync starts from the last committed index instead of the middle of a
+// half-applied transfer.
+func (h *historyBuffer) recordNoPersist(r *core.RegionInfo) {
+	h.Lock()
+	defer h.Unlock()
+	syncIndexGauge.Set(float64(h.index))
+	h.records[h.tail] = r
+	h.tail = (h.tail + 1) % h.size
+	if h.tail == h.head {
+		h.head = (h.head + 1) % h.size
+	}
+	h.index++
+}
 func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()
@@ -378,4 +395,29 @@ func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 		return h.records[pos]
 	}
 	return nil
+}
+
+// commit persists the current historyIndex. The syncer client calls this
+// when an end-of-history marker is received, to atomically commit a bulk
+// or catch-up transfer.
+func (h *historyBuffer) commit() {
+	h.Lock()
+	defer h.Unlock()
+	h.persist()
+	h.flushCount = defaultFlushCount
+}
+
+// rollback resets the in-memory historyIndex back to the last value
+// persisted on disk and clears the ring buffer. The syncer client calls
+// this when a sync session ends without ever receiving an end-of-history
+// marker, so the next sync starts from the last committed index (0 for a
+// fresh member that never completed a catch-up).
+func (h *historyBuffer) rollback() {
+	h.Lock()
+	defer h.Unlock()
+	h.index = 0
+	h.head = 0
+	h.tail = 0
+	h.flushCount = defaultFlushCount
+	h.reload()
 }

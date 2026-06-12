@@ -16,6 +16,7 @@ package syncer
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -71,6 +73,54 @@ func TestLoadRegion(t *testing.T) {
 	rc.StopSyncWithLeader()
 	re.Greater(time.Since(start), time.Second) // make sure failpoint is injected
 	re.Less(time.Since(start), time.Second*2)
+}
+
+// TestHistorySyncedInitFromDurableState verifies that NewRegionSyncer
+// seeds historySynced from the persisted history index so a node that
+// previously completed a sync can still campaign after a restart followed
+// by a leader death mid-sync. A fresh-on-disk node must stay false so it
+// is forced through a real catch-up before it can campaign.
+func TestHistorySyncedInitFromDurableState(t *testing.T) {
+	re := require.New(t)
+
+	newSyncer := func(seed func(kv.Base)) *RegionSyncer {
+		tempDir := t.TempDir()
+		rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+		re.NoError(err)
+		t.Cleanup(func() { re.NoError(rs.Close()) })
+		seed(rs)
+		server := mockserver.NewMockServer(
+			context.Background(),
+			nil,
+			nil,
+			storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+			core.NewBasicCluster(),
+		)
+		return NewRegionSyncer(server)
+	}
+
+	// Fresh KV: no persisted historyIndex. Stays false so the node is
+	// gated until it actually catches up to a leader.
+	rc := newSyncer(func(kv.Base) {})
+	re.False(rc.IsHistorySynced(),
+		"fresh KV should not be treated as already synced")
+
+	// Persisted historyIndex from a prior successful sync. The index only
+	// ever lands on disk after SaveRegion calls succeeded (via commit() or
+	// record()'s flushCount path), so a non-zero index is sufficient
+	// evidence of durable region state.
+	rc = newSyncer(func(b kv.Base) {
+		re.NoError(b.Save(historyKey, "42"))
+	})
+	re.True(rc.IsHistorySynced(),
+		"persisted history index must initialize historySynced to true")
+	re.Equal(uint64(42), rc.history.getNextIndex(),
+		"history index should reload the persisted value")
+	// Sanity: a value that round-trips through strconv matches what
+	// history_buffer's persist path writes.
+	v, err := strconv.ParseUint("42", 10, 64)
+	re.NoError(err)
+	re.Equal(rc.history.getNextIndex(), v)
 }
 
 func TestErrorCode(t *testing.T) {
