@@ -41,6 +41,15 @@ const (
 	keyspaceNameLabel         = "keyspace_name"
 	fillRateLabel             = "fill_rate"
 	burstLimitLabel           = "burst_limit"
+	slotEventLabel            = "event"
+	slotCreatedEventLabel     = "created"
+	slotDeletedEventLabel     = "deleted"
+	slotExpiredEventLabel     = "expired"
+	kindLabel                 = "kind"
+	throttleKindLabel         = "throttling"
+	trickleKindLabel          = "trickle"
+	serviceLimitCauseLabel    = "service_limit"
+	groupCauseLabel           = "group_fill_rate_or_burst"
 
 	// Labels for the config.
 	ruPerSecLabel   = "ru_per_sec"
@@ -220,6 +229,50 @@ var (
 			Help:      "The duration of pushing RU metrics to Prometheus.",
 			Buckets:   prometheus.DefBuckets,
 		})
+	grantedTokensHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "granted_tokens",
+			Help:      "Histogram of tokens granted per request.",
+			Buckets:   []float64{0, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000},
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+	activeSlotCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "active_slot_count",
+			Help:      "Number of active token slots per resource group.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+	slotEventsCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "slot_events_total",
+			Help:      "Counter of slot lifecycle events (created, deleted, expired).",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, slotEventLabel})
+	tokenLoanGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "token_loan",
+			Help:      "Current total token loan amount per resource group.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+	trickleDurationHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "trickle_duration_ms",
+			Help:      "Histogram of trickle duration in milliseconds per request.",
+			Buckets:   []float64{0, 100, 500, 1000, 2000, 3000, 4000, 5000, 10000},
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+	requestCauseCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "request_cause_total",
+			Help:      "Counter of throttling and trickle contributing causes per resource group.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, kindLabel, "cause"})
 )
 
 type metrics struct {
@@ -274,6 +327,12 @@ func init() {
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
 	prometheus.MustRegister(pushRUMetricsDuration)
+	prometheus.MustRegister(grantedTokensHistogram)
+	prometheus.MustRegister(activeSlotCountGauge)
+	prometheus.MustRegister(slotEventsCounter)
+	prometheus.MustRegister(tokenLoanGauge)
+	prometheus.MustRegister(trickleDurationHistogram)
+	prometheus.MustRegister(requestCauseCounter)
 }
 
 func newMetrics() *metrics {
@@ -480,6 +539,11 @@ type gaugeMetrics struct {
 	sampledRequestUnitPerSecGauge      prometheus.Gauge
 	overrideFillRateGauge              prometheus.Gauge
 	overrideBurstLimitGauge            prometheus.Gauge
+	activeSlotCountGauge               prometheus.Gauge
+	tokenLoanGauge                     prometheus.Gauge
+	slotCreatedCounter                 prometheus.Counter
+	slotDeletedCounter                 prometheus.Counter
+	slotExpiredCounter                 prometheus.Counter
 }
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
@@ -491,6 +555,11 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		sampledRequestUnitPerSecGauge:      sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName),
 		overrideFillRateGauge:              overrideSettings.WithLabelValues(groupName, keyspaceName, fillRateLabel),
 		overrideBurstLimitGauge:            overrideSettings.WithLabelValues(groupName, keyspaceName, burstLimitLabel),
+		activeSlotCountGauge:               activeSlotCountGauge.WithLabelValues(groupName, keyspaceName),
+		tokenLoanGauge:                     tokenLoanGauge.WithLabelValues(groupName, keyspaceName),
+		slotCreatedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotCreatedEventLabel),
+		slotDeletedCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotDeletedEventLabel),
+		slotExpiredCounter:                 slotEventsCounter.WithLabelValues(groupName, keyspaceName, slotExpiredEventLabel),
 	}
 }
 
@@ -516,6 +585,15 @@ func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
 		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, burstLimitLabel)
 	} else {
 		m.overrideBurstLimitGauge.Set(float64(overrideBurstLimit))
+	}
+
+	slotMetrics := group.GetSlotMetrics()
+	m.activeSlotCountGauge.Set(float64(slotMetrics.SlotCount))
+	m.tokenLoanGauge.Set(slotMetrics.TokenLoan)
+	if created, deleted, expired := group.DrainSlotEvents(); created+deleted+expired > 0 {
+		m.slotCreatedCounter.Add(float64(created))
+		m.slotDeletedCounter.Add(float64(deleted))
+		m.slotExpiredCounter.Add(float64(expired))
 	}
 }
 
@@ -552,7 +630,30 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
+	activeSlotCountGauge.DeleteLabelValues(groupName, keyspaceName)
+	tokenLoanGauge.DeleteLabelValues(groupName, keyspaceName)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotCreatedEventLabel)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotDeletedEventLabel)
+	slotEventsCounter.DeleteLabelValues(groupName, keyspaceName, slotExpiredEventLabel)
+	grantedTokensHistogram.DeleteLabelValues(groupName, keyspaceName)
+	trickleDurationHistogram.DeleteLabelValues(groupName, keyspaceName)
+	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, throttleKindLabel, serviceLimitCauseLabel)
+	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, throttleKindLabel, groupCauseLabel)
+	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, trickleKindLabel, serviceLimitCauseLabel)
+	requestCauseCounter.DeleteLabelValues(groupName, keyspaceName, trickleKindLabel, groupCauseLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+}
+
+func observeTokenGrant(groupName, keyspaceName string, tokens *rmpb.GrantedRUTokenBucket) {
+	if tokens == nil || tokens.GrantedTokens == nil {
+		return
+	}
+	grantedTokensHistogram.WithLabelValues(groupName, keyspaceName).Observe(tokens.GrantedTokens.GetTokens())
+	trickleDurationHistogram.WithLabelValues(groupName, keyspaceName).Observe(float64(tokens.GetTrickleTimeMs()))
+}
+
+func observeRequestCause(groupName, keyspaceName, kind, cause string) {
+	requestCauseCounter.WithLabelValues(groupName, keyspaceName, kind, cause).Inc()
 }
 
 type maxPerSecCostTracker struct {
