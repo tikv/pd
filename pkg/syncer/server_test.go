@@ -129,13 +129,11 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 
-	records := make([]*core.RegionInfo, 0, 5)
 	for i := range 5 {
 		record := newHistoryBufferTestRegion(uint64(100 + i))
-		records = append(records, record)
 		syncer.history.record(record)
 	}
-	syncer.broadcast(context.Background(), records, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	close(unblockSend)
 	fullResp := <-stream.sendCh
@@ -201,7 +199,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	for _, record := range catchUpRecords {
 		syncer.history.record(record)
 	}
-	syncer.broadcast(context.Background(), catchUpRecords, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	done := make(chan error, 1)
 	go func() {
@@ -212,7 +210,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	liveStartIndex := startIndex + uint64(len(catchUpRecords))
 	liveRecords := []*core.RegionInfo{newHistoryBufferTestRegion(102)}
 	syncer.history.record(liveRecords[0])
-	syncer.broadcast(context.Background(), liveRecords, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	stream.unblockSend()
 	re.NoError(<-done)
@@ -284,7 +282,7 @@ func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 	for _, record := range liveRecords {
 		syncer.history.record(record)
 	}
-	syncer.broadcast(context.Background(), liveRecords, false)
+	syncer.notifyDownstreams(context.Background(), false)
 	re.Greater(syncer.history.getFirstIndex(), syncStartIndex)
 
 	close(unblockSend)
@@ -365,7 +363,7 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 }
 
-func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
+func TestSyncExitsWhenDownstreamNotificationSendFails(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
@@ -404,7 +402,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 	})
 
 	stream.setSendErr(errors.New("send failed"))
-	syncer.broadcast(context.Background(), nil, true)
+	syncer.notifyDownstreams(context.Background(), true)
 
 	var syncErr error
 	testutil.Eventually(re, func() bool {
@@ -494,7 +492,7 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 	close(unblockSend)
 }
 
-func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
+func TestNotifyDownstreamsClosesStreamWhenSendBlocks(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
@@ -534,15 +532,15 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 	})
 
 	unblockSend := stream.blockSend()
-	broadcastDone := make(chan struct{})
+	notifyDone := make(chan struct{})
 	go func() {
-		syncer.broadcast(context.Background(), nil, true)
-		close(broadcastDone)
+		syncer.notifyDownstreams(context.Background(), true)
+		close(notifyDone)
 	}()
 	testutil.Eventually(re, stream.isSendBlocked)
 	testutil.Eventually(re, func() bool {
 		select {
-		case <-broadcastDone:
+		case <-notifyDone:
 			return true
 		default:
 			return false
@@ -653,7 +651,7 @@ func TestSyncExitsWhenContextCanceledBeforeRequest(t *testing.T) {
 	})
 }
 
-func TestBroadcastUsesIndependentDownstreamIndexes(t *testing.T) {
+func TestNotifyDownstreamsUsesIndependentDownstreamIndexes(t *testing.T) {
 	re := require.New(t)
 	pd2Stream := &testServerStream{}
 	pd3Stream := &testServerStream{}
@@ -670,7 +668,7 @@ func TestBroadcastUsesIndependentDownstreamIndexes(t *testing.T) {
 		syncer.history.record(record)
 	}
 
-	syncer.broadcast(context.Background(), records, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	testutil.Eventually(re, func() bool {
 		return pd2Stream.lastResponse() != nil && pd3Stream.lastResponse() != nil
@@ -684,7 +682,7 @@ func TestBroadcastUsesIndependentDownstreamIndexes(t *testing.T) {
 	re.Equal(records, syncer.history.recordsFrom(10))
 }
 
-func TestBroadcastRemovesOnlyFailedDownstream(t *testing.T) {
+func TestNotifyDownstreamsRemovesOnlyFailedDownstream(t *testing.T) {
 	re := require.New(t)
 	pd2Stream := &testServerStream{sendErr: errors.New("send failed")}
 	pd3Stream := &testServerStream{}
@@ -698,7 +696,7 @@ func TestBroadcastRemovesOnlyFailedDownstream(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 	syncer.history.record(records[0])
 
-	syncer.broadcast(context.Background(), records, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	testutil.Eventually(re, func() bool {
 		return len(syncer.GetAllDownstreamNames()) == 1 && pd3Stream.lastResponse() != nil
@@ -710,7 +708,7 @@ func TestBroadcastRemovesOnlyFailedDownstream(t *testing.T) {
 	re.Equal(uint64(11), pd3SyncStream.getSendIndex())
 }
 
-func TestBroadcastRecordsBusyDownstreamAndDrainsLater(t *testing.T) {
+func TestNotifyDownstreamsLeavesBusyDownstreamToDrainLater(t *testing.T) {
 	re := require.New(t)
 	activeStream := &testServerStream{}
 	busyStream := &testServerStream{}
@@ -733,7 +731,7 @@ func TestBroadcastRecordsBusyDownstreamAndDrainsLater(t *testing.T) {
 		syncer.history.record(record)
 	}
 
-	syncer.broadcast(context.Background(), records, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	testutil.Eventually(re, func() bool {
 		return activeStream.lastResponse() != nil
@@ -751,6 +749,157 @@ func TestBroadcastRecordsBusyDownstreamAndDrainsLater(t *testing.T) {
 	})
 	re.Equal(uint64(10), busyStream.lastResponse().GetStartIndex())
 	re.Equal(uint64(12), busySyncStream.getSendIndex())
+}
+
+func TestRunServerReservesHistoryBeforeAppendForSlowDownstream(t *testing.T) {
+	re := require.New(t)
+	busyStream := &testServerStream{}
+	busySyncStream := newRegionSyncStream(busyStream, 10)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.mu.streams = map[string]*regionSyncStream{"pd2": busySyncStream}
+	syncer.history.resetWithIndex(10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionNotifier := make(chan *core.RegionInfo, 5)
+	done := make(chan struct{})
+	go func() {
+		syncer.RunServer(ctx, regionNotifier)
+		close(done)
+	}()
+
+	for i := range 5 {
+		regionNotifier <- newTestRegion(uint64(100 + i))
+	}
+
+	testutil.Eventually(re, func() bool {
+		return syncer.history.getNextIndex() == 15
+	})
+	re.Len(syncer.history.recordsFrom(10), 5)
+	re.Equal(8, syncer.history.capacity())
+	cancel()
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func TestReserveBeforeAppendDoesNotWaitForBusyDownstream(t *testing.T) {
+	re := require.New(t)
+	busyStream := &testServerStream{}
+	busySyncStream := newRegionSyncStream(busyStream, 10)
+	busySyncStream.sendMu.Lock()
+	defer busySyncStream.sendMu.Unlock()
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": busySyncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	records := make([]*core.RegionInfo, 0, 5)
+	for i := range 5 {
+		records = append(records, newTestRegion(uint64(100+i)))
+	}
+	done := make(chan struct{})
+
+	go func() {
+		syncer.appendHistoryRecords(records)
+		close(done)
+	}()
+
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, testutil.WithWaitFor(time.Second), testutil.WithTickInterval(10*time.Millisecond))
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+	re.Len(syncer.history.recordsFrom(10), 5)
+	re.Equal(8, syncer.history.capacity())
+}
+
+func TestObserveDownstreamSendWindowBeforeShrinkUsesSlowestDownstream(t *testing.T) {
+	re := require.New(t)
+	pd2Stream := &testServerStream{}
+	pd3Stream := &testServerStream{}
+	pd2SyncStream := newRegionSyncStream(pd2Stream, 10)
+	pd3SyncStream := newRegionSyncStream(pd3Stream, 14)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": pd2SyncStream,
+		"pd3": pd3SyncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	records := make([]*core.RegionInfo, 0, 6)
+	for i := range 6 {
+		records = append(records, newTestRegion(uint64(100+i)))
+	}
+	syncer.history.recordBatchFrom(10, records)
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+
+	for range historyBufferShrinkRounds {
+		syncer.observeDownstreamSendWindowBeforeShrink()
+		syncer.history.maybeShrink()
+	}
+
+	re.Equal(8, syncer.history.capacity())
+	re.Equal(uint64(10), syncer.history.getFirstIndex())
+	historyRecords := syncer.history.recordsFrom(10)
+	re.Len(historyRecords, 6)
+	re.Equal(uint64(100), historyRecords[0].GetID())
+
+	pd2SyncStream.advanceSendIndex(6)
+	pd3SyncStream.advanceSendIndex(2)
+	for range historyBufferShrinkRounds {
+		syncer.observeDownstreamSendWindowBeforeShrink()
+		syncer.history.maybeShrink()
+	}
+	re.Equal(4, syncer.history.capacity())
+}
+
+func TestNotifyDownstreamsSendsKeepAliveWhenNoPendingRecords(t *testing.T) {
+	re := require.New(t)
+	stream := &testServerStream{}
+	syncStream := newRegionSyncStream(stream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": syncStream,
+	})
+	syncer.history.resetWithIndex(10)
+
+	syncer.notifyDownstreams(context.Background(), true)
+
+	testutil.Eventually(re, func() bool {
+		return stream.lastResponse() != nil
+	})
+	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
+	re.Empty(stream.lastResponse().GetRegions())
+	re.Equal(uint64(10), syncStream.getSendIndex())
+}
+
+func TestNotifyDownstreamsSkipsKeepAliveWhenPendingRecordsSent(t *testing.T) {
+	re := require.New(t)
+	stream := &testServerStream{}
+	syncStream := newRegionSyncStream(stream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": syncStream,
+	})
+	syncer.history.resetWithIndex(10)
+	syncer.history.record(newHistoryBufferTestRegion(1))
+
+	syncer.notifyDownstreams(context.Background(), true)
+
+	testutil.Eventually(re, func() bool {
+		return len(stream.sentResponses()) == 1
+	})
+	re.Len(stream.sentResponses(), 1)
+	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
+	re.Equal([]*metapb.Region{{Id: 1}}, stream.lastResponse().GetRegions())
+	re.Equal(uint64(11), syncStream.getSendIndex())
 }
 
 func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
@@ -774,7 +923,7 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 
 	liveRecords := []*core.RegionInfo{newTestRegion(3)}
 	syncer.history.record(liveRecords[0])
-	syncer.broadcast(context.Background(), liveRecords, false)
+	syncer.notifyDownstreams(context.Background(), false)
 
 	testutil.Eventually(re, func() bool {
 		return len(stream.sentResponses()) == 2
@@ -782,6 +931,26 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 	re.Len(stream.sentResponses(), 2)
 	re.Equal(uint64(12), stream.lastResponse().GetStartIndex())
 	re.Equal(uint64(13), syncStream.getSendIndex())
+}
+
+func TestDrainDownstreamObservesLiveSyncWindow(t *testing.T) {
+	re := require.New(t)
+	stream := &testServerStream{}
+	syncStream := newRegionSyncStream(stream, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd2": syncStream,
+	})
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+	for i := range 2 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(i + 1)))
+	}
+
+	re.Equal(2, syncer.history.capacity())
+	re.NoError(syncer.sendDownstream(context.Background(), "pd2", syncStream, false))
+
+	re.Equal(4, syncer.history.capacity())
+	re.Equal(uint64(12), syncStream.getSendIndex())
 }
 
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {

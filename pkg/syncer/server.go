@@ -73,10 +73,11 @@ type regionSyncStream struct {
 		syncutil.Mutex
 		ServerStream
 	}
-	// sendMu serializes the logical send flow and protects sendIndex.
+	// sendIndex records the next history index this stream needs to send.
+	sendIndex atomic.Uint64
+	// sendMu serializes the logical send flow.
 	sendMu struct {
 		syncutil.Mutex
-		sendIndex uint64
 	}
 	notifyCh chan bool
 	done     chan struct{}
@@ -84,42 +85,34 @@ type regionSyncStream struct {
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
-	return &regionSyncStream{
+	s := &regionSyncStream{
 		stream: struct {
 			syncutil.Mutex
 			ServerStream
 		}{
 			ServerStream: stream,
 		},
-		sendMu: struct {
-			syncutil.Mutex
-			sendIndex uint64
-		}{
-			sendIndex: startIndex,
-		},
 		notifyCh: make(chan bool, 1),
 		done:     make(chan struct{}),
 	}
+	s.sendIndex.Store(startIndex)
+	return s
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.getSendIndexLocked()
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) getSendIndexLocked() uint64 {
-	return s.sendMu.sendIndex
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) advanceSendIndex(count int) {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	s.advanceSendIndexLocked(count)
+	s.sendIndex.Add(uint64(count))
 }
 
 func (s *regionSyncStream) advanceSendIndexLocked(count int) {
-	s.sendMu.sendIndex += uint64(count)
+	s.sendIndex.Add(uint64(count))
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -236,11 +229,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
-	processRegion := func(region *core.RegionInfo) {
-		records = append(records, region)
-		s.history.record(region)
-	}
-
 	defer func() {
 		keepAliveTicker.Stop()
 		shrinkTicker.Stop()
@@ -261,21 +249,23 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			processRegion(first)
+			records = append(records, first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
-					processRegion(region)
+					records = append(records, region)
 				default:
 					break loop
 				}
 			}
-			s.broadcast(ctx, records, false)
+			s.appendHistoryRecords(records)
+			s.notifyDownstreams(ctx, false)
 		case <-shrinkTicker.C:
+			s.observeDownstreamSendWindowBeforeShrink()
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
-			s.broadcast(ctx, nil, true)
+			s.notifyDownstreams(ctx, true)
 		}
 		records = records[:0]
 	}
@@ -291,6 +281,42 @@ func (s *RegionSyncer) GetAllDownstreamNames() []string {
 	}
 	s.mu.RUnlock()
 	return names
+}
+
+func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
+	s.mu.RLock()
+	streams := make([]*regionSyncStream, 0, len(s.mu.streams))
+	for _, stream := range s.mu.streams {
+		streams = append(streams, stream)
+	}
+	s.mu.RUnlock()
+	var minIndex uint64
+	var ok bool
+	for _, stream := range streams {
+		sendIndex := stream.getSendIndex()
+		if !ok || sendIndex < minIndex {
+			minIndex = sendIndex
+			ok = true
+		}
+	}
+	return minIndex, ok
+}
+
+func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
+	minIndex, ok := s.minDownstreamSendIndex()
+	if !ok {
+		s.history.recordBatch(records)
+		return
+	}
+	s.history.recordBatchFrom(minIndex, records)
+}
+
+func (s *RegionSyncer) observeDownstreamSendWindowBeforeShrink() {
+	minIndex, ok := s.minDownstreamSendIndex()
+	if !ok {
+		return
+	}
+	s.history.observeWindowFrom(minIndex, s.history.getNextIndex())
 }
 
 // Sync firstly tries to sync the history records to client.
@@ -557,10 +583,10 @@ func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*reg
 
 func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.mu.streams[name] == stream {
 		delete(s.mu.streams, name)
 	}
+	s.mu.Unlock()
 	stream.close()
 }
 
@@ -585,12 +611,13 @@ func (s *RegionSyncer) runDownstreamSender(ctx context.Context, name string, str
 
 func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *regionSyncStream, keepAlive bool) error {
 	stream.sendMu.Lock()
-	defer stream.sendMu.Unlock()
 	sentRecords, err := s.drainDownstreamLocked(ctx, name, stream)
 	if err != nil {
+		stream.sendMu.Unlock()
 		return err
 	}
 	if !keepAlive || sentRecords {
+		stream.sendMu.Unlock()
 		return nil
 	}
 	resp := &pdpb.SyncRegionResponse{
@@ -598,9 +625,11 @@ func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *
 		StartIndex: stream.getSendIndexLocked(),
 	}
 	if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
+		stream.sendMu.Unlock()
 		return errors.Errorf("send region sync keepalive failed")
 	}
 	_, err = s.drainDownstreamLocked(ctx, name, stream)
+	stream.sendMu.Unlock()
 	return err
 }
 
@@ -629,6 +658,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		if sendIndex == bufferNextIndex {
 			return sentRecords, nil
 		}
+		s.history.observeRequiredWindow(bufferNextIndex - sendIndex)
 		endIndex := bufferNextIndex
 		if endIndex-sendIndex > uint64(maxSyncRegionBatchSize) {
 			endIndex = sendIndex + uint64(maxSyncRegionBatchSize)
@@ -646,16 +676,14 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 	}
 }
 
-func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
+func (s *RegionSyncer) notifyDownstreams(ctx context.Context, keepAlive bool) {
 	defer logutil.LogPanic()
 	s.mu.RLock()
 	for _, sender := range s.mu.streams {
 		if ctx.Err() != nil {
 			break
 		}
-		if len(records) != 0 || keepAlive {
-			sender.notify(keepAlive)
-		}
+		sender.notify(keepAlive)
 	}
 	s.mu.RUnlock()
 }
