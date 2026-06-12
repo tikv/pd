@@ -487,6 +487,11 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				waitResourceManagerServiceURL(re, cli, false)
 			}
 			waitLeaderServingClient(re, cli, leader.GetAddr())
+			testutil.Eventually(re, func() bool {
+				// Switching endpoint can transiently leave the controller in degraded mode
+				// until the first successful token-bucket response arrives.
+				return !rgController.IsDegraded()
+			}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 			switched.Store(true)
 			testutil.Eventually(re, func() bool {
