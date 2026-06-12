@@ -83,6 +83,7 @@ type clusterMiddleware struct {
 	s                         *server.Server
 	rd                        *render.Render
 	allowFollowerSyncedRegion bool
+	regionReadOnly            bool
 }
 
 type clusterMiddlewareOption func(*clusterMiddleware)
@@ -90,6 +91,12 @@ type clusterMiddlewareOption func(*clusterMiddleware)
 func withFollowerSyncedRegion() clusterMiddlewareOption {
 	return func(m *clusterMiddleware) {
 		m.allowFollowerSyncedRegion = true
+	}
+}
+
+func withRegionReadOnly() clusterMiddlewareOption {
+	return func(m *clusterMiddleware) {
+		m.regionReadOnly = true
 	}
 }
 
@@ -106,6 +113,20 @@ func newClusterMiddleware(s *server.Server, opts ...clusterMiddlewareOption) clu
 
 func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.regionReadOnly {
+			rc := m.s.GetRegionReadRaftCluster()
+			if rc == nil {
+				rc = m.getFollowerSyncedCluster(r)
+			}
+			if rc == nil {
+				m.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+				return
+			}
+			ctx := context.WithValue(r.Context(), clusterCtxKey{}, rc)
+			h.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		rc := m.s.GetRaftCluster()
 		if rc == nil {
 			rc = m.getFollowerSyncedCluster(r)

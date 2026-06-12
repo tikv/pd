@@ -168,7 +168,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.EndKey = core.HexRegionKeyStr(r.GetEndKey())
 	s.RegionEpoch = r.GetRegionEpoch()
 	s.Peers = fromPeerSlice(r.GetPeers())
-	s.Leader = fromPeer(r.GetLeader())
+	s.Leader = fromPeer(r.GetLeaderForRead())
 	s.DownPeers = fromPeerStatsSlice(r.GetDownPeers())
 	s.PendingPeers = fromPeerSlice(r.GetPendingPeers())
 	s.CPUUsage = r.GetCPUUsage()

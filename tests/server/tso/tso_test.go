@@ -16,6 +16,10 @@ package tso_test
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +28,10 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -52,6 +58,7 @@ func (s *tsoTestSuite) SetupSuite() {
 	s.updateInterval = config.MaxTSOUpdatePhysicalInterval
 	s.env = tests.NewSchedulingTestEnvironment(s.T(), func(conf *config.Config, _ string) {
 		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: s.updateInterval}
+		conf.PDServerCfg.UseRegionStorage = false
 	})
 	s.env.PDCount = 2
 }
@@ -111,6 +118,326 @@ func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
 // This test is used to simulate this situation and verify that the retry mechanism.
 func (s *tsoTestSuite) TestDelaySyncTimestamp() {
 	s.env.RunTestInNonMicroserviceEnv(s.checkDelaySyncTimestamp)
+}
+
+func (s *tsoTestSuite) TestServeBeforeRaftClusterLoaded() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkServeBeforeRaftClusterLoaded)
+}
+
+func (s *tsoTestSuite) checkServeBeforeRaftClusterLoaded(cluster *tests.TestCluster) {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	leaderServer := cluster.GetLeaderServer()
+	var nextLeaderServer *tests.TestServer
+	for _, s := range cluster.GetServers() {
+		if s.GetConfig().Name != cluster.GetLeader() {
+			nextLeaderServer = s
+		}
+	}
+	re.NotNil(nextLeaderServer)
+
+	regionID := uint64(10)
+	region := tests.MustPutRegion(re, cluster, regionID, 1, []byte("a"), []byte("m"))
+	nextRegionID := uint64(11)
+	nextRegion := tests.MustPutRegion(re, cluster, nextRegionID, 1, []byte("m"), []byte("z"))
+	testutil.Eventually(re, func() bool {
+		return leaderServer.GetRaftCluster().GetRegion(regionID) != nil &&
+			leaderServer.GetRaftCluster().GetRegion(nextRegionID) != nil
+	})
+	for _, id := range []uint64{regionID, nextRegionID} {
+		regionID := id
+		testutil.Eventually(re, func() bool {
+			loadedRegion := &metapb.Region{}
+			ok, err := leaderServer.GetServer().GetStorage().LoadRegion(regionID, loadedRegion)
+			re.NoError(err)
+			return ok && loadedRegion.GetId() == regionID
+		})
+	}
+
+	beforeCreateRaftClusterPaused := make(chan struct{})
+	resumeBeforeCreateRaftCluster := make(chan struct{})
+	var beforeCreateRaftClusterPauseOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/pauseBeforeCreateRaftCluster", func() {
+		beforeCreateRaftClusterPauseOnce.Do(func() {
+			close(beforeCreateRaftClusterPaused)
+		})
+		<-resumeBeforeCreateRaftCluster
+	}))
+	regionReadReadyPaused := make(chan struct{})
+	resumeAfterRegionReadReady := make(chan struct{})
+	var regionReadReadyPauseOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady", func() {
+		regionReadReadyPauseOnce.Do(func() {
+			close(regionReadReadyPaused)
+		})
+		<-resumeAfterRegionReadReady
+	}))
+	defer func() {
+		select {
+		case <-resumeBeforeCreateRaftCluster:
+		default:
+			close(resumeBeforeCreateRaftCluster)
+		}
+		select {
+		case <-resumeAfterRegionReadReady:
+		default:
+			close(resumeAfterRegionReadReady)
+		}
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/pauseBeforeCreateRaftCluster"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/pauseAfterRegionReadReady"))
+	}()
+
+	re.NoError(leaderServer.ResignLeaderWithRetry())
+	re.True(nextLeaderServer.WaitLeader())
+	select {
+	case <-beforeCreateRaftClusterPaused:
+	case <-time.After(20 * time.Second):
+		re.FailNow("timed out waiting before raft cluster creation")
+	}
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, nextLeaderServer.GetAddr())
+	defer conn.Close()
+	req := &pdpb.TsoRequest{
+		Header: testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		Count:  1,
+	}
+	rpcCtx, rpcCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer rpcCancel()
+	tsoClient, err := grpcPDClient.Tso(rpcCtx)
+	re.NoError(err)
+	defer func() {
+		err = tsoClient.CloseSend()
+		re.NoError(err)
+	}()
+	re.NoError(tsoClient.Send(req))
+	resp, err := tsoClient.Recv()
+	re.NoError(err)
+	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+
+	httpClient := &http.Client{Timeout: time.Second}
+	rc := nextLeaderServer.GetServer().DirectlyGetRaftCluster()
+	re.NotNil(rc)
+	re.False(rc.IsRegionReadReady())
+	assertRegionReadsNotBootstrapped(
+		re, ctx, grpcPDClient, httpClient, nextLeaderServer,
+		region.GetStartKey(), nextRegion.GetEndKey(), nextRegion.GetStartKey(), regionID,
+	)
+
+	close(resumeBeforeCreateRaftCluster)
+	select {
+	case <-regionReadReadyPaused:
+	case <-time.After(20 * time.Second):
+		re.FailNow("timed out waiting for region read readiness pause")
+	}
+
+	re.True(rc.IsRegionReadReady())
+	expectedLeader := region.GetLeader()
+	re.NotNil(expectedLeader)
+	loadedRegion := rc.GetRegion(regionID)
+	re.NotNil(loadedRegion)
+	re.Nil(loadedRegion.GetLeader())
+	assertLeaderForRead(re, expectedLeader, loadedRegion.GetLeaderForRead())
+
+	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
+	defer regionRPCCancel()
+	regionByIDResp, err := grpcPDClient.GetRegionByID(regionRPCContext, &pdpb.GetRegionByIDRequest{
+		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		RegionId:    regionID,
+		NeedBuckets: true,
+	})
+	re.NoError(err)
+	re.Nil(regionByIDResp.GetHeader().GetError())
+	re.Equal(regionID, regionByIDResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, regionByIDResp.GetLeader())
+
+	regionByKeyResp, err := grpcPDClient.GetRegion(regionRPCContext, &pdpb.GetRegionRequest{
+		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		RegionKey:   region.GetStartKey(),
+		NeedBuckets: true,
+	})
+	re.NoError(err)
+	re.Nil(regionByKeyResp.GetHeader().GetError())
+	re.Equal(regionID, regionByKeyResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, regionByKeyResp.GetLeader())
+
+	prevRegionResp, err := grpcPDClient.GetPrevRegion(regionRPCContext, &pdpb.GetRegionRequest{
+		Header:      testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		RegionKey:   nextRegion.GetStartKey(),
+		NeedBuckets: true,
+	})
+	re.NoError(err)
+	re.Nil(prevRegionResp.GetHeader().GetError())
+	re.Equal(regionID, prevRegionResp.GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, prevRegionResp.GetLeader())
+
+	scanContext, scanCancel := context.WithTimeout(ctx, time.Second)
+	defer scanCancel()
+	scanResp, err := grpcPDClient.ScanRegions(scanContext, &pdpb.ScanRegionsRequest{
+		Header:   testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		StartKey: region.GetStartKey(),
+		EndKey:   nextRegion.GetEndKey(),
+		Limit:    1,
+	})
+	re.NoError(err)
+	re.Nil(scanResp.GetHeader().GetError())
+	re.Len(scanResp.GetRegions(), 1)
+	re.Equal(regionID, scanResp.GetRegions()[0].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, scanResp.GetRegions()[0].GetLeader())
+	re.Len(scanResp.GetLeaders(), 1)
+	assertLeaderForRead(re, expectedLeader, scanResp.GetLeaders()[0])
+
+	batchScanResp, err := grpcPDClient.BatchScanRegions(scanContext, &pdpb.BatchScanRegionsRequest{
+		Header: testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		Ranges: []*pdpb.KeyRange{{
+			StartKey: region.GetStartKey(),
+			EndKey:   nextRegion.GetEndKey(),
+		}},
+		Limit: 1,
+	})
+	re.NoError(err)
+	re.Nil(batchScanResp.GetHeader().GetError())
+	re.Len(batchScanResp.GetRegions(), 1)
+	re.Equal(regionID, batchScanResp.GetRegions()[0].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, batchScanResp.GetRegions()[0].GetLeader())
+
+	queryRegionCtx, queryRegionCancel := context.WithTimeout(ctx, time.Second)
+	defer queryRegionCancel()
+	queryRegionClient, err := grpcPDClient.QueryRegion(queryRegionCtx)
+	re.NoError(err)
+	re.NoError(queryRegionClient.Send(&pdpb.QueryRegionRequest{
+		Header:   testutil.NewRequestHeader(nextLeaderServer.GetClusterID()),
+		Ids:      []uint64{regionID},
+		Keys:     [][]byte{region.GetStartKey()},
+		PrevKeys: [][]byte{nextRegion.GetStartKey()},
+	}))
+	queryRegionResp, err := queryRegionClient.Recv()
+	re.NoError(err)
+	re.Nil(queryRegionResp.GetHeader().GetError())
+	re.Equal(regionID, queryRegionResp.GetRegionsById()[regionID].GetRegion().GetId())
+	assertLeaderForRead(re, expectedLeader, queryRegionResp.GetRegionsById()[regionID].GetLeader())
+	re.Equal([]uint64{regionID}, queryRegionResp.GetKeyIdMap())
+	re.Equal([]uint64{regionID}, queryRegionResp.GetPrevKeyIdMap())
+	re.NoError(queryRegionClient.CloseSend())
+
+	var httpRegion response.RegionInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		fmt.Sprintf("%s/pd/api/v1/region/id/%d", nextLeaderServer.GetAddr(), regionID),
+		&httpRegion))
+	re.Equal(regionID, httpRegion.ID)
+	assertLeaderForRead(re, expectedLeader, httpRegion.Leader.Peer)
+
+	var scannedRegions response.RegionsInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		fmt.Sprintf("%s/pd/api/v1/regions/key?key=a&end_key=z&limit=1", nextLeaderServer.GetAddr()),
+		&scannedRegions))
+	re.Equal(1, scannedRegions.Count)
+	re.Len(scannedRegions.Regions, 1)
+	re.Equal(regionID, scannedRegions.Regions[0].ID)
+	assertLeaderForRead(re, expectedLeader, scannedRegions.Regions[0].Leader.Peer)
+
+	var regionCount response.RegionsInfo
+	re.NoError(testutil.ReadGetJSON(re, httpClient,
+		nextLeaderServer.GetAddr()+"/pd/api/v1/regions/count",
+		&regionCount))
+	re.Equal(rc.GetTotalRegionCount(), regionCount.Count)
+
+	close(resumeAfterRegionReadReady)
+	testutil.Eventually(re, func() bool {
+		return nextLeaderServer.GetRaftCluster() != nil
+	}, testutil.WithWaitFor(20*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func assertLeaderForRead(re *require.Assertions, expected, actual *metapb.Peer) {
+	re.NotNil(actual)
+	re.Equal(expected.GetId(), actual.GetId())
+	re.Equal(expected.GetStoreId(), actual.GetStoreId())
+}
+
+func assertRegionReadsNotBootstrapped(
+	re *require.Assertions,
+	ctx context.Context,
+	grpcPDClient pdpb.PDClient,
+	httpClient *http.Client,
+	svr *tests.TestServer,
+	startKey, endKey, prevKey []byte,
+	regionID uint64,
+) {
+	requestHeader := testutil.NewRequestHeader(svr.GetClusterID())
+	regionRPCContext, regionRPCCancel := context.WithTimeout(ctx, time.Second)
+	defer regionRPCCancel()
+	regionByIDResp, err := grpcPDClient.GetRegionByID(regionRPCContext, &pdpb.GetRegionByIDRequest{
+		Header:   requestHeader,
+		RegionId: regionID,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, regionByIDResp.GetHeader().GetError().GetType())
+
+	regionByKeyResp, err := grpcPDClient.GetRegion(regionRPCContext, &pdpb.GetRegionRequest{
+		Header:    requestHeader,
+		RegionKey: startKey,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, regionByKeyResp.GetHeader().GetError().GetType())
+
+	prevRegionResp, err := grpcPDClient.GetPrevRegion(regionRPCContext, &pdpb.GetRegionRequest{
+		Header:    requestHeader,
+		RegionKey: prevKey,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, prevRegionResp.GetHeader().GetError().GetType())
+
+	scanContext, scanCancel := context.WithTimeout(ctx, time.Second)
+	defer scanCancel()
+	scanResp, err := grpcPDClient.ScanRegions(scanContext, &pdpb.ScanRegionsRequest{
+		Header:   requestHeader,
+		StartKey: startKey,
+		EndKey:   endKey,
+		Limit:    1,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, scanResp.GetHeader().GetError().GetType())
+
+	batchScanResp, err := grpcPDClient.BatchScanRegions(scanContext, &pdpb.BatchScanRegionsRequest{
+		Header: requestHeader,
+		Ranges: []*pdpb.KeyRange{{
+			StartKey: startKey,
+			EndKey:   endKey,
+		}},
+		Limit: 1,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, batchScanResp.GetHeader().GetError().GetType())
+
+	queryRegionCtx, queryRegionCancel := context.WithTimeout(ctx, time.Second)
+	defer queryRegionCancel()
+	queryRegionClient, err := grpcPDClient.QueryRegion(queryRegionCtx)
+	re.NoError(err)
+	re.NoError(queryRegionClient.Send(&pdpb.QueryRegionRequest{
+		Header:   requestHeader,
+		Ids:      []uint64{regionID},
+		Keys:     [][]byte{startKey},
+		PrevKeys: [][]byte{prevKey},
+	}))
+	queryRegionResp, err := queryRegionClient.Recv()
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_NOT_BOOTSTRAPPED, queryRegionResp.GetHeader().GetError().GetType())
+	re.NoError(queryRegionClient.CloseSend())
+
+	checkHTTPNotBootstrapped := func(url string) {
+		req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+		re.NoError(err)
+		resp, err := httpClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
+		re.Contains(string(body), "not bootstrapped")
+	}
+	checkHTTPNotBootstrapped(fmt.Sprintf("%s/pd/api/v1/region/id/%d", svr.GetAddr(), regionID))
+	checkHTTPNotBootstrapped(fmt.Sprintf("%s/pd/api/v1/regions/key?key=a&end_key=z&limit=1", svr.GetAddr()))
+	checkHTTPNotBootstrapped(svr.GetAddr() + "/pd/api/v1/regions/count")
 }
 
 func (s *tsoTestSuite) checkDelaySyncTimestamp(cluster *tests.TestCluster) {

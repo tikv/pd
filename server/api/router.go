@@ -132,9 +132,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.Use(newClusterMiddleware(svr).middleware)
 	regionReadRouter := apiRouter.NewRoute().Subrouter()
 	regionReadRouter.Use(newClusterMiddleware(svr, withFollowerSyncedRegion()).middleware)
+	regionRootReadRouter := apiRouter.NewRoute().Subrouter()
+	regionRootReadRouter.Use(newClusterMiddleware(svr, withRegionReadOnly(), withFollowerSyncedRegion()).middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
-	regionReadEscapeRouter := regionReadRouter.NewRoute().Subrouter().UseEncodedPath()
+	regionRootReadEscapeRouter := regionRootReadRouter.NewRoute().Subrouter().UseEncodedPath()
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -248,16 +250,16 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/hotspot/buckets", hotStatusHandler.GetHotBuckets, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	regionHandler := newRegionHandler(svr, rd)
-	registerFunc(regionReadRouter, "/region/id/{id}", regionHandler.GetRegionByID, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(regionReadEscapeRouter, "/region/key/{key}", regionHandler.GetRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(regionRootReadRouter, "/region/id/{id}", regionHandler.GetRegionByID, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(regionRootReadEscapeRouter, "/region/key/{key}", regionHandler.GetRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)
 	registerFunc(regionReadRouter, "/regions", regionsAllHandler.GetRegions, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
 
 	regionsHandler := newRegionsHandler(svr, rd)
-	registerFunc(regionReadRouter, "/regions/key", regionsHandler.ScanRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(regionReadRouter, "/regions/count", regionsHandler.GetRegionCount, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(regionRootReadRouter, "/regions/key", regionsHandler.ScanRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(regionRootReadRouter, "/regions/count", regionsHandler.GetRegionCount, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(regionReadRouter, "/regions/store/{id}", regionsHandler.GetStoreRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(regionReadRouter, "/regions/keyspace/id/{id}", regionsHandler.GetKeyspaceRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(regionReadRouter, "/regions/writeflow", regionsHandler.GetTopWriteFlowRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -281,7 +283,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	registerFunc(regionReadRouter, "/regions/check/hist-size", regionsHandler.GetSizeHistogram, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(regionReadRouter, "/regions/check/hist-keys", regionsHandler.GetKeysHistogram, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(regionReadRouter, "/regions/sibling/{id}", regionsHandler.GetRegionSiblings, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(regionRootReadRouter, "/regions/sibling/{id}", regionsHandler.GetRegionSiblings, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/regions/accelerate-schedule/batch", regionsHandler.AccelerateRegionsScheduleInRanges, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/regions/scatter", regionsHandler.ScatterRegions, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))

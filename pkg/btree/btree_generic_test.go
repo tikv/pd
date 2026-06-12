@@ -173,6 +173,39 @@ func TestBTreeSizeInfo(t *testing.T) {
 	}
 }
 
+func TestAppendG(t *testing.T) {
+	tr := NewG[Int](4)
+	const treeSize = 1000
+	for i := range treeSize {
+		if ok := tr.Append(Int(i)); !ok {
+			t.Fatalf("append %d failed", i)
+		}
+		assertEq(t, "root length after append", tr.getRootLength(), tr.Len())
+	}
+	assertEq(t, "append len", tr.Len(), treeSize)
+	assertEq(t, "append ordered items", all(tr), rang(treeSize))
+	for k := range treeSize {
+		assertEq(t, "append get k-th", tr.GetAt(k), Int(k))
+		y, rk := tr.GetWithIndex(Int(k))
+		assertEq(t, "append get", y, Int(k))
+		assertEq(t, "append get rank", rk, k)
+	}
+
+	if ok := tr.Append(Int(treeSize - 1)); ok {
+		t.Fatalf("append accepted duplicate max item")
+	}
+	if ok := tr.Append(Int(treeSize / 2)); ok {
+		t.Fatalf("append accepted non-monotonic item")
+	}
+	assertEq(t, "append reject keeps len", tr.Len(), treeSize)
+	assertEq(t, "append reject keeps items", all(tr), rang(treeSize))
+
+	if _, found := tr.ReplaceOrInsert(Int(treeSize + 1)); found {
+		t.Fatalf("replace-or-insert unexpectedly replaced appended tree item")
+	}
+	assertEq(t, "replace after append", tr.GetAt(tr.Len()-1), Int(treeSize+1))
+}
+
 func TestBTreeG(t *testing.T) {
 	tr := NewG[Int](*btreeDegree)
 	const treeSize = 10000
@@ -457,6 +490,40 @@ const benchmarkTreeSize = 10000
 func BenchmarkInsert(b *testing.B) {
 	b.StopTimer()
 	insertP := perm(benchmarkTreeSize)
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		tr := NewG[Int](*btreeDegree)
+		for _, item := range insertP {
+			tr.ReplaceOrInsert(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+	}
+}
+
+func BenchmarkAppendOrdered(b *testing.B) {
+	b.StopTimer()
+	insertP := rang(benchmarkTreeSize)
+	b.StartTimer()
+	i := 0
+	for i < b.N {
+		tr := NewG[Int](*btreeDegree)
+		for _, item := range insertP {
+			tr.Append(item)
+			i++
+			if i >= b.N {
+				return
+			}
+		}
+	}
+}
+
+func BenchmarkInsertOrdered(b *testing.B) {
+	b.StopTimer()
+	insertP := rang(benchmarkTreeSize)
 	b.StartTimer()
 	i := 0
 	for i < b.N {

@@ -53,7 +53,7 @@ func GetRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest, isFollower
 	return &pdpb.GetRegionResponse{
 		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
+		Leader:       region.GetLeaderForRead(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
 		Buckets:      buckets,
@@ -80,7 +80,7 @@ func GetPrevRegion(rc *core.BasicCluster, request *pdpb.GetRegionRequest, isFoll
 	return &pdpb.GetRegionResponse{
 		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
+		Leader:       region.GetLeaderForRead(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
 		Buckets:      buckets,
@@ -106,7 +106,7 @@ func GetRegionByID(rc *core.BasicCluster, request *pdpb.GetRegionByIDRequest, is
 	return &pdpb.GetRegionResponse{
 		Header:       WrapHeader(),
 		Region:       region.GetMeta(),
-		Leader:       region.GetLeader(),
+		Leader:       region.GetLeaderForRead(),
 		DownPeers:    region.GetDownPeers(),
 		PendingPeers: region.GetPendingPeers(),
 		Buckets:      buckets,
@@ -125,7 +125,7 @@ func ScanRegions(rc *core.BasicCluster, request *pdpb.ScanRegionsRequest, isFoll
 	}
 	resp = &pdpb.ScanRegionsResponse{Header: WrapHeader()}
 	for _, r := range regions {
-		leader := r.GetLeader()
+		leader := r.GetLeaderForRead()
 		if leader == nil {
 			leader = &metapb.Peer{}
 		}
@@ -181,7 +181,7 @@ func BatchScanRegions(rc *core.BasicCluster, request *pdpb.BatchScanRegionsReque
 	}
 	regions := make([]*pdpb.Region, 0, len(res))
 	for _, r := range res {
-		leader := r.GetLeader()
+		leader := r.GetLeaderForRead()
 		if leader == nil {
 			leader = &metapb.Peer{}
 		}
