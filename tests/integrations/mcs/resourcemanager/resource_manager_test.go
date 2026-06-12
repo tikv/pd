@@ -21,6 +21,8 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -193,6 +195,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 		// Ensure RM service discovery has picked up the standalone endpoint before running tests.
 		waitResourceManagerServiceURL(re, suite.client, true)
 	}
+	waitAsyncLoadResourceGroups(re, suite.client)
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -269,6 +272,13 @@ func waitResourceManagerServiceURL(re *require.Assertions, cli pd.Client, wantNo
 		}
 		return url == ""
 	})
+}
+
+func waitAsyncLoadResourceGroups(re *require.Assertions, cli pd.Client) {
+	testutil.Eventually(re, func() bool {
+		_, err := cli.ListResourceGroups(context.TODO())
+		return err == nil
+	}, testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func TestSwitchModeDuringWorkload(t *testing.T) {
@@ -545,6 +555,7 @@ func (suite *resourceManagerClientTestSuite) resignAndWaitLeader(re *require.Ass
 	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(newLeader)
 	waitLeaderServingClient(re, suite.client, newLeader.GetAddr())
+	waitAsyncLoadResourceGroups(re, suite.client)
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
@@ -625,16 +636,21 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// Make sure the resource group active
-	meta, err = controller.GetResourceGroup(group.Name)
-	re.NotNil(meta)
-	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		meta, err = controller.GetResourceGroup(group.Name)
+		if err != nil || meta == nil {
+			return false
+		}
+		meta = controller.GetActiveResourceGroup(group.Name)
+		return meta != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	modifySettings(group, 30000)
 	resp, err = cli.ModifyResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	testutil.Eventually(re, func() bool {
 		meta = controller.GetActiveResourceGroup(group.Name)
-		return meta.RUSettings.RU.Settings.FillRate == uint64(30000)
+		return meta != nil && meta.RUSettings.RU.Settings.FillRate == uint64(30000)
 	}, testutil.WithTickInterval(100*time.Millisecond))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
 
@@ -1487,13 +1503,40 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	// re-connect client as well
 	suite.client = suite.setupPDClient(re)
 	cli = suite.client
+	expectedGroups := normalizeResourceGroupsForSettingsCompare(groups)
 	var newGroups []*rmpb.ResourceGroup
 	testutil.Eventually(re, func() bool {
 		var err error
 		newGroups, err = cli.ListResourceGroups(suite.ctx)
-		return err == nil
-	}, testutil.WithWaitFor(time.Second))
-	re.Equal(groups, newGroups)
+		return err == nil && reflect.DeepEqual(expectedGroups, normalizeResourceGroupsForSettingsCompare(newGroups))
+	})
+	re.Equal(expectedGroups, normalizeResourceGroupsForSettingsCompare(newGroups))
+}
+
+func normalizeResourceGroupsForSettingsCompare(groups []*rmpb.ResourceGroup) []*rmpb.ResourceGroup {
+	normalized := make([]*rmpb.ResourceGroup, 0, len(groups))
+	for _, group := range groups {
+		cloned := typeutil.DeepClone(group, func() *rmpb.ResourceGroup {
+			return &rmpb.ResourceGroup{}
+		})
+		cloned.RUStats = nil
+		resetTokenBucketRuntimeState(cloned.GetRUSettings().GetRU())
+		rawSettings := cloned.GetRawResourceSettings()
+		resetTokenBucketRuntimeState(rawSettings.GetCpu())
+		resetTokenBucketRuntimeState(rawSettings.GetIoRead())
+		resetTokenBucketRuntimeState(rawSettings.GetIoWrite())
+		normalized = append(normalized, cloned)
+	}
+	sort.Slice(normalized, func(i, j int) bool {
+		return normalized[i].GetName() < normalized[j].GetName()
+	})
+	return normalized
+}
+
+func resetTokenBucketRuntimeState(bucket *rmpb.TokenBucket) {
+	if bucket != nil {
+		bucket.Tokens = 0
+	}
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {

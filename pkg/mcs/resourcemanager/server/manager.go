@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -114,7 +115,21 @@ type Manager struct {
 	metrics *metrics
 	// ruCollector is used to collect the RU metering data.
 	ruCollector *ruCollector
+	// async loading state management
+	loadingState int32 // atomic access
+	// syncLoadedGroups records groups that were loaded synchronously (e.g., by lazy loading)
+	syncLoadedGroups map[trackerKey]bool
 }
+
+// LoadingState represents the current loading state of resource groups
+const (
+	// LoadingStateNotStarted means resource groups haven't started loading
+	LoadingStateNotStarted int32 = iota
+	// LoadingStateInProgress means resource groups are being loaded asynchronously
+	LoadingStateInProgress
+	// LoadingStateCompleted means all resource groups have been loaded
+	LoadingStateCompleted
+)
 
 // factoryProvider is a factory provider for the manager, which injects some specialized functions
 // that need to be retrieved from the `bs.Server` instance without interacting with its interface.
@@ -149,6 +164,8 @@ func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupW
 		keyspaceIDLookup:      make(map[string]uint32),
 		metrics:               newMetrics(),
 		ruCollector:           newRUCollector(),
+		loadingState:          LoadingStateNotStarted,
+		syncLoadedGroups:      make(map[trackerKey]bool),
 	}
 }
 
@@ -194,7 +211,10 @@ func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager,
 		nil,
 	)
 	m.srv = srv
-	if err := m.initMetadata(); err != nil {
+	if err := m.initControllerConfig(); err != nil {
+		return nil, err
+	}
+	if err := m.loadKeyspaceResourceGroups(); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -325,13 +345,16 @@ func (m *Manager) Init(ctx context.Context) error {
 			m.wg.Wait()
 			return err
 		}
+		atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
 	} else {
-		if err := m.initMetadata(); err != nil {
-			return err
-		}
 		// This context is derived from the leader/primary context, it will be canceled
 		// from the outside loop when the leader/primary step down.
 		ctx, m.cancel = context.WithCancel(ctx)
+		if err := m.initMetadata(ctx); err != nil {
+			m.cancel()
+			m.wg.Wait()
+			return err
+		}
 	}
 	m.wg.Add(1)
 	// Start the background metrics flusher.
@@ -369,34 +392,140 @@ func (m *Manager) initControllerConfig() error {
 	return nil
 }
 
-func (m *Manager) initMetadata() error {
+func (m *Manager) initMetadata(ctx context.Context) error {
 	if err := m.initControllerConfig(); err != nil {
 		return err
 	}
 
-	// Load keyspace resource groups from the storage.
-	return m.loadKeyspaceResourceGroups()
+	m.Lock()
+	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.syncLoadedGroups = make(map[trackerKey]bool)
+	atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+	m.Unlock()
+
+	m.initReservedInCache()
+	if err := m.loadServiceLimits(); err != nil {
+		return err
+	}
+
+	m.wg.Add(1)
+	go m.asyncLoadResourceGroups(ctx)
+	return nil
+}
+
+func (m *Manager) loadServiceLimits() error {
+	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+	})
 }
 
 func (m *Manager) loadKeyspaceResourceGroups() error {
-	// Empty the keyspace resource group manager map before the loading.
+	tempKrgms, err := m.loadKeyspaceResourceGroupsFromStorage()
+	if err != nil {
+		return err
+	}
 	m.Lock()
-	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.krgms = tempKrgms
+	m.syncLoadedGroups = nil
+	atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
 	m.Unlock()
-	// Load keyspace resource group meta info from the storage.
+	m.initReserved()
+	return m.loadServiceLimits()
+}
+
+func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+
+	const retryInterval = 10 * time.Second
+	retry := 0
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("async loading resource groups cancelled")
+			return
+		default:
+		}
+		if retry > 0 {
+			log.Info("retrying async loading resource groups", zap.Int("retry", retry))
+			timer := time.NewTimer(retryInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Info("async loading resource groups cancelled")
+				return
+			case <-timer.C:
+			}
+		}
+
+		atomic.StoreInt32(&m.loadingState, LoadingStateInProgress)
+		startTime := time.Now()
+		tempKrgms, err := m.loadKeyspaceResourceGroupsFromStorage()
+		if err != nil {
+			log.Error("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
+			atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+			retry++
+			continue
+		}
+
+		loaded := 0
+		m.Lock()
+		for keyspaceID, tempKrgm := range tempKrgms {
+			krgm := m.krgms[keyspaceID]
+			if krgm == nil {
+				krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+				m.krgms[keyspaceID] = krgm
+			}
+			groupsToSync := make([]*ResourceGroup, 0)
+			tempKrgm.RLock()
+			krgm.Lock()
+			for name, group := range tempKrgm.groups {
+				key := trackerKey{keyspaceID: keyspaceID, groupName: name}
+				if !m.syncLoadedGroups[key] {
+					krgm.groups[name] = group
+					groupsToSync = append(groupsToSync, group)
+					loaded++
+				}
+			}
+			krgm.Unlock()
+			tempKrgm.RUnlock()
+			for _, group := range groupsToSync {
+				krgm.syncBurstabilityWithServiceLimit(group)
+			}
+		}
+		m.syncLoadedGroups = nil
+		m.Unlock()
+
+		m.initReserved()
+		atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
+		duration := time.Since(startTime)
+		asyncLoadGroupDuration.Observe(duration.Seconds())
+		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))
+		return
+	}
+}
+
+func (m *Manager) loadKeyspaceResourceGroupsFromStorage() (map[uint32]*keyspaceResourceGroupManager, error) {
+	tempKrgms := make(map[uint32]*keyspaceResourceGroupManager)
+	getOrCreateTempKrgm := func(keyspaceID uint32) *keyspaceResourceGroupManager {
+		krgm, ok := tempKrgms[keyspaceID]
+		if !ok {
+			krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+			tempKrgms[keyspaceID] = krgm
+		}
+		return krgm
+	}
 	if err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
-		// Since the default resource group might be loaded from the storage, we don't need to initialize it here.
-		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).addResourceGroupFromRaw(name, rawValue)
+		err := getOrCreateTempKrgm(keyspaceID).addResourceGroupFromRaw(name, rawValue)
 		if err != nil {
 			log.Error("failed to add resource group to the keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
 		}
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	// Load keyspace resource group states from the storage.
 	if err := m.storage.LoadResourceGroupStates(func(keyspaceID uint32, name string, rawValue string) {
-		krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+		krgm := tempKrgms[keyspaceID]
 		if krgm == nil {
 			log.Warn("failed to get the corresponding keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
@@ -408,18 +537,86 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
 		}
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	// Initialize the reserved keyspace resource group manager and default resource groups.
-	m.initReserved()
-	// Load service limits from the storage after all resource groups are loaded.
-	return m.loadServiceLimits()
+	return tempKrgms, nil
 }
 
-func (m *Manager) loadServiceLimits() error {
-	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
-	})
+func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+	rawValue, err := m.storage.LoadResourceGroupSetting(keyspaceID, name)
+	if err != nil {
+		return nil, err
+	}
+	if rawValue == "" {
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
+	}
+	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+	if err := krgm.addResourceGroupFromRaw(name, rawValue); err != nil {
+		return nil, err
+	}
+	state, err := m.storage.LoadResourceGroupState(keyspaceID, name)
+	if err != nil {
+		log.Warn("failed to load resource group state, continuing without state",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.Error(err))
+	} else if state != "" {
+		if err := krgm.setRawStatesIntoResourceGroup(name, state); err != nil {
+			return nil, err
+		}
+	}
+	return krgm.getMutableResourceGroup(name), nil
+}
+
+func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
+	if atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted {
+		return nil
+	}
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm != nil {
+		if group := krgm.getMutableResourceGroup(name); group != nil {
+			return nil
+		}
+	}
+	if name == DefaultResourceGroupName {
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+		return nil
+	}
+	group, err := m.loadResourceGroup(keyspaceID, name)
+	if err != nil {
+		return err
+	}
+	krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	inserted := false
+	krgm.Lock()
+	if _, exists := krgm.groups[name]; !exists {
+		krgm.groups[name] = group
+		inserted = true
+	}
+	krgm.Unlock()
+	if inserted {
+		krgm.syncBurstabilityWithServiceLimit(group)
+	}
+	markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
+	m.Lock()
+	if m.syncLoadedGroups != nil {
+		m.syncLoadedGroups[markKey] = true
+	}
+	m.Unlock()
+	syncLoadGroupCounter.Inc()
+	return nil
+}
+
+func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, name string) {
+	m.Lock()
+	defer m.Unlock()
+	if m.syncLoadedGroups != nil {
+		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
+	}
+}
+
+func (m *Manager) isResourceGroupLoadingComplete() bool {
+	return atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted
 }
 
 func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
@@ -456,6 +653,7 @@ func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawV
 			zap.Error(err))
 		return err
 	}
+	m.markResourceGroupSyncLoaded(keyspaceID, name)
 	return nil
 }
 
@@ -492,6 +690,7 @@ func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawVa
 			zap.Error(err))
 		return err
 	}
+	m.markResourceGroupSyncLoaded(keyspaceID, name)
 	return nil
 }
 
@@ -501,6 +700,15 @@ func (m *Manager) initReserved() {
 	// Initialize the default resource group respectively for each keyspace if it doesn't exist.
 	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 		krgm.initDefaultResourceGroup()
+	}
+}
+
+func (m *Manager) initReservedInCache() {
+	// Initialize the reserved default group in memory before async loading
+	// without overwriting persisted default group settings.
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, false).ensureReservedDefaultGroupInCache()
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		krgm.ensureReservedDefaultGroupInCache()
 	}
 }
 
@@ -574,7 +782,14 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.addResourceGroup(grouppb)
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+	}
+	if err := krgm.addResourceGroup(grouppb); err != nil {
+		return err
+	}
+	m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+	return nil
 }
 
 // ModifyResourceGroup modifies an existing resource group.
@@ -583,11 +798,19 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		return errMetadataWriteDisabled
 	}
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+		return err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
 	if err != nil {
 		return err
 	}
-	return krgm.modifyResourceGroup(grouppb)
+	if err := krgm.modifyResourceGroup(grouppb); err != nil {
+		return err
+	}
+	m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+	return nil
 }
 
 // DeleteResourceGroup deletes a resource group.
@@ -595,16 +818,28 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return err
+	}
 	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.deleteResourceGroup(name)
+	if err := krgm.deleteResourceGroup(name); err != nil {
+		return err
+	}
+	m.markResourceGroupSyncLoaded(keyspaceID, name)
+	return nil
 }
 
 // GetResourceGroup returns a copy of a resource group.
 func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) (*ResourceGroup, error) {
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return nil, err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
 		return nil, err
@@ -614,6 +849,10 @@ func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats boo
 
 // GetMutableResourceGroup returns a mutable resource group.
 func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return nil, err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
 		return nil, err
@@ -622,7 +861,12 @@ func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*Reso
 }
 
 // GetResourceGroupList returns copies of resource group list.
+// Returns error if resource groups are still being loaded asynchronously.
 func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*ResourceGroup, error) {
+	if !m.isResourceGroupLoadingComplete() {
+		log.Debug("resource groups are still being loaded, cannot return list")
+		return nil, errs.ErrResourceGroupsLoading
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
 	if err != nil {
 		return nil, err

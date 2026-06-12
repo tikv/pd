@@ -408,7 +408,9 @@ func TestInitManager(t *testing.T) {
 	m.storage = storage
 	err = m.Init(ctx)
 	re.NoError(err)
-	re.Len(m.getKeyspaceResourceGroupManagers(), 2)
+	testutil.Eventually(re, func() bool {
+		return len(m.getKeyspaceResourceGroupManagers()) == 2
+	})
 	// Get the default resource group.
 	rg, err := m.GetResourceGroup(1, DefaultResourceGroupName, true)
 	re.NoError(err)
