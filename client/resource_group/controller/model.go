@@ -52,6 +52,7 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+	RequestSource() string
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be

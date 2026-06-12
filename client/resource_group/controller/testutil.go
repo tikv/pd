@@ -22,11 +22,12 @@ import "time"
 
 // TestRequestInfo is used to test the request info interface.
 type TestRequestInfo struct {
-	isWrite     bool
-	writeBytes  uint64
-	numReplicas int64
-	storeID     uint64
-	accessType  AccessLocationType
+	isWrite       bool
+	writeBytes    uint64
+	numReplicas   int64
+	storeID       uint64
+	accessType    AccessLocationType
+	requestSource string
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
@@ -68,6 +69,11 @@ func (tri *TestRequestInfo) RequestSize() uint64 {
 // AccessLocationType implements the AccessLocationType interface.
 func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
+}
+
+// RequestSource implements the RequestInfo interface.
+func (tri *TestRequestInfo) RequestSource() string {
+	return tri.requestSource
 }
 
 // TestResponseInfo is used to test the response info interface.
