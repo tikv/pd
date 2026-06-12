@@ -112,8 +112,11 @@ func TestLeaseKeepAlive(t *testing.T) {
 	lease := NewLease(client, "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(ctx, 2*time.Second)
-	time.Sleep(2 * time.Second)
-	<-ch
+	ch := lease.keepAliveWorker(ctx)
+	select {
+	case <-ch:
+	case <-time.After(2 * lease.getKeepAliveInterval()):
+		re.Fail("timed out waiting for lease keepalive")
+	}
 	re.NoError(lease.Close())
 }
