@@ -259,6 +259,18 @@ func waitLeaderServingClient(re *require.Assertions, cli pd.Client, leaderAddr s
 	})
 }
 
+func newMinimalRUResourceGroup(name string) *rmpb.ResourceGroup {
+	return &rmpb.ResourceGroup{
+		Name: name,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{},
+			},
+		},
+	}
+}
+
 func waitResourceManagerServiceURL(re *require.Assertions, cli pd.Client, wantNonEmpty bool) {
 	innerCli, ok := cli.(interface{ GetResourceManagerServiceURL() string })
 	re.True(ok)
@@ -1312,10 +1324,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	finalNum := 1
 	// Test Resource Group CURD via gRPC
 	for i, tcase := range testCasesSet1 {
-		group := &rmpb.ResourceGroup{
-			Name: tcase.name,
-			Mode: tcase.mode,
-		}
+		group := newMinimalRUResourceGroup(tcase.name)
+		group.Mode = tcase.mode
 		// Create Resource Group
 		resp, err := cli.AddResourceGroup(suite.ctx, group)
 		checkErr(err, true)
@@ -1380,10 +1390,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	}
 	for i, tcase := range testCasesSet1 {
 		// Create Resource Group
-		group := &rmpb.ResourceGroup{
-			Name: tcase.name,
-			Mode: tcase.mode,
-		}
+		group := newMinimalRUResourceGroup(tcase.name)
+		group.Mode = tcase.mode
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
@@ -2350,10 +2358,7 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 
 	// Add a resource group in Keyspace A and check
 	groupName := "keyspace_test"
-	originalGroup := &rmpb.ResourceGroup{
-		Name: groupName,
-		Mode: rmpb.GroupMode_RUMode,
-	}
+	originalGroup := newMinimalRUResourceGroup(groupName)
 	resp, err := clientA.AddResourceGroup(ctx, originalGroup)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
