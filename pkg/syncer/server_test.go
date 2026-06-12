@@ -1020,7 +1020,6 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	)
 	syncer := NewRegionSyncer(server)
 	bc := core.NewBasicCluster()
-	fullSyncing := false
 	region := &metapb.Region{
 		Id:          1,
 		StartKey:    []byte{1},
@@ -1029,20 +1028,24 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 		Peers:       []*metapb.Peer{{Id: 11, StoreId: 1}},
 	}
 
-	syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 		Regions:    []*metapb.Region{region},
 		StartIndex: 0,
-	}, bc, regionStorage, &fullSyncing)
+	}, bc, regionStorage, false)
+	re.True(handled)
 	re.True(fullSyncing)
 	re.False(syncer.IsRunning())
+	re.Equal(uint64(0), syncer.history.getNextIndex())
 
-	syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, fullSyncing = syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 		StartIndex: 1,
-	}, bc, regionStorage, &fullSyncing)
+	}, bc, regionStorage, fullSyncing)
+	re.True(handled)
 	re.False(fullSyncing)
 	re.True(syncer.IsRunning())
+	re.Equal(uint64(1), syncer.history.getNextIndex())
 }
 
 func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSyncer, *core.BasicCluster) {

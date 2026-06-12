@@ -103,8 +103,7 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 	syncer.streamingRunning.Store(true)
 
-	fullSyncing := false
-	handled := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
 		Header: &pdpb.ResponseHeader{
 			ClusterId: keypath.ClusterID(),
 			Error: &pdpb.Error{
@@ -112,9 +111,10 @@ func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
 				Message: "server stopped, close the region syncer client",
 			},
 		},
-	}, nil, nil, &fullSyncing)
+	}, nil, nil, false)
 
 	re.False(handled)
+	re.False(fullSyncing)
 	re.Equal(uint64(10), syncer.history.getNextIndex())
 	re.False(syncer.IsRunning())
 }

@@ -90,16 +90,31 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
-func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.SyncRegionResponse, bc *core.BasicCluster, regionStorage storage.Storage, fullSyncing *bool) bool {
+func (s *RegionSyncer) handleRegionSyncResponse(
+	ctx context.Context,
+	resp *pdpb.SyncRegionResponse,
+	bc *core.BasicCluster,
+	regionStorage storage.Storage,
+	fullSyncing bool,
+) (handled bool, nextFullSyncing bool) {
+	nextFullSyncing = fullSyncing
 	if syncErr := resp.GetHeader().GetError(); syncErr != nil {
 		s.streamingRunning.Store(false)
 		log.Warn("region sync with leader received error response",
 			zap.String("server", s.server.Name()),
 			zap.String("error-type", syncErr.GetType().String()),
 			zap.String("error-message", syncErr.GetMessage()))
-		return false
+		return false, nextFullSyncing
 	}
-	if s.history.getNextIndex() != resp.GetStartIndex() {
+	stats := resp.GetRegionStats()
+	regions := resp.GetRegions()
+	buckets := resp.GetBuckets()
+	regionLeaders := resp.GetRegionLeaders()
+	startFullSync := !nextFullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
+	if startFullSync {
+		nextFullSyncing = true
+	}
+	if (startFullSync || !nextFullSyncing || len(regions) == 0) && s.history.getNextIndex() != resp.GetStartIndex() {
 		log.Warn("server sync index not match the leader",
 			zap.String("server", s.server.Name()),
 			zap.Uint64("own", s.history.getNextIndex()),
@@ -107,13 +122,6 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 			zap.Int("records-length", len(resp.GetRegions())))
 		// reset index
 		s.history.resetWithIndex(resp.GetStartIndex())
-	}
-	stats := resp.GetRegionStats()
-	regions := resp.GetRegions()
-	buckets := resp.GetBuckets()
-	regionLeaders := resp.GetRegionLeaders()
-	if !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0 {
-		*fullSyncing = true
 	}
 	hasStats := len(stats) == len(regions)
 	hasBuckets := len(buckets) == len(regions)
@@ -155,23 +163,23 @@ func (s *RegionSyncer) handleRegionSyncResponse(ctx context.Context, resp *pdpb.
 		if saveKV {
 			err = regionStorage.SaveRegion(r)
 		}
-		if err == nil {
+		if err == nil && !nextFullSyncing {
 			s.history.record(region)
 		}
 		for _, old := range overlaps {
 			_ = regionStorage.DeleteRegion(old.GetMeta())
 		}
 	}
-	if *fullSyncing {
+	if nextFullSyncing {
 		if len(regions) == 0 {
-			*fullSyncing = false
+			nextFullSyncing = false
 			s.streamingRunning.Store(true)
 		}
-		return true
+		return true, nextFullSyncing
 	}
 	// mark the client as running status when it finished the first history region sync.
 	s.streamingRunning.Store(true)
-	return true
+	return true, nextFullSyncing
 }
 
 // IsRunning returns whether the region syncer client is running.
@@ -275,7 +283,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					break
 				}
-				if !s.handleRegionSyncResponse(ctx, resp, bc, regionStorage, &fullSyncing) {
+				handled, nextFullSyncing := s.handleRegionSyncResponse(ctx, resp, bc, regionStorage, fullSyncing)
+				fullSyncing = nextFullSyncing
+				if !handled {
 					if err = stream.CloseSend(); err != nil {
 						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
