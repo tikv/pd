@@ -1091,6 +1091,26 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 	return keyspaceGroups
 }
 
+// GetServingKeyspaceGroups returns all keyspace groups that this TSO node is actively
+// serving (i.e. has an allocator for), regardless of keyspace assignments.
+func (kgm *KeyspaceGroupManager) GetServingKeyspaceGroups() map[uint32]*endpoint.KeyspaceGroup {
+	kgm.RLock()
+	defer kgm.RUnlock()
+	result := make(map[uint32]*endpoint.KeyspaceGroup)
+	for i, allocator := range kgm.allocators {
+		if allocator != nil {
+			result[uint32(i)] = kgm.kgs[i]
+		}
+	}
+	return result
+}
+
+// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is serving it.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
+	_, kg := kgm.getKeyspaceGroupMeta(id)
+	return kg
+}
+
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	ctx context.Context,
