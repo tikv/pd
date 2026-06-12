@@ -52,7 +52,7 @@ func TestHistoryBufferMaxSizeFromMemory(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
+		t.Run(testCase.name, func(_ *testing.T) {
 			require.Equal(t, testCase.expected, historyBufferMaxSizeFromMemory(testCase.totalMemory))
 		})
 	}

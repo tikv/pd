@@ -13672,7 +13672,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"sync_index\"}",
+              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"sync_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -13755,7 +13755,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"last_index\"}",
+              "expr": "pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"last_index\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -13767,6 +13767,104 @@
           "timeRegions": [],
           "timeShift": null,
           "title": "History last index",
+          "tooltip": {
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "buckets": null,
+            "mode": "time",
+            "name": null,
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "format": "none",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            },
+            {
+              "format": "short",
+              "label": null,
+              "logBase": 1,
+              "max": null,
+              "min": null,
+              "show": true
+            }
+          ]
+        },
+        {
+          "aliasColors": {},
+          "bars": false,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "fill": 1,
+          "gridPos": {
+            "h": 7,
+            "w": 24,
+            "x": 0,
+            "y": 220
+          },
+          "id": 1503,
+          "legend": {
+            "alignAsTable": true,
+            "avg": false,
+            "current": false,
+            "max": false,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "total": false,
+            "values": false
+          },
+          "lines": true,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null",
+          "percentage": false,
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [
+            {
+              "alias": "history buffer size",
+              "color": "#E24D42",
+              "dashes": true,
+              "fill": 0,
+              "linewidth": 3
+            }
+          ],
+          "spaceLength": 10,
+          "stack": false,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "max(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"last_index\"}) - min(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"sync_index\"})",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "index gap",
+              "refId": "A"
+            },
+            {
+              "expr": "max(pd_region_syncer_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=~\".*pd.*\", type=\"history_buffer_size\"})",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "history buffer size",
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeFrom": null,
+          "timeRegions": [],
+          "timeShift": null,
+          "title": "History index gap",
           "tooltip": {
             "shared": true,
             "sort": 0,

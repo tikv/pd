@@ -36,9 +36,10 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	syncIndexGauge  = regionSyncerStatus.WithLabelValues("sync_index")
-	firstIndexGauge = regionSyncerStatus.WithLabelValues("first_index")
-	lastIndexGauge  = regionSyncerStatus.WithLabelValues("last_index")
+	syncIndexGauge         = regionSyncerStatus.WithLabelValues("sync_index")
+	firstIndexGauge        = regionSyncerStatus.WithLabelValues("first_index")
+	lastIndexGauge         = regionSyncerStatus.WithLabelValues("last_index")
+	historyBufferSizeGauge = regionSyncerStatus.WithLabelValues("history_buffer_size")
 )
 
 type historyBuffer struct {
@@ -85,6 +86,8 @@ func newHistoryBufferWithConfig(baseCapacity, maxCapacity, capacityUnit int, kv 
 		flushCount:   defaultFlushCount,
 	}
 	h.reload()
+	h.updateHistoryIndexMetrics()
+	h.updateHistoryBufferSizeMetric()
 	return h
 }
 
@@ -135,6 +138,7 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 		h.head = (h.head + 1) % h.size
 	}
 	h.index++
+	h.updateHistoryIndexMetrics()
 	h.flushCount--
 	if h.flushCount <= 0 {
 		h.persist()
@@ -293,6 +297,7 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	if h.capacity() > h.baseCapacity {
 		h.resizeLocked(h.baseCapacity)
 	}
+	h.updateHistoryIndexMetrics()
 }
 
 func (h *historyBuffer) getNextIndex() uint64 {
@@ -328,8 +333,6 @@ func (h *historyBuffer) reload() {
 }
 
 func (h *historyBuffer) persist() {
-	firstIndexGauge.Set(float64(h.firstIndex()))
-	lastIndexGauge.Set(float64(h.nextIndex()))
 	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
 	if err != nil {
 		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
@@ -370,6 +373,7 @@ func (h *historyBuffer) resizeLocked(newCapacity int) {
 	h.size = newCapacity + 1
 	h.head = 0
 	h.tail = keep % h.size
+	h.updateHistoryBufferSizeMetric()
 }
 
 func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
@@ -378,4 +382,13 @@ func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 		return h.records[pos]
 	}
 	return nil
+}
+
+func (h *historyBuffer) updateHistoryIndexMetrics() {
+	firstIndexGauge.Set(float64(h.firstIndex()))
+	lastIndexGauge.Set(float64(h.nextIndex()))
+}
+
+func (h *historyBuffer) updateHistoryBufferSizeMetric() {
+	historyBufferSizeGauge.Set(float64(h.capacity()))
 }
