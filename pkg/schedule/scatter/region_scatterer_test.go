@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -1412,7 +1413,38 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 		region,
 		targetPeers,
 		[]uint64{1, 4, 5},
+		nil,
 	)
+	re.NotContains(candidates, uint64(4))
+
+	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
+	re.Equal(uint64(5), leader)
+}
+
+func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
+	re := require.New(t)
+	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
+	tc := scatterer.cluster.(*mockcluster.Cluster)
+	cfg := tc.PersistOptions.GetStoreConfig().Clone()
+	cfg.ReadPool.Unified.MaxThreadCount = 12
+	tc.SetStoreConfig(cfg)
+	tc.Set(4, &pdpb.StoreStats{
+		Interval: &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+		CpuUsages: []*pdpb.RecordPair{{
+			Key:   "unified-read-0",
+			Value: 850,
+		}},
+	})
+
+	group := "test-leader-read-pool-pressure"
+	re.True(state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, map[uint64]uint64{1: 3, 4: 0, 5: 1}))
+	targetPeers := map[uint64]*metapb.Peer{
+		1: region.GetStorePeer(1),
+		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
+		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
+	}
+	readCPUByStore := splitScatterReadCPUByStore(tc.GetStoresLoads(), tc)
+	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, readCPUByStore)
 	re.NotContains(candidates, uint64(4))
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
@@ -1432,7 +1464,7 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5})
+	candidates := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil)
 	re.Equal([]uint64{1}, candidates)
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)

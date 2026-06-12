@@ -33,10 +33,13 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -105,6 +108,37 @@ func cloneDistribution(distribution map[uint64]uint64) map[uint64]uint64 {
 		cloned[id] = count
 	}
 	return cloned
+}
+
+type storeLoadsProvider interface {
+	GetStoresLoads() map[uint64]statistics.StoreKindLoads
+}
+
+type storeConfigProvider interface {
+	GetStoreConfig() sc.StoreConfigProvider
+}
+
+type storeReadCPURecentMaxProvider interface {
+	GetStoreReadCPURecentMax(storeID uint64) float64
+}
+
+func splitScatterReadCPUByStore(
+	storesLoads map[uint64]statistics.StoreKindLoads,
+	recentMaxProvider storeReadCPURecentMaxProvider,
+) map[uint64]float64 {
+	readCPUByStore := make(map[uint64]float64, len(storesLoads))
+	for storeID, loads := range storesLoads {
+		readCPU := loads[utils.StoreReadCPU]
+		if recentMaxProvider != nil {
+			if recentMax := recentMaxProvider.GetStoreReadCPURecentMax(storeID); recentMax > readCPU {
+				readCPU = recentMax
+			}
+		}
+		if readCPU > 0 {
+			readCPUByStore[storeID] = readCPU
+		}
+	}
+	return readCPUByStore
 }
 
 func decrementDistribution(distribution map[uint64]uint64, id uint64) {
@@ -703,7 +737,16 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
 	if internalScatter {
-		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores)
+		var storesLoads map[uint64]statistics.StoreKindLoads
+		if provider, ok := r.cluster.(storeLoadsProvider); ok {
+			storesLoads = provider.GetStoresLoads()
+		}
+		var recentMaxProvider storeReadCPURecentMaxProvider
+		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
+			recentMaxProvider = provider
+		}
+		readCPUByStore := splitScatterReadCPUByStore(storesLoads, recentMaxProvider)
+		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, readCPUByStore)
 	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
@@ -760,6 +803,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	region *core.RegionInfo,
 	targetPeers map[uint64]*metapb.Peer,
 	candidateStores []uint64,
+	readCPUByStore map[uint64]float64,
 ) []uint64 {
 	if len(candidateStores) == 0 {
 		return candidateStores
@@ -778,9 +822,20 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		}
 		return filtered
 	}
+	readPoolThreadCount := uint64(0)
+	if provider, ok := r.cluster.(storeConfigProvider); ok {
+		readPoolThreadCount = provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+	}
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
+			continue
+		}
+		store := r.cluster.GetStore(storeID)
+		if store == nil {
+			continue
+		}
+		if !filter.Target(r.cluster.GetSharedConfig(), store, []filter.Filter{filter.NewReadPoolPressureFilter(r.name, readCPUByStore, readPoolThreadCount)}) {
 			continue
 		}
 		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
