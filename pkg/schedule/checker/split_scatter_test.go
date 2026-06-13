@@ -780,6 +780,7 @@ func newTestSplitScatterController(t *testing.T) (*Controller, *mockcluster.Clus
 	}
 	putSplitScatterRegion(tc, 100, "", "m", splitScatterNoCPUUsage)
 
+	tc.SetSplitScatterScheduleLimit(4)
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	controller := NewController(ctx, tc, tc.GetCheckerConfig(), oc)
