@@ -214,7 +214,12 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				var tokens *rmpb.GrantedRUTokenBucket
 				for _, re := range req.GetRuItems().GetRequestRU() {
 					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
+						requiredToken := re.GetValue()
+						// Sample the latest RU demand.
+						grt := s.manager.getOrCreateGroupRUTracker(resourceGroupName)
+						grt.sample(clientUniqueID, now, requiredToken)
+						// Request the tokens from the resource group.
+						tokens = rg.RequestRU(now, requiredToken, targetPeriodMs, clientUniqueID, grt)
 					}
 					if tokens == nil {
 						continue
