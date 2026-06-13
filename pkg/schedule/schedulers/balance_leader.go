@@ -545,9 +545,13 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Step++
 	defer func() { solver.Step-- }()
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(s.GetName()), solver.targetStoreScore(s.GetName())
+	solver.calcSourceStoreScore(s.GetName())
+	solver.calcTargetStoreScore(s.GetName())
 	if !solver.shouldBalance(s.GetName()) {
 		balanceLeaderSkipCounter.Inc()
+		if solver.isPotentialReverse() {
+			solver.recordPotentialReverse(s.GetName())
+		}
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}

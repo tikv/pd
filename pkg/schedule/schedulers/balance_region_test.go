@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"testing"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -65,14 +66,16 @@ func TestInfluenceAmp(t *testing.T) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	solver := newSolver(basePlan, kind, tc, influence)
 	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+	solver.calcSourceStoreScore("")
+	solver.calcTargetStoreScore("")
 	re.True(solver.shouldBalance(""))
 
 	// It will not schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
 	tc.AddRegionStore(1, int(100+influenceAmp+2))
 	solver.Source = tc.GetStore(1)
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+	solver.calcSourceStoreScore("")
+	solver.calcTargetStoreScore("")
 	re.False(solver.shouldBalance(""))
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
 }
@@ -150,7 +153,8 @@ func TestShouldBalance(t *testing.T) {
 		basePlan := plan.NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 		solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-		solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+		solver.calcSourceStoreScore("")
+		solver.calcTargetStoreScore("")
 		re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 	}
 
@@ -164,10 +168,81 @@ func TestShouldBalance(t *testing.T) {
 			basePlan := plan.NewBalanceSchedulerPlan()
 			solver := newSolver(basePlan, kind, tc, oc.GetOpInfluence(tc.GetBasicCluster()))
 			solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
-			solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+			solver.calcSourceStoreScore("")
+			solver.calcTargetStoreScore("")
 			re.Equal(testCase.expectedResult, solver.shouldBalance(""))
 		}
 	}
+}
+
+func TestBalanceRegionPotentialReverse(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.SetTolerantSizeRatio(1)
+	tc.SetRegionScoreFormulaVersion("v1")
+
+	tc.AddRegionStore(1, 11)
+	tc.AddRegionStore(2, 9)
+	tc.AddRegionStore(3, 6)
+	tc.AddRegionStore(4, 5)
+	tc.AddRegionStore(5, 2)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	store5 := tc.GetStore(5)
+	stats := store5.GetStoreStats()
+	stats.Capacity = 50
+	stats.Available = 20
+	stats.UsedSize = 28
+	tc.PutStore(store5.Clone(core.SetStoreStats(stats)))
+
+	basePlan := plan.NewBalanceSchedulerPlan()
+	solver := newSolver(basePlan, constant.NewScheduleKind(constant.RegionKind, constant.BySize), tc, oc.GetOpInfluence(tc.GetBasicCluster()))
+	solver.Source = tc.GetStore(1)
+	solver.Target = tc.GetStore(5)
+	solver.Region = tc.GetRegion(1)
+	solver.calcSourceStoreScore("")
+	solver.calcTargetStoreScore("")
+
+	re.False(solver.shouldBalance(""))
+	sourceOriginalScore, targetOriginalScore := solver.originalStoreScores()
+	re.Greater(sourceOriginalScore, targetOriginalScore)
+	re.True(solver.isPotentialReverse())
+}
+
+func TestBalanceRegionPotentialReverseMetric(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetTolerantSizeRatio(1)
+	tc.SetRegionScoreFormulaVersion("v1")
+
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	tc.AddRegionStore(1, 11)
+	tc.AddRegionStore(2, 9)
+	tc.AddRegionStore(3, 6)
+	tc.AddRegionStore(4, 5)
+	tc.AddRegionStore(5, 2)
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	store5 := tc.GetStore(5)
+	stats := store5.GetStoreStats()
+	stats.Capacity = 50
+	stats.Available = 20
+	stats.UsedSize = 28
+	tc.PutStore(store5.Clone(core.SetStoreStats(stats)))
+
+	metric := balancePotentialReverseCounter.WithLabelValues(types.BalanceRegionScheduler.String())
+	before := promtestutil.ToFloat64(metric)
+	ops, _ := sb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferPeer(re, ops[0], operator.OpKind(0), 1, 4)
+	re.Equal(before+1, promtestutil.ToFloat64(metric))
 }
 
 func TestTolerantRatio(t *testing.T) {
