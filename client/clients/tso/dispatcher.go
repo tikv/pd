@@ -167,7 +167,10 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		stream    *tsoStream
 	)
 	// Loop through each batch of TSO requests and send them for processing.
-	streamLoopTimer := time.NewTimer(option.Timeout)
+	// Use TSO-specific timeout which can be configured via WithCustomTSOTimeoutOption.
+	// GetTSOTimeout also considers the backoffer's total time limit if set.
+	tsoTimeout := option.GetTSOTimeout()
+	streamLoopTimer := time.NewTimer(tsoTimeout)
 	defer streamLoopTimer.Stop()
 
 	// Create a not-started-timer to be used for collecting batches for concurrent RPC.
@@ -215,7 +218,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tsoBatchController.AdjustBestBatchSize()
 		}
-		streamLoopTimer.Reset(option.Timeout)
+		streamLoopTimer.Reset(tsoTimeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
@@ -323,7 +326,7 @@ tsoBatchLoop:
 			}
 		}
 
-		done := td.deadlineWatcher.Start(ctx, option.Timeout, cancel)
+		done := td.deadlineWatcher.Start(ctx, tsoTimeout, cancel)
 		if done == nil {
 			// Finish the collected requests if the context is canceled.
 			td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
