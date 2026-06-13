@@ -177,6 +177,7 @@ func newTestSchedulingServiceForSplit(
 	re.NoError(err)
 	cfg.Schedule.AffinityScheduleLimit = 4
 	cfg.Schedule.MaxAffinityMergeRegionSize = 10
+	cfg.Schedule.SplitScatterScheduleLimit = 4
 
 	basicCluster := core.NewBasicCluster()
 	for i := uint64(1); i <= 3; i++ {
