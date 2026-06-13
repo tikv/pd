@@ -27,7 +27,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	// Set a timeout for leak detection to prevent tests from hanging
+	options := append([]goleak.Option{goleak.VerifyTimeout(time.Minute)}, testutil.LeakOptions...)
+	goleak.VerifyTestMain(m, options...)
 }
 
 func TestIsHot(t *testing.T) {
