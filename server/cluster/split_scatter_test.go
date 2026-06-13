@@ -160,6 +160,7 @@ func newSplitScatterTestCluster(t *testing.T) (*RaftCluster, context.CancelFunc)
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
+	opt.SetSplitScatterScheduleLimit(4)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.regionLabeler, err = labeler.NewRegionLabeler(ctx, cluster.storage, time.Second*5)
 	re.NoError(err)

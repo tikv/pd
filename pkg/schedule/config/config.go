@@ -42,7 +42,7 @@ const (
 	defaultMergeScheduleLimit        = 8
 	defaultHotRegionScheduleLimit    = 4
 	defaultAffinityScheduleLimit     = 0 // default to disable
-	defaultSplitScatterScheduleLimit = 4
+	defaultSplitScatterScheduleLimit = 0
 	defaultTolerantSizeRatio         = 0
 	defaultLowSpaceRatio             = 0.8
 	defaultHighSpaceRatio            = 0.7

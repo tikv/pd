@@ -195,6 +195,7 @@ leader-schedule-limit = 0
 	re.Equal(0, cfg.Log.File.MaxDays)
 	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
+	re.Equal(uint64(0), cfg.Schedule.SplitScatterScheduleLimit)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
 	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
