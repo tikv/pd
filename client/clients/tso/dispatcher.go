@@ -475,9 +475,11 @@ func (td *tsoDispatcher) processRequests(
 func tsoRequestFinisher(physical, firstLogical int64, streamID string) batch.FinisherFunc[*Request] {
 	return func(idx int, tsoReq *Request, err error) {
 		// Retrieve the request context before the request is done to trace without race.
+		tsoReq.mu.Lock()
 		requestCtx := tsoReq.requestCtx
 		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(idx)
 		tsoReq.streamID = streamID
+		tsoReq.mu.Unlock()
 		tsoReq.TryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
 	}
