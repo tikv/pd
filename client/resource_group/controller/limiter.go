@@ -332,13 +332,6 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 // the burst cap. maybeNotify is intentionally not called either —
 // refunding can only raise the token count, never push the limiter into
 // the low-token state.
-//
-// Wakes any acquireTokens retry waits via reconfiguredCh so the newly
-// refunded tokens can be picked up immediately instead of after the
-// next retry-interval tick. In-flight WaitReservations sleepers keep
-// honoring their pre-computed timeToAct (whose delay was reserved
-// against the at-reserve-time token count); reservation re-evaluation
-// is out of scope here.
 func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
@@ -348,11 +341,6 @@ func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
 	_, tokens := lim.getTokens(now)
 	lim.last = now
 	lim.tokens = tokens + amount
-	// Mirror Reconfigure: refunded tokens may unblock acquireTokens retry waits.
-	if lim.reconfiguredCh != nil {
-		close(lim.reconfiguredCh)
-	}
-	lim.reconfiguredCh = make(chan struct{})
 }
 
 type tokenBucketReconfigureArgs struct {
