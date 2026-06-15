@@ -36,6 +36,22 @@ func counterValue(re *require.Assertions, c interface{ Write(*dto.Metric) error 
 	return m.GetCounter().GetValue()
 }
 
+func histogramSampleCount(re *require.Assertions, h prometheus.Observer) uint64 {
+	metric, ok := h.(prometheus.Metric)
+	re.True(ok)
+	if !ok {
+		return 0
+	}
+	var m dto.Metric
+	re.NoError(metric.Write(&m))
+	histogram := m.GetHistogram()
+	re.NotNil(histogram)
+	if histogram == nil {
+		return 0
+	}
+	return histogram.GetSampleCount()
+}
+
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
 		Name:     "test",
@@ -563,14 +579,15 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	re.Positive(counterValue(re, gmc.prechargeCounter))
 	re.Positive(counterValue(re, gmc.actualBytesCounter))
 	re.Positive(counterValue(re, gmc.nonprechargeCounter))
+	re.Positive(histogramSampleCount(re, gmc.predictionResidualBytes))
+	re.Positive(histogramSampleCount(re, gmc.settlementRUDelta))
 
 	gmc.deletePagingLabels(name)
 
 	// After cleanup, refetching each Vec with the same label must yield a
 	// fresh zero-valued series. Covers every counter declared in
 	// initMetrics so a forgotten DeleteLabelValues in deletePagingLabels
-	// surfaces here. Histogram Vecs share the same Delete semantics on
-	// the Vec interface, so counter coverage transitively validates them.
+	// surfaces here.
 	for _, vec := range []*prometheus.CounterVec{
 		metrics.PagingPrechargeCounter,
 		metrics.PagingNonprechargeCounter,
@@ -582,6 +599,13 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	} {
 		re.Zero(counterValue(re, vec.WithLabelValues(name)),
 			"paging counter series for %q should be cleared by deletePagingLabels", name)
+	}
+	for _, vec := range []*prometheus.HistogramVec{
+		metrics.PagingPredictionResidualBytes,
+		metrics.PagingSettlementRUDelta,
+	} {
+		re.Zero(histogramSampleCount(re, vec.WithLabelValues(name)),
+			"paging histogram series for %q should be cleared by deletePagingLabels", name)
 	}
 }
 
