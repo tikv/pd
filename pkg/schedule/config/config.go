@@ -227,6 +227,8 @@ type ScheduleConfig struct {
 	// StoreBalanceRate is the maximum of balance rate for each store.
 	// WARN: StoreBalanceRate is deprecated.
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
+	// DefaultStoreLimit is the default limit of scheduling for stores.
+	DefaultStoreLimit StoreLimitConfig `toml:"default-store-limit" json:"default-store-limit"`
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
@@ -457,6 +459,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
+	defaultStoreLimitMeta := meta.Child("default-store-limit")
+	c.migrateStoreBalanceRate(defaultStoreLimitMeta)
+	c.adjustDefaultStoreLimit(defaultStoreLimitMeta)
 
 	for k, b := range c.migrateConfigurationMap() {
 		v, err := parseDeprecatedFlag(meta, k, *b[0], *b[1])
@@ -464,11 +469,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 			return err
 		}
 		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
-	}
-
-	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		c.StoreBalanceRate = 0
 	}
 
 	if c.StoreLimit == nil {
@@ -487,6 +487,38 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
 	}
 	return c.Validate()
+}
+
+func (c *ScheduleConfig) adjustDefaultStoreLimit(meta *configutil.ConfigMetaData) {
+	defaultStoreLimit := DefaultStoreLimitConfig()
+	if !meta.IsDefined("add-peer") {
+		configutil.AdjustFloat64(&c.DefaultStoreLimit.AddPeer, defaultStoreLimit.AddPeer)
+	}
+	if !meta.IsDefined("remove-peer") {
+		configutil.AdjustFloat64(&c.DefaultStoreLimit.RemovePeer, defaultStoreLimit.RemovePeer)
+	}
+}
+
+func (c *ScheduleConfig) migrateStoreBalanceRate(defaultStoreLimitMeta *configutil.ConfigMetaData) {
+	if c.StoreBalanceRate == 0 {
+		return
+	}
+	defaultStoreLimit := StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+	DefaultStoreLimit = StoreLimit{AddPeer: defaultStoreLimit.AddPeer, RemovePeer: defaultStoreLimit.RemovePeer}
+	if defaultStoreLimitMeta == nil {
+		if c.DefaultStoreLimit == (StoreLimitConfig{}) {
+			c.DefaultStoreLimit = defaultStoreLimit
+		}
+		c.StoreBalanceRate = 0
+		return
+	}
+	if !defaultStoreLimitMeta.IsDefined("add-peer") {
+		c.DefaultStoreLimit.AddPeer = defaultStoreLimit.AddPeer
+	}
+	if !defaultStoreLimitMeta.IsDefined("remove-peer") {
+		c.DefaultStoreLimit.RemovePeer = defaultStoreLimit.RemovePeer
+	}
+	c.StoreBalanceRate = 0
 }
 
 func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
@@ -536,10 +568,7 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
-	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		c.StoreBalanceRate = 0
-	}
+	c.migrateStoreBalanceRate(nil)
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {
@@ -604,6 +633,19 @@ func (c *ScheduleConfig) Deprecated() error {
 type StoreLimitConfig struct {
 	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
 	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+}
+
+// DefaultStoreLimitConfig returns the current process default store limit config.
+func DefaultStoreLimitConfig() StoreLimitConfig {
+	return StoreLimitConfig{
+		AddPeer:    DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+	}
+}
+
+// GetDefaultStoreLimit returns the default store limit config.
+func (c *ScheduleConfig) GetDefaultStoreLimit() StoreLimitConfig {
+	return c.DefaultStoreLimit
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
