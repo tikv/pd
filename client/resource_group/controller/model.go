@@ -64,14 +64,26 @@ type RequestInfo interface {
 	IsCop() bool
 }
 
-// estimatedReadBytes returns the predicted read-bytes hint for read requests.
-// Writes always return 0 so paging pre-charge / settlement / metrics stay
-// gated to reads.
+// pagingReadEstimate returns the predicted read-bytes hint for coprocessor
+// read requests. The boolean reports whether the request participates in
+// paging accounting at all; a true result with 0 bytes means a paging
+// cold-start request with no usable estimate yet.
+func pagingReadEstimate(req RequestInfo) (uint64, bool) {
+	if req.IsWrite() || !req.IsCop() {
+		return 0, false
+	}
+	return req.PredictedReadBytes(), true
+}
+
+// estimatedReadBytes returns the predicted read-bytes hint for coprocessor
+// read requests. Writes and non-coprocessor reads always return 0 so paging
+// pre-charge and settlement stay gated to paging RPCs.
 func estimatedReadBytes(req RequestInfo) uint64 {
-	if req.IsWrite() {
+	bytesForEst, ok := pagingReadEstimate(req)
+	if !ok {
 		return 0
 	}
-	return req.PredictedReadBytes()
+	return bytesForEst
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be

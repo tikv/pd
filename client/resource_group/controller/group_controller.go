@@ -644,7 +644,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
 	}
-	if bytesForEst := estimatedReadBytes(info); bytesForEst > 0 {
+	if bytesForEst, ok := pagingReadEstimate(info); ok && bytesForEst > 0 {
 		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
 	}
 
@@ -678,11 +678,13 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
-	if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
-		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
-			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-	} else if !req.IsWrite() && req.IsCop() {
-		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+	if bytesForEst, ok := pagingReadEstimate(req); ok {
+		if bytesForEst > 0 {
+			gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+				getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+		} else {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
@@ -716,18 +718,20 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
-	bytesForEst := estimatedReadBytes(req)
-	if bytesForEst > 0 {
-		gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
-			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-	} else if !req.IsWrite() && req.IsCop() {
-		gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	if isPagingRead {
+		if bytesForEst > 0 {
+			gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
+				getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+		} else {
+			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
+		}
 	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		v := getRUValueFromConsumption(delta)
 		if v > 0 {
-			if bytesForEst > 0 {
+			if isPagingRead && bytesForEst > 0 {
 				// The precharged request has already consumed TiKV resources.
 				// Debit any positive settlement delta immediately so future
 				// requests observe the debt instead of queueing this completed

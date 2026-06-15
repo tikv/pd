@@ -227,6 +227,7 @@ func TestPredictedReadBytesPreCharge(t *testing.T) {
 	predictedReadBytes := uint64(256 * 1024) // learned EMA estimate
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: predictedReadBytes,
 	}
 	precharge := &rmpb.Consumption{}
@@ -258,6 +259,39 @@ func TestPredictedReadBytesPreCharge(t *testing.T) {
 		"Total RRU across precharge+settle should equal baseCost + actualCost")
 }
 
+func TestPredictedReadBytesRequiresCopRead(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+
+	predictedReadBytes := uint64(256 * 1024)
+	req := &TestRequestInfo{
+		isWrite:            false,
+		isCop:              false,
+		predictedReadBytes: predictedReadBytes,
+	}
+	precharge := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(precharge, req)
+
+	baseCost := float64(cfg.ReadBaseCost) + float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	re.InDelta(baseCost, precharge.RRU, 1e-6,
+		"non-cop reads must not consume the paging predicted-read hint")
+
+	actualReadBytes := uint64(300 * 1024)
+	resp := &TestResponseInfo{
+		readBytes: actualReadBytes,
+		kvCPU:     10 * time.Millisecond,
+		succeed:   true,
+	}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
+
+	actualReadCost := float64(cfg.ReadBytesCost) * float64(actualReadBytes)
+	cpuCost := float64(cfg.CPUMsCost) * 10.0
+	re.InDelta(actualReadCost+cpuCost, settle.RRU, 1e-6,
+		"non-cop reads must not settle against the paging predicted-read hint")
+}
+
 func TestPagingPreChargeTokenRefund(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -274,6 +308,7 @@ func TestPagingPreChargeTokenRefund(t *testing.T) {
 
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
@@ -323,6 +358,7 @@ func TestPagingPreChargeNoRefundWhenActualExceedsEstimate(t *testing.T) {
 
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
@@ -401,6 +437,7 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: predictedReadBytes,
 	}
 	resp := &TestResponseInfo{
@@ -481,6 +518,7 @@ func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
 
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: predictedReadBytes,
 	}
 	// Failed response: no bytes read, no CPU consumed, succeed=false.
@@ -623,6 +661,7 @@ func TestPagingPrechargeNotObservedOnThrottle(t *testing.T) {
 	// acquireTokens returns ErrClientResourceGroupThrottled.
 	req := &TestRequestInfo{
 		isWrite:            false,
+		isCop:              true,
 		predictedReadBytes: 4 * 1024 * 1024 * 1024,
 	}
 
