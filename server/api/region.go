@@ -908,10 +908,23 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	splitKeyHexes := s.([]any)
-	if len(splitKeyHexes) < 1 {
+	splitKeyValues, ok := s.([]any)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be an array.")
+		return
+	}
+	if len(splitKeyValues) < 1 {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
+	}
+	splitKeyHexes := make([]string, 0, len(splitKeyValues))
+	for _, splitKeyValue := range splitKeyValues {
+		splitKeyHex, ok := splitKeyValue.(string)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "split_keys should contain only strings.")
+			return
+		}
+		splitKeyHexes = append(splitKeyHexes, splitKeyHex)
 	}
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {

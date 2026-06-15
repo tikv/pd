@@ -1435,10 +1435,23 @@ func splitRegions(c *gin.Context) {
 		c.String(http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	splitKeyHexes := s.([]any)
-	if len(splitKeyHexes) < 1 {
+	splitKeyValues, ok := s.([]any)
+	if !ok {
+		c.String(http.StatusBadRequest, "split_keys should be an array.")
+		return
+	}
+	if len(splitKeyValues) < 1 {
 		c.String(http.StatusBadRequest, "empty split keys.")
 		return
+	}
+	splitKeyHexes := make([]string, 0, len(splitKeyValues))
+	for _, splitKeyValue := range splitKeyValues {
+		splitKeyHex, ok := splitKeyValue.(string)
+		if !ok {
+			c.String(http.StatusBadRequest, "split_keys should contain only strings.")
+			return
+		}
+		splitKeyHexes = append(splitKeyHexes, splitKeyHex)
 	}
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
