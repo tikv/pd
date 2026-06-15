@@ -240,12 +240,11 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
 			Name:      "paging_prediction_residual_bytes",
-			// Signed residual = actual - predicted. Buckets span ±64MB to
-			// absorb large first-page responses when the predictor has no
-			// prior observation (predicted=0) and workload shifts that
-			// leave the prediction above actual. Factor-4 spacing keeps
+			// Signed residual = actual - predicted for a single coprocessor
+			// RPC response. Buckets span ±64MB to cover per-RPC prediction
+			// residuals in both directions while factor-4 spacing keeps
 			// resolution near zero.
-			Buckets: []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
+			Buckets:     []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
 			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Shows predictor accuracy.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
