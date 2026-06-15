@@ -36,6 +36,140 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+func TestHistoryBufferMaxSizeFromMemory(t *testing.T) {
+	testCases := []struct {
+		name        string
+		totalMemory uint64
+		expected    int
+	}{
+		{name: "unknown-memory", totalMemory: 0, expected: defaultHistoryBufferSize},
+		{name: "below-step", totalMemory: historyBufferMemoryStep / 2, expected: defaultHistoryBufferSize},
+		{name: "one-step", totalMemory: historyBufferMemoryStep, expected: defaultHistoryBufferSize},
+		{name: "round-to-two-steps", totalMemory: 2 * historyBufferMemoryStep, expected: 2 * defaultHistoryBufferSize},
+		{name: "round-to-four-steps", totalMemory: 3 * historyBufferMemoryStep, expected: 4 * defaultHistoryBufferSize},
+		{name: "clamp-to-max", totalMemory: historyBufferMemoryStep * 100, expected: maxHistoryBufferSize},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.expected, historyBufferMaxSizeFromMemory(testCase.totalMemory))
+		})
+	}
+}
+
+func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	syncStream, err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
+		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member:     &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}},
+		StartIndex: 0,
+	}, stream)
+	if syncStream != nil {
+		defer syncer.unbindStream("pd-follower", syncStream)
+	}
+
+	re.NoError(err)
+	re.Equal(2, syncer.history.capacity())
+}
+
+func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
+	re := require.New(t)
+	syncer := newTestRegionSyncer(t, core.NewBasicCluster())
+	records := make([]*core.RegionInfo, 0, maxSyncRegionBatchSize+1)
+	for i := range maxSyncRegionBatchSize + 1 {
+		records = append(records, newHistoryBufferTestRegion(uint64(i)))
+	}
+	stream := newMockSyncRegionsServer()
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
+
+	re.NoError(syncer.syncHistoryRecords(10, records, stream))
+	first := <-stream.sendCh
+	second := <-stream.sendCh
+	re.Equal(uint64(10), first.GetStartIndex())
+	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
+	re.Equal(uint64(10+maxSyncRegionBatchSize), second.GetStartIndex())
+	re.Len(second.GetRegions(), 1)
+}
+
+func TestSyncFullRegionsRetainsCatchUpHistory(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newHistoryBufferTestRegion(1))
+	syncer := newTestRegionSyncer(t, bc)
+	syncer.history = newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	startIndex := syncer.history.getNextIndex()
+	done := make(chan syncFullRegionsResult, 1)
+	go func() {
+		syncStream, err := syncer.syncFullRegions(context.Background(), "pd-follower", stream)
+		done <- syncFullRegionsResult{syncStream: syncStream, err: err}
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	for i := range 5 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(100 + i)))
+	}
+	records := syncer.history.recordsFrom(startIndex)
+
+	close(unblockSend)
+	fullResp := <-stream.sendCh
+	catchUpResp := <-stream.sendCh
+	result := <-done
+	if result.syncStream != nil {
+		defer syncer.unbindStream("pd-follower", result.syncStream)
+	}
+
+	re.NoError(result.err)
+	re.Len(fullResp.GetRegions(), 1)
+	re.Len(records, 5)
+	re.Equal(startIndex, catchUpResp.GetStartIndex())
+	re.Len(catchUpResp.GetRegions(), 5)
+}
+
+func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
+	re := require.New(t)
+	bc := core.NewBasicCluster()
+	bc.PutRegion(newHistoryBufferTestRegion(1))
+	syncer := newTestRegionSyncer(t, bc)
+	syncer.history = newHistoryBufferWithConfig(2, 2, 1, storage.NewStorageWithMemoryBackend())
+	syncer.history.resetWithIndex(10)
+
+	stream := newMockSyncRegionsServer()
+	unblockSend := stream.blockSend()
+	done := make(chan syncFullRegionsResult, 1)
+	go func() {
+		syncStream, err := syncer.syncFullRegions(context.Background(), "pd-follower", stream)
+		done <- syncFullRegionsResult{syncStream: syncStream, err: err}
+	}()
+	testutil.Eventually(re, stream.isSendBlocked)
+
+	for i := range 3 {
+		syncer.history.record(newHistoryBufferTestRegion(uint64(200 + i)))
+	}
+
+	close(unblockSend)
+	re.NotNil(<-stream.sendCh)
+	result := <-done
+	if result.syncStream != nil {
+		defer syncer.unbindStream("pd-follower", result.syncStream)
+	}
+
+	re.Error(result.err)
+}
+
+type syncFullRegionsResult struct {
+	syncStream *regionSyncStream
+	err        error
+}
+
 func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
@@ -353,6 +487,25 @@ func newMockSyncRegionsServer() *mockSyncRegionsServer {
 		recvCh: make(chan *pdpb.SyncRegionRequest),
 		sendCh: make(chan *pdpb.SyncRegionResponse, 1),
 	}
+}
+
+func newTestRegionSyncer(t *testing.T, bc *core.BasicCluster) *RegionSyncer {
+	t.Helper()
+	re := require.New(t)
+	tempDir := t.TempDir()
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	t.Cleanup(func() {
+		re.NoError(regionStorage.Close())
+	})
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
+		bc,
+	)
+	return NewRegionSyncer(server)
 }
 
 func (s *mockSyncRegionsServer) Send(resp *pdpb.SyncRegionResponse) error {

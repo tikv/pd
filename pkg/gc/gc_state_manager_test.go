@@ -542,11 +542,41 @@ func (s *gcStateManagerTestSuite) testCompatibleGCSafePointUpdateSequentiallyImp
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithLegacyLoad() {
+	re := s.Require()
+
 	for _, keyspaceID := range s.keyspacePresets.manageable {
 		s.testCompatibleGCSafePointUpdateSequentiallyImpl(keyspaceID, func(keyspaceID uint32) (uint64, error) {
 			return s.manager.CompatibleLoadGCSafePoint(keyspaceID)
 		})
 	}
+
+	// Legacy load must bypass the local cache once this PD node is no longer leader.
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 200, time.Now())
+	re.NoError(err)
+	_, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, 100)
+	re.NoError(err)
+	re.Equal(uint64(100), newGCSafePoint)
+
+	gcSafePoint, err := s.manager.CompatibleLoadGCSafePoint(keyspaceID)
+	re.NoError(err)
+	re.Equal(uint64(100), gcSafePoint)
+
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceID)
+	re.True(ok)
+	re.Equal(uint64(100), cachedState.GCSafePoint)
+
+	err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		return wb.SetGCSafePoint(keyspaceID, 101)
+	})
+	re.NoError(err)
+	oldLeadership := s.manager.nodeLeadership.Load()
+	s.manager.nodeLeadership.Store(0)
+	defer s.manager.nodeLeadership.Store(oldLeadership)
+
+	gcSafePoint, err = s.manager.CompatibleLoadGCSafePoint(keyspaceID)
+	re.NoError(err)
+	re.Equal(uint64(101), gcSafePoint)
 }
 
 func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSequentiallyWithNewLoad() {
@@ -1992,6 +2022,85 @@ func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriers
 	}
 }
 
+func (s *gcStateManagerTestSuite) TestGetAllKeyspacesGCStatesExcludingGCBarriersFiltersStaleCachedState() {
+	re := s.Require()
+
+	const (
+		keyspaceIDArchived = uint32(2)
+		keyspaceIDUnified  = uint32(3)
+	)
+
+	_, err := s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
+		Op:    keyspace.OpPut,
+		Key:   keyspace.GCManagementType,
+		Value: keyspace.KeyspaceLevelGC,
+	}})
+	re.NoError(err)
+
+	_, err = s.manager.AdvanceTxnSafePoint(keyspaceIDUnified, 20, time.Now())
+	re.NoError(err)
+
+	_, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
+	re.True(ok)
+
+	_, err = s.manager.keyspaceManager.UpdateKeyspaceConfig("ks3", []*keyspace.Mutation{{
+		Op:    keyspace.OpPut,
+		Key:   keyspace.GCManagementType,
+		Value: keyspace.UnifiedGC,
+	}})
+	re.NoError(err)
+
+	// The keyspace config change itself does not invalidate GCStateManager's local cache.
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceIDUnified)
+	re.True(ok)
+	re.Equal(uint64(20), cachedState.TxnSafePoint)
+
+	allStates, err := s.manager.GetAllKeyspacesGCStates(context.Background(), false)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+	state, ok := allStates[keyspaceIDUnified]
+	re.True(ok)
+	re.False(state.IsKeyspaceLevel)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all))
+	state, ok = allStates[keyspaceIDUnified]
+	re.True(ok)
+	re.False(state.IsKeyspaceLevel)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDUnified)
+	re.True(ok)
+
+	_, err = s.manager.keyspaceManager.UpdateKeyspaceState("ks2", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = s.manager.keyspaceManager.UpdateKeyspaceState("ks2", keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+
+	// The keyspace state change itself does not invalidate GCStateManager's local cache.
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
+	re.True(ok)
+
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), false)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all)-1)
+	_, ok = allStates[keyspaceIDArchived]
+	re.False(ok)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
+	re.True(ok)
+
+	allStates, err = s.manager.GetAllKeyspacesGCStates(context.Background(), true)
+	re.NoError(err)
+	re.Len(allStates, len(s.keyspacePresets.all)-1)
+	_, ok = allStates[keyspaceIDArchived]
+	re.False(ok)
+	_, ok = s.manager.gcStateCache.load(keyspaceIDArchived)
+	re.False(ok)
+}
+
 func (s *gcStateManagerTestSuite) TestGetGCStateCacheMissConcurrent() {
 	re := s.Require()
 	s.ensureMarkedLeader()
@@ -2263,6 +2372,44 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointUpdatesWarmCache() {
 	re.Equal(beforeAdvance.hit+1, afterRead.hit)
 	re.Equal(beforeAdvance.slowHit, afterRead.slowHit)
 	re.Equal(beforeAdvance.miss, afterRead.miss)
+}
+
+func (s *gcStateManagerTestSuite) TestCompatibleUpdateGCSafePointSmallerTargetKeepsWarmCacheUsable() {
+	re := s.Require()
+	s.ensureMarkedLeader()
+	tracker := s.trackGCStateCacheAccessCounters()
+
+	const keyspaceID = uint32(2)
+	_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 50, time.Now())
+	re.NoError(err)
+	_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 40)
+	re.NoError(err)
+
+	state, err := s.manager.GetGCState(keyspaceID, true)
+	re.NoError(err)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(40), state.GCSafePoint)
+
+	beforeUpdate := tracker.snapshot()
+	oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(keyspaceID, 35)
+	re.NoError(err)
+	re.Equal(uint64(40), oldGCSafePoint)
+	re.Equal(uint64(40), newGCSafePoint)
+
+	cachedState, ok := s.manager.gcStateCache.load(keyspaceID)
+	re.True(ok)
+	re.Equal(uint64(50), cachedState.TxnSafePoint)
+	re.Equal(uint64(40), cachedState.GCSafePoint)
+
+	state, err = s.manager.GetGCState(keyspaceID, true)
+	re.NoError(err)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(40), state.GCSafePoint)
+
+	afterRead := tracker.snapshot()
+	re.Equal(beforeUpdate.hit+1, afterRead.hit)
+	re.Equal(beforeUpdate.slowHit, afterRead.slowHit)
+	re.Equal(beforeUpdate.miss, afterRead.miss)
 }
 
 func (s *gcStateManagerTestSuite) TestSetGCBarrierKeepsWarmSafePointCacheUsable() {
@@ -3532,20 +3679,27 @@ func benchmarkGetGCStateImpl(b *testing.B, excludeGCBarriers bool, keyspacesCoun
 	}()
 
 	stopWriteCh := make(chan struct{}, 1)
+	var txnSafePointAlloc atomic.Uint64
 	var wg sync.WaitGroup
 	wg.Add(concurrentWriteThreads)
 	for range concurrentWriteThreads {
 		go func() {
 			defer wg.Done()
-			for i := uint64(1); ; i++ {
+			for {
 				select {
 				case <-stopWriteCh:
 					return
 				default:
 				}
+				nextTxnSafePoint := txnSafePointAlloc.Add(1)
 				keyspaceID := rand.Uint32N(uint32(keyspacesCount)) + 1
-				_, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, i, time.Now())
-				re.NoError(err)
+				_, err := gcStateManager.AdvanceTxnSafePoint(keyspaceID, nextTxnSafePoint, time.Now())
+				if err != nil {
+					if errors.ErrorEqual(err, errs.ErrDecreasingTxnSafePoint) {
+						continue
+					}
+					re.NoError(err)
+				}
 			}
 		}()
 	}
