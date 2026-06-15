@@ -267,7 +267,19 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	// -1 forces an initial publish on the first tick.
 	lastPublishedRegionCount := -1
 	publishCommittedRegionCount := func() {
-		if count := s.server.GetBasicCluster().GetTotalRegionCount(); count != lastPublishedRegionCount {
+		count := s.server.GetBasicCluster().GetTotalRegionCount()
+		// Only advertise a non-zero committed count once regions have actually
+		// entered the syncer history and thus become syncable by followers.
+		// Regions present in the basic cluster but that never flowed through the
+		// heartbeat -> changedRegions -> history path (most notably the bootstrap
+		// region) cannot have been synced by any follower. Counting them would
+		// keep the region-syncer campaign gate (canCampaignAsRegionSyncerCaughtUp)
+		// permanently closed and stall the next leader election until the grace
+		// elapses, even though no follower could possibly be caught up.
+		if s.history.getNextIndex() == 0 {
+			count = 0
+		}
+		if count != lastPublishedRegionCount {
 			if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
 				log.Warn("failed to persist committed region count", errs.ZapError(err))
 			} else {
