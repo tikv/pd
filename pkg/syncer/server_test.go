@@ -1048,6 +1048,54 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	re.Equal(uint64(1), syncer.history.getNextIndex())
 }
 
+func TestClientFinishesFullSyncWithOldLeaderKeepAlive(t *testing.T) {
+	re := require.New(t)
+	regionStorage := storage.NewStorageWithMemoryBackend()
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		regionStorage,
+		core.NewBasicCluster(),
+	)
+	syncer := NewRegionSyncer(server)
+	syncer.history.resetWithIndex(42)
+	bc := core.NewBasicCluster()
+	snapshotRegion := newTestSyncRegion(1, 11)
+	catchUpRegion := newTestSyncRegion(2, 12)
+
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		Regions:    []*metapb.Region{snapshotRegion.GetMeta()},
+		StartIndex: 0,
+	}, bc, regionStorage, false)
+	re.True(handled)
+	re.True(fullSyncing)
+	re.False(syncer.IsRunning())
+	re.Equal(uint64(0), syncer.history.getNextIndex())
+	re.NotNil(bc.GetRegion(1))
+
+	handled, fullSyncing = syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		Regions:    []*metapb.Region{catchUpRegion.GetMeta()},
+		StartIndex: 42,
+	}, bc, regionStorage, fullSyncing)
+	re.True(handled)
+	re.True(fullSyncing)
+	re.False(syncer.IsRunning())
+	re.Equal(uint64(0), syncer.history.getNextIndex())
+	re.NotNil(bc.GetRegion(2))
+
+	handled, fullSyncing = syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: 43,
+	}, bc, regionStorage, fullSyncing)
+	re.True(handled)
+	re.False(fullSyncing)
+	re.True(syncer.IsRunning())
+	re.Equal(uint64(43), syncer.history.getNextIndex())
+}
+
 func newTestRegionSyncer(t *testing.T, regions ...*core.RegionInfo) (*RegionSyncer, *core.BasicCluster) {
 	t.Helper()
 	bc := core.NewBasicCluster()

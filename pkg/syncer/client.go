@@ -110,11 +110,12 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	regions := resp.GetRegions()
 	buckets := resp.GetBuckets()
 	regionLeaders := resp.GetRegionLeaders()
-	startFullSync := !nextFullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
-	if startFullSync {
-		nextFullSyncing = true
-	}
-	if (startFullSync || !nextFullSyncing || len(regions) == 0) && s.history.getNextIndex() != resp.GetStartIndex() {
+	startFullSync := !fullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
+	inFullSync := fullSyncing || startFullSync
+	// During a full sync, intermediate data frames carry a positional
+	// offset, not a reusable history index.
+	isPositionalBatch := inFullSync && !startFullSync && len(regions) > 0
+	if !isPositionalBatch && s.history.getNextIndex() != resp.GetStartIndex() {
 		log.Warn("server sync index not match the leader",
 			zap.String("server", s.server.Name()),
 			zap.Uint64("own", s.history.getNextIndex()),
@@ -163,22 +164,18 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 		if saveKV {
 			err = regionStorage.SaveRegion(r)
 		}
-		if err == nil && !nextFullSyncing {
+		if err == nil && !inFullSync {
 			s.history.record(region)
 		}
 		for _, old := range overlaps {
 			_ = regionStorage.DeleteRegion(old.GetMeta())
 		}
 	}
-	if nextFullSyncing {
-		if len(regions) == 0 {
-			nextFullSyncing = false
-			s.streamingRunning.Store(true)
-		}
-		return true, nextFullSyncing
+	nextFullSyncing = inFullSync && len(regions) > 0
+	if !nextFullSyncing {
+		// mark the client as running status when it finished the first history region sync.
+		s.streamingRunning.Store(true)
 	}
-	// mark the client as running status when it finished the first history region sync.
-	s.streamingRunning.Store(true)
 	return true, nextFullSyncing
 }
 
