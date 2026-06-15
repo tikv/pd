@@ -206,12 +206,12 @@ func scanRegionCommandFunc(cmd *cobra.Command, _ []string) {
 			return
 		}
 
-		lastEndKey := regions.Regions[len(regions.Regions)-1].EndKey
-		if lastEndKey == "" {
+		lastEndKeyHex := regions.Regions[len(regions.Regions)-1].EndKey
+		if lastEndKeyHex == "" {
 			return
 		}
 
-		key, err = hex.DecodeString(lastEndKey)
+		key, err = hex.DecodeString(lastEndKeyHex)
 		if err != nil {
 			cmd.Println("Bad format region key: ", key)
 			return
