@@ -556,7 +556,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		return wb.SetTxnSafePoint(keyspaceID, newTxnSafePoint)
 	})
 	if err != nil {
-		log.Error("failed to advance GC safe point",
+		log.Error("failed to advance txn safe point",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("keyspace-name", getKeyspaceNameFromCtx(ctx)),
 			zap.Uint64("old-txn-safe-point", oldTxnSafePoint), zap.Uint64("target", target),
 			zap.Uint64("new-txn-safe-point", newTxnSafePoint), zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode), zap.Error(err))
@@ -900,7 +900,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (
 	gcState, err := m.getGCStateImpl(keyspaceID, excludeGCBarriers)
 
 	if err != nil {
-		log.Error("failed to get GC satete", zap.Uint32("keyspace-id", keyspaceID),
+		log.Error("failed to get GC state", zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("keyspace-name", keyspaceName), zap.Bool("exclude-gc-barriers", excludeGCBarriers), zap.Error(err))
 	}
 
