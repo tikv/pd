@@ -554,9 +554,10 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	gmc := initMetrics(name, name)
 	// Push a sample through every paging counter / histogram so each label
 	// series actually exists in the underlying Vec.
-	gmc.observePagingPrecharge(100, 1.0)
-	gmc.observePagingActual(100, 80, 2.0, 0.5)
-	gmc.observePagingNonprecharge(200)
+	gmc.observePagingRequest(100, 1.0)
+	gmc.observePagingResponse(100, 80, 2.0, 0.5)
+	gmc.observePagingRequest(0, 0)
+	gmc.observePagingResponse(0, 200, 0, 0)
 
 	// Sanity: cached counters are non-zero before cleanup.
 	re.Positive(counterValue(re, gmc.prechargeCounter))
@@ -597,17 +598,50 @@ func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
 	nonCop := &TestRequestInfo{isWrite: false, isCop: false}
 	cop := &TestRequestInfo{isWrite: false, isCop: true}
 
-	before := counterValue(re, gc.metrics.nonprechargeCounter)
+	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
+	actualBytesBefore := counterValue(re, gc.metrics.nonprechargeActualBytes)
 
-	_, err := gc.onResponseImpl(nonCop, resp)
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), nonCop)
 	re.NoError(err)
-	re.InDelta(before, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+
+	_, err = gc.onResponseImpl(nonCop, resp)
+	re.NoError(err)
+	re.InDelta(counterBefore, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
 		"non-cop reads must not increment paging_nonprecharge_*")
+	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
+		"non-cop reads must not increment paging_nonprecharge_*")
+
+	_, _, _, _, err = gc.onRequestWaitImpl(context.TODO(), cop)
+	re.NoError(err)
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+		"cop reads without a hint must increment paging_nonprecharge_total on the request path")
+	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
+		"cop reads without a hint must not record actual bytes before response")
 
 	_, err = gc.onResponseImpl(cop, resp)
 	re.NoError(err)
-	re.InDelta(before+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
-		"cop reads without a hint must increment paging_nonprecharge_*")
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+		"cop read responses must not increment paging_nonprecharge_total again")
+	re.InDelta(actualBytesBefore+float64(resp.ReadBytes()), counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
+		"cop read responses without a hint must record paging_nonprecharge_actual_bytes_total")
+}
+
+func TestPagingNonprechargeCounterObservedOnRequest(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	req := &TestRequestInfo{isWrite: false, isCop: true}
+
+	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
+	actualBytesBefore := counterValue(re, gc.metrics.nonprechargeActualBytes)
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+		"cop reads without a prediction should be counted at the same request boundary as precharged reads")
+	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
+		"actual bytes are response-only and must not be recorded on the request path")
 }
 
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {

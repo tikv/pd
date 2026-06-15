@@ -165,32 +165,33 @@ func (gmc *groupMetricsCollection) deletePagingLabels(name string) {
 	metrics.PagingSettlementRUDelta.DeleteLabelValues(name)
 }
 
-// observePagingPrecharge requires bytesForEst > 0.
-// prechargeRU is the total RU pre-acquired at BeforeKVRequest
-// (base + ReadBytesCost * bytesForEst).
-func (gmc *groupMetricsCollection) observePagingPrecharge(bytesForEst uint64, prechargeRU float64) {
+// observePagingRequest records request-boundary paging counters. Callers must
+// gate the call on pagingReadEstimate(...).ok so the metric stays scoped to
+// coprocessor reads and excludes point gets, batch gets, scans, and other
+// bounded-size reads.
+func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64, prechargeRU float64) {
+	if bytesForEst == 0 {
+		gmc.nonprechargeCounter.Inc()
+		return
+	}
 	gmc.prechargeCounter.Inc()
 	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
 	gmc.prechargeRU.Add(prechargeRU)
 }
 
-// observePagingActual requires predicted > 0.
-// settlementRU is the total RU finally consumed (base + CPU + ReadBytesCost * actual);
-// vDelta is (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
-func (gmc *groupMetricsCollection) observePagingActual(predicted, actual uint64, settlementRU, vDelta float64) {
+// observePagingResponse records response-boundary paging metrics. For
+// precharged RPCs, settlementRU is the total RU finally consumed
+// (base + CPU + ReadBytesCost * actual) and vDelta is
+// (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
+func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64, settlementRU, vDelta float64) {
+	if bytesForEst == 0 {
+		gmc.nonprechargeActualBytes.Add(float64(actual))
+		return
+	}
 	gmc.actualBytesCounter.Add(float64(actual))
-	gmc.predictionResidualBytes.Observe(float64(actual) - float64(predicted))
+	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
 	gmc.settlementRU.Add(settlementRU)
 	gmc.settlementRUDelta.Observe(vDelta)
-}
-
-// observePagingNonprecharge counts a coprocessor RPC whose EMA produced no hint
-// (cold-start). Callers must gate the call on RequestInfo.IsCop() && !IsWrite()
-// so the metric stays scoped to coprocessor reads and excludes point gets,
-// batch gets, scans, and other bounded-size reads.
-func (gmc *groupMetricsCollection) observePagingNonprecharge(actual uint64) {
-	gmc.nonprechargeCounter.Inc()
-	gmc.nonprechargeActualBytes.Add(float64(actual))
 }
 
 type tokenCounter struct {
@@ -644,8 +645,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
 	}
-	if bytesForEst, ok := pagingReadEstimate(info); ok && bytesForEst > 0 {
-		gc.metrics.observePagingPrecharge(bytesForEst, getRUValueFromConsumption(delta))
+	if bytesForEst, ok := pagingReadEstimate(info); ok {
+		gc.metrics.observePagingRequest(bytesForEst, getRUValueFromConsumption(delta))
 	}
 
 	gc.mu.Lock()
@@ -679,12 +680,8 @@ func (gc *groupCostController) onResponseImpl(
 		calc.BeforeKVRequest(count, req)
 	}
 	if bytesForEst, ok := pagingReadEstimate(req); ok {
-		if bytesForEst > 0 {
-			gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
-				getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-		} else {
-			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
-		}
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
@@ -719,43 +716,37 @@ func (gc *groupCostController) onResponseWaitImpl(
 		calc.BeforeKVRequest(count, req)
 	}
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
-	if isPagingRead {
-		if bytesForEst > 0 {
-			gc.metrics.observePagingActual(bytesForEst, resp.ReadBytes(),
-				getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
-		} else {
-			gc.metrics.observePagingNonprecharge(resp.ReadBytes())
-		}
-	}
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		v := getRUValueFromConsumption(delta)
-		if v > 0 {
-			if isPagingRead && bytesForEst > 0 {
-				// The precharged request has already consumed TiKV resources.
-				// Debit any positive settlement delta immediately so future
-				// requests observe the debt instead of queueing this completed
-				// request for response-side admission.
-				gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
-			} else {
-				allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-				d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-				if err != nil {
-					if errs.ErrClientResourceGroupThrottled.Equal(err) {
-						gc.metrics.failedRequestCounterWithThrottled.Inc()
-						gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-					} else {
-						gc.metrics.failedRequestCounterWithOthers.Inc()
-					}
-					return nil, waitDuration, err
+		if v > 0 && isPagingRead && bytesForEst > 0 {
+			// The precharged request has already consumed TiKV resources.
+			// Debit any positive settlement delta immediately so future
+			// requests observe the debt instead of queueing this completed
+			// request for response-side admission.
+			gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+		} else if v > 0 {
+			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+			if err != nil {
+				if errs.ErrClientResourceGroupThrottled.Equal(err) {
+					gc.metrics.failedRequestCounterWithThrottled.Inc()
+					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+				} else {
+					gc.metrics.failedRequestCounterWithOthers.Inc()
 				}
-				gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-				waitDuration += d
+				return nil, waitDuration, err
 			}
+			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+			waitDuration += d
 		} else if v < 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
 		}
+	}
+	if isPagingRead {
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes(),
+			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
 	}
 
 	gc.mu.Lock()
