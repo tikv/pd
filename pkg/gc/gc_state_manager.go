@@ -1028,7 +1028,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 		}
 
 		// Workaround: Check unified GC before checking `keyspacePred`. This breaks the semantics of
-		// the function, but it makes sure keyspaces that chagned from keyspace-level GC to unified GC, the invalidated
+		// the function, but it makes sure keyspaces that changed from keyspace-level GC to unified GC, the invalidated
 		// cached GC states (if any) are always overwritten by the unified GC ones.
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
