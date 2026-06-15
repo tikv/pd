@@ -245,7 +245,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			// residuals in both directions while factor-4 spacing keeps
 			// resolution near zero.
 			Buckets:     []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
-			Help:        "Histogram of (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Shows predictor accuracy.",
+			Help:        "Histogram of signed (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -276,7 +276,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			// Negative => flows through RefundTokens; positive => flows through RemoveTokens / acquireTokens.
 			// Factor-4 spacing over ±1024 RU covers CPU (±tens of RU) plus bytes residuals up to ±64MB.
 			Buckets:     []float64{-1024, -256, -64, -16, -4, -1, -0.25, -0.0625, 0, 0.0625, 0.25, 1, 4, 16, 64, 256, 1024},
-			Help:        "Per-RPC signed settlement RU delta (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs. Negative means refund, positive means extra debit.",
+			Help:        "Histogram of signed per-RPC settlement RU delta (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 }
