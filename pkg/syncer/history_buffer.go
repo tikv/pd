@@ -125,29 +125,21 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	h.prepareRequiredWindowLocked(0, false, 1)
+	h.prepareRequiredWindowLocked(0, 1)
 	h.recordLocked(r)
 }
 
 func (h *historyBuffer) recordBatch(records []*core.RegionInfo) {
-	if len(records) == 0 {
-		return
-	}
-	h.Lock()
-	defer h.Unlock()
-	h.prepareRequiredWindowLocked(0, false, uint64(len(records)))
-	for _, r := range records {
-		h.recordLocked(r)
-	}
+	h.recordBatchWithRequiredWindow(records, 0)
 }
 
-func (h *historyBuffer) recordBatchFromReplay(replayFrom uint64, records []*core.RegionInfo) {
+func (h *historyBuffer) recordBatchWithRequiredWindow(records []*core.RegionInfo, requiredWindow uint64) {
 	if len(records) == 0 {
 		return
 	}
 	h.Lock()
 	defer h.Unlock()
-	h.prepareRequiredWindowLocked(replayFrom, true, uint64(len(records)))
+	h.prepareRequiredWindowLocked(requiredWindow, uint64(len(records)))
 	for _, r := range records {
 		h.recordLocked(r)
 	}
@@ -168,16 +160,14 @@ func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	}
 }
 
-func (h *historyBuffer) prepareRequiredWindowLocked(replayFrom uint64, hasReplayFrom bool, appendCount uint64) {
-	retainIndex, ok := h.minRequiredIndexLocked(replayFrom, hasReplayFrom)
-	if !ok {
-		return
+func (h *historyBuffer) prepareRequiredWindowLocked(requiredWindow uint64, appendCount uint64) {
+	if retainIndex, ok := h.minRetainIndexLocked(); ok {
+		endIndex := h.index + appendCount
+		if retainIndex < endIndex {
+			requiredWindow = max(requiredWindow, endIndex-retainIndex)
+		}
 	}
-	endIndex := h.index + appendCount
-	if retainIndex >= endIndex {
-		return
-	}
-	h.growForWindowLocked(endIndex - retainIndex)
+	h.growForWindowLocked(requiredWindow)
 }
 
 func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
@@ -262,27 +252,16 @@ func (h *historyBuffer) minRetainIndexLocked() (uint64, bool) {
 	return min, ok
 }
 
-func (h *historyBuffer) minRequiredIndexLocked(replayFrom uint64, hasReplayFrom bool) (uint64, bool) {
-	min, ok := h.minRetainIndexLocked()
-	if hasReplayFrom && (!ok || replayFrom < min) {
-		min = replayFrom
-		ok = true
-	}
-	return min, ok
-}
-
-func (h *historyBuffer) observeReplayWindow(replayFrom, endIndex uint64) {
+func (h *historyBuffer) observeRequiredWindow(window uint64) {
 	h.Lock()
 	defer h.Unlock()
-	h.observeReplayWindowLocked(replayFrom, true, endIndex)
+	h.observeRequiredWindowLocked(window)
 }
 
-func (h *historyBuffer) observeReplayWindowLocked(replayFrom uint64, hasReplayFrom bool, endIndex uint64) {
-	retainIndex, ok := h.minRequiredIndexLocked(replayFrom, hasReplayFrom)
-	if !ok || retainIndex >= endIndex {
+func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
+	if window == 0 {
 		return
 	}
-	window := endIndex - retainIndex
 	if window > h.observedRequiredWindow {
 		h.observedRequiredWindow = window
 	}

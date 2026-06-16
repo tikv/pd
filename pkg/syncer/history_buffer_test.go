@@ -162,7 +162,7 @@ func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferRecordBatchFromReplayKeepsSlowDownstreamRecords(t *testing.T) {
+func TestHistoryBufferRecordBatchWithRequiredWindowKeepsSlowDownstreamRecords(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 	h.resetWithIndex(10)
@@ -171,11 +171,11 @@ func TestHistoryBufferRecordBatchFromReplayKeepsSlowDownstreamRecords(t *testing
 		newHistoryBufferTestRegion(2),
 	})
 
-	h.recordBatchFromReplay(10, []*core.RegionInfo{
+	h.recordBatchWithRequiredWindow([]*core.RegionInfo{
 		newHistoryBufferTestRegion(3),
 		newHistoryBufferTestRegion(4),
 		newHistoryBufferTestRegion(5),
-	})
+	}, 5)
 
 	records := h.recordsFrom(10)
 	re.Len(records, 5)
@@ -186,7 +186,7 @@ func TestHistoryBufferRecordBatchFromReplayKeepsSlowDownstreamRecords(t *testing
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferFullSyncRetainTakesPriorityOverReplayStart(t *testing.T) {
+func TestHistoryBufferFullSyncRetainTakesPriorityOverRequiredWindow(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 	h.resetWithIndex(10)
@@ -197,11 +197,11 @@ func TestHistoryBufferFullSyncRetainTakesPriorityOverReplayStart(t *testing.T) {
 	release := h.retainFrom(10)
 	defer release()
 
-	h.recordBatchFromReplay(11, []*core.RegionInfo{
+	h.recordBatchWithRequiredWindow([]*core.RegionInfo{
 		newHistoryBufferTestRegion(3),
 		newHistoryBufferTestRegion(4),
 		newHistoryBufferTestRegion(5),
-	})
+	}, 4)
 
 	records := h.recordsFrom(10)
 	re.Len(records, 5)
@@ -211,11 +211,11 @@ func TestHistoryBufferFullSyncRetainTakesPriorityOverReplayStart(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferObserveReplayWindowGrowsWithoutRetain(t *testing.T) {
+func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 
-	h.observeReplayWindow(0, 3)
+	h.observeRequiredWindow(3)
 
 	re.Equal(8, h.capacity())
 }
@@ -223,12 +223,12 @@ func TestHistoryBufferObserveReplayWindowGrowsWithoutRetain(t *testing.T) {
 func TestHistoryBufferShrinksOneStepAfterReplayWindowStaysLow(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
-	h.observeReplayWindow(0, 3)
+	h.observeRequiredWindow(3)
 	re.Equal(8, h.capacity())
 	h.maybeShrink()
 
 	for range historyBufferShrinkRounds {
-		h.observeReplayWindow(h.getNextIndex(), h.getNextIndex())
+		h.observeRequiredWindow(0)
 		h.maybeShrink()
 	}
 

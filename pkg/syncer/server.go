@@ -269,20 +269,23 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 }
 
 func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
-	replayFrom, ok := s.minDownstreamSendIndex()
-	if !ok {
-		s.history.recordBatch(records)
-		return
-	}
-	s.history.recordBatchFromReplay(replayFrom, records)
+	s.history.recordBatchWithRequiredWindow(records, s.downstreamReplayWindow(uint64(len(records))))
 }
 
 func (s *RegionSyncer) observeDownstreamReplayWindow() {
-	replayFrom, ok := s.minDownstreamSendIndex()
+	s.history.observeRequiredWindow(s.downstreamReplayWindow(0))
+}
+
+func (s *RegionSyncer) downstreamReplayWindow(appendCount uint64) uint64 {
+	minSendIndex, ok := s.minDownstreamSendIndex()
 	if !ok {
-		return
+		return 0
 	}
-	s.history.observeReplayWindow(replayFrom, s.history.getNextIndex())
+	endIndex := s.history.getNextIndex() + appendCount
+	if minSendIndex >= endIndex {
+		return 0
+	}
+	return endIndex - minSendIndex
 }
 
 func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
@@ -409,7 +412,7 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
 	if startIndex != 0 && startIndex < endIndex {
-		s.history.observeReplayWindow(startIndex, endIndex)
+		s.history.observeRequiredWindow(endIndex - startIndex)
 	}
 	records := s.history.recordsBetween(startIndex, endIndex)
 	if len(records) == 0 {
