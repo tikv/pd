@@ -2292,7 +2292,7 @@ func TestCompatibility(t *testing.T) {
 	re.NoError(err)
 	// default
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})
@@ -2301,7 +2301,7 @@ func TestCompatibility(t *testing.T) {
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{"error", utils.BytePriority}
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.QueryPriority, utils.BytePriority, utils.KeyPriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})
@@ -2343,19 +2343,11 @@ func TestCompatibility(t *testing.T) {
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	re.False(hb.(*hotScheduler).conf.lastQuerySupported) // it will updated after scheduling
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
-		{utils.QueryDim, utils.ByteDim},
-		{utils.ByteDim, utils.KeyDim},
-	})
-	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
-	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
-	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})
-	re.True(hb.(*hotScheduler).conf.lastCPUSupported)
+	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
 }
 
 func TestCompatibilityConfig(t *testing.T) {
@@ -2367,7 +2359,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	hb, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})
@@ -2377,7 +2369,7 @@ func TestCompatibilityConfig(t *testing.T) {
 		ConfigSliceDecoder(types.BalanceHotRegionScheduler, []string{"read-priorities=byte,query"}))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
-		{utils.QueryDim, utils.ByteDim},
+		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
 		{utils.ByteDim, utils.KeyDim},
 	})

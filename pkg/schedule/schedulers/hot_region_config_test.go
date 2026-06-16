@@ -22,54 +22,42 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
-func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
+func TestAdjustPrioritiesConfigDefaultCPU(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
 		name         string
 		querySupport bool
-		cpuSupport   bool
 		origins      []string
 		expect       []string
 	}{
 		{
 			name:         "cpu-supported-keep-origins",
 			querySupport: true,
-			cpuSupport:   true,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
 			expect:       getReadPriorities(&defaultPrioritiesConfig),
 		},
 		{
-			name:         "cpu-unsupported-fallback-to-query",
+			name:         "cpu-default-without-version-gate",
 			querySupport: true,
-			cpuSupport:   false,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
-			expect:       getReadPriorities(&queryPrioritiesConfig),
-		},
-		{
-			name:         "cpu-unsupported-keep-query-origins",
-			querySupport: true,
-			cpuSupport:   false,
-			origins:      []string{utils.QueryPriority, utils.BytePriority},
-			expect:       []string{utils.QueryPriority, utils.BytePriority},
+			expect:       []string{utils.CPUPriority, utils.BytePriority},
 		},
 		{
 			name:         "query-unsupported-fallback-to-compatible",
 			querySupport: false,
-			cpuSupport:   true,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
-			expect:       getReadPriorities(&compatiblePrioritiesConfig),
+			expect:       []string{utils.CPUPriority, utils.BytePriority},
 		},
 		{
 			name:         "query-unsupported-with-query-origins",
 			querySupport: false,
-			cpuSupport:   false,
 			origins:      []string{utils.QueryPriority, utils.BytePriority},
 			expect:       getReadPriorities(&compatiblePrioritiesConfig),
 		},
 	}
 
 	for _, test := range tests {
-		got := adjustPrioritiesConfig(test.querySupport, test.cpuSupport, test.origins, getReadPriorities)
+		got := adjustPrioritiesConfig(test.querySupport, test.origins, getReadPriorities)
 		re.Equal(test.expect, got, test.name)
 	}
 }

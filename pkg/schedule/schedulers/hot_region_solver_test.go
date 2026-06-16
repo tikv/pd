@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/versioninfo"
 )
 
 func TestSplitBucketsBySize(t *testing.T) {
@@ -160,11 +159,10 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
-func TestSplitBucketsByLoadWithCPUFallback(t *testing.T) {
+func TestSplitBucketsByLoadWithCPU(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	tc.SetRegionBucketEnabled(true)
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
@@ -244,7 +242,6 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	checkSortResult(re, []uint64{1, 2}, u)
 
 	// Verify the CPU-first priority path can pick by CPU dim.
-	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
 	hb.conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 	cpuLeaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
 	cpuHotPeers := []*statistics.HotPeerStat{{

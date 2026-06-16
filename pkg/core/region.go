@@ -260,12 +260,8 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor uint
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.approximateColumnarKvSize = int64(h.GetApproximateColumnarKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
-<<<<<<< HEAD
-		region.cpuUsage = h.GetCpuUsage()
-=======
 		region.cpuStats = h.GetCpuStats()
 		region.cpuUsage = h.CpuUsage
->>>>>>> 3aee2efeb5 (pd: report hot read cpu in heartbeat (#10178))
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
