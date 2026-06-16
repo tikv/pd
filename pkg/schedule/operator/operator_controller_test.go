@@ -953,6 +953,62 @@ func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Oper
 	re.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)
 }
 
+func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	for i := uint64(1); i <= 3; i++ {
+		region := suite.newRegionInfo(i, fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 1, 1, []uint64{100 + i, 1}, []uint64{100 + i, 1})
+		cluster.PutRegion(region)
+	}
+
+	newTransferLeaderOp := func(regionID uint64) *Operator {
+		return NewTestOperator(regionID, cluster.GetRegion(regionID).GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	}
+
+	runningOp := newTransferLeaderOp(1)
+	re.True(controller.AddOperator(runningOp))
+	re.NotNil(controller.GetOperator(runningOp.RegionID()))
+	re.Equal(uint64(1), controller.OperatorCount(OpLeader))
+	re.Equal(1, controller.opNotifierQueue.len())
+
+	waitingOp1 := newTransferLeaderOp(2)
+	waitingOp2 := newTransferLeaderOp(3)
+	controller.wop.PutOperator(waitingOp1)
+	controller.wop.PutOperator(waitingOp2)
+	controller.wopStatus.incCount(waitingOp1.Desc())
+	controller.wopStatus.incCount(waitingOp2.Desc())
+	re.Len(controller.GetWaitingOperators(), 2)
+	re.Equal(uint64(2), controller.wopStatus.getCount(waitingOp1.Desc()))
+
+	controller.CancelAllOperators(AdminStop)
+
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.GetWaitingOperators())
+	re.Equal(uint64(0), controller.OperatorCount(OpLeader))
+	re.Equal(0, controller.opNotifierQueue.len())
+	re.Equal(uint64(0), controller.wopStatus.getCount(waitingOp1.Desc()))
+	for _, op := range []*Operator{runningOp, waitingOp1, waitingOp2} {
+		re.True(op.IsEnd())
+		re.Equal(CANCELED, op.Status())
+		re.NotNil(controller.GetOperatorStatus(op.RegionID()))
+		reason, ok := op.GetAdditionalInfo(cancelReason)
+		re.True(ok)
+		re.Equal(string(AdminStop), reason)
+	}
+
+	newWaitingOp := newTransferLeaderOp(2)
+	added := controller.AddWaitingOperator(newWaitingOp)
+	re.Equal(1, added)
+	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
+}
+
 func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()

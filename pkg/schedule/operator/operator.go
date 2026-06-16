@@ -49,6 +49,8 @@ var (
 	AlreadyExist CancelReasonType = "already exist"
 	// AdminStop is the cancel reason when the operator is stopped by admin.
 	AdminStop CancelReasonType = "admin stop"
+	// UnsafeRecovery is the cancel reason when the operator is stopped by unsafe recovery.
+	UnsafeRecovery CancelReasonType = "unsafe recovery"
 	// NotInRunningState is the cancel reason when the operator is not in running state.
 	NotInRunningState CancelReasonType = "not in running state"
 	// Timeout is the cancel reason when the operator is timeout.

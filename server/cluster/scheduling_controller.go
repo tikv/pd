@@ -317,6 +317,16 @@ func (sc *schedulingController) GetOperatorController() *operator.Controller {
 	return sc.coordinator.GetOperatorController()
 }
 
+// CancelAllOperators cancels all running and waiting operators.
+func (sc *schedulingController) CancelAllOperators() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	if sc.coordinator == nil {
+		return
+	}
+	sc.coordinator.GetOperatorController().CancelAllOperators(operator.UnsafeRecovery)
+}
+
 // GetRegionScatterer returns the region scatter.
 func (sc *schedulingController) GetRegionScatterer() *scatter.RegionScatterer {
 	sc.mu.RLock()

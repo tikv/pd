@@ -89,3 +89,12 @@ func (ch *concurrentHeapOpQueue) pop() (*operatorWithTime, bool) {
 	x := heap.Pop(&ch.heap).(*operatorWithTime)
 	return x, true
 }
+
+func (ch *concurrentHeapOpQueue) clear() {
+	ch.Lock()
+	defer ch.Unlock()
+	for i := range ch.heap {
+		ch.heap[i] = nil
+	}
+	ch.heap = ch.heap[:0]
+}

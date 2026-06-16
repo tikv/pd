@@ -648,6 +648,31 @@ func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 	}
 }
 
+// CancelAllOperators cancels all running and waiting operators and clears pending notifications.
+func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
+	oc.RemoveOperators(reasons...)
+
+	var cancelReason CancelReasonType
+	if len(reasons) > 0 {
+		cancelReason = reasons[0]
+	}
+	waitingOps := oc.wop.Drain()
+	oc.wopStatus.reset()
+	for _, op := range waitingOps {
+		if op == nil || op.IsEnd() {
+			continue
+		}
+		if op.Cancel(cancelReason) {
+			log.Info("waiting operator removed",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("lives", op.ElapsedTime()),
+				zap.Reflect("operator", op))
+		}
+		oc.buryOperator(op)
+	}
+	oc.opNotifierQueue.clear()
+}
+
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 	var removed []*Operator
 	oc.operators.Range(func(regionID, value any) bool {
