@@ -73,43 +73,37 @@ type regionSyncStream struct {
 		syncutil.Mutex
 		ServerStream
 	}
-	// sendMu serializes the logical send flow and protects sendIndex.
+	// sendMu serializes the logical send flow.
 	sendMu struct {
 		syncutil.Mutex
-		sendIndex uint64
 	}
-	notifyCh chan bool
-	done     chan struct{}
-	once     sync.Once
+	sendIndex atomic.Uint64
+	notifyCh  chan bool
+	done      chan struct{}
+	once      sync.Once
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
-	return &regionSyncStream{
+	syncStream := &regionSyncStream{
 		stream: struct {
 			syncutil.Mutex
 			ServerStream
 		}{
 			ServerStream: stream,
 		},
-		sendMu: struct {
-			syncutil.Mutex
-			sendIndex uint64
-		}{
-			sendIndex: startIndex,
-		},
 		notifyCh: make(chan bool, 1),
 		done:     make(chan struct{}),
 	}
+	syncStream.sendIndex.Store(startIndex)
+	return syncStream
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
 	return s.getSendIndexLocked()
 }
 
 func (s *regionSyncStream) getSendIndexLocked() uint64 {
-	return s.sendMu.sendIndex
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) advanceSendIndex(count int) {
@@ -119,7 +113,7 @@ func (s *regionSyncStream) advanceSendIndex(count int) {
 }
 
 func (s *regionSyncStream) advanceSendIndexLocked(count int) {
-	s.sendMu.sendIndex += uint64(count)
+	s.sendIndex.Add(uint64(count))
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -238,7 +232,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 
 	processRegion := func(region *core.RegionInfo) {
 		records = append(records, region)
-		s.history.record(region)
 	}
 
 	defer func() {
@@ -271,14 +264,53 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 					break loop
 				}
 			}
+			s.appendHistoryRecords(records)
 			s.broadcast(ctx, records, false)
 		case <-shrinkTicker.C:
+			s.observeDownstreamReplayWindow()
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
 		}
 		records = records[:0]
 	}
+}
+
+func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
+	replayFrom, ok := s.minDownstreamSendIndex()
+	if !ok {
+		s.history.recordBatch(records)
+		return
+	}
+	s.history.recordBatchFromReplay(replayFrom, records)
+}
+
+func (s *RegionSyncer) observeDownstreamReplayWindow() {
+	replayFrom, ok := s.minDownstreamSendIndex()
+	if !ok {
+		return
+	}
+	s.history.observeReplayWindow(replayFrom, s.history.getNextIndex())
+}
+
+func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var minIndex uint64
+	var ok bool
+	for _, stream := range s.mu.streams {
+		select {
+		case <-stream.done:
+			continue
+		default:
+		}
+		sendIndex := stream.getSendIndex()
+		if !ok || sendIndex < minIndex {
+			minIndex = sendIndex
+			ok = true
+		}
+	}
+	return minIndex, ok
 }
 
 // GetAllDownstreamNames tries to get the all bind stream's name.
@@ -385,7 +417,7 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
 	if startIndex != 0 && startIndex < endIndex {
-		s.history.observeRequiredWindow(endIndex - startIndex)
+		s.history.observeReplayWindow(startIndex, endIndex)
 	}
 	records := s.history.recordsBetween(startIndex, endIndex)
 	if len(records) == 0 {
