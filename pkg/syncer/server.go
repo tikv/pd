@@ -538,7 +538,11 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			syncStartIndex, nextIndex)
 	}
 	if len(records) > 0 {
-		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
+		catchUpStartIndex := syncStartIndex
+		if len(regions) == 0 {
+			catchUpStartIndex = 0
+		}
+		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
 			return err
 		}
 		syncStream.advanceSendIndexLocked(len(records))
