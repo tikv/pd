@@ -250,6 +250,25 @@ func NewHeartbeatProcessTracer() RegionHeartbeatProcessTracer {
 	return tracerPool.Get().(*regionHeartbeatProcessTracer)
 }
 
+// addDurationSum adds the duration (in seconds) to the counter, clamping
+// non-positive values to zero.
+//
+// The duration is derived from time.Now().Sub(...). Although Go's monotonic
+// clock is normally non-decreasing, on some virtualized hosts the underlying OS
+// monotonic clock (CLOCK_MONOTONIC, read via the vDSO) can briefly move
+// backwards, e.g. an unstable/unsynchronized TSC across vCPUs or after a live
+// migration. NTP/chrony does not prevent this: it disciplines CLOCK_REALTIME and
+// can only slew the rate of CLOCK_MONOTONIC, never step it backwards. A negative
+// duration passed to prometheus.Counter.Add panics ("counter cannot decrease in
+// value") and crashes pd-server. Clamping downgrades such a transient clock
+// glitch to an at-most negligibly under-counted metric.
+func addDurationSum(c prometheus.Counter, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	c.Add(d.Seconds())
+}
+
 // Begin implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) Begin() {
 	now := time.Now()
@@ -262,7 +281,7 @@ func (h *regionHeartbeatProcessTracer) OnPreCheckFinished() {
 	now := time.Now()
 	h.preCheckDuration = now.Sub(h.lastCheckTime)
 	h.lastCheckTime = now
-	preCheckDurationSum.Add(h.preCheckDuration.Seconds())
+	addDurationSum(preCheckDurationSum, h.preCheckDuration)
 	preCheckCount.Inc()
 }
 
@@ -271,7 +290,7 @@ func (h *regionHeartbeatProcessTracer) OnAsyncHotStatsFinished() {
 	now := time.Now()
 	h.asyncHotStatsDuration = now.Sub(h.lastCheckTime)
 	h.lastCheckTime = now
-	asyncHotStatsDurationSum.Add(h.preCheckDuration.Seconds())
+	addDurationSum(asyncHotStatsDurationSum, h.asyncHotStatsDuration)
 	asyncHotStatsCount.Inc()
 }
 
@@ -280,7 +299,7 @@ func (h *regionHeartbeatProcessTracer) OnRegionGuideFinished() {
 	now := time.Now()
 	h.regionGuideDuration = now.Sub(h.lastCheckTime)
 	h.lastCheckTime = now
-	regionGuideDurationSum.Add(h.regionGuideDuration.Seconds())
+	addDurationSum(regionGuideDurationSum, h.regionGuideDuration)
 	regionGuideCount.Inc()
 }
 
@@ -301,7 +320,7 @@ func (h *regionHeartbeatProcessTracer) OnSaveCacheFinished() {
 // OnCollectRegionStatsFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnCollectRegionStatsFinished() {
 	now := time.Now()
-	regionCollectDurationSum.Add(now.Sub(h.lastCheckTime).Seconds())
+	addDurationSum(regionCollectDurationSum, now.Sub(h.lastCheckTime))
 	regionCollectCount.Inc()
 	h.lastCheckTime = now
 }
@@ -309,9 +328,9 @@ func (h *regionHeartbeatProcessTracer) OnCollectRegionStatsFinished() {
 // OnCheckOverlapsFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnCheckOverlapsFinished() {
 	now := time.Now()
-	h.saveCacheStats.checkOverlapsDuration = now.Sub(h.lastCheckTime)
+	h.saveCacheStats.checkOverlapsDuration = now.Sub(h.saveCacheStats.lastCheckTime)
 	h.saveCacheStats.lastCheckTime = now
-	checkOverlapsDurationSum.Add(h.saveCacheStats.checkOverlapsDuration.Seconds())
+	addDurationSum(checkOverlapsDurationSum, h.saveCacheStats.checkOverlapsDuration)
 	checkOverlapsCount.Inc()
 }
 
@@ -320,7 +339,7 @@ func (h *regionHeartbeatProcessTracer) OnValidateRegionFinished() {
 	now := time.Now()
 	h.saveCacheStats.validateRegionDuration = now.Sub(h.saveCacheStats.lastCheckTime)
 	h.saveCacheStats.lastCheckTime = now
-	validateRegionDurationSum.Add(h.saveCacheStats.validateRegionDuration.Seconds())
+	addDurationSum(validateRegionDurationSum, h.saveCacheStats.validateRegionDuration)
 	validateRegionCount.Inc()
 }
 
@@ -329,7 +348,7 @@ func (h *regionHeartbeatProcessTracer) OnSetRegionFinished() {
 	now := time.Now()
 	h.saveCacheStats.setRegionDuration = now.Sub(h.saveCacheStats.lastCheckTime)
 	h.saveCacheStats.lastCheckTime = now
-	setRegionDurationSum.Add(h.saveCacheStats.setRegionDuration.Seconds())
+	addDurationSum(setRegionDurationSum, h.saveCacheStats.setRegionDuration)
 	setRegionCount.Inc()
 }
 
@@ -338,7 +357,7 @@ func (h *regionHeartbeatProcessTracer) OnUpdateSubTreeFinished() {
 	now := time.Now()
 	h.saveCacheStats.updateSubTreeDuration = now.Sub(h.saveCacheStats.lastCheckTime)
 	h.saveCacheStats.lastCheckTime = now
-	updateSubTreeDurationSum.Add(h.saveCacheStats.updateSubTreeDuration.Seconds())
+	addDurationSum(updateSubTreeDurationSum, h.saveCacheStats.updateSubTreeDuration)
 	updateSubTreeCount.Inc()
 }
 
@@ -346,7 +365,7 @@ func (h *regionHeartbeatProcessTracer) OnUpdateSubTreeFinished() {
 func (h *regionHeartbeatProcessTracer) OnAllStageFinished() {
 	now := time.Now()
 	h.OtherDuration = now.Sub(h.lastCheckTime)
-	otherDurationSum.Add(h.OtherDuration.Seconds())
+	addDurationSum(otherDurationSum, h.OtherDuration)
 	otherCount.Inc()
 }
 
