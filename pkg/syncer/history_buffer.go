@@ -136,7 +136,9 @@ func (h *historyBuffer) recordBatch(records []*core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
 	h.prepareRequiredWindowLocked(0, false, uint64(len(records)))
-	h.recordBatchLocked(records)
+	for _, r := range records {
+		h.recordLocked(r)
+	}
 }
 
 func (h *historyBuffer) recordBatchFromReplay(replayFrom uint64, records []*core.RegionInfo) {
@@ -146,10 +148,6 @@ func (h *historyBuffer) recordBatchFromReplay(replayFrom uint64, records []*core
 	h.Lock()
 	defer h.Unlock()
 	h.prepareRequiredWindowLocked(replayFrom, true, uint64(len(records)))
-	h.recordBatchLocked(records)
-}
-
-func (h *historyBuffer) recordBatchLocked(records []*core.RegionInfo) {
 	for _, r := range records {
 		h.recordLocked(r)
 	}

@@ -99,10 +99,6 @@ func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStre
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	return s.getSendIndexLocked()
-}
-
-func (s *regionSyncStream) getSendIndexLocked() uint64 {
 	return s.sendIndex.Load()
 }
 
@@ -230,10 +226,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
-	processRegion := func(region *core.RegionInfo) {
-		records = append(records, region)
-	}
-
 	defer func() {
 		keepAliveTicker.Stop()
 		shrinkTicker.Stop()
@@ -254,12 +246,12 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			processRegion(first)
+			records = append(records, first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
-					processRegion(region)
+					records = append(records, region)
 				default:
 					break loop
 				}
@@ -627,7 +619,7 @@ func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		StartIndex: stream.getSendIndexLocked(),
+		StartIndex: stream.getSendIndex(),
 	}
 	if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 		return errors.Errorf("send region sync keepalive failed")
@@ -649,7 +641,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		}
 		s.mu.RUnlock()
 
-		sendIndex := stream.getSendIndexLocked()
+		sendIndex := stream.getSendIndex()
 		firstIndex := s.history.getFirstIndex()
 		if sendIndex < firstIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
