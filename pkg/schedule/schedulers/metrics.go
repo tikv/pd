@@ -327,6 +327,7 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = hotRegionCounterWithEvent("write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = hotRegionCounterWithEvent("read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = hotRegionCounterWithEvent("write-skip-query-uniform-store")
+	readSkipCPUDimUniformStoreCounter    = hotRegionCounterWithEvent("read-skip-cpu-uniform-store")
 	pendingOpFailsStoreCounter           = hotRegionCounterWithEvent("pending-op-fails")
 
 	labelCounter            = labelCounterWithEvent("schedule")

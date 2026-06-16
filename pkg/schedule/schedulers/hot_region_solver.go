@@ -110,7 +110,9 @@ func (bs *balanceSolver) init() {
 	rankStepRatios := []float64{
 		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
 		utils.KeyDim:   bs.sche.conf.getKeyRankStepRatio(),
-		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio()}
+		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio(),
+		utils.CPUDim:   bs.sche.conf.getCPURateRankStepRatio(),
+	}
 	var stepLoads statistics.Loads
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -262,6 +264,8 @@ func (bs *balanceSolver) skipCounter(label string) prometheus.Counter {
 			return readSkipKeyDimUniformStoreCounter
 		case "query":
 			return readSkipQueryDimUniformStoreCounter
+		case "cpu":
+			return readSkipCPUDimUniformStoreCounter
 		default:
 			return readSkipAllDimUniformStoreCounter
 		}
@@ -746,6 +750,8 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 		return bs.sche.conf.getMinHotByteRate()
 	case utils.QueryDim:
 		return bs.sche.conf.getMinHotQueryRate()
+	case utils.CPUDim:
+		return bs.sche.conf.getMinHotCPURate()
 	}
 	return -1
 }
@@ -754,6 +760,7 @@ var dimToStep = [utils.DimLen]float64{
 	utils.ByteDim:  100,
 	utils.KeyDim:   10,
 	utils.QueryDim: 10,
+	utils.CPUDim:   10,
 }
 
 // compareSrcStore compares the source store of detail1, detail2, the result is:
@@ -908,18 +915,21 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // bucketFirstStat returns the first priority statistics of the bucket.
-// if the first priority is query rate, it will return the second priority .
+// If the first priority is a dimension that buckets do not report, it falls
+// back to another bucket-supported priority.
 func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
-	base := utils.RegionReadBytes
-	if bs.rwTy == utils.Write {
-		base = utils.RegionWriteBytes
+	dim := bs.firstPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = bs.secondPriority
 	}
-	offset := bs.firstPriority
-	// todo: remove it if bucket's qps has been supported.
-	if bs.firstPriority == utils.QueryDim {
-		offset = bs.secondPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = utils.ByteDim
 	}
-	return base + utils.RegionStatKind(offset)
+	return bs.rwTy.RegionStats()[dim]
+}
+
+func isBucketLoadDimSupported(dim int) bool {
+	return dim == utils.ByteDim || dim == utils.KeyDim || dim == utils.QueryDim
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {
