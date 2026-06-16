@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -443,6 +444,8 @@ type serviceDiscovery struct {
 	tlsCfg               *tls.Config
 	// Client option.
 	option *opt.Option
+
+	flight singleflight.Group
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -474,6 +477,7 @@ func NewServiceDiscovery(
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
+		flight:               singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
@@ -919,18 +923,31 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
-	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
-	if err != nil {
+	key := "GetClusterInfo-" + url
+	r := c.flight.DoChan(key, func() (any, error) {
+		return pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
+	})
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		clusterInfo := val.(*pdpb.GetClusterInfoResponse)
+		if clusterInfo.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		return clusterInfo, nil
+	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
-	if clusterInfo.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
-	}
-	return clusterInfo, nil
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
@@ -942,18 +959,31 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
-	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
-	if err != nil {
+	key := "GetMembers-" + url
+	r := c.flight.DoChan(key, func() (any, error) {
+		return pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
+	})
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		members := val.(*pdpb.GetMembersResponse)
+		if members.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		return members, nil
+	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
-	if members.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
-	}
-	return members, nil
 }
 
 func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {

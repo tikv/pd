@@ -349,21 +349,21 @@ func CollectStringOption(option string, input map[string]any, collectors ...func
 	return nil
 }
 
-// ParseKey is used to parse interface into []byte and string
+// ParseKey decodes a hex-encoded key string and returns the decoded key with the original hex string.
 func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
 	}
-	rawKey, ok := k.(string)
+	keyHex, ok := k.(string)
 	if !ok {
 		return nil, "", fmt.Errorf("bad format %s", name)
 	}
-	returned, err := hex.DecodeString(rawKey)
+	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
 	}
-	return returned, rawKey, nil
+	return key, keyHex, nil
 }
 
 // ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".

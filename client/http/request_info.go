@@ -93,6 +93,7 @@ const (
 	deletePitrRestoreModeMarkName           = "DeletePitrRestoreModeMark"
 	createOperators                         = "CreateOperators"
 	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceConfigName                = "UpdateKeyspaceConfig"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 	GetKeyspaceMetaByIDName                 = "GetKeyspaceMetaByID"

@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -582,4 +583,23 @@ func TestRateLimitClone(t *testing.T) {
 	}
 	gdc := gCfg.LimiterConfig["test"]
 	re.Zero(gdc.ConcurrencyLimit)
+}
+
+func TestKeyspaceConfigClone(t *testing.T) {
+	re := require.New(t)
+	cfg := &KeyspaceConfig{
+		PreAlloc:                 []string{"keyspace-1"},
+		MetaServiceGroups:        map[string]string{"group-1": "http://127.0.0.1:2379"},
+		CheckRegionSplitInterval: typeutil.NewDuration(10 * time.Millisecond),
+		WaitRegionSplitTimeout:   typeutil.NewDuration(1 * time.Minute),
+	}
+
+	re.NoError(cfg.Validate())
+	clone := cfg.Clone()
+	clone.MetaServiceGroups[""] = "http://127.0.0.1:2380"
+	re.Error(clone.Validate())
+
+	clone1 := cfg.Clone()
+	clone1.MetaServiceGroups["group-1"] = ""
+	re.Error(clone1.Validate())
 }

@@ -58,3 +58,42 @@ func TestGCBarrierInfoExpiration(t *testing.T) {
 	re.False(b1.isExpiredImpl(now))
 	re.False(b1.isExpiredImpl(now.Add(time.Hour * 24 * 365 * 10)))
 }
+
+func TestGCStateAccessors(t *testing.T) {
+	re := require.New(t)
+
+	state := NewGCStateWithoutGCBarriers(1, 2, 3)
+	re.False(state.HasGCBarriers())
+	barriers, err := state.GetGCBarriers()
+	re.Error(err)
+	re.Nil(barriers)
+
+	state = NewGCStateWithGCBarriers(1, 2, 3, []*GCBarrierInfo{
+		NewGCBarrierInfo("b1", 4, time.Second, time.Now()),
+	})
+	re.True(state.HasGCBarriers())
+	barriers, err = state.GetGCBarriers()
+	re.NoError(err)
+	re.Len(barriers, 1)
+	re.Equal("b1", barriers[0].BarrierID)
+}
+
+func TestClusterGCStatesAccessors(t *testing.T) {
+	re := require.New(t)
+
+	state := NewGCStateWithoutGCBarriers(1, 2, 3)
+	clusterState := NewClusterGCStatesWithoutGlobalGCBarriers(map[uint32]GCState{1: state})
+	re.False(clusterState.HasGlobalGCBarriers())
+	barriers, err := clusterState.GetGlobalGCBarriers()
+	re.Error(err)
+	re.Nil(barriers)
+
+	clusterState = NewClusterGCStatesWithGlobalGCBarriers(map[uint32]GCState{1: state}, []*GlobalGCBarrierInfo{
+		NewGlobalGCBarrierInfo("b1", 4, time.Second, time.Now()),
+	})
+	re.True(clusterState.HasGlobalGCBarriers())
+	barriers, err = clusterState.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Len(barriers, 1)
+	re.Equal("b1", barriers[0].BarrierID)
+}

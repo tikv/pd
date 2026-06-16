@@ -176,6 +176,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// meta-service group manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
 	// metering writer
 	meteringWriter *metering.Writer
 	// for basicCluster operation.
@@ -528,7 +530,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	s.keyspaceManager = keyspace.NewKeyspaceManager(
+		s.ctx,
+		s.storage,
+		s.cluster,
+		keyspaceIDAllocator,
+		&s.cfg.Keyspace,
+		s.keyspaceGroupManager,
+		s.metaServiceGroupManager,
+	)
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
@@ -972,6 +983,11 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
 }
 
+// GetMetaServiceGroupManager returns the meta-service group manager of server.
+func (s *Server) GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager {
+	return s.metaServiceGroupManager
+}
+
 // SetKeyspaceGroupManager sets the keyspace group manager of server.
 // Note: it is only used for test.
 func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupManager) {
@@ -1030,22 +1046,25 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 }
 
 // SetKeyspaceConfig sets the keyspace config information.
-func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	if err := newCfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetKeyspaceConfig()
-	s.persistOptions.SetKeyspaceConfig(&cfg)
+
+	if !s.persistOptions.CASKeyspaceConfig(oldCfg, newCfg) {
+		return errors.New("update keyspace config failed, because the keyspace config has been changed by other process, please retry")
+	}
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetKeyspaceConfig(old)
+		s.persistOptions.SetKeyspaceConfig(oldCfg)
 		log.Error("failed to update keyspace config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(&cfg)
-	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.keyspaceManager.UpdateConfig(newCfg)
+
+	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
@@ -1472,7 +1491,7 @@ func (s *Server) IsServiceIndependent(name string) bool {
 }
 
 // DirectlyGetRaftCluster returns raft cluster directly.
-// Only used for test.
+// It bypasses the leader-running check for follower-local paths and tests.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }

@@ -102,6 +102,32 @@ func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTest(suite.checkConfigAll)
 }
 
+func (suite *configTestSuite) TestKeyspaceConfigUpdate() {
+	suite.env.RunTest(suite.checkKeyspaceConfigUpdate)
+}
+
+func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	addr := fmt.Sprintf("%s/pd/api/v1/config", leaderServer.GetAddr())
+
+	postData, err := json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+
+	testutil.Eventually(re, func() bool {
+		return !leaderServer.GetServer().GetPersistOptions().GetKeyspaceConfig().ToWaitRegionSplit()
+	})
+
+	postData, err = json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+}
+
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
@@ -426,6 +452,7 @@ var ttlConfig = map[string]any{
 	"schedule.hot-region-schedule-limit":      999,
 	"schedule.replica-schedule-limit":         999,
 	"schedule.merge-schedule-limit":           999,
+	"schedule.split-scatter-schedule-limit":   999,
 	"schedule.enable-tikv-split-region":       false,
 }
 
@@ -444,6 +471,7 @@ type ttlConfigInterface interface {
 	GetHotRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
+	GetSplitScatterScheduleLimit() uint64
 	IsTikvRegionSplitEnabled() bool
 }
 
@@ -467,6 +495,7 @@ func assertTTLConfig(
 		equality(uint64(999), options.GetHotRegionScheduleLimit())
 		equality(uint64(999), options.GetReplicaScheduleLimit())
 		equality(uint64(999), options.GetMergeScheduleLimit())
+		equality(uint64(999), options.GetSplitScatterScheduleLimit())
 		equality(false, options.IsTikvRegionSplitEnabled())
 	}
 	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())

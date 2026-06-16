@@ -99,17 +99,18 @@ type UpdateAffinityGroupPeersRequest struct {
 // --- Handlers ---
 
 // PostAffinityGroups handles POST requests for affinity groups.
-// @Tags     affinity-groups
-// @Summary  Create or delete affinity groups.
-// @Description Create affinity groups (default), or delete multiple groups if ?delete query parameter is present. When delete parameter is absent, expects CreateAffinityGroupsRequest in body. When delete parameter is present, expects BatchDeleteAffinityGroupsRequest in body.
-// @Param    delete  query  string  false  "If present, triggers batch deletion instead of creation"
-// @Param    skip_exist_check  query  bool  false  "If true, skip existing groups and create the rest"
-// @Param    body    body    object  true   "Request body (type depends on delete parameter)"
-// @Produce  json
-// @Success  200  {object}  AffinityGroupsResponse  "Response for create or delete operation"
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups [post]
+//
+//	@Tags			affinity-groups
+//	@Summary		Create or delete affinity groups.
+//	@Description	Create affinity groups (default), or delete multiple groups if ?delete query parameter is present. When delete parameter is absent, expects CreateAffinityGroupsRequest in body. When delete parameter is present, expects BatchDeleteAffinityGroupsRequest in body.
+//	@Param			delete				query	string	false	"If present, triggers batch deletion instead of creation"
+//	@Param			skip_exist_check	query	bool	false	"If true, skip existing groups and create the rest"
+//	@Param			body				body	object	true	"Request body (type depends on delete parameter)"
+//	@Produce		json
+//	@Success		200	{object}	AffinityGroupsResponse	"Response for create or delete operation"
+//	@Failure		400	{string}	string					"The input is invalid."
+//	@Failure		500	{string}	string					"PD server failed to proceed the request."
+//	@Router			/affinity-groups [post]
 func PostAffinityGroups(c *gin.Context) {
 	// Check if this is a delete operation via ?delete query parameter
 	// Use POST /?delete to delete multiple objects
@@ -264,14 +265,15 @@ func deleteAffinityGroups(c *gin.Context) {
 }
 
 // BatchModifyAffinityGroups batch modifies key ranges for multiple affinity groups.
-// @Tags     affinity-groups
-// @Summary  Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
-// @Param    body  body  BatchModifyAffinityGroupsRequest  true  "Batch modify request with add and remove operations"
-// @Produce  json
-// @Success  200  {object}  AffinityGroupsResponse  "Updated affinity groups"
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups [patch]
+//
+//	@Tags		affinity-groups
+//	@Summary	Batch modify key ranges for affinity groups. Remove operations are executed before add operations.
+//	@Param		body	body	BatchModifyAffinityGroupsRequest	true	"Batch modify request with add and remove operations"
+//	@Produce	json
+//	@Success	200	{object}	AffinityGroupsResponse	"Updated affinity groups"
+//	@Failure	400	{string}	string					"The input is invalid."
+//	@Failure	500	{string}	string					"PD server failed to proceed the request."
+//	@Router		/affinity-groups [patch]
 func BatchModifyAffinityGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -336,16 +338,17 @@ func BatchModifyAffinityGroups(c *gin.Context) {
 }
 
 // UpdateAffinityGroupPeers updates leader and voter stores of an affinity group.
-// @Tags     affinity-groups
-// @Summary  Update leader and voter stores of an affinity group.
-// @Param    group_id  path  string                          true  "The group id of the affinity group"
-// @Param    body      body  UpdateAffinityGroupPeersRequest true  "New leader and voter store IDs"
-// @Produce  json
-// @Success  200  {object}  affinity.GroupState  "Updated affinity group state"
-// @Failure  400  {string}  string               "The input is invalid."
-// @Failure  404  {string}  string               "Affinity group not found."
-// @Failure  500  {string}  string               "PD server failed to proceed the request."
-// @Router   /affinity-groups/{group_id} [put]
+//
+//	@Tags		affinity-groups
+//	@Summary	Update leader and voter stores of an affinity group.
+//	@Param		group_id	path	string							true	"The group id of the affinity group"
+//	@Param		body		body	UpdateAffinityGroupPeersRequest	true	"New leader and voter store IDs"
+//	@Produce	json
+//	@Success	200	{object}	affinity.GroupState	"Updated affinity group state"
+//	@Failure	400	{string}	string				"The input is invalid."
+//	@Failure	404	{string}	string				"Affinity group not found."
+//	@Failure	500	{string}	string				"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id} [put]
 func UpdateAffinityGroupPeers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -380,17 +383,18 @@ func UpdateAffinityGroupPeers(c *gin.Context) {
 }
 
 // DeleteAffinityGroup deletes a specific affinity group by group id.
-// @Tags     affinity-groups
-// @Summary  Delete an affinity group by group id.
-// @Param    group_id  path   string  true   "The group id of the affinity group"
-// @Param    force     query  bool    false  "Force delete even if the group has key ranges"
-// @Produce  json
-// @Success  200  {string}  string  "Affinity group deleted successfully."
-// @Failure  400  {string}  string  "The input is invalid or group has ranges without force flag."
-// @Failure  404  {string}  string  "Affinity group not found."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups/{group_id} [delete]
-// @Description force=false: missing group returns 404; force=true: missing group is ignored, existing group is deleted.
+//
+//	@Tags			affinity-groups
+//	@Summary		Delete an affinity group by group id.
+//	@Param			group_id	path	string	true	"The group id of the affinity group"
+//	@Param			force		query	bool	false	"Force delete even if the group has key ranges"
+//	@Produce		json
+//	@Success		200	{string}	string	"Affinity group deleted successfully."
+//	@Failure		400	{string}	string	"The input is invalid or group has ranges without force flag."
+//	@Failure		404	{string}	string	"Affinity group not found."
+//	@Failure		500	{string}	string	"PD server failed to proceed the request."
+//	@Router			/affinity-groups/{group_id} [delete]
+//	@Description	force=false: missing group returns 404; force=true: missing group is ignored, existing group is deleted.
 func DeleteAffinityGroup(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -437,14 +441,15 @@ func DeleteAffinityGroup(c *gin.Context) {
 }
 
 // GetAllAffinityGroups lists affinity groups, with optional range details.
-// @Tags     affinity-groups
-// @Summary  List all affinity groups.
-// @Param    ids  query  []string  false  "Optional affinity group IDs. Repeat as ids=a&ids=b."
-// @Produce  json
-// @Success  200  {object}  AffinityGroupsResponse
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups [get]
+//
+//	@Tags		affinity-groups
+//	@Summary	List all affinity groups.
+//	@Param		ids	query	[]string	false	"Optional affinity group IDs. Repeat as ids=a&ids=b."
+//	@Produce	json
+//	@Success	200	{object}	AffinityGroupsResponse
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/affinity-groups [get]
 func GetAllAffinityGroups(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()
@@ -474,14 +479,15 @@ func GetAllAffinityGroups(c *gin.Context) {
 }
 
 // GetAffinityGroup gets a specific affinity group by group id, with optional range details.
-// @Tags     affinity-groups
-// @Summary  Get an affinity group by group id.
-// @Param    group_id    path  string  true   "The group id of the affinity group"
-// @Produce  json
-// @Success  200  {object}  *affinity.GroupState
-// @Failure  404  {string}  string  "Affinity group not found."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /affinity-groups/{group_id} [get]
+//
+//	@Tags		affinity-groups
+//	@Summary	Get an affinity group by group id.
+//	@Param		group_id	path	string	true	"The group id of the affinity group"
+//	@Produce	json
+//	@Success	200	{object}	*affinity.GroupState
+//	@Failure	404	{string}	string	"Affinity group not found."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/affinity-groups/{group_id} [get]
 func GetAffinityGroup(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	manager, err := svr.GetAffinityManager()

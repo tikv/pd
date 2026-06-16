@@ -93,7 +93,7 @@ type fakeMetaStorageClient struct {
 	value []byte
 }
 
-func (*fakeMetaStorageClient) Watch(context.Context, []byte, ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (*fakeMetaStorageClient) Watch(context.Context, []byte, ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	return nil, errors.New("not implemented")
 }
 

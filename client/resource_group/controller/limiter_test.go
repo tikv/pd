@@ -139,35 +139,92 @@ func TestReconfig(t *testing.T) {
 	re.Equal(int64(-1), lim.GetBurst())
 }
 
-// TestLastStaysMonotonicOnStaleNow guards against a non-monotonic lim.last:
-// callers capture `now` before taking lim.mu, so under lock contention a
-// mutator can run with a `now` already older than lim.last. A raw
-// `lim.last = now` would rewind the clock and make the next getTokens
-// over-accrue tokens. The mutators must keep lim.last monotonic (updateLast),
-// matching reserveN (see issue #8435).
+// TestLastStaysMonotonicOnStaleNow guards the assumption used by
+// groupCostController.acquireTokens: a mutator's now is captured before it
+// takes lim.mu, so under concurrency a sibling request on the same per-group
+// limiter can advance lim.last past that now. The stale (backward) now must
+// not rewind the limiter's logical clock.
+//
+// In every sub-case the shared Reserve below plays that concurrent sibling: it
+// advances lim.last to advancedAt, after which each mutator runs with the
+// earlier staleNow.
 func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
-	re := require.New(t)
-	resetTime()
-	nc := make(chan notifyMsg, 1)
+	tests := []struct {
+		name         string
+		mutate       func(lim *Limiter, r *Reservation, staleNow time.Time)
+		expectedPool float64
+		checkPool    bool
+	}{
+		{
+			name: "remove tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RemoveTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		{
+			name: "refund tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RefundTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		// CancelAt is covered by TestAcquireTokensCancelKeepsLastMonotonic.
+		{
+			name: "reconfigure",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+				})
+			},
+			expectedPool: 1100,
+			checkPool:    true,
+		},
+		{
+			name: "reconfigure unlimited",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+					newBurst:    -1,
+				})
+			},
+			checkPool: false,
+		},
+	}
 
-	// RemoveTokens with a stale now must not rewind last.
-	lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
-	r := lim.reserveN(t0.Add(10*time.Second), 10, InfDuration)
-	re.True(r.reserved)
-	_, pool := lim.getTokens(t0.Add(10 * time.Second))
-	re.InDelta(990, pool, 1e-6)
-	lim.RemoveTokens(t0.Add(9*time.Second), 0) // STALE now
-	_, pool = lim.getTokens(t0.Add(11 * time.Second))
-	re.InDelta(1090, pool, 1e-6) // buggy rewind would over-accrue to 1190
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			resetTime()
+			nc := make(chan notifyMsg, 1)
+			lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
 
-	// RefundTokens (the high-frequency paging settlement path) must not rewind
-	// last either.
-	lim2 := NewLimiter(t0, 100, 0, 0, nc)
-	r2 := lim2.reserveN(t0.Add(10*time.Second), 10, InfDuration)
-	re.True(r2.reserved)
-	lim2.RefundTokens(t0.Add(9*time.Second), 0) // STALE now
-	_, pool = lim2.getTokens(t0.Add(11 * time.Second))
-	re.InDelta(1090, pool, 1e-6)
+			advancedAt := t0.Add(10 * time.Second)
+			staleNow := t0.Add(9 * time.Second)
+			checkAt := t0.Add(11 * time.Second)
+
+			// Advance last through the public API to t0+10s and leave pool =
+			// 100*10 - 10 = 990.
+			r := lim.Reserve(context.Background(), InfDuration, advancedAt, 10)
+			re.True(r.reserved)
+			_, pool := lim.getTokens(advancedAt)
+			re.InDelta(990, pool, 1e-6)
+
+			tt.mutate(lim, r, staleNow)
+			re.Equal(advancedAt, lim.last)
+
+			if tt.checkPool {
+				// Accrual over t0+10s..t0+11s is 1s*100 = 100. A rewound
+				// last (to t0+9s) would over-accrue by another 100 tokens.
+				_, pool = lim.getTokens(checkAt)
+				re.InDelta(tt.expectedPool, pool, 1e-6)
+			}
+		})
+	}
 }
 
 func TestRefundTokens(t *testing.T) {

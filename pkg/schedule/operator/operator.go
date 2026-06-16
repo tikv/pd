@@ -220,6 +220,12 @@ func (o *Operator) Kind() OpKind {
 // SchedulerKind return the highest OpKind even if the operator has many OpKind
 // fix #3778
 func (o *Operator) SchedulerKind() OpKind {
+	if o.kind&OpAdmin != 0 {
+		return OpAdmin
+	}
+	if o.kind&OpSplitScatter != 0 {
+		return OpSplitScatter
+	}
 	// LowBit ref: https://en.wikipedia.org/wiki/Find_first_set
 	// 6(110) ==> 2(10)
 	// 5(101) ==> 1(01)
