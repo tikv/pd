@@ -422,7 +422,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					sqlLayerRuMetrics.Add(consumption.SqlLayerCpuTimeMs * m.controllerConfig.RequestUnit.CPUMsCost)
 					sqlCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 				}
-				kvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+				// A well-behaved client keeps TotalCpuTimeMs >= SqlLayerCpuTimeMs, but the
+				// values are reported by the client and not validated here. Guard against a
+				// negative KV CPU time so a malformed report cannot panic prometheus.Counter.Add.
+				if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+					kvCPUMetrics.Add(kvCPUTimeMs)
+				}
 			}
 			// RPC count info.
 			if consumption.KvReadRpcCount > 0 {

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 )
 
 var (
@@ -125,15 +124,6 @@ var tracerPool = &sync.Pool{
 	},
 }
 
-type saveCacheStats struct {
-	startTime              time.Time
-	lastCheckTime          time.Time
-	checkOverlapsDuration  time.Duration
-	validateRegionDuration time.Duration
-	setRegionDuration      time.Duration
-	updateSubTreeDuration  time.Duration
-}
-
 // RegionHeartbeatProcessTracer is used to trace the process of handling region heartbeat.
 type RegionHeartbeatProcessTracer interface {
 	// Begin starts the tracing.
@@ -160,8 +150,6 @@ type RegionHeartbeatProcessTracer interface {
 	OnCollectRegionStatsFinished()
 	// OnAllStageFinished will be called when all stages are finished.
 	OnAllStageFinished()
-	// LogFields returns the log fields.
-	LogFields() []zap.Field
 	// Release releases the tracer.
 	Release()
 }
@@ -209,22 +197,15 @@ func (*noopHeartbeatProcessTracer) OnCollectRegionStatsFinished() {}
 // OnAllStageFinished implements the RegionHeartbeatProcessTracer interface.
 func (*noopHeartbeatProcessTracer) OnAllStageFinished() {}
 
-// LogFields implements the RegionHeartbeatProcessTracer interface.
-func (*noopHeartbeatProcessTracer) LogFields() []zap.Field {
-	return nil
-}
-
 // Release implements the RegionHeartbeatProcessTracer interface.
 func (*noopHeartbeatProcessTracer) Release() {}
 
+// regionHeartbeatProcessTracer measures the duration of each region-heartbeat
+// processing stage and reports it to the breakdown metrics. It keeps a single
+// checkpoint: a stage's duration is the time elapsed since the previous stage
+// advanced the checkpoint.
 type regionHeartbeatProcessTracer struct {
-	startTime             time.Time
-	lastCheckTime         time.Time
-	preCheckDuration      time.Duration
-	asyncHotStatsDuration time.Duration
-	regionGuideDuration   time.Duration
-	saveCacheStats        saveCacheStats
-	OtherDuration         time.Duration
+	lastCheckTime time.Time
 }
 
 // NewHeartbeatProcessTracer returns a heartbeat process tracer.
@@ -234,116 +215,91 @@ func NewHeartbeatProcessTracer() RegionHeartbeatProcessTracer {
 
 // Begin implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) Begin() {
+	h.lastCheckTime = time.Now()
+}
+
+// measure records one processing stage: it reads the clock once, computes the
+// duration since the previous checkpoint, advances the checkpoint, and updates
+// the stage's duration-sum and count counters.
+//
+// A non-positive duration is not added to the sum counter. time.Now() normally
+// carries a monotonic reading, so two consecutive reads never go backwards; but
+// on some virtualized hosts the OS monotonic clock (CLOCK_MONOTONIC) can briefly
+// regress -- e.g. an unsynchronized TSC across vCPUs, or a live migration.
+// Without this guard the negative value would reach prometheus.Counter.Add,
+// which panics with "counter cannot decrease in value" and crashes pd-server.
+// Guarding turns that rare, external clock glitch into a negligibly
+// under-counted metric instead of a fatal panic.
+func (h *regionHeartbeatProcessTracer) measure(durationSum, count prometheus.Counter) {
 	now := time.Now()
-	h.startTime = now
+	duration := now.Sub(h.lastCheckTime)
 	h.lastCheckTime = now
+	if duration > 0 {
+		durationSum.Add(duration.Seconds())
+	}
+	count.Inc()
+}
+
+// resetCheckpoint starts a fresh measurement window at the current time. It is
+// used at the SaveCache boundaries, whose enclosed sub-stages are timed on their
+// own and should not be attributed to the surrounding stages.
+func (h *regionHeartbeatProcessTracer) resetCheckpoint() {
+	h.lastCheckTime = time.Now()
 }
 
 // OnPreCheckFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnPreCheckFinished() {
-	now := time.Now()
-	h.preCheckDuration = now.Sub(h.lastCheckTime)
-	h.lastCheckTime = now
-	preCheckDurationSum.Add(h.preCheckDuration.Seconds())
-	preCheckCount.Inc()
+	h.measure(preCheckDurationSum, preCheckCount)
 }
 
 // OnAsyncHotStatsFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnAsyncHotStatsFinished() {
-	now := time.Now()
-	h.asyncHotStatsDuration = now.Sub(h.lastCheckTime)
-	h.lastCheckTime = now
-	asyncHotStatsDurationSum.Add(h.preCheckDuration.Seconds())
-	asyncHotStatsCount.Inc()
+	h.measure(asyncHotStatsDurationSum, asyncHotStatsCount)
 }
 
 // OnRegionGuideFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnRegionGuideFinished() {
-	now := time.Now()
-	h.regionGuideDuration = now.Sub(h.lastCheckTime)
-	h.lastCheckTime = now
-	regionGuideDurationSum.Add(h.regionGuideDuration.Seconds())
-	regionGuideCount.Inc()
+	h.measure(regionGuideDurationSum, regionGuideCount)
 }
 
 // OnSaveCacheBegin implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnSaveCacheBegin() {
-	now := time.Now()
-	h.saveCacheStats.startTime = now
-	h.saveCacheStats.lastCheckTime = now
-	h.lastCheckTime = now
+	h.resetCheckpoint()
 }
 
 // OnSaveCacheFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnSaveCacheFinished() {
-	// update the outer checkpoint time
-	h.lastCheckTime = time.Now()
-}
-
-// OnCollectRegionStatsFinished implements the RegionHeartbeatProcessTracer interface.
-func (h *regionHeartbeatProcessTracer) OnCollectRegionStatsFinished() {
-	now := time.Now()
-	regionCollectDurationSum.Add(now.Sub(h.lastCheckTime).Seconds())
-	regionCollectCount.Inc()
-	h.lastCheckTime = now
+	h.resetCheckpoint()
 }
 
 // OnCheckOverlapsFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnCheckOverlapsFinished() {
-	now := time.Now()
-	h.saveCacheStats.checkOverlapsDuration = now.Sub(h.lastCheckTime)
-	h.saveCacheStats.lastCheckTime = now
-	checkOverlapsDurationSum.Add(h.saveCacheStats.checkOverlapsDuration.Seconds())
-	checkOverlapsCount.Inc()
+	h.measure(checkOverlapsDurationSum, checkOverlapsCount)
 }
 
 // OnValidateRegionFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnValidateRegionFinished() {
-	now := time.Now()
-	h.saveCacheStats.validateRegionDuration = now.Sub(h.saveCacheStats.lastCheckTime)
-	h.saveCacheStats.lastCheckTime = now
-	validateRegionDurationSum.Add(h.saveCacheStats.validateRegionDuration.Seconds())
-	validateRegionCount.Inc()
+	h.measure(validateRegionDurationSum, validateRegionCount)
 }
 
 // OnSetRegionFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnSetRegionFinished() {
-	now := time.Now()
-	h.saveCacheStats.setRegionDuration = now.Sub(h.saveCacheStats.lastCheckTime)
-	h.saveCacheStats.lastCheckTime = now
-	setRegionDurationSum.Add(h.saveCacheStats.setRegionDuration.Seconds())
-	setRegionCount.Inc()
+	h.measure(setRegionDurationSum, setRegionCount)
 }
 
 // OnUpdateSubTreeFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnUpdateSubTreeFinished() {
-	now := time.Now()
-	h.saveCacheStats.updateSubTreeDuration = now.Sub(h.saveCacheStats.lastCheckTime)
-	h.saveCacheStats.lastCheckTime = now
-	updateSubTreeDurationSum.Add(h.saveCacheStats.updateSubTreeDuration.Seconds())
-	updateSubTreeCount.Inc()
+	h.measure(updateSubTreeDurationSum, updateSubTreeCount)
+}
+
+// OnCollectRegionStatsFinished implements the RegionHeartbeatProcessTracer interface.
+func (h *regionHeartbeatProcessTracer) OnCollectRegionStatsFinished() {
+	h.measure(regionCollectDurationSum, regionCollectCount)
 }
 
 // OnAllStageFinished implements the RegionHeartbeatProcessTracer interface.
 func (h *regionHeartbeatProcessTracer) OnAllStageFinished() {
-	now := time.Now()
-	h.OtherDuration = now.Sub(h.lastCheckTime)
-	otherDurationSum.Add(h.OtherDuration.Seconds())
-	otherCount.Inc()
-}
-
-// LogFields implements the RegionHeartbeatProcessTracer interface.
-func (h *regionHeartbeatProcessTracer) LogFields() []zap.Field {
-	return []zap.Field{
-		zap.Duration("pre-check-duration", h.preCheckDuration),
-		zap.Duration("async-hot-stats-duration", h.asyncHotStatsDuration),
-		zap.Duration("region-guide-duration", h.regionGuideDuration),
-		zap.Duration("check-overlaps-duration", h.saveCacheStats.checkOverlapsDuration),
-		zap.Duration("validate-region-duration", h.saveCacheStats.validateRegionDuration),
-		zap.Duration("set-region-duration", h.saveCacheStats.setRegionDuration),
-		zap.Duration("update-sub-tree-duration", h.saveCacheStats.updateSubTreeDuration),
-		zap.Duration("other-duration", h.OtherDuration),
-	}
+	h.measure(otherDurationSum, otherCount)
 }
 
 // Release implements the RegionHeartbeatProcessTracer interface.
