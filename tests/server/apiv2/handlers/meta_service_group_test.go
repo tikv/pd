@@ -122,7 +122,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		"etcd-group-5": &addr5,
 	}
 
-	groups = mustAddMetaServiceGroups(re, suite.server, patch)
+	groups = mustPatchMetaServiceGroups(re, suite.server, patch)
 	re.Equal(len(groups), len(mockMetaServiceGroups())+len(patch))
 	// Newly assigned meta-service group should have no assigned keyspace.
 	for _, group := range groups {
@@ -147,7 +147,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	modifyPatch := map[string]*string{
 		"etcd-group-1": &newAddr,
 	}
-	groups = mustAddMetaServiceGroups(re, suite.server, modifyPatch)
+	groups = mustPatchMetaServiceGroups(re, suite.server, modifyPatch)
 	found := false
 	for _, group := range groups {
 		if group.ID == "etcd-group-1" {
@@ -163,10 +163,22 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	}
 	mustPatchMetaServiceGroupsFail(re, suite.server, rejectPatch)
 
-	// Delete etcd-group-4 which has no assigned keyspaces.
+	// Deleting etcd-group-4 should also be rejected once it has assigned keyspaces.
 	deletePatch := map[string]*string{
 		"etcd-group-4": nil,
 	}
-	// can't delete group with assigned keyspaces, so the operation should fail and the group should still exist.
 	mustPatchMetaServiceGroupsFail(re, suite.server, deletePatch)
+
+	// Delete a newly-added group with no assigned keyspaces.
+	unusedAddr := "etcd-group-unused.tidb-serverless.cluster.svc.local"
+	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
+		"etcd-group-unused": &unusedAddr,
+	})
+	re.Len(groups, len(collectedGroups)+1)
+	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
+		"etcd-group-unused": nil,
+	})
+	for _, group := range groups {
+		re.NotEqual("etcd-group-unused", group.ID)
+	}
 }

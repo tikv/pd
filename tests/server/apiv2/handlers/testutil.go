@@ -343,7 +343,7 @@ func mustLoadMetaServiceGroups(re *require.Assertions, server *tests.TestServer)
 	return groups
 }
 
-func mustAddMetaServiceGroups(re *require.Assertions, server *tests.TestServer, patch map[string]*string) []*handlers.MetaServiceGroupStatus {
+func mustPatchMetaServiceGroups(re *require.Assertions, server *tests.TestServer, patch map[string]*string) []*handlers.MetaServiceGroupStatus {
 	data, err := json.Marshal(patch)
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))

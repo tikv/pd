@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"fmt"
 	"math"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -152,6 +153,45 @@ func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 		groups[id] = endpoints
 	}
 	return groups
+}
+
+// UpdateGroupsSafely persists and applies meta-service group changes while
+// blocking concurrent keyspace assignments.
+func (m *MetaServiceGroupManager) UpdateGroupsSafely(
+	ctx context.Context,
+	metaServiceGroups map[string]string,
+	deletedGroups []string,
+	persist func() error,
+	afterPersist func(),
+) error {
+	m.Lock()
+
+	var assignmentCounts map[string]int
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+		var err error
+		assignmentCounts, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+		return err
+	}); err != nil {
+		m.Unlock()
+		return err
+	}
+	for _, id := range deletedGroups {
+		if assignmentCounts[id] > 0 {
+			m.Unlock()
+			return fmt.Errorf("cannot delete meta-service group with assigned keyspaces: %s", id)
+		}
+	}
+	if err := persist(); err != nil {
+		m.Unlock()
+		return err
+	}
+	m.metaServiceGroups = metaServiceGroups
+	m.Unlock()
+
+	if afterPersist != nil {
+		afterPersist()
+	}
+	return nil
 }
 
 // updateGroups updates currently available meta-service groups.

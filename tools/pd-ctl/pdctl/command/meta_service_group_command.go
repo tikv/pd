@@ -35,7 +35,7 @@ func NewMetaServiceGroupCommand() *cobra.Command {
 		Short: "meta-service group commands",
 	}
 	cmd.AddCommand(newListMetaServiceGroupCommand())
-	cmd.AddCommand(newUpsetMetaServiceGroupCommand())
+	cmd.AddCommand(newUpsertMetaServiceGroupCommand())
 	cmd.AddCommand(newDeleteMetaServiceGroupCommand())
 	return cmd
 }
@@ -62,18 +62,18 @@ func listMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(resp)
 }
 
-func newUpsetMetaServiceGroupCommand() *cobra.Command {
+func newUpsertMetaServiceGroupCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "upset --group <id=addr1,addr2,...> [--group <id=addr1,addr2,...> ...]",
-		Short: "upset one or more meta-service groups",
-		Run:   newUpsetMetaServiceGroupFunc,
+		Use:   "upsert",
+		Short: "upsert one or more meta-service groups",
+		Run:   newUpsertMetaServiceGroupFunc,
 	}
 	r.Flags().StringArrayP(nmGroup, "g", nil, "meta-service group in format id=addr1,addr2,... (for add/update)")
 	_ = r.MarkFlagRequired(nmGroup)
 	return r
 }
 
-func newUpsetMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
+func newUpsertMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 	metaServiceGroups, err := cmd.Flags().GetStringArray("group")
 	if err != nil {
 		cmd.PrintErrln("Failed to read --group flag:", err)
@@ -100,6 +100,12 @@ func newUpsetMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 		if addr == "" {
 			cmd.PrintErrf("Invalid --group: address cannot be empty in %q", group)
 			return
+		}
+		for _, addrSegment := range strings.Split(addr, ",") {
+			if strings.TrimSpace(addrSegment) == "" {
+				cmd.PrintErrf("Invalid --group: address cannot contain empty segment in %q", group)
+				return
+			}
 		}
 		patch[id] = &addr
 	}

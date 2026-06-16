@@ -70,44 +70,51 @@ func PatchMetaServiceGroups(c *gin.Context) {
 
 	var patch map[string]*string
 	if err := c.BindJSON(&patch); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
+		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
+	normalizedPatch := make(map[string]*string, len(patch))
 	for id, addresses := range patch {
-		if strings.TrimSpace(id) == "" {
+		trimmedID := strings.TrimSpace(id)
+		if trimmedID == "" {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "group ID cannot be empty or whitespace-only")
 			return
 		}
-		if addresses != nil && strings.TrimSpace(*addresses) == "" {
-			c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
-			return
-		}
-	}
-	// Check that groups to be deleted have no assigned keyspaces.
-	assignmentCounts, err := manager.GetAssignmentCounts(c.Request.Context())
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
-	for id, addresses := range patch {
-		if addresses == nil && assignmentCounts[id] > 0 {
-			c.AbortWithStatusJSON(http.StatusBadRequest,
-				"cannot delete meta-service group with assigned keyspaces: "+id)
-			return
+		if addresses == nil {
+			normalizedPatch[trimmedID] = nil
+		} else {
+			trimmedAddresses := strings.TrimSpace(*addresses)
+			if trimmedAddresses == "" {
+				c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
+				return
+			}
+			normalizedPatch[trimmedID] = &trimmedAddresses
 		}
 	}
 	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()
-	for id, addresses := range patch {
+	newGroups := oldCfg.GetMetaServiceGroups()
+	deletedGroups := make([]string, 0)
+	for id, addresses := range normalizedPatch {
 		if addresses == nil {
 			// Remove operation
-			delete(newCfg.MetaServiceGroups, id)
+			delete(newGroups, id)
+			deletedGroups = append(deletedGroups, id)
 		} else {
 			// Add or update operation
-			newCfg.MetaServiceGroups[id] = *addresses
+			newGroups[id] = *addresses
 		}
 	}
-	if err := svr.SetKeyspaceConfig(oldCfg, newCfg); err != nil {
+	newCfg.MetaServiceGroups = newGroups
+	if err := manager.UpdateGroupsSafely(c.Request.Context(), newGroups, deletedGroups, func() error {
+		return svr.SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg)
+	}, func() {
+		svr.UpdateKeyspaceConfig(newCfg)
+	}); err != nil {
+		if strings.HasPrefix(err.Error(), "cannot delete meta-service group") {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

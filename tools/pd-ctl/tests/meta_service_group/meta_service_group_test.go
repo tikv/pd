@@ -90,12 +90,12 @@ func (suite *metaServiceGroupCLITestSuite) TestListMetaServiceGroups() {
 	re.Equal("addr1.example.com", groupMap["group-1"])
 }
 
-func (suite *metaServiceGroupCLITestSuite) TestUpsetMetaServiceGroup() {
+func (suite *metaServiceGroupCLITestSuite) TestUpsertMetaServiceGroup() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 
 	// Add a new group.
-	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "group-2=addr2.example.com")
 	re.NoError(err)
 	var groups []*handlers.MetaServiceGroupStatus
@@ -111,7 +111,7 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsetMetaServiceGroup() {
 	re.True(found)
 
 	// Update an existing group address.
-	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "group-0=new-addr0.example.com")
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &groups))
@@ -121,8 +121,8 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsetMetaServiceGroup() {
 		}
 	}
 
-	// Upset multiple groups at once.
-	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	// Upsert multiple groups at once.
+	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "group-3=addr3.example.com",
 		"--group", "group-4=addr4.example.com")
 	re.NoError(err)
@@ -142,25 +142,30 @@ func (suite *metaServiceGroupCLITestSuite) TestDeleteMetaServiceGroup() {
 	re.Equal("group-0", groups[0].ID)
 }
 
-func (suite *metaServiceGroupCLITestSuite) TestUpsetInvalidInput() {
+func (suite *metaServiceGroupCLITestSuite) TestUpsertInvalidInput() {
 	re := suite.Require()
-	cmd := ctl.GetRootCmd()
 
 	// Missing "=" separator.
-	output, err := tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "group-noeq")
 	re.NoError(err)
 	re.Contains(string(output), "Invalid --group format")
 
 	// Empty ID.
-	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "=addr.example.com")
 	re.NoError(err)
-	re.Contains(string(output), "(expected id=addr1,addr2,...)")
+	re.Contains(string(output), "ID cannot be empty")
 
 	// Empty address.
-	output, err = tests.ExecuteCommand(cmd, "-u", suite.pdAddr, "meta-service-group", "upset",
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
 		"--group", "group-x=")
 	re.NoError(err)
-	re.Contains(string(output), "(expected id=addr1,addr2,...)")
+	re.Contains(string(output), "address cannot be empty")
+
+	// Empty address segment.
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
+		"--group", "group-x=addr.example.com,")
+	re.NoError(err)
+	re.Contains(string(output), "address cannot contain empty segment")
 }
