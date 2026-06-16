@@ -87,6 +87,34 @@ func TestActiveRequestUnitMetricUsesV2ForOverriddenKeyspace(t *testing.T) {
 	re.Equal(float64(31), testutil.ToFloat64(metrics.ActiveRUMetrics))
 }
 
+func TestCounterMetricsAddToleratesNegativeKvCPUTime(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "billing-neg-kvcpu-keyspace"
+		groupName    = "billing-neg-kvcpu-group"
+		keyspaceID   = uint32(303)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	// SqlLayerCpuTimeMs exceeds TotalCpuTimeMs: the two are reported independently
+	// by the client, so accounting skew can make the KV CPU diff negative. It must
+	// not panic prometheus.Counter.Add.
+	re.NotPanics(func() {
+		metrics.add(&rmpb.Consumption{
+			TotalCpuTimeMs:    3,
+			SqlLayerCpuTimeMs: 5,
+		}, &ControllerConfig{
+			RequestUnit: RequestUnitConfig{CPUMsCost: 2},
+		}, keyspaceID)
+	})
+	re.Equal(float64(0), testutil.ToFloat64(metrics.KvCPUMetrics), "negative KV CPU time must not be recorded")
+}
+
 func TestMaxPerSecCostTracker(t *testing.T) {
 	re := require.New(t)
 	tracker := newMaxPerSecCostTracker("test", "test", defaultCollectIntervalSec)
