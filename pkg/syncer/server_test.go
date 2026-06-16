@@ -350,7 +350,6 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 		},
 	}
 	re.NotNil(<-stream.sendCh)
-	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
 		return len(names) == 1 && names[0] == "pd-follower"
@@ -404,7 +403,6 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
-	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
@@ -462,7 +460,6 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
-	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()
@@ -536,7 +533,6 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 			ClientUrls: []string{"http://127.0.0.1:2379"},
 		},
 	}
-	re.NotNil(<-stream.sendCh)
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
 		names := syncer.GetAllDownstreamNames()

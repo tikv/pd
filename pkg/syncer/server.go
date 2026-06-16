@@ -473,16 +473,6 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 	defer releaseRetain()
 	regions := s.server.GetRegions()
 	start := time.Now()
-	if len(regions) == 0 {
-		resp := &pdpb.SyncRegionResponse{
-			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-			StartIndex: 0,
-		}
-		if err := syncStream.sendStreamIfOpen(resp); err != nil {
-			log.Warn("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
-			return err
-		}
-	}
 	lastIndex := 0
 	metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
