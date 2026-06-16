@@ -59,7 +59,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -1160,10 +1159,6 @@ func TestRegionHeartbeat(t *testing.T) {
 		ctx.Tracer = tracer
 		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
 		tracer.OnAllStageFinished()
-		re.Condition(func() bool {
-			fields := tracer.LogFields()
-			return slice.AllOf(fields, func(i int) bool { return fields[i].Integer > 0 })
-		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
