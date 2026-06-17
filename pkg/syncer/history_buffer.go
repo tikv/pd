@@ -295,6 +295,13 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	}
 }
 
+func (h *historyBuffer) resetWithIndexAndPersist(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	h.resetWithIndexLocked(index)
+	h.persist()
+}
+
 func (h *historyBuffer) getNextIndex() uint64 {
 	h.RLock()
 	defer h.RUnlock()
