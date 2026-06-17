@@ -604,6 +604,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
+	defer tracer.Release()
 	var taskRunner, miscRunner, logRunner ratelimit.Runner
 	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
