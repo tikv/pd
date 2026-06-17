@@ -856,8 +856,8 @@ func TestRemovedStreamDoesNotKeepHistoryWindow(t *testing.T) {
 	minIndex, ok := syncer.minDownstreamSendIndex()
 	re.True(ok)
 	re.Equal(uint64(15), minIndex)
-	for range historyBufferShrinkRounds {
-		syncer.observeDownstreamReplayWindow()
+	for range historyBufferShrinkRounds + 1 {
+		syncer.observeDownstreamReplayWindow(0)
 		syncer.history.maybeShrink()
 	}
 

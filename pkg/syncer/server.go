@@ -259,7 +259,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			s.appendHistoryRecords(records)
 			s.broadcast(ctx, records, false)
 		case <-shrinkTicker.C:
-			s.observeDownstreamReplayWindow()
+			s.observeDownstreamReplayWindow(0)
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
@@ -269,23 +269,20 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 }
 
 func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
-	s.history.recordBatchWithRequiredWindow(records, s.downstreamReplayWindow(uint64(len(records))))
+	s.observeDownstreamReplayWindow(uint64(len(records)))
+	s.history.recordBatch(records)
 }
 
-func (s *RegionSyncer) observeDownstreamReplayWindow() {
-	s.history.observeRequiredWindow(s.downstreamReplayWindow(0))
-}
-
-func (s *RegionSyncer) downstreamReplayWindow(appendCount uint64) uint64 {
+func (s *RegionSyncer) observeDownstreamReplayWindow(appendCount uint64) {
 	minSendIndex, ok := s.minDownstreamSendIndex()
 	if !ok {
-		return 0
+		return
 	}
 	endIndex := s.history.getNextIndex() + appendCount
 	if minSendIndex >= endIndex {
-		return 0
+		return
 	}
-	return endIndex - minSendIndex
+	s.history.observeRequiredWindow(endIndex - minSendIndex)
 }
 
 func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {

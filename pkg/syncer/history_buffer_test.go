@@ -162,7 +162,7 @@ func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferRecordBatchWithRequiredWindowKeepsSlowDownstreamRecords(t *testing.T) {
+func TestHistoryBufferObservedRequiredWindowKeepsSlowDownstreamRecords(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 	h.resetWithIndex(10)
@@ -171,11 +171,12 @@ func TestHistoryBufferRecordBatchWithRequiredWindowKeepsSlowDownstreamRecords(t 
 		newHistoryBufferTestRegion(2),
 	})
 
-	h.recordBatchWithRequiredWindow([]*core.RegionInfo{
+	h.observeRequiredWindow(5)
+	h.recordBatch([]*core.RegionInfo{
 		newHistoryBufferTestRegion(3),
 		newHistoryBufferTestRegion(4),
 		newHistoryBufferTestRegion(5),
-	}, 5)
+	})
 
 	records := h.recordsFrom(10)
 	re.Len(records, 5)
@@ -197,11 +198,12 @@ func TestHistoryBufferFullSyncRetainTakesPriorityOverRequiredWindow(t *testing.T
 	release := h.retainFrom(10)
 	defer release()
 
-	h.recordBatchWithRequiredWindow([]*core.RegionInfo{
+	h.observeRequiredWindow(4)
+	h.recordBatch([]*core.RegionInfo{
 		newHistoryBufferTestRegion(3),
 		newHistoryBufferTestRegion(4),
 		newHistoryBufferTestRegion(5),
-	}, 4)
+	})
 
 	records := h.recordsFrom(10)
 	re.Len(records, 5)

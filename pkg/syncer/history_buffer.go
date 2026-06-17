@@ -125,21 +125,17 @@ func (h *historyBuffer) capacity() int {
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
-	h.prepareRequiredWindowLocked(0, 1)
+	h.prepareRequiredWindowLocked(1)
 	h.recordLocked(r)
 }
 
 func (h *historyBuffer) recordBatch(records []*core.RegionInfo) {
-	h.recordBatchWithRequiredWindow(records, 0)
-}
-
-func (h *historyBuffer) recordBatchWithRequiredWindow(records []*core.RegionInfo, requiredWindow uint64) {
 	if len(records) == 0 {
 		return
 	}
 	h.Lock()
 	defer h.Unlock()
-	h.prepareRequiredWindowLocked(requiredWindow, uint64(len(records)))
+	h.prepareRequiredWindowLocked(uint64(len(records)))
 	for _, r := range records {
 		h.recordLocked(r)
 	}
@@ -160,14 +156,13 @@ func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	}
 }
 
-func (h *historyBuffer) prepareRequiredWindowLocked(requiredWindow uint64, appendCount uint64) {
+func (h *historyBuffer) prepareRequiredWindowLocked(appendCount uint64) {
 	if retainIndex, ok := h.minRetainIndexLocked(); ok {
 		endIndex := h.index + appendCount
 		if retainIndex < endIndex {
-			requiredWindow = max(requiredWindow, endIndex-retainIndex)
+			h.growForWindowLocked(endIndex - retainIndex)
 		}
 	}
-	h.growForWindowLocked(requiredWindow)
 }
 
 func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
