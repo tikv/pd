@@ -173,7 +173,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	normalizedDuplicateAddr := "etcd-group-6.tidb-serverless.cluster.svc.local"
 	normalizedDuplicatePatch := map[string]*string{
 		"etcd-group-6":   &normalizedDuplicateAddr,
-		" etcd-group-6 ": nil,
+		" etcd-group-6 ": nil, //nolint:gocritic // The whitespace is intentional to verify ID normalization.
 	}
 	mustPatchMetaServiceGroupsFail(re, suite.server, normalizedDuplicatePatch)
 
