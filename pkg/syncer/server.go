@@ -270,7 +270,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 
 func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
 	s.observeDownstreamReplayWindow(uint64(len(records)))
-	s.history.recordBatch(records)
+	s.history.record(records...)
 }
 
 func (s *RegionSyncer) observeDownstreamReplayWindow(appendCount uint64) {

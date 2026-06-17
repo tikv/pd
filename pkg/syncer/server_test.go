@@ -764,10 +764,10 @@ func TestAppendHistoryRecordsKeepsSlowestDownstreamWindow(t *testing.T) {
 	})
 	syncer.history = newTestHistoryBuffer(8)
 	syncer.history.resetWithIndex(10)
-	syncer.history.recordBatch([]*core.RegionInfo{
+	syncer.history.record(
 		newTestRegion(1),
 		newTestRegion(2),
-	})
+	)
 
 	syncer.appendHistoryRecords([]*core.RegionInfo{
 		newTestRegion(3),
@@ -799,10 +799,10 @@ func TestAppendHistoryRecordsDoesNotWaitForBusyDownstream(t *testing.T) {
 	})
 	syncer.history = newTestHistoryBuffer(8)
 	syncer.history.resetWithIndex(10)
-	syncer.history.recordBatch([]*core.RegionInfo{
+	syncer.history.record(
 		newTestRegion(1),
 		newTestRegion(2),
-	})
+	)
 
 	done := make(chan struct{})
 	go func() {
@@ -840,10 +840,10 @@ func TestRemovedStreamDoesNotKeepHistoryWindow(t *testing.T) {
 	})
 	syncer.history = newTestHistoryBuffer(8)
 	syncer.history.resetWithIndex(10)
-	syncer.history.recordBatch([]*core.RegionInfo{
+	syncer.history.record(
 		newTestRegion(1),
 		newTestRegion(2),
-	})
+	)
 	syncer.appendHistoryRecords([]*core.RegionInfo{
 		newTestRegion(3),
 		newTestRegion(4),

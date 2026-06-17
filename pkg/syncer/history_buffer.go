@@ -122,14 +122,7 @@ func (h *historyBuffer) capacity() int {
 	return h.size - 1
 }
 
-func (h *historyBuffer) record(r *core.RegionInfo) {
-	h.Lock()
-	defer h.Unlock()
-	h.prepareRequiredWindowLocked(1)
-	h.recordLocked(r)
-}
-
-func (h *historyBuffer) recordBatch(records []*core.RegionInfo) {
+func (h *historyBuffer) record(records ...*core.RegionInfo) {
 	if len(records) == 0 {
 		return
 	}
