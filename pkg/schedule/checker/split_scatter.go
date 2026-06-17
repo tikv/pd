@@ -32,15 +32,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/types"
-	statutils "github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
 	splitScatterPendingLimit = 4096
-	// Heartbeat-level backoff aligned with the region heartbeat interval.
-	// This trades retry immediacy for fewer redundant checks across all retry scenarios.
-	splitScatterRetryBackoff = time.Duration(statutils.RegionHeartBeatReportInterval) * time.Second
+	// Keep retries short enough for normal split-scatter progress while avoiding
+	// tight retry loops when an old operator is still running.
+	splitScatterRetryBackoff = 10 * time.Second
 	// Keep the pending TTL aligned with PD's slow operator step threshold so a
 	// scatter blocked by slow AddLearner/store limits still has time to retry.
 	splitScatterPendingTTL = 10 * time.Minute
@@ -53,9 +52,8 @@ type splitScatterPendingItem struct {
 	// sourceWaitVersion is the minimum source-region epoch version PD must
 	// observe before dispatching the split scatter.
 	sourceWaitVersion uint64
-	// regionWaitVersion is the exact epoch version expected on the pending
-	// split-result region. A zero value is a legacy fallback and disables the
-	// exact stale-epoch check for child regions.
+	// regionWaitVersion is the minimum epoch version expected on the pending
+	// split-result region. A later version can come from another valid split.
 	regionWaitVersion uint64
 	retryAt           time.Time
 	expireAt          time.Time
@@ -121,7 +119,6 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	// are rechecked before dispatch and delay/delete recheck the pending identity.
 	pendingSnapshot := make([]splitScatterPendingItem, 0, len(c.pending))
 	expiredSnapshot := make([]splitScatterPendingItem, 0)
-	staleSnapshot := make([]splitScatterPendingItem, 0)
 	for _, pending := range c.pending {
 		if !pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 			expiredSnapshot = append(expiredSnapshot, pending)
@@ -144,16 +141,8 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 			continue
 		}
 		regionVersion := splitScatterRegionVersion(region)
-		if pending.regionWaitVersion > 0 {
-			// Wait for the split-result epoch. If it has already moved past the
-			// expected version, this pending item belongs to an older split.
-			if regionVersion < pending.regionWaitVersion {
-				continue
-			}
-			if regionVersion > pending.regionWaitVersion {
-				staleSnapshot = append(staleSnapshot, pending)
-				continue
-			}
+		if pending.regionWaitVersion > 0 && regionVersion < pending.regionWaitVersion {
+			continue
 		}
 		if op := c.opController.GetOperator(regionID); op != nil && op.Desc() == scatter.InternalScatterOperatorDesc {
 			c.delayPendingSplitScatter(pending)
@@ -222,19 +211,6 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		}
 		c.pendingMu.Unlock()
 		observeSplitScatterPendingExpired(attemptedExpiredCount, unattemptedExpiredCount)
-	}
-	if len(staleSnapshot) > 0 {
-		c.pendingMu.Lock()
-		for _, stale := range staleSnapshot {
-			pending, ok := c.pending[stale.regionID]
-			// staleSnapshot was collected without pendingMu held. Recheck identity
-			// so a newer pending item for the same region is not deleted.
-			if ok && pending.group == stale.group && pending.expireAt.Equal(stale.expireAt) {
-				delete(c.pending, stale.regionID)
-			}
-		}
-		c.updatePendingGaugeLocked()
-		c.pendingMu.Unlock()
 	}
 	return candidates
 }
@@ -370,9 +346,9 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceW
 	}
 	group := makeSplitScatterGroup(sourceRegionID, newRegionIDs[0])
 	expireAt := time.Now().Add(splitScatterPendingTTL)
-	// When the caller provides an explicit wait version, trust it exactly for
-	// the split-result region stale check. The cached fallback only applies
-	// to the legacy path where sourceWaitVersion is zero.
+	// When the caller provides an explicit wait version, use it as the minimum
+	// pending-region version. The cached fallback only applies to the legacy
+	// path where sourceWaitVersion is zero.
 	regionWaitVersion := sourceWaitVersion
 	if sourceWaitVersion == 0 {
 		sourceWaitVersion = 1
@@ -467,9 +443,8 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 			continue
 		}
 		// Recheck after collection because region heartbeat may advance before
-		// operator creation; in that case this old pending item must be dropped.
-		if pending.regionWaitVersion > 0 && splitScatterRegionVersion(region) != pending.regionWaitVersion {
-			c.deletePendingSplitScatter(pending)
+		// operator creation.
+		if pending.regionWaitVersion > 0 && splitScatterRegionVersion(region) < pending.regionWaitVersion {
 			continue
 		}
 		rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(region, c.hasSplitScatterTxnKeyspaceBounds)

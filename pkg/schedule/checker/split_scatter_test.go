@@ -175,7 +175,7 @@ func TestDispatchSplitScatterUsesRequestWaitVersionWhenCacheLags(t *testing.T) {
 	re.NotNil(oc.GetOperator(101))
 }
 
-func TestCollectTopPendingDeletesStaleRegionEpoch(t *testing.T) {
+func TestCollectTopPendingAllowsAdvancedRegionEpoch(t *testing.T) {
 	re := require.New(t)
 	controller, tc, _, cleanup := newTestSplitScatterController(t)
 	defer cleanup()
@@ -188,8 +188,8 @@ func TestCollectTopPendingDeletesStaleRegionEpoch(t *testing.T) {
 
 	advanceSplitScatterRegionVersion(t, tc, 101)
 
-	re.ElementsMatch([]uint64{100}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
-	re.False(splitScatterPendingMaybe(controller, 101))
+	re.ElementsMatch([]uint64{100, 101}, pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
+	re.True(splitScatterPendingMaybe(controller, 101))
 }
 
 func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
@@ -211,6 +211,35 @@ func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
 	controller.dispatchSplitScatterRegions()
 
 	re.Len(oc.GetOperators(), 1)
+}
+
+func TestCollectTopPendingBacksOffWhenInternalScatterOperatorExists(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101})
+	putSplitScatterRegion(tc, 101, "m", "", splitScatterReportedCPUUsage)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	for _, regionID := range []uint64{100, 101} {
+		region := tc.GetRegion(regionID)
+		op := operator.NewTestOperator(
+			region.GetID(),
+			region.GetRegionEpoch(),
+			operator.OpSplitScatter|operator.OpLeader,
+			operator.TransferLeader{FromStore: 1, ToStore: 2},
+		)
+		op.SetDesc(scatter.InternalScatterOperatorDesc)
+		re.True(oc.AddOperator(op))
+	}
+
+	re.Empty(controller.collectTopPendingSplitScatter(2))
+	for _, regionID := range []uint64{100, 101} {
+		pending := splitScatterPending(t, controller, regionID)
+		re.True(pending.retryAt.After(time.Now()))
+		re.True(splitScatterPendingMaybe(controller, regionID))
+	}
 }
 
 func TestRecordSplitScatterBatchSkipsWhenDisabled(t *testing.T) {
