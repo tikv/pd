@@ -73,6 +73,12 @@ func PatchMetaServiceGroups(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause().Error())
 		return
 	}
+	// A top-level JSON `null` decodes into a nil map, which would otherwise be
+	// treated as a successful no-op. The request body must be a JSON object.
+	if patch == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, "request body must be a JSON object")
+		return
+	}
 	normalizedPatch := make(map[string]*string, len(patch))
 	for id, addresses := range patch {
 		trimmedID := strings.TrimSpace(id)

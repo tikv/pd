@@ -117,6 +117,20 @@ func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) 
 	return assignedGroup, nil
 }
 
+// reassignKeyspaceLocked validates that newGroupID (if any) still exists and
+// moves a single keyspace assignment from oldGroupID to newGroupID within txn.
+// The caller must hold the read lock for the whole enclosing transaction so a
+// concurrent UpdateGroupsSafely cannot delete a group between this validation
+// and the persisted assignment count update.
+func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID, newGroupID string) error {
+	if newGroupID != "" {
+		if _, ok := m.metaServiceGroups[newGroupID]; !ok {
+			return errUnknownMetaServiceGroup
+		}
+	}
+	return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)
+}
+
 func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
 	if oldGroupID != "" {
 		if err := m.store.IncrementAssignmentCount(txn, oldGroupID, -1); err != nil {

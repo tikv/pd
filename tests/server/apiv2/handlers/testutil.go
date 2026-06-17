@@ -362,7 +362,11 @@ func mustPatchMetaServiceGroups(re *require.Assertions, server *tests.TestServer
 func mustPatchMetaServiceGroupsFail(re *require.Assertions, server *tests.TestServer, patch map[string]*string) {
 	data, err := json.Marshal(patch)
 	re.NoError(err)
-	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
+	mustPatchMetaServiceGroupsRawFail(re, server, data)
+}
+
+func mustPatchMetaServiceGroupsRawFail(re *require.Assertions, server *tests.TestServer, body []byte) {
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(body))
 	re.NoError(err)
 	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)

@@ -15,7 +15,11 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -94,6 +98,54 @@ func collectStatus(re *require.Assertions, keyspaces []*keyspacepb.KeyspaceMeta)
 	return collectedStatuses
 }
 
+// TestUpdateMetaServiceGroupsViaConfigAPI verifies that changing
+// meta-service-groups through the generic /config API is routed through the
+// MetaServiceGroupManager (UpdateGroupsSafely) rather than directly mutating the
+// keyspace manager. The /config payload is merged into the existing config, so
+// groups can be added or updated, and the change is reflected by the v2 API.
+func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI() {
+	re := suite.Require()
+	// Adding a new group through /config should succeed and be visible via v2 API.
+	added := mockMetaServiceGroups()
+	added["etcd-group-x"] = "etcd-group-x.example.local"
+	code, body := suite.setMetaServiceGroupsViaConfig(re, added)
+	re.Equal(http.StatusOK, code, body)
+	groups := mustLoadMetaServiceGroups(re, suite.server)
+	re.Len(groups, len(added))
+	var x *handlers.MetaServiceGroupStatus
+	for _, group := range groups {
+		if group.ID == "etcd-group-x" {
+			x = group
+		}
+	}
+	re.NotNil(x, "etcd-group-x should be added via /config")
+	re.Equal("etcd-group-x.example.local", x.Addresses)
+
+	// Updating an existing group's address through /config should also work.
+	added["etcd-group-x"] = "etcd-group-x-modified.example.local"
+	code, body = suite.setMetaServiceGroupsViaConfig(re, added)
+	re.Equal(http.StatusOK, code, body)
+	groups = mustLoadMetaServiceGroups(re, suite.server)
+	for _, group := range groups {
+		if group.ID == "etcd-group-x" {
+			re.Equal("etcd-group-x-modified.example.local", group.Addresses)
+		}
+	}
+}
+
+func (suite *metaServiceGroupTestSuite) setMetaServiceGroupsViaConfig(re *require.Assertions, groups map[string]string) (int, string) {
+	payload, err := json.Marshal(map[string]any{"keyspace.meta-service-groups": groups})
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(payload))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	return resp.StatusCode, string(data)
+}
+
 func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	re := suite.Require()
 	// Default keyspace must not contain any meta-service group config.
@@ -168,6 +220,9 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		"etcd-group-4": nil,
 	}
 	mustPatchMetaServiceGroupsFail(re, suite.server, deletePatch)
+
+	// A top-level JSON null body should be rejected rather than treated as a no-op.
+	mustPatchMetaServiceGroupsRawFail(re, suite.server, []byte("null"))
 
 	// Duplicated group IDs after normalization should be rejected.
 	normalizedDuplicateAddr := "etcd-group-6.tidb-serverless.cluster.svc.local"

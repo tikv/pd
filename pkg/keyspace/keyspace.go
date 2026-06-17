@@ -798,10 +798,23 @@ func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutatio
 	return nil
 }
 
+// runTxnWithMetaGroupLock runs f inside a storage transaction while holding the
+// meta-service group manager's read lock for the whole transaction. This keeps
+// keyspace assignment validation and the persisted assignment count update
+// atomic with respect to MetaServiceGroupManager.UpdateGroupsSafely, which takes
+// the write lock before deleting a group.
+func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error) error {
+	if manager.mgm != nil {
+		manager.mgm.RLock()
+		defer manager.mgm.RUnlock()
+	}
+	return manager.store.RunInTxn(manager.ctx, f)
+}
+
 func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *keyspacepb.KeyspaceMeta) error) (*keyspacepb.KeyspaceMeta, error) {
 	var meta *keyspacepb.KeyspaceMeta
 	oldConfig := make(map[string]string)
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	txnFunc := func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
 		if err != nil {
@@ -850,10 +863,9 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		oldMetaServiceGroup := oldConfig[MetaServiceGroupIDKey]
 		newMetaServiceGroup := newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
-			if newMetaServiceGroup != "" && manager.mgm.GetGroups()[newMetaServiceGroup] == "" {
-				return errUnknownMetaServiceGroup
-			}
-			if err := manager.mgm.updateAssignmentTxn(txn, oldMetaServiceGroup, newMetaServiceGroup); err != nil {
+			// The read lock held by runTxnWithMetaGroupLock keeps this validation and
+			// the assignment update atomic with respect to UpdateGroupsSafely.
+			if err := manager.mgm.reassignKeyspaceLocked(txn, oldMetaServiceGroup, newMetaServiceGroup); err != nil {
 				return err
 			}
 		}
@@ -867,7 +879,8 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 			return err
 		}
 		return nil
-	})
+	}
+	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),
