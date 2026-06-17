@@ -309,7 +309,14 @@ func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName
 }
 
 func (m *metrics) deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
-	delete(m.maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
+	key := trackerKey{keyspaceID, groupName}
+	tracker := m.maxPerSecTrackerMap[key]
+	delete(m.maxPerSecTrackerMap, key)
+	if tracker == nil {
+		return
+	}
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, tracker.keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, tracker.keyspaceName)
 }
 
 func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
@@ -329,9 +336,21 @@ func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName str
 }
 
 func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
-	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
-	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
-	deleteLabelValues(keyspaceName, groupName, ruType)
+	counterKey := metricsKey{keyspaceID, groupName, ruType}
+	gaugeKey := metricsKey{keyspaceID, groupName, ""}
+	counterMetrics := m.counterMetricsMap[counterKey]
+	gaugeMetrics := m.gaugeMetricsMap[gaugeKey]
+	delete(m.counterMetricsMap, counterKey)
+	delete(m.gaugeMetricsMap, gaugeKey)
+
+	deleteKeyspaceName := keyspaceName
+	if counterMetrics != nil {
+		deleteKeyspaceName = counterMetrics.keyspaceName
+	}
+	deleteLabelValues(deleteKeyspaceName, groupName, ruType)
+	if gaugeMetrics != nil && gaugeMetrics.keyspaceName != deleteKeyspaceName {
+		deleteLabelValues(gaugeMetrics.keyspaceName, groupName, ruType)
+	}
 }
 
 func (m *metrics) recordConsumption(
@@ -362,6 +381,7 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 }
 
 type counterMetrics struct {
+	keyspaceName               string
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
 	ActiveRUMetrics            prometheus.Counter
@@ -382,6 +402,7 @@ type counterMetrics struct {
 
 func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetrics {
 	return &counterMetrics{
+		keyspaceName:               keyspaceName,
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -478,6 +499,7 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 }
 
 type gaugeMetrics struct {
+	keyspaceName                       string
 	availableRUCounter                 prometheus.Gauge
 	priorityResourceGroupConfigGauge   prometheus.Gauge
 	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
@@ -489,6 +511,7 @@ type gaugeMetrics struct {
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 	return &gaugeMetrics{
+		keyspaceName:                       keyspaceName,
 		availableRUCounter:                 availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName),
 		priorityResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, priorityLabel, keyspaceName),
 		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
@@ -499,7 +522,7 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 	}
 }
 
-func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
+func (m *gaugeMetrics) setGroup(group *ResourceGroup, _keyspaceName string) {
 	// skip basic metrics for the default group.
 	if group.Name != DefaultResourceGroupName {
 		ru := math.Max(group.getRUToken(), 0)
@@ -512,13 +535,13 @@ func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
 	// Set the override fill rate and burst limit and delete the metrics if the override is not set.
 	overrideFillRate := group.getOverrideFillRate()
 	if overrideFillRate == -1 {
-		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, fillRateLabel)
+		overrideSettings.DeleteLabelValues(group.Name, m.keyspaceName, fillRateLabel)
 	} else {
 		m.overrideFillRateGauge.Set(overrideFillRate)
 	}
 	overrideBurstLimit := group.getOverrideBurstLimit()
 	if overrideBurstLimit == -1 {
-		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, burstLimitLabel)
+		overrideSettings.DeleteLabelValues(group.Name, m.keyspaceName, burstLimitLabel)
 	} else {
 		m.overrideBurstLimitGauge.Set(float64(overrideBurstLimit))
 	}
@@ -552,8 +575,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
 	requestCount.DeleteLabelValues(groupName, groupName, writeTypeLabel, keyspaceName)
 	availableRUCounter.DeleteLabelValues(groupName, groupName, keyspaceName)
-	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
-	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
