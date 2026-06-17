@@ -169,6 +169,14 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	}
 	mustPatchMetaServiceGroupsFail(re, suite.server, deletePatch)
 
+	// Duplicated group IDs after normalization should be rejected.
+	normalizedDuplicateAddr := "etcd-group-6.tidb-serverless.cluster.svc.local"
+	normalizedDuplicatePatch := map[string]*string{
+		"etcd-group-6":   &normalizedDuplicateAddr,
+		" etcd-group-6 ": nil,
+	}
+	mustPatchMetaServiceGroupsFail(re, suite.server, normalizedDuplicatePatch)
+
 	// Delete a newly-added group with no assigned keyspaces.
 	unusedAddr := "etcd-group-unused.tidb-serverless.cluster.svc.local"
 	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
