@@ -37,8 +37,9 @@ import (
 
 const (
 	splitScatterPendingLimit = 4096
-	// Keep retries short enough for normal split-scatter progress while avoiding
-	// tight retry loops when an old operator is still running.
+	// The actual retry cadence is also bounded by the checker dispatch loop. This
+	// is only the minimum interval to avoid retrying the same pending item too
+	// frequently when checker ticks are fast.
 	splitScatterRetryBackoff = 10 * time.Second
 	// Keep the pending TTL aligned with PD's slow operator step threshold so a
 	// scatter blocked by slow AddLearner/store limits still has time to retry.
