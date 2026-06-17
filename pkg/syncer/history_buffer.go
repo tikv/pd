@@ -126,6 +126,13 @@ func (h *historyBuffer) resetWithIndex(index uint64) {
 	h.flushCount = defaultFlushCount
 }
 
+func (h *historyBuffer) resetWithIndexAndPersist(index uint64) {
+	h.Lock()
+	defer h.Unlock()
+	h.resetWithIndexLocked(index)
+	h.persist()
+}
+
 func (h *historyBuffer) getNextIndex() uint64 {
 	h.RLock()
 	defer h.RUnlock()
