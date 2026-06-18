@@ -31,6 +31,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -123,6 +124,7 @@ type tsoServiceDiscovery struct {
 	serviceDiscovery ServiceDiscovery
 	clusterID        uint64
 	keyspaceID       atomic.Uint32
+	keyspaceIdentity *apipb.KeyspaceIdentity
 	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
@@ -156,7 +158,7 @@ type tsoServiceDiscovery struct {
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
-	keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
+	keyspaceID uint32, keyspaceIdentity *apipb.KeyspaceIdentity, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -165,6 +167,7 @@ func NewTSOServiceDiscovery(
 		metacli:           metacli,
 		serviceDiscovery:  serviceDiscovery,
 		clusterID:         serviceDiscovery.GetClusterID(),
+		keyspaceIdentity:  cloneKeyspaceIdentity(keyspaceIdentity),
 		keyspaceMeta:      keyspaceMeta,
 		tlsCfg:            tlsCfg,
 		option:            option,
@@ -265,6 +268,16 @@ func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 // SetKeyspaceID sets the ID of the keyspace
 func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 	c.keyspaceID.Store(keyspaceID)
+}
+
+// GetKeyspaceIdentity returns the API V3 identity of the keyspace, if any.
+func (c *tsoServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity {
+	return cloneKeyspaceIdentity(c.keyspaceIdentity)
+}
+
+// SetKeyspaceIdentity sets the API V3 identity of the keyspace.
+func (c *tsoServiceDiscovery) SetKeyspaceIdentity(identity *apipb.KeyspaceIdentity) {
+	c.keyspaceIdentity = cloneKeyspaceIdentity(identity)
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
@@ -633,14 +646,18 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 		return nil, 0, err
 	}
 
+	header := &tsopb.RequestHeader{
+		ClusterId:       c.clusterID,
+		KeyspaceId:      keyspaceID,
+		KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+		CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
+	}
+	if c.keyspaceIdentity != nil {
+		header.KeyspaceIdentity = cloneKeyspaceIdentity(c.keyspaceIdentity)
+	}
 	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
 		ctx, &tsopb.FindGroupByKeyspaceIDRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       c.clusterID,
-				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
-				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
-			},
+			Header:      header,
 			KeyspaceId:  keyspaceID,
 			ModRevision: modRevision,
 		})

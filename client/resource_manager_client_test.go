@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -52,13 +53,15 @@ func newTestServiceDiscovery(servingURL string, conn *grpc.ClientConn) *testServ
 	return t
 }
 
-func (*testServiceDiscovery) Init() error                { return nil }
-func (*testServiceDiscovery) Close()                     {}
-func (*testServiceDiscovery) GetClusterID() uint64       { return 0 }
-func (t *testServiceDiscovery) GetKeyspaceID() uint32    { return t.keyspaceID }
-func (t *testServiceDiscovery) SetKeyspaceID(id uint32)  { t.keyspaceID = id }
-func (*testServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }
-func (t *testServiceDiscovery) GetServiceURLs() []string { return []string{t.servingURL} }
+func (*testServiceDiscovery) Init() error                                  { return nil }
+func (*testServiceDiscovery) Close()                                       {}
+func (*testServiceDiscovery) GetClusterID() uint64                         { return 0 }
+func (t *testServiceDiscovery) GetKeyspaceID() uint32                      { return t.keyspaceID }
+func (t *testServiceDiscovery) SetKeyspaceID(id uint32)                    { t.keyspaceID = id }
+func (*testServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity { return nil }
+func (*testServiceDiscovery) SetKeyspaceIdentity(*apipb.KeyspaceIdentity)  {}
+func (*testServiceDiscovery) GetKeyspaceGroupID() uint32                   { return 0 }
+func (t *testServiceDiscovery) GetServiceURLs() []string                   { return []string{t.servingURL} }
 func (t *testServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	conn, _ := t.clientConns.Load(t.servingURL)
 	if conn == nil {
