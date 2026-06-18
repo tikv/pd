@@ -648,9 +648,17 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 
 	header := &tsopb.RequestHeader{
 		ClusterId:       c.clusterID,
-		KeyspaceId:      keyspaceID,
 		KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 		CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
+	}
+	if c.keyspaceIdentity != nil {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceIdentity{
+			KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
+		}
+	} else {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceId{
+			KeyspaceId: keyspaceID,
+		}
 	}
 	tsoClient := tsopb.NewTSOClient(cc)
 	var (
@@ -660,11 +668,13 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 		findErr       error
 	)
 	if c.keyspaceIdentity != nil {
-		resp, err := tsoClient.FindGroupByKeyspace(
-			ctx, &tsopb.FindGroupByKeyspaceRequest{
-				Header:           header,
-				KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
-				ModRevision:      modRevision,
+		resp, err := tsoClient.FindGroupByKeyspaceID(
+			ctx, &tsopb.FindGroupByKeyspaceIDRequest{
+				Header: header,
+				Keyspace: &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceIdentity{
+					KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
+				},
+				ModRevision: modRevision,
 			})
 		findErr = err
 		if resp != nil {
@@ -675,8 +685,10 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	} else {
 		resp, err := tsoClient.FindGroupByKeyspaceID(
 			ctx, &tsopb.FindGroupByKeyspaceIDRequest{
-				Header:      header,
-				KeyspaceId:  keyspaceID,
+				Header: header,
+				Keyspace: &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{
+					KeyspaceId: keyspaceID,
+				},
 				ModRevision: modRevision,
 			})
 		findErr = err

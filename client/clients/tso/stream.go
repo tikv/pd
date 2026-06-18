@@ -166,15 +166,23 @@ type tsoTSOStreamAdapter struct {
 
 // Send implements the grpcTSOStreamAdapter interface.
 func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, keyspaceIdentity *apipb.KeyspaceIdentity, count int64) error {
-	req := &tsopb.TsoRequest{
-		Header: &tsopb.RequestHeader{
-			ClusterId:        clusterID,
-			KeyspaceId:       keyspaceID,
-			KeyspaceGroupId:  keyspaceGroupID,
-			CalleeId:         s.calleeID,
+	header := &tsopb.RequestHeader{
+		ClusterId:       clusterID,
+		KeyspaceGroupId: keyspaceGroupID,
+		CalleeId:        s.calleeID,
+	}
+	if keyspaceIdentity != nil {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceIdentity{
 			KeyspaceIdentity: cloneKeyspaceIdentity(keyspaceIdentity),
-		},
-		Count: uint32(count),
+		}
+	} else {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceId{
+			KeyspaceId: keyspaceID,
+		}
+	}
+	req := &tsopb.TsoRequest{
+		Header: header,
+		Count:  uint32(count),
 	}
 	return s.stream.Send(req)
 }
