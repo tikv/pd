@@ -408,7 +408,10 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 ) error {
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
-	if startIndex != 0 && startIndex < endIndex {
+	if startIndex == 0 || startIndex > endIndex {
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex)
+	}
+	if startIndex < endIndex {
 		s.history.observeRequiredWindow(endIndex - startIndex)
 	}
 	records := s.history.recordsBetween(startIndex, endIndex)
@@ -493,8 +496,8 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 	releaseRetain := s.history.retainFrom(syncStartIndex)
 	defer releaseRetain()
 	regions := s.server.GetRegions()
-	lastIndex := 0
 	start := time.Now()
+	lastIndex := 0
 	metas := make([]*metapb.Region, 0, maxSyncRegionBatchSize)
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
 	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
@@ -559,10 +562,22 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 			syncStartIndex, nextIndex)
 	}
 	if len(records) > 0 {
-		if err := s.syncHistoryRecordsLocked(syncStartIndex, records, syncStream); err != nil {
+		catchUpStartIndex := syncStartIndex
+		if len(regions) == 0 {
+			catchUpStartIndex = 0
+		}
+		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
 			return err
 		}
 		syncStream.advanceSendIndexLocked(len(records))
+	}
+	resp := &pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: nextIndex,
+	}
+	if err := syncStream.sendStreamIfOpen(resp); err != nil {
+		log.Warn("failed to send sync region completion response", errs.ZapError(errs.ErrGRPCSend, err))
+		return err
 	}
 	return nil
 }
@@ -572,11 +587,15 @@ func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*reg
 	defer s.mu.Unlock()
 	startIndex := s.history.getNextIndex()
 	syncStream := newRegionSyncStream(stream, startIndex)
+	s.bindStreamLocked(name, syncStream)
+	return syncStream, startIndex
+}
+
+func (s *RegionSyncer) bindStreamLocked(name string, syncStream *regionSyncStream) {
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 	}
 	s.mu.streams[name] = syncStream
-	return syncStream, startIndex
 }
 
 func (s *RegionSyncer) unbindStream(name string, stream *regionSyncStream) {
