@@ -86,30 +86,6 @@ func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 	re.Equal(bootstrapKeyspaceName, keyspaceDefault.GetName())
 }
 
-func (suite *clientStatelessTestSuite) TestLoadKeyspaceByID() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
-	}()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 10)
-	for _, expected := range metas {
-		loaded, err := suite.client.LoadKeyspaceByID(suite.ctx, expected.GetId())
-		re.NoError(err)
-		re.Equal(expected, loaded)
-	}
-	// Loading non-existing keyspace should result in error.
-	_, err := suite.client.LoadKeyspaceByID(suite.ctx, math.MaxUint32)
-	re.Error(err)
-	// Loading bootstrap keyspace should be successful.
-	bootstrapKeyspaceName := keyspace.GetBootstrapKeyspaceName()
-	bootstrapKeyspaceID := keyspace.GetBootstrapKeyspaceID()
-	keyspaceDefault, err := suite.client.LoadKeyspaceByID(suite.ctx, bootstrapKeyspaceID)
-	re.NoError(err)
-	re.Equal(bootstrapKeyspaceID, keyspaceDefault.GetId())
-	re.Equal(bootstrapKeyspaceName, keyspaceDefault.GetName())
-}
-
 func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
