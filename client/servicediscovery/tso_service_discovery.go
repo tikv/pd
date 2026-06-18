@@ -652,41 +652,71 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 		KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 		CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
 	}
+	tsoClient := tsopb.NewTSOClient(cc)
+	var (
+		keyspaceGroup *tsopb.KeyspaceGroup
+		respHeader    *tsopb.ResponseHeader
+		respRevision  uint64
+		findErr       error
+	)
 	if c.keyspaceIdentity != nil {
-		header.KeyspaceIdentity = cloneKeyspaceIdentity(c.keyspaceIdentity)
+		resp, err := tsoClient.FindGroupByKeyspace(
+			ctx, &tsopb.FindGroupByKeyspaceRequest{
+				Header:           header,
+				KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
+				ModRevision:      modRevision,
+			})
+		findErr = err
+		if resp != nil {
+			keyspaceGroup = resp.GetKeyspaceGroup()
+			respHeader = resp.GetHeader()
+			respRevision = resp.GetModRevision()
+		}
+	} else {
+		resp, err := tsoClient.FindGroupByKeyspaceID(
+			ctx, &tsopb.FindGroupByKeyspaceIDRequest{
+				Header:      header,
+				KeyspaceId:  keyspaceID,
+				ModRevision: modRevision,
+			})
+		findErr = err
+		if resp != nil {
+			keyspaceGroup = resp.GetKeyspaceGroup()
+			respHeader = resp.GetHeader()
+			respRevision = resp.GetModRevision()
+		}
 	}
-	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
-		ctx, &tsopb.FindGroupByKeyspaceIDRequest{
-			Header:      header,
-			KeyspaceId:  keyspaceID,
-			ModRevision: modRevision,
-		})
-	if err != nil {
+	if findErr != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
-			err, cc.Target(), cc.GetState().String())
+			findErr, cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if err := resp.GetHeader().GetError(); err != nil {
+	if respHeader == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"empty find group response", cc.Target(), cc.GetState().String())
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if err := respHeader.GetError(); err != nil {
 		if strings.Contains(err.GetMessage(), errs.MismatchCalleeIDErr) {
 			// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
 			c.RemoveClientConn(tsoSrvURL)
 		}
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
-			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			err.String(), cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.KeyspaceGroup == nil {
+	if keyspaceGroup == nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			"no keyspace group found", cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.ModRevision < modRevision {
+	if respRevision < modRevision {
 		attachErr := errors.Errorf("error:%s target:%s response mod revision:%d current mod revision:%d",
-			"response mod revision less than the given mod revision", cc.Target(), resp.ModRevision, modRevision)
+			"response mod revision less than the given mod revision", cc.Target(), respRevision, modRevision)
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 
-	return resp.KeyspaceGroup, resp.GetModRevision(), nil
+	return keyspaceGroup, respRevision, nil
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
