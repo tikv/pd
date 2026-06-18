@@ -16,16 +16,19 @@ package pd
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	clienterrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
@@ -36,6 +39,7 @@ type testKeyspaceServer struct {
 	meta     *keyspacepb.KeyspaceMeta
 	respType pdpb.ErrorType
 	respMsg  string
+	rpcErr   error
 	lastID   atomic.Uint32
 }
 
@@ -44,6 +48,9 @@ func (s *testKeyspaceServer) LoadKeyspaceByID(
 	req *keyspacepb.LoadKeyspaceByIDRequest,
 ) (*keyspacepb.LoadKeyspaceResponse, error) {
 	s.lastID.Store(req.GetId())
+	if s.rpcErr != nil {
+		return nil, s.rpcErr
+	}
 	resp := &keyspacepb.LoadKeyspaceResponse{
 		Header: &pdpb.ResponseHeader{},
 	}
@@ -115,7 +122,9 @@ func TestLoadKeyspaceByID(t *testing.T) {
 	t.Cleanup(cleanup)
 
 	client := newTestKeyspaceClient(t, ctx, addr)
-	loaded, err := client.LoadKeyspaceByID(ctx, expected.GetId())
+	span, tracedCtx := opentracing.StartSpanFromContext(ctx, "test-load-keyspace-by-id")
+	defer span.Finish()
+	loaded, err := client.LoadKeyspaceByID(tracedCtx, expected.GetId())
 	re.NoError(err)
 	re.Equal(expected, loaded)
 	re.Equal(expected.GetId(), keyspaceServer.lastID.Load())
@@ -136,5 +145,38 @@ func TestLoadKeyspaceByIDReturnsHeaderError(t *testing.T) {
 	re.Nil(loaded)
 	re.ErrorContains(err, "Load keyspace id 42 failed")
 	re.ErrorContains(err, "keyspace does not exist")
+	re.Equal(uint32(42), keyspaceServer.lastID.Load())
+}
+
+func TestLoadKeyspaceByIDReturnsProtoClientError(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	option := opt.NewOption()
+	client := &client{
+		inner: &innerClient{
+			serviceDiscovery: &testServiceDiscovery{},
+			ctx:              ctx,
+			option:           option,
+		},
+	}
+
+	loaded, err := client.LoadKeyspaceByID(ctx, 42)
+	re.Nil(loaded)
+	re.True(clienterrs.ErrClientGetProtoClient.Equal(err))
+}
+
+func TestLoadKeyspaceByIDReturnsRPCError(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	keyspaceServer := &testKeyspaceServer{
+		rpcErr: errors.New("load keyspace by id failed"),
+	}
+	addr, cleanup := startTestKeyspaceServer(t, keyspaceServer)
+	t.Cleanup(cleanup)
+
+	client := newTestKeyspaceClient(t, ctx, addr)
+	loaded, err := client.LoadKeyspaceByID(ctx, 42)
+	re.Nil(loaded)
+	re.ErrorContains(err, "load keyspace by id failed")
 	re.Equal(uint32(42), keyspaceServer.lastID.Load())
 }

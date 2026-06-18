@@ -24,6 +24,7 @@ import (
 	keyspacepkg "github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	pdtests "github.com/tikv/pd/tests"
 )
 
 func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
@@ -59,6 +60,20 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
+
+	regionBound := keyspacepkg.MakeRegionBound(created.GetId())
+	regionID := uint64(created.GetId()) * 10
+	pdtests.MustPutRegion(re, suite.cluster, regionID+1, 1, regionBound.RawLeftBound, regionBound.RawRightBound)
+	pdtests.MustPutRegion(re, suite.cluster, regionID+2, 1, regionBound.RawRightBound, regionBound.TxnLeftBound)
+	pdtests.MustPutRegion(re, suite.cluster, regionID+3, 1, regionBound.TxnLeftBound, regionBound.TxnRightBound)
+	pdtests.MustPutRegion(re, suite.cluster, regionID+4, 1, regionBound.TxnRightBound, []byte{})
+	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
+		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
+		Id:     created.GetId(),
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+	re.Equal(created, resp.GetKeyspace())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
 	defer func() {
