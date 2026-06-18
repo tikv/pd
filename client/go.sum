@@ -55,6 +55,8 @@ github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86 h1:tdMsjOqUR7YXH
 github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86/go.mod h1:exzhVYca3WRtd6gclGNErRWb1qEgff3LYta0LvRmON4=
 github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473 h1:n6QWAac97mv2NJhn17iFPFnsE5fMgtPLNmsGZeqq78o=
 github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473/go.mod h1:z6+aAHB7dBkA+LyinEX+48/ImRJ3jag0Hg0c7wkhEvE=
+github.com/pingcap/kvproto v0.0.0-20260618032004-5ec421b79217 h1:h9Hv1Wr5F+if9ggNV12zEv20iDAzOnwOUld2Qy/sV6Q=
+github.com/pingcap/kvproto v0.0.0-20260618032004-5ec421b79217/go.mod h1:z6+aAHB7dBkA+LyinEX+48/ImRJ3jag0Hg0c7wkhEvE=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 h1:HR/ylkkLmGdSSDaD8IDP+SZrdhV1Kibl9KrHxJ9eciw=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3/go.mod h1:DWQW5jICDR7UJh4HtxXSM20Churx4CQL0fwL/SoOSA4=
 github.com/pkg/errors v0.8.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

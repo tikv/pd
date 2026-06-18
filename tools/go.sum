@@ -480,6 +480,8 @@ github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86/go.mod h1:exzhVY
 github.com/pingcap/kvproto v0.0.0-20191211054548-3c6b38ea5107/go.mod h1:WWLmULLO7l8IOcQG+t+ItJ3fEcrL5FxF0Wu+HrMy26w=
 github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473 h1:n6QWAac97mv2NJhn17iFPFnsE5fMgtPLNmsGZeqq78o=
 github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473/go.mod h1:z6+aAHB7dBkA+LyinEX+48/ImRJ3jag0Hg0c7wkhEvE=
+github.com/pingcap/kvproto v0.0.0-20260618032004-5ec421b79217 h1:h9Hv1Wr5F+if9ggNV12zEv20iDAzOnwOUld2Qy/sV6Q=
+github.com/pingcap/kvproto v0.0.0-20260618032004-5ec421b79217/go.mod h1:z6+aAHB7dBkA+LyinEX+48/ImRJ3jag0Hg0c7wkhEvE=
 github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7/go.mod h1:8AanEdAHATuRurdGxZXBz0At+9avep+ub7U1AGYLIMM=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 h1:HR/ylkkLmGdSSDaD8IDP+SZrdhV1Kibl9KrHxJ9eciw=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3/go.mod h1:DWQW5jICDR7UJh4HtxXSM20Churx4CQL0fwL/SoOSA4=
