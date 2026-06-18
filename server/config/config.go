@@ -879,6 +879,9 @@ type KeyspaceConfig struct {
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+	// MetaServiceGroups is the available external meta-service groups.
+	// The key is the meta-service group name, and the value is the corresponding endpoint.
+	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -889,6 +892,14 @@ func (c *KeyspaceConfig) Validate() error {
 	}
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	for groupID, endpoint := range c.MetaServiceGroups {
+		if strings.TrimSpace(groupID) == "" {
+			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
+		if strings.TrimSpace(endpoint) == "" {
+			return errors.New("[keyspace] meta-service group addresses cannot be empty")
+		}
 	}
 	return nil
 }
@@ -907,15 +918,22 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
-	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
 	cfg := *c
-	cfg.PreAlloc = preAlloc
+	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
+	if c.MetaServiceGroups != nil {
+		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
+		for name, endpoint := range c.MetaServiceGroups {
+			cfg.MetaServiceGroups[name] = endpoint
+		}
+	}
 	return &cfg
 }
 
 // GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
 func (c *KeyspaceConfig) GetPreAlloc() []string {
-	return c.PreAlloc
+	ret := make([]string, len(c.PreAlloc))
+	copy(ret, c.PreAlloc)
+	return ret
 }
 
 // ToWaitRegionSplit returns whether to wait for the region split to complete.
@@ -931,4 +949,18 @@ func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
 // GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
 func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
+}
+
+// GetMetaServiceGroups returns the current meta-service-group configuration.
+func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
+	ret := make(map[string]string, len(c.MetaServiceGroups))
+	for name, endpoint := range c.MetaServiceGroups {
+		ret[name] = endpoint
+	}
+	return ret
+}
+
+// SetMetaServiceGroups updates the current meta-service-group configuration.
+func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+	c.MetaServiceGroups = metaServiceGroups
 }

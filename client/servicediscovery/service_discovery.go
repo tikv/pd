@@ -29,6 +29,7 @@ import (
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
@@ -124,6 +125,8 @@ type ServiceDiscovery interface {
 	GetAllServiceClients() []ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given url.
 	GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error)
+	// RemoveClientConn removes and closes the gRPC connection of the given URL.
+	RemoveClientConn(url string)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
@@ -250,7 +253,11 @@ func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 
 // GetClientConn implements ServiceClient.
 func (c *serviceClient) GetClientConn() *grpc.ClientConn {
-	if c == nil {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	// If the connection is in Shutdown state, it means the connection is closed and we should not reuse it.
+	if c.conn.GetState() == connectivity.Shutdown {
 		return nil
 	}
 	return c.conn
@@ -646,7 +653,7 @@ func (c *serviceDiscovery) Close() {
 		log.Info("[pd] close service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
-				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 			}
 			c.clientConns.Delete(key)
 			return true
@@ -1103,4 +1110,15 @@ func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *p
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+}
+
+// RemoveClientConn removes and closes the grpc client connection of the given URL.
+func (c *serviceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	if err := cc.(*grpc.ClientConn).Close(); err != nil {
+		log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+	}
 }

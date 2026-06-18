@@ -218,7 +218,7 @@ func (c *tsoServiceDiscovery) Close() {
 
 	c.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
-			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+			log.Warn("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
 		c.clientConns.Delete(key)
 		return true
@@ -316,6 +316,17 @@ func (c *tsoServiceDiscovery) GetBackupURLs() []string {
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+}
+
+// RemoveClientConn removes and closes the gRPC connection of the given URL.
+func (c *tsoServiceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	if err := cc.(*grpc.ClientConn).Close(); err != nil {
+		log.Warn("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+	}
 }
 
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
@@ -628,6 +639,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 				ClusterId:       c.clusterID,
 				KeyspaceId:      keyspaceID,
 				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
 			},
 			KeyspaceId:  keyspaceID,
 			ModRevision: modRevision,
@@ -637,7 +649,11 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			err, cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.GetHeader().GetError() != nil {
+	if err := resp.GetHeader().GetError(); err != nil {
+		if strings.Contains(err.GetMessage(), errs.MismatchCalleeIDErr) {
+			// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
+			c.RemoveClientConn(tsoSrvURL)
+		}
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()

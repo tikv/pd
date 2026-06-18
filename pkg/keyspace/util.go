@@ -52,6 +52,9 @@ const (
 )
 
 var (
+	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
+	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
+
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
 	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
@@ -226,8 +229,8 @@ func getRegionLabelID(id uint32) string {
 	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32) *labeler.LabelRule {
+// MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
+func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
 	return buildLabelRule(id, txnRegionBound)
 }
 
@@ -417,4 +420,16 @@ func isProtectedKeyspaceName(name string) bool {
 		return name == constant.SystemKeyspaceName
 	}
 	return name == constant.DefaultKeyspaceName
+}
+
+// IgnoreMetaServiceGroup removes the meta-service-group fields from the config.
+// Exported for tests.
+func IgnoreMetaServiceGroup(m map[string]string) map[string]string {
+	c := make(map[string]string, len(m))
+	for k, v := range m {
+		if k != MetaServiceGroupIDKey && k != MetaServiceGroupAddressesKey {
+			c[k] = v
+		}
+	}
+	return c
 }

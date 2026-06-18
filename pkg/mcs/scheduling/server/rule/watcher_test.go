@@ -98,7 +98,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	<-etcd.Server.ReadyNotify()
 
 	for i := 1; i < rulesNum+1; i++ {
-		rule := keyspace.MakeLabelRule(uint32(i))
+		rule := keyspace.MakeTxnLabelRule(uint32(i))
 		value, err := json.Marshal(rule)
 		re.NoError(err)
 		key := keypath.RegionLabelKeyPath(rule.ID)

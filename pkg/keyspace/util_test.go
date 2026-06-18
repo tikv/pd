@@ -126,7 +126,7 @@ func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
 	re.NoError(err)
 
-	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(constant.MaxValidKeyspaceID)))
+	re.NoError(regionLabeler.SetLabelRule(MakeTxnLabelRule(constant.MaxValidKeyspaceID)))
 	encodeKey := func(key []byte) []byte {
 		return []byte(codec.EncodeBytes(key))
 	}
@@ -348,7 +348,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	}{
 		// Valid keyspace label rule.
 		{
-			labelRule:  MakeLabelRule(1),
+			labelRule:  MakeTxnLabelRule(1),
 			expectedID: 1,
 			expectedOK: true,
 		},

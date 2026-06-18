@@ -136,6 +136,11 @@ func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 	o.keyspace.Store(cfg)
 }
 
+// CASKeyspaceConfig compares and swaps the keyspace configuration.
+func (o *PersistOptions) CASKeyspaceConfig(oldCfg, newCfg *KeyspaceConfig) bool {
+	return o.keyspace.CompareAndSwap(oldCfg, newCfg)
+}
+
 // GetMicroserviceConfig returns the microservice configuration.
 func (o *PersistOptions) GetMicroserviceConfig() *MicroserviceConfig {
 	return o.microservice.Load().(*MicroserviceConfig)
