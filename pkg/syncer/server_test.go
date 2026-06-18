@@ -790,6 +790,38 @@ func TestAppendHistoryRecordsKeepsSlowestDownstreamWindow(t *testing.T) {
 	re.Equal(uint64(12), pd3SyncStream.getSendIndex())
 }
 
+func TestBindStreamWaitsForAppendHistoryRecordsBoundary(t *testing.T) {
+	re := require.New(t)
+	stream := &testServerStream{}
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{})
+	syncer.history = newTestHistoryBuffer(8)
+	syncer.history.resetWithIndex(10)
+	records := []*core.RegionInfo{
+		newTestRegion(1),
+		newTestRegion(2),
+		newTestRegion(3),
+	}
+
+	syncer.mu.RLock()
+	bindResultCh := make(chan uint64, 1)
+	go func() {
+		syncStream, syncStartIndex := syncer.bindStreamForSync("pd2", stream)
+		defer syncer.unbindStream("pd2", syncStream)
+		bindResultCh <- syncStartIndex
+	}()
+
+	select {
+	case <-bindResultCh:
+		re.Fail("bindStreamForSync should wait for the append history boundary")
+	case <-time.After(10 * time.Millisecond):
+	}
+	syncer.observeDownstreamReplayWindowLocked(uint64(len(records)))
+	syncer.history.record(records...)
+	syncer.mu.RUnlock()
+
+	re.Equal(uint64(13), <-bindResultCh)
+}
+
 func TestAppendHistoryRecordsDoesNotWaitForBusyDownstream(t *testing.T) {
 	re := require.New(t)
 	busySyncStream := newRegionSyncStream(&testServerStream{}, 10)
