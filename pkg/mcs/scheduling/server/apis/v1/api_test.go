@@ -15,14 +15,16 @@
 package apis
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/schedule/handler"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -30,12 +32,17 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestHandlerReturnsNotBootstrappedWhenClusterMissing(t *testing.T) {
-	re := require.New(t)
-	h := handler.NewHandler(&server{Server: &scheserver.Server{}})
+func TestGetAllStoresReturnsNotBootstrappedWhenBasicClusterMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
 
-	re.NotPanics(func() {
-		_, err := h.GetStoresLoads()
-		re.ErrorIs(err, errs.ErrNotBootstrapped)
-	})
+	re := require.New(t)
+	resp := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(resp)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/stores", nil)
+	ctx.Set(multiservicesapi.ServiceContextKey, &scheserver.Server{})
+
+	getAllStores(ctx)
+
+	re.Equal(http.StatusInternalServerError, resp.Code)
+	re.Contains(resp.Body.String(), "not bootstrapped")
 }

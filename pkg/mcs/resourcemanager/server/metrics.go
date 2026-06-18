@@ -211,6 +211,15 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
 type metrics struct {
@@ -264,6 +273,7 @@ func init() {
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(pushRUMetricsDuration)
 }
 
 func newMetrics() *metrics {
@@ -445,7 +455,12 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 			m.SQLLayerRUMetrics.Add(sqlRU)
 			m.SQLCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 		}
-		m.KvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+		// A well-behaved client keeps TotalCpuTimeMs >= SqlLayerCpuTimeMs, but the
+		// values are reported by the client and not validated here. Guard against a
+		// negative KV CPU time so a malformed report cannot panic prometheus.Counter.Add.
+		if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+			m.KvCPUMetrics.Add(kvCPUTimeMs)
+		}
 	}
 	// RPC count info.
 	if consumption.KvReadRpcCount > 0 {
