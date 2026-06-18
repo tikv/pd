@@ -372,3 +372,16 @@ func (s ClusterGCStates) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
 	}
 	return s.globalGCBarriers, nil
 }
+
+// LegacyClientV2 is the GC client interface for legacy PD servers using (old) GC API V2.
+// Used to migrate legacy PD servers which do not support the "new GC API" for multi-tenant usage (e.g. TiCDC nextgen).
+// This interface is intentionally not added to RPCClient to avoid misuse or breaking existing stub and mock implementations.
+// Will be removed after the migration is done.
+type LegacyClientV2 interface {
+	// GetMinServiceSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+	GetMinServiceSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error)
+	// SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
+	SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// DeleteServiceSafePointV2 deletes a service GC safe point for the given keyspace and returns the new minimum safe point.
+	DeleteServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string) (uint64, error)
+}

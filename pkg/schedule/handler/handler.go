@@ -373,8 +373,8 @@ func (h *Handler) HandleOperatorCreation(input map[string]any) (int, any, error)
 		}
 	case "scatter-regions":
 		// support both receiving key ranges or regionIDs
-		startKey, _ := input["start_key"].(string)
-		endKey, _ := input["end_key"].(string)
+		startKeyHex, _ := input["start_key"].(string)
+		endKeyHex, _ := input["end_key"].(string)
 		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
 		if !ok {
 			return http.StatusBadRequest, nil, errors.Errorf("region_ids is invalid")
@@ -385,7 +385,7 @@ func (h *Handler) HandleOperatorCreation(input map[string]any) (int, any, error)
 		if rl, ok := input["retry_limit"].(float64); ok {
 			retryLimit = int(rl)
 		}
-		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
+		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKeyHex, endKeyHex, group, retryLimit)
 		errorMessage := ""
 		if err != nil {
 			errorMessage = err.Error()
@@ -682,8 +682,8 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	return h.addOperator(op)
 }
 
-// AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error
-func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, endRawKey, group string, retryLimit int) (int, error) {
+// AddScatterRegionsOperators add operators to scatter regions and return the processed percentage and error.
+func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startKeyHex, endKeyHex, group string, retryLimit int) (int, error) {
 	s, err := h.GetRegionScatterer()
 	if err != nil {
 		return 0, err
@@ -691,12 +691,12 @@ func (h *Handler) AddScatterRegionsOperators(regionIDs []uint64, startRawKey, en
 	opsCount := 0
 	var failures map[uint64]error
 	// If startKey and endKey are both defined, use them first.
-	if len(startRawKey) > 0 && len(endRawKey) > 0 {
-		startKey, err := hex.DecodeString(startRawKey)
+	if len(startKeyHex) > 0 && len(endKeyHex) > 0 {
+		startKey, err := hex.DecodeString(startKeyHex)
 		if err != nil {
 			return 0, err
 		}
-		endKey, err := hex.DecodeString(endRawKey)
+		endKey, err := hex.DecodeString(endKeyHex)
 		if err != nil {
 			return 0, err
 		}
@@ -1053,8 +1053,8 @@ type HotBucketsResponse map[uint64][]*HotBucketsItem
 
 // HotBucketsItem is the item of hot buckets.
 type HotBucketsItem struct {
-	StartKey   string `json:"start_key"`
-	EndKey     string `json:"end_key"`
+	StartKey   string `json:"start_key"` // hex-encoded
+	EndKey     string `json:"end_key"`   // hex-encoded
 	HotDegree  int    `json:"hot_degree"`
 	ReadBytes  uint64 `json:"read_bytes"`
 	ReadKeys   uint64 `json:"read_keys"`
@@ -1110,13 +1110,13 @@ func (h *Handler) GetRegionLabeler() (*labeler.RegionLabeler, error) {
 	return c.GetRegionLabeler(), nil
 }
 
-// AccelerateRegionsScheduleInRange accelerates regions scheduling in a given range.
-func (h *Handler) AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey string, limit int) error {
-	startKey, err := hex.DecodeString(rawStartKey)
+// AccelerateRegionsScheduleInRange accelerates regions scheduling in a given hex-encoded key range.
+func (h *Handler) AccelerateRegionsScheduleInRange(startKeyHex, endKeyHex string, limit int) error {
+	startKey, err := hex.DecodeString(startKeyHex)
 	if err != nil {
 		return err
 	}
-	endKey, err := hex.DecodeString(rawEndKey)
+	endKey, err := hex.DecodeString(endKeyHex)
 	if err != nil {
 		return err
 	}
@@ -1209,13 +1209,13 @@ func (*Handler) BuildScatterRegionsResp(opsCount int, failures map[uint64]error)
 	}
 }
 
-// ScatterRegionsByRange scatters regions by range.
-func (h *Handler) ScatterRegionsByRange(rawStartKey, rawEndKey string, group string, retryLimit int) (int, map[uint64]error, error) {
-	startKey, err := hex.DecodeString(rawStartKey)
+// ScatterRegionsByRange scatters regions by hex-encoded key range.
+func (h *Handler) ScatterRegionsByRange(startKeyHex, endKeyHex string, group string, retryLimit int) (int, map[uint64]error, error) {
+	startKey, err := hex.DecodeString(startKeyHex)
 	if err != nil {
 		return 0, nil, err
 	}
-	endKey, err := hex.DecodeString(rawEndKey)
+	endKey, err := hex.DecodeString(endKeyHex)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -1241,15 +1241,15 @@ type SplitRegionsResponse struct {
 	NewRegionsID        []uint64 `json:"regions-id"`
 }
 
-// SplitRegions splits regions by split keys.
-func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLimit int) (*SplitRegionsResponse, error) {
+// SplitRegions splits regions by hex-encoded split keys.
+func (h *Handler) SplitRegions(ctx context.Context, splitKeyHexes []string, retryLimit int) (*SplitRegionsResponse, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	splitKeys := make([][]byte, 0, len(rawSplitKeys))
-	for _, rawKey := range rawSplitKeys {
-		key, err := hex.DecodeString(rawKey.(string))
+	splitKeys := make([][]byte, 0, len(splitKeyHexes))
+	for _, keyHex := range splitKeyHexes {
+		key, err := hex.DecodeString(keyHex)
 		if err != nil {
 			return nil, err
 		}
@@ -1271,13 +1271,13 @@ func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLim
 	return s, nil
 }
 
-// CheckRegionsReplicated checks if regions are replicated.
-func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string, error) {
-	startKey, err := hex.DecodeString(rawStartKey)
+// CheckRegionsReplicated checks if regions in a hex-encoded key range are replicated.
+func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string, error) {
+	startKey, err := hex.DecodeString(startKeyHex)
 	if err != nil {
 		return "", err
 	}
-	endKey, err := hex.DecodeString(rawEndKey)
+	endKey, err := hex.DecodeString(endKeyHex)
 	if err != nil {
 		return "", err
 	}

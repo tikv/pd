@@ -79,6 +79,9 @@ func (t *testServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn
 	}
 	return conn.(*grpc.ClientConn), nil
 }
+func (t *testServiceDiscovery) RemoveClientConn(url string) {
+	t.clientConns.Delete(url)
+}
 func (*testServiceDiscovery) ScheduleCheckMemberChanged() {}
 func (*testServiceDiscovery) CheckMemberChanged() error   { return nil }
 func (t *testServiceDiscovery) ExecAndAddLeaderSwitchedCallback(cb sd.LeaderSwitchedCallbackFunc) {
@@ -93,7 +96,7 @@ type fakeMetaStorageClient struct {
 	value []byte
 }
 
-func (*fakeMetaStorageClient) Watch(context.Context, []byte, ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (*fakeMetaStorageClient) Watch(context.Context, []byte, ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	return nil, errors.New("not implemented")
 }
 

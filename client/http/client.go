@@ -155,7 +155,7 @@ func (ci *clientInner) requestWithRetry(
 				continue
 			}
 			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
-			if err == nil || noNeedRetry(statusCode) {
+			if err == nil || noNeedRetryForRequest(reqInfo, statusCode) {
 				return err
 			}
 			log.Debug("[pd] http request url failed", append(logFields,
@@ -177,7 +177,7 @@ func (ci *clientInner) requestWithRetry(
 	// Set the retryable checker for the backoffer if it's not set.
 	bo.SetRetryableChecker(func(err error) bool {
 		// Backoffer also needs to check the status code to determine whether to retry.
-		return err != nil && !noNeedRetry(statusCode)
+		return err != nil && !noNeedRetryForRequest(reqInfo, statusCode)
 	}, false)
 	return bo.Exec(ctx, execFunc)
 }
@@ -186,6 +186,13 @@ func noNeedRetry(statusCode int) bool {
 	return statusCode == http.StatusNotFound ||
 		statusCode == http.StatusForbidden ||
 		statusCode == http.StatusBadRequest
+}
+
+func noNeedRetryForRequest(reqInfo *requestInfo, statusCode int) bool {
+	if noNeedRetry(statusCode) {
+		return true
+	}
+	return reqInfo.name == UpdateKeyspaceConfigName && statusCode == http.StatusConflict
 }
 
 func (ci *clientInner) doRequest(

@@ -102,6 +102,32 @@ func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTest(suite.checkConfigAll)
 }
 
+func (suite *configTestSuite) TestKeyspaceConfigUpdate() {
+	suite.env.RunTest(suite.checkKeyspaceConfigUpdate)
+}
+
+func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	addr := fmt.Sprintf("%s/pd/api/v1/config", leaderServer.GetAddr())
+
+	postData, err := json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+
+	testutil.Eventually(re, func() bool {
+		return !leaderServer.GetServer().GetPersistOptions().GetKeyspaceConfig().ToWaitRegionSplit()
+	})
+
+	postData, err = json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+}
+
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
