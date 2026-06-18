@@ -442,7 +442,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
-	members, err := cluster.GetMembers(s.GetClient())
+	members, err := s.Server.GetMembers()
 	if err != nil {
 		return &pdpb.GetMembersResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -451,19 +451,16 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 
 	var etcdLeader, pdLeader *pdpb.Member
 	leaderID := s.member.GetEtcdLeader()
-	for _, m := range members {
-		if m.MemberId == leaderID {
-			etcdLeader = m
-			break
-		}
-	}
-
 	leader := s.member.GetLeader()
-	for _, m := range members {
-		if m.MemberId == leader.GetMemberId() {
-			pdLeader = m
-			break
+	etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
+	if (pdLeader == nil && leader != nil) || (etcdLeader == nil && leaderID != 0) {
+		members, err = s.ReloadMembers()
+		if err != nil {
+			return &pdpb.GetMembersResponse{
+				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
 		}
+		etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
 	}
 
 	return &pdpb.GetMembersResponse{
@@ -472,6 +469,19 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		Leader:     pdLeader,
 		EtcdLeader: etcdLeader,
 	}, nil
+}
+
+func findLeadersInMembers(members []*pdpb.Member, etcdLeaderID uint64, leader *pdpb.Member) (*pdpb.Member, *pdpb.Member) {
+	var etcdLeader, pdLeader *pdpb.Member
+	for _, m := range members {
+		if m.GetMemberId() == etcdLeaderID {
+			etcdLeader = m
+		}
+		if leader != nil && m.GetMemberId() == leader.GetMemberId() {
+			pdLeader = m
+		}
+	}
+	return etcdLeader, pdLeader
 }
 
 // Tso implements gRPC PDServer.

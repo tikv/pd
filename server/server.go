@@ -242,6 +242,7 @@ type Server struct {
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
+	membersCache                     *membersCache
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -274,6 +275,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
+		membersCache:                    newMembersCache(membersCacheTTL),
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
@@ -1162,8 +1164,22 @@ func (s *Server) StartTimestamp() int64 {
 
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(false)
+}
+
+// ReloadMembers reloads PD server list and updates the cache.
+func (s *Server) ReloadMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(true)
+}
+
+func (s *Server) loadMembers(forceRefresh bool) ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	if s.membersCache != nil {
+		return s.membersCache.get(forceRefresh, func() ([]*pdpb.Member, error) {
+			return cluster.GetMembers(s.GetClient())
+		})
 	}
 	return cluster.GetMembers(s.GetClient())
 }
