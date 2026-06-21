@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -695,41 +694,49 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 }
 
 // TestDoPatrolKeyspaceGroupSizeForAutoSplit tests the auto-split patrol logic:
-// when a group's keyspace count exceeds the threshold (5 when failpoint is enabled),
+// when a group's keyspace count exceeds the default threshold (40k),
 // it splits about half of the keyspaces into a new group.
 func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplit() {
 	re := suite.Require()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	// Create default keyspace group with 10 keyspaces and 2 members (without Bootstrap).
+	// Bootstrap the manager so the in-memory group index is initialized before the patrol
+	// calls SplitKeyspaceGroupByID.
+	re.NoError(kgm.Bootstrap(suite.ctx))
+	// Build a keyspace list that is exactly one element above the default split threshold,
+	// so this test validates the current production default instead of a failpoint override.
+	keyspaces := make([]uint32, 0, defaultKeyspaceCountSplitThreshold+1)
+	for i := 0; i <= defaultKeyspaceCountSplitThreshold; i++ {
+		keyspaces = append(keyspaces, uint32(i))
+	}
+
+	// Overwrite the default keyspace group with enough keyspaces to trigger auto-split.
 	err := store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		kg := &endpoint.KeyspaceGroup{
 			ID:        constant.DefaultKeyspaceGroupID,
 			UserKind:  endpoint.Basic.String(),
-			Keyspaces: []uint32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+			Keyspaces: keyspaces,
 			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
 		}
 		return store.SaveKeyspaceGroup(txn, kg)
 	})
 	re.NoError(err)
-	// Enable failpoint so threshold becomes 5 (otherwise 80000).
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/autoSplitKeyspaceGroupThreshold"))
-	}()
+
 	// Run one round of patrol; should split group 0 into 0 and 1.
 	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
-	// After split: default group keeps first half [0,1,2,3,4], new group 1 gets [5,6,7,8,9].
 	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(kg0)
-	re.Len(kg0.Keyspaces, 5)
-	re.Equal([]uint32{0, 1, 2, 3, 4}, kg0.Keyspaces)
+	// The patrol uses splitIdx := count / 2, so with 40001 keyspaces the source keeps 20000
+	// and the target receives the remaining 20001.
+	re.Len(kg0.Keyspaces, defaultKeyspaceCountSplitThreshold/2)
 	kg1, err := kgm.GetKeyspaceGroupByID(1)
 	re.NoError(err)
 	re.NotNil(kg1)
-	re.Len(kg1.Keyspaces, 5)
-	re.Equal([]uint32{5, 6, 7, 8, 9}, kg1.Keyspaces)
+	// Assert exact ordering as well, to verify the patrol moves the tail half of the slice.
+	re.Len(kg1.Keyspaces, defaultKeyspaceCountSplitThreshold/2+1)
+	re.Equal(keyspaces[:defaultKeyspaceCountSplitThreshold/2], kg0.Keyspaces)
+	re.Equal(keyspaces[defaultKeyspaceCountSplitThreshold/2:], kg1.Keyspaces)
 	re.True(kg1.IsSplitTarget())
 	re.Equal(constant.DefaultKeyspaceGroupID, kg1.SplitSource())
 }

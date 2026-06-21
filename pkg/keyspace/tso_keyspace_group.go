@@ -55,9 +55,9 @@ const (
 	allocNodesInterval                 = 10 * time.Millisecond
 	// defaultKeyspaceCountSplitThreshold is the keyspace count threshold for auto-splitting
 	// a keyspace group. When a group's keyspace count exceeds this value, a new group will be split automatically.
-	defaultKeyspaceCountSplitThreshold = 80000
+	defaultKeyspaceCountSplitThreshold = 40000
 	// autoSplitKeyspaceGroupPatrolInterval is the interval for patrolling keyspace group size for auto-split.
-	autoSplitKeyspaceGroupPatrolInterval = 5 * time.Minute
+	autoSplitKeyspaceGroupPatrolInterval = 15 * time.Minute
 )
 
 const (
@@ -229,7 +229,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 // patrolKeyspaceGroupSizeForAutoSplit periodically checks all tso keyspace groups.
-// If a group's keyspace count exceeds defaultKeyspaceCountSplitThreshold (80k),
+// If a group's keyspace count exceeds defaultKeyspaceCountSplitThreshold,
 // it automatically splits a new group and moves about half of the keyspaces to the new group.
 func (m *GroupManager) patrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) {
 	defer logutil.LogPanic()
