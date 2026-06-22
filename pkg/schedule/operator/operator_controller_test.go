@@ -992,7 +992,6 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
 	re.Empty(controller.GetOperators())
 	re.Empty(controller.GetWaitingOperators())
 	re.Equal(uint64(0), controller.OperatorCount(OpLeader))
-	re.Equal(0, controller.opNotifierQueue.len())
 	re.Equal(uint64(0), controller.wopStatus.getCount(waitingOp1.Desc()))
 	for _, op := range []*Operator{runningOp, waitingOp1, waitingOp2} {
 		re.True(op.IsEnd())
@@ -1002,29 +1001,14 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
 		re.True(ok)
 		re.Equal(string(AdminStop), reason)
 	}
+	region, next := controller.pollNeedDispatchRegion()
+	re.Nil(region)
+	re.True(next)
 
 	newWaitingOp := newTransferLeaderOp(2)
 	added := controller.AddWaitingOperator(newWaitingOp)
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
-}
-
-func (suite *operatorControllerTestSuite) TestPollNeedDispatchRegionAfterNotifierQueueClear() {
-	re := suite.Require()
-	opts := mockconfig.NewTestOptions()
-	cluster := mockcluster.NewCluster(suite.ctx, opts)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
-	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
-
-	controller.opNotifierQueue.push(&operatorWithTime{
-		op:   NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
-		time: time.Now(),
-	})
-	controller.opNotifierQueue.clear()
-
-	region, next := controller.pollNeedDispatchRegion()
-	re.Nil(region)
-	re.False(next)
 }
 
 func (suite *operatorControllerTestSuite) TestCancelAllOperatorsWaitsPromotingOperator() {

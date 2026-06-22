@@ -88,8 +88,7 @@ type Controller struct {
 	cluster   *core.BasicCluster
 	hbStreams *hbstream.HeartbeatStreams
 
-	// operatorLock serializes bulk cancellation with operator addition, promotion,
-	// and active push queue updates.
+	// operatorLock serializes bulk cancellation with operator addition and promotion.
 	operatorLock syncutil.Mutex
 
 	// fast path, TTLUint64 is safe for concurrent.
@@ -259,9 +258,6 @@ func getNextPushOperatorTime(step OpStep, now time.Time) time.Time {
 // "next" is true to indicate that it may exist in next attempt,
 // and false is the end for the poll.
 func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
-	oc.operatorLock.Lock()
-	defer oc.operatorLock.Unlock()
-
 	item, ok := oc.opNotifierQueue.pop()
 	if !ok || item == nil || item.op == nil {
 		return nil, false
@@ -657,18 +653,16 @@ func (oc *Controller) ack(op *Operator) {
 
 // RemoveOperators removes all operators from the running operators.
 func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
-	oc.operatorLock.Lock()
-	defer oc.operatorLock.Unlock()
-	oc.removeOperatorsLocked(reasons...)
+	removed := oc.removeOperatorsWithoutBury()
+	oc.cancelAndBuryOperators(removed, reasons...)
 }
 
-func (oc *Controller) removeOperatorsLocked(reasons ...CancelReasonType) {
-	removed := oc.removeOperatorsWithoutBury()
+func (oc *Controller) cancelAndBuryOperators(ops []*Operator, reasons ...CancelReasonType) {
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
 	}
-	for _, op := range removed {
+	for _, op := range ops {
 		if op.Cancel(cancelReason) {
 			log.Info("operator removed",
 				zap.Uint64("region-id", op.RegionID()),
@@ -679,11 +673,12 @@ func (oc *Controller) removeOperatorsLocked(reasons ...CancelReasonType) {
 	}
 }
 
-// CancelAllOperators cancels all running and waiting operators and clears pending notifications.
+// CancelAllOperators cancels all running and waiting operators.
 func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 	oc.operatorLock.Lock()
 	defer oc.operatorLock.Unlock()
-	oc.removeOperatorsLocked(reasons...)
+	removed := oc.removeOperatorsWithoutBury()
+	oc.cancelAndBuryOperators(removed, reasons...)
 
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
@@ -703,7 +698,6 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 		}
 		oc.buryOperator(op)
 	}
-	oc.opNotifierQueue.clear()
 }
 
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
