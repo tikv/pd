@@ -599,7 +599,7 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	configBytes, err := json.Marshal(config)
 	re.NoError(err)
 	// trigger resource group controller to watch config changes.
-	_, err = suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, 1), configBytes)
+	_, err = suite.client.Put(ctx, pd.ControllerConfigPathPrefixBytes, configBytes)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return rgController.GetRUVersion() == controller.RUVersionV2
