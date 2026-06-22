@@ -15,6 +15,7 @@
 package server
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -78,6 +79,56 @@ func TestMembersCacheForceRefresh(t *testing.T) {
 	re.Equal(int32(2), loadCount.Load())
 }
 
+func TestMembersCacheForceRefreshDoesNotShareNormalRefresh(t *testing.T) {
+	re := require.New(t)
+	cache := newMembersCache(time.Hour)
+	var loadCount atomic.Int32
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	load := func() ([]*pdpb.Member, error) {
+		id := loadCount.Add(1)
+		switch id {
+		case 1:
+			close(firstStarted)
+			<-releaseFirst
+		case 2:
+		default:
+			return nil, errors.New("unexpected member load")
+		}
+		return []*pdpb.Member{{MemberId: uint64(id)}}, nil
+	}
+
+	normalCh := make(chan struct {
+		members []*pdpb.Member
+		err     error
+	}, 1)
+	go func() {
+		members, err := cache.get(false, load)
+		normalCh <- struct {
+			members []*pdpb.Member
+			err     error
+		}{members: members, err: err}
+	}()
+	<-firstStarted
+
+	forceMembers, err := cache.get(true, load)
+	re.NoError(err)
+	re.Equal(uint64(2), forceMembers[0].GetMemberId())
+	re.Equal(int32(2), loadCount.Load())
+
+	close(releaseFirst)
+	normalResult := <-normalCh
+	re.NoError(normalResult.err)
+	re.Equal(uint64(1), normalResult.members[0].GetMemberId())
+
+	cachedMembers, err := cache.get(false, func() ([]*pdpb.Member, error) {
+		return nil, errors.New("cache should keep the forced refresh result")
+	})
+	re.NoError(err)
+	re.Equal(uint64(2), cachedMembers[0].GetMemberId())
+	re.Equal(int32(2), loadCount.Load())
+}
+
 func TestMembersCacheSingleflight(t *testing.T) {
 	re := require.New(t)
 	cache := newMembersCache(time.Hour)
@@ -86,7 +137,9 @@ func TestMembersCacheSingleflight(t *testing.T) {
 	release := make(chan struct{})
 	var once sync.Once
 	load := func() ([]*pdpb.Member, error) {
-		loadCount.Add(1)
+		if loadCount.Add(1) > 1 {
+			return nil, errors.New("duplicate member load")
+		}
 		once.Do(func() { close(started) })
 		<-release
 		return []*pdpb.Member{{MemberId: 1}}, nil

@@ -471,8 +471,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}, nil
 }
 
-func findLeadersInMembers(members []*pdpb.Member, etcdLeaderID uint64, leader *pdpb.Member) (*pdpb.Member, *pdpb.Member) {
-	var etcdLeader, pdLeader *pdpb.Member
+func findLeadersInMembers(members []*pdpb.Member, etcdLeaderID uint64, leader *pdpb.Member) (etcdLeader, pdLeader *pdpb.Member) {
 	for _, m := range members {
 		if m.GetMemberId() == etcdLeaderID {
 			etcdLeader = m

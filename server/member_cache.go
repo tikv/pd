@@ -24,13 +24,18 @@ import (
 )
 
 const membersCacheTTL = time.Second
+const (
+	membersCacheLoadKey      = "members"
+	membersCacheForceLoadKey = "members-force"
+)
 
 type membersCache struct {
-	mu       sync.RWMutex
-	ttl      time.Duration
-	members  []*pdpb.Member
-	expireAt time.Time
-	flight   singleflight.Group
+	mu         sync.RWMutex
+	ttl        time.Duration
+	members    []*pdpb.Member
+	expireAt   time.Time
+	refreshSeq uint64
+	flight     singleflight.Group
 }
 
 func newMembersCache(ttl time.Duration) *membersCache {
@@ -44,28 +49,51 @@ func (c *membersCache) get(forceRefresh bool, load func() ([]*pdpb.Member, error
 		}
 	}
 
-	value, err, _ := c.flight.Do("members", func() (any, error) {
+	key := membersCacheLoadKey
+	if forceRefresh {
+		key = membersCacheForceLoadKey
+	}
+	value, err, _ := c.flight.Do(key, func() (any, error) {
 		if !forceRefresh {
 			if members, ok := c.getFresh(); ok {
 				return members, nil
 			}
 		}
 
-		members, err := load()
-		if err != nil {
-			return nil, err
-		}
-		cachedMembers := cloneMembers(members)
-		c.mu.Lock()
-		c.members = cachedMembers
-		c.expireAt = time.Now().Add(c.ttl)
-		c.mu.Unlock()
-		return cachedMembers, nil
+		return c.loadAndStore(load)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return cloneMembers(value.([]*pdpb.Member)), nil
+}
+
+func (c *membersCache) loadAndStore(load func() ([]*pdpb.Member, error)) ([]*pdpb.Member, error) {
+	seq := c.beginRefresh()
+	members, err := load()
+	if err != nil {
+		return nil, err
+	}
+	cachedMembers := cloneMembers(members)
+	c.storeIfLatest(seq, cachedMembers)
+	return cachedMembers, nil
+}
+
+func (c *membersCache) beginRefresh() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.refreshSeq++
+	return c.refreshSeq
+}
+
+func (c *membersCache) storeIfLatest(seq uint64, members []*pdpb.Member) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if seq != c.refreshSeq {
+		return
+	}
+	c.members = members
+	c.expireAt = time.Now().Add(c.ttl)
 }
 
 func (c *membersCache) getFresh() ([]*pdpb.Member, bool) {

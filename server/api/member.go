@@ -56,7 +56,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/members [get]
 func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
-	members, err := getMembers(h.svr)
+	members, err := getMembers(h.svr, false)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -64,9 +64,11 @@ func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, members)
 }
 
-func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
-	if _, err := svr.ReloadMembers(); err != nil {
-		return nil, errors.WithStack(err)
+func getMembers(svr *server.Server, forceRefresh bool) (*pdpb.GetMembersResponse, error) {
+	if forceRefresh {
+		if _, err := svr.ReloadMembers(); err != nil {
+			return nil, errors.WithStack(err)
+		}
 	}
 	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	grpcServer := &server.GrpcServer{Server: svr}
@@ -205,7 +207,7 @@ func (h *memberHandler) DeleteMemberByID(w http.ResponseWriter, r *http.Request)
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/members/name/{name} [post]
 func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := getMembers(h.svr)
+	members, membersErr := getMembers(h.svr, true)
 	if membersErr != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
 		return
