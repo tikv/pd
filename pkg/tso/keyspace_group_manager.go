@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -1238,23 +1239,48 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
-func (kgm *KeyspaceGroupManager) sendDeleteRequestToBackend(path string) (*http.Response, error) {
+func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix string) (*http.Response, error) {
 	var lastErr error
+	var lastResp *http.Response
 	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
 		endpoint = strings.TrimSpace(endpoint)
-		if len(endpoint) == 0 {
+		if endpoint == "" {
 			continue
 		}
-		resp, err := apiutil.DoDelete(kgm.httpClient, strings.TrimRight(endpoint, "/")+path)
-		if err == nil {
+		parsedURL, err := url.Parse(endpoint)
+		if err != nil {
+			continue
+		}
+		if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			continue
+		}
+		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
+		resp, err := apiutil.DoDelete(kgm.httpClient, requestURL)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
 			return resp, nil
 		}
-		lastErr = err
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			lastErr = err
+			continue
+		}
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		lastResp = resp
+	}
+	if lastResp != nil {
+		return lastResp, nil
 	}
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, perrors.New("empty backend endpoints")
+	return nil, errs.ErrURLParse.FastGenByArgs()
 }
 
 // Put the code below into the critical section to prevent from sending too many HTTP requests.
@@ -1272,7 +1298,7 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := kgm.sendDeleteRequestToBackend(keyspaceGroupsAPIPrefix + fmt.Sprintf("/%d/split", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
@@ -1309,7 +1335,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := kgm.sendDeleteRequestToBackend(keyspaceGroupsAPIPrefix + fmt.Sprintf("/%d/merge", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/merge", id))
 	if err != nil {
 		return err
 	}

@@ -1318,9 +1318,89 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				}
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
-				resp, err := kgm.sendDeleteRequestToBackend(keyspaceGroupsAPIPrefix + "/1/split")
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
 				re.NoError(err)
 				re.NotNil(resp)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "status-code-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.Equal(http.StatusOK, resp.StatusCode)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "all-status-codes-fail",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusBadGateway,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusServiceUnavailable,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.Equal(http.StatusServiceUnavailable, resp.StatusCode)
 				re.NoError(resp.Body.Close())
 			},
 			wantURLs: []string{
@@ -1361,6 +1441,54 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 			},
 			wantURLs: []string{
 				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/split",
+			},
+		},
+		{
+			name: "finish-split-status-code-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				kgm := &KeyspaceGroupManager{
+					state:      state{},
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+					metrics: newKeyspaceGroupMetrics(),
+				}
+				kgm.initialize()
+				kgm.kgs[2] = &endpoint.KeyspaceGroup{
+					ID:         2,
+					SplitState: &endpoint.SplitState{SplitSource: 1},
+				}
+				return kgm
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/2/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusBadGateway,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(kgm.finishSplitKeyspaceGroup(2))
+			},
+			assert: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NotNil(kgm.kgs[2])
+				re.Nil(kgm.kgs[2].SplitState)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/2/split",
 			},
 		},
 		{
