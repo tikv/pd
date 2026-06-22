@@ -73,3 +73,27 @@ func TestMakeKeyRanges(t *testing.T) {
 		re.Equal(tc.expectedTxnEnd, txnEnd)
 	}
 }
+
+func TestMakeRawKeyRanges(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		keyspaceID       uint32
+		expectedRawStart string
+		expectedRawEnd   string
+	}{
+		{keyspaceID: 0, expectedRawStart: "7200000000000000fb", expectedRawEnd: "7200000100000000fb"},
+		{keyspaceID: 1, expectedRawStart: "7200000100000000fb", expectedRawEnd: "7200000200000000fb"},
+		{keyspaceID: 100, expectedRawStart: "7200006400000000fb", expectedRawEnd: "7200006500000000fb"},
+		{keyspaceID: constant.MaxValidKeyspaceID, expectedRawStart: "72ffffff00000000fb", expectedRawEnd: "7300000000000000fb"},
+	}
+
+	for _, tc := range testCases {
+		ranges := keyspace.MakeRawKeyRanges(tc.keyspaceID)
+		re.Len(ranges, 1, "should have 1 range (raw)")
+
+		rawRange := ranges[0].(map[string]any)
+		re.Equal(tc.expectedRawStart, rawRange["start_key"].(string))
+		re.Equal(tc.expectedRawEnd, rawRange["end_key"].(string))
+	}
+}

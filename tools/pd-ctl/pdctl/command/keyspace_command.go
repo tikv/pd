@@ -497,13 +497,16 @@ func newSetPlacementCommand() *cobra.Command {
 	r := &cobra.Command{
 		Use:   "set-placement <keyspace-id> <label-key>=<label-value> [<label-key>=<label-value>...]",
 		Short: "set keyspace placement rules with store label constraints",
-		Long: "Set placement rules for all txn regions of a keyspace to stores matching the specified labels.\n" +
-			"This creates a placement rule bundle that places the keyspace's txn regions on stores matching all the label constraints.\n" +
+		Long: "Set placement rules for all regions of a keyspace to stores matching the specified labels.\n" +
+			"By default the txn region bound is used; pass --raw to use the raw region bound instead.\n" +
+			"This creates a placement rule bundle that places the keyspace's regions on stores matching all the label constraints.\n" +
 			"Examples:\n" +
 			"  pd-ctl keyspace set-placement 1 zone=east\n" +
-			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd",
+			"  pd-ctl keyspace set-placement 1 zone=east disk=ssd\n" +
+			"  pd-ctl keyspace set-placement 1 zone=east --raw",
 		Run: setPlacementCommandFunc,
 	}
+	r.Flags().Bool("raw", false, "use raw key range instead of the default txn key range")
 	return r
 }
 
@@ -550,8 +553,20 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		})
 	}
 
-	// Generate key ranges for the keyspace
+	raw, err := cmd.Flags().GetBool("raw")
+	if err != nil {
+		cmd.PrintErrf("Failed to get raw flag: %v\n", err)
+		return
+	}
+
+	// Generate key ranges for the keyspace. Use the raw region bound when --raw
+	// is set, otherwise the txn region bound.
 	keyRanges := keyspace.MakeTxnKeyRanges(keyspaceID32)
+	boundName := "txn"
+	if raw {
+		keyRanges = keyspace.MakeRawKeyRanges(keyspaceID32)
+		boundName = "raw"
+	}
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := &pd.GroupBundle{
@@ -561,7 +576,7 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 		Rules: []*pd.Rule{
 			{
 				GroupID: groupID,
-				ID:      fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID),
+				ID:      fmt.Sprintf("keyspace-%d-rule-%s", keyspaceID, boundName),
 				Role:    pd.Voter,
 				// TODO: make replica count configurable
 				Count:            3,
