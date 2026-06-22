@@ -15,31 +15,32 @@
 package server
 
 import (
+	"context"
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const membersCacheTTL = time.Second
-const (
-	membersCacheLoadKey      = "members"
-	membersCacheForceLoadKey = "members-force"
-)
 
 type membersCache struct {
-	mu         sync.RWMutex
-	ttl        time.Duration
-	members    []*pdpb.Member
-	expireAt   time.Time
-	refreshSeq uint64
-	flight     singleflight.Group
+	mu              sync.RWMutex
+	ttl             time.Duration
+	members         []*pdpb.Member
+	expireAt        time.Time
+	refreshSeq      uint64
+	loadFlight      *syncutil.OrderedSingleFlight[[]*pdpb.Member]
+	forceLoadFlight *syncutil.OrderedSingleFlight[[]*pdpb.Member]
 }
 
 func newMembersCache(ttl time.Duration) *membersCache {
-	return &membersCache{ttl: ttl}
+	return &membersCache{
+		ttl:             ttl,
+		loadFlight:      syncutil.NewOrderedSingleFlight[[]*pdpb.Member](),
+		forceLoadFlight: syncutil.NewOrderedSingleFlight[[]*pdpb.Member](),
+	}
 }
 
 func (c *membersCache) get(forceRefresh bool, load func() ([]*pdpb.Member, error)) ([]*pdpb.Member, error) {
@@ -49,11 +50,11 @@ func (c *membersCache) get(forceRefresh bool, load func() ([]*pdpb.Member, error
 		}
 	}
 
-	key := membersCacheLoadKey
+	flight := c.loadFlight
 	if forceRefresh {
-		key = membersCacheForceLoadKey
+		flight = c.forceLoadFlight
 	}
-	value, err, _ := c.flight.Do(key, func() (any, error) {
+	members, err := flight.Do(context.Background(), func(context.Context) ([]*pdpb.Member, error) {
 		if !forceRefresh {
 			if members, ok := c.getFresh(); ok {
 				return members, nil
@@ -65,7 +66,7 @@ func (c *membersCache) get(forceRefresh bool, load func() ([]*pdpb.Member, error
 	if err != nil {
 		return nil, err
 	}
-	return cloneMembers(value.([]*pdpb.Member)), nil
+	return cloneMembers(members), nil
 }
 
 func (c *membersCache) loadAndStore(load func() ([]*pdpb.Member, error)) ([]*pdpb.Member, error) {
