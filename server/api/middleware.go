@@ -120,7 +120,7 @@ func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 func (m clusterMiddleware) getFollowerSyncedCluster(r *http.Request) *cluster.RaftCluster {
 	if r.Method != http.MethodGet ||
 		!m.allowFollowerSyncedRegion ||
-		m.s.GetMember().IsServing() ||
+		m.s.IsServing() ||
 		r.Header.Get(apiutil.PDAllowFollowerHandleHeader) == "" {
 		return nil
 	}
