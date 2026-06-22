@@ -321,9 +321,6 @@ func (sc *schedulingController) GetOperatorController() *operator.Controller {
 func (sc *schedulingController) CancelAllOperators() {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	if sc.coordinator == nil {
-		return
-	}
 	sc.coordinator.GetOperatorController().CancelAllOperators(operator.UnsafeRecovery)
 }
 

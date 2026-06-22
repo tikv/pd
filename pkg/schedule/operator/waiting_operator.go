@@ -174,7 +174,9 @@ func (s *waitingOperatorStatus) incCount(kind string) {
 func (s *waitingOperatorStatus) decCount(kind string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ops[kind]--
+	if count := s.ops[kind]; count > 0 {
+		s.ops[kind] = count - 1
+	}
 }
 
 // getCount returns the count of the given operator kind.
