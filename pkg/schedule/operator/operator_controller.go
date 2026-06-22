@@ -88,6 +88,10 @@ type Controller struct {
 	cluster   *core.BasicCluster
 	hbStreams *hbstream.HeartbeatStreams
 
+	// operatorLock serializes bulk cancellation with operator addition, promotion,
+	// and active push queue updates.
+	operatorLock syncutil.Mutex
+
 	// fast path, TTLUint64 is safe for concurrent.
 	fastOperators *cache.TTLUint64
 
@@ -255,10 +259,13 @@ func getNextPushOperatorTime(step OpStep, now time.Time) time.Time {
 // "next" is true to indicate that it may exist in next attempt,
 // and false is the end for the poll.
 func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
-	if oc.opNotifierQueue.len() == 0 {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+
+	item, ok := oc.opNotifierQueue.pop()
+	if !ok || item == nil || item.op == nil {
 		return nil, false
 	}
-	item, _ := oc.opNotifierQueue.pop()
 	regionID := item.op.RegionID()
 	opi, ok := oc.operators.Load(regionID)
 	if !ok || opi.(*Operator) == nil {
@@ -312,6 +319,12 @@ func (oc *Controller) PushOperators(recordOpStepWithTTL func(regionID uint64)) {
 
 // AddWaitingOperator adds operators to waiting operators.
 func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	return oc.addWaitingOperatorLocked(ops...)
+}
+
+func (oc *Controller) addWaitingOperatorLocked(ops ...*Operator) int {
 	added := 0
 	needPromoted := 0
 
@@ -362,13 +375,19 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	}
 	operatorCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
 	for range needPromoted {
-		oc.PromoteWaitingOperator()
+		oc.promoteWaitingOperatorLocked()
 	}
 	return added
 }
 
 // AddOperator adds operators to the running operators.
 func (oc *Controller) AddOperator(ops ...*Operator) bool {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	return oc.addOperatorLocked(ops...)
+}
+
+func (oc *Controller) addOperatorLocked(ops ...*Operator) bool {
 	// note: checkAddOperator uses false param for `isPromoting`.
 	// This is used to keep check logic before fixing issue #4946,
 	// but maybe user want to add operator when waiting queue is busy
@@ -397,6 +416,12 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 
 // PromoteWaitingOperator promotes operators from waiting operators.
 func (oc *Controller) PromoteWaitingOperator() {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	oc.promoteWaitingOperatorLocked()
+}
+
+func (oc *Controller) promoteWaitingOperatorLocked() {
 	var ops []*Operator
 	for {
 		// GetOperator returns one operator or two merge operators
@@ -632,6 +657,12 @@ func (oc *Controller) ack(op *Operator) {
 
 // RemoveOperators removes all operators from the running operators.
 func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	oc.removeOperatorsLocked(reasons...)
+}
+
+func (oc *Controller) removeOperatorsLocked(reasons ...CancelReasonType) {
 	removed := oc.removeOperatorsWithoutBury()
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
@@ -650,7 +681,9 @@ func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
 
 // CancelAllOperators cancels all running and waiting operators and clears pending notifications.
 func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
-	oc.RemoveOperators(reasons...)
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	oc.removeOperatorsLocked(reasons...)
 
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {

@@ -1009,6 +1009,66 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
 	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
 }
 
+func (suite *operatorControllerTestSuite) TestPollNeedDispatchRegionAfterNotifierQueueClear() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+
+	controller.opNotifierQueue.push(&operatorWithTime{
+		op:   NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
+		time: time.Now(),
+	})
+	controller.opNotifierQueue.clear()
+
+	region, next := controller.pollNeedDispatchRegion()
+	re.Nil(region)
+	re.False(next)
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsWaitsPromotingOperator() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	region := suite.newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	cluster.PutRegion(region)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	controller.wop.PutOperator(op)
+	controller.wopStatus.incCount(op.Desc())
+
+	promoteStarted := make(chan struct{})
+	promoteFinished := make(chan struct{})
+	controller.operatorLock.Lock()
+	go func() {
+		defer close(promoteFinished)
+		ops := controller.wop.GetOperator()
+		re.Len(ops, 1)
+		controller.wopStatus.decCount(ops[0].Desc())
+		close(promoteStarted)
+		time.Sleep(20 * time.Millisecond)
+		re.True(controller.addOperatorLocked(ops...))
+		controller.operatorLock.Unlock()
+	}()
+
+	<-promoteStarted
+	cancelFinished := make(chan struct{})
+	go func() {
+		defer close(cancelFinished)
+		controller.CancelAllOperators(AdminStop)
+	}()
+
+	<-promoteFinished
+	<-cancelFinished
+	re.Empty(controller.GetOperators())
+	re.Equal(CANCELED, op.Status())
+	re.NotNil(controller.GetOperatorStatus(op.RegionID()))
+}
+
 func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
