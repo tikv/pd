@@ -460,6 +460,8 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
+		leaderID = s.member.GetEtcdLeader()
+		leader = s.member.GetLeader()
 		etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
 	}
 
