@@ -559,6 +559,19 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 
+	// This test overwrites the shared controller config key, so save the
+	// original value and restore it afterwards to avoid polluting other tests.
+	originalConfig, err := suite.client.Get(ctx, pd.ControllerConfigPathPrefixBytes)
+	re.NoError(err)
+	defer func() {
+		if len(originalConfig.GetKvs()) == 0 {
+			return
+		}
+		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
+		_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, originalConfig.GetKvs()[0].GetValue())
+		re.NoError(err)
+	}()
+
 	minRevision := int64(0)
 	maxRevision := int64(0)
 	for i := range 3 {
