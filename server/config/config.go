@@ -953,9 +953,24 @@ func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 
 // GetMetaServiceGroups returns the current meta-service-group configuration.
 func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
-	ret := make(map[string]string, len(c.MetaServiceGroups))
-	for name, endpoint := range c.MetaServiceGroups {
-		ret[name] = endpoint
+	return extractMetaServiceGroupFromKeyspaceConfig(c.MetaServiceGroups)
+}
+
+func extractMetaServiceGroupFromKeyspaceConfig(cfgs map[string]string) map[string]string {
+	ret := make(map[string]string, len(cfgs))
+	for name, endpoint := range cfgs {
+		trimmedID := strings.TrimSpace(name)
+		if trimmedID == "" {
+			continue
+		}
+		if _, ok := ret[trimmedID]; ok {
+			continue
+		}
+		trimmedAddress := strings.TrimSpace(endpoint)
+		if trimmedAddress == "" {
+			continue
+		}
+		ret[trimmedID] = endpoint
 	}
 	return ret
 }
