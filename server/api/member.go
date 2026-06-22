@@ -56,7 +56,9 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/members [get]
 func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
-	members, err := getMembers(h.svr, false)
+	// Keep the HTTP admin API fresh because external controllers use it for
+	// membership management decisions.
+	members, err := getMembers(h.svr, true)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
