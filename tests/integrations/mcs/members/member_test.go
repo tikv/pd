@@ -584,6 +584,29 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 		return false
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
+	// Sending the transfer request to a non-primary member of the group should
+	// return 400 instead of a 500, since its expected primary lease is nil.
+	var nonPrimaryAddr string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && !m.IsPrimary {
+			nonPrimaryAddr = tsoSvr.GetAddr()
+			break
+		}
+	}
+	re.NotEmpty(nonPrimaryAddr)
+	body["new_primary"] = ""
+	body["keyspace_group_id"] = testGroupID
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", nonPrimaryAddr),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
 	// Requesting transfer for a non-existent keyspace group should return 400.
 	body["keyspace_group_id"] = uint32(9999)
 	data, err = json.Marshal(body)

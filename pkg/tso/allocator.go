@@ -377,6 +377,12 @@ func (a *Allocator) isServing() bool {
 	return a.member.IsServing()
 }
 
+// IsServing returns whether this allocator is currently the serving primary of
+// its keyspace group.
+func (a *Allocator) IsServing() bool {
+	return a.isServing()
+}
+
 func (a *Allocator) isPrimaryElected() bool {
 	if a == nil || a.member == nil {
 		return false

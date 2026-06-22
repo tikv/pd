@@ -667,9 +667,11 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							continue
 						}
 						// only members of specific group are valid primary candidates.
-						group := kgm.GetKeyspaceGroups()[kg.ID]
-						memberMap := make(map[string]bool, len(group.Members))
-						for _, m := range group.Members {
+						// Use kg directly instead of GetKeyspaceGroups()[kg.ID], which
+						// is built from the keyspace lookup table and would miss a served
+						// group that has no keyspaces, causing a nil-pointer panic here.
+						memberMap := make(map[string]bool, len(kg.Members))
+						for _, m := range kg.Members {
 							memberMap[m.Address] = true
 						}
 						log.Info("tso priority checker moves primary",
@@ -1105,9 +1107,17 @@ func (kgm *KeyspaceGroupManager) GetServingKeyspaceGroups() map[uint32]*endpoint
 	return result
 }
 
-// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is serving it.
+// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is
+// serving it (i.e. has a non-nil allocator for it). It returns nil when the ID is out of
+// range or the group is not served by this node.
 func (kgm *KeyspaceGroupManager) GetKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
-	_, kg := kgm.getKeyspaceGroupMeta(id)
+	if err := checkKeySpaceGroupID(id); err != nil {
+		return nil
+	}
+	allocator, kg := kgm.getKeyspaceGroupMeta(id)
+	if allocator == nil {
+		return nil
+	}
 	return kg
 }
 

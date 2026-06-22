@@ -329,13 +329,27 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 
+	// The request may be routed to a non-primary replica of the target group,
+	// whose expected primary lease is nil or stale. Reject it with a clear error
+	// instead of letting TransferPrimary fail with a 500.
+	if !allocator.IsServing() {
+		primaryAddr := allocator.GetPrimaryAddr()
+		if primaryAddr == "" {
+			primaryAddr = "unknown"
+		}
+		c.AbortWithStatusJSON(http.StatusBadRequest,
+			fmt.Sprintf("this tso node is not the primary of keyspace group %d, please send the request to its primary %s", keyspaceGroupID, primaryAddr))
+		return
+	}
+	lease := allocator.GetExpectedPrimaryLease()
+
 	// only members of specific group are valid primary candidates.
 	memberMap := make(map[string]bool, len(group.Members))
 	for _, member := range group.Members {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetExpectedPrimaryLease(),
+	if err := utils.TransferPrimary(svr.GetClient(), lease,
 		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
