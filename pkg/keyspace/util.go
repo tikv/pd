@@ -200,16 +200,13 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// MakeTxnKeyRanges encodes keyspace ID to correct LabelRule data with the txn
+// MakeKeyRanges encodes keyspace ID to correct LabelRule data with the specified
 // region bound. Used by tests and pd-ctl.
-func MakeTxnKeyRanges(id uint32) []any {
+func MakeKeyRanges(id uint32, keyType string) []any {
+	if keyType == coreconstant.Raw.String() {
+		return buildKeyRanges(id, rawRegionBound)
+	}
 	return buildKeyRanges(id, txnRegionBound)
-}
-
-// MakeRawKeyRanges encodes keyspace ID to correct LabelRule data with the raw
-// region bound. Used by pd-ctl.
-func MakeRawKeyRanges(id uint32) []any {
-	return buildKeyRanges(id, rawRegionBound)
 }
 
 func buildKeyRanges(id uint32, boundType regionBoundType) []any {

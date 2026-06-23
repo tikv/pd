@@ -59,7 +59,7 @@ func TestMakeKeyRanges(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ranges := keyspace.MakeTxnKeyRanges(tc.keyspaceID)
+		ranges := keyspace.MakeKeyRanges(tc.keyspaceID, "txn")
 		re.Len(ranges, 1, "should have 1 range (txn)")
 
 		// Verify txn key range
@@ -89,7 +89,7 @@ func TestMakeRawKeyRanges(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		ranges := keyspace.MakeRawKeyRanges(tc.keyspaceID)
+		ranges := keyspace.MakeKeyRanges(tc.keyspaceID, "raw")
 		re.Len(ranges, 1, "should have 1 range (raw)")
 
 		rawRange := ranges[0].(map[string]any)

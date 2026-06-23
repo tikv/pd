@@ -561,12 +561,11 @@ func setPlacementCommandFunc(cmd *cobra.Command, args []string) {
 
 	// Generate key ranges for the keyspace. Use the raw region bound when --raw
 	// is set, otherwise the txn region bound.
-	keyRanges := keyspace.MakeTxnKeyRanges(keyspaceID32)
 	boundName := "txn"
 	if raw {
-		keyRanges = keyspace.MakeRawKeyRanges(keyspaceID32)
 		boundName = "raw"
 	}
+	keyRanges := keyspace.MakeKeyRanges(keyspaceID32, boundName)
 	// Create placement rule bundle
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := &pd.GroupBundle{
