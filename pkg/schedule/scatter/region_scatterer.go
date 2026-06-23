@@ -826,6 +826,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	if provider, ok := r.cluster.(storeConfigProvider); ok {
 		readPoolThreadCount = provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
 	}
+	readPoolPressureFilters := []filter.Filter{filter.NewReadPoolPressureFilter(r.name, readCPUByStore, readPoolThreadCount)}
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
@@ -835,7 +836,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		if store == nil {
 			continue
 		}
-		if !filter.Target(r.cluster.GetSharedConfig(), store, []filter.Filter{filter.NewReadPoolPressureFilter(r.name, readCPUByStore, readPoolThreadCount)}) {
+		if !filter.Target(r.cluster.GetSharedConfig(), store, readPoolPressureFilters) {
 			continue
 		}
 		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
