@@ -693,6 +693,34 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 	}
 }
 
+func savePatrolTestKeyspaceGroups(
+	t require.TestingT,
+	ctx context.Context,
+	store *endpoint.StorageEndpoint,
+	groups ...*endpoint.KeyspaceGroup,
+) {
+	require.NoError(t, store.RunInTxn(ctx, func(txn kv.Txn) error {
+		for _, group := range groups {
+			if err := store.SaveKeyspaceGroup(txn, group); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
+func testKeyspaceGroupMembers() []endpoint.KeyspaceGroupMember {
+	return make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount)
+}
+
+func buildSequentialKeyspaces(start uint32, count int) []uint32 {
+	keyspaces := make([]uint32, 0, count)
+	for i := range count {
+		keyspaces = append(keyspaces, start+uint32(i))
+	}
+	return keyspaces
+}
+
 // TestDoPatrolKeyspaceGroupSizeForAutoSplit tests the auto-split patrol logic:
 // when a group's keyspace count exceeds the default threshold (40k),
 // it splits about half of the keyspaces into a new group.
@@ -739,6 +767,156 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplit()
 	re.Equal(keyspaces[defaultKeyspaceCountSplitThreshold/2:], kg1.Keyspaces)
 	re.True(kg1.IsSplitTarget())
 	re.Equal(constant.DefaultKeyspaceGroupID, kg1.SplitSource())
+}
+
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitBelowThreshold() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	keyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold)
+	savePatrolTestKeyspaceGroups(suite.T(), suite.ctx, store, &endpoint.KeyspaceGroup{
+		ID:        constant.DefaultKeyspaceGroupID,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: keyspaces,
+		Members:   testKeyspaceGroupMembers(),
+	})
+
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
+
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Equal(keyspaces, kg0.Keyspaces)
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Nil(kg1)
+}
+
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSkipsSplittingAndMergingGroups() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	splittingKeyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold+1)
+	mergingKeyspaces := buildSequentialKeyspaces(100000, defaultKeyspaceCountSplitThreshold+1)
+	eligibleKeyspaces := buildSequentialKeyspaces(200000, defaultKeyspaceCountSplitThreshold+1)
+	savePatrolTestKeyspaceGroups(
+		suite.T(),
+		suite.ctx,
+		store,
+		&endpoint.KeyspaceGroup{
+			ID:         constant.DefaultKeyspaceGroupID,
+			UserKind:   endpoint.Basic.String(),
+			Keyspaces:  splittingKeyspaces,
+			Members:    testKeyspaceGroupMembers(),
+			SplitState: &endpoint.SplitState{SplitSource: constant.DefaultKeyspaceGroupID},
+		},
+		&endpoint.KeyspaceGroup{
+			ID:         1,
+			UserKind:   endpoint.Standard.String(),
+			Keyspaces:  mergingKeyspaces,
+			Members:    testKeyspaceGroupMembers(),
+			MergeState: &endpoint.MergeState{MergeList: []uint32{1}},
+		},
+		&endpoint.KeyspaceGroup{
+			ID:        2,
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: eligibleKeyspaces,
+			Members:   testKeyspaceGroupMembers(),
+		},
+	)
+
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
+
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Equal(splittingKeyspaces, kg0.Keyspaces)
+	re.True(kg0.IsSplitting())
+
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg1)
+	re.Equal(mergingKeyspaces, kg1.Keyspaces)
+	re.True(kg1.IsMerging())
+
+	kg2, err := kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.NotNil(kg2)
+	re.Equal(eligibleKeyspaces[:defaultKeyspaceCountSplitThreshold/2], kg2.Keyspaces)
+	re.True(kg2.IsSplitSource())
+
+	kg3, err := kgm.GetKeyspaceGroupByID(3)
+	re.NoError(err)
+	re.NotNil(kg3)
+	re.Equal(eligibleKeyspaces[defaultKeyspaceCountSplitThreshold/2:], kg3.Keyspaces)
+	re.True(kg3.IsSplitTarget())
+	re.Equal(uint32(2), kg3.SplitSource())
+}
+
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSkipsWhenNoAvailableTargetID() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	keyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold+1)
+	savePatrolTestKeyspaceGroups(
+		suite.T(),
+		suite.ctx,
+		store,
+		&endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: keyspaces,
+			Members:   testKeyspaceGroupMembers(),
+		},
+		&endpoint.KeyspaceGroup{
+			ID:        constant.MaxKeyspaceGroupCountInUse,
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: []uint32{100},
+		},
+	)
+
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
+
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Equal(keyspaces, kg0.Keyspaces)
+	re.False(kg0.IsSplitting())
+}
+
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSkipsWhenNoKeyspacesToMove() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	// Use a synthetic malformed state to cover the defensive branch where the tail half
+	// contains only default-keyspace entries, so there is nothing valid to move.
+	keyspaces := make([]uint32, 0, defaultKeyspaceCountSplitThreshold+1)
+	keyspaces = append(keyspaces, buildSequentialKeyspaces(1, defaultKeyspaceCountSplitThreshold/2)...)
+	keyspaces = append(keyspaces, make([]uint32, defaultKeyspaceCountSplitThreshold/2+1)...)
+	savePatrolTestKeyspaceGroups(suite.T(), suite.ctx, store, &endpoint.KeyspaceGroup{
+		ID:        constant.DefaultKeyspaceGroupID,
+		UserKind:  endpoint.Basic.String(),
+		Keyspaces: keyspaces,
+		Members:   testKeyspaceGroupMembers(),
+	})
+
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit()
+
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Equal(keyspaces, kg0.Keyspaces)
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Nil(kg1)
 }
 
 func TestParsePrimaryName(t *testing.T) {
