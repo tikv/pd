@@ -75,7 +75,7 @@ const (
 )
 
 // finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
-var finishKeyspaceGroupPerEndpointTimeout = 2 * time.Second
+var finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
