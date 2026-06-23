@@ -359,6 +359,10 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 			return
 		case firstRequest = <-tbc.tokenRequestCh:
 		}
+		if err := dispatcherCtx.Err(); err != nil {
+			firstRequest.done <- errors.WithStack(err)
+			return
+		}
 		// Try to get a stream connection.
 		stream, streamCtx = connection.stream, connection.ctx
 		select {

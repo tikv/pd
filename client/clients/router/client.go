@@ -621,6 +621,7 @@ batchLoop:
 			// Check if the dispatcher is canceled or the timeout timer is triggered.
 			select {
 			case <-ctx.Done():
+				c.batchController.FinishCollectedRequests(requestFinisher(nil), ctx.Err())
 				return
 			case <-timeoutTimer.C:
 				log.Error("[router] router stream connection is not ready until timeout, abort the batch")

@@ -148,6 +148,9 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 
 func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToken) {
 	start := time.Now()
+	if token != nil {
+		defer cr.limiter.ReleaseToken(token)
+	}
 	select {
 	case <-ctx.Done():
 		return

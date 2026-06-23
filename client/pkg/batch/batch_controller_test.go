@@ -17,6 +17,7 @@ package batch
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -144,4 +145,44 @@ func TestFetchPendingRequests(t *testing.T) {
 	re.Equal(testMaxBatchSize, bc.collectedRequestCount)
 	// Drain the requestCh.
 	<-requestCh
+}
+
+func TestFetchPendingRequestsWithCanceledContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	finishedCount := 0
+	bc := NewController[int](testMaxBatchSize, func(_ int, _ int, err error) {
+		re.ErrorIs(err, context.Canceled)
+		finishedCount++
+	}, nil)
+	requestCh := make(chan int, 1)
+	requestCh <- 1
+	tokenCh := make(chan struct{}, 1)
+	tokenCh <- struct{}{}
+
+	err := bc.FetchPendingRequests(ctx, requestCh, tokenCh, 0)
+	re.ErrorIs(err, context.Canceled)
+	re.Zero(bc.collectedRequestCount)
+	re.Zero(finishedCount)
+	re.Len(requestCh, 1)
+	re.Len(tokenCh, 1)
+}
+
+func TestFetchRequestsWithTimerWithCanceledContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	bc := NewController[int](testMaxBatchSize, nil, nil)
+	requestCh := make(chan int, 1)
+	requestCh <- 1
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+
+	err := bc.FetchRequestsWithTimer(ctx, requestCh, timer)
+	re.ErrorIs(err, context.Canceled)
+	re.Zero(bc.collectedRequestCount)
+	re.Len(requestCh, 1)
 }

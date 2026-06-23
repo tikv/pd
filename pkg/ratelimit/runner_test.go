@@ -117,4 +117,25 @@ func TestConcurrentRunner(t *testing.T) {
 		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
 		require.Greater(t, updatedSubmitted, lastSubmitted)
 	})
+
+	t.Run("ReleaseTokenWhenContextCanceled", func(t *testing.T) {
+		limiter := NewConcurrencyLimiter(1)
+		runner := NewConcurrentRunner("test", limiter, time.Minute)
+		token, err := limiter.AcquireToken(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, uint64(1), limiter.GetRunningTasksNum())
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		called := false
+		runner.run(ctx, &Task{
+			name: "test4",
+			f: func(context.Context) {
+				called = true
+			},
+		}, token)
+
+		require.False(t, called)
+		require.Zero(t, limiter.GetRunningTasksNum())
+	})
 }

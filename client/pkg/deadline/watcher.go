@@ -83,12 +83,11 @@ func (w *Watcher) Start(
 	cancel context.CancelFunc,
 ) chan struct{} {
 	// Check if the watcher is already canceled.
-	select {
-	case <-w.ctx.Done():
+	if w.ctx.Err() != nil {
 		return nil
-	case <-ctx.Done():
+	}
+	if ctx.Err() != nil {
 		return nil
-	default:
 	}
 	// Initialize the deadline.
 	timer := timerutil.GlobalTimerPool.Get(timeout)
@@ -106,6 +105,10 @@ func (w *Watcher) Start(
 		timerutil.GlobalTimerPool.Put(timer)
 		return nil
 	case w.Ch <- d:
+		if w.ctx.Err() != nil || ctx.Err() != nil {
+			close(d.done)
+			return nil
+		}
 		return d.done
 	}
 }

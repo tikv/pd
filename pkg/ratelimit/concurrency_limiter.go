@@ -108,7 +108,15 @@ func (l *ConcurrencyLimiter) GetWaitingTasksNum() uint64 {
 
 // AcquireToken acquires a token from the limiter. which will block until a token is available or ctx is done, like Timeout.
 func (l *ConcurrencyLimiter) AcquireToken(ctx context.Context) (*TaskToken, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	l.mu.Lock()
+	if err := ctx.Err(); err != nil {
+		l.mu.Unlock()
+		return nil, err
+	}
 	if l.current >= l.limit {
 		l.waiting++
 		l.mu.Unlock()
@@ -121,9 +129,17 @@ func (l *ConcurrencyLimiter) AcquireToken(ctx context.Context) (*TaskToken, erro
 			return nil, ctx.Err()
 		case token := <-l.queue:
 			l.mu.Lock()
+			l.waiting--
+			if err := ctx.Err(); err != nil {
+				l.mu.Unlock()
+				select {
+				case l.queue <- token:
+				default:
+				}
+				return nil, err
+			}
 			token.released = false
 			l.current++
-			l.waiting--
 			l.mu.Unlock()
 			return token, nil
 		}
