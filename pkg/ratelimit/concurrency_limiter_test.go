@@ -116,6 +116,44 @@ func TestConcurrencyLimiterAcquireWithCanceledContext(t *testing.T) {
 	re.Zero(limiter.GetWaitingTasksNum())
 }
 
+func TestConcurrencyLimiterDoesNotReuseStaleQueuedToken(t *testing.T) {
+	re := require.New(t)
+	limiter := NewConcurrencyLimiter(1)
+
+	token1, err := limiter.AcquireToken(context.Background())
+	re.NoError(err)
+	limiter.ReleaseToken(token1)
+
+	token2, err := limiter.AcquireToken(context.Background())
+	re.NoError(err)
+	re.Equal(uint64(1), limiter.GetRunningTasksNum())
+
+	type acquireResult struct {
+		token *TaskToken
+		err   error
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan acquireResult, 1)
+	go func() {
+		token, err := limiter.AcquireToken(ctx)
+		resultCh <- acquireResult{token: token, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		re.Failf("unexpected token acquisition", "token: %v, err: %v", result.token, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	result := <-resultCh
+	re.ErrorIs(result.err, context.Canceled)
+	re.Nil(result.token)
+	re.Equal(uint64(1), limiter.GetRunningTasksNum())
+	re.Zero(limiter.GetWaitingTasksNum())
+	limiter.ReleaseToken(token2)
+}
+
 func TestConcurrencyLimiterAcquire(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
