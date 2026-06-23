@@ -38,6 +38,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -1543,8 +1544,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
 				re.Error(err)
 				re.Nil(resp)
-				re.Contains(err.Error(), "parse url error")
+				re.True(errors.Is(err, errs.ErrURLParse))
 				re.Contains(err.Error(), "ftp://127.0.0.1:2379")
+				re.Contains(err.Error(), `scheme="ftp"`)
 			},
 			wantURLs: []string{},
 		},
@@ -1587,7 +1589,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 	for _, tc := range testCases {
 		suite.Run(tc.name, func() {
 			re := suite.Require()
-			var requestedURLs []string
+			requestedURLs := make([]string, 0)
 			client := &http.Client{
 				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 					requestedURLs = append(requestedURLs, req.URL.String())
