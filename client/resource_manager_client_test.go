@@ -131,6 +131,7 @@ type testRMServer struct {
 	modifyCount atomic.Int32
 	deleteCount atomic.Int32
 	tokenCount  atomic.Int32
+	tokenError  atomic.Bool
 }
 
 func (s *testRMServer) ListResourceGroups(context.Context, *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
@@ -176,6 +177,14 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 			return err
 		}
 		s.tokenCount.Add(1)
+		if s.tokenError.Load() {
+			if err := stream.Send(&rmpb.TokenBucketsResponse{
+				Error: &rmpb.Error{Message: "token error"},
+			}); err != nil {
+				return err
+			}
+			continue
+		}
 		resp := &rmpb.TokenBucketsResponse{
 			Responses: make([]*rmpb.TokenBucketResponse, 0, len(req.GetRequests())),
 		}
@@ -393,4 +402,27 @@ func TestAcquireTokenBucketsWithCanceledContextDoesNotEnqueue(t *testing.T) {
 	_, err := cli.AcquireTokenBuckets(requestCtx, &rmpb.TokenBucketsRequest{})
 	require.ErrorIs(t, err, context.Canceled)
 	require.Len(t, tokenRequestCh, 1)
+}
+
+func TestAcquireTokenBucketsReturnsServerError(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdAddr, pdServer, pdCleanup := startTestRMServer(t, "pd")
+	t.Cleanup(pdCleanup)
+	pdServer.tokenError.Store(true)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.createTokenDispatcher()
+	t.Cleanup(func() {
+		inner.tokenDispatcher.dispatcherCancel()
+		inner.wg.Wait()
+	})
+	cli := &client{inner: inner}
+
+	_, err := cli.AcquireTokenBuckets(ctx, &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{{ResourceGroupName: "test-group"}},
+	})
+	require.ErrorContains(t, err, "token error")
+	require.EqualValues(t, 1, pdServer.tokenCount.Load())
 }

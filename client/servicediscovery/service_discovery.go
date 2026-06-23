@@ -935,6 +935,11 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+	}
 	key := "GetClusterInfo-" + url
 	r := c.flight.DoChan(key, func() (any, error) {
 		return pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
@@ -975,6 +980,11 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
 		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	key := "GetMembers-" + url
 	r := c.flight.DoChan(key, func() (any, error) {

@@ -434,7 +434,9 @@ func (c *innerClient) processTokenRequests(stream rmpb.ResourceManager_AcquireTo
 		return err
 	}
 	if resp.GetError() != nil {
-		return errors.Errorf("[resource_manager] %s", resp.GetError().Message)
+		err := errors.Errorf("[resource_manager] %s", resp.GetError().Message)
+		t.done <- err
+		return err
 	}
 	t.TokenBuckets = resp.GetResponses()
 	t.done <- nil
