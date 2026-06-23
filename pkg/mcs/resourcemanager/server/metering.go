@@ -46,6 +46,27 @@ type ruMetering struct {
 	tiflashRUV2         float64
 }
 
+// RUCarry tracks negative RU that cannot be emitted to metering until
+// later positive usage offsets it.
+type RUCarry struct {
+	oltpRU float64
+	olapRU float64
+}
+
+func applyRUCarry(value float64, carry *float64) float64 {
+	value += *carry
+	if value < 0 {
+		*carry = value
+		return 0
+	}
+	*carry = 0
+	return value
+}
+
+func (c *RUCarry) empty() bool {
+	return c.oltpRU == 0 && c.olapRU == 0
+}
+
 func (rm *ruMetering) add(consumption *consumptionItem) {
 	// Keep the legacy oltp/olap buckets unchanged for compatibility, and
 	// expose the finer-grained experimental RUv2 breakdown separately.
@@ -96,11 +117,14 @@ type ruCollector struct {
 	sync.RWMutex
 	// KeyspaceName -> RU metering data
 	keyspaceRUMetering map[string]*ruMetering
+	// KeyspaceName -> pending negative metering RU
+	keyspaceRUCarry map[string]*RUCarry
 }
 
 func newRUCollector() *ruCollector {
 	return &ruCollector{
 		keyspaceRUMetering: make(map[string]*ruMetering),
+		keyspaceRUCarry:    make(map[string]*RUCarry),
 	}
 }
 
@@ -108,6 +132,7 @@ func (c *ruCollector) remove(keyspaceName string) {
 	c.Lock()
 	defer c.Unlock()
 	delete(c.keyspaceRUMetering, keyspaceName)
+	delete(c.keyspaceRUCarry, keyspaceName)
 }
 
 // Category returns the category of the collector.
@@ -131,10 +156,24 @@ func (c *ruCollector) Aggregate() []map[string]any {
 	c.Lock()
 	keyspaceRUMetering := c.keyspaceRUMetering
 	c.keyspaceRUMetering = make(map[string]*ruMetering)
-	c.Unlock()
 	if len(keyspaceRUMetering) == 0 {
+		c.Unlock()
 		return nil
 	}
+	for keyspaceName, ruMetering := range keyspaceRUMetering {
+		carry := c.keyspaceRUCarry[keyspaceName]
+		if carry == nil {
+			carry = &RUCarry{}
+		}
+		ruMetering.oltpRU = applyRUCarry(ruMetering.oltpRU, &carry.oltpRU)
+		ruMetering.olapRU = applyRUCarry(ruMetering.olapRU, &carry.olapRU)
+		if carry.empty() {
+			delete(c.keyspaceRUCarry, keyspaceName)
+		} else {
+			c.keyspaceRUCarry[keyspaceName] = carry
+		}
+	}
+	c.Unlock()
 	records := make([]map[string]any, 0, len(keyspaceRUMetering))
 	for keyspaceName, ruMetering := range keyspaceRUMetering {
 		// Convert the ruMetering to the map[string]any.

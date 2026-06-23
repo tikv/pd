@@ -76,13 +76,6 @@ type ResourceGroupKVInterceptor interface {
 	// OnResponseWait is used to consume tokens after receiving a response. If the response requires many tokens, we need to wait for the tokens.
 	// This is an optimized version of OnResponse for cases where the response requires many tokens, making the debt smaller and smoother.
 	OnResponseWait(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, time.Duration, error)
-	// OnRequestCancel undoes the pre-charge performed by a preceding successful
-	// OnRequestWait when the underlying RPC fails before producing a response
-	// (e.g. transport error, context cancellation). Without this, the predicted
-	// RU pre-charged in BeforeKVRequest would stay permanently debited.
-	// Callers must invoke it exactly once per cancelled request, with the same
-	// RequestInfo that was passed to OnRequestWait.
-	OnRequestCancel(ctx context.Context, resourceGroupName string, info RequestInfo)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
 	IsBackgroundRequest(ctx context.Context, resourceGroupName, requestResource string) bool
 	// GetRUVersion returns the current RU calculation version for this keyspace.
@@ -770,19 +763,6 @@ func (c *ResourceGroupsController) OnResponseWait(
 		return &rmpb.Consumption{}, time.Duration(0), nil
 	}
 	return gc.onResponseWaitImpl(ctx, req, resp)
-}
-
-// OnRequestCancel implements ResourceGroupKVInterceptor.
-func (c *ResourceGroupsController) OnRequestCancel(
-	_ context.Context, resourceGroupName string, info RequestInfo,
-) {
-	gc, ok := c.loadGroupController(resourceGroupName)
-	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist on cancel",
-			zap.String("name", resourceGroupName))
-		return
-	}
-	gc.onRequestCancelImpl(info)
 }
 
 // IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.

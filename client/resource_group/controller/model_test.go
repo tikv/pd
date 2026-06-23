@@ -133,6 +133,69 @@ func TestUpdateDeltaConsumption(t *testing.T) {
 	re.Equal(now.TiflashRUV2, last.TiflashRUV2)
 }
 
+func TestUpdateDeltaConsumptionReportsSignedRequestUnits(t *testing.T) {
+	re := require.New(t)
+	last := &rmpb.Consumption{
+		RRU:                      10,
+		WRU:                      20,
+		ReadBytes:                100,
+		WriteBytes:               200,
+		TotalCpuTimeMs:           300,
+		SqlLayerCpuTimeMs:        400,
+		KvReadRpcCount:           500,
+		KvWriteRpcCount:          600,
+		ReadCrossAzTrafficBytes:  700,
+		WriteCrossAzTrafficBytes: 800,
+		TikvRUV2:                 900,
+		TidbRUV2:                 1000,
+		TiflashRUV2:              1100,
+	}
+	now := &rmpb.Consumption{
+		RRU:                      7,
+		WRU:                      15,
+		ReadBytes:                90,
+		WriteBytes:               190,
+		TotalCpuTimeMs:           290,
+		SqlLayerCpuTimeMs:        390,
+		KvReadRpcCount:           490,
+		KvWriteRpcCount:          590,
+		ReadCrossAzTrafficBytes:  690,
+		WriteCrossAzTrafficBytes: 790,
+		TikvRUV2:                 890,
+		TidbRUV2:                 990,
+		TiflashRUV2:              1090,
+	}
+
+	delta := updateDeltaConsumption(last, now)
+
+	re.Equal(float64(-3), delta.RRU)
+	re.Equal(float64(-5), delta.WRU)
+	re.Zero(delta.ReadBytes)
+	re.Zero(delta.WriteBytes)
+	re.Zero(delta.TotalCpuTimeMs)
+	re.Zero(delta.SqlLayerCpuTimeMs)
+	re.Zero(delta.KvReadRpcCount)
+	re.Zero(delta.KvWriteRpcCount)
+	re.Zero(delta.ReadCrossAzTrafficBytes)
+	re.Zero(delta.WriteCrossAzTrafficBytes)
+	re.Zero(delta.TikvRUV2)
+	re.Zero(delta.TidbRUV2)
+	re.Zero(delta.TiflashRUV2)
+	re.Equal(now.RRU, last.RRU)
+	re.Equal(now.WRU, last.WRU)
+	re.Equal(float64(100), last.ReadBytes)
+	re.Equal(float64(200), last.WriteBytes)
+	re.Equal(float64(300), last.TotalCpuTimeMs)
+	re.Equal(float64(400), last.SqlLayerCpuTimeMs)
+	re.Equal(float64(500), last.KvReadRpcCount)
+	re.Equal(float64(600), last.KvWriteRpcCount)
+	re.Equal(uint64(700), last.ReadCrossAzTrafficBytes)
+	re.Equal(uint64(800), last.WriteCrossAzTrafficBytes)
+	re.Equal(float64(900), last.TikvRUV2)
+	re.Equal(float64(1000), last.TidbRUV2)
+	re.Equal(float64(1100), last.TiflashRUV2)
+}
+
 func TestEqualRU(t *testing.T) {
 	re := require.New(t)
 

@@ -55,8 +55,8 @@ var (
 	SuccessfulTokenRequestDuration prometheus.Observer
 
 	// PagingPrechargeCounter counts coprocessor RPCs that triggered RC paging pre-charge
-	// (PredictedReadBytes hint > 0). Self-gated to coprocessor reads because non-cop callers
-	// never set the hint.
+	// (PredictedReadBytes hint > 0). Explicitly gated to coprocessor reads; non-cop
+	// hints are ignored by paging accounting.
 	PagingPrechargeCounter *prometheus.CounterVec
 	// PagingNonprechargeCounter counts coprocessor RPCs that reached the RC interceptor
 	// without a PredictedReadBytes hint (EMA cold-start). Explicitly gated by
@@ -70,7 +70,7 @@ var (
 	// PagingActualBytesCounter accumulates actual bytes read by pre-charged coprocessor RPCs.
 	PagingActualBytesCounter *prometheus.CounterVec
 	// PagingNonprechargeActualBytes accumulates actual bytes read by coprocessor RPCs that
-	// reached the RC interceptor without a hint (EMA cold-start). Same IsCop() gating as
+	// reached the RC interceptor without a hint (EMA cold-start). Same coprocessor gating as
 	// PagingNonprechargeCounter.
 	PagingNonprechargeActualBytes *prometheus.CounterVec
 	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read

@@ -81,6 +81,48 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(metering.NewRUValue(40.0), record[meteringDataTiFlashRUV2Field])
 }
 
+func TestRUCollectorCarriesNegativeRUAcrossFlushes(t *testing.T) {
+	re := require.New(t)
+	collector := newRUCollector()
+
+	collector.Collect(&consumptionItem{
+		keyspaceName: testKeyspaceName,
+		Consumption: &rmpb.Consumption{
+			RRU: -1.0,
+		},
+		isBackground: false,
+		isTiFlash:    false,
+	})
+
+	records := collector.Aggregate()
+	re.Len(records, 1)
+	record := records[0]
+	re.Equal(metering.NewRUValue(0), record[meteringDataOLTPRUField])
+
+	collector.Collect(&consumptionItem{
+		keyspaceName: testKeyspaceName,
+		Consumption: &rmpb.Consumption{
+			RRU: 3.0,
+		},
+		isBackground: false,
+		isTiFlash:    false,
+	})
+	collector.Collect(&consumptionItem{
+		keyspaceName: testKeyspaceName,
+		Consumption: &rmpb.Consumption{
+			RRU: 5.0,
+		},
+		isBackground: false,
+		isTiFlash:    true,
+	})
+
+	records = collector.Aggregate()
+	re.Len(records, 1)
+	record = records[0]
+	re.Equal(metering.NewRUValue(2), record[meteringDataOLTPRUField])
+	re.Equal(metering.NewRUValue(5), record[meteringDataOLAPRUField])
+}
+
 func TestRUCollectorCollectMultipleKeyspaces(t *testing.T) {
 	re := require.New(t)
 	collector := newRUCollector()
