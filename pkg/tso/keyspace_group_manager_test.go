@@ -1548,6 +1548,40 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 			},
 			wantURLs: []string{},
 		},
+		{
+			name: "request-timeout",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				re.NotZero(req.Context())
+				_, ok := req.Context().Deadline()
+				re.True(ok)
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				oldTimeout := finishKeyspaceGroupRequestTimeout
+				finishKeyspaceGroupRequestTimeout = 50 * time.Millisecond
+				defer func() { finishKeyspaceGroupRequestTimeout = oldTimeout }()
+
+				start := time.Now()
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				elapsed := time.Since(start)
+				re.Error(err)
+				re.Nil(resp)
+				re.ErrorIs(err, context.DeadlineExceeded)
+				re.Less(elapsed, time.Second)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
 	}
 
 	for _, tc := range testCases {

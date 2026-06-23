@@ -17,6 +17,7 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -72,6 +73,10 @@ const (
 	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
 	keyspaceGroupMetricsSyncInterval = 15 * time.Second
 )
+
+// finishKeyspaceGroupRequestTimeout is the overall deadline for finish split/merge
+// HTTP requests to backend PD endpoints.
+var finishKeyspaceGroupRequestTimeout = etcdutil.DefaultRequestTimeout
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
@@ -1240,10 +1245,21 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
 func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix string) (*http.Response, error) {
+	parentCtx := kgm.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, finishKeyspaceGroupRequestTimeout)
+	defer cancel()
+
 	var lastErr error
 	var lastResp *http.Response
 	var lastParseErr error
 	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
+		if err := ctx.Err(); err != nil {
+			lastErr = err
+			break
+		}
 		endpoint = strings.TrimSpace(endpoint)
 		if endpoint == "" {
 			continue
@@ -1267,7 +1283,7 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 			continue
 		}
 		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
-		resp, err := apiutil.DoDelete(kgm.httpClient, requestURL)
+		resp, err := apiutil.DoDeleteWithContext(ctx, kgm.httpClient, requestURL)
 		if err == nil && resp.StatusCode == http.StatusOK {
 			if lastResp != nil {
 				lastResp.Body.Close()
@@ -1277,6 +1293,12 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 		if err != nil {
 			if resp != nil {
 				resp.Body.Close()
+			}
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				log.Warn("finish keyspace group request timed out",
+					zap.String("endpoint", endpoint),
+					zap.String("suffix", suffix),
+					zap.Error(err))
 			}
 			lastErr = err
 			continue

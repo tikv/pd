@@ -17,6 +17,7 @@ package apiutil
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -276,6 +277,15 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 // DoDelete is used to send delete request and return http response code.
 func DoDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+// DoDeleteWithContext is used to send delete request with context and return http response.
+func DoDeleteWithContext(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
