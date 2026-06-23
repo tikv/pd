@@ -90,10 +90,10 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "duplicate meta-service group ID after trimming")
 			return
 		}
-		if addresses == nil {
+		trimmedAddresses := strings.TrimSpace(*addresses)
+		if trimmedAddresses == "" {
 			normalizedPatch[trimmedID] = nil
 		} else {
-			trimmedAddresses := strings.TrimSpace(*addresses)
 			if trimmedAddresses == "" {
 				c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
 				return

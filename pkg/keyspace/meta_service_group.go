@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/server/config"
 )
 
 // MetaServiceGroupManager manages external meta-service groups.
@@ -178,6 +179,9 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	persist func() error,
 	afterPersist func(),
 ) error {
+	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
+		return err
+	}
 	m.Lock()
 
 	var assignmentCounts map[string]int
