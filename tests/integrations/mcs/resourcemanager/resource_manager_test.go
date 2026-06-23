@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1419,8 +1420,14 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-		re.NoError(err)
+		var gresp *rmpb.ResourceGroup
+		testutil.Eventually(re, func() bool {
+			gresp, err = cli.GetResourceGroup(suite.ctx, tcase.name)
+			if err != nil || gresp.GetName() != tcase.name {
+				return false
+			}
+			return !tcase.modifySuccess || reflect.DeepEqual(group, gresp)
+		}, testutil.WithTickInterval(50*time.Millisecond))
 		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
 			re.Equal(group, gresp)
@@ -1442,8 +1449,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
-				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name))
+				expectedErr := fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name)
+				testutil.Eventually(re, func() bool {
+					_, err = cli.GetResourceGroup(suite.ctx, g.Name)
+					return err != nil && err.Error() == expectedErr
+				}, testutil.WithTickInterval(50*time.Millisecond))
+				re.EqualError(err, expectedErr)
 			}
 
 			// to test the deletion of persistence
