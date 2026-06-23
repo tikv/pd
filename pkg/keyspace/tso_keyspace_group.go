@@ -268,9 +268,9 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit() {
 		}
 	}
 	nextID := maxID + 1
-	if nextID > constant.MaxKeyspaceGroupCountInUse {
+	if nextID > mcs.MaxKeyspaceGroupCountInUse {
 		log.Warn("no available keyspace group id for auto-split, max id reached",
-			zap.Uint32("max-keyspace-group-count-in-use", constant.MaxKeyspaceGroupCountInUse))
+			zap.Uint32("max-keyspace-group-count-in-use", mcs.MaxKeyspaceGroupCountInUse))
 		return
 	}
 	threshold := defaultKeyspaceCountSplitThreshold

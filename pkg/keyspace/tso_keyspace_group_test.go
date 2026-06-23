@@ -710,7 +710,7 @@ func savePatrolTestKeyspaceGroups(
 }
 
 func testKeyspaceGroupMembers() []endpoint.KeyspaceGroupMember {
-	return make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount)
+	return make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount)
 }
 
 func buildSequentialKeyspaces(start uint32, count int) []uint32 {
@@ -744,7 +744,7 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplit()
 			ID:        constant.DefaultKeyspaceGroupID,
 			UserKind:  endpoint.Basic.String(),
 			Keyspaces: keyspaces,
-			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount),
 		}
 		return store.SaveKeyspaceGroup(txn, kg)
 	})
@@ -872,7 +872,7 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 			Members:   testKeyspaceGroupMembers(),
 		},
 		&endpoint.KeyspaceGroup{
-			ID:        constant.MaxKeyspaceGroupCountInUse,
+			ID:        mcs.MaxKeyspaceGroupCountInUse,
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{100},
 		},
