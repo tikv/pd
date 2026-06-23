@@ -960,13 +960,14 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	kg1, err := kgm.GetKeyspaceGroupByID(1)
 	re.NoError(err)
 	re.NotNil(kg1)
-	re.Equal(eligibleKeyspaces[:defaultKeyspaceCountSplitThreshold/2], kg1.Keyspaces)
+	expectedSplitIdx := (defaultKeyspaceCountSplitThreshold + 1) / 2
+	re.Equal(eligibleKeyspaces[:expectedSplitIdx], kg1.Keyspaces)
 	re.True(kg1.IsSplitSource())
 
 	kg2, err := kgm.GetKeyspaceGroupByID(2)
 	re.NoError(err)
 	re.NotNil(kg2)
-	re.Equal(eligibleKeyspaces[defaultKeyspaceCountSplitThreshold/2:], kg2.Keyspaces)
+	re.Equal(eligibleKeyspaces[expectedSplitIdx:], kg2.Keyspaces)
 	re.True(kg2.IsSplitTarget())
 	re.Equal(uint32(1), kg2.SplitSource())
 }
