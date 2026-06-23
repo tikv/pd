@@ -74,17 +74,18 @@ func startTestKeyspaceServer(t *testing.T, keyspaceServer *testKeyspaceServer) (
 	server := grpc.NewServer()
 	keyspacepb.RegisterKeyspaceServer(server, keyspaceServer)
 
-	done := make(chan struct{})
+	serveErr := make(chan error, 1)
 	go func() {
-		defer close(done)
-		_ = server.Serve(listener)
+		defer close(serveErr)
+		if err := server.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			serveErr <- err
+		}
 	}()
 
 	addr := "http://" + listener.Addr().String()
 	cleanup := func() {
 		server.Stop()
-		_ = listener.Close()
-		<-done
+		require.NoError(t, <-serveErr)
 	}
 	return addr, cleanup
 }
