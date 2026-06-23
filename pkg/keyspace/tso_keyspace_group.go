@@ -246,13 +246,20 @@ func (m *GroupManager) patrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) 
 			log.Info("the raftcluster is closed, stop patrolling keyspace group size for auto-split")
 			return
 		case <-ticker.C:
-			m.doPatrolKeyspaceGroupSizeForAutoSplit()
+			m.doPatrolKeyspaceGroupSizeForAutoSplit(ctx)
 		}
 	}
 }
 
 // doPatrolKeyspaceGroupSizeForAutoSplit checks once and performs at most one auto-split.
-func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit() {
+func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) {
+	select {
+	case <-m.ctx.Done():
+		return
+	case <-ctx.Done():
+		return
+	default:
+	}
 	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
 		log.Error("failed to load keyspace groups for auto-split patrol", zap.Error(err))
