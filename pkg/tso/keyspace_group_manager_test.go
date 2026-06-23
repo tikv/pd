@@ -1526,6 +1526,28 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/merge",
 			},
 		},
+		{
+			name: "invalid-endpoints",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "://bad,ftp://127.0.0.1:2379",
+					},
+				}
+			},
+			handler: func(_ *require.Assertions, _ *http.Request) (*http.Response, error) {
+				return nil, nil
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.Error(err)
+				re.Nil(resp)
+				re.Contains(err.Error(), "parse url error")
+				re.Contains(err.Error(), "ftp://127.0.0.1:2379")
+			},
+			wantURLs: []string{},
+		},
 	}
 
 	for _, tc := range testCases {

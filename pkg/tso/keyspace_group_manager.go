@@ -1242,6 +1242,7 @@ const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix string) (*http.Response, error) {
 	var lastErr error
 	var lastResp *http.Response
+	var lastParseErr error
 	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
 		endpoint = strings.TrimSpace(endpoint)
 		if endpoint == "" {
@@ -1249,9 +1250,20 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 		}
 		parsedURL, err := url.Parse(endpoint)
 		if err != nil {
+			log.Warn("skip invalid backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.Error(err))
+			lastParseErr = err
 			continue
 		}
 		if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			validationErr := perrors.Errorf("invalid backend endpoint %q: host=%q scheme=%q",
+				endpoint, parsedURL.Host, parsedURL.Scheme)
+			log.Warn("skip unsupported backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.String("host", parsedURL.Host),
+				zap.String("scheme", parsedURL.Scheme))
+			lastParseErr = validationErr
 			continue
 		}
 		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
@@ -1280,7 +1292,10 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	return nil, errs.ErrURLParse.FastGenByArgs()
+	if lastParseErr != nil {
+		return nil, errs.ErrURLParse.Wrap(lastParseErr).GenWithStackByCause()
+	}
+	return nil, errs.ErrURLParse.FastGenByArgs("no valid backend endpoint configured")
 }
 
 // Put the code below into the critical section to prevent from sending too many HTTP requests.
