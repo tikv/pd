@@ -77,12 +77,12 @@ const (
 // finishKeyspaceGroupOverallTimeout is the overall deadline for one finish split/merge
 // request across all backend PD endpoints. It is set to 3 * per-endpoint timeout so
 // each of the three PD backends can use a full per-endpoint budget before the cap.
-var finishKeyspaceGroupOverallTimeout = 6 * time.Second
+var finishKeyspaceGroupOverallTimeout = 9 * time.Second
 
 // finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
 // It is nested under finishKeyspaceGroupOverallTimeout so a hanging endpoint does not
 // block fallback to later healthy endpoints.
-var finishKeyspaceGroupPerEndpointTimeout = 2 * time.Second
+var finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
