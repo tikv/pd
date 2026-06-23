@@ -17,7 +17,6 @@ package checker
 import (
 	"context"
 	"math"
-	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -204,7 +203,8 @@ func isTiFlashLearnerRule(rule *placement.Rule) bool {
 		return false
 	}
 	for _, constraint := range rule.LabelConstraints {
-		if constraint.Key == core.EngineKey && constraint.Op == placement.In && slices.Contains(constraint.Values, core.EngineTiFlash) {
+		if constraint.Key == core.EngineKey && constraint.Op == placement.In &&
+			len(constraint.Values) == 1 && constraint.Values[0] == core.EngineTiFlash {
 			return true
 		}
 	}

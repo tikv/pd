@@ -1827,6 +1827,46 @@ func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashSwapFitOverOfflinePeer(
 	re.False(exist)
 }
 
+func (suite *ruleCheckerTestSuite) TestDoNotPreferWideEngineLearnerRuleOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "wide-engine",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    core.EngineKey,
+				Op:     placement.In,
+				Values: []string{core.EngineTiFlash, core.EngineTiKV},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreOffline(2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	_, exist := suite.rc.pendingList.Get(1)
+	re.False(exist)
+}
+
 func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
