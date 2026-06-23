@@ -694,8 +694,8 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 }
 
 func savePatrolTestKeyspaceGroups(
-	t require.TestingT,
 	ctx context.Context,
+	t require.TestingT,
 	store *endpoint.StorageEndpoint,
 	groups ...*endpoint.KeyspaceGroup,
 ) {
@@ -773,7 +773,7 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitBe
 	re := suite.Require()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	keyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold)
-	savePatrolTestKeyspaceGroups(suite.T(), suite.ctx, store, &endpoint.KeyspaceGroup{
+	savePatrolTestKeyspaceGroups(suite.ctx, suite.T(), store, &endpoint.KeyspaceGroup{
 		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
 		Keyspaces: keyspaces,
@@ -801,8 +801,8 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	mergingKeyspaces := buildSequentialKeyspaces(100000, defaultKeyspaceCountSplitThreshold+1)
 	eligibleKeyspaces := buildSequentialKeyspaces(200000, defaultKeyspaceCountSplitThreshold+1)
 	savePatrolTestKeyspaceGroups(
-		suite.T(),
 		suite.ctx,
+		suite.T(),
 		store,
 		&endpoint.KeyspaceGroup{
 			ID:         constant.DefaultKeyspaceGroupID,
@@ -862,8 +862,8 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	keyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold+1)
 	savePatrolTestKeyspaceGroups(
-		suite.T(),
 		suite.ctx,
+		suite.T(),
 		store,
 		&endpoint.KeyspaceGroup{
 			ID:        constant.DefaultKeyspaceGroupID,
@@ -898,7 +898,7 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	keyspaces := make([]uint32, 0, defaultKeyspaceCountSplitThreshold+1)
 	keyspaces = append(keyspaces, buildSequentialKeyspaces(1, defaultKeyspaceCountSplitThreshold/2)...)
 	keyspaces = append(keyspaces, make([]uint32, defaultKeyspaceCountSplitThreshold/2+1)...)
-	savePatrolTestKeyspaceGroups(suite.T(), suite.ctx, store, &endpoint.KeyspaceGroup{
+	savePatrolTestKeyspaceGroups(suite.ctx, suite.T(), store, &endpoint.KeyspaceGroup{
 		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
 		Keyspaces: keyspaces,
