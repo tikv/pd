@@ -289,6 +289,9 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 		if group.IsSplitting() || group.IsMerging() {
 			continue
 		}
+		if len(group.Members) < mcs.DefaultKeyspaceGroupReplicaCount {
+			continue
+		}
 		count := len(group.Keyspaces)
 		if count <= threshold {
 			continue

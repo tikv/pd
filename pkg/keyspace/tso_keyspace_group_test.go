@@ -919,6 +919,58 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	re.Nil(kg1)
 }
 
+func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSkipsUnderReplicatedGroups() {
+	re := suite.Require()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	// The first group exceeds the split threshold but is intentionally short on replicas.
+	// The second group is eligible, so the patrol should skip the first and continue.
+	underReplicatedKeyspaces := buildSequentialKeyspaces(0, defaultKeyspaceCountSplitThreshold+1)
+	eligibleKeyspaces := buildSequentialKeyspaces(100000, defaultKeyspaceCountSplitThreshold+1)
+	savePatrolTestKeyspaceGroups(
+		suite.ctx,
+		suite.T(),
+		store,
+		&endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: underReplicatedKeyspaces,
+			Members:   make([]endpoint.KeyspaceGroupMember, mcs.DefaultKeyspaceGroupReplicaCount-1),
+		},
+		&endpoint.KeyspaceGroup{
+			ID:        1,
+			UserKind:  endpoint.Standard.String(),
+			Keyspaces: eligibleKeyspaces,
+			Members:   testKeyspaceGroupMembers(),
+		},
+	)
+
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+
+	kgm.doPatrolKeyspaceGroupSizeForAutoSplit(suite.ctx)
+
+	// The under-replicated source group must be left untouched.
+	kg0, err := kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	re.NotNil(kg0)
+	re.Equal(underReplicatedKeyspaces, kg0.Keyspaces)
+	re.False(kg0.IsSplitting())
+
+	// A later eligible group should still be auto-split in the same patrol round.
+	kg1, err := kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg1)
+	re.Equal(eligibleKeyspaces[:defaultKeyspaceCountSplitThreshold/2], kg1.Keyspaces)
+	re.True(kg1.IsSplitSource())
+
+	kg2, err := kgm.GetKeyspaceGroupByID(2)
+	re.NoError(err)
+	re.NotNil(kg2)
+	re.Equal(eligibleKeyspaces[defaultKeyspaceCountSplitThreshold/2:], kg2.Keyspaces)
+	re.True(kg2.IsSplitTarget())
+	re.Equal(uint32(1), kg2.SplitSource())
+}
+
 func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitRespectsCanceledContext() {
 	re := suite.Require()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
