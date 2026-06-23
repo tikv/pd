@@ -565,6 +565,8 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	re.NoError(err)
 	defer func() {
 		if len(originalConfig.GetKvs()) == 0 {
+			_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, []byte("{}"))
+			re.NoError(err)
 			return
 		}
 		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
