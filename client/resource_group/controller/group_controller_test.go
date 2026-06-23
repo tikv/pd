@@ -604,17 +604,16 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	gmc := initMetrics(name, name)
 	// Push a sample through every paging counter / histogram so each label
 	// series actually exists in the underlying Vec.
-	gmc.observePagingRequest(100, 1.0)
-	gmc.observePagingResponse(100, 80, 2.0, 0.5)
-	gmc.observePagingRequest(0, 0)
-	gmc.observePagingResponse(0, 200, 0, 0)
+	gmc.observePagingRequest(100)
+	gmc.observePagingResponse(100, 80)
+	gmc.observePagingRequest(0)
+	gmc.observePagingResponse(0, 200)
 
 	// Sanity: cached counters are non-zero before cleanup.
 	re.Positive(counterValue(re, gmc.prechargeCounter))
 	re.Positive(counterValue(re, gmc.actualBytesCounter))
 	re.Positive(counterValue(re, gmc.nonprechargeCounter))
 	re.Positive(histogramSampleCount(re, gmc.predictionResidualBytes))
-	re.Positive(histogramSampleCount(re, gmc.settlementRUDelta))
 
 	gmc.deletePagingLabels(name)
 
@@ -627,15 +626,12 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 		metrics.PagingNonprechargeCounter,
 		metrics.PagingPrechargeBytesCounter,
 		metrics.PagingActualBytesCounter,
-		metrics.PagingPrechargeRU,
-		metrics.PagingSettlementRU,
 	} {
 		re.Zero(counterValue(re, vec.WithLabelValues(name)),
 			"paging counter series for %q should be cleared by deletePagingLabels", name)
 	}
 	for _, vec := range []*prometheus.HistogramVec{
 		metrics.PagingPredictionResidualBytes,
-		metrics.PagingSettlementRUDelta,
 	} {
 		re.Zero(histogramSampleCount(re, vec.WithLabelValues(name)),
 			"paging histogram series for %q should be cleared by deletePagingLabels", name)

@@ -114,9 +114,6 @@ type groupMetricsCollection struct {
 	actualBytesCounter      prometheus.Counter
 	predictionResidualBytes prometheus.Observer
 	nonprechargeCounter     prometheus.Counter
-	prechargeRU             prometheus.Counter
-	settlementRU            prometheus.Counter
-	settlementRUDelta       prometheus.Observer
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -140,9 +137,6 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
 
 		nonprechargeCounter: metrics.PagingNonprechargeCounter.WithLabelValues(name),
-		prechargeRU:         metrics.PagingPrechargeRU.WithLabelValues(name),
-		settlementRU:        metrics.PagingSettlementRU.WithLabelValues(name),
-		settlementRUDelta:   metrics.PagingSettlementRUDelta.WithLabelValues(name),
 	}
 }
 
@@ -157,37 +151,29 @@ func (*groupMetricsCollection) deletePagingLabels(name string) {
 	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
 	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
 	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
-	metrics.PagingPrechargeRU.DeleteLabelValues(name)
-	metrics.PagingSettlementRU.DeleteLabelValues(name)
-	metrics.PagingSettlementRUDelta.DeleteLabelValues(name)
 }
 
 // observePagingRequest records request-boundary paging counters. Callers must
 // gate the call on pagingReadEstimate(...).ok so the metric stays scoped to
 // coprocessor reads and excludes point gets, batch gets, scans, and other
 // bounded-size reads.
-func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64, prechargeRU float64) {
+func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
 	if bytesForEst == 0 {
 		gmc.nonprechargeCounter.Inc()
 		return
 	}
 	gmc.prechargeCounter.Inc()
 	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
-	gmc.prechargeRU.Add(prechargeRU)
 }
 
-// observePagingResponse records response-boundary paging metrics. For
-// precharged RPCs, settlementRU is the total RU finally consumed
-// (base + CPU + ReadBytesCost * actual) and vDelta is
-// (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
-func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64, settlementRU, vDelta float64) {
+// observePagingResponse records response-boundary paging metrics for
+// precharged coprocessor RPCs.
+func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
 	if bytesForEst == 0 {
 		return
 	}
 	gmc.actualBytesCounter.Add(float64(actual))
 	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
-	gmc.settlementRU.Add(settlementRU)
-	gmc.settlementRUDelta.Observe(vDelta)
 }
 
 type tokenCounter struct {
@@ -664,7 +650,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 		waitDuration += d
 	}
 	if bytesForEst, ok := pagingReadEstimate(info); ok {
-		gc.metrics.observePagingRequest(bytesForEst, getRUValueFromConsumption(delta))
+		gc.metrics.observePagingRequest(bytesForEst)
 	}
 
 	gc.mu.Lock()
@@ -698,8 +684,7 @@ func (gc *groupCostController) onResponseImpl(
 		calc.BeforeKVRequest(count, req)
 	}
 	if bytesForEst, ok := pagingReadEstimate(req); ok {
-		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes(),
-			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
@@ -763,8 +748,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 		}
 	}
 	if isPagingRead {
-		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes(),
-			getRUValueFromConsumption(count), getRUValueFromConsumption(delta))
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
 	}
 
 	gc.mu.Lock()

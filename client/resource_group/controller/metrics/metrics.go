@@ -72,16 +72,6 @@ var (
 	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read
 	// bytes for pre-charged coprocessor RPCs.
 	PagingPredictionResidualBytes *prometheus.HistogramVec
-
-	// PagingPrechargeRU accumulates RU pre-acquired at BeforeKVRequest for pre-charged
-	// coprocessor RPCs.
-	PagingPrechargeRU *prometheus.CounterVec
-	// PagingSettlementRU accumulates total RU finally consumed by pre-charged coprocessor RPCs
-	// (base + CPU + bytes cost).
-	PagingSettlementRU *prometheus.CounterVec
-	// PagingSettlementRUDelta records the distribution of per-RPC signed RU delta
-	// (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs.
-	PagingSettlementRUDelta *prometheus.HistogramVec
 )
 
 func init() {
@@ -235,37 +225,6 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Histogram of signed (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
-
-	PagingPrechargeRU = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   requestSubsystem,
-			Name:        "paging_precharge_ru_total",
-			Help:        "Sum of RU pre-acquired at BeforeKVRequest for pre-charged coprocessor RPCs (read base cost + ReadBytesCost * predicted_bytes).",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
-
-	PagingSettlementRU = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   requestSubsystem,
-			Name:        "paging_settlement_ru_total",
-			Help:        "Sum of total RU finally consumed by pre-charged coprocessor RPCs (read base cost + CPUMsCost * kv_cpu_ms + ReadBytesCost * actual_bytes). Equals precharge_ru + settlement_ru_delta.",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
-
-	PagingSettlementRUDelta = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: namespace,
-			Subsystem: requestSubsystem,
-			Name:      "paging_settlement_ru_delta",
-			// v = settlement_ru - precharge_ru = CPUMsCost * kv_cpu_ms + ReadBytesCost * (actual - predicted).
-			// Negative => flows through RefundTokens; positive => flows through RemoveTokens / acquireTokens.
-			// Factor-4 spacing over ±1024 RU covers CPU (±tens of RU) plus bytes residuals up to ±64MB.
-			Buckets:     []float64{-1024, -256, -64, -16, -4, -1, -0.25, -0.0625, 0, 0.0625, 0.25, 1, 4, 16, 64, 256, 1024},
-			Help:        "Histogram of signed per-RPC settlement RU delta (settlement_ru - precharge_ru) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -286,7 +245,4 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
 	prometheus.MustRegister(PagingPredictionResidualBytes)
-	prometheus.MustRegister(PagingPrechargeRU)
-	prometheus.MustRegister(PagingSettlementRU)
-	prometheus.MustRegister(PagingSettlementRUDelta)
 }
