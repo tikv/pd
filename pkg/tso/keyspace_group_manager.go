@@ -385,6 +385,9 @@ type KeyspaceGroupManager struct {
 	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
 	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
 
+	// finishSplitMu serializes split finish requests without blocking the state RWMutex.
+	finishSplitMu sync.Mutex
+
 	primaryPriorityCheckInterval time.Duration
 
 	// tsoNodes is the registered tso servers.
@@ -1238,24 +1241,17 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
-// Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
-	kgm.Lock()
-	defer kgm.Unlock()
-	// Check if the keyspace group is in split state.
-	splitGroup := kgm.kgs[id]
-	if !splitGroup.IsSplitTarget() {
-		return nil
-	}
-	// Check if the HTTP client is initialized.
-	if kgm.httpClient == nil {
+	kgm.finishSplitMu.Lock()
+	defer kgm.finishSplitMu.Unlock()
+
+	httpClient, requestURL, ok := kgm.getFinishSplitRequest(id)
+	if !ok {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+	resp, err := apiutil.DoDelete(httpClient, requestURL)
 	if err != nil {
 		return err
 	}
@@ -1271,11 +1267,38 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	// Note: to avoid data race with state read APIs, we always replace the group in memory as a whole.
 	// For now, we only have scenarios to update split state/merge state, and the other fields are always
 	// loaded from etcd without any modification, so we can simply copy the group and replace the state.
+	kgm.completeFinishSplitKeyspaceGroup(id)
+	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
+	return nil
+}
+
+func (kgm *KeyspaceGroupManager) getFinishSplitRequest(id uint32) (*http.Client, string, bool) {
+	kgm.Lock()
+	defer kgm.Unlock()
+
+	// Check if the keyspace group is in split state.
+	splitGroup := kgm.kgs[id]
+	if !splitGroup.IsSplitTarget() {
+		return nil, "", false
+	}
+	// Check if the HTTP client is initialized.
+	if kgm.httpClient == nil {
+		return nil, "", false
+	}
+	return kgm.httpClient, kgm.cfg.GetBackendEndpoints() + keyspaceGroupsAPIPrefix + fmt.Sprintf("/%d/split", id), true
+}
+
+func (kgm *KeyspaceGroupManager) completeFinishSplitKeyspaceGroup(id uint32) {
+	kgm.Lock()
+	defer kgm.Unlock()
+
+	splitGroup := kgm.kgs[id]
+	if !splitGroup.IsSplitTarget() {
+		return
+	}
 	newSplitGroup := *splitGroup
 	newSplitGroup.SplitState = nil
 	kgm.kgs[id] = &newSplitGroup
-	kgm.metrics.finishSplitDuration.Observe(time.Since(start).Seconds())
-	return nil
 }
 
 func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {

@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"sort"
 	"strconv"
@@ -74,6 +76,76 @@ func TestKeyspaceGroupPrimaryElectionPurposeIncludesGroupID(t *testing.T) {
 	re.Equal("keyspace group primary election 00000", keyspaceGroupPrimaryElectionPurpose(0))
 	re.Equal("keyspace group primary election 00012", keyspaceGroupPrimaryElectionPurpose(12))
 	re.Equal("keyspace group primary election 12345", keyspaceGroupPrimaryElectionPurpose(12345))
+}
+
+func TestFinishSplitKeyspaceGroupDoesNotBlockStateReads(t *testing.T) {
+	re := require.New(t)
+
+	requestReceived := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	var closeRequestReceived sync.Once
+	var closeReleaseResponse sync.Once
+	defer closeReleaseResponse.Do(func() { close(releaseResponse) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		closeRequestReceived.Do(func() { close(requestReceived) })
+		<-releaseResponse
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	kgm := &KeyspaceGroupManager{
+		ctx:        ctx,
+		httpClient: server.Client(),
+		cfg: &TestServiceConfig{
+			BackendEndpoints: server.URL,
+		},
+		metrics: newKeyspaceGroupMetrics(),
+	}
+	kgm.initialize()
+	const groupID = uint32(1)
+	kgm.kgs[groupID] = &endpoint.KeyspaceGroup{
+		ID: groupID,
+		SplitState: &endpoint.SplitState{
+			SplitSource: constant.DefaultKeyspaceGroupID,
+		},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- kgm.finishSplitKeyspaceGroup(groupID)
+	}()
+
+	select {
+	case <-requestReceived:
+	case <-time.After(time.Second):
+		re.FailNow("timed out waiting for finish request")
+	}
+
+	readDone := make(chan struct{})
+	go func() {
+		kgm.RLock()
+		_ = kgm.kgs[groupID].ID
+		kgm.RUnlock()
+		close(readDone)
+	}()
+	select {
+	case <-readDone:
+	case <-time.After(200 * time.Millisecond):
+		re.FailNow("state read was blocked while finish request was in flight")
+	}
+
+	closeReleaseResponse.Do(func() { close(releaseResponse) })
+	select {
+	case err := <-done:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		re.FailNow("timed out waiting for finish request to complete")
+	}
+
+	re.False(kgm.kgs[groupID].IsSplitTarget())
 }
 
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
