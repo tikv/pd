@@ -1541,7 +1541,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				return nil, nil
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
-				_, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				if resp != nil {
+					re.NoError(resp.Body.Close())
+				}
 				re.Error(err)
 				re.ErrorIs(err, errs.ErrURLParse)
 				re.Contains(err.Error(), "ftp://127.0.0.1:2379")
@@ -1572,7 +1575,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				defer func() { finishKeyspaceGroupRequestTimeout = oldTimeout }()
 
 				start := time.Now()
-				_, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				if resp != nil {
+					re.NoError(resp.Body.Close())
+				}
 				elapsed := time.Since(start)
 				re.Error(err)
 				re.ErrorIs(err, context.DeadlineExceeded)
