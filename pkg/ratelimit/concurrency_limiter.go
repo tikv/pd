@@ -137,7 +137,14 @@ func (l *ConcurrencyLimiter) AcquireToken(ctx context.Context) (*TaskToken, erro
 			l.mu.Lock()
 			if err := ctx.Err(); err != nil {
 				l.waiting--
+				shouldWakeUp := l.waiting > 0 && (l.limit == unlimit || l.current < l.limit)
 				l.mu.Unlock()
+				if shouldWakeUp {
+					select {
+					case l.queue <- struct{}{}:
+					default:
+					}
+				}
 				return nil, err
 			}
 			if l.limit == unlimit || l.current < l.limit {
