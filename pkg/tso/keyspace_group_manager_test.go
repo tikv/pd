@@ -1553,6 +1553,52 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 			wantURLs: []string{},
 		},
 		{
+			name: "timeout-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
+				oldOverall := finishKeyspaceGroupOverallTimeout
+				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
+				finishKeyspaceGroupOverallTimeout = 500 * time.Millisecond
+				defer func() {
+					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
+					finishKeyspaceGroupOverallTimeout = oldOverall
+				}()
+
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
 			name: "request-timeout",
 			setup: func(client *http.Client) *KeyspaceGroupManager {
 				return &KeyspaceGroupManager{
@@ -1570,9 +1616,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				return nil, req.Context().Err()
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
-				oldTimeout := finishKeyspaceGroupRequestTimeout
-				finishKeyspaceGroupRequestTimeout = 50 * time.Millisecond
-				defer func() { finishKeyspaceGroupRequestTimeout = oldTimeout }()
+				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
+				oldOverall := finishKeyspaceGroupOverallTimeout
+				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
+				finishKeyspaceGroupOverallTimeout = 50 * time.Millisecond
+				defer func() {
+					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
+					finishKeyspaceGroupOverallTimeout = oldOverall
+				}()
 
 				start := time.Now()
 				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")

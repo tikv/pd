@@ -74,9 +74,15 @@ const (
 	keyspaceGroupMetricsSyncInterval = 15 * time.Second
 )
 
-// finishKeyspaceGroupRequestTimeout is the overall deadline for finish split/merge
-// HTTP requests to backend PD endpoints.
-var finishKeyspaceGroupRequestTimeout = 3 * time.Second
+// finishKeyspaceGroupOverallTimeout is the overall deadline for one finish split/merge
+// request across all backend PD endpoints. It is set to 3 * per-endpoint timeout so
+// each of the three PD backends can use a full per-endpoint budget before the cap.
+var finishKeyspaceGroupOverallTimeout = 6 * time.Second
+
+// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
+// It is nested under finishKeyspaceGroupOverallTimeout so a hanging endpoint does not
+// block fallback to later healthy endpoints.
+var finishKeyspaceGroupPerEndpointTimeout = 2 * time.Second
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
@@ -1249,14 +1255,14 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, finishKeyspaceGroupRequestTimeout)
-	defer cancel()
+	overallCtx, overallCancel := context.WithTimeout(parentCtx, finishKeyspaceGroupOverallTimeout)
+	defer overallCancel()
 
 	var lastErr error
 	var lastResp *http.Response
 	var lastParseErr error
 	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
-		if err := ctx.Err(); err != nil {
+		if err := overallCtx.Err(); err != nil {
 			lastErr = err
 			break
 		}
@@ -1283,7 +1289,9 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 			continue
 		}
 		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
-		resp, err := apiutil.DoDeleteWithContext(ctx, kgm.httpClient, requestURL)
+		reqCtx, reqCancel := context.WithTimeout(overallCtx, finishKeyspaceGroupPerEndpointTimeout)
+		resp, err := apiutil.DoDeleteWithContext(reqCtx, kgm.httpClient, requestURL)
+		reqCancel()
 		if err == nil && resp.StatusCode == http.StatusOK {
 			if lastResp != nil {
 				lastResp.Body.Close()
