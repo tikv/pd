@@ -69,10 +69,6 @@ var (
 	PagingPrechargeBytesCounter *prometheus.CounterVec
 	// PagingActualBytesCounter accumulates actual bytes read by pre-charged coprocessor RPCs.
 	PagingActualBytesCounter *prometheus.CounterVec
-	// PagingNonprechargeActualBytes accumulates actual bytes read by coprocessor RPCs that
-	// reached the RC interceptor without a hint (EMA cold-start). Same coprocessor gating as
-	// PagingNonprechargeCounter.
-	PagingNonprechargeActualBytes *prometheus.CounterVec
 	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read
 	// bytes for pre-charged coprocessor RPCs.
 	PagingPredictionResidualBytes *prometheus.HistogramVec
@@ -226,15 +222,6 @@ func initMetrics(constLabels prometheus.Labels) {
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
-	PagingNonprechargeActualBytes = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace:   namespace,
-			Subsystem:   requestSubsystem,
-			Name:        "paging_nonprecharge_actual_bytes_total",
-			Help:        "Sum of actual bytes read by coprocessor RPCs that reached the RC interceptor without a hint (EMA cold-start; IsCop()-gated). Quantifies read volume settled without pre-charge throttling.",
-			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel})
-
 	PagingPredictionResidualBytes = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -298,7 +285,6 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(PagingNonprechargeCounter)
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
-	prometheus.MustRegister(PagingNonprechargeActualBytes)
 	prometheus.MustRegister(PagingPredictionResidualBytes)
 	prometheus.MustRegister(PagingPrechargeRU)
 	prometheus.MustRegister(PagingSettlementRU)

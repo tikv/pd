@@ -114,7 +114,6 @@ type groupMetricsCollection struct {
 	actualBytesCounter      prometheus.Counter
 	predictionResidualBytes prometheus.Observer
 	nonprechargeCounter     prometheus.Counter
-	nonprechargeActualBytes prometheus.Counter
 	prechargeRU             prometheus.Counter
 	settlementRU            prometheus.Counter
 	settlementRUDelta       prometheus.Observer
@@ -140,11 +139,10 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
 		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
 
-		nonprechargeCounter:     metrics.PagingNonprechargeCounter.WithLabelValues(name),
-		nonprechargeActualBytes: metrics.PagingNonprechargeActualBytes.WithLabelValues(name),
-		prechargeRU:             metrics.PagingPrechargeRU.WithLabelValues(name),
-		settlementRU:            metrics.PagingSettlementRU.WithLabelValues(name),
-		settlementRUDelta:       metrics.PagingSettlementRUDelta.WithLabelValues(name),
+		nonprechargeCounter: metrics.PagingNonprechargeCounter.WithLabelValues(name),
+		prechargeRU:         metrics.PagingPrechargeRU.WithLabelValues(name),
+		settlementRU:        metrics.PagingSettlementRU.WithLabelValues(name),
+		settlementRUDelta:   metrics.PagingSettlementRUDelta.WithLabelValues(name),
 	}
 }
 
@@ -158,7 +156,6 @@ func (*groupMetricsCollection) deletePagingLabels(name string) {
 	metrics.PagingNonprechargeCounter.DeleteLabelValues(name)
 	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
 	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
-	metrics.PagingNonprechargeActualBytes.DeleteLabelValues(name)
 	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
 	metrics.PagingPrechargeRU.DeleteLabelValues(name)
 	metrics.PagingSettlementRU.DeleteLabelValues(name)
@@ -185,7 +182,6 @@ func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64, prec
 // (settlement_ru - precharge_ru), the signed per-RPC RU adjustment.
 func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64, settlementRU, vDelta float64) {
 	if bytesForEst == 0 {
-		gmc.nonprechargeActualBytes.Add(float64(actual))
 		return
 	}
 	gmc.actualBytesCounter.Add(float64(actual))

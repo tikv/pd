@@ -627,7 +627,6 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 		metrics.PagingNonprechargeCounter,
 		metrics.PagingPrechargeBytesCounter,
 		metrics.PagingActualBytesCounter,
-		metrics.PagingNonprechargeActualBytes,
 		metrics.PagingPrechargeRU,
 		metrics.PagingSettlementRU,
 	} {
@@ -657,7 +656,7 @@ func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
 	cop := &TestRequestInfo{isWrite: false, isCop: true}
 
 	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
-	actualBytesBefore := counterValue(re, gc.metrics.nonprechargeActualBytes)
+	residualSamplesBefore := histogramSampleCount(re, gc.metrics.predictionResidualBytes)
 
 	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), nonCop)
 	re.NoError(err)
@@ -666,22 +665,22 @@ func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
 	re.NoError(err)
 	re.InDelta(counterBefore, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
 		"non-cop reads must not increment paging_nonprecharge_*")
-	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
-		"non-cop reads must not increment paging_nonprecharge_*")
+	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
+		"non-cop reads must not be included in paging prediction residuals")
 
 	_, _, _, _, err = gc.onRequestWaitImpl(context.TODO(), cop)
 	re.NoError(err)
 	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
 		"cop reads without a hint must increment paging_nonprecharge_total on the request path")
-	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
-		"cop reads without a hint must not record actual bytes before response")
+	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
+		"cop reads without a hint must not record prediction residuals before response")
 
 	_, err = gc.onResponseImpl(cop, resp)
 	re.NoError(err)
 	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
 		"cop read responses must not increment paging_nonprecharge_total again")
-	re.InDelta(actualBytesBefore+float64(resp.ReadBytes()), counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
-		"cop read responses without a hint must record paging_nonprecharge_actual_bytes_total")
+	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
+		"cop read responses without a hint must not be included in precharge prediction residuals")
 }
 
 func TestPagingNonprechargeCounterObservedOnRequest(t *testing.T) {
@@ -691,15 +690,15 @@ func TestPagingNonprechargeCounterObservedOnRequest(t *testing.T) {
 	req := &TestRequestInfo{isWrite: false, isCop: true}
 
 	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
-	actualBytesBefore := counterValue(re, gc.metrics.nonprechargeActualBytes)
+	residualSamplesBefore := histogramSampleCount(re, gc.metrics.predictionResidualBytes)
 
 	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
 	re.NoError(err)
 
 	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
 		"cop reads without a prediction should be counted at the same request boundary as precharged reads")
-	re.InDelta(actualBytesBefore, counterValue(re, gc.metrics.nonprechargeActualBytes), 1e-9,
-		"actual bytes are response-only and must not be recorded on the request path")
+	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
+		"prediction residuals are response-only and must not be recorded on the request path")
 }
 
 func TestNoPreChargeWithoutPredictedReadBytes(t *testing.T) {
