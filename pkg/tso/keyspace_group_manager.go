@@ -76,7 +76,7 @@ const (
 
 // finishKeyspaceGroupRequestTimeout is the overall deadline for finish split/merge
 // HTTP requests to backend PD endpoints.
-var finishKeyspaceGroupRequestTimeout = etcdutil.DefaultRequestTimeout
+var finishKeyspaceGroupRequestTimeout = 3 * time.Second
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
