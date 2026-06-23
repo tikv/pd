@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -1637,8 +1638,18 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	g.RUSettings.RU.Settings.FillRate = 12345
 	_, err = cli.ModifyResourceGroup(suite.ctx, g)
 	re.NoError(err)
-	g1, err := cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
+	var g1 *rmpb.ResourceGroup
+	if suite.mode == resourceManagerStandaloneWithClientDiscovery {
+		// In standalone RM mode, metadata writes are persisted through PD first and
+		// become visible to the RM read path after the watcher applies the update.
+		testutil.Eventually(re, func() bool {
+			g1, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+			return err == nil && reflect.DeepEqual(g1, g)
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	} else {
+		g1, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		re.NoError(err)
+	}
 	re.Equal(g1, g)
 
 	// test leader change

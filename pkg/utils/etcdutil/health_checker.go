@@ -454,7 +454,9 @@ func (checker *healthChecker) removeClient(ep string) {
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
 func (checker *healthChecker) syncURLs() (eps []string) {
-	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client)
+	// Endpoint sync should keep using locally served member data so clients can
+	// refresh URLs even while the cluster is temporarily without a leader.
+	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client, false)
 	if err != nil {
 		log.Warn("failed to list members",
 			zap.String("source", checker.source),

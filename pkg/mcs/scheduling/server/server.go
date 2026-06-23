@@ -193,7 +193,7 @@ func (s *Server) updatePDMemberLoop() {
 		if !s.IsServing() {
 			continue
 		}
-		members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient())
+		members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient(), true)
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
