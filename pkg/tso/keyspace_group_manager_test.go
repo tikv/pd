@@ -1580,12 +1580,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
 				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
-				oldOverall := finishKeyspaceGroupOverallTimeout
 				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
-				finishKeyspaceGroupOverallTimeout = 500 * time.Millisecond
 				defer func() {
 					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
-					finishKeyspaceGroupOverallTimeout = oldOverall
 				}()
 
 				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
@@ -1617,12 +1614,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
 				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
-				oldOverall := finishKeyspaceGroupOverallTimeout
 				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
-				finishKeyspaceGroupOverallTimeout = 50 * time.Millisecond
 				defer func() {
 					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
-					finishKeyspaceGroupOverallTimeout = oldOverall
 				}()
 
 				start := time.Now()
