@@ -183,7 +183,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if request.GetReason() == pdpb.SplitReason_LOAD {
 		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
 			reqRegion.GetId(),
-			// Wait until PD observes the source region version advanced by the split.
+			// Use the post-split region version as this split-scatter batch identity.
 			reqRegion.GetRegionEpoch().GetVersion()+1,
 			newRegionIDs,
 		)
