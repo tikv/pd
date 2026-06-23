@@ -373,3 +373,24 @@ func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {
 		require.EqualValues(t, 1, pdServer.tokenCount.Load())
 	})
 }
+
+func TestAcquireTokenBucketsWithCanceledContextDoesNotEnqueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	tokenRequestCh := make(chan *tokenRequest, 1)
+	tokenRequestCh <- &tokenRequest{done: make(chan error, 1)}
+	cli := &client{
+		inner: &innerClient{
+			ctx: ctx,
+			tokenDispatcher: &tokenDispatcher{
+				tokenBatchController: newTokenBatchController(tokenRequestCh),
+			},
+		},
+	}
+
+	requestCtx, requestCancel := context.WithCancel(context.Background())
+	requestCancel()
+	_, err := cli.AcquireTokenBuckets(requestCtx, &rmpb.TokenBucketsRequest{})
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, tokenRequestCh, 1)
+}

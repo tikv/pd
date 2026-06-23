@@ -924,16 +924,16 @@ func (c *serviceDiscovery) updateMember() error {
 func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cc, err := c.GetOrCreateGRPCConn(url)
-	if err != nil {
-		return nil, err
-	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
 	if err := ctx.Err(); err != nil {
 		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		attachErr := errors.Errorf("error:%s target:%s", err, url)
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+	}
+	cc, err := c.GetOrCreateGRPCConn(url)
+	if err != nil {
+		return nil, err
 	}
 	key := "GetClusterInfo-" + url
 	r := c.flight.DoChan(key, func() (any, error) {
@@ -965,16 +965,16 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cc, err := c.GetOrCreateGRPCConn(url)
-	if err != nil {
-		return nil, err
-	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
 	if err := ctx.Err(); err != nil {
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+		attachErr := errors.Errorf("error:%s target:%s", err, url)
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+	}
+	cc, err := c.GetOrCreateGRPCConn(url)
+	if err != nil {
+		return nil, err
 	}
 	key := "GetMembers-" + url
 	r := c.flight.DoChan(key, func() (any, error) {

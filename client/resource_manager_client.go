@@ -258,13 +258,25 @@ func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 
 // AcquireTokenBuckets implements the ResourceManagerClient interface.
 func (c *client) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, errors.WithStack(err)
+	}
+	if err := c.inner.ctx.Err(); err != nil {
+		return nil, errors.WithStack(err)
+	}
 	req := &tokenRequest{
 		done:       make(chan error, 1),
 		requestCtx: ctx,
 		clientCtx:  c.inner.ctx,
 		Request:    request,
 	}
-	c.inner.tokenDispatcher.tokenBatchController.tokenRequestCh <- req
+	select {
+	case c.inner.tokenDispatcher.tokenBatchController.tokenRequestCh <- req:
+	case <-ctx.Done():
+		return nil, errors.WithStack(ctx.Err())
+	case <-c.inner.ctx.Done():
+		return nil, errors.WithStack(c.inner.ctx.Err())
+	}
 	grantedTokens, err := req.wait()
 	if err != nil {
 		return nil, err
@@ -362,6 +374,10 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		if err := dispatcherCtx.Err(); err != nil {
 			firstRequest.done <- errors.WithStack(err)
 			return
+		}
+		if err := firstRequest.requestCtx.Err(); err != nil {
+			firstRequest.done <- errors.WithStack(err)
+			continue
 		}
 		// Try to get a stream connection.
 		stream, streamCtx = connection.stream, connection.ctx

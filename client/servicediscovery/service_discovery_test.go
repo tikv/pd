@@ -452,3 +452,40 @@ func TestGRPCDialOption(t *testing.T) {
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
 }
+
+func TestCanceledGetClusterInfoAndMembersDoesNotCreateConn(t *testing.T) {
+	const url = "http://127.0.0.1:1"
+	newCanceledCtx := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+
+	t.Run("get-cluster-info", func(t *testing.T) {
+		re := require.New(t)
+		cli := &serviceDiscovery{
+			ctx:    context.Background(),
+			option: opt.NewOption(),
+		}
+		resp, err := cli.getClusterInfo(newCanceledCtx(), url, time.Second)
+		re.Error(err)
+		re.Contains(err.Error(), context.Canceled.Error())
+		re.Nil(resp)
+		_, ok := cli.clientConns.Load(url)
+		re.False(ok)
+	})
+
+	t.Run("get-members", func(t *testing.T) {
+		re := require.New(t)
+		cli := &serviceDiscovery{
+			ctx:    context.Background(),
+			option: opt.NewOption(),
+		}
+		resp, err := cli.getMembers(newCanceledCtx(), url, time.Second)
+		re.Error(err)
+		re.Contains(err.Error(), context.Canceled.Error())
+		re.Nil(resp)
+		_, ok := cli.clientConns.Load(url)
+		re.False(ok)
+	})
+}
