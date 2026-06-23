@@ -19,7 +19,6 @@ import (
 	"errors"
 	"math"
 	"math/rand"
-	"slices"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -221,7 +220,8 @@ func isTiFlashLearnerRule(rule *placement.Rule) bool {
 		return false
 	}
 	for _, constraint := range rule.LabelConstraints {
-		if constraint.Key == core.EngineKey && constraint.Op == placement.In && slices.Contains(constraint.Values, core.EngineTiFlash) {
+		if constraint.Key == core.EngineKey && constraint.Op == placement.In &&
+			len(constraint.Values) == 1 && constraint.Values[0] == core.EngineTiFlash {
 			return true
 		}
 	}
