@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
