@@ -19,6 +19,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -183,6 +184,12 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			}
 		}
 		if c.isOfflinePeer(peer) {
+			op, err := c.fixMissingTiFlashLearnerPeer(region, fit)
+			if err != nil {
+				log.Debug("fail to fix missing TiFlash learner peer before replacing offline peer", errs.ZapError(err))
+			} else if op != nil {
+				return op, nil
+			}
 			ruleCheckerReplaceOfflineCounter.Inc()
 			return c.replaceUnexpectedRulePeer(region, rf, fit, peer, offlineStatus)
 		}
@@ -200,7 +207,32 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	return c.fixBetterLocation(region, rf)
 }
 
+func (c *RuleChecker) fixMissingTiFlashLearnerPeer(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
+	for _, rf := range fit.RuleFits {
+		if len(rf.Peers) < rf.Rule.Count && isTiFlashLearnerRule(rf.Rule) {
+			return c.addRulePeerWithOptions(region, fit, rf, false, false)
+		}
+	}
+	return nil, nil
+}
+
+func isTiFlashLearnerRule(rule *placement.Rule) bool {
+	if rule.Role != placement.Learner {
+		return false
+	}
+	for _, constraint := range rule.LabelConstraints {
+		if constraint.Key == core.EngineKey && constraint.Op == placement.In && slices.Contains(constraint.Values, core.EngineTiFlash) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
+	return c.addRulePeerWithOptions(region, fit, rf, true, true)
+}
+
+func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, updateFilterState, allowReplacement bool) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
 	ruleStores := c.getRuleFitStores(rf)
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
@@ -208,7 +240,12 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 	store, filterByTempState := c.strategy(c.r, region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		ruleCheckerNoStoreAddCounter.Inc()
-		c.handleFilterState(region, filterByTempState)
+		if updateFilterState {
+			c.handleFilterState(region, filterByTempState)
+		}
+		if !allowReplacement {
+			return nil, errs.ErrNoStoreToAdd
+		}
 		// try to replace an existing peer that matches the label constraints.
 		// issue: https://github.com/tikv/pd/issues/7185
 		for _, p := range region.GetPeers() {
