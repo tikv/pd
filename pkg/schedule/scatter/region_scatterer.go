@@ -52,23 +52,34 @@ var (
 	operatorPriorityLevel = constant.High
 
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterSkipEmptyRegionCounter   = scatterCounter.WithLabelValues("skip", "empty-region")
-	scatterSkipNoRegionCounter      = scatterCounter.WithLabelValues("skip", "no-region")
-	scatterSkipNoLeaderCounter      = scatterCounter.WithLabelValues("skip", "no-leader")
-	scatterSkipHotRegionCounter     = scatterCounter.WithLabelValues("skip", "hot")
-	scatterSkipNotReplicatedCounter = scatterCounter.WithLabelValues("skip", "not-replicated")
-	scatterSkipAffinityCounter      = scatterCounter.WithLabelValues("skip", "affinity")
-	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
-	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
-	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
-	scatterOperatorRunningCounter   = scatterCounter.WithLabelValues("skip", "running")
-	scatterOperatorExistedCounter   = scatterCounter.WithLabelValues("fail", "other-existed")
+	scatterSkipEmptyRegionCounter            = scatterCounter.WithLabelValues("skip", "empty-region")
+	scatterSkipNoRegionCounter               = scatterCounter.WithLabelValues("skip", "no-region")
+	scatterSkipNoLeaderCounter               = scatterCounter.WithLabelValues("skip", "no-leader")
+	scatterSkipHotRegionCounter              = scatterCounter.WithLabelValues("skip", "hot")
+	scatterSkipNotReplicatedCounter          = scatterCounter.WithLabelValues("skip", "not-replicated")
+	scatterSkipAffinityCounter               = scatterCounter.WithLabelValues("skip", "affinity")
+	scatterSkipNoLeaderCandidateCounter      = scatterCounter.WithLabelValues("skip", "no-leader-candidate")
+	scatterSkipLeaderSourceFilteredCounter   = scatterCounter.WithLabelValues("skip", "leader-source-filtered")
+	scatterSkipReadPoolPressureCounter       = scatterCounter.WithLabelValues("skip", "read-pool-pressure")
+	scatterSkipLeaderTargetFilteredCounter   = scatterCounter.WithLabelValues("skip", "leader-target-filtered")
+	scatterSkipLeaderCandidateMissingCounter = scatterCounter.WithLabelValues("skip", "leader-candidate-missing")
+	scatterSkipNoLeaderTargetCounter         = scatterCounter.WithLabelValues("skip", "no-leader-target-filtered")
+	scatterSkipBalancedReadCPUCounter        = scatterCounter.WithLabelValues("skip", "balanced-read-cpu")
+	scatterUnnecessaryCounter                = scatterCounter.WithLabelValues("unnecessary", "")
+	scatterFailCounter                       = scatterCounter.WithLabelValues("fail", "")
+	scatterSuccessCounter                    = scatterCounter.WithLabelValues("success", "")
+	scatterOperatorRunningCounter            = scatterCounter.WithLabelValues("skip", "running")
+	scatterOperatorExistedCounter            = scatterCounter.WithLabelValues("fail", "other-existed")
 )
 
 const (
-	maxSleepDuration     = time.Minute
-	initialSleepDuration = 100 * time.Millisecond
-	maxRetryLimit        = 30
+	maxSleepDuration                = time.Minute
+	initialSleepDuration            = 100 * time.Millisecond
+	maxRetryLimit                   = 30
+	splitScatterReadCPUUsagePerCore = 100.0
+	// Only let internal split-scatter proceed by count when the current leader
+	// store is meaningfully busier than the chosen target leader store.
+	splitScatterReadCPUImbalanceThreshold = 0.10
 	// AdminScatterOperatorDesc is used by external admin/API scatter requests.
 	AdminScatterOperatorDesc = "scatter-region"
 	// InternalScatterOperatorDesc is used by PD-internal split-scatter dispatch.
@@ -121,6 +132,17 @@ type storeConfigProvider interface {
 type storeReadCPURecentMaxProvider interface {
 	GetStoreReadCPURecentMax(storeID uint64) float64
 }
+
+type leaderCandidateFilterReason int
+
+const (
+	leaderCandidateFilterReasonNone leaderCandidateFilterReason = iota
+	leaderCandidateFilterReasonNoCandidate
+	leaderCandidateFilterReasonSourceFiltered
+	leaderCandidateFilterReasonReadPoolPressure
+	leaderCandidateFilterReasonTargetFiltered
+	leaderCandidateFilterReasonCandidateMissing
+)
 
 func splitScatterReadCPUByStore(
 	storesLoads map[uint64]statistics.StoreKindLoads,
@@ -736,6 +758,9 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		// leader candidates so leader selection still only considers ordinary stores.
 		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
 	}
+	var readCPUByStore map[uint64]float64
+	readPoolThreadCount := uint64(0)
+	leaderFilterReason := leaderCandidateFilterReasonNone
 	if internalScatter {
 		var storesLoads map[uint64]statistics.StoreKindLoads
 		if provider, ok := r.cluster.(storeLoadsProvider); ok {
@@ -745,16 +770,21 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 		if provider, ok := r.cluster.(storeReadCPURecentMaxProvider); ok {
 			recentMaxProvider = provider
 		}
-		readCPUByStore := splitScatterReadCPUByStore(storesLoads, recentMaxProvider)
-		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, readCPUByStore)
+		readCPUByStore = splitScatterReadCPUByStore(storesLoads, recentMaxProvider)
+		readPoolThreadCount = r.getReadPoolThreadCount()
+		leaderCandidateStores, leaderFilterReason = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores, readCPUByStore)
 	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
 	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
 	if targetLeader == 0 {
-		scatterSkipNoLeaderCounter.Inc()
+		observeNoLeaderTargetMetrics(internalScatter, leaderFilterReason)
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
+	}
+	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
+		scatterSkipBalancedReadCPUCounter.Inc()
+		return nil, nil
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -804,46 +834,83 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 	targetPeers map[uint64]*metapb.Peer,
 	candidateStores []uint64,
 	readCPUByStore map[uint64]float64,
-) []uint64 {
+) ([]uint64, leaderCandidateFilterReason) {
 	if len(candidateStores) == 0 {
-		return candidateStores
+		return candidateStores, leaderCandidateFilterReasonNoCandidate
 	}
 	filtered := candidateStores[:0]
 	leader := region.GetLeader()
 	if leader == nil {
-		return filtered
+		return filtered, leaderCandidateFilterReasonNoCandidate
 	}
 	currentLeaderStoreID := leader.GetStoreId()
 	if !r.isAllowedLeaderSource(currentLeaderStoreID) {
 		for _, storeID := range candidateStores {
 			if storeID == currentLeaderStoreID {
-				return append(filtered, storeID)
+				return append(filtered, storeID), leaderCandidateFilterReasonNone
 			}
 		}
-		return filtered
+		return filtered, leaderCandidateFilterReasonSourceFiltered
 	}
 	readPoolThreadCount := uint64(0)
 	if provider, ok := r.cluster.(storeConfigProvider); ok {
 		readPoolThreadCount = provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
 	}
 	readPoolPressureFilters := []filter.Filter{filter.NewReadPoolPressureFilter(r.name, readCPUByStore, readPoolThreadCount)}
+	filterReason := leaderCandidateFilterReasonNoCandidate
 	for _, storeID := range candidateStores {
 		peer := targetPeers[storeID]
 		if peer == nil {
+			filterReason = leaderCandidateFilterReasonCandidateMissing
 			continue
 		}
 		store := r.cluster.GetStore(storeID)
 		if store == nil {
+			filterReason = leaderCandidateFilterReasonCandidateMissing
 			continue
 		}
 		if !filter.Target(r.cluster.GetSharedConfig(), store, readPoolPressureFilters) {
+			filterReason = leaderCandidateFilterReasonReadPoolPressure
 			continue
 		}
 		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
 			filtered = append(filtered, storeID)
+			continue
 		}
+		filterReason = leaderCandidateFilterReasonTargetFiltered
 	}
-	return filtered
+	if len(filtered) > 0 {
+		return filtered, leaderCandidateFilterReasonNone
+	}
+	return filtered, filterReason
+}
+
+func (r *RegionScatterer) getReadPoolThreadCount() uint64 {
+	if provider, ok := r.cluster.(storeConfigProvider); ok {
+		return provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+	}
+	return 0
+}
+
+func observeNoLeaderTargetMetrics(internalScatter bool, reason leaderCandidateFilterReason) {
+	if !internalScatter {
+		scatterSkipNoLeaderCounter.Inc()
+		return
+	}
+	switch reason {
+	case leaderCandidateFilterReasonNoCandidate:
+		scatterSkipNoLeaderCandidateCounter.Inc()
+	case leaderCandidateFilterReasonSourceFiltered:
+		scatterSkipLeaderSourceFilteredCounter.Inc()
+	case leaderCandidateFilterReasonReadPoolPressure:
+		scatterSkipReadPoolPressureCounter.Inc()
+	case leaderCandidateFilterReasonTargetFiltered:
+		scatterSkipLeaderTargetFilteredCounter.Inc()
+	case leaderCandidateFilterReasonCandidateMissing:
+		scatterSkipLeaderCandidateMissingCounter.Inc()
+	default:
+		scatterSkipNoLeaderTargetCounter.Inc()
+	}
 }
 
 func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
@@ -1017,6 +1084,28 @@ func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, grou
 	// A zero source count means this group has no seeded/current leader history
 	// for the origin store, so keep the original scatter fallback behavior.
 	return fromCount == 0 || fromCount > toCount+1
+}
+
+func shouldSkipInternalScatterByBalancedReadCPU(
+	region *core.RegionInfo,
+	targetLeader uint64,
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+) bool {
+	if region == nil || region.GetLeader() == nil || readPoolThreadCount == 0 {
+		return false
+	}
+	sourceLeader := region.GetLeader().GetStoreId()
+	sourceReadCPU, ok := readCPUByStore[sourceLeader]
+	if !ok {
+		return false
+	}
+	targetReadCPU, ok := readCPUByStore[targetLeader]
+	if !ok {
+		return false
+	}
+	capacity := float64(readPoolThreadCount) * splitScatterReadCPUUsagePerCore
+	return sourceReadCPU-targetReadCPU < capacity*splitScatterReadCPUImbalanceThreshold
 }
 
 func isSameRegionEpoch(left, right *metapb.RegionEpoch) bool {
