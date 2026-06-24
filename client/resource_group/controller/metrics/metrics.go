@@ -54,15 +54,12 @@ var (
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 
-	// PagingPrechargeCounter counts coprocessor RPCs that triggered RC paging pre-charge
-	// (PredictedReadBytes hint > 0). Explicitly gated to coprocessor reads; non-cop
-	// hints are ignored by paging accounting.
-	PagingPrechargeCounter *prometheus.CounterVec
-	// PagingNonprechargeCounter counts coprocessor RPCs that reached the RC interceptor
-	// without a PredictedReadBytes hint (EMA cold-start). Explicitly gated by
-	// the optional cop request provider so non-cop reads (CmdGet, CmdBatchGet, CmdScan, internal lookups)
-	// do not pollute the metric.
-	PagingNonprechargeCounter *prometheus.CounterVec
+	// CopReadPrechargeCounter counts read coprocessor RPCs that carried a positive
+	// PredictedReadBytes hint and triggered RC read-byte pre-charge.
+	CopReadPrechargeCounter *prometheus.CounterVec
+	// CopReadNoPrechargeCounter counts read coprocessor RPCs without a positive
+	// PredictedReadBytes hint, so request-side read-byte pre-charge was skipped.
+	CopReadNoPrechargeCounter *prometheus.CounterVec
 
 	// PagingPrechargeBytesCounter accumulates bytes used as the RC paging pre-charge basis
 	// (sum of predicted hints from coprocessor RPCs).
@@ -176,21 +173,21 @@ func initMetrics(constLabels prometheus.Labels) {
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
 
-	PagingPrechargeCounter = prometheus.NewCounterVec(
+	CopReadPrechargeCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
-			Name:        "paging_precharge_total",
-			Help:        "Counter of coprocessor RPCs that triggered RC paging pre-charge (PredictedReadBytes hint > 0).",
+			Name:        "cop_read_precharge_total",
+			Help:        "Counter of read coprocessor RPCs that carried a positive PredictedReadBytes hint and triggered request-side read-byte pre-charge.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
-	PagingNonprechargeCounter = prometheus.NewCounterVec(
+	CopReadNoPrechargeCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
-			Name:        "paging_nonprecharge_total",
-			Help:        "Counter of coprocessor RPCs that reached the RC interceptor without a PredictedReadBytes hint (EMA cold-start). Gated on the optional cop request provider so non-cop reads do not inflate the metric. These RPCs skip pre-charge and settle on actual read bytes only.",
+			Name:        "cop_read_no_precharge_total",
+			Help:        "Counter of read coprocessor RPCs that reached the RC interceptor without a positive PredictedReadBytes hint, so request-side read-byte pre-charge was skipped.",
 			ConstLabels: constLabels,
 		}, []string{newResourceGroupNameLabel})
 
@@ -240,8 +237,8 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
-	prometheus.MustRegister(PagingPrechargeCounter)
-	prometheus.MustRegister(PagingNonprechargeCounter)
+	prometheus.MustRegister(CopReadPrechargeCounter)
+	prometheus.MustRegister(CopReadNoPrechargeCounter)
 	prometheus.MustRegister(PagingPrechargeBytesCounter)
 	prometheus.MustRegister(PagingActualBytesCounter)
 	prometheus.MustRegister(PagingPredictionResidualBytes)

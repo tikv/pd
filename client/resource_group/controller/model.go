@@ -87,8 +87,8 @@ func isCopRequest(req RequestInfo) bool {
 
 // pagingReadEstimate returns the predicted read-bytes hint for coprocessor
 // read requests. The boolean reports whether the request participates in
-// paging accounting at all; a true result with 0 bytes means a paging
-// cold-start request with no usable estimate yet.
+// cop-read pre-charge accounting at all; a true result with 0 bytes means
+// the cop read did not carry a usable pre-charge hint.
 func pagingReadEstimate(req RequestInfo) (uint64, bool) {
 	if req.IsWrite() || !isCopRequest(req) {
 		return 0, false
@@ -97,8 +97,8 @@ func pagingReadEstimate(req RequestInfo) (uint64, bool) {
 }
 
 // estimatedReadBytes returns the predicted read-bytes hint for coprocessor
-// read requests. Writes and non-coprocessor reads always return 0 so paging
-// pre-charge and settlement stay gated to paging RPCs.
+// read requests. Writes and non-coprocessor reads always return 0 so cop-read
+// pre-charge and settlement stay gated to coprocessor RPCs.
 func estimatedReadBytes(req RequestInfo) uint64 {
 	bytesForEst, ok := pagingReadEstimate(req)
 	if !ok {

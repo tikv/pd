@@ -623,7 +623,7 @@ func TestNonCopPredictedReadBytesResponseIgnoresPagingAccounting(t *testing.T) {
 
 	prechargeBefore := counterValue(re, gc.metrics.prechargeCounter)
 	actualBefore := counterValue(re, gc.metrics.actualBytesCounter)
-	nonprechargeBefore := counterValue(re, gc.metrics.nonprechargeCounter)
+	noPrechargeBefore := counterValue(re, gc.metrics.noPrechargeCounter)
 	delta, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
 	re.NoError(err)
 	cfg := DefaultRUConfig()
@@ -639,7 +639,7 @@ func TestNonCopPredictedReadBytesResponseIgnoresPagingAccounting(t *testing.T) {
 		"non-cop response settlement must bill actual read bytes and CPU without subtracting the ignored hint")
 	re.InDelta(prechargeBefore, counterValue(re, gc.metrics.prechargeCounter), 1e-9)
 	re.InDelta(actualBefore, counterValue(re, gc.metrics.actualBytesCounter), 1e-9)
-	re.InDelta(nonprechargeBefore, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9)
+	re.InDelta(noPrechargeBefore, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9)
 }
 
 func TestDeletePagingLabelsResetsSeries(t *testing.T) {
@@ -658,7 +658,7 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	// Sanity: cached counters are non-zero before cleanup.
 	re.Positive(counterValue(re, gmc.prechargeCounter))
 	re.Positive(counterValue(re, gmc.actualBytesCounter))
-	re.Positive(counterValue(re, gmc.nonprechargeCounter))
+	re.Positive(counterValue(re, gmc.noPrechargeCounter))
 	re.Positive(histogramSampleCount(re, gmc.predictionResidualBytes))
 
 	gmc.deletePagingLabels(name)
@@ -668,8 +668,8 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	// initMetrics so a forgotten DeleteLabelValues in deletePagingLabels
 	// surfaces here.
 	for _, vec := range []*prometheus.CounterVec{
-		metrics.PagingPrechargeCounter,
-		metrics.PagingNonprechargeCounter,
+		metrics.CopReadPrechargeCounter,
+		metrics.CopReadNoPrechargeCounter,
 		metrics.PagingPrechargeBytesCounter,
 		metrics.PagingActualBytesCounter,
 	} {
@@ -684,20 +684,20 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	}
 }
 
-func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
+func TestCopReadNoPrechargeGatedByIsCop(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
-	// Reads without a paging hint reach onResponseImpl through the same RC
+	// Reads without a pre-charge hint reach onResponseImpl through the same RC
 	// interceptor regardless of cmd type (CmdGet, CmdBatchGet, CmdCop, ...).
-	// Only IsCop()==true requests should land in paging_nonprecharge_*; the
-	// rest must be ignored so the metric keeps its "paging cold-start"
+	// Only IsCop()==true requests should land in cop_read_no_precharge_total;
+	// the rest must be ignored so the metric keeps its cop-read coverage
 	// semantics.
 	resp := &TestResponseInfo{readBytes: 1024, succeed: true}
 	nonCop := &TestRequestInfo{isWrite: false, isCop: false}
 	cop := &TestRequestInfo{isWrite: false, isCop: true}
 
-	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
+	counterBefore := counterValue(re, gc.metrics.noPrechargeCounter)
 	residualSamplesBefore := histogramSampleCount(re, gc.metrics.predictionResidualBytes)
 
 	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), nonCop)
@@ -705,39 +705,39 @@ func TestPagingNonprechargeGatedByIsCop(t *testing.T) {
 
 	_, err = gc.onResponseImpl(nonCop, resp)
 	re.NoError(err)
-	re.InDelta(counterBefore, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
-		"non-cop reads must not increment paging_nonprecharge_*")
+	re.InDelta(counterBefore, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9,
+		"non-cop reads must not increment cop_read_no_precharge_total")
 	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
 		"non-cop reads must not be included in paging prediction residuals")
 
 	_, _, _, _, err = gc.onRequestWaitImpl(context.TODO(), cop)
 	re.NoError(err)
-	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
-		"cop reads without a hint must increment paging_nonprecharge_total on the request path")
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9,
+		"cop reads without a hint must increment cop_read_no_precharge_total on the request path")
 	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
 		"cop reads without a hint must not record prediction residuals before response")
 
 	_, err = gc.onResponseImpl(cop, resp)
 	re.NoError(err)
-	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
-		"cop read responses must not increment paging_nonprecharge_total again")
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9,
+		"cop read responses must not increment cop_read_no_precharge_total again")
 	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
 		"cop read responses without a hint must not be included in precharge prediction residuals")
 }
 
-func TestPagingNonprechargeCounterObservedOnRequest(t *testing.T) {
+func TestCopReadNoPrechargeCounterObservedOnRequest(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
 	req := &TestRequestInfo{isWrite: false, isCop: true}
 
-	counterBefore := counterValue(re, gc.metrics.nonprechargeCounter)
+	counterBefore := counterValue(re, gc.metrics.noPrechargeCounter)
 	residualSamplesBefore := histogramSampleCount(re, gc.metrics.predictionResidualBytes)
 
 	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
 	re.NoError(err)
 
-	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.nonprechargeCounter), 1e-9,
+	re.InDelta(counterBefore+1, counterValue(re, gc.metrics.noPrechargeCounter), 1e-9,
 		"cop reads without a prediction should be counted at the same request boundary as precharged reads")
 	re.Equal(residualSamplesBefore, histogramSampleCount(re, gc.metrics.predictionResidualBytes),
 		"prediction residuals are response-only and must not be recorded on the request path")
@@ -884,7 +884,7 @@ func TestPagingPrechargeNotObservedOnThrottle(t *testing.T) {
 	// Throttled requests never reach OnResponse for settlement, so the
 	// precharge counter must not be incremented either.
 	re.Equal(before, after,
-		"throttled paging request should not inflate PagingPrechargeCounter")
+		"throttled paging request should not inflate CopReadPrechargeCounter")
 }
 
 func TestAcquireTokensSignalAwareWait(t *testing.T) {

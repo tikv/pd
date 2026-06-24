@@ -113,7 +113,7 @@ type groupMetricsCollection struct {
 	prechargeBytesCounter   prometheus.Counter
 	actualBytesCounter      prometheus.Counter
 	predictionResidualBytes prometheus.Observer
-	nonprechargeCounter     prometheus.Counter
+	noPrechargeCounter      prometheus.Counter
 }
 
 func initMetrics(oldName, name string) *groupMetricsCollection {
@@ -131,12 +131,12 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 
-		prechargeCounter:        metrics.PagingPrechargeCounter.WithLabelValues(name),
+		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
 		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
 		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
 		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
 
-		nonprechargeCounter: metrics.PagingNonprechargeCounter.WithLabelValues(name),
+		noPrechargeCounter: metrics.CopReadNoPrechargeCounter.WithLabelValues(name),
 	}
 }
 
@@ -146,20 +146,20 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 // sync with initMetrics — adding a paging metric there must be paired
 // with a deletion here.
 func (*groupMetricsCollection) deletePagingLabels(name string) {
-	metrics.PagingPrechargeCounter.DeleteLabelValues(name)
-	metrics.PagingNonprechargeCounter.DeleteLabelValues(name)
+	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
+	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
 	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
 	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
 	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
 }
 
-// observePagingRequest records request-boundary paging counters. Callers must
-// gate the call on pagingReadEstimate(...).ok so the metric stays scoped to
-// coprocessor reads and excludes point gets, batch gets, scans, and other
-// bounded-size reads.
+// observePagingRequest records request-boundary cop read pre-charge counters.
+// Callers must gate the call on pagingReadEstimate(...).ok so the metric stays
+// scoped to coprocessor reads and excludes point gets, batch gets, scans, and
+// other bounded-size reads.
 func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
 	if bytesForEst == 0 {
-		gmc.nonprechargeCounter.Inc()
+		gmc.noPrechargeCounter.Inc()
 		return
 	}
 	gmc.prechargeCounter.Inc()
