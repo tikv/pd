@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"go.uber.org/zap"
 
@@ -85,6 +86,16 @@ func (cfg *pushMetricsConfig) syncPushMetricsTicker(
 	}
 	ticker = time.NewTicker(newCfg.interval)
 	return ticker
+}
+
+func resourceGroupPushCollectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		readRequestUnitCost,
+		writeRequestUnitCost,
+		readRequestUnitRefund,
+		writeRequestUnitRefund,
+		sqlLayerRequestUnitCost,
+	}
 }
 
 // Manager is the manager of resource group.
@@ -670,6 +681,7 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
+		Settlement:        req.GetSettlementSinceLastRequest(),
 		isBackground:      isBackground,
 		isTiFlash:         isTiFlash,
 	}
@@ -787,7 +799,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			log.Info("resource group manager background metrics flush loop exits")
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
+			if consumptionInfo == nil || (consumptionInfo.Consumption == nil && consumptionInfo.Settlement == nil) {
 				continue
 			}
 			keyspaceID := consumptionInfo.keyspaceID
@@ -796,15 +808,17 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				continue
 			}
 			consumptionInfo.keyspaceName = keyspaceName
-			m.ruCollector.Collect(consumptionInfo)
+			if consumptionInfo.Consumption != nil {
+				m.ruCollector.Collect(consumptionInfo)
+			}
 			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
-			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
+			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil && consumptionInfo.Consumption != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.metrics.consumptionRecordMap {
+			for r, lastTime := range m.metrics.metricsActivityRecordMap {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}
@@ -879,12 +893,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
 			start := time.Now()
-			err := push.New(pushMetricsConfig.address, "resource_group_svc").
-				Grouping("pod", podName).
-				Collector(readRequestUnitCost).
-				Collector(writeRequestUnitCost).
-				Collector(sqlLayerRequestUnitCost).
-				PushContext(pushCtx)
+			pusher := push.New(pushMetricsConfig.address, "resource_group_svc").
+				Grouping("pod", podName)
+			for _, collector := range resourceGroupPushCollectors() {
+				pusher.Collector(collector)
+			}
+			err := pusher.PushContext(pushCtx)
 			cancel()
 			if err != nil {
 				log.Warn("push metrics to Prometheus failed", zap.Error(err))

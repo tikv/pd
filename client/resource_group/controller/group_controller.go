@@ -49,6 +49,7 @@ type groupCostController struct {
 	mu      struct {
 		sync.Mutex
 		consumption   *rmpb.Consumption
+		settlement    *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
 	}
@@ -79,10 +80,12 @@ type groupCostController struct {
 		// requestUnitConsumptions []*rmpb.RequestUnitItem
 		// resourceConsumptions    []*rmpb.ResourceItem
 		consumption *rmpb.Consumption
+		settlement  *rmpb.Consumption
 
 		// lastRequestUnitConsumptions []*rmpb.RequestUnitItem
 		// lastResourceConsumptions    []*rmpb.ResourceItem
 		lastRequestConsumption *rmpb.Consumption
+		lastRequestSettlement  *rmpb.Consumption
 
 		// initialRequestCompleted is set to true when the first token bucket
 		// request completes successfully.
@@ -236,6 +239,7 @@ func newGroupCostController(
 	}
 
 	gc.mu.consumption = &rmpb.Consumption{}
+	gc.mu.settlement = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
 	// TODO: re-init the state if user change mode from RU to RAW mode.
@@ -249,7 +253,9 @@ func (gc *groupCostController) initRunState() {
 	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.targetPeriod = defaultTargetPeriod
 	gc.run.consumption = &rmpb.Consumption{}
+	gc.run.settlement = &rmpb.Consumption{}
 	gc.run.lastRequestConsumption = &rmpb.Consumption{SqlLayerCpuTimeMs: getSQLProcessCPUTime(gc.mainCfg.isSingleGroupByKeyspace)}
+	gc.run.lastRequestSettlement = &rmpb.Consumption{}
 
 	isBurstable := true
 	cfgFunc := func(tb *rmpb.TokenBucket) tokenBucketReconfigureArgs {
@@ -310,8 +316,9 @@ func (gc *groupCostController) updateRunState() {
 		calc.Trickle(gc.mu.consumption)
 	}
 	*gc.run.consumption = *gc.mu.consumption
+	*gc.run.settlement = *gc.mu.settlement
 	gc.mu.Unlock()
-	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Bool("is-throttled", gc.isThrottled.Load()))
+	logControllerTrace("[resource group controller] update run state", zap.String("name", gc.name), zap.Any("request-unit-consumption", gc.run.consumption), zap.Any("request-unit-settlement", gc.run.settlement), zap.Bool("is-throttled", gc.isThrottled.Load()))
 	gc.run.now = newTime
 }
 
@@ -401,6 +408,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 			return true
 		}
 		if getRUValueFromConsumption(gc.run.consumption)-getRUValueFromConsumption(gc.run.lastRequestConsumption) >= consumptionsReportingThreshold {
+			return true
+		}
+		if hasRUSettlementRefund(gc.run.lastRequestSettlement, gc.run.settlement) {
 			return true
 		}
 	}
@@ -537,6 +547,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 		return nil
 	}
 	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
+	req.SettlementSinceLastRequest = updateDeltaSettlement(gc.run.lastRequestSettlement, gc.run.settlement)
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
@@ -628,9 +639,12 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
+	settlementDelta := requestUnitSettlement(delta)
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
+	add(gc.mu.settlement, settlementDelta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -643,7 +657,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
-			sub(gc.mu.consumption, delta)
+			sub(gc.mu.consumption, reportedDelta)
+			sub(gc.mu.settlement, settlementDelta)
 			gc.mu.Unlock()
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
@@ -681,6 +696,8 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, resp, delta)
+	settlementDelta := requestUnitSettlement(delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -701,7 +718,8 @@ func (gc *groupCostController) onResponseImpl(
 	}
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
+	add(gc.mu.settlement, settlementDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -716,6 +734,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, resp, delta)
+	settlementDelta := requestUnitSettlement(delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -732,6 +752,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 			// requests observe the debt instead of queueing this completed
 			// request for response-side admission.
 			gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+			gc.metrics.successfulRequestDuration.Observe(0)
 		} else if v > 0 {
 			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
 			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
@@ -749,6 +770,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 		} else if v < 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
+		} else {
+			gc.metrics.successfulRequestDuration.Observe(0)
 		}
 	}
 	if isPagingRead {
@@ -756,7 +779,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	}
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
+	add(gc.mu.settlement, settlementDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()

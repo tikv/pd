@@ -246,6 +246,95 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 }
 
+func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
+	if consumption == nil {
+		return &rmpb.Consumption{}
+	}
+	cloned := *consumption
+	return &cloned
+}
+
+func (kc *KVCalculator) pagingPrechargeRRU(req RequestInfo) float64 {
+	bytesForEst := estimatedReadBytes(req)
+	if bytesForEst == 0 {
+		return 0
+	}
+	return float64(kc.ReadBytesCost) * float64(bytesForEst)
+}
+
+func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmpb.Consumption, req RequestInfo, sign float64) {
+	if consumption == nil {
+		return
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		consumption.RRU += sign * kvCalc.pagingPrechargeRRU(req)
+	}
+}
+
+func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
+	reservation := &rmpb.Consumption{}
+	if !req.IsWrite() {
+		return reservation
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		kvCalc.calculateWriteCost(reservation, req)
+	}
+	return reservation
+}
+
+func writeRefundConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
+	refund := &rmpb.Consumption{}
+	if !req.IsWrite() {
+		return refund
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		kvCalc.payBackWriteCost(refund, req)
+	}
+	return refund
+}
+
+func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, -1)
+	sub(reported, writeReservationConsumption(calculators, req))
+	return reported
+}
+
+func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, resp ResponseInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, 1)
+	if req.IsWrite() {
+		if resp.Succeed() {
+			add(reported, writeReservationConsumption(calculators, req))
+		} else {
+			sub(reported, writeRefundConsumption(calculators, req))
+		}
+	}
+	return reported
+}
+
+func requestUnitSettlement(consumption *rmpb.Consumption) *rmpb.Consumption {
+	if consumption == nil {
+		return &rmpb.Consumption{}
+	}
+	return &rmpb.Consumption{
+		RRU: consumption.RRU,
+		WRU: consumption.WRU,
+	}
+}
+
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
 	*RUConfig
@@ -303,11 +392,11 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
 	delta := &rmpb.Consumption{}
-	if now.RRU != last.RRU {
+	if now.RRU > last.RRU {
 		delta.RRU = now.RRU - last.RRU
 		last.RRU = now.RRU
 	}
-	if now.WRU != last.WRU {
+	if now.WRU > last.WRU {
 		delta.WRU = now.WRU - last.WRU
 		last.WRU = now.WRU
 	}
@@ -355,7 +444,37 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
 		last.TiflashRUV2 = now.TiflashRUV2
 	}
+	if isZeroConsumption(delta) {
+		return nil
+	}
 	return delta
+}
+
+func updateDeltaSettlement(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
+	delta := &rmpb.Consumption{}
+	if now.RRU != last.RRU {
+		delta.RRU = now.RRU - last.RRU
+		last.RRU = now.RRU
+	}
+	if now.WRU != last.WRU {
+		delta.WRU = now.WRU - last.WRU
+		last.WRU = now.WRU
+	}
+	if isZeroConsumption(delta) {
+		return nil
+	}
+	return delta
+}
+
+func isZeroConsumption(consumption *rmpb.Consumption) bool {
+	return consumption == nil || *consumption == rmpb.Consumption{}
+}
+
+func hasRUSettlementRefund(last *rmpb.Consumption, now *rmpb.Consumption) bool {
+	if last == nil || now == nil {
+		return false
+	}
+	return now.RRU < last.RRU || now.WRU < last.WRU
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {

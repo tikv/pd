@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -60,6 +61,18 @@ func (*mockConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
+
+func TestResourceGroupPushCollectorsIncludesRefundCounters(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal([]prometheus.Collector{
+		readRequestUnitCost,
+		writeRequestUnitCost,
+		readRequestUnitRefund,
+		writeRequestUnitRefund,
+		sqlLayerRequestUnitCost,
+	}, resourceGroupPushCollectors())
+}
 
 type mockRoleConfigProvider struct {
 	bs.Server
@@ -476,6 +489,33 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	})
 }
 
+func TestDispatchConsumptionIncludesSignedSettlement(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	req := &rmpb.TokenBucketRequest{
+		ResourceGroupName: "test_group",
+		ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+		SettlementSinceLastRequest: &rmpb.Consumption{
+			RRU: -4,
+			WRU: -2,
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 42},
+	}
+
+	err := m.dispatchConsumption(req)
+	re.NoError(err)
+
+	item := <-m.consumptionDispatcher
+	re.Equal(uint32(42), item.keyspaceID)
+	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
+	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
+	re.Equal(req.GetSettlementSinceLastRequest(), item.Settlement)
+}
+
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
@@ -552,13 +592,13 @@ func TestCleanUpTicker(t *testing.T) {
 	// Put a keyspace meta.
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
-	// Insert two consumption records manually.
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
+	// Insert two metrics activity records manually.
+	m.metrics.metricsActivityRecordMap[metricsActivityRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_1",
 		ruType:     defaultTypeLabel,
 	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	m.metrics.consumptionRecordMap[consumptionRecordKey{
+	m.metrics.metricsActivityRecordMap[metricsActivityRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
@@ -575,8 +615,8 @@ func TestCleanUpTicker(t *testing.T) {
 	// Close the manager to avoid the data race.
 	m.close()
 
-	re.Len(m.metrics.consumptionRecordMap, 1)
-	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
+	re.Len(m.metrics.metricsActivityRecordMap, 1)
+	re.Contains(m.metrics.metricsActivityRecordMap, metricsActivityRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,

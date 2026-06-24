@@ -16,7 +16,9 @@ package server
 
 import (
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
@@ -115,7 +117,254 @@ func TestCounterMetricsRecordsRequestUnitRefund(t *testing.T) {
 	re.Equal(float64(3), testutil.ToFloat64(metrics.WRUMetrics))
 	re.Equal(float64(1), testutil.ToFloat64(metrics.WRURefundMetrics))
 	re.Equal(float64(13), testutil.ToFloat64(metrics.ActiveRUMetrics))
-	re.Equal(float64(5), testutil.ToFloat64(metrics.ActiveRURefundMetrics))
+}
+
+func TestActiveRequestUnitRefundMetricIsNotExposed(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "no-active-refund-keyspace"
+		groupName    = "no-active-refund-group"
+		keyspaceID   = uint32(313)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	metrics := newCounterMetrics(keyspaceName, groupName, defaultTypeLabel)
+	metrics.add(&rmpb.Consumption{
+		RRU: -4,
+		WRU: -1,
+	}, &ControllerConfig{}, keyspaceID)
+
+	families, err := prometheus.DefaultGatherer.Gather()
+	re.NoError(err)
+	for _, family := range families {
+		re.NotEqual("resource_manager_resource_unit_active_request_unit_refund_sum", family.GetName())
+	}
+}
+
+func TestRecordConsumptionUsesSettlementForRequestUnitCounters(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "settlement-counter-keyspace"
+		groupName    = "settlement-counter-group"
+		keyspaceID   = uint32(404)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+		Settlement: &rmpb.Consumption{
+			RRU: -4,
+			WRU: -2,
+		},
+	}, &ControllerConfig{}, time.Now())
+
+	counter := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	re.Zero(testutil.ToFloat64(counter.RRUMetrics))
+	re.Equal(float64(4), testutil.ToFloat64(counter.RRURefundMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRUMetrics))
+	re.Equal(float64(2), testutil.ToFloat64(counter.WRURefundMetrics))
+	re.Equal(float64(1024), testutil.ToFloat64(counter.WriteByteMetrics),
+		"byte and other non-RU metrics should still come from actual consumption")
+}
+
+func TestRecordConsumptionTouchesActivityForSettlementOnlyRefund(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "settlement-only-keyspace"
+		groupName    = "settlement-only-group"
+		keyspaceID   = uint32(406)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	now := time.Now()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Settlement: &rmpb.Consumption{
+			RRU: -4,
+			WRU: -2,
+		},
+	}, &ControllerConfig{}, now)
+
+	counter := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	re.Zero(testutil.ToFloat64(counter.RRUMetrics))
+	re.Equal(float64(4), testutil.ToFloat64(counter.RRURefundMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRUMetrics))
+	re.Equal(float64(2), testutil.ToFloat64(counter.WRURefundMetrics))
+	re.Contains(m.metricsActivityRecordMap, metricsActivityRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	})
+	re.Equal(now, m.metricsActivityRecordMap[metricsActivityRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}])
+}
+
+func TestRecordConsumptionIgnoresEmptySettlementOnlyReport(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "empty-settlement-keyspace"
+		groupName    = "empty-settlement-group"
+		keyspaceID   = uint32(407)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Settlement:        &rmpb.Consumption{},
+	}, &ControllerConfig{}, time.Now())
+
+	re.Empty(m.counterMetricsMap)
+	re.Empty(m.metricsActivityRecordMap)
+}
+
+func TestRecordConsumptionFallsBackToActualRequestUnitCountersWithoutSettlement(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "actual-counter-keyspace"
+		groupName    = "actual-counter-group"
+		keyspaceID   = uint32(405)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+	}, &ControllerConfig{}, time.Now())
+
+	counter := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	re.Equal(float64(12), testutil.ToFloat64(counter.RRUMetrics))
+	re.Zero(testutil.ToFloat64(counter.RRURefundMetrics))
+	re.Equal(float64(8), testutil.ToFloat64(counter.WRUMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRURefundMetrics))
+	re.Equal(float64(1024), testutil.ToFloat64(counter.WriteByteMetrics))
+}
+
+func TestRecordConsumptionUsesActualForActiveRequestUnit(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "actual-active-ru-keyspace"
+		groupName    = "actual-active-ru-group"
+		keyspaceID   = uint32(505)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			RRU:               12,
+			WRU:               8,
+			TotalCpuTimeMs:    4,
+			SqlLayerCpuTimeMs: 3,
+		},
+		Settlement: &rmpb.Consumption{
+			RRU: -4,
+			WRU: -2,
+		},
+	}, &ControllerConfig{
+		RequestUnit: RequestUnitConfig{CPUMsCost: 2},
+	}, time.Now())
+
+	counter := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	re.Zero(testutil.ToFloat64(counter.RRUMetrics))
+	re.Equal(float64(4), testutil.ToFloat64(counter.RRURefundMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRUMetrics))
+	re.Equal(float64(2), testutil.ToFloat64(counter.WRURefundMetrics))
+	re.Equal(float64(26), testutil.ToFloat64(counter.ActiveRUMetrics))
+}
+
+func TestRecordConsumptionUsesActualRUV2ForActiveRequestUnit(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		keyspaceName = "actual-active-ruv2-keyspace"
+		groupName    = "actual-active-ruv2-group"
+		keyspaceID   = uint32(606)
+	)
+
+	t.Cleanup(func() {
+		deleteLabelValues(keyspaceName, groupName, defaultTypeLabel)
+	})
+
+	m := newMetrics()
+	m.recordConsumption(&consumptionItem{
+		keyspaceID:        keyspaceID,
+		keyspaceName:      keyspaceName,
+		resourceGroupName: groupName,
+		Consumption: &rmpb.Consumption{
+			TikvRUV2:    7,
+			TidbRUV2:    11,
+			TiflashRUV2: 13,
+		},
+		Settlement: &rmpb.Consumption{
+			RRU: -4,
+			WRU: -2,
+		},
+	}, &ControllerConfig{
+		RUVersionPolicy: &RUVersionPolicy{
+			Default: RUVersionV1,
+			Overrides: map[uint32]RUVersion{
+				keyspaceID: RUVersionV2,
+			},
+		},
+	}, time.Now())
+
+	counter := m.getCounterMetrics(keyspaceID, keyspaceName, groupName, defaultTypeLabel)
+	re.Zero(testutil.ToFloat64(counter.RRUMetrics))
+	re.Equal(float64(4), testutil.ToFloat64(counter.RRURefundMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRUMetrics))
+	re.Equal(float64(2), testutil.ToFloat64(counter.WRURefundMetrics))
+	re.Equal(float64(31), testutil.ToFloat64(counter.ActiveRUMetrics))
 }
 
 func TestMaxPerSecCostTracker(t *testing.T) {

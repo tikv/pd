@@ -169,7 +169,7 @@ func TestUpdateDeltaConsumption(t *testing.T) {
 	re.Equal(now.TiflashRUV2, last.TiflashRUV2)
 }
 
-func TestUpdateDeltaConsumptionReportsSignedRequestUnits(t *testing.T) {
+func TestUpdateDeltaConsumptionIgnoresDecreasedRequestUnits(t *testing.T) {
 	re := require.New(t)
 	last := &rmpb.Consumption{
 		RRU:                      10,
@@ -204,21 +204,9 @@ func TestUpdateDeltaConsumptionReportsSignedRequestUnits(t *testing.T) {
 
 	delta := updateDeltaConsumption(last, now)
 
-	re.Equal(float64(-3), delta.RRU)
-	re.Equal(float64(-5), delta.WRU)
-	re.Zero(delta.ReadBytes)
-	re.Zero(delta.WriteBytes)
-	re.Zero(delta.TotalCpuTimeMs)
-	re.Zero(delta.SqlLayerCpuTimeMs)
-	re.Zero(delta.KvReadRpcCount)
-	re.Zero(delta.KvWriteRpcCount)
-	re.Zero(delta.ReadCrossAzTrafficBytes)
-	re.Zero(delta.WriteCrossAzTrafficBytes)
-	re.Zero(delta.TikvRUV2)
-	re.Zero(delta.TidbRUV2)
-	re.Zero(delta.TiflashRUV2)
-	re.Equal(now.RRU, last.RRU)
-	re.Equal(now.WRU, last.WRU)
+	re.Nil(delta)
+	re.Equal(float64(10), last.RRU)
+	re.Equal(float64(20), last.WRU)
 	re.Equal(float64(100), last.ReadBytes)
 	re.Equal(float64(200), last.WriteBytes)
 	re.Equal(float64(300), last.TotalCpuTimeMs)
@@ -230,6 +218,21 @@ func TestUpdateDeltaConsumptionReportsSignedRequestUnits(t *testing.T) {
 	re.Equal(float64(900), last.TikvRUV2)
 	re.Equal(float64(1000), last.TidbRUV2)
 	re.Equal(float64(1100), last.TiflashRUV2)
+}
+
+func TestUpdateDeltaSettlementReportsSignedRequestUnits(t *testing.T) {
+	re := require.New(t)
+	last := &rmpb.Consumption{RRU: 10, WRU: 20, ReadBytes: 100}
+	now := &rmpb.Consumption{RRU: 7, WRU: 15, ReadBytes: 90}
+
+	delta := updateDeltaSettlement(last, now)
+
+	re.Equal(float64(-3), delta.RRU)
+	re.Equal(float64(-5), delta.WRU)
+	re.Zero(delta.ReadBytes)
+	re.Equal(now.RRU, last.RRU)
+	re.Equal(now.WRU, last.WRU)
+	re.Equal(float64(100), last.ReadBytes)
 }
 
 func TestRequestInfoPagingProvidersAreOptional(t *testing.T) {
@@ -260,6 +263,54 @@ func TestRequestInfoMissingPredictionProviderReturnsZeroHint(t *testing.T) {
 
 	re.True(ok)
 	re.Zero(bytesForEst)
+}
+
+func TestReportedConsumptionStripsPagingPrecharge(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	calculators := []ResourceCalculator{kvCalc}
+	req := &TestRequestInfo{
+		isWrite:            false,
+		isCop:              true,
+		predictedReadBytes: 1024,
+	}
+
+	tokenDelta := &rmpb.Consumption{
+		RRU: float64(cfg.ReadBaseCost) +
+			float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion +
+			float64(cfg.ReadBytesCost)*1024,
+	}
+	reported := reportedRequestConsumption(calculators, req, tokenDelta)
+
+	re.InDelta(float64(cfg.ReadBaseCost)+
+		float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion,
+		reported.RRU, 1e-6)
+	re.InDelta(tokenDelta.RRU, reported.RRU+float64(cfg.ReadBytesCost)*1024, 1e-6)
+}
+
+func TestReportedConsumptionRestoresPagingSettlement(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	calculators := []ResourceCalculator{kvCalc}
+	req := &TestRequestInfo{
+		isWrite:            false,
+		isCop:              true,
+		predictedReadBytes: 4096,
+	}
+
+	actualReadBytes := uint64(1024)
+	tokenDelta := &rmpb.Consumption{
+		RRU:       float64(cfg.ReadBytesCost) * (float64(actualReadBytes) - float64(req.predictedReadBytes)),
+		ReadBytes: float64(actualReadBytes),
+	}
+	reported := reportedResponseConsumption(calculators, req, &TestResponseInfo{succeed: true}, tokenDelta)
+
+	re.InDelta(float64(cfg.ReadBytesCost)*float64(actualReadBytes), reported.RRU, 1e-6)
+	re.Equal(float64(actualReadBytes), reported.ReadBytes)
+	re.Negative(tokenDelta.RRU)
+	re.GreaterOrEqual(reported.RRU, 0.0)
 }
 
 func TestEqualRU(t *testing.T) {
