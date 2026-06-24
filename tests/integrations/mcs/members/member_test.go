@@ -468,22 +468,16 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 	}
 }
 
-// TestTransferPrimaryWithKeyspaceGroup tests that the transfer primary API accepts
-// a keyspace_group_id field and routes the transfer to the correct keyspace group.
-func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
-	}()
-
-	// Create keyspace group 1 without members first, then use AllocNodes so that
+// mustSetupKeyspaceGroupWithoutKeyspaces creates a keyspace group that has no
+// keyspaces assigned, allocates TSO nodes for it, and waits until one of them
+// becomes the primary. It returns the primary's address.
+func (suite *memberTestSuite) mustSetupKeyspaceGroupWithoutKeyspaces(re *require.Assertions, groupID uint32) string {
+	// Create the keyspace group without members first, then use AllocNodes so that
 	// TSO nodes discover the group via etcd watch and elect a primary.
-	const testGroupID = uint32(1)
 	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
-				ID:       testGroupID,
+				ID:       groupID,
 				UserKind: endpoint.Standard.String(),
 			},
 		},
@@ -496,7 +490,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	})
 	re.NoError(err)
 	allocReq, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("%s/pd/api/v2/tso/keyspace-groups/%d/alloc", suite.backendEndpoints, testGroupID),
+		fmt.Sprintf("%s/pd/api/v2/tso/keyspace-groups/%d/alloc", suite.backendEndpoints, groupID),
 		bytes.NewBuffer(allocBody))
 	re.NoError(err)
 	allocResp, err := tests.TestDialClient.Do(allocReq)
@@ -510,7 +504,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 		for _, s := range suite.tsoNodes {
 			tsoSvr := s.(*tso.Server)
 			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
-			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+			if m, ok := members[groupID]; ok && m.IsPrimary {
 				groupPrimary = tsoSvr.GetAddr()
 				return true
 			}
@@ -518,6 +512,44 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 		return false
 	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 	re.NotEmpty(groupPrimary)
+	return groupPrimary
+}
+
+// TestKeyspaceGroupMembersWithoutKeyspaces verifies that the keyspace-groups
+// members API returns a keyspace group that is served by the node but has no
+// keyspaces assigned. This guards against regressing back to GetKeyspaceGroups(),
+// which is built from the keyspace lookup table and would miss such a group, so
+// its primary would never be observed through this API.
+func (suite *memberTestSuite) TestKeyspaceGroupMembersWithoutKeyspaces() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// The group with no keyspaces must be returned by the members API, and its
+	// member list must not carry any keyspace.
+	members := mustGetKeyspaceGroupMembers(re, suite.tsoNodes[groupPrimary].(*tso.Server))
+	m, ok := members[testGroupID]
+	re.True(ok)
+	re.True(m.IsPrimary)
+	re.Empty(m.Group.Keyspaces)
+}
+
+// TestTransferPrimaryWithKeyspaceGroup tests that the transfer primary API accepts
+// a keyspace_group_id field and routes the transfer to the correct keyspace group.
+func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
 
 	// Transfer primary within keyspace group 1 (random resign — new_primary left empty).
 	body := map[string]any{
