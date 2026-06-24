@@ -72,10 +72,9 @@ const (
 	groupPatrolInterval                 = time.Minute
 	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
 	keyspaceGroupMetricsSyncInterval = 15 * time.Second
+	// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
+	finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 )
-
-// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
-var finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
 // It mirrors keyspace.GetBootstrapKeyspaceID() to avoid importing pkg/keyspace (which would
