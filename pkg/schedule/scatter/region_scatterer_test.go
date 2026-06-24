@@ -797,7 +797,7 @@ func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 	setStoreReadCPU(tc, 4, 450)
 
 	op, err := scatterer.ScatterInternal(region, "balanced-read-cpu", []byte("a"), []byte("z"))
-	re.NoError(err)
+	re.ErrorIs(err, ErrInternalScatterBalancedReadCPU)
 	re.Nil(op)
 }
 
@@ -813,6 +813,17 @@ func TestInternalScatterAllowsWhenReadCPUIsImbalanced(t *testing.T) {
 	re.NotNil(op)
 	_, targetLeader := finalPlacementAfterOperator(region, op)
 	re.Equal(uint64(4), targetLeader)
+}
+
+func TestInternalScatterBalancedReadCPUDoesNotBlockSameLeader(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc, 12)
+	setStoreReadCPU(tc, 1, 500)
+
+	op, err := scatterer.ScatterInternal(region, "balanced-same-leader", []byte("t"), []byte("z"))
+	re.NoError(err)
+	re.Nil(op)
 }
 
 func TestSeedGroupDistributionByRangeAppliesNetChange(t *testing.T) {

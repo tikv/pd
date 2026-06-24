@@ -286,6 +286,7 @@ var (
 	splitScatterDispatchScheduleDisabledCounter  = splitScatterCheckerCounterWithEvent("dispatch-schedule-disabled")
 	splitScatterDispatchNotReplicatedCounter     = splitScatterCheckerCounterWithEvent("dispatch-not-fully-replicated")
 	splitScatterDispatchScatterFailedCounter     = splitScatterCheckerCounterWithEvent("dispatch-scatter-failed")
+	splitScatterDispatchBalancedReadCPUCounter   = splitScatterCheckerCounterWithEvent("dispatch-balanced-read-cpu")
 	splitScatterDispatchStoreLimitCounter        = splitScatterCheckerCounterWithEvent("dispatch-store-limit")
 	splitScatterDispatchAddOperatorFailedCounter = splitScatterCheckerCounterWithEvent("dispatch-add-operator-failed")
 	splitScatterDispatchOperatorCreatedCounter   = splitScatterCheckerCounterWithEvent("dispatch-operator-created")

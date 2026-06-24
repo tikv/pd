@@ -70,6 +70,10 @@ var (
 	scatterSuccessCounter                    = scatterCounter.WithLabelValues("success", "")
 	scatterOperatorRunningCounter            = scatterCounter.WithLabelValues("skip", "running")
 	scatterOperatorExistedCounter            = scatterCounter.WithLabelValues("fail", "other-existed")
+
+	// ErrInternalScatterBalancedReadCPU means split-scatter is temporarily skipped
+	// because moving the selected leader would not reduce read CPU pressure enough.
+	ErrInternalScatterBalancedReadCPU = errors.New("internal split scatter skipped due to balanced read CPU")
 )
 
 const (
@@ -784,7 +788,7 @@ func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group s
 	}
 	if internalScatter && shouldSkipInternalScatterByBalancedReadCPU(region, targetLeader, readCPUByStore, readPoolThreadCount) {
 		scatterSkipBalancedReadCPUCounter.Inc()
-		return nil, nil
+		return nil, ErrInternalScatterBalancedReadCPU
 	}
 
 	if isSameDistribution(region, targetPeers, targetLeader) {
@@ -1096,6 +1100,9 @@ func shouldSkipInternalScatterByBalancedReadCPU(
 		return false
 	}
 	sourceLeader := region.GetLeader().GetStoreId()
+	if sourceLeader == targetLeader {
+		return false
+	}
 	sourceReadCPU, ok := readCPUByStore[sourceLeader]
 	if !ok {
 		return false

@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -35,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 const (
@@ -788,6 +790,34 @@ func TestDispatchSplitScatterKeepsStableGroupWhenRegionSplitsAgain(t *testing.T)
 	}
 }
 
+func TestDispatchSplitScatterKeepsPendingWhenReadCPUIsBalanced(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	setSplitScatterUnifiedReadPoolThreadCount(tc, 12)
+	setSplitScatterStoreReadCPU(tc, 1, 500)
+	for _, storeID := range []uint64{2, 3, 4} {
+		setSplitScatterStoreReadCPU(tc, storeID, 450)
+	}
+
+	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101, 102})
+	putSplitScatterRegion(tc, 101, "m", "t")
+	putSplitScatterRegion(tc, 102, "t", "")
+	advanceSplitScatterSourceVersion(t, tc)
+
+	balancedReadCPUBefore := promtestutil.ToFloat64(splitScatterDispatchBalancedReadCPUCounter)
+	controller.dispatchSplitScatterRegions()
+
+	re.Empty(oc.GetOperators())
+	re.Equal(3, splitScatterPendingCount(controller))
+	re.Equal(float64(3), promtestutil.ToFloat64(splitScatterDispatchBalancedReadCPUCounter)-balancedReadCPUBefore)
+	for _, regionID := range []uint64{100, 101, 102} {
+		pending := splitScatterPending(t, controller, regionID)
+		re.True(pending.retryAt.After(time.Now()))
+	}
+}
+
 func TestDispatchSplitScatterBacksOff(t *testing.T) {
 	testCases := []struct {
 		name      string
@@ -1016,6 +1046,22 @@ func putSplitScatterRegionWithoutLeader(tc *mockcluster.Cluster, regionID uint64
 		{Id: regionID*10 + 3, StoreId: 3},
 	}
 	tc.PutRegion(newSplitScatterRegionInfo(regionID, startKey, endKey, peers, nil, cpuUsage))
+}
+
+func setSplitScatterUnifiedReadPoolThreadCount(tc *mockcluster.Cluster, threadCount uint64) {
+	cfg := tc.PersistOptions.GetStoreConfig().Clone()
+	cfg.ReadPool.Unified.MaxThreadCount = threadCount
+	tc.SetStoreConfig(cfg)
+}
+
+func setSplitScatterStoreReadCPU(tc *mockcluster.Cluster, storeID uint64, readCPU uint64) {
+	tc.Set(storeID, &pdpb.StoreStats{
+		Interval: &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
+		CpuUsages: []*pdpb.RecordPair{{
+			Key:   "unified-read-0",
+			Value: readCPU,
+		}},
+	})
 }
 
 func fillSplitScatterPending(controller *Controller, expireAt time.Time) {

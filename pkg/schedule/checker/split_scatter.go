@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sort"
 	"time"
@@ -41,9 +42,10 @@ const (
 	// is only the minimum interval to avoid retrying the same pending item too
 	// frequently when checker ticks are fast.
 	splitScatterRetryBackoff = 10 * time.Second
-	// Keep the pending TTL aligned with PD's slow operator step threshold so a
-	// scatter blocked by slow AddLearner/store limits still has time to retry.
-	splitScatterPendingTTL = 10 * time.Minute
+	// Keep the pending TTL longer than a single slow operator step. Split-scatter
+	// can be blocked by several consecutive gates, including running operators,
+	// store limits, replication, scheduling labels, and balanced read CPU.
+	splitScatterPendingTTL = 3 * operator.SlowStepWaitTime
 )
 
 type splitScatterPendingItem struct {
@@ -534,6 +536,16 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
+			if stderrors.Is(err, scatter.ErrInternalScatterBalancedReadCPU) {
+				splitScatterDispatchBalancedReadCPUCounter.Inc()
+				c.delayPendingSplitScatter(pending)
+				log.Info("dispatch internal split scatter delayed",
+					zap.Uint64("region-id", pending.regionID),
+					zap.String("batch-group", pending.group),
+					zap.String("scatter-group", scatterGroup),
+					zap.String("reason", "balanced-read-cpu"))
+				continue
+			}
 			splitScatterDispatchScatterFailedCounter.Inc()
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter failed",
