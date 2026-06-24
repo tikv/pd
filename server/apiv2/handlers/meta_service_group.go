@@ -90,16 +90,19 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "duplicate meta-service group ID after trimming")
 			return
 		}
+		// A null value (nil pointer) means delete the group. A non-null value
+		// must trim to a non-empty address; an empty or whitespace-only address
+		// is rejected.
+		if addresses == nil {
+			normalizedPatch[trimmedID] = nil
+			continue
+		}
 		trimmedAddresses := strings.TrimSpace(*addresses)
 		if trimmedAddresses == "" {
-			normalizedPatch[trimmedID] = nil
-		} else {
-			if trimmedAddresses == "" {
-				c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
-				return
-			}
-			normalizedPatch[trimmedID] = &trimmedAddresses
+			c.AbortWithStatusJSON(http.StatusBadRequest, "group addresses cannot be empty or whitespace-only")
+			return
 		}
+		normalizedPatch[trimmedID] = &trimmedAddresses
 	}
 	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()

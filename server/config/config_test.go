@@ -599,7 +599,7 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 		},
 		{
 			name:     "multiple groups",
-			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "},
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
 			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
 		},
 		{
@@ -616,7 +616,7 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 		},
 		{
 			name:      "duplicate group ID after trim",
-			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"},
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
 		},
