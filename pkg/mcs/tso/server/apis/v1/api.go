@@ -332,7 +332,7 @@ func transferPrimary(c *gin.Context) {
 	// The request may be routed to a non-primary replica of the target group,
 	// whose expected primary lease is nil or stale. Reject it with a clear error
 	// instead of letting TransferPrimary fail with a 500.
-	if !allocator.IsServing() {
+	if !allocator.GetMember().IsServing() {
 		primaryAddr := allocator.GetPrimaryAddr()
 		if primaryAddr == "" {
 			primaryAddr = "unknown"
