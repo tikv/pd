@@ -1579,10 +1579,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				}
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
-				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
-				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
+				re.NoError(failpoint.Enable(
+					"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout", "return(50)"))
 				defer func() {
-					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
+					re.NoError(failpoint.Disable(
+						"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout"))
 				}()
 
 				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
@@ -1613,10 +1614,11 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoint
 				return nil, req.Context().Err()
 			},
 			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
-				oldPerEndpoint := finishKeyspaceGroupPerEndpointTimeout
-				finishKeyspaceGroupPerEndpointTimeout = 50 * time.Millisecond
+				re.NoError(failpoint.Enable(
+					"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout", "return(50)"))
 				defer func() {
-					finishKeyspaceGroupPerEndpointTimeout = oldPerEndpoint
+					re.NoError(failpoint.Disable(
+						"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout"))
 				}()
 
 				start := time.Now()

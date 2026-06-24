@@ -1275,7 +1275,13 @@ func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix str
 			continue
 		}
 		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
-		reqCtx, reqCancel := context.WithTimeout(parentCtx, finishKeyspaceGroupPerEndpointTimeout)
+		perEndpointTimeout := finishKeyspaceGroupPerEndpointTimeout
+		failpoint.Inject("finishKeyspaceGroupPerEndpointTimeout", func(val failpoint.Value) {
+			if ms, ok := val.(int); ok {
+				perEndpointTimeout = time.Duration(ms) * time.Millisecond
+			}
+		})
+		reqCtx, reqCancel := context.WithTimeout(parentCtx, perEndpointTimeout)
 		resp, err := apiutil.DoDeleteWithContext(reqCtx, kgm.httpClient, requestURL)
 		reqCancel()
 		if err == nil && resp.StatusCode == http.StatusOK {
