@@ -619,6 +619,46 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	resp.Body.Close()
 }
 
+// TestTransferPrimaryToDefaultGroupFollower documents an intentional behavior
+// change: the transfer primary request is no longer redirected to the primary.
+// Sending it to a follower of the default keyspace group now returns HTTP 400
+// instead of being forwarded, so the caller must retry against the primary.
+func (suite *memberTestSuite) TestTransferPrimaryToDefaultGroupFollower() {
+	re := suite.Require()
+
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	// Pick a follower of the default keyspace group.
+	var followerAddr string
+	for addr := range suite.tsoAvailMembers {
+		if addr != primary {
+			followerAddr = addr
+			break
+		}
+	}
+	re.NotEmpty(followerAddr)
+
+	// Omit keyspace_group_id so it defaults to the default keyspace group (0).
+	data, err := json.Marshal(map[string]any{"new_primary": ""})
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", followerAddr),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// Sending the same request to the primary still succeeds.
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", primary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+}
+
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+"/tso/api/v1/keyspace-groups/members", nil)
 	re.NoError(err)
