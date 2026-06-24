@@ -313,15 +313,20 @@ func transferPrimary(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
+	// Reject an empty body explicitly. Since this endpoint has side effects, we
+	// must not silently fall back to a random transfer on the default keyspace
+	// group when no body is provided.
+	if len(body) == 0 {
+		c.String(http.StatusBadRequest, "request body is required")
+		return
+	}
 	var input struct {
 		NewPrimary      string  `json:"new_primary"`
 		KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
 	}
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &input); err != nil {
-			c.String(http.StatusBadRequest, err.Error())
-			return
-		}
+	if err := json.Unmarshal(body, &input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
 	}
 
 	keyspaceGroupID := constant.DefaultKeyspaceGroupID

@@ -656,6 +656,15 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	re.NoError(err)
 	re.Equal(http.StatusBadRequest, resp.StatusCode)
 	resp.Body.Close()
+
+	// An empty request body must be rejected instead of silently falling back to
+	// a random transfer on the default keyspace group.
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", http.NoBody)
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
 }
 
 // TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary
