@@ -81,6 +81,38 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	}, nil
 }
 
+// LoadKeyspaceByID loads and returns target keyspace metadata.
+// Request must specify keyspace ID.
+// On Error, keyspaceMeta in response will be nil,
+// error information will be encoded in response header with corresponding error type.
+func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb.LoadKeyspaceByIDRequest) (*keyspacepb.LoadKeyspaceResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	manager := s.GetKeyspaceManager()
+	meta, err := manager.LoadKeyspaceByID(request.GetId())
+	if err != nil {
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
+	failpoint.Inject("skipKeyspaceRegionCheck", func() {
+		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
+			Header:   grpcutil.WrapHeader(),
+			Keyspace: meta,
+		}, nil)
+	})
+	if !manager.CheckKeyspaceRegionBound(meta) {
+		// If the keyspace region is not split yet, we treat it as not found.
+		// To avoid clients using the keyspace before region split is done.
+		err = errs.ErrKeyspaceNotFound
+		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
+	}
+	return &keyspacepb.LoadKeyspaceResponse{
+		Header:   grpcutil.WrapHeader(),
+		Keyspace: meta,
+	}, nil
+}
+
 // WatchKeyspaces captures and sends keyspace metadata changes to the client via gRPC stream.
 // Note: It sends all existing keyspaces as it's first package to the client.
 func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesRequest, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
