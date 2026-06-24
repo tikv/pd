@@ -188,15 +188,14 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 	}()
 
 	var (
-		lastTimestamp      *pdpb.Timestamp
-		sawPhysicalAdvance bool
+		maxDuration   time.Duration
+		lastTimestamp *pdpb.Timestamp
 	)
 	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
 	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
-	// When overflow happens, the current implementation advances the physical part in the request path
-	// instead of necessarily waiting for the periodic update ticker.
 	count := (1 << 18) / 10
 	for range 20 {
+		begin := time.Now()
 		req := &pdpb.TsoRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Count:  uint32(count),
@@ -204,15 +203,17 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
+		// Record the max duration to validate whether the overflow is triggered later.
+		duration := time.Since(begin)
+		if duration > maxDuration {
+			maxDuration = duration
+		}
 		// Check the monotonicity of the timestamp.
 		timestamp := checkAndReturnTimestampResponse(re, req, resp)
 		re.NotNil(timestamp)
 		if lastTimestamp != nil {
 			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
 			re.GreaterOrEqual(curPhysical, lastPhysical)
-			if curPhysical > lastPhysical {
-				sawPhysicalAdvance = true
-			}
 			// If the physical time is the same, the logical time must be strictly increasing.
 			if curPhysical == lastPhysical {
 				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
@@ -220,6 +221,6 @@ func (s *tsoTestSuite) checkLogicalOverflow(cluster *tests.TestCluster) {
 		}
 		lastTimestamp = timestamp
 	}
-	// Logical overflow should force the physical part to advance within the request loop.
-	re.True(sawPhysicalAdvance)
+	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
+	re.Greater(maxDuration, s.updateInterval)
 }
