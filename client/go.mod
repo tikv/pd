@@ -2,7 +2,7 @@ module github.com/tikv/pd/client
 
 go 1.25.10
 
-replace github.com/pingcap/kvproto => github.com/YuhaoZhang00/kvproto v0.0.0-20260624115700-e82b69b9ab9d
+replace github.com/pingcap/kvproto => github.com/YuhaoZhang00/kvproto v0.0.0-20260624120537-6017aaa77a41
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -12,7 +12,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473
+	github.com/pingcap/kvproto v0.0.0-20260622063236-b41e86365ce0
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1

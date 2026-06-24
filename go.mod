@@ -5,7 +5,7 @@ go 1.25.10
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-replace github.com/pingcap/kvproto => github.com/YuhaoZhang00/kvproto v0.0.0-20260624115700-e82b69b9ab9d
+replace github.com/pingcap/kvproto => github.com/YuhaoZhang00/kvproto v0.0.0-20260624120537-6017aaa77a41
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
@@ -35,7 +35,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20260514102340-daa7c864b473
+	github.com/pingcap/kvproto v0.0.0-20260622063236-b41e86365ce0
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/metering_sdk v0.0.0-20260203082503-b9f282339654
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21

@@ -205,6 +205,8 @@ type Server struct {
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
 
+	followerRegionResetMu sync.Mutex
+
 	tsoClientPool struct {
 		syncutil.RWMutex
 		clients map[string]*streamWrapper
@@ -940,6 +942,155 @@ func (s *Server) SetStorage(storage storage.Storage) {
 // GetBasicCluster returns the basic cluster of server.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
+}
+
+// ResetFollowerRegionCache resets follower local region cache and restarts
+// region sync from the leader.
+func (s *Server) ResetFollowerRegionCache(regionIDs ...uint64) error {
+	if !s.persistOptions.IsUseRegionStorage() {
+		return errors.New("region storage is disabled")
+	}
+	s.followerRegionResetMu.Lock()
+	defer s.followerRegionResetMu.Unlock()
+
+	leader := s.GetLeader()
+	if leader == nil {
+		return errs.ErrLeaderNil.FastGenByArgs()
+	}
+	leaderURLs := leader.GetClientUrls()
+	if len(leaderURLs) == 0 {
+		return errors.New("pd leader has no client url")
+	}
+
+	syncer := s.cluster.GetRegionSyncer()
+	syncer.StopSyncWithLeader()
+	// Keep the follower connected even when the reset returns an error.
+	defer syncer.StartSyncWithLeader(leaderURLs[0])
+
+	var resetErr error
+	if err := s.storage.Flush(); err != nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	if len(regionIDs) == 0 {
+		if err := s.deleteFollowerRegionStorage(); resetErr == nil && err != nil {
+			resetErr = err
+		}
+		s.basicCluster.ResetRegionCache()
+	} else {
+		for _, regionID := range regionIDs {
+			if err := s.deleteFollowerRegion(regionID); resetErr == nil && err != nil {
+				resetErr = err
+			}
+		}
+	}
+	if err := s.storage.Flush(); err != nil && resetErr == nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	// Force a full sync after the local reset attempt so the follower can
+	// rebuild any cache entries that were removed before an error happened.
+	syncer.ResetHistoryIndex(0)
+
+	log.Info("reset follower region cache and restart region syncer",
+		zap.String("server", s.Name()),
+		zap.String("leader", leader.GetName()),
+		zap.Int("region-count", len(regionIDs)))
+	return resetErr
+}
+
+func (s *Server) deleteFollowerRegion(regionID uint64) error {
+	region := s.basicCluster.GetRegion(regionID)
+	if region == nil {
+		meta := &metapb.Region{}
+		ok, err := s.storage.LoadRegion(regionID, meta)
+		if err != nil {
+			return errors.Wrap(err, "load follower region from local storage")
+		}
+		if ok {
+			region = core.NewRegionInfo(meta, nil, core.SetSource(core.Storage))
+		}
+	}
+	if region != nil {
+		if err := s.deleteFollowerRegionMeta(region.GetMeta()); err != nil {
+			return err
+		}
+	}
+	s.basicCluster.RemoveRegionIfExist(regionID)
+	return nil
+}
+
+func (s *Server) deleteFollowerRegionStorage() error {
+	regionStorage := storage.RetrieveRegionStorage(s.storage)
+	regionKV, ok := regionStorage.(kv.Base)
+	if !ok {
+		return errors.New("region storage does not support range scan")
+	}
+
+	startID := uint64(0)
+	endKey := keypath.RegionPath(math.MaxUint64)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		default:
+		}
+
+		keys, _, err := regionKV.LoadRange(keypath.RegionPath(startID), endKey, endpoint.MaxKVRangeLimit)
+		if err != nil {
+			return errors.Wrap(err, "load follower regions from local storage")
+		}
+		var lastRegionID uint64
+		for _, key := range keys {
+			regionID, err := parseRegionIDFromStorageKey(key)
+			if err != nil {
+				return err
+			}
+			lastRegionID = regionID
+		}
+		if err := deleteFollowerRegionStorageKeys(s.ctx, regionKV, keys); err != nil {
+			return errors.Wrap(err, "delete follower regions from local storage")
+		}
+		if len(keys) < endpoint.MaxKVRangeLimit {
+			return nil
+		}
+		if lastRegionID == math.MaxUint64 {
+			return nil
+		}
+		startID = lastRegionID + 1
+	}
+}
+
+func deleteFollowerRegionStorageKeys(ctx context.Context, regionKV kv.Base, keys []string) error {
+	return regionKV.RunInTxn(ctx, func(txn kv.Txn) error {
+		for _, key := range keys {
+			if err := txn.Remove(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Server) deleteFollowerRegionMeta(region *metapb.Region) error {
+	if err := s.storage.DeleteRegion(region); err != nil {
+		log.Warn("failed to delete follower region from local storage",
+			zap.String("server", s.Name()),
+			zap.Uint64("region-id", region.GetId()),
+			errs.ZapError(err))
+		return errors.Wrap(err, "delete follower region from local storage")
+	}
+	return nil
+}
+
+func parseRegionIDFromStorageKey(key string) (uint64, error) {
+	idx := strings.LastIndexByte(key, '/')
+	if idx < 0 || idx == len(key)-1 {
+		return 0, errors.Errorf("invalid region storage key %q", key)
+	}
+	regionID, err := strconv.ParseUint(key[idx+1:], 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "parse region storage key")
+	}
+	return regionID, nil
 }
 
 // GetPersistOptions returns the schedule option.
@@ -1710,12 +1861,16 @@ func (s *Server) leaderLoop() {
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
+				s.followerRegionResetMu.Lock()
 				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
+				s.followerRegionResetMu.Unlock()
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			leader.Watch(s.serverLoopCtx)
+			s.followerRegionResetMu.Lock()
 			syncer.StopSyncWithLeader()
+			s.followerRegionResetMu.Unlock()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 
