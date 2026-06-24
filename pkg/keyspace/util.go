@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -149,6 +150,37 @@ type RegionBound struct {
 	TxnRightBound []byte
 }
 
+type regionBoundType int
+
+const (
+	txnRegionBound regionBoundType = iota
+	rawRegionBound
+)
+
+// String returns the string representation of the regionBoundType.
+func (t regionBoundType) String() string {
+	if t == rawRegionBound {
+		return "raw"
+	}
+	return "txn"
+}
+
+// keyTypeToRegionBoundType converts the key type to the corresponding region bound type.
+// ref rfc: https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md
+func keyTypeToRegionBoundType(keyType coreconstant.KeyType) regionBoundType {
+	if keyType == coreconstant.Raw {
+		return rawRegionBound
+	}
+	return txnRegionBound
+}
+
+func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
+	if keyType == coreconstant.Raw.String() {
+		return rawRegionBound
+	}
+	return txnRegionBound
+}
+
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
 	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)
@@ -168,17 +200,29 @@ func MakeRegionBound(id uint32) *RegionBound {
 	}
 }
 
-// MakeKeyRanges encodes keyspace ID to correct LabelRule data.
-func MakeKeyRanges(id uint32) []any {
+// MakeKeyRanges encodes keyspace ID to correct LabelRule data with the specified
+// region bound. Used by tests and pd-ctl.
+func MakeKeyRanges(id uint32, keyType string) []any {
+	if keyType == coreconstant.Raw.String() {
+		return buildKeyRanges(id, rawRegionBound)
+	}
+	return buildKeyRanges(id, txnRegionBound)
+}
+
+func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 	regionBound := MakeRegionBound(id)
+	if boundType == txnRegionBound {
+		return []any{
+			map[string]any{
+				"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
+				"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
+			},
+		}
+	}
 	return []any{
 		map[string]any{
 			"start_key": hex.EncodeToString(regionBound.RawLeftBound),
 			"end_key":   hex.EncodeToString(regionBound.RawRightBound),
-		},
-		map[string]any{
-			"start_key": hex.EncodeToString(regionBound.TxnLeftBound),
-			"end_key":   hex.EncodeToString(regionBound.TxnRightBound),
 		},
 	}
 }
@@ -188,8 +232,12 @@ func getRegionLabelID(id uint32) string {
 	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
-// MakeLabelRule makes the label rule for the given keyspace id.
-func MakeLabelRule(id uint32) *labeler.LabelRule {
+// MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
+func MakeTxnLabelRule(id uint32) *labeler.LabelRule {
+	return buildLabelRule(id, txnRegionBound)
+}
+
+func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,
@@ -200,7 +248,7 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 			},
 		},
 		RuleType: labeler.KeyRange,
-		Data:     MakeKeyRanges(id),
+		Data:     buildKeyRanges(id, boundType),
 	}
 }
 

@@ -69,7 +69,7 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 			Keyspace: meta,
 		}, nil)
 	})
-	if !manager.CheckKeyspaceRegionBound(meta.GetId()) {
+	if !manager.CheckKeyspaceRegionBound(meta) {
 		// If the keyspace region is not split yet, we treat it as not found.
 		// To avoid clients using the keyspace before region split is done.
 		err = errs.ErrKeyspaceNotFound
@@ -101,7 +101,7 @@ func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb
 			Keyspace: meta,
 		}, nil)
 	})
-	if !manager.CheckKeyspaceRegionBound(meta.GetId()) {
+	if !manager.CheckKeyspaceRegionBound(meta) {
 		// If the keyspace region is not split yet, we treat it as not found.
 		// To avoid clients using the keyspace before region split is done.
 		err = errs.ErrKeyspaceNotFound
