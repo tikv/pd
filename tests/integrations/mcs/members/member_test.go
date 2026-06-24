@@ -617,7 +617,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	// Sending the transfer request to a non-primary member of the group should
-	// return 400 instead of a 500, since its expected primary lease is nil.
+	// be forwarded to the group's primary and still succeed.
 	var nonPrimaryAddr string
 	for _, s := range suite.tsoNodes {
 		tsoSvr := s.(*tso.Server)
@@ -632,12 +632,19 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	body["keyspace_group_id"] = testGroupID
 	data, err = json.Marshal(body)
 	re.NoError(err)
-	resp, err = tests.TestDialClient.Post(
-		fmt.Sprintf("%s/tso/api/v1/primary/transfer", nonPrimaryAddr),
-		"application/json", bytes.NewBuffer(data))
-	re.NoError(err)
-	re.Equal(http.StatusBadRequest, resp.StatusCode)
-	resp.Body.Close()
+	// The follower forwards the request to the group's primary. While a primary
+	// election is in flight the primary address can be briefly unavailable, so
+	// retry until the forwarded request succeeds.
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", nonPrimaryAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 
 	// Requesting transfer for a non-existent keyspace group should return 400.
 	body["keyspace_group_id"] = uint32(9999)
@@ -651,10 +658,10 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	resp.Body.Close()
 }
 
-// TestTransferPrimaryToDefaultGroupFollower documents an intentional behavior
-// change: the transfer primary request is no longer redirected to the primary.
-// Sending it to a follower of the default keyspace group now returns HTTP 400
-// instead of being forwarded, so the caller must retry against the primary.
+// TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary
+// request for the default keyspace group is still forwarded from a follower to
+// the primary and succeeds, preserving backward compatibility with the previous
+// ServiceRedirector behavior.
 func (suite *memberTestSuite) TestTransferPrimaryToDefaultGroupFollower() {
 	re := suite.Require()
 
@@ -673,22 +680,20 @@ func (suite *memberTestSuite) TestTransferPrimaryToDefaultGroupFollower() {
 	re.NotEmpty(followerAddr)
 
 	// Omit keyspace_group_id so it defaults to the default keyspace group (0).
+	// The follower should forward the request to the primary and succeed. Retry
+	// to ride over any in-flight primary election.
 	data, err := json.Marshal(map[string]any{"new_primary": ""})
 	re.NoError(err)
-	resp, err := tests.TestDialClient.Post(
-		fmt.Sprintf("%s/tso/api/v1/primary/transfer", followerAddr),
-		"application/json", bytes.NewBuffer(data))
-	re.NoError(err)
-	re.Equal(http.StatusBadRequest, resp.StatusCode)
-	resp.Body.Close()
-
-	// Sending the same request to the primary still succeeds.
-	resp, err = tests.TestDialClient.Post(
-		fmt.Sprintf("%s/tso/api/v1/primary/transfer", primary),
-		"application/json", bytes.NewBuffer(data))
-	re.NoError(err)
-	re.Equal(http.StatusOK, resp.StatusCode)
-	resp.Body.Close()
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", followerAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
