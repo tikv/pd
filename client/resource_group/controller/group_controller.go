@@ -367,7 +367,11 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
 	})
-	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
+	ruDelta := new - counter.avgRUPerSecLastRU
+	if ruDelta < 0 {
+		ruDelta = 0
+	}
+	delta := ruDelta / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	failpoint.Inject("acceleratedSpeedTrend", func() {
 		if delta > 0 {
