@@ -849,8 +849,7 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 		if peer == nil {
 			continue
 		}
-		store := r.cluster.GetStore(storeID)
-		if store == nil {
+		if r.cluster.GetStore(storeID) == nil {
 			continue
 		}
 		pendingReadCPU := regionReadCPU
@@ -870,6 +869,8 @@ func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
 
 func (r *RegionScatterer) getReadPoolThreadCount() uint64 {
 	if provider, ok := r.cluster.(storeConfigProvider); ok {
+		// This is a cluster-level StoreConfig estimate; PD does not know per-store
+		// runtime unified read-pool sizes, so heterogeneous stores may be imprecise.
 		return provider.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
 	}
 	return 0

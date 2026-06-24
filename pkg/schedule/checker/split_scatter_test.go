@@ -869,11 +869,11 @@ func putSplitScatterRegionWithVersion(
 	version uint64,
 ) {
 	tc.AddLeaderRegionWithRange(regionID, startKey, endKey, 1, 2, 3)
-	region := tc.GetRegion(regionID).Clone(core.SetCPUUsage(cpuUsage))
+	region := tc.GetRegion(regionID)
 	if version > 0 {
 		region = region.Clone(core.SetRegionVersion(version))
 	}
-	tc.PutRegion(region)
+	tc.PutRegion(splitScatterRegionWithReadCPU(region, cpuUsage))
 }
 
 func putSplitScatterRegionWithKeys(tc *mockcluster.Cluster, startKey, endKey []byte, cpuUsage uint64) {
@@ -912,9 +912,8 @@ func putSplitScatterRegionWithKeysByIDAtVersion(
 			RegionEpoch: epoch,
 		},
 		peers[0],
-		core.SetCPUUsage(cpuUsage),
 	)
-	tc.PutRegion(region)
+	tc.PutRegion(splitScatterRegionWithReadCPU(region, cpuUsage))
 }
 
 func newSplitScatterRegionInfo(
@@ -942,7 +941,7 @@ func newSplitScatterRegionInfoWithVersion(
 			Version: version,
 		}
 	}
-	return core.NewRegionInfo(
+	region := core.NewRegionInfo(
 		&metapb.Region{
 			Id:          regionID,
 			StartKey:    []byte(startKey),
@@ -951,8 +950,16 @@ func newSplitScatterRegionInfoWithVersion(
 			RegionEpoch: epoch,
 		},
 		leader,
-		core.SetCPUUsage(cpuUsage),
 	)
+	return splitScatterRegionWithReadCPU(region, cpuUsage)
+}
+
+func splitScatterRegionWithReadCPU(region *core.RegionInfo, readCPU uint64) *core.RegionInfo {
+	return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: readCPU},
+	}, 0)
 }
 
 func putSplitScatterRegionWithStores(tc *mockcluster.Cluster, regionID uint64, startKey, endKey string, cpuUsage uint64, stores ...uint64) {

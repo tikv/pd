@@ -220,11 +220,11 @@ func newSplitScatterRegionWithStores(regionID uint64, start, end []byte, cpuUsag
 			Version: 1,
 		},
 	}
-	return core.NewRegionInfo(
-		region,
-		peers[0],
-		core.SetCPUUsage(cpuUsage),
-	)
+	return core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region,
+		Leader:   peers[0],
+		CpuStats: &pdpb.CPUStats{UnifiedRead: cpuUsage},
+	}, 0)
 }
 
 func newSplitScatterIndexKey(suffix string) []byte {
