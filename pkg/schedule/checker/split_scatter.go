@@ -254,23 +254,9 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 }
 
 func (c *splitScatterController) deleteStalePendingSplitScatter(stale []splitScatterPendingItem) {
-	if len(stale) == 0 {
-		return
+	for _, pending := range stale {
+		c.deletePendingSplitScatter(pending)
 	}
-	deletedCount := 0
-	c.pendingMu.Lock()
-	for _, expected := range stale {
-		pending, ok := c.pending[expected.regionID]
-		if !ok || !samePendingSplitScatter(pending, expected) {
-			continue
-		}
-		delete(c.pending, expected.regionID)
-		deletedCount++
-	}
-	if deletedCount > 0 {
-		c.updatePendingGaugeLocked()
-	}
-	c.pendingMu.Unlock()
 }
 
 func (c *splitScatterController) delayMissingPendingSplitScatter(missing []splitScatterPendingItem, now time.Time) {

@@ -151,95 +151,35 @@ func TestDispatchSplitScatterKeepsPendingUntilSplitHeartbeat(t *testing.T) {
 	re.Equal(scatter.InternalScatterOperatorDesc, op.Desc())
 }
 
-func TestDispatchSplitScatterUsesRequestSplitVersionWhenCacheLags(t *testing.T) {
+func TestDispatchSplitScatterVersionLifecycle(t *testing.T) {
 	re := require.New(t)
 	controller, tc, oc, cleanup := newTestSplitScatterController(t)
 	defer cleanup()
 
-	source := tc.GetRegion(100)
-	re.NotNil(source)
-	tc.PutRegion(source.Clone(core.SetRegionVersion(4)))
+	tc.PutRegion(tc.GetRegion(100).Clone(core.SetRegionVersion(4)))
+	controller.RecordSplitScatterBatch(100, 6, []uint64{101, 102})
+	putSplitScatterRegionWithVersion(tc, 101, "m", "t", splitScatterReportedCPUUsage, 5)
+	putSplitScatterRegionWithVersion(tc, 102, "t", "", splitScatterReportedCPUUsage, 7)
 
-	controller.RecordSplitScatterBatch(100, 6, []uint64{101})
-	putSplitScatterRegionWithVersion(tc, 101, "m", "", splitScatterReportedCPUUsage, 6)
 	advanceSplitScatterRegionVersion(t, tc, 100)
-
 	controller.dispatchSplitScatterRegions()
-
 	re.Empty(oc.GetOperators())
 	re.Equal(2, splitScatterPendingCount(controller))
+	re.NotContains(pendingRegionIDSet(controller), uint64(102))
 
 	advanceSplitScatterRegionVersion(t, tc, 100)
+	setSplitScatterNextDispatchAt(t, controller, time.Now().Add(-time.Second))
+	re.ElementsMatch([]uint64{100}, pendingRegionIDs(controller.collectTopPendingSplitScatter(3)))
+	re.NotContains(pendingRegionIDSet(controller), uint64(102))
+
 	tc.PutRegion(tc.GetRegion(101).Clone(core.SetRegionVersion(6)))
+	transferSplitScatterLeader(t, tc, 101, 2)
+	advanceSplitScatterRegionVersion(t, tc, 100)
 	setSplitScatterNextDispatchAt(t, controller, time.Now().Add(-time.Second))
 	controller.dispatchSplitScatterRegions()
 
 	re.NotNil(oc.GetOperator(101))
-}
-
-func TestDispatchSplitScatterWaitsUntilResultVersionMatches(t *testing.T) {
-	re := require.New(t)
-	controller, tc, _, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
-
-	source := tc.GetRegion(100)
-	re.NotNil(source)
-	tc.PutRegion(source.Clone(core.SetRegionVersion(5)))
-
-	controller.RecordSplitScatterBatch(100, 6, []uint64{101})
-	putSplitScatterRegionWithVersion(tc, 101, "m", "", splitScatterReportedCPUUsage, 5)
-	advanceSplitScatterRegionVersion(t, tc, 100)
-
-	re.NotContains(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)), uint64(101))
-	re.Equal(2, splitScatterPendingCount(controller))
-
-	tc.PutRegion(tc.GetRegion(101).Clone(core.SetRegionVersion(6)))
-
-	re.Contains(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)), uint64(101))
-}
-
-func TestDispatchSplitScatterDropsStaleResultVersion(t *testing.T) {
-	re := require.New(t)
-	controller, tc, oc, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
-
-	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101})
-	putSplitScatterRegionWithVersion(tc, 101, "m", "", splitScatterReportedCPUUsage, 2)
-
-	controller.dispatchSplitScatterRegions()
-
-	re.Empty(oc.GetOperators())
-	re.Equal(1, splitScatterPendingCount(controller))
-	re.NotContains(pendingRegionIDSet(controller), uint64(101))
-}
-
-func TestDispatchSplitScatterAllowsSourceVersionAhead(t *testing.T) {
-	re := require.New(t)
-	controller, tc, oc, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
-
-	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101})
-	putSplitScatterRegion(tc, 101, "m", "")
-	advanceSplitScatterSourceVersion(t, tc)
-	advanceSplitScatterSourceVersion(t, tc)
-
-	controller.dispatchSplitScatterRegions()
-
-	re.NotNil(oc.GetOperator(101))
 	re.NotContains(pendingRegionIDSet(controller), uint64(100))
-}
-
-func TestDispatchSplitScatterKeepsPendingAfterTransferLeader(t *testing.T) {
-	re := require.New(t)
-	controller, tc, _, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
-
-	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101})
-	putSplitScatterRegion(tc, 101, "m", "")
-	transferSplitScatterLeader(t, tc, 101, 2)
-	advanceSplitScatterSourceVersion(t, tc)
-
-	re.Contains(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)), uint64(101))
 }
 
 func TestDispatchSplitScatterRespectsScheduleLimit(t *testing.T) {
@@ -286,8 +226,7 @@ func TestCollectTopPendingBacksOffWhenInternalScatterOperatorExists(t *testing.T
 
 	re.Empty(controller.collectTopPendingSplitScatter(2))
 	for _, regionID := range []uint64{100, 101} {
-		pending := splitScatterPending(t, controller, regionID)
-		re.True(pending.retryAt.After(time.Now()))
+		requireSplitScatterPendingDelayed(t, controller, regionID)
 		re.True(splitScatterPendingMaybe(controller, regionID))
 	}
 }
@@ -443,10 +382,7 @@ func TestDispatchSplitScatterRespectsScheduleDeny(t *testing.T) {
 	re.Empty(oc.GetOperators())
 	re.Equal(2, splitScatterPendingCount(controller))
 	re.Equal(float64(2), promtestutil.ToFloat64(splitScatterDispatchScheduleDisabledCounter)-counterBefore)
-	for _, regionID := range []uint64{100, 101} {
-		pending := splitScatterPending(t, controller, regionID)
-		re.True(pending.retryAt.After(time.Now()))
-	}
+	requireSplitScatterPendingDelayed(t, controller, 100, 101)
 }
 
 func TestCollectTopPendingRemovesExpiredPending(t *testing.T) {
@@ -790,49 +726,41 @@ func TestDispatchSplitScatterKeepsStableGroupWhenRegionSplitsAgain(t *testing.T)
 	}
 }
 
-func TestDispatchSplitScatterKeepsPendingWhenReadCPUIsBalanced(t *testing.T) {
-	re := require.New(t)
-	controller, tc, oc, cleanup := newTestSplitScatterController(t)
-	defer cleanup()
-
-	setSplitScatterUnifiedReadPoolThreadCount(tc, 12)
-	setSplitScatterStoreReadCPU(tc, 1, 500)
-	for _, storeID := range []uint64{2, 3, 4} {
-		setSplitScatterStoreReadCPU(tc, storeID, 450)
-	}
-
-	controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101, 102})
-	putSplitScatterRegion(tc, 101, "m", "t")
-	putSplitScatterRegion(tc, 102, "t", "")
-	advanceSplitScatterSourceVersion(t, tc)
-
-	balancedReadCPUBefore := promtestutil.ToFloat64(splitScatterDispatchBalancedReadCPUCounter)
-	controller.dispatchSplitScatterRegions()
-
-	re.Empty(oc.GetOperators())
-	re.Equal(3, splitScatterPendingCount(controller))
-	re.Equal(float64(3), promtestutil.ToFloat64(splitScatterDispatchBalancedReadCPUCounter)-balancedReadCPUBefore)
-	for _, regionID := range []uint64{100, 101, 102} {
-		pending := splitScatterPending(t, controller, regionID)
-		re.True(pending.retryAt.After(time.Now()))
-	}
-}
-
 func TestDispatchSplitScatterBacksOff(t *testing.T) {
 	testCases := []struct {
-		name      string
-		putRegion func(*mockcluster.Cluster)
+		name        string
+		childIDs    []uint64
+		setup       func(*mockcluster.Cluster)
+		wantPending []uint64
 	}{
 		{
-			name: "region is not fully replicated",
-			putRegion: func(tc *mockcluster.Cluster) {
+			name:        "region is not fully replicated",
+			childIDs:    []uint64{101},
+			wantPending: []uint64{101},
+			setup: func(tc *mockcluster.Cluster) {
 				putSplitScatterRegionWithStores(tc, 101, "m", "", splitScatterReportedCPUUsage, 1, 2)
 			},
 		},
 		{
-			name: "scatter internal fails",
-			putRegion: func(tc *mockcluster.Cluster) {
+			name:        "scatter internal fails",
+			childIDs:    []uint64{101},
+			wantPending: []uint64{101},
+			setup: func(tc *mockcluster.Cluster) {
 				putSplitScatterRegionWithoutLeader(tc, 101, "m", "", splitScatterReportedCPUUsage)
+			},
+		},
+		{
+			name:        "read CPU is balanced",
+			childIDs:    []uint64{101, 102},
+			wantPending: []uint64{100, 101, 102},
+			setup: func(tc *mockcluster.Cluster) {
+				setSplitScatterUnifiedReadPoolThreadCount(tc, 12)
+				setSplitScatterStoreReadCPU(tc, 1, 500)
+				for _, storeID := range []uint64{2, 3, 4} {
+					setSplitScatterStoreReadCPU(tc, storeID, 450)
+				}
+				putSplitScatterRegion(tc, 101, "m", "t")
+				putSplitScatterRegion(tc, 102, "t", "")
 			},
 		},
 	}
@@ -843,15 +771,14 @@ func TestDispatchSplitScatterBacksOff(t *testing.T) {
 			controller, tc, _, cleanup := newTestSplitScatterController(t)
 			defer cleanup()
 
-			controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, []uint64{101})
-			testCase.putRegion(tc)
+			controller.RecordSplitScatterBatch(100, splitScatterTestSplitVersion, testCase.childIDs)
+			testCase.setup(tc)
 			advanceSplitScatterSourceVersion(t, tc)
 
 			controller.dispatchSplitScatterRegions()
 
-			re.Equal(1, splitScatterPendingCount(controller))
-			pending := splitScatterObservedPending(t, controller)
-			re.True(pending.retryAt.After(time.Now()))
+			re.Equal(len(testCase.wantPending), splitScatterPendingCount(controller))
+			requireSplitScatterPendingDelayed(t, controller, testCase.wantPending...)
 			re.Empty(pendingRegionIDs(controller.collectTopPendingSplitScatter(2)))
 		})
 	}
@@ -1136,6 +1063,15 @@ func splitScatterPendingMaybe(controller *Controller, regionID uint64) bool {
 	defer controller.splitScatter.pendingMu.RUnlock()
 	_, ok := controller.splitScatter.pending[regionID]
 	return ok
+}
+
+func requireSplitScatterPendingDelayed(t *testing.T, controller *Controller, regionIDs ...uint64) {
+	t.Helper()
+	now := time.Now()
+	for _, regionID := range regionIDs {
+		pending := splitScatterPending(t, controller, regionID)
+		require.True(t, pending.retryAt.After(now))
+	}
 }
 
 func splitScatterObservedPending(t *testing.T, controller *Controller) splitScatterPendingItem {

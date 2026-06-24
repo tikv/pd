@@ -1451,6 +1451,7 @@ func TestInternalScatterLeaderFiltersRejectedTarget(t *testing.T) {
 		targetPeers,
 		[]uint64{1, 4, 5},
 		nil,
+		0,
 	)
 	re.NotContains(candidates, uint64(4))
 
@@ -1462,6 +1463,11 @@ func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
 	re := require.New(t)
 	scatterer, state, region, _ := newInternalScatterSelectionTestFixture(t, nil)
 	tc := scatterer.cluster.(*mockcluster.Cluster)
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 300},
+	}, 0)
 	cfg := tc.PersistOptions.GetStoreConfig().Clone()
 	cfg.ReadPool.Unified.MaxThreadCount = 12
 	tc.SetStoreConfig(cfg)
@@ -1469,7 +1475,7 @@ func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
 		Interval: &pdpb.TimeInterval{EndTimestamp: utils.StoreHeartBeatReportInterval},
 		CpuUsages: []*pdpb.RecordPair{{
 			Key:   "unified-read-0",
-			Value: 850,
+			Value: 550,
 		}},
 	})
 
@@ -1481,11 +1487,19 @@ func TestInternalScatterLeaderFiltersReadPoolPressure(t *testing.T) {
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
 	readCPUByStore := splitScatterReadCPUByStore(tc.GetStoresLoads(), tc)
-	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, readCPUByStore)
+	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, readCPUByStore, tc.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount())
 	re.NotContains(candidates, uint64(4))
 
+	region = core.RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
+		Region:   region.GetMeta(),
+		Leader:   region.GetLeader(),
+		CpuStats: &pdpb.CPUStats{UnifiedRead: 900},
+	}, 0)
+	candidates, _ = scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 5}, nil, tc.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount())
+	re.Equal([]uint64{1}, candidates)
+
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)
-	re.Equal(uint64(5), leader)
+	re.Equal(uint64(1), leader)
 }
 
 func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
@@ -1501,7 +1515,7 @@ func TestInternalScatterLeaderKeepsOriginWhenSourcePausedOut(t *testing.T) {
 		4: {StoreId: 4, Role: metapb.PeerRole_Voter},
 		5: {StoreId: 5, Role: metapb.PeerRole_Voter},
 	}
-	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil)
+	candidates, _ := scatterer.filterAllowedLeaderCandidateStores(region, targetPeers, []uint64{1, 4, 5}, nil, 0)
 	re.Equal([]uint64{1}, candidates)
 
 	leader, _ := scatterer.selectAvailableLeaderStore(group, region, candidates, state.ordinaryEngine.asSelectionContext(), true)

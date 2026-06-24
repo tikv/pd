@@ -100,19 +100,6 @@ func TestLabelConstraintsFilter(t *testing.T) {
 	}
 }
 
-func TestReadPoolPressureFilterUsesRecentMaxReadCPU(t *testing.T) {
-	re := require.New(t)
-	store := core.NewStoreInfoWithLabel(1, map[string]string{})
-	readCPUByStore := map[uint64]float64{
-		1: 850,
-	}
-	filter := NewReadPoolPressureFilter("test", readCPUByStore, 12)
-	re.Equal(plan.StatusCode(plan.StatusStoreBusy), filter.Target(mockconfig.NewTestOptions(), store).StatusCode)
-
-	readCPUByStore[1] = 800
-	re.Equal(plan.StatusOK, filter.Target(mockconfig.NewTestOptions(), store).StatusCode)
-}
-
 func TestRuleFitFilter(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

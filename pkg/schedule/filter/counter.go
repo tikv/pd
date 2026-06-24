@@ -68,7 +68,6 @@ const (
 	storeStateTooManyPendingPeer
 	storeStateRejectLeader
 	storeStateSlowTrend
-	readPoolPressure
 
 	filtersLen
 )
@@ -99,7 +98,6 @@ var filters = [filtersLen]string{
 	"store-state-too-many-pending-peers-filter",
 	"store-state-reject-leader-filter",
 	"store-state-slow-trend-filter",
-	"read-pool-pressure-filter",
 }
 
 // String implements fmt.Stringer interface.
