@@ -22,6 +22,42 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
+type legacyRequestInfo struct {
+	isWrite bool
+}
+
+func (req *legacyRequestInfo) IsWrite() bool {
+	return req.isWrite
+}
+
+func (*legacyRequestInfo) WriteBytes() uint64 {
+	return 0
+}
+
+func (*legacyRequestInfo) ReplicaNumber() int64 {
+	return 0
+}
+
+func (*legacyRequestInfo) StoreID() uint64 {
+	return 0
+}
+
+func (*legacyRequestInfo) RequestSize() uint64 {
+	return 0
+}
+
+func (*legacyRequestInfo) AccessLocationType() AccessLocationType {
+	return AccessUnknown
+}
+
+type copRequestInfoWithoutPrediction struct {
+	legacyRequestInfo
+}
+
+func (*copRequestInfoWithoutPrediction) IsCop() bool {
+	return true
+}
+
 func TestGetRUValueFromConsumption(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
@@ -194,6 +230,36 @@ func TestUpdateDeltaConsumptionReportsSignedRequestUnits(t *testing.T) {
 	re.Equal(float64(900), last.TikvRUV2)
 	re.Equal(float64(1000), last.TidbRUV2)
 	re.Equal(float64(1100), last.TiflashRUV2)
+}
+
+func TestRequestInfoPagingProvidersAreOptional(t *testing.T) {
+	re := require.New(t)
+	cfg := DefaultRUConfig()
+	kvCalc := newKVCalculator(cfg)
+	req := &legacyRequestInfo{}
+
+	bytesForEst, ok := pagingReadEstimate(req)
+	re.False(ok)
+	re.Zero(bytesForEst)
+
+	consumption := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(consumption, req)
+	re.InDelta(float64(cfg.ReadBaseCost)+float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion, consumption.RRU, 1e-6)
+
+	resp := &TestResponseInfo{readBytes: 1024, succeed: true}
+	settle := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(settle, req, resp)
+	re.InDelta(float64(cfg.ReadBytesCost)*1024, settle.RRU, 1e-6)
+}
+
+func TestRequestInfoMissingPredictionProviderReturnsZeroHint(t *testing.T) {
+	re := require.New(t)
+	req := &copRequestInfoWithoutPrediction{}
+
+	bytesForEst, ok := pagingReadEstimate(req)
+
+	re.True(ok)
+	re.Zero(bytesForEst)
 }
 
 func TestEqualRU(t *testing.T) {

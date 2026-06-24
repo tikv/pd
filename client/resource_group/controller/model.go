@@ -45,6 +45,8 @@ const (
 
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
+// Implementations may additionally provide PredictedReadBytes() and IsCop() methods to opt
+// into paging pre-charge accounting; missing methods are treated as no hint and non-cop.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
@@ -52,10 +54,16 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+}
+
+type predictedReadBytesProvider interface {
 	// PredictedReadBytes returns the caller-supplied read-bytes hint. The
 	// controller only uses it for coprocessor reads; non-cop hints are
 	// ignored by paging accounting.
 	PredictedReadBytes() uint64
+}
+
+type copRequestInfo interface {
 	// IsCop reports whether this request targets the coprocessor endpoint
 	// (CmdCop / CmdCopStream). Only coprocessor reads participate in paging
 	// pre-charge, settlement, and metrics; point gets, batch gets, scans and
@@ -64,15 +72,28 @@ type RequestInfo interface {
 	IsCop() bool
 }
 
+func predictedReadBytes(req RequestInfo) uint64 {
+	provider, ok := req.(predictedReadBytesProvider)
+	if !ok {
+		return 0
+	}
+	return provider.PredictedReadBytes()
+}
+
+func isCopRequest(req RequestInfo) bool {
+	copReq, ok := req.(copRequestInfo)
+	return ok && copReq.IsCop()
+}
+
 // pagingReadEstimate returns the predicted read-bytes hint for coprocessor
 // read requests. The boolean reports whether the request participates in
 // paging accounting at all; a true result with 0 bytes means a paging
 // cold-start request with no usable estimate yet.
 func pagingReadEstimate(req RequestInfo) (uint64, bool) {
-	if req.IsWrite() || !req.IsCop() {
+	if req.IsWrite() || !isCopRequest(req) {
 		return 0, false
 	}
-	return req.PredictedReadBytes(), true
+	return predictedReadBytes(req), true
 }
 
 // estimatedReadBytes returns the predicted read-bytes hint for coprocessor

@@ -72,12 +72,12 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
 }
 
-// PredictedReadBytes implements the RequestInfo interface.
+// PredictedReadBytes implements the optional predictedReadBytesProvider interface.
 func (tri *TestRequestInfo) PredictedReadBytes() uint64 {
 	return tri.predictedReadBytes
 }
 
-// IsCop implements the RequestInfo interface.
+// IsCop implements the optional copRequestInfo interface.
 func (tri *TestRequestInfo) IsCop() bool {
 	return tri.isCop
 }
