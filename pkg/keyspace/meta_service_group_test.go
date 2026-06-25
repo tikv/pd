@@ -229,6 +229,17 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	re.NoError(err)
 	re.True(persisted, "deletion of an actually-empty group must be persisted")
 
+	// The persisted counter for the deleted group must be cleared, so re-adding
+	// the same ID later does not inherit the stale count.
+	var residual map[string]int
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var err error
+		residual, err = suite.manager.store.GetAssignmentCount(txn, map[string]string{"etcd-group-2": ""})
+		return err
+	})
+	re.NoError(err)
+	re.Equal(0, residual["etcd-group-2"], "deleted group's persisted count must be cleared")
+
 	// A group with real keyspaces must still be rejected.
 	actual["etcd-group-1"] = 1
 	groups2 := mockMetaServiceGroups()

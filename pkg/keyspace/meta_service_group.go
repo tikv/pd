@@ -19,6 +19,10 @@ import (
 	"fmt"
 	"math"
 
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -237,6 +241,24 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		return err
 	}
 	m.metaServiceGroups = metaServiceGroups
+	// Clear the persisted assignment counter for deleted groups so re-adding a
+	// group with the same ID does not inherit a stale count, which would skew
+	// list output and PickGroup balancing. Best-effort: the config deletion is
+	// already persisted and the delete guard relies on actual keyspace scans,
+	// not this counter.
+	if len(deletedGroups) > 0 {
+		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+			for _, id := range deletedGroups {
+				if err := m.store.RemoveAssignmentCount(txn, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			log.Warn("[keyspace] failed to clear assignment counts for deleted meta-service groups",
+				zap.Strings("deleted-groups", deletedGroups), zap.Error(err))
+		}
+	}
 	return nil
 }
 
