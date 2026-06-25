@@ -671,9 +671,11 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							continue
 						}
 						// only members of specific group are valid primary candidates.
-						group := kgm.GetKeyspaceGroups()[kg.ID]
-						memberMap := make(map[string]bool, len(group.Members))
-						for _, m := range group.Members {
+						// Use kg directly instead of GetKeyspaceGroups()[kg.ID], which
+						// is built from the keyspace lookup table and would miss a served
+						// group that has no keyspaces, causing a nil-pointer panic here.
+						memberMap := make(map[string]bool, len(kg.Members))
+						for _, m := range kg.Members {
 							memberMap[m.Address] = true
 						}
 						log.Info("tso priority checker moves primary",
@@ -1093,6 +1095,34 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 		keyspaceGroups[keyspaceGroupID] = kgm.kgs[keyspaceGroupID]
 	}
 	return keyspaceGroups
+}
+
+// GetServingKeyspaceGroups returns all keyspace groups that this TSO node is actively
+// serving (i.e. has an allocator for), regardless of keyspace assignments.
+func (kgm *KeyspaceGroupManager) GetServingKeyspaceGroups() map[uint32]*endpoint.KeyspaceGroup {
+	kgm.RLock()
+	defer kgm.RUnlock()
+	result := make(map[uint32]*endpoint.KeyspaceGroup)
+	for i, allocator := range kgm.allocators {
+		if allocator != nil {
+			result[uint32(i)] = kgm.kgs[i]
+		}
+	}
+	return result
+}
+
+// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is
+// serving it (i.e. has a non-nil allocator for it). It returns nil when the ID is out of
+// range or the group is not served by this node.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
+	if err := checkKeySpaceGroupID(id); err != nil {
+		return nil
+	}
+	allocator, kg := kgm.getKeyspaceGroupMeta(id)
+	if allocator == nil {
+		return nil
+	}
+	return kg
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
