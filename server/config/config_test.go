@@ -497,7 +497,7 @@ func newBlockingConfigStorage() *blockingConfigStorage {
 	}
 }
 
-func (s *blockingConfigStorage) LoadConfig(any) (bool, error) {
+func (*blockingConfigStorage) LoadConfig(any) (bool, error) {
 	return false, nil
 }
 
@@ -535,19 +535,19 @@ func (s *blockingConfigStorage) SaveConfig(cfg any) error {
 	return err
 }
 
-func (s *blockingConfigStorage) LoadAllSchedulerConfigs() ([]string, []string, error) {
+func (*blockingConfigStorage) LoadAllSchedulerConfigs() (names, configs []string, err error) {
 	return nil, nil, nil
 }
 
-func (s *blockingConfigStorage) LoadSchedulerConfig(string) (string, error) {
+func (*blockingConfigStorage) LoadSchedulerConfig(string) (string, error) {
 	return "", nil
 }
 
-func (s *blockingConfigStorage) SaveSchedulerConfig(string, []byte) error {
+func (*blockingConfigStorage) SaveSchedulerConfig(string, []byte) error {
 	return nil
 }
 
-func (s *blockingConfigStorage) RemoveSchedulerConfig(string) error {
+func (*blockingConfigStorage) RemoveSchedulerConfig(string) error {
 	return nil
 }
 

@@ -1302,9 +1302,7 @@ func (s *Server) UpdateScheduleConfig(update func(*sc.ScheduleConfig) error) err
 		return err
 	}
 	// Update the scheduling halt status at the same time.
-	if s.persistOptions.GetScheduleConfig().HaltScheduling == updated.HaltScheduling {
-		s.persistOptions.SetSchedulingAllowanceStatus(updated.HaltScheduling, "manually")
-	}
+	s.persistOptions.SetSchedulingAllowanceStatusIfCurrent(updated.HaltScheduling, "manually")
 	log.Info("schedule config is updated", zap.Reflect("new", updated), zap.Reflect("old", old))
 	return nil
 }

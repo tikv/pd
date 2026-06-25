@@ -1049,6 +1049,16 @@ func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
 	}
 }
 
+// SetSchedulingAllowanceStatusIfCurrent sets the scheduling allowance status if the halt value is still current.
+func (o *PersistOptions) SetSchedulingAllowanceStatusIfCurrent(halt bool, source string) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+	if o.GetScheduleConfig().HaltScheduling != halt {
+		return
+	}
+	o.SetSchedulingAllowanceStatus(halt, source)
+}
+
 // SetHaltScheduling set HaltScheduling.
 func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
 	v := o.GetScheduleConfig().Clone()
