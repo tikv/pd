@@ -254,10 +254,16 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 	}
 	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
 	// the map persisted via newCfg and the map applied to the manager are the
-	// same reference. UpdateGroupsSafely trims it in place, and we must persist
-	// the trimmed values too. newCfg is a locally owned clone, so there is no
-	// aliasing with the live config.
+	// same reference. newCfg is a locally owned clone, so there is no aliasing
+	// with the live config.
 	newGroups := newCfg.MetaServiceGroups
+	// Normalize (trim/dedup) before computing deletedGroups. Otherwise a
+	// whitespace-padded ID (e.g. " g ") for an existing group g would not match
+	// the already-normalized key in oldCfg, so g would be wrongly classified as a
+	// deletion and rejected by UpdateGroupsSafely when it still has keyspaces.
+	if err := config.AdjustMetaServiceGroups(newGroups); err != nil {
+		return err
+	}
 	deletedGroups := make([]string, 0)
 	for id := range oldCfg.GetMetaServiceGroups() {
 		if _, ok := newGroups[id]; !ok {
