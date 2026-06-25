@@ -57,7 +57,7 @@ type MetaServiceGroupStatus struct {
 // @Summary  Patch meta-service groups using JSON Merge Patch.
 // @Param    body  body  object  true  "JSON Merge Patch for meta-service groups (string values for add/update, null for delete)"
 // @Produce  json
-// @Success  200  {object}  []MetaServiceGroupStatus  "List of all meta-service groups after patch"
+// @Success  200  {array}   MetaServiceGroupStatus    "List of all meta-service groups after patch"
 // @Failure  400  {string}  string                    "Bad request (invalid JSON or invalid operation)"
 // @Failure  500  {string}  string                    "Internal server error"
 // @Router   /meta-service-groups [patch]
@@ -146,7 +146,7 @@ func PatchMetaServiceGroups(c *gin.Context) {
 // @Tags     meta-service-groups
 // @Summary  Get meta-service groups.
 // @Produce  json
-// @Success  200  {object}  []MetaServiceGroupStatus  "List of all meta-service groups"
+// @Success  200  {array}   MetaServiceGroupStatus    "List of all meta-service groups"
 // @Failure  500  {string}  string                    "Internal server error"
 // @Router   /meta-service-groups [get]
 func GetMetaServiceGroups(c *gin.Context) {
