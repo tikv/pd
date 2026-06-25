@@ -1217,6 +1217,15 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 		return err
 	}
 	if err := s.keyspaceManager.UpdateConfig(newCfg); err != nil {
+		// UpdateConfig is applied after Persist, so revert the persisted config on
+		// failure to keep the operation atomic from the caller's perspective.
+		s.persistOptions.SetKeyspaceConfig(oldCfg)
+		if rollbackErr := s.persistOptions.Persist(s.storage); rollbackErr != nil {
+			log.Error("failed to rollback keyspace config after keyspace manager update failed",
+				zap.Reflect("new", newCfg),
+				zap.Reflect("old", oldCfg),
+				errs.ZapError(rollbackErr))
+		}
 		return err
 	}
 

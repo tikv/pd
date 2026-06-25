@@ -884,7 +884,7 @@ type KeyspaceConfig struct {
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
 	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
-	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2,string"`
+	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.

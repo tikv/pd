@@ -270,11 +270,18 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) error {
+	// SetGlobalSafePointV2 reads from manager.config, so assign it first and roll
+	// back on failure to avoid leaving partially applied in-memory state.
+	oldCfg := manager.config
 	manager.config = cfg
+	if err := manager.SetGlobalSafePointV2(); err != nil {
+		manager.config = oldCfg
+		return err
+	}
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
 	}
-	return manager.SetGlobalSafePointV2()
+	return nil
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
