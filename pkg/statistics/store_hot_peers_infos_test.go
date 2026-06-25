@@ -68,6 +68,14 @@ func TestGetHotStoreLeaders(t *testing.T) {
 			AntiCount: 0,
 			Loads:     []float64{50, 0, 0},
 		},
+		{
+			RegionID:  106,
+			StoreID:   1,
+			isLeader:  true, // Stale leader stat
+			HotDegree: 1,
+			AntiCount: 0,
+			Loads:     []float64{300, 0, 0},
+		},
 	}
 
 	// Create hot write peers for store 2
@@ -147,6 +155,9 @@ func TestGetHotStoreLeaders(t *testing.T) {
 		&metapb.Region{Id: 105, StartKey: []byte("e"), EndKey: []byte("f")},
 		&metapb.Peer{StoreId: 2, Id: 1005, Role: metapb.PeerRole_Voter}))
 	cluster.PutRegion(core.NewRegionInfo(
+		&metapb.Region{Id: 106, StartKey: []byte("e1"), EndKey: []byte("e2")},
+		&metapb.Peer{StoreId: 2, Id: 1006, Role: metapb.PeerRole_Voter}))
+	cluster.PutRegion(core.NewRegionInfo(
 		&metapb.Region{Id: 201, StartKey: []byte("f"), EndKey: []byte("g")},
 		&metapb.Peer{StoreId: 2, Id: 2001, Role: metapb.PeerRole_Voter}))
 	cluster.PutRegion(core.NewRegionInfo(
@@ -176,6 +187,7 @@ func TestGetHotStoreLeaders(t *testing.T) {
 	re.True(regionIDs[101], "Region 101 should be a hot leader for store 1")
 	re.True(regionIDs[102], "Region 102 should be a hot leader for store 1")
 	re.True(regionIDs[104], "Region 104 should be a hot leader for store 1")
+	re.False(regionIDs[106], "Region 106 should not be a hot leader for store 1 because its current leader is store 2")
 
 	// Test GetHotStoreLeaders for store 2
 	hotWriteLeaders = GetHotStoreLeaders(cluster, 2, storeHotWritePeers)

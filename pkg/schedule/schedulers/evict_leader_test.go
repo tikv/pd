@@ -195,6 +195,37 @@ func TestEvictHotLeader(t *testing.T) {
 	re.Len(ops, 3)
 }
 
+func TestEvictHotLeaderWithRanges(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+
+	for _, storeID := range []uint64{1, 2, 3} {
+		tc.UpdateStorageWrittenBytes(storeID, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+		tc.UpdateStorageWrittenKeys(storeID, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	}
+
+	addRegionInfo(tc, utils.Write, []testRegionInfo{
+		{101, []uint64{1, 2, 3}, 2.0 * units.MiB, 2.0 * units.MiB, 0},
+		{102, []uint64{1, 2, 3}, 3.0 * units.MiB, 3.0 * units.MiB, 0},
+	})
+	tc.AddLeaderRegionWithRange(101, "b", "c", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(102, "x", "z", 1, 2, 3)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1", "a", "d"}), func(string) error { return nil })
+	re.NoError(err)
+	sl.(*evictLeaderScheduler).conf.Batch = 1
+
+	ops, _ := sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(101), ops[0].RegionID())
+}
+
 func BenchmarkScheduleEvictLeaderBatch(b *testing.B) {
 	cases := []struct {
 		name       string

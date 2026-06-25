@@ -303,6 +303,10 @@ func GetHotStoreLeaders(
 		if region == nil {
 			continue
 		}
+		leader := region.GetLeader()
+		if leader == nil || leader.GetStoreId() != id {
+			continue
+		}
 		hotLeaders[regionID] = region
 	}
 

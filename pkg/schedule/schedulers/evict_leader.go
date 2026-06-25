@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"bytes"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -364,8 +365,8 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 			inProgressFilter := filter.NewRegionInProgressFilter(func(id uint64) bool {
 				return pendingRegions[id] != nil
 			})
-			region = pickHotLeader(cluster, storeID, inProgressFilter, downFilter)
-			isHot = true
+			region = pickHotLeader(cluster, storeID, ranges, inProgressFilter, downFilter)
+			isHot = region != nil
 		}
 
 		if region == nil {
@@ -538,11 +539,33 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	return router
 }
 
-func pickHotLeader(cluster sche.SchedulerCluster, storeID uint64, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
+func pickHotLeader(cluster sche.SchedulerCluster, storeID uint64, ranges []core.KeyRange, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
 	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
+	filterHotLeadersByRanges(regions, ranges)
 	if len(regions) != 0 {
 		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
 
 	return nil
+}
+
+func filterHotLeadersByRanges(regions map[uint64]*core.RegionInfo, ranges []core.KeyRange) {
+	if len(regions) == 0 || len(ranges) == 0 {
+		return
+	}
+	for id, region := range regions {
+		if !regionInKeyRanges(region, ranges) {
+			delete(regions, id)
+		}
+	}
+}
+
+func regionInKeyRanges(region *core.RegionInfo, ranges []core.KeyRange) bool {
+	for _, kr := range ranges {
+		if bytes.Compare(region.GetStartKey(), kr.StartKey) >= 0 &&
+			(len(kr.EndKey) == 0 || (len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), kr.EndKey) <= 0)) {
+			return true
+		}
+	}
+	return false
 }
