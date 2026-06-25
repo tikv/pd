@@ -145,7 +145,7 @@ func TestRegionSyncer(t *testing.T) {
 				}
 			}
 			return true
-		}, testutil.WithWaitFor(time.Minute))
+		})
 	}
 	checkRegions(regions)
 
