@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -570,7 +571,15 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 	re.Equal(originalDashboard, newCfg.DashboardAddress)
 	re.NotEqual(originalUseRegionStorage, newCfg.UseRegionStorage)
 
+	// The dynamic config API normalizes a bare dashboard address before validation.
+	cfg = svr.GetPDServerConfig()
+	cfg.DashboardAddress = strings.TrimPrefix(svr.GetAddr(), svr.GetClientScheme()+"://")
+	err = svr.SetPDServerConfig(*cfg)
+	re.NoError(err)
+	re.Equal(svr.GetAddr(), svr.GetPDServerConfig().DashboardAddress)
+
 	// Change both other field and dashboard
+	cfg = svr.GetPDServerConfig()
 	cfg.UseRegionStorage = !cfg.UseRegionStorage
 	cfg.DashboardAddress = "https://new-dashboard-address:1234"
 	err = svr.SetPDServerConfig(*cfg)

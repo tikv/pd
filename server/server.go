@@ -1264,25 +1264,48 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 // SetScheduleConfig sets the balance config information.
 // This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
-	if err := cfg.Deprecated(); err != nil {
-		return err
-	}
-	old := s.persistOptions.GetScheduleConfig()
-	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
-		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
-			errs.ZapError(err))
+	return s.UpdateScheduleConfig(func(current *sc.ScheduleConfig) error {
+		*current = *cfg.Clone()
+		return nil
+	})
+}
+
+// UpdateScheduleConfig updates the latest schedule config and persists it atomically.
+func (s *Server) UpdateScheduleConfig(update func(*sc.ScheduleConfig) error) error {
+	var (
+		old        *sc.ScheduleConfig
+		updated    *sc.ScheduleConfig
+		persisting bool
+	)
+	err := s.persistOptions.UpdateScheduleConfig(s.storage, func(cfg *sc.ScheduleConfig) error {
+		old = s.persistOptions.GetScheduleConfig()
+		if err := update(cfg); err != nil {
+			return err
+		}
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		if err := cfg.Deprecated(); err != nil {
+			return err
+		}
+		updated = cfg.Clone()
+		persisting = true
+		return nil
+	})
+	if err != nil {
+		if persisting {
+			log.Error("failed to update schedule config",
+				zap.Reflect("new", updated),
+				zap.Reflect("old", old),
+				errs.ZapError(err))
+		}
 		return err
 	}
 	// Update the scheduling halt status at the same time.
-	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	if s.persistOptions.GetScheduleConfig().HaltScheduling == updated.HaltScheduling {
+		s.persistOptions.SetSchedulingAllowanceStatus(updated.HaltScheduling, "manually")
+	}
+	log.Info("schedule config is updated", zap.Reflect("new", updated), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1511,34 +1534,75 @@ func (s *Server) GetPDServerConfig() *config.PDServerConfig {
 
 // SetPDServerConfig sets the server config.
 func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
+	return s.UpdatePDServerConfig(func(current *config.PDServerConfig) error {
+		*current = *cfg.Clone()
+		return nil
+	})
+}
+
+// SetDashboardAddress updates the dashboard address without overwriting other PD server config fields.
+func (s *Server) SetDashboardAddress(addr string) error {
+	return s.UpdatePDServerConfig(func(cfg *config.PDServerConfig) error {
+		cfg.DashboardAddress = addr
+		return nil
+	})
+}
+
+// UpdatePDServerConfig updates the latest PD server config and persists it atomically.
+func (s *Server) UpdatePDServerConfig(update func(*config.PDServerConfig) error) error {
+	var (
+		old        *config.PDServerConfig
+		updated    *config.PDServerConfig
+		persisting bool
+	)
+	err := s.persistOptions.UpdatePDServerConfig(s.storage, func(cfg *config.PDServerConfig) error {
+		old = s.persistOptions.GetPDServerConfig()
+		if err := update(cfg); err != nil {
+			return err
+		}
+		if err := s.preparePDServerConfig(old, cfg); err != nil {
+			return err
+		}
+		updated = cfg.Clone()
+		persisting = true
+		return nil
+	})
+	if err != nil {
+		if persisting {
+			log.Error("failed to update PDServer config",
+				zap.Reflect("new", updated),
+				zap.Reflect("old", old),
+				errs.ZapError(err))
+		}
+		return err
+	}
+	log.Info("PD server config is updated", zap.Reflect("new", updated), zap.Reflect("old", old))
+	return nil
+}
+
+func (s *Server) preparePDServerConfig(old, cfg *config.PDServerConfig) error {
+	switch cfg.DashboardAddress {
+	case "auto":
+	case "none":
+	default:
+		if !strings.HasPrefix(cfg.DashboardAddress, "http") {
+			cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetPDServerConfig()
-	// See https://github.com/tikv/pd/issues/10114 for more details
+	// See https://github.com/tikv/pd/issues/10114 for more details.
 	if old.DashboardAddress != cfg.DashboardAddress {
 		switch cfg.DashboardAddress {
 		case "auto":
 		case "none":
 		default:
-			if !strings.HasPrefix(cfg.DashboardAddress, "http") {
-				cfg.DashboardAddress = fmt.Sprintf("%s://%s", s.GetClientScheme(), cfg.DashboardAddress)
-			}
 			if !cluster.IsClientURL(cfg.DashboardAddress, s.client) {
 				return errors.Errorf("dashboard address %s is not the client url of any member", cfg.DashboardAddress)
 			}
 		}
 	}
-	s.persistOptions.SetPDServerConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetPDServerConfig(old)
-		log.Error("failed to update PDServer config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
-			errs.ZapError(err))
-		return err
-	}
-	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 

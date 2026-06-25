@@ -190,47 +190,57 @@ func (s *Server) updatePDMemberLoop() {
 		case <-ticker.C:
 		case <-s.checkMembershipCh:
 		}
-		if !s.IsServing() {
+		curLeader = s.updatePDLeader(ctx, curLeader)
+	}
+}
+
+func (s *Server) updatePDLeader(ctx context.Context, curLeader uint64) uint64 {
+	if !s.IsServing() {
+		return curLeader
+	}
+	members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient())
+	if err != nil {
+		log.Warn("failed to list members", errs.ZapError(err))
+		return curLeader
+	}
+	for _, ep := range members.Members {
+		if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+			log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
 			continue
 		}
-		members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient())
+		probeCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+		status, err := s.GetClient().Status(probeCtx, ep.ClientURLs[0])
+		cancel()
 		if err != nil {
-			log.Warn("failed to list members", errs.ZapError(err))
+			log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
 			continue
 		}
-		for _, ep := range members.Members {
-			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
-				continue
+		if status.Leader != ep.ID {
+			continue
+		}
+		probeCtx, cancel = context.WithTimeout(ctx, requestTimeout)
+		cc, err := s.GetDelegateClient(probeCtx, s.GetTLSConfig(), ep.ClientURLs[0])
+		cancel()
+		if err != nil {
+			log.Info("failed to get delegate client", errs.ZapError(err))
+			continue
+		}
+		if !s.IsServing() {
+			// double check
+			return curLeader
+		}
+		cluster := s.GetCluster()
+		if cluster == nil {
+			return curLeader
+		}
+		if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+			if status.Leader != curLeader {
+				log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 			}
-			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
-			if err != nil {
-				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
-				continue
-			}
-			if status.Leader == ep.ID {
-				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
-				if err != nil {
-					log.Info("failed to get delegate client", errs.ZapError(err))
-					continue
-				}
-				if !s.IsServing() {
-					// double check
-					break
-				}
-				cluster := s.GetCluster()
-				if cluster != nil {
-					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
-						if status.Leader != curLeader {
-							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
-						}
-						curLeader = ep.ID
-						break
-					}
-				}
-			}
+			return ep.ID
 		}
 	}
+	return curLeader
 }
 
 func (s *Server) primaryElectionLoop() {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -47,6 +48,7 @@ import (
 type PersistOptions struct {
 	// configuration -> ttl value
 	ttl             *cache.TTLString
+	configMu        sync.Mutex
 	schedule        atomic.Value
 	replication     atomic.Value
 	pdServerConfig  atomic.Value
@@ -83,7 +85,31 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+	o.storeScheduleConfig(cfg)
+}
+
+func (o *PersistOptions) storeScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
+}
+
+// UpdateScheduleConfig updates and persists the latest scheduling configuration.
+func (o *PersistOptions) UpdateScheduleConfig(storage endpoint.ConfigStorage, update func(*sc.ScheduleConfig) error) error {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+
+	old := o.GetScheduleConfig()
+	cfg := old.Clone()
+	if err := update(cfg); err != nil {
+		return err
+	}
+	o.storeScheduleConfig(cfg)
+	if err := o.Persist(storage); err != nil {
+		o.storeScheduleConfig(old)
+		return err
+	}
+	return nil
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -103,7 +129,31 @@ func (o *PersistOptions) GetPDServerConfig() *PDServerConfig {
 
 // SetPDServerConfig sets the PD configuration.
 func (o *PersistOptions) SetPDServerConfig(cfg *PDServerConfig) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+	o.storePDServerConfig(cfg)
+}
+
+func (o *PersistOptions) storePDServerConfig(cfg *PDServerConfig) {
 	o.pdServerConfig.Store(cfg)
+}
+
+// UpdatePDServerConfig updates and persists the latest PD server configuration.
+func (o *PersistOptions) UpdatePDServerConfig(storage endpoint.ConfigStorage, update func(*PDServerConfig) error) error {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+
+	old := o.GetPDServerConfig()
+	cfg := old.Clone()
+	if err := update(cfg); err != nil {
+		return err
+	}
+	o.storePDServerConfig(cfg)
+	if err := o.Persist(storage); err != nil {
+		o.storePDServerConfig(old)
+		return err
+	}
+	return nil
 }
 
 // GetReplicationModeConfig returns the replication mode config.
@@ -706,6 +756,9 @@ func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 
 // AddSchedulerCfg adds the scheduler configurations.
 func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+
 	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -719,16 +772,19 @@ func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []s
 		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
-			o.SetScheduleConfig(v)
+			o.storeScheduleConfig(v)
 			return
 		}
 	}
 	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
-	o.SetScheduleConfig(v)
+	o.storeScheduleConfig(v)
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+
 	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
@@ -739,7 +795,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 			} else {
 				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
 			}
-			o.SetScheduleConfig(v)
+			o.storeScheduleConfig(v)
 			return
 		}
 	}

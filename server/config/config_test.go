@@ -411,6 +411,31 @@ dashboard-address = "foo"
 	}
 }
 
+func TestUpdatePDServerConfigKeepsLatestFields(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	storage := storage.NewStorageWithMemoryBackend()
+
+	latest := opt.GetPDServerConfig().Clone()
+	latest.BlockSafePointV1 = true
+	opt.SetPDServerConfig(latest)
+
+	re.NoError(opt.UpdatePDServerConfig(storage, func(cfg *PDServerConfig) error {
+		cfg.DashboardAddress = "none"
+		return nil
+	}))
+
+	re.True(opt.GetPDServerConfig().BlockSafePointV1)
+	re.Equal("none", opt.GetPDServerConfig().DashboardAddress)
+
+	reloaded, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(storage))
+	re.True(reloaded.GetPDServerConfig().BlockSafePointV1)
+	re.Equal("none", reloaded.GetPDServerConfig().DashboardAddress)
+}
+
 func TestDashboardConfig(t *testing.T) {
 	re := require.New(t)
 	cfgData := `

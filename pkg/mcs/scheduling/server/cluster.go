@@ -107,6 +107,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
+	pdLeaderRetryInterval = 50 * time.Millisecond
 	requestInterval       = 10 * time.Second
 
 	// heartbeat relative const
@@ -382,12 +383,12 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // AllocID allocates new IDs.
 func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
-	client, err := c.getPDLeaderClient()
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	client, err := c.getPDLeaderClient(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
-	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
-	defer cancel()
 	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
 
 	failpoint.Inject("allocIDNonBatch", func() {
@@ -401,13 +402,24 @@ func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	return resp.GetId(), resp.GetCount(), nil
 }
 
-func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
-	cli := c.pdLeader.Load()
-	if cli == nil {
-		c.triggerMembershipCheck()
-		return nil, errors.New("PD leader is not found")
+func (c *Cluster) getPDLeaderClient(ctx context.Context) (pdpb.PDClient, error) {
+	if cli := c.pdLeader.Load(); cli != nil {
+		return cli.(pdpb.PDClient), nil
 	}
-	return cli.(pdpb.PDClient), nil
+	c.triggerMembershipCheck()
+	ticker := time.NewTicker(pdLeaderRetryInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, errors.New("pd leader is not found")
+		case <-ticker.C:
+		}
+		if cli := c.pdLeader.Load(); cli != nil {
+			return cli.(pdpb.PDClient), nil
+		}
+		c.triggerMembershipCheck()
+	}
 }
 
 func (c *Cluster) triggerMembershipCheck() {

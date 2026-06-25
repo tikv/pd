@@ -16,6 +16,7 @@ package schedule
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -283,6 +285,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
+	originalSchedulerCfgs := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		select {
@@ -382,14 +385,44 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	}
 
 	// Removes the invalid scheduler config and persist.
-	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
+	validSchedulerCfgs := scheduleCfg.Schedulers[:k]
+	invalidSchedulerCfgs := make(sc.SchedulerConfigs, 0, len(originalSchedulerCfgs)-len(validSchedulerCfgs))
+	for _, schedulerCfg := range originalSchedulerCfgs {
+		if !containsSchedulerConfig(validSchedulerCfgs, schedulerCfg) {
+			invalidSchedulerCfgs = append(invalidSchedulerCfgs, schedulerCfg)
+		}
+	}
+	var updatedSchedulers sc.SchedulerConfigs
+	if err := c.cluster.GetSchedulerConfig().UpdateScheduleConfig(c.cluster.GetStorage(), func(latest *sc.ScheduleConfig) error {
+		if len(invalidSchedulerCfgs) == 0 {
+			updatedSchedulers = append(sc.SchedulerConfigs(nil), latest.Schedulers...)
+			return nil
+		}
+		latest.Schedulers = removeSchedulerConfigs(latest.Schedulers, invalidSchedulerCfgs)
+		updatedSchedulers = append(sc.SchedulerConfigs(nil), latest.Schedulers...)
+		return nil
+	}); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
-	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", scheduleCfg.Schedulers))
+	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", updatedSchedulers))
 
 	c.markSchedulersInitialized()
+}
+
+func containsSchedulerConfig(schedulers sc.SchedulerConfigs, target sc.SchedulerConfig) bool {
+	return slice.AnyOf(schedulers, func(i int) bool {
+		return reflect.DeepEqual(schedulers[i], target)
+	})
+}
+
+func removeSchedulerConfigs(schedulers, removed sc.SchedulerConfigs) sc.SchedulerConfigs {
+	retained := schedulers[:0]
+	for _, schedulerCfg := range schedulers {
+		if !containsSchedulerConfig(removed, schedulerCfg) {
+			retained = append(retained, schedulerCfg)
+		}
+	}
+	return retained
 }
 
 // LoadPlugin load user plugin
