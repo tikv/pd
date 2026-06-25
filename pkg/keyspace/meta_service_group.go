@@ -32,6 +32,18 @@ type MetaServiceGroupManager struct {
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	metaServiceGroups map[string]string
+	// keyspaceAssignmentCounter, when set, returns the actual number of keyspaces
+	// assigned to each of the given groups by scanning keyspace metadata. It is
+	// the authoritative source for the delete guard so a stale persisted counter
+	// cannot permanently block removing an actually-empty group.
+	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
+}
+
+// SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
+// counter used by the delete guard. It must be called during initialization,
+// before any concurrent group update.
+func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(groupIDs map[string]struct{}) (map[string]int, error)) {
+	m.keyspaceAssignmentCounter = counter
 }
 
 // NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
@@ -182,34 +194,65 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	if err := config.AdjustMetaServiceGroups(metaServiceGroups); err != nil {
 		return err
 	}
-	m.Lock()
-
-	var assignmentCounts map[string]int
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		var err error
-		assignmentCounts, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
-		return err
-	}); err != nil {
-		m.Unlock()
+	if err := m.persistGroupsLocked(ctx, metaServiceGroups, deletedGroups, persist); err != nil {
 		return err
 	}
-	for _, id := range deletedGroups {
-		if assignmentCounts[id] > 0 {
-			m.Unlock()
-			return fmt.Errorf("%w: %s", ErrGroupHasAssignedKeyspaces, id)
-		}
-	}
-	if err := persist(); err != nil {
-		m.Unlock()
-		return err
-	}
-	m.metaServiceGroups = metaServiceGroups
-	m.Unlock()
-
 	if afterPersist != nil {
 		afterPersist()
 	}
 	return nil
+}
+
+// persistGroupsLocked performs the delete-guard check and persists the new
+// groups while holding the write lock, which blocks concurrent keyspace
+// assignment (AssignToGroup/PickGroup/reassign all take the read lock).
+func (m *MetaServiceGroupManager) persistGroupsLocked(
+	ctx context.Context,
+	metaServiceGroups map[string]string,
+	deletedGroups []string,
+	persist func() error,
+) error {
+	m.Lock()
+	defer m.Unlock()
+	if len(deletedGroups) > 0 {
+		counts, err := m.assignedKeyspaceCounts(ctx, deletedGroups)
+		if err != nil {
+			return err
+		}
+		for _, id := range deletedGroups {
+			if counts[id] > 0 {
+				return fmt.Errorf("%w: %s", ErrGroupHasAssignedKeyspaces, id)
+			}
+		}
+	}
+	if err := persist(); err != nil {
+		return err
+	}
+	m.metaServiceGroups = metaServiceGroups
+	return nil
+}
+
+// assignedKeyspaceCounts returns the number of keyspaces assigned to each of the
+// given groups. It prefers the authoritative keyspace scan (immune to counter
+// drift) and falls back to the persisted counter when no scanner is configured,
+// e.g. in unit tests without a keyspace manager.
+func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, groupIDs []string) (map[string]int, error) {
+	if m.keyspaceAssignmentCounter != nil {
+		set := make(map[string]struct{}, len(groupIDs))
+		for _, id := range groupIDs {
+			set[id] = struct{}{}
+		}
+		return m.keyspaceAssignmentCounter(set)
+	}
+	var counts map[string]int
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+		var err error
+		counts, err = m.store.GetAssignmentCount(txn, m.metaServiceGroups)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return counts, nil
 }
 
 // updateGroups updates currently available meta-service groups.
