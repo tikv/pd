@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -68,6 +67,9 @@ const (
 	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
 	// in a unified way (managed by the NullKeyspace).
 	UnifiedGC = "unified"
+	// RegionBoundType is the key for region bound type in keyspace config,
+	// which is used to indicate the region bound type of the keyspace.
+	RegionBoundType = "region_bound_type"
 	// MetaServiceGroupIDKey is the key for meta-service group id in keyspace config.
 	MetaServiceGroupIDKey = "meta_service_group_id"
 	// MetaServiceGroupAddressesKey is the key for meta-service group addresses in keyspace config.
@@ -201,8 +203,9 @@ func (manager *Manager) Bootstrap() error {
 }
 
 func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
+	boundType := manager.getRegionBoundType()
 	// Split Keyspace Region for default/system keyspace.
-	if err := manager.splitKeyspaceRegion(id, false); err != nil {
+	if err := manager.splitKeyspaceRegion(id, false, boundType); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
@@ -218,6 +221,8 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if err != nil {
 		return err
 	}
+
+	config[RegionBoundType] = boundType.String()
 	// It is needed to set for system keyspace in next-gen.
 	if id == constant.SystemKeyspaceID {
 		config[GCManagementType] = KeyspaceLevelGC
@@ -280,6 +285,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 
 	// Get keyspace config.
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	boundType := manager.getRegionBoundType()
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
 		return nil, err
@@ -291,6 +297,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
+		request.Config[RegionBoundType] = boundType.String()
 	}
 
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
@@ -337,7 +344,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	tracer.OnSaveKeyspaceMetaFinished()
 
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
+	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit(), boundType)
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			idPath := keypath.KeyspaceIDPath(request.Name)
@@ -442,6 +449,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	if err != nil {
 		return nil, err
 	}
+	boundType := manager.getRegionBoundType()
 	if len(config) != 0 {
 		if request.Config == nil {
 			request.Config = config
@@ -449,6 +457,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
 		}
+		request.Config[RegionBoundType] = boundType.String()
 	}
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
@@ -489,7 +498,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		return nil, err
 	}
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit(), boundType)
 	if err != nil {
 		idPath := keypath.KeyspaceIDPath(name)
 		metaPath := keypath.KeyspaceMetaPath(id)
@@ -574,13 +583,13 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
-func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
+func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool, boundType regionBoundType) (err error) {
 	failpoint.Inject("skipSplitRegion", func() {
 		failpoint.Return(nil)
 	})
 
 	start := time.Now()
-	keyspaceRule := MakeLabelRule(id)
+	keyspaceRule := buildLabelRule(id, boundType)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
 		return errors.New("cluster does not support region label")
@@ -601,11 +610,18 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 					zap.Error(err),
 				)
 			}
+			return
 		}
+		log.Info("added region label for keyspace",
+			zap.Uint32("keyspace-id", id),
+			zap.Any("label-rule", keyspaceRule),
+			zap.Duration("takes", time.Since(start)),
+			zap.Stringer("key-type", boundType),
+		)
 	}()
 
 	if waitRegionSplit {
-		err = manager.waitKeyspaceRegionSplit(id)
+		err = manager.waitKeyspaceRegionSplit(id, boundType)
 		if err != nil {
 			log.Warn("[keyspace] wait region split meets error",
 				zap.Uint32("keyspace-id", id),
@@ -614,16 +630,10 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		}
 		return err
 	}
-
-	log.Info("[keyspace] added region label for keyspace",
-		zap.Uint32("keyspace-id", id),
-		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
-		zap.Duration("takes", time.Since(start)),
-	)
-	return
+	return nil
 }
 
-func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBoundType) error {
 	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
 	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
 	defer func() {
@@ -635,7 +645,7 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 		case <-manager.ctx.Done():
 			return errors.New("[keyspace] wait region split canceled")
 		case <-ticker.C:
-			if manager.CheckKeyspaceRegionBound(id) {
+			if manager.hasKeyspaceRegionBound(id, boundType) {
 				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
 				return nil
 			}
@@ -649,12 +659,31 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 }
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
-func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
+func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
+	config := meta.GetConfig()
+	val, ok := config[RegionBoundType]
+	// if config does not contain region bound type, we use the default one from manager.
+	if !ok {
+		val = manager.getRegionBoundType().String()
+	}
+	typ := keyTypeStringToRegionBoundType(val)
+	return manager.hasKeyspaceRegionBound(meta.GetId(), typ)
+}
+
+func (manager *Manager) hasKeyspaceRegionBound(id uint32, boundType regionBoundType) bool {
 	regionBound := MakeRegionBound(id)
-	return manager.checkBound(regionBound.RawLeftBound) &&
-		manager.checkBound(regionBound.RawRightBound) &&
-		manager.checkBound(regionBound.TxnLeftBound) &&
-		manager.checkBound(regionBound.TxnRightBound)
+	if boundType == txnRegionBound {
+		return manager.checkBound(regionBound.TxnLeftBound) &&
+			manager.checkBound(regionBound.TxnRightBound)
+	}
+	return manager.checkBound(regionBound.RawLeftBound) && manager.checkBound(regionBound.RawRightBound)
+}
+
+func (manager *Manager) getRegionBoundType() regionBoundType {
+	if manager.cluster == nil || manager.cluster.GetSharedConfig() == nil {
+		return txnRegionBound
+	}
+	return keyTypeToRegionBoundType(manager.cluster.GetSharedConfig().GetKeyType())
 }
 
 func (manager *Manager) checkBound(key []byte) bool {
