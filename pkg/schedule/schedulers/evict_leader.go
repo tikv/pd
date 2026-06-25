@@ -320,6 +320,7 @@ type evictLeaderStoresConf interface {
 func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
+	hotLeaders := prepareHotLeaderCandidates(cluster, conf, pendingRegions != nil)
 	for range batchSize {
 		for _, op := range pendingRegions {
 			status := op.CheckAndGetStatus()
@@ -329,7 +330,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 				continue
 			}
 		}
-		once := scheduleEvictLeaderOnce(r, name, cluster, conf, pendingRegions)
+		once := scheduleEvictLeaderOnce(r, name, cluster, conf, pendingRegions, hotLeaders)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -343,7 +344,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 	return ops
 }
 
-func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
+func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator, hotLeaders map[uint64]map[uint64]*core.RegionInfo) []*operator.Operator {
 	storeIDs := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(storeIDs))
 
@@ -365,7 +366,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 			inProgressFilter := filter.NewRegionInProgressFilter(func(id uint64) bool {
 				return pendingRegions[id] != nil
 			})
-			region = pickHotLeader(cluster, storeID, ranges, inProgressFilter, downFilter)
+			region = pickHotLeader(hotLeaders[storeID], inProgressFilter, downFilter)
 			isHot = region != nil
 		}
 
@@ -539,14 +540,29 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	return router
 }
 
-func pickHotLeader(cluster sche.SchedulerCluster, storeID uint64, ranges []core.KeyRange, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
-	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
-	filterHotLeadersByRanges(regions, ranges)
-	if len(regions) != 0 {
-		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
+func prepareHotLeaderCandidates(cluster sche.SchedulerCluster, conf evictLeaderStoresConf, enable bool) map[uint64]map[uint64]*core.RegionInfo {
+	if !enable {
+		return nil
 	}
+	storeHotPeers := cluster.GetHotPeerStats(utils.Write, 1)
+	storeIDs := conf.getStores()
+	hotLeaders := make(map[uint64]map[uint64]*core.RegionInfo, len(storeIDs))
+	for _, storeID := range storeIDs {
+		ranges := conf.getKeyRangesByID(storeID)
+		if len(ranges) == 0 {
+			continue
+		}
+		regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, storeHotPeers)
+		filterHotLeadersByRanges(regions, ranges)
+		if len(regions) != 0 {
+			hotLeaders[storeID] = regions
+		}
+	}
+	return hotLeaders
+}
 
-	return nil
+func pickHotLeader(regions map[uint64]*core.RegionInfo, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
+	return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 }
 
 func filterHotLeadersByRanges(regions map[uint64]*core.RegionInfo, ranges []core.KeyRange) {
