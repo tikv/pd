@@ -107,6 +107,10 @@ func newUpsertMetaServiceGroupFunc(cmd *cobra.Command, _ []string) {
 				return
 			}
 		}
+		if _, exists := patch[id]; exists {
+			cmd.PrintErrf("Invalid --group: duplicate ID %q after trimming", id)
+			return
+		}
 		patch[id] = &addr
 	}
 	body, err := json.Marshal(patch)
