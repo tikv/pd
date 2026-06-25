@@ -17,7 +17,7 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -434,7 +434,7 @@ func BenchmarkScheduleEvictLeaderBatch(b *testing.B) {
 				for i := 1; i <= tc.hotRegions; i++ {
 					peers := []uint64{1}
 					for len(peers) < 3 {
-						sid := uint64(rand.Intn(tc.stores) + 1)
+						sid := uint64(rand.IntN(tc.stores) + 1)
 						if !containsUint64(peers, sid) {
 							peers = append(peers, sid)
 						}
@@ -450,9 +450,9 @@ func BenchmarkScheduleEvictLeaderBatch(b *testing.B) {
 			}
 
 			for i := 1; i <= tc.regions; i++ {
-				peers := []uint64{uint64(rand.Intn(tc.stores) + 1)}
+				peers := []uint64{uint64(rand.IntN(tc.stores) + 1)}
 				for len(peers) < 3 {
-					sid := uint64(rand.Intn(tc.stores) + 1)
+					sid := uint64(rand.IntN(tc.stores) + 1)
 					if !containsUint64(peers, sid) {
 						peers = append(peers, sid)
 					}

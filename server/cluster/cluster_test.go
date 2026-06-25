@@ -2718,11 +2718,14 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 			tc.GetBasicCluster(),
 			tc.GetOpts(),
 			nil)
-	}, func(co *schedule.Coordinator) { co.Run() }, re)
+	}, func(co *schedule.Coordinator) {
+		rc := co.GetCluster().(*RaftCluster)
+		rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+		rc.coordinator = co
+		co.Run()
+	}, re)
 	defer cleanup()
 	rc := co.GetCluster().(*RaftCluster)
-	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	// Make sure there are no problem when concurrent write and read
 	var wg sync.WaitGroup
@@ -2755,12 +2758,15 @@ func TestCollectMetrics(t *testing.T) {
 			tc.GetBasicCluster(),
 			tc.GetOpts(),
 			nil)
-	}, func(co *schedule.Coordinator) { co.Run() }, re)
+	}, func(co *schedule.Coordinator) {
+		rc := co.GetCluster().(*RaftCluster)
+		rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+		rc.coordinator = co
+		co.Run()
+	}, re)
 	defer cleanup()
 
 	rc := co.GetCluster().(*RaftCluster)
-	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	count := 10
 	for i := 0; i <= count; i++ {
