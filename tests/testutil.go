@@ -20,10 +20,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
-	"os"
 	"path"
 	"runtime"
 	"strconv"
@@ -34,7 +33,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
-	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -45,22 +43,23 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	router "github.com/tikv/pd/pkg/mcs/router/server"
+	rc "github.com/tikv/pd/pkg/mcs/router/server/config"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/tikv/pd/server/config"
 )
 
 var (
@@ -80,13 +79,13 @@ func SetRangePort(start, end int) {
 	portRange := []int{start, end}
 	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{}
-		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		randomPort := strconv.Itoa(rand.IntN(portRange[1]-portRange[0]) + portRange[0])
 		testPortMutex.Lock()
 		for range 10 {
 			if _, ok := testPortMap[randomPort]; !ok {
 				break
 			}
-			randomPort = strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+			randomPort = strconv.Itoa(rand.IntN(portRange[1]-portRange[0]) + portRange[0])
 		}
 		testPortMutex.Unlock()
 		localAddr, err := net.ResolveTCPAddr(network, "0.0.0.0:"+randomPort)
@@ -118,6 +117,41 @@ func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapPrope
 		log.Sync()
 	})
 	return err
+}
+
+// StartSingleResourceManagerTestServer creates and starts a resource manager server with default config for testing.
+func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*rm.Server, func()) {
+	cfg := rm.NewConfig()
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
+	cfg, err := rm.GenerateConfig(cfg)
+	re.NoError(err)
+
+	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return !s.IsClosed()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup
+}
+
+// StartSingleRouterServerWithoutCheck creates and starts a router server with default config for testing.
+func StartSingleRouterServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*router.Server, func(), error) {
+	cfg := rc.NewConfig()
+	cfg.BackendEndpoints = backendEndpoints
+	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
+	cfg, err := router.GenerateConfig(cfg)
+	re.NoError(err)
+	s, cleanup, err := router.NewTestServer(ctx, re, cfg)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return !s.IsClosed()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	return s, cleanup, nil
 }
 
 // StartSingleTSOTestServerWithoutCheck creates and starts a tso server with default config for testing.
@@ -224,6 +258,9 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		// Wait for the raft cluster on the leader to be bootstrapped.
 		return raftCluster != nil && raftCluster.IsRunning()
 	})
+	if store.LastHeartbeat == 0 {
+		store.LastHeartbeat = time.Now().UnixNano()
+	}
 	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
@@ -242,8 +279,11 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
-	if tc.GetSchedulingPrimaryServer() != nil {
-		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	raftCluster.UpdateAllStoreStatus()
+	sche := tc.GetSchedulingPrimaryServer()
+	if sche != nil {
+		sche.GetCluster().PutStore(newStore)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 
@@ -270,25 +310,28 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo *core.RegionInfo) {
 	err := cluster.HandleRegionHeartbeat(regionInfo)
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		err = sche.GetCluster().HandleRegionHeartbeat(regionInfo)
 		re.NoError(err)
 	}
 }
 
 // MustHandleStoreHeartbeat is used for test purpose.
+// When we need to test statistics, we need to forward store heartbeat to scheduling server.
+// If we only test store metadata, we only use store watcher and not need to forward store heartbeat.
 func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
 	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
 	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		hb := &schedulingpb.StoreHeartbeatRequest{
 			Header: &schedulingpb.RequestHeader{
 				ClusterId: heartbeat.Header.ClusterId,
 			},
 			Stats: heartbeat.GetStats(),
 		}
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		err = sche.GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
+		sche.GetCluster().UpdateAllStoreStatus()
 	}
 }
 
@@ -302,7 +345,7 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 		// report buckets interval is 10s
 		PeriodInMs: 10000,
 	}
-	err := cluster.HandleReportBuckets(buckets)
+	err := cluster.HandleRegionBuckets(buckets)
 	re.NoError(err)
 	// TODO: forwards to scheduling server after it supports buckets
 	return buckets
@@ -356,43 +399,181 @@ func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
 	}
 }
 
+// RunFunc runs a given function on the active test cluster.
+// If env not set, it will run test in both non-microservice env and microservice env.
+// It is used to run some helper functions.
+func (s *SchedulingTestEnvironment) RunFunc(f func(*TestCluster)) {
+	switch s.Env {
+	case NonMicroserviceEnv:
+		s.runFuncInNonMicroserviceEnv(f)
+	case MicroserviceEnv:
+		s.runFuncInMicroserviceEnv(f)
+	default:
+		s.runFuncInNonMicroserviceEnv(f)
+		s.runFuncInMicroserviceEnv(f)
+	}
+}
+
 // RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in non-microservice environment", getTestName())
-	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
-		s.startCluster(NonMicroserviceEnv)
-	}
-	test(s.clusters[NonMicroserviceEnv])
-}
-
-func getTestName() string {
-	pc, _, _, _ := runtime.Caller(2)
-	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
-		pc, _, _, _ = runtime.Caller(3)
-		caller = runtime.FuncForPC(pc)
-	}
-	if caller != nil {
-		elements := strings.Split(caller.Name(), ".")
-		return elements[len(elements)-1]
-	}
-	return ""
+	s.runFuncInNonMicroserviceEnv(test)
 }
 
 // RunTestInMicroserviceEnv is to run test in microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
-	re := require.New(s.t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
-	}()
 	s.t.Logf("start test %s in microservice environment", getTestName())
-	if _, ok := s.clusters[MicroserviceEnv]; !ok {
-		s.startCluster(MicroserviceEnv)
+	s.runFuncInMicroserviceEnv(test)
+}
+
+// Reset is to reset the environment.
+// It will reset stores, regions, rules and schedulers.
+func (s *SchedulingTestEnvironment) Reset(re *require.Assertions) {
+	resetFunc := func(cluster *TestCluster) {
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+		leaderServer := cluster.GetLeaderServer()
+		rc := leaderServer.GetRaftCluster()
+		// replace rules with default rule
+		configURL := fmt.Sprintf("%s/config", urlPrefix)
+		reqData, e := json.Marshal(map[string]any{
+			"enable-placement-rules": "true",
+		})
+		re.NoError(e)
+		err := testutil.CheckPostJSON(TestDialClient, configURL, reqData, testutil.StatusOK(re))
+		re.NoError(err)
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			// wait for the scheduling server to update the config
+			testutil.Eventually(re, func() bool {
+				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+			})
+		}
+		defaultRule := placement.GroupBundle{
+			ID: placement.DefaultGroupID,
+			Rules: []*placement.Rule{
+				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3},
+			},
+		}
+		data, err := json.Marshal([]placement.GroupBundle{defaultRule})
+		re.NoError(err)
+		ruleURL := fmt.Sprintf("%s/config/placement-rule", urlPrefix)
+		err = testutil.CheckPostJSON(TestDialClient, ruleURL, data, testutil.StatusOK(re))
+		re.NoError(err)
+		respBundle := make([]placement.GroupBundle, 0)
+		testutil.Eventually(re, func() bool {
+			err = testutil.CheckGetJSON(TestDialClient, ruleURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
+			re.NoError(err)
+			return len(respBundle) == 1 && respBundle[0].ID == placement.DefaultGroupID && len(respBundle[0].Rules) == 1 &&
+				respBundle[0].Rules[0].ID == placement.DefaultRuleID && respBundle[0].Rules[0].Count == 3 && respBundle[0].Rules[0].Role == placement.Voter
+		})
+		// clean region storage and cache
+		for _, region := range leaderServer.GetRegions() {
+			url := fmt.Sprintf("%s/admin/storage/region/%d", urlPrefix, region.GetID())
+			err = testutil.CheckDelete(TestDialClient, url, testutil.StatusOK(re))
+			re.NoError(err)
+		}
+		re.Empty(leaderServer.GetRegions())
+		// clean stores
+		for _, store := range leaderServer.GetStores() {
+			if store.NodeState == metapb.NodeState_Removed {
+				continue
+			}
+			err := rc.RemoveStore(store.GetId(), true)
+			if err != nil {
+				re.ErrorIs(err, errs.ErrStoreRemoved)
+			}
+			re.NoError(rc.BuryStore(store.GetId(), true))
+		}
+		re.NoError(rc.RemoveTombStoneRecords())
+		re.Empty(leaderServer.GetStores())
+		testutil.Eventually(re, func() bool {
+			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+				for _, s := range sche.GetBasicCluster().GetStores() {
+					if s.GetState() != metapb.StoreState_Tombstone {
+						return false
+					}
+				}
+			}
+			return true
+		})
+		// clean schedulers
+		schedulerURL := fmt.Sprintf("%s/schedulers", urlPrefix)
+		testutil.Eventually(re, func() bool {
+			// get current schedulers
+			var currentSchedulers []string
+			err := testutil.CheckGetJSON(http.DefaultClient, schedulerURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &currentSchedulers))
+			re.NoError(err)
+			// compare schedulers
+			defaultSet := make(map[string]struct{}, len(types.DefaultSchedulers))
+			for _, s := range types.DefaultSchedulers {
+				defaultSet[s.String()] = struct{}{}
+			}
+			currentSet := make(map[string]struct{}, len(currentSchedulers))
+			for _, s := range currentSchedulers {
+				currentSet[s] = struct{}{}
+			}
+			var toAdd, toRemove []string
+			for name := range defaultSet {
+				if _, ok := currentSet[name]; !ok {
+					toAdd = append(toAdd, name)
+				}
+			}
+			for name := range currentSet {
+				if _, ok := defaultSet[name]; !ok {
+					toRemove = append(toRemove, name)
+				}
+			}
+			if len(toAdd) == 0 && len(toRemove) == 0 {
+				return true
+			}
+			// sync schedulers
+			for _, name := range toAdd {
+				input := map[string]any{"name": name}
+				body, err := json.Marshal(input)
+				re.NoError(err)
+				err = testutil.CheckPostJSON(http.DefaultClient, schedulerURL, body)
+				re.NoError(err)
+			}
+			for _, name := range toRemove {
+				err = testutil.CheckDelete(http.DefaultClient, schedulerURL+"/"+name)
+				re.NoError(err)
+			}
+			return false
+		})
+		// clean hot cache
+		hotStat := leaderServer.GetRaftCluster().GetHotStat()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			hotStat = sche.GetCluster().GetHotStat()
+		}
+		hotStat.CleanCache()
+		// clean operators
+		operatorURL := fmt.Sprintf("%s/operators", urlPrefix)
+		err = testutil.CheckDelete(TestDialClient, operatorURL, testutil.StatusOK(re))
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			var operators []*operator.Operator
+			err := testutil.CheckGetJSON(TestDialClient, operatorURL, nil,
+				testutil.StatusOK(re), testutil.ExtractJSON(re, &operators))
+			re.NoError(err)
+			return len(operators) == 0
+		})
+		rc.GetOperatorController().CleanAllOpRecords()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			sche.GetCoordinator().GetOperatorController().CleanAllOpRecords()
+		}
+		// clean pending processed regions
+		rc.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			sche.GetCoordinator().GetCheckerController().ClearPendingProcessedRegions()
+		}
+		// reset id allocator
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err = leaderServer.GetServer().RecoverAllocID(ctx, 0)
+		re.NoError(err)
 	}
-	test(s.clusters[MicroserviceEnv])
+	s.RunFunc(resetFunc)
 }
 
 // Cleanup is to cleanup the environment.
@@ -403,6 +584,27 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	for _, cancel := range s.cancels {
 		cancel()
 	}
+}
+
+func (s *SchedulingTestEnvironment) runFuncInNonMicroserviceEnv(f func(*TestCluster)) {
+	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
+		s.startCluster(NonMicroserviceEnv)
+	}
+	f(s.clusters[NonMicroserviceEnv])
+}
+
+func (s *SchedulingTestEnvironment) runFuncInMicroserviceEnv(f func(*TestCluster)) {
+	re := require.New(s.t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	}()
+	if _, ok := s.clusters[MicroserviceEnv]; !ok {
+		s.startCluster(MicroserviceEnv)
+	}
+	f(s.clusters[MicroserviceEnv])
 }
 
 func (s *SchedulingTestEnvironment) startCluster(m Env) {
@@ -439,12 +641,25 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		tc.WaitForPrimaryServing(re)
 		tc.GetPrimaryServer().GetCluster().SetPrepared()
 		cluster.SetSchedulingCluster(tc)
-		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
 		s.clusters[MicroserviceEnv] = cluster
 	}
+}
+
+func getTestName() string {
+	pc, _, _, _ := runtime.Caller(2)
+	caller := runtime.FuncForPC(pc)
+	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
+		pc, _, _, _ = runtime.Caller(3)
+		caller = runtime.FuncForPC(pc)
+	}
+	if caller != nil {
+		elements := strings.Split(caller.Name(), ".")
+		return elements[len(elements)-1]
+	}
+	return ""
 }
 
 type idAllocator struct {
@@ -482,7 +697,6 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 			r.EndKey = []byte{}
 		default:
 		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {
 			buckets := &metapb.Buckets{
@@ -490,96 +704,15 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				Keys:     [][]byte{r.StartKey, r.EndKey},
 				Version:  1,
 			}
+			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat), core.SetBuckets(buckets))
 			region.UpdateBuckets(buckets, region.GetBuckets())
+			regions = append(regions, region)
 		} else {
-			region.UpdateBuckets(&metapb.Buckets{}, region.GetBuckets())
+			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
+			regions = append(regions, region)
 		}
-		regions = append(regions, region)
 	}
 	return regions
-}
-
-var logOnce sync.Once
-
-// NewTestSingleConfig is only for test to create one pd.
-// Because PD client also needs this, so export here.
-func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
-	schedulers.Register()
-	cfg := &config.Config{
-		Name:       "pd",
-		ClientUrls: tempurl.Alloc(),
-		PeerUrls:   tempurl.Alloc(),
-
-		InitialClusterState: embed.ClusterStateFlagNew,
-
-		LeaderLease:     10,
-		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
-	}
-
-	cfg.AdvertiseClientUrls = cfg.ClientUrls
-	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
-	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
-	cfg.DisableStrictReconfigCheck = true
-	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
-	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
-	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
-	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	c.AssertNil(err)
-	logOnce.Do(func() {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	})
-
-	c.AssertNil(cfg.Adjust(nil, false))
-	cfg.Keyspace.WaitRegionSplit = false
-
-	return cfg
-}
-
-// NewTestMultiConfig is only for test to create multiple pd configurations.
-// Because PD client also needs this, so export here.
-func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
-	cfgs := make([]*config.Config, count)
-
-	clusters := []string{}
-	for i := 1; i <= count; i++ {
-		cfg := NewTestSingleConfig(c)
-		cfg.Name = fmt.Sprintf("pd%d", i)
-
-		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
-
-		cfgs[i-1] = cfg
-	}
-
-	initialCluster := strings.Join(clusters, ",")
-	for _, cfg := range cfgs {
-		cfg.InitialCluster = initialCluster
-	}
-
-	return cfgs
-}
-
-// NewServer creates a pd server for testing.
-func NewServer(re *require.Assertions, c *assertutil.Checker) (*server.Server, testutil.CleanupFunc, error) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cfg := NewTestSingleConfig(c)
-	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	s, err := server.CreateServer(ctx, cfg, nil, mockHandler)
-	if err != nil {
-		cancel()
-		return nil, nil, err
-	}
-	if err = s.Run(); err != nil {
-		cancel()
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		cancel()
-		s.Close()
-		os.RemoveAll(cfg.DataDir)
-	}
-	return s, cleanup, nil
 }
 
 // MustWaitLeader return the leader until timeout.
@@ -598,24 +731,6 @@ func MustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Serve
 		return true
 	})
 	return leader
-}
-
-// CreateMockHandler creates a mock handler for test.
-func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder {
-	return func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
-			fmt.Fprintln(w, "Hello World")
-			// test getting ip
-			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
-			re.Equal(ip, clientIP)
-		})
-		info := apiutil.APIServiceGroup{
-			Name:    "mock",
-			Version: "v1",
-		}
-		return mux, info, nil
-	}
 }
 
 const (
@@ -676,4 +791,16 @@ func MustCallSchedulerConfigAPI(
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// NewResourceManagerTestServer creates a resource manager server with given config for testing.
+func NewResourceManagerTestServer(ctx context.Context, cfg *rm.Config) (*rm.Server, testutil.CleanupFunc, error) {
+	s := rm.CreateServer(ctx, cfg)
+	if err := s.Run(); err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		s.Close()
+	}
+	return s, cleanup, nil
 }

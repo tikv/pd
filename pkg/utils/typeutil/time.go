@@ -14,7 +14,11 @@
 
 package typeutil
 
-import "time"
+import (
+	"encoding/json"
+	"math"
+	"time"
+)
 
 // ZeroTime is a zero time.
 var ZeroTime = time.Time{}
@@ -39,4 +43,37 @@ func SubRealTimeByWallClock(after, before time.Time) time.Duration {
 // SubTSOPhysicalByWallClock returns the duration between two different TSOs' physical times with millisecond precision.
 func SubTSOPhysicalByWallClock(after, before time.Time) int64 {
 	return after.UnixNano()/int64(time.Millisecond) - before.UnixNano()/int64(time.Millisecond)
+}
+
+// TimeOptional is time.Time or nil
+type TimeOptional struct {
+	Time *time.Time
+}
+
+func (t *TimeOptional) unixSeconds() int64 {
+	if t.Time != nil {
+		return t.Time.Unix()
+	}
+	return 0
+}
+
+// MarshalJSON implements json.Marshaler for TimeOptional
+// NOTE: marshal only keep the precision to seconds!
+func (t *TimeOptional) MarshalJSON() ([]byte, error) {
+	return json.Marshal(t.unixSeconds())
+}
+
+// UnmarshalJSON implements json.Marshaler for TimeOptional
+func (t *TimeOptional) UnmarshalJSON(b []byte) error {
+	var unixSeconds int64
+	if err := json.Unmarshal(b, &unixSeconds); err != nil {
+		return err
+	}
+	if unixSeconds < math.MaxInt64 && unixSeconds > 0 {
+		val := time.Unix(unixSeconds, 0)
+		t.Time = &val
+	} else {
+		t.Time = nil
+	}
+	return nil
 }

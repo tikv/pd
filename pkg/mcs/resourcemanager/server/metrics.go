@@ -14,7 +14,16 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"math"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 const (
 	namespace                 = "resource_manager"
@@ -29,6 +38,9 @@ const (
 	tiflashTypeLabel          = "ap"
 	defaultTypeLabel          = "tp"
 	newResourceGroupNameLabel = "resource_group"
+	keyspaceNameLabel         = "keyspace_name"
+	fillRateLabel             = "fill_rate"
+	burstLimitLabel           = "burst_limit"
 
 	// Labels for the config.
 	ruPerSecLabel   = "ru_per_sec"
@@ -37,6 +49,8 @@ const (
 )
 
 var (
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
+
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
@@ -45,14 +59,51 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	activeRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "active_request_unit_sum",
+			Help:      "Counter of the active request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+
+	// RUv2 metrics (experimental v2 RU calculation, recording only).
+	requestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_v2_sum",
+			Help:      "Counter of the total experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tikvRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tikv_request_unit_v2_sum",
+			Help:      "Counter of the TiKV-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tidbRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tidb_request_unit_v2_sum",
+			Help:      "Counter of the TiDB-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tiflashRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tiflash_request_unit_v2_sum",
+			Help:      "Counter of the TiFlash-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -60,14 +111,14 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_max_per_sec",
 			Help:      "Gauge of the max read request unit per second for all resource groups.",
-		}, []string{newResourceGroupNameLabel})
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 	writeRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_max_per_sec",
 			Help:      "Gauge of the max write request unit per second for all resource groups.",
-		}, []string{newResourceGroupNameLabel})
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -75,7 +126,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, keyspaceNameLabel})
 
 	// Resource cost metrics.
 	readByteCost = prometheus.NewCounterVec(
@@ -84,35 +135,42 @@ var (
 			Subsystem: resourceSubsystem,
 			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	crossAZTrafficCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: resourceSubsystem,
+			Name:      "cross_az_traffic_byte_sum",
+			Help:      "Counter of the cross AZ traffic byte cost for all resource groups.",
+		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "request_count",
 			Help:      "The number of read/write requests for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	availableRUCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -120,7 +178,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, keyspaceNameLabel})
 
 	resourceGroupConfigGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -128,15 +186,83 @@ var (
 			Subsystem: serverSubsystem,
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
-		}, []string{newResourceGroupNameLabel, typeLabel})
+		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+
+	sampledRequestUnitPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "sampled_request_unit_per_sec",
+			Help:      "Gauge of the sampled RU/s for all resource groups.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
+
+	overrideSettings = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "override_settings",
+			Help:      "Gauge of the override settings for all resource groups.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel, typeLabel})
+
+	serviceLimit = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "service_limit",
+			Help:      "Gauge of the total RU limit of specific keyspace.",
+		}, []string{keyspaceNameLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
+type metrics struct {
+	// record update time of each resource group
+	consumptionRecordMap map[consumptionRecordKey]time.Time
+	// max per sec trackers for each keyspace and resource group.
+	maxPerSecTrackerMap map[trackerKey]*maxPerSecCostTracker
+	// cached counter metrics for each keyspace, resource group and RU type.
+	counterMetricsMap map[metricsKey]*counterMetrics
+	// cached gauge metrics for each keyspace, resource group and RU type.
+	gaugeMetricsMap map[metricsKey]*gaugeMetrics
+}
+
+type consumptionRecordKey struct {
+	keyspaceID uint32
+	groupName  string
+	ruType     string
+}
+
+type metricsKey struct {
+	keyspaceID uint32
+	groupName  string
+	ruType     string
+}
+
+type trackerKey struct {
+	keyspaceID uint32
+	groupName  string
+}
+
 func init() {
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(activeRequestUnitCost)
+	prometheus.MustRegister(requestUnitV2Cost)
+	prometheus.MustRegister(tikvRequestUnitV2Cost)
+	prometheus.MustRegister(tidbRequestUnitV2Cost)
+	prometheus.MustRegister(tiflashRequestUnitV2Cost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
+	prometheus.MustRegister(crossAZTrafficCost)
 	prometheus.MustRegister(kvCPUCost)
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
@@ -144,4 +270,352 @@ func init() {
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
+	prometheus.MustRegister(sampledRequestUnitPerSec)
+	prometheus.MustRegister(overrideSettings)
+	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(pushRUMetricsDuration)
+}
+
+func newMetrics() *metrics {
+	return &metrics{
+		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
+		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
+		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
+		gaugeMetricsMap:      make(map[metricsKey]*gaugeMetrics),
+	}
+}
+
+// insertConsumptionRecord inserts the consumption record.
+func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) {
+	key := consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     ruType,
+	}
+	m.consumptionRecordMap[key] = now
+}
+
+func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
+	delete(m.consumptionRecordMap, record)
+}
+
+func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
+	tracker := m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
+	if tracker == nil {
+		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
+		m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}] = tracker
+	}
+	return tracker
+}
+
+func (m *metrics) deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
+	delete(m.maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
+}
+
+func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
+	key := metricsKey{keyspaceID, groupName, ruType}
+	if m.counterMetricsMap[key] == nil {
+		m.counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
+	}
+	return m.counterMetricsMap[key]
+}
+
+func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
+	key := metricsKey{keyspaceID, groupName, ""}
+	if m.gaugeMetricsMap[key] == nil {
+		m.gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
+	}
+	return m.gaugeMetricsMap[key]
+}
+
+func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
+	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
+	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
+	deleteLabelValues(keyspaceName, groupName, ruType)
+}
+
+func (m *metrics) recordConsumption(
+	consumptionInfo *consumptionItem,
+	controllerConfig *ControllerConfig,
+	now time.Time,
+) {
+	keyspaceID := consumptionInfo.keyspaceID
+	keyspaceName := consumptionInfo.keyspaceName
+	groupName := consumptionInfo.resourceGroupName
+	ruLabelType := defaultTypeLabel
+	if consumptionInfo.isBackground {
+		ruLabelType = backgroundTypeLabel
+	}
+	if consumptionInfo.isTiFlash {
+		ruLabelType = tiflashTypeLabel
+	}
+	consumption := consumptionInfo.Consumption
+	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
+	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
+}
+
+func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
+	m.deleteConsumptionRecord(r)
+	m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
+	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
+}
+
+type counterMetrics struct {
+	RRUMetrics                 prometheus.Counter
+	WRUMetrics                 prometheus.Counter
+	ActiveRUMetrics            prometheus.Counter
+	TotalRUV2Metrics           prometheus.Counter
+	TiKVRUV2Metrics            prometheus.Counter
+	TiDBRUV2Metrics            prometheus.Counter
+	TiFlashRUV2Metrics         prometheus.Counter
+	SQLLayerRUMetrics          prometheus.Counter
+	ReadByteMetrics            prometheus.Counter
+	WriteByteMetrics           prometheus.Counter
+	ReadCrossAZTrafficMetrics  prometheus.Counter
+	WriteCrossAZTrafficMetrics prometheus.Counter
+	KvCPUMetrics               prometheus.Counter
+	SQLCPUMetrics              prometheus.Counter
+	ReadRequestCountMetrics    prometheus.Counter
+	WriteRequestCountMetrics   prometheus.Counter
+}
+
+func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetrics {
+	return &counterMetrics{
+		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TotalRUV2Metrics:           requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiKVRUV2Metrics:            tikvRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiDBRUV2Metrics:            tidbRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiFlashRUV2Metrics:         tiflashRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLLayerRUMetrics:          sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
+		ReadByteMetrics:            readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WriteByteMetrics:           writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ReadCrossAZTrafficMetrics:  crossAZTrafficCost.WithLabelValues(groupName, "read", keyspaceName),
+		WriteCrossAZTrafficMetrics: crossAZTrafficCost.WithLabelValues(groupName, "write", keyspaceName),
+		KvCPUMetrics:               kvCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLCPUMetrics:              sqlCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ReadRequestCountMetrics:    requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName),
+		WriteRequestCountMetrics:   requestCount.WithLabelValues(groupName, groupName, writeTypeLabel, keyspaceName),
+	}
+}
+
+func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) float64 {
+	if consumption.TotalCpuTimeMs <= 0 || consumption.SqlLayerCpuTimeMs <= 0 {
+		return 0
+	}
+	if controllerConfig == nil {
+		return 0
+	}
+	return consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost
+}
+
+func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) float64 {
+	if controllerConfig.getKeyspaceRUVersion(keyspaceID) == RUVersionV2 {
+		return consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2
+	}
+	return consumption.RRU + consumption.WRU + calculateSQLRU(consumption, controllerConfig)
+}
+
+func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
+	// RU info.
+	if consumption.RRU > 0 {
+		m.RRUMetrics.Add(consumption.RRU)
+	}
+	if consumption.WRU > 0 {
+		m.WRUMetrics.Add(consumption.WRU)
+	}
+	if activeRU := calculateActiveRU(consumption, controllerConfig, keyspaceID); activeRU > 0 {
+		m.ActiveRUMetrics.Add(activeRU)
+	}
+	// RUv2 info (experimental).
+	if consumption.TikvRUV2 > 0 {
+		m.TiKVRUV2Metrics.Add(consumption.TikvRUV2)
+	}
+	if consumption.TidbRUV2 > 0 {
+		m.TiDBRUV2Metrics.Add(consumption.TidbRUV2)
+	}
+	if consumption.TiflashRUV2 > 0 {
+		m.TiFlashRUV2Metrics.Add(consumption.TiflashRUV2)
+	}
+	if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2; ruv2 > 0 {
+		m.TotalRUV2Metrics.Add(ruv2)
+	}
+	// Byte info.
+	if consumption.ReadBytes > 0 {
+		m.ReadByteMetrics.Add(consumption.ReadBytes)
+	}
+	if consumption.WriteBytes > 0 {
+		m.WriteByteMetrics.Add(consumption.WriteBytes)
+	}
+	// CPU time info.
+	if consumption.TotalCpuTimeMs > 0 {
+		if sqlRU := calculateSQLRU(consumption, controllerConfig); sqlRU > 0 {
+			m.SQLLayerRUMetrics.Add(sqlRU)
+			m.SQLCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
+		}
+		// A well-behaved client keeps TotalCpuTimeMs >= SqlLayerCpuTimeMs, but the
+		// values are reported by the client and not validated here. Guard against a
+		// negative KV CPU time so a malformed report cannot panic prometheus.Counter.Add.
+		if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+			m.KvCPUMetrics.Add(kvCPUTimeMs)
+		}
+	}
+	// RPC count info.
+	if consumption.KvReadRpcCount > 0 {
+		m.ReadRequestCountMetrics.Add(consumption.KvReadRpcCount)
+	}
+	if consumption.KvWriteRpcCount > 0 {
+		m.WriteRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+	}
+	if consumption.ReadCrossAzTrafficBytes > 0 {
+		m.ReadCrossAZTrafficMetrics.Add(float64(consumption.ReadCrossAzTrafficBytes))
+	}
+	if consumption.WriteCrossAzTrafficBytes > 0 {
+		m.WriteCrossAZTrafficMetrics.Add(float64(consumption.WriteCrossAzTrafficBytes))
+	}
+}
+
+type gaugeMetrics struct {
+	availableRUCounter                 prometheus.Gauge
+	priorityResourceGroupConfigGauge   prometheus.Gauge
+	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
+	ruCapacityResourceGroupConfigGauge prometheus.Gauge
+	sampledRequestUnitPerSecGauge      prometheus.Gauge
+	overrideFillRateGauge              prometheus.Gauge
+	overrideBurstLimitGauge            prometheus.Gauge
+}
+
+func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
+	return &gaugeMetrics{
+		availableRUCounter:                 availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName),
+		priorityResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, priorityLabel, keyspaceName),
+		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
+		ruCapacityResourceGroupConfigGauge: resourceGroupConfigGauge.WithLabelValues(groupName, ruCapacityLabel, keyspaceName),
+		sampledRequestUnitPerSecGauge:      sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName),
+		overrideFillRateGauge:              overrideSettings.WithLabelValues(groupName, keyspaceName, fillRateLabel),
+		overrideBurstLimitGauge:            overrideSettings.WithLabelValues(groupName, keyspaceName, burstLimitLabel),
+	}
+}
+
+func (m *gaugeMetrics) setGroup(group *ResourceGroup, keyspaceName string) {
+	// skip basic metrics for the default group.
+	if group.Name != DefaultResourceGroupName {
+		ru := math.Max(group.getRUToken(), 0)
+		m.availableRUCounter.Set(ru)
+		m.priorityResourceGroupConfigGauge.Set(group.getPriority())
+		m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate(true))
+		m.ruCapacityResourceGroupConfigGauge.Set(float64(group.getBurstLimit(true)))
+	}
+
+	// Set the override fill rate and burst limit and delete the metrics if the override is not set.
+	overrideFillRate := group.getOverrideFillRate()
+	if overrideFillRate == -1 {
+		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, fillRateLabel)
+	} else {
+		m.overrideFillRateGauge.Set(overrideFillRate)
+	}
+	overrideBurstLimit := group.getOverrideBurstLimit()
+	if overrideBurstLimit == -1 {
+		overrideSettings.DeleteLabelValues(group.Name, keyspaceName, burstLimitLabel)
+	} else {
+		m.overrideBurstLimitGauge.Set(float64(overrideBurstLimit))
+	}
+}
+
+func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
+	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
+}
+
+func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
+	if limit > 0 {
+		serviceLimit.WithLabelValues(keyspaceName).Set(limit)
+	} else {
+		serviceLimit.DeleteLabelValues(keyspaceName)
+	}
+}
+
+func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
+	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tiflashRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
+	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	kvCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	sqlCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
+	requestCount.DeleteLabelValues(groupName, groupName, writeTypeLabel, keyspaceName)
+	availableRUCounter.DeleteLabelValues(groupName, groupName, keyspaceName)
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
+	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
+	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
+	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+}
+
+type maxPerSecCostTracker struct {
+	keyspaceName  string
+	groupName     string
+	maxPerSecRRU  float64
+	maxPerSecWRU  float64
+	rruSum        float64
+	wruSum        float64
+	lastRRUSum    float64
+	lastWRUSum    float64
+	flushPeriod   int
+	cnt           int
+	rruMaxMetrics prometheus.Gauge
+	wruMaxMetrics prometheus.Gauge
+}
+
+func newMaxPerSecCostTracker(keyspaceName, groupName string, flushPeriod int) *maxPerSecCostTracker {
+	return &maxPerSecCostTracker{
+		keyspaceName:  keyspaceName,
+		groupName:     groupName,
+		flushPeriod:   flushPeriod,
+		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
+		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
+	}
+}
+
+func (t *maxPerSecCostTracker) collect(consume *rmpb.Consumption) {
+	t.rruSum += consume.RRU
+	t.wruSum += consume.WRU
+}
+
+func (t *maxPerSecCostTracker) flushMetrics() {
+	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
+		t.lastRRUSum = t.rruSum
+		t.lastWRUSum = t.wruSum
+		return
+	}
+	deltaRRU := t.rruSum - t.lastRRUSum
+	deltaWRU := t.wruSum - t.lastWRUSum
+	t.lastRRUSum = t.rruSum
+	t.lastWRUSum = t.wruSum
+	if deltaRRU > t.maxPerSecRRU {
+		t.maxPerSecRRU = deltaRRU
+	}
+	if deltaWRU > t.maxPerSecWRU {
+		t.maxPerSecWRU = deltaWRU
+	}
+	t.cnt++
+	// flush to metrics in every flushPeriod.
+	if t.cnt%t.flushPeriod == 0 {
+		t.rruMaxMetrics.Set(t.maxPerSecRRU)
+		t.wruMaxMetrics.Set(t.maxPerSecWRU)
+		t.maxPerSecRRU = 0
+		t.maxPerSecWRU = 0
+	}
+}
+
+func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
 }

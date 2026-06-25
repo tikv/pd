@@ -28,11 +28,31 @@ type (
 	Component string
 )
 
+// nolint: exported
 const (
 	// TestID is used for test.
 	TestID ID = "test"
+
 	// TestComponent is used for test.
 	TestComponent Component = "test"
+
+	// client-go component
+	CodecPDClient       Component = "CodecPdClient"
+	RegionCache         Component = "RegionCache"
+	StoreCache          Component = "StoreCache"
+	Oracle              Component = "Oracle"
+	Rawkv               Component = "Rawkv"
+	KvStore             Component = "KvStore"
+	InterceptedPDClient Component = "InterceptedPdClient"
+
+	// TiDB component
+	Pitr             Component = "Pitr"
+	Ddl              Component = "Ddl"
+	ImportInto       Component = "ImportInto"
+	TikvHandler      Component = "TikvHandler"
+	GcWorker         Component = "GcWorker"
+	GcJob            Component = "GcJob"
+	DistributedGcJob Component = "DistributedGcJob"
 )
 
 var processName ID

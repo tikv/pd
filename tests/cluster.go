@@ -18,11 +18,13 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -34,13 +36,17 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	ks "github.com/tikv/pd/pkg/keyspace/constant"
+	rm_redirector "github.com/tikv/pd/pkg/mcs/resourcemanager/redirector"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -69,7 +75,41 @@ var (
 	WaitPreAllocKeyspacesInterval = 500 * time.Millisecond
 	// WaitPreAllocKeyspacesRetryTimes represents the maximum number of loops of WaitPreAllocKeyspaces.
 	WaitPreAllocKeyspacesRetryTimes = 100
+
+	// defaultMaxRetryTimes is the default maximum retry times for starting servers.
+	defaultMaxRetryTimes = 5
 )
+
+type startServersRetryAction int
+
+const (
+	startServersNoRetry startServersRetryAction = iota
+	startServersRetryCurrent
+	startServersRetryRecreate
+)
+
+func shouldRetryCurrentServers(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "ErrCancelStartEtcd") || strings.Contains(errMsg, "ErrStartEtcd")
+}
+
+func classifyInitialServersError(err error) startServersRetryAction {
+	if err == nil {
+		return startServersNoRetry
+	}
+	errMsg := err.Error()
+	switch {
+	case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
+		return startServersRetryRecreate
+	case shouldRetryCurrentServers(err):
+		return startServersRetryCurrent
+	default:
+		return startServersNoRetry
+	}
+}
 
 // TestServer is only for test.
 type TestServer struct {
@@ -82,8 +122,16 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
-	//  disable the heartbeat async runner in test
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string, handlers ...server.HandlerBuilder) (*TestServer, error) {
+	// use temp dir to ensure test isolation.
+	if cfg.DataDir == "" || strings.HasPrefix(cfg.DataDir, "default.") {
+		tempDir, err := os.MkdirTemp("", "pd_tests")
+		if err != nil {
+			return nil, errors.Wrap(err, "failed to create safeguard temp data dir for test server")
+		}
+		cfg.DataDir = tempDir
+	}
+	// disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
@@ -96,11 +144,21 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
-	if swaggerserver.Enabled() {
-		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+
+	var serviceBuilders []server.HandlerBuilder
+	if len(handlers) > 0 {
+		serviceBuilders = append(serviceBuilders, handlers...)
+	} else {
+		serviceBuilders = []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
+		if swaggerserver.Enabled() {
+			serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+		}
+		serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+		if !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+			serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+		}
 	}
-	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
+
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		return nil, err
@@ -156,15 +214,37 @@ func (s *TestServer) Destroy() error {
 func (s *TestServer) ResetPDLeader() {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 }
 
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
 	defer s.Unlock()
-	s.server.GetMember().ResetLeader()
+	s.server.GetMember().Resign()
 	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), "")
+}
+
+// ResignLeaderWithRetry resigns the leader of the server with retry.
+func (s *TestServer) ResignLeaderWithRetry() (err error) {
+	if !s.IsLeader() {
+		return
+	}
+	// The default timeout of moving an etcd leader is 5 seconds,
+	// set the retry times to 3 will get a maximum of ~15 seconds of trying.
+	const retryCount = 3
+	for retry := range retryCount {
+		err = s.ResignLeader()
+		if err == nil {
+			return
+		}
+		// Do not retry if the last attempt fails.
+		if retry == retryCount-1 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return
 }
 
 // State returns the current TestServer's state.
@@ -260,7 +340,7 @@ func (s *TestServer) GetServerID() uint64 {
 func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
-	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
+	return !s.server.IsClosed() && s.server.GetMember().IsServing()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
@@ -397,7 +477,7 @@ func (s *TestServer) BootstrapCluster() error {
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
 	for range WaitLeaderRetryTimes {
-		if s.server.GetMember().IsLeader() {
+		if s.server.GetMember().IsServing() {
 			return true
 		}
 		time.Sleep(WaitLeaderCheckInterval)
@@ -406,7 +486,7 @@ func (s *TestServer) WaitLeader() bool {
 }
 
 func (s *TestServer) waitPreAllocKeyspaces() error {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	if len(keyspaces) == 0 {
 		return nil
 	}
@@ -417,11 +497,12 @@ Outer:
 	for range WaitPreAllocKeyspacesRetryTimes {
 		for idx < len(keyspaces) {
 			_, err := manager.LoadKeyspace(keyspaces[idx])
-			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
-				time.Sleep(WaitPreAllocKeyspacesInterval)
-				continue Outer
-			}
 			if err != nil {
+				// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+				if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) || errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
+					time.Sleep(WaitPreAllocKeyspacesInterval)
+					continue Outer
+				}
 				return errors.Trace(err)
 			}
 
@@ -434,7 +515,7 @@ Outer:
 
 // GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
 func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
-	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	keyspaces := s.GetConfig().Keyspace.GetPreAlloc()
 	ids := make([]uint32, 0, len(keyspaces))
 	manager := s.GetKeyspaceManager()
 	for _, keyspace := range keyspaces {
@@ -454,6 +535,7 @@ func (s *TestServer) GetServicePrimaryAddr(ctx context.Context, serviceName stri
 
 // TestCluster is only for test.
 type TestCluster struct {
+	ctx     context.Context
 	config  *clusterConfig
 	servers map[string]*TestServer
 	// tsPool is used to check the TSO uniqueness among the test cluster
@@ -462,6 +544,10 @@ type TestCluster struct {
 		pool map[uint64]struct{}
 	}
 	schedulingCluster *TestSchedulingCluster
+	tsoCluster        *TestTSOCluster
+	// services and opts are stored for recreating servers on port conflicts
+	services []string
+	opts     []ConfigOption
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -470,34 +556,50 @@ type TestCluster struct {
 // and so on, which determined by the number of servers you set.
 type ConfigOption func(conf *config.Config, serverName string)
 
+// WithGCTuner set WithGCTuner for tests
+func WithGCTuner(enabled bool) ConfigOption {
+	return func(conf *config.Config, _ string) {
+		conf.PDServerCfg.EnableGOGCTuner = enabled
+	}
+}
+
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, nil, opts...)
+	return createTestCluster(ctx, initialServerCount, nil, nil, opts...)
+}
+
+// NewTestClusterWithHandlers creates a new TestCluster with handlers.
+func NewTestClusterWithHandlers(ctx context.Context, initialServerCount int, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, nil, handlers, opts...)
 }
 
 // NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
 func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
+	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, nil, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, services []string, handlers []server.HandlerBuilder, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
 	for _, cfg := range config.InitialServers {
-		serverConf, err := cfg.Generate(opts...)
+		allOpts := append([]ConfigOption{WithGCTuner(false)}, opts...)
+		serverConf, err := cfg.Generate(allOpts...)
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(ctx, serverConf, services)
+		s, err := NewTestServer(ctx, serverConf, services, handlers...)
 		if err != nil {
 			return nil, err
 		}
 		servers[cfg.Name] = s
 	}
 	return &TestCluster{
-		config:  config,
-		servers: servers,
+		ctx:      ctx,
+		config:   config,
+		servers:  servers,
+		services: services,
+		opts:     opts,
 		tsPool: struct {
 			syncutil.Mutex
 			pool map[uint64]struct{}
@@ -517,8 +619,11 @@ func restartTestCluster(
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
-		config:  cluster.config,
-		servers: make(map[string]*TestServer, len(cluster.servers)),
+		ctx:      ctx,
+		config:   cluster.config,
+		servers:  make(map[string]*TestServer, len(cluster.servers)),
+		services: cluster.services,
+		opts:     cluster.opts,
 		tsPool: struct {
 			syncutil.Mutex
 			pool map[uint64]struct{}
@@ -535,7 +640,10 @@ func restartTestCluster(
 		wg.Add(1)
 		go func(serverName string, server *TestServer) {
 			defer wg.Done()
-			server.Destroy()
+			err := server.Destroy()
+			if err != nil {
+				return
+			}
 			var (
 				newServer *TestServer
 				serverErr error
@@ -592,11 +700,115 @@ func RunServers(servers []*TestServer) error {
 
 // RunInitialServers starts to run servers in InitialServers.
 func (c *TestCluster) RunInitialServers() error {
-	servers := make([]*TestServer, 0, len(c.config.InitialServers))
-	for _, conf := range c.config.InitialServers {
-		servers = append(servers, c.GetServer(conf.Name))
+	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
+}
+
+// runInitialServersWithRetry starts to run servers with port conflict handling.
+func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
+	if maxRetries <= 0 {
+		maxRetries = 1
 	}
-	return RunServers(servers)
+	var lastErr error
+	for i := range maxRetries {
+		servers := make([]*TestServer, 0, len(c.config.InitialServers))
+		for _, conf := range c.config.InitialServers {
+			servers = append(servers, c.GetServer(conf.Name))
+		}
+
+		lastErr = RunServers(servers)
+		if lastErr == nil {
+			return nil
+		}
+
+		switch classifyInitialServersError(lastErr) {
+		case startServersRetryRecreate:
+			// `Etcd cluster ID mismatch` can happen when the allocated peer URL happens to
+			// connect to another test's etcd cluster (port reuse across concurrent `go test`
+			// processes). Treat it as a port conflict and recreate servers with new ports.
+			log.Warn("port conflict detected, recreating servers with new ports",
+				zap.Int("attempt", i+1),
+				zap.Int("maxRetries", maxRetries),
+				zap.Error(lastErr))
+
+			// Stop and destroy all servers
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+				_ = s.Destroy()
+			}
+
+			// Recreate servers with new ports
+			for _, conf := range c.config.InitialServers {
+				// Regenerate config to get new ports
+				conf.ClientURLs = tempurl.Alloc()
+				conf.PeerURLs = tempurl.Alloc()
+				conf.AdvertiseClientURLs = conf.ClientURLs
+				conf.AdvertisePeerURLs = conf.PeerURLs
+
+				// Use the original opts passed during cluster creation
+				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
+				serverConf, err := conf.Generate(allOpts...)
+				if err != nil {
+					return err
+				}
+
+				// Use the original services passed during cluster creation
+				s, err := NewTestServer(c.ctx, serverConf, c.services)
+				if err != nil {
+					return err
+				}
+				c.servers[conf.Name] = s
+			}
+
+			// Wait before retry
+			backoff := time.Duration(i+1) * 500 * time.Millisecond
+			if backoff > 3*time.Second {
+				backoff = 3 * time.Second
+			}
+			time.Sleep(backoff)
+			continue
+		case startServersRetryCurrent:
+			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+			}
+			time.Sleep(100 * time.Millisecond)
+			continue
+		default:
+			// For other errors, don't retry
+			return lastErr
+		}
+	}
+	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
+}
+
+// RunServersWithRetry starts to run multiple TestServer with retry logic.
+func RunServersWithRetry(servers []*TestServer, maxRetries int) error {
+	var lastErr error
+	for range maxRetries {
+		lastErr = RunServers(servers)
+		if lastErr == nil {
+			return nil
+		}
+
+		if shouldRetryCurrentServers(lastErr) {
+			log.Warn("etcd start failed, will retry", zap.Error(lastErr))
+			// Stop any partially started servers before retrying
+			for _, s := range servers {
+				if s.State() == Running {
+					_ = s.Stop()
+				}
+			}
+			continue
+		}
+
+		// For other errors, don't retry
+		return lastErr
+	}
+	return errors.Wrapf(lastErr, "failed to start servers after %d retries", maxRetries)
 }
 
 // StopAll is used to stop all servers.
@@ -637,7 +849,7 @@ func (c *TestCluster) GetLeader() string {
 // GetFollower returns an follower of all servers
 func (c *TestCluster) GetFollower() string {
 	for name, s := range c.servers {
-		if !s.server.IsClosed() && !s.server.GetMember().IsLeader() {
+		if !s.server.IsClosed() && !s.server.GetMember().IsServing() {
 			return name
 		}
 	}
@@ -754,11 +966,11 @@ func (c *TestCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	return cluster.HandleRegionHeartbeat(region)
 }
 
-// HandleReportBuckets processes BucketInfo reports from the client.
-func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
+// HandleRegionBuckets processes BucketInfo reports from the client.
+func (c *TestCluster) HandleRegionBuckets(b *metapb.Buckets) error {
 	leader := c.GetLeader()
 	cluster := c.servers[leader].GetRaftCluster()
-	return cluster.HandleReportBuckets(b)
+	return cluster.HandleRegionBuckets(b)
 }
 
 // Join is used to add a new TestServer into the cluster.
@@ -800,6 +1012,9 @@ func (c *TestCluster) Destroy() {
 	if c.schedulingCluster != nil {
 		c.schedulingCluster.Destroy()
 	}
+	if c.tsoCluster != nil {
+		c.tsoCluster.Destroy()
+	}
 }
 
 // CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.
@@ -821,9 +1036,22 @@ func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
 	return c.schedulingCluster.GetPrimaryServer()
 }
 
+// GetDefaultTSOPrimaryServer returns the primary TSO server for the default keyspace.
+func (c *TestCluster) GetDefaultTSOPrimaryServer() *tso.Server {
+	if c.tsoCluster == nil {
+		return nil
+	}
+	return c.tsoCluster.GetPrimaryServer(ks.DefaultKeyspaceID, ks.DefaultKeyspaceGroupID)
+}
+
 // SetSchedulingCluster sets the scheduling cluster.
 func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
 	c.schedulingCluster = cluster
+}
+
+// SetTSOCluster sets the TSO cluster.
+func (c *TestCluster) SetTSOCluster(cluster *TestTSOCluster) {
+	c.tsoCluster = cluster
 }
 
 // WaitOp represent the wait configuration

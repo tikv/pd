@@ -36,16 +36,18 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 }
 
 // GetPDStatus gets the build info of PD server.
-// @Summary  Get the build info of PD server.
-// @Produce  json
-// @Success  200  {object}  versioninfo.Status
-// @Router   /status [get]
+//
+//	@Summary	Get the build info of PD server.
+//	@Produce	json
+//	@Success	200	{object}	versioninfo.Status
+//	@Router		/status [get]
 func (h *statusHandler) GetPDStatus(w http.ResponseWriter, _ *http.Request) {
 	version := versioninfo.Status{
 		BuildTS:        versioninfo.PDBuildTS,
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
+		KernelType:     versioninfo.PDKernelType,
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)

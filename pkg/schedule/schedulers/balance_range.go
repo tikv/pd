@@ -15,7 +15,8 @@
 package schedulers
 
 import (
-	"bytes"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
@@ -34,10 +36,17 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+)
+
+var (
+	defaultJobTimeout = 30 * time.Minute
+	reserveDuration   = 7 * 24 * time.Hour
+	reportInterval    = 10 * time.Second
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -53,6 +62,8 @@ func newBalanceRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/config", handler.updateConfig).Methods(http.MethodPost)
 	router.HandleFunc("/list", handler.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/job", handler.addJob).Methods(http.MethodPut)
+	router.HandleFunc("/job", handler.deleteJob).Methods(http.MethodDelete)
 	return router
 }
 
@@ -61,72 +72,232 @@ func (handler *balanceRangeSchedulerHandler) updateConfig(w http.ResponseWriter,
 }
 
 func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.clone()
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	conf := handler.config.cloneLocked()
 	if err := handler.rd.JSON(w, http.StatusOK, conf); err != nil {
 		log.Error("failed to marshal balance key range scheduler config", errs.ZapError(err))
 	}
 }
 
+func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	job := &balanceRangeSchedulerJob{
+		Create:  time.Now(),
+		Status:  pending,
+		Timeout: defaultJobTimeout,
+	}
+	engine, ok := input["engine"].(string)
+	if !ok || len(engine) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "engine is required and must be a string")
+		return
+	}
+	job.Engine = engine
+	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", job.Engine))
+		return
+	}
+	ruleStr, ok := input["rule"].(string)
+	if !ok || len(ruleStr) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "rule is required and must be a string")
+		return
+	}
+	job.Rule = core.NewRule(ruleStr)
+	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
+			ruleStr))
+		return
+	}
+
+	alias, ok := input["alias"].(string)
+	if !ok || len(alias) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "alias is required and must be a string")
+		return
+	}
+	job.Alias = alias
+	if timeoutVal, exists := input["timeout"]; exists {
+		timeoutStr, ok := timeoutVal.(string)
+		if !ok {
+			handler.rd.JSON(w, http.StatusBadRequest, "timeout must be a string")
+			return
+		}
+		if len(timeoutStr) > 0 {
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", timeoutStr))
+				return
+			}
+			if timeout <= 0 {
+				handler.rd.JSON(w, http.StatusBadRequest, "timeout must be positive")
+				return
+			}
+			job.Timeout = timeout
+		}
+	}
+
+	keys, err := keyutil.DecodeHTTPKeyRanges(input)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	krs, err := getKeyRanges(keys)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Info("add balance key range job", zap.String("alias", job.Alias))
+	job.Ranges = krs
+	if err := handler.config.addJob(job); err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
+	jobStr := r.URL.Query().Get("job-id")
+	if jobStr == "" {
+		handler.rd.JSON(w, http.StatusBadRequest, "job-id is required")
+		return
+	}
+	jobID, err := strconv.ParseUint(jobStr, 10, 64)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, "invalid job-id")
+		return
+	}
+	if err := handler.config.deleteJob(jobID); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err)
+		return
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
 type balanceRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
+	syncutil.Mutex
 	jobs []*balanceRangeSchedulerJob
 }
 
-type balanceRangeSchedulerJob struct {
-	JobID   uint64          `json:"job-id"`
-	Role    core.Role       `json:"role"`
-	Engine  string          `json:"engine"`
-	Timeout time.Duration   `json:"timeout"`
-	Ranges  []core.KeyRange `json:"ranges"`
-	Alias   string          `json:"alias"`
-	Start   *time.Time      `json:"start,omitempty"`
-	Finish  *time.Time      `json:"finish,omitempty"`
-	Create  time.Time       `json:"create"`
-	Status  JobStatus       `json:"status"`
-}
-
-func (conf *balanceRangeSchedulerConfig) begin(index int) *balanceRangeSchedulerJob {
+func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
 	conf.Lock()
 	defer conf.Unlock()
+	for _, c := range conf.jobs {
+		if c.isComplete() {
+			continue
+		}
+		if job.Alias == c.Alias {
+			return errors.New("job already exists")
+		}
+	}
+	job.Status = pending
+	if len(conf.jobs) == 0 {
+		job.JobID = 1
+	} else {
+		job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
+	}
+	return conf.persistLocked(func() {
+		conf.jobs = append(conf.jobs, job)
+	})
+}
+
+func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
+	conf.Lock()
+	defer conf.Unlock()
+	for _, job := range conf.jobs {
+		if job.JobID == jobID {
+			if job.isComplete() {
+				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf(
+					"The job:%d has been completed and cannot be cancelled.", jobID))
+			}
+			return conf.persistLocked(func() {
+				job.Status = cancelled
+				now := time.Now()
+				if job.Start == nil {
+					job.Start = &now
+				}
+				job.Finish = &now
+			})
+		}
+	}
+	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
+}
+
+func (conf *balanceRangeSchedulerConfig) gcLocked() error {
+	needGC := false
+	gcIdx := 0
+	for idx, job := range conf.jobs {
+		if job.isComplete() && job.expired(reserveDuration) {
+			needGC = true
+			gcIdx = idx
+		} else {
+			// The jobs are sorted by the started time and executed by it.
+			// So it can end util the first element doesn't satisfy the condition.
+			break
+		}
+	}
+	if !needGC {
+		return nil
+	}
+	return conf.persistLocked(func() {
+		conf.jobs = conf.jobs[gcIdx+1:]
+	})
+}
+
+func (conf *balanceRangeSchedulerConfig) persistLocked(updateFn func()) error {
+	originJobs := conf.cloneLocked()
+	updateFn()
+	if err := conf.save(); err != nil {
+		conf.jobs = originJobs
+		return err
+	}
+	return nil
+}
+
+// MarshalJSON marshals to json.
+func (conf *balanceRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(conf.jobs)
+}
+
+// UnmarshalJSON unmarshals from json.
+func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
+	jobs := make([]*balanceRangeSchedulerJob, 0)
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		return err
+	}
+	conf.jobs = jobs
+	return nil
+}
+
+func (conf *balanceRangeSchedulerConfig) beginLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != pending {
-		return nil
+		return errors.New("the job is not pending")
 	}
-	now := time.Now()
-	job.Start = &now
-	job.Status = running
-	if err := conf.save(); err != nil {
-		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
-		job.Status = pending
-		job.Start = nil
-	}
-	return job
+	return conf.persistLocked(func() {
+		now := time.Now()
+		job.Start = &now
+		job.Status = running
+	})
 }
 
-func (conf *balanceRangeSchedulerConfig) finish(index int) *balanceRangeSchedulerJob {
-	conf.Lock()
-	defer conf.Unlock()
+func (conf *balanceRangeSchedulerConfig) finishLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != running {
-		return nil
+		return errors.New("the job is not running")
 	}
-	now := time.Now()
-	job.Finish = &now
-	job.Status = finished
-	if err := conf.save(); err != nil {
-		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
-		job.Status = running
-		job.Finish = nil
-	}
-	return job
+	return conf.persistLocked(func() {
+		now := time.Now()
+		job.Finish = &now
+		job.Status = finished
+	})
 }
 
-func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
-	conf.RLock()
-	defer conf.RUnlock()
+func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
 	for index, job := range conf.jobs {
-		if job.Status == finished {
+		if job.isComplete() {
 			continue
 		}
 		return index, job
@@ -134,31 +305,64 @@ func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob)
 	return 0, nil
 }
 
-func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
-	conf.RLock()
-	defer conf.RUnlock()
+func (conf *balanceRangeSchedulerConfig) cloneLocked() []*balanceRangeSchedulerJob {
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(conf.jobs))
 	for _, job := range conf.jobs {
-		ranges := make([]core.KeyRange, len(job.Ranges))
+		ranges := make([]keyutil.KeyRange, len(job.Ranges))
 		copy(ranges, job.Ranges)
 		jobs = append(jobs, &balanceRangeSchedulerJob{
 			Ranges:  ranges,
-			Role:    job.Role,
+			Rule:    job.Rule,
 			Engine:  job.Engine,
 			Timeout: job.Timeout,
 			Alias:   job.Alias,
 			JobID:   job.JobID,
 			Start:   job.Start,
+			Status:  job.Status,
+			Create:  job.Create,
+			Finish:  job.Finish,
 		})
 	}
 
 	return jobs
 }
 
+type balanceRangeSchedulerJob struct {
+	JobID   uint64             `json:"job-id"`
+	Rule    core.Rule          `json:"rule"`
+	Engine  string             `json:"engine"`
+	Timeout time.Duration      `json:"timeout"`
+	Ranges  []keyutil.KeyRange `json:"ranges"`
+	Alias   string             `json:"alias"`
+	Start   *time.Time         `json:"start,omitempty"`
+	Finish  *time.Time         `json:"finish,omitempty"`
+	Create  time.Time          `json:"create"`
+	Status  JobStatus          `json:"status"`
+}
+
+func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
+	if job == nil {
+		return true
+	}
+	if job.Finish == nil {
+		return false
+	}
+	now := time.Now()
+	return now.Sub(*job.Finish) > dur
+}
+
+func (job *balanceRangeSchedulerJob) shouldFinished() bool {
+	return time.Since(*job.Start) > job.Timeout
+}
+
+func (job *balanceRangeSchedulerJob) isComplete() bool {
+	return job.Status == finished || job.Status == cancelled
+}
+
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
-	s.conf.RLock()
-	defer s.conf.RUnlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	return EncodeConfig(s.conf.jobs)
 }
 
@@ -166,9 +370,8 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
-	if err := s.conf.load(jobs); err != nil {
+	if err := s.conf.load(&jobs); err != nil {
 		return err
 	}
 	s.conf.jobs = jobs
@@ -181,6 +384,33 @@ type balanceRangeScheduler struct {
 	handler       http.Handler
 	filters       []filter.Filter
 	filterCounter *filter.Counter
+	// stores is sorted by score desc
+	stores []*core.StoreInfo
+	// scoreMap records the storeID -> score
+	scoreMap map[uint64]float64
+	// expectScoreMap records the storeID -> expect score
+	expectScoreMap map[uint64]float64
+	job            *balanceRangeSchedulerJob
+	solver         *solver
+	lastReportTime time.Time
+}
+
+func (s *balanceRangeScheduler) report() {
+	now := time.Now()
+	if now.Sub(s.lastReportTime) < reportInterval {
+		return
+	}
+	for storeID, score := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(score)
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(expect)
+		} else {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
+		}
+	}
+	balanceRangeJobGauge.WithLabelValues().Set(float64(s.job.JobID))
+	s.lastReportTime = now
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -188,31 +418,101 @@ func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	s.handler.ServeHTTP(w, r)
 }
 
+func (s *balanceRangeScheduler) isBalanced() bool {
+	diff := 0
+	for storeID, score := range s.scoreMap {
+		if expect, ok := s.expectScoreMap[storeID]; ok {
+			if expect > score {
+				diff += int(expect - score)
+			} else {
+				diff += int(score - expect)
+			}
+		}
+	}
+	return diff <= 1
+}
+
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
 func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
+		return false
 	}
-	index, job := s.conf.peek()
-	if job != nil {
-		if job.Status == pending {
-			job = s.conf.begin(index)
-		}
-		// todo: add other conditions such as the diff of the score between the source and target store.
-		if time.Since(*job.Start) > job.Timeout {
-			s.conf.finish(index)
-			balanceRangeExpiredCounter.Inc()
-		}
+	return s.checkJob(cluster)
+}
+
+func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	if err := s.conf.gcLocked(); err != nil {
+		log.Error("balance range jobs gc failed", errs.ZapError(err))
+		return false
+	}
+	// If the running job has been cancelled, it needs to stop the job.
+	if s.job != nil && s.job.Status == cancelled {
+		s.cleanJobStatus(cluster, s.job)
 	}
 
-	return allowed
+	index, job := s.conf.peekLocked()
+	// all jobs are completed
+	if job == nil {
+		balanceRangeNoJobCounter.Inc()
+		return false
+	}
+
+	if job.Status == pending {
+		if err := s.conf.beginLocked(index); err != nil {
+			return false
+		}
+		km := cluster.GetKeyRangeManager()
+		km.Append(job.Ranges)
+	}
+	if job.shouldFinished() {
+		if err := s.conf.finishLocked(index); err != nil {
+			balancePersistFailedCounter.Inc()
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeExpiredCounter.Inc()
+		log.Info("balance key range job finished due to timeout", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+	}
+
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	err := s.prepare(cluster, opInfluence, job)
+	if err != nil {
+		log.Warn("failed to prepare balance key range scheduler", errs.ZapError(err))
+		return false
+	}
+	if s.isBalanced() {
+		if err = s.conf.finishLocked(index); err != nil {
+			balancePersistFailedCounter.Inc()
+			return false
+		}
+		s.cleanJobStatus(cluster, job)
+		balanceRangeBalancedCounter.Inc()
+		log.Info("balance key range job finished due to balanced", zap.String("alias", job.Alias), zap.Uint64("job-id", job.JobID))
+		return false
+	}
+	return true
+}
+
+func (s *balanceRangeScheduler) cleanJobStatus(cluster sche.SchedulerCluster, job *balanceRangeSchedulerJob) {
+	km := cluster.GetKeyRangeManager()
+	km.Delete(job.Ranges)
+	for storeID := range s.scoreMap {
+		storeStr := strconv.FormatUint(storeID, 10)
+		balanceRangeGauge.WithLabelValues(storeStr, "score").Set(0)
+		if _, ok := s.expectScoreMap[storeID]; ok {
+			balanceRangeGauge.WithLabelValues(storeStr, "expect").Set(0)
+		}
+	}
 }
 
 // BalanceRangeCreateOption is used to create a scheduler with an option.
 type BalanceRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceRangeScheduler creates a scheduler that tends to keep given peer Role on
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer rule on
 // special store balanced.
 func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
@@ -225,7 +525,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	}
 
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	s.filterCounter = filter.NewCounter(s.GetName())
@@ -235,59 +535,59 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	_, job := s.conf.peek()
-	if job == nil {
-		balanceRangeNoJobCounter.Inc()
-		return nil, nil
-	}
+	job := s.job
+	defer s.filterCounter.Flush()
 
-	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
-	// todo: don't prepare every times, the prepare information can be reused.
-	plan, err := s.prepare(cluster, opInfluence, job)
-	if err != nil {
-		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
-		return nil, nil
-	}
-
-	downFilter := filter.NewRegionDownFilter()
+	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
+	sources := filter.SelectSourceStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
+	solver := s.solver
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
-	pendingFilter := filter.NewRegionPendingFilter()
-	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
+	baseRegionFilters := []filter.RegionFilter{
+		filter.NewRegionDownFilter(),
+		filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium),
+		filter.NewRegionPendingFilter(),
+		replicaFilter,
+	}
 
-	for sourceIndex, sourceStore := range plan.stores {
-		plan.source = sourceStore
-		plan.sourceScore = plan.score(plan.source.GetID())
-		if plan.sourceScore < plan.averageScore {
-			break
+	for sourceIndex, sourceStore := range sources {
+		solver.Source = sourceStore
+		solver.sourceScore = s.score(solver.sourceStoreID())
+		if solver.sourceScore <= s.expectScoreMap[solver.sourceStoreID()] {
+			continue
 		}
-		switch job.Role {
-		case core.Leader:
-			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.Learner:
-			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.Follower:
-			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		switch job.Rule {
+		case core.LeaderScatter:
+			solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case core.LearnerScatter:
+			solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case core.PeerScatter:
+			solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			if solver.Region == nil {
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			}
+			if solver.Region == nil {
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			}
 		}
-		if plan.region == nil {
+		if solver.Region == nil {
 			balanceRangeNoRegionCounter.Inc()
 			continue
 		}
-		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 		// Skip hot regions.
-		if cluster.IsRegionHot(plan.region) {
-			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		if cluster.IsRegionHot(solver.Region) {
+			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 			balanceRangeHotCounter.Inc()
 			continue
 		}
 		// Check region leader
-		if plan.region.GetLeader() == nil {
-			log.Warn("region has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		if solver.Region.GetLeader() == nil {
+			log.Warn("region has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
 			balanceRangeNoLeaderCounter.Inc()
 			continue
 		}
-		plan.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
-		if op := s.transferPeer(plan, plan.stores[sourceIndex+1:]); op != nil {
+		solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+		if op := s.transferPeer(sources[sourceIndex+1:], faultStores); op != nil {
 			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
 			return []*operator.Operator{op}, nil
 		}
@@ -296,36 +596,42 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
-func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
-	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Role == core.Leader {
+func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultStores []*core.StoreInfo) *operator.Operator {
+	solver := s.solver
+	excludeTargets := solver.Region.GetStoreIDs()
+	if s.job.Rule == core.LeaderScatter {
 		excludeTargets = make(map[uint64]struct{})
-		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
+		excludeTargets[solver.Region.GetLeader().GetStoreId()] = struct{}{}
 	}
-	conf := plan.GetSchedulerConfig()
-	filters := []filter.Filter{
+	for _, store := range faultStores {
+		excludeTargets[store.GetID()] = struct{}{}
+	}
+	conf := solver.GetSchedulerConfig()
+	filters := s.filters
+	filters = append(filters,
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
-	}
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
+	)
+
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
-		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
-		plan.targetScore = plan.score(plan.target.GetID())
-		if plan.targetScore > plan.averageScore {
-			break
+		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
+		solver.targetScore = s.score(solver.targetStoreID())
+		if solver.targetScore >= s.expectScoreMap[solver.targetStoreID()] {
+			continue
 		}
-		regionID := plan.region.GetID()
-		sourceID := plan.source.GetID()
-		targetID := plan.target.GetID()
-		if !plan.shouldBalance(s.GetName()) {
+		regionID := solver.Region.GetID()
+		sourceID := solver.sourceStoreID()
+		targetID := solver.targetStoreID()
+		if !s.shouldBalance(s.GetName()) {
 			continue
 		}
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-		oldPeer := plan.region.GetStorePeer(sourceID)
+		oldPeer := solver.Region.GetStorePeer(sourceID)
 		exist := false
-		if plan.job.Role == core.Leader {
-			peers := plan.region.GetPeers()
+		if s.job.Rule == core.LeaderScatter {
+			peers := solver.Region.GetPeers()
 			for _, peer := range peers {
 				if peer.GetStoreId() == targetID {
 					exist = true
@@ -336,182 +642,147 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		var op *operator.Operator
 		var err error
 		if exist {
-			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
+			op, err = operator.CreateTransferLeaderOperator(s.GetName(), solver, solver.Region, targetID, []uint64{}, operator.OpRange)
 		} else {
-			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-			op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			newPeer := &metapb.Peer{StoreId: targetID, Role: oldPeer.Role}
+			if solver.Region.GetLeader().GetStoreId() == sourceID {
+				op, err = operator.CreateReplaceLeaderPeerOperator(s.GetName(), solver, solver.Region, operator.OpRange, oldPeer.GetStoreId(), newPeer, newPeer)
+			} else {
+				op, err = operator.CreateMovePeerOperator(s.GetName(), solver, solver.Region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+			}
 		}
 
 		if err != nil {
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
 		}
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+			balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 		)
-		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
-		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
-		op.SetAdditionalInfo("tolerate", strconv.FormatInt(plan.tolerate, 10))
+		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(s.score(sourceID), 'f', 2, 64))
+		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(s.score(targetID), 'f', 2, 64))
+		op.SetAdditionalInfo("sourceExpectScore", strconv.FormatFloat(s.expectScoreMap[sourceID], 'f', 2, 64))
+		op.SetAdditionalInfo("targetExpectScore", strconv.FormatFloat(s.expectScoreMap[targetID], 'f', 2, 64))
 		return op
 	}
 	balanceRangeNoReplacementCounter.Inc()
 	return nil
 }
 
-// balanceRangeSchedulerPlan is used to record the plan of balance key range scheduler.
-type balanceRangeSchedulerPlan struct {
-	sche.SchedulerCluster
-	// stores is sorted by score desc
-	stores []*core.StoreInfo
-	// scoreMap records the storeID -> score
-	scoreMap     map[uint64]int64
-	source       *core.StoreInfo
-	sourceScore  int64
-	target       *core.StoreInfo
-	targetScore  int64
-	region       *core.RegionInfo
-	fit          *placement.RegionFit
-	averageScore int64
-	job          *balanceRangeSchedulerJob
-	opInfluence  operator.OpInfluence
-	tolerate     int64
-}
-
-func fetchAllRegions(cluster sche.SchedulerCluster, ranges *core.KeyRanges) []*core.RegionInfo {
-	scanLimit := 32
-	regions := make([]*core.RegionInfo, 0)
-	krs := ranges.Ranges()
-
-	for _, kr := range krs {
-		for {
-			region := cluster.ScanRegions(kr.StartKey, kr.EndKey, scanLimit)
-			if len(region) == 0 {
-				break
-			}
-			regions = append(regions, region...)
-			if len(region) < scanLimit {
-				break
-			}
-			kr.StartKey = region[len(region)-1].GetEndKey()
-			if bytes.Equal(kr.StartKey, kr.EndKey) {
-				break
-			}
-		}
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence, job *balanceRangeSchedulerJob) error {
+	basePlan := plan.NewBalanceSchedulerPlan()
+	// todo: if supports to balance region size, it needs to change here.
+	var kind constant.ScheduleKind
+	switch job.Rule {
+	case core.LeaderScatter:
+		kind = constant.NewScheduleKind(constant.LeaderKind, constant.ByCount)
+	default:
+		kind = constant.NewScheduleKind(constant.RegionKind, constant.ByCount)
 	}
-	return regions
-}
+	solver := newSolver(basePlan, kind, cluster, opInfluence)
+	// only select source stores that are healthy and match the engine type and ignore the store limit restriction,
+	filters := []filter.Filter{
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: constant.Medium},
+		filter.NewStorageThresholdFilter(s.GetName()),
+	}
 
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
-	filters := s.filters
 	switch job.Engine {
 	case core.EngineTiKV:
 		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.NotSpecialEngines))
 	case core.EngineTiFlash:
 		filters = append(filters, filter.NewEngineFilter(string(types.BalanceRangeScheduler), filter.SpecialEngines))
 	default:
-		return nil, errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
+		return errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
 	}
-	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
-	if len(sources) <= 1 {
-		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
-	}
+	availableSource := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
 
-	krs := core.NewKeyRanges(job.Ranges)
-	scanRegions := fetchAllRegions(cluster, krs)
-	if len(scanRegions) == 0 {
-		return nil, errs.ErrRegionNotFound.FastGenByArgs("no region found")
-	}
-
-	// storeID <--> score mapping
-	scoreMap := make(map[uint64]int64, len(sources))
-	for _, source := range sources {
-		scoreMap[source.GetID()] = 0
-	}
-	totalScore := int64(0)
-	for _, region := range scanRegions {
-		for _, peer := range region.GetPeersByRole(job.Role) {
-			scoreMap[peer.GetStoreId()] += 1
-			totalScore += 1
+	// filter some store that not match the rules in the key ranges
+	sources := make([]*core.StoreInfo, 0)
+	expectScoreMap := make(map[uint64]float64)
+	for _, store := range availableSource {
+		count := float64(0)
+		for _, r := range job.Ranges {
+			count += getCountThreshold(cluster, availableSource, store, r, job.Rule)
 		}
+		if count > 0 {
+			sources = append(sources, store)
+			expectScoreMap[store.GetID()] = count
+		}
+	}
+	if len(sources) <= 1 {
+		return errs.ErrNoStoreToBeSelected.FastGenByArgs()
+	}
+	// storeID <--> score mapping
+	scoreMap := make(map[uint64]float64, len(sources))
+	for _, source := range sources {
+		count := 0
+		for _, kr := range job.Ranges {
+			switch job.Rule {
+			case core.LeaderScatter:
+				count += cluster.GetStoreLeaderCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.PeerScatter:
+				count += cluster.GetStorePeerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			case core.LearnerScatter:
+				count += cluster.GetStoreLearnerCountByRange(source.GetID(), kr.StartKey, kr.EndKey)
+			default:
+				return errs.ErrInvalidArgument.FastGenByArgs("not supported rule: " + job.Rule.String())
+			}
+		}
+		scoreMap[source.GetID()] = float64(count)
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
-		role := job.Role
-		iop := opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(role)
-		jop := opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(role)
+		iop := float64(solver.getOpInfluence(sources[i].GetID()))
+		jop := float64(solver.getOpInfluence(sources[j].GetID()))
 		iScore := scoreMap[sources[i].GetID()]
 		jScore := scoreMap[sources[j].GetID()]
 		return iScore+iop > jScore+jop
 	})
-
-	averageScore := int64(0)
-	averageScore = totalScore / int64(len(sources))
-
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
-	if tolerantSizeRatio < 1 {
-		tolerantSizeRatio = 1
-	}
-	return &balanceRangeSchedulerPlan{
-		SchedulerCluster: cluster,
-		stores:           sources,
-		scoreMap:         scoreMap,
-		source:           nil,
-		target:           nil,
-		region:           nil,
-		averageScore:     averageScore,
-		job:              job,
-		opInfluence:      opInfluence,
-		tolerate:         tolerantSizeRatio,
-	}, nil
+	s.stores = sources
+	s.scoreMap = scoreMap
+	s.expectScoreMap = expectScoreMap
+	s.solver = solver
+	s.job = job
+	s.report()
+	return nil
 }
 
-func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
-	return p.source.GetID()
+func (s *balanceRangeScheduler) score(storeID uint64) float64 {
+	return s.scoreMap[storeID]
 }
-
-func (p *balanceRangeSchedulerPlan) targetStoreID() uint64 {
-	return p.target.GetID()
-}
-
-func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
-	return p.scoreMap[storeID]
-}
-
-func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
-	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
-	sourceInf := sourceInfluence.GetStoreInfluenceByRole(p.job.Role)
+func (s *balanceRangeScheduler) shouldBalance(scheduler string) bool {
+	solve := s.solver
+	sourceInf := solve.getOpInfluence(solve.sourceStoreID())
 	// Sometimes, there are many remove-peer operators in the source store, we don't want to pick this store as source.
 	if sourceInf < 0 {
 		sourceInf = -sourceInf
 	}
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
-	sourceScore := p.sourceScore - sourceInf - p.tolerate
+	sourceScore := solve.sourceScore - float64(sourceInf) - 1
 
-	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
-	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Role)
+	targetInf := solve.getOpInfluence(solve.targetStoreID())
 	// Sometimes, there are many add-peer operators in the target store, we don't want to pick this store as target.
 	if targetInf < 0 {
 		targetInf = -targetInf
 	}
-	targetScore := p.targetScore + targetInf + p.tolerate
+	targetScore := solve.targetScore + float64(targetInf) + 1
 
 	// the source score must be greater than the target score
 	shouldBalance := sourceScore >= targetScore
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance",
 			zap.String("scheduler", scheduler),
-			zap.Uint64("region-id", p.region.GetID()),
-			zap.Uint64("source-store", p.sourceStoreID()),
-			zap.Uint64("target-store", p.targetStoreID()),
-			zap.Int64("origin-source-score", p.sourceScore),
-			zap.Int64("origin-target-score", p.targetScore),
-			zap.Int64("influence-source-score", sourceScore),
-			zap.Int64("influence-target-score", targetScore),
-			zap.Int64("average-region-score", p.averageScore),
-			zap.Int64("tolerate", p.tolerate),
+			zap.Uint64("region-id", solve.Region.GetID()),
+			zap.Uint64("source-store", solve.sourceStoreID()),
+			zap.Uint64("target-store", solve.targetStoreID()),
+			zap.Float64("origin-source-score", solve.sourceScore),
+			zap.Float64("origin-target-score", solve.targetScore),
+			zap.Float64("influence-source-score", sourceScore),
+			zap.Float64("influence-target-score", targetScore),
+			zap.Float64("expect-source-score", s.expectScoreMap[solve.sourceStoreID()]),
+			zap.Float64("expect-target-score", s.expectScoreMap[solve.targetStoreID()]),
 		)
 	}
 	return shouldBalance
@@ -524,21 +795,39 @@ const (
 	pending JobStatus = iota
 	running
 	finished
+	cancelled
 )
 
-func (s JobStatus) String() string {
-	switch s {
+func (s *JobStatus) String() string {
+	switch *s {
 	case pending:
 		return "pending"
 	case running:
 		return "running"
 	case finished:
 		return "finished"
+	case cancelled:
+		return "cancelled"
 	}
 	return "unknown"
 }
 
 // MarshalJSON marshals to json.
-func (s JobStatus) MarshalJSON() ([]byte, error) {
+func (s *JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
+}
+
+// UnmarshalJSON unmarshals from json.
+func (s *JobStatus) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case `"running"`:
+		*s = running
+	case `"finished"`:
+		*s = finished
+	case `"cancelled"`:
+		*s = cancelled
+	case `"pending"`:
+		*s = pending
+	}
+	return nil
 }

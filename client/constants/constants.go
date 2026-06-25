@@ -19,7 +19,7 @@ import "time"
 const (
 	// DefaultKeyspaceID is the default keyspace ID.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
+	// 0 is reserved for default keyspace with the name "DEFAULT", It's initialized
 	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
 	// MaxKeyspaceID is the maximum keyspace ID.
@@ -31,6 +31,9 @@ const (
 	DefaultKeyspaceGroupID = uint32(0)
 	// DefaultKeyspaceName is the default keyspace name.
 	DefaultKeyspaceName = "DEFAULT"
+	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
+	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
+	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 
 	// RetryInterval is the base retry interval.
 	RetryInterval = 500 * time.Millisecond

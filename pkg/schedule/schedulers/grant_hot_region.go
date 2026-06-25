@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -188,7 +189,12 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		}
 		storeIDs = append(storeIDs, id)
 	}
-	leaderID, err := strconv.ParseUint(input["store-leader-id"].(string), 10, 64)
+	leaderStr, ok := input["store-leader-id"].(string)
+	if !ok {
+		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
+		return
+	}
+	leaderID, err := strconv.ParseUint(leaderStr, 10, 64)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
@@ -242,7 +248,7 @@ func (s *grantHotRegionScheduler) dispatch(typ resourceType, cluster sche.Schedu
 }
 
 func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, srcStores []*statistics.StoreLoadDetail) (ops []*operator.Operator) {
-	isLeader := s.r.Int()%2 == 1
+	isLeader := rand.Int()%2 == 1
 	for _, srcStore := range srcStores {
 		srcStoreID := srcStore.GetID()
 		if isLeader {
@@ -312,7 +318,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	if srcPeer == nil {
 		return nil, errs.ErrStoreNotFound
 	}
-	i := s.r.Int() % len(destStoreIDs)
+	i := rand.Int() % len(destStoreIDs)
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {

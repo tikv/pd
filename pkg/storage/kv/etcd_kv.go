@@ -96,7 +96,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
 
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
@@ -113,8 +112,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -144,6 +141,15 @@ type SlowLogTxn struct {
 // NewSlowLogTxn create a SlowLogTxn.
 func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 	ctx, cancel := context.WithTimeout(client.Ctx(), requestTimeout)
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
+// NewSlowLogTxnWithContext creates a SlowLogTxn with a specific context.
+func NewSlowLogTxnWithContext(ctx context.Context, client *clientv3.Client) clientv3.Txn {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	return &SlowLogTxn{
 		Txn:    client.Txn(ctx),
 		cancel: cancel,
@@ -218,8 +224,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 // Save puts a put operation into operations.
 // Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
-
 	operation := clientv3.OpPut(key, value)
 	txn.operations = append(txn.operations, operation)
 
@@ -228,8 +232,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 
 // Remove puts a delete operation into operations.
 func (txn *etcdTxn) Remove(key string) error {
-	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
-
 	operation := clientv3.OpDelete(key)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -280,8 +282,11 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 
 // commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
+	failpoint.Inject("slowTxn", func() {
+		time.Sleep(10 * time.Second)
+	})
 	// Using slowLogTxn to commit transaction.
-	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn := NewSlowLogTxnWithContext(txn.ctx, txn.kv.client)
 	slowLogTxn.If(txn.conditions...)
 	slowLogTxn.Then(txn.operations...)
 	resp, err := slowLogTxn.Commit()
@@ -354,14 +359,16 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Then(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	l.inner = l.inner.Then(convertedOps...)
 	return l
 }
 
 // Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Else(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	l.inner = l.inner.Else(convertedOps...)
 	return l
 }
 

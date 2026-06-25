@@ -15,7 +15,7 @@
 package schedulers
 
 import (
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/pingcap/log"
 
@@ -28,12 +28,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type randomMergeSchedulerConfig struct {
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
@@ -70,7 +71,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
-	store := filter.NewCandidates(s.R, cluster.GetStores()).
+	store := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low}).
 		RandomPick()
 	if store == nil {

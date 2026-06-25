@@ -257,7 +257,7 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (sc *schedulingController) GetStoresLoads() map[uint64][]float64 {
+func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return sc.hotStat.GetStoresLoads()
 }
 
@@ -274,10 +274,7 @@ func (sc *schedulingController) GetHotPeerStat(rw utils.RWType, regionID, storeI
 // GetHotPeerStats returns the read or write statistics for hot regions.
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-func (sc *schedulingController) GetHotPeerStats(rw utils.RWType, minHotDegree int) map[uint64][]*statistics.HotPeerStat {
-	if minHotDegree > 0 {
-		return sc.hotStat.GetHotPeerStats(rw, minHotDegree)
-	}
+func (sc *schedulingController) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
 	// GetHotPeerStats is a thread-safe method
 	threshold := sc.opt.GetHotRegionCacheHitsThreshold()
 	if rw == utils.Read {

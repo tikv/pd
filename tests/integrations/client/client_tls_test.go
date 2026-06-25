@@ -149,7 +149,7 @@ func testTLSReload(
 	endpoints := make([]string, 0, len(testServers))
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-		tlsConfig, err := s.GetConfig().Security.ToTLSConfig()
+		tlsConfig, err := s.GetConfig().Security.ToClientTLSConfig()
 		re.NoError(err)
 		httpClient := &http.Client{
 			Transport: &http.Transport{
@@ -170,7 +170,7 @@ func testTLSReload(
 					CAPath:   testClientTLSInfo.TrustedCAFile,
 					CertPath: testClientTLSInfo.CertFile,
 					KeyPath:  testClientTLSInfo.KeyFile,
-				}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+				}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -203,7 +203,7 @@ func testTLSReload(
 			CAPath:   testClientTLSInfo.TrustedCAFile,
 			CertPath: testClientTLSInfo.CertFile,
 			KeyPath:  testClientTLSInfo.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -218,7 +218,7 @@ func testTLSReload(
 			SSLCABytes:   caData,
 			SSLCertBytes: certData,
 			SSLKEYBytes:  keyData,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
@@ -332,7 +332,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 			CAPath:   tls.TrustedCAFile,
 			CertPath: tls.CertFile,
 			KeyPath:  tls.KeyFile,
-		}, opt.WithGRPCDialOptions(grpc.WithBlock()))
+		}, opt.WithGRPCDialOptions(grpc.WithBlock())) //nolint:staticcheck
 	if err != nil {
 		return err
 	}

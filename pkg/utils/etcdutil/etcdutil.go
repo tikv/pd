@@ -94,7 +94,7 @@ func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
+			log.Warn("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -155,7 +155,6 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
 	})
-	InjectFailToCollectTestEtcdKey(key, "get")
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -167,21 +166,6 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		return resp, e
 	}
 	return resp, nil
-}
-
-// InjectFailToCollectTestEtcdKey injects the failpoint to collect the key for testing.
-func InjectFailToCollectTestEtcdKey(key, op string) {
-	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
-		file := val.(string)
-
-		if len(file) != 0 {
-			err := writeKeyToFile(file, key, op)
-			if err != nil {
-				pwd, _ := os.Getwd()
-				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
-			}
-		}
-	})
 }
 
 // WriteKeyToFile writes the key to the file. It is only used for testing.
@@ -279,30 +263,51 @@ const (
 	etcdServerDisconnectedTimeout = 1 * time.Minute
 )
 
-func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
+// EtcdClientPurpose marks the purpose of the etcd client.
+type EtcdClientPurpose string
+
+const (
+	// TestEtcdClientPurpose is the default etcd client purpose, used for testing.
+	TestEtcdClientPurpose EtcdClientPurpose = "default-etcd-client"
+	// ServerEtcdClientPurpose is the etcd client purpose for server, most of the time.
+	ServerEtcdClientPurpose EtcdClientPurpose = "server-etcd-client"
+	// ElectionEtcdClientPurpose is the etcd client purpose for election and tso.
+	ElectionEtcdClientPurpose EtcdClientPurpose = "election-etcd-client"
+	// McsEtcdClientPurpose is the etcd client purpose for mcs.
+	McsEtcdClientPurpose EtcdClientPurpose = "mcs-etcd-client"
+)
+
+// CreateEtcdClientOpt is an alias of the function that edits clientv3.Config.
+type CreateEtcdClientOpt func(*clientv3.Config)
+
+func newClient(tlsConfig *tls.Config, endpoints []string, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	if len(endpoints) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
 	}
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
+	cfg := clientv3.Config{
 		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
 		DialKeepAliveTime:    defaultDialKeepAliveTime,
 		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	client, err := clientv3.New(cfg)
 	return client, err
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...string) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
 	}
-	client, err := newClient(tlsConfig, urls...)
+	client, err := newClient(tlsConfig, urls, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -311,14 +316,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...stri
 	failpoint.Inject("fastTick", func() {
 		tickerInterval = 100 * time.Millisecond
 	})
-	failpoint.Inject("closeTick", func() {
-		failpoint.Return(client, err)
-	})
-	source := "default-etcd-client"
-	if len(sourceOpt) > 0 {
-		source = sourceOpt[0]
+	if enableChecker {
+		initHealthChecker(tickerInterval, tlsConfig, client, purpose, opts...)
 	}
-	initHealthChecker(tickerInterval, tlsConfig, client, source)
 
 	return client, err
 }
@@ -530,7 +530,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := Watch(watcherCtx, watcher, lw.key, opts...)
+		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it", zap.Error(err),
@@ -767,10 +767,4 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
-}
-
-// Watch watches the key, it wraps a injected failpoint.
-func Watch(ctx context.Context, watcher clientv3.Watcher, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
-	InjectFailToCollectTestEtcdKey(key, "watch")
-	return watcher.Watch(ctx, key, opts...)
 }

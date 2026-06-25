@@ -84,11 +84,10 @@ type tsoDispatcher struct {
 
 func newTSODispatcher(
 	ctx context.Context,
-	maxBatchSize int,
 	provider tsoServiceProvider,
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
-	tsoRequestCh := make(chan *Request, maxBatchSize*2)
+	tsoRequestCh := make(chan *Request, defaultMaxTSOBatchSize*2)
 	failpoint.Inject("shortDispatcherChannel", func() {
 		tsoRequestCh = make(chan *Request, 1)
 	})
@@ -106,7 +105,7 @@ func newTSODispatcher(
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return batch.NewController[*Request](
-					maxBatchSize*2,
+					defaultMaxTSOBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
 					metrics.TSOBestBatchSize,
 				)
@@ -215,15 +214,6 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tsoBatchController.AdjustBestBatchSize()
 		}
-		// Stop the timer if it's not stopped.
-		if !streamLoopTimer.Stop() {
-			select {
-			case <-streamLoopTimer.C: // try to drain from the channel
-			default:
-			}
-		}
-		// We need be careful here, see more details in the comments of Timer.Reset.
-		// https://pkg.go.dev/time@master#Timer.Reset
 		streamLoopTimer.Reset(option.Timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
@@ -247,7 +237,7 @@ tsoBatchLoop:
 					return
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
-					log.Error("[tso] create tso stream error", errs.ZapError(err))
+					log.Warn("[tso] create tso stream error", errs.ZapError(err))
 					svcDiscovery.ScheduleCheckMemberChanged()
 					// Finish the collected requests if the stream is failed to be created.
 					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
@@ -273,7 +263,7 @@ tsoBatchLoop:
 				exit := !td.handleProcessRequestError(ctx, bo, conCtxMgr, streamURL, err)
 				stream = nil
 				if exit {
-					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(err))
 					return
 				}
 				continue
@@ -326,7 +316,7 @@ tsoBatchLoop:
 					// There should not be other kinds of errors.
 					log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 						zap.Error(err))
-					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(tsoBatchController, invalidStreamID, err)
 					return
 				}
 			}
@@ -384,13 +374,17 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	conCtxMgr.Release(streamURL)
 	// Update the member list to ensure the latest topology is used before the next batch.
 	svcDiscovery := td.provider.getServiceDiscovery()
-	if errs.IsLeaderChange(err) {
+	switch {
+	case errs.IsCalleeMismatch(err):
+		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
+		svcDiscovery.RemoveClientConn(streamURL)
+	case errs.IsLeaderChange(err):
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 			log.Error("[tso] check member changed error after the leader changed", zap.Error(err))
 		}
-	} else {
+	default:
 		// For other errors, we can just schedule a member change check asynchronously.
 		svcDiscovery.ScheduleCheckMemberChanged()
 	}

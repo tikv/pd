@@ -33,6 +33,7 @@ const (
 	regionsByKey              = "/pd/api/v1/regions/key"
 	RegionsByStoreIDPrefix    = "/pd/api/v1/regions/store"
 	regionsReplicated         = "/pd/api/v1/regions/replicated"
+	regionsSiblings           = "/pd/api/v1/regions/sibling"
 	EmptyRegions              = "/pd/api/v1/regions/check/empty-region"
 	AccelerateSchedule        = "/pd/api/v1/regions/accelerate-schedule"
 	AccelerateScheduleInBatch = "/pd/api/v1/regions/accelerate-schedule/batch"
@@ -67,6 +68,7 @@ const (
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
 	SnapshotRecoveringMark = "/pd/api/v1/admin/cluster/markers/snapshot-recovering"
+	PitrRestoreModeMark    = "/pd/api/v1/admin/cluster/markers/pitr-restore-mode"
 	// Debug
 	PProfProfile   = "/pd/api/v1/debug/pprof/profile"
 	PProfHeap      = "/pd/api/v1/debug/pprof/heap"
@@ -87,6 +89,10 @@ const (
 	// Keyspace
 	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
+	GetKeyspaceMetaByID   = "/pd/api/v2/keyspaces/id/%d"
+	// Affinity
+	AffinityGroups    = "/pd/api/v2/affinity-groups"
+	AffinityGroupByID = "/pd/api/v2/affinity-groups/%s"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -116,6 +122,11 @@ func RegionsReplicatedByKeyRange(keyRange *KeyRange) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsHexStr()
 	return fmt.Sprintf("%s?startKey=%s&endKey=%s",
 		regionsReplicated, startKeyStr, endKeyStr)
+}
+
+// RegionSiblingsByID returns the path of PD HTTP API to get sibling regions by ID.
+func RegionSiblingsByID(regionID uint64) string {
+	return fmt.Sprintf("%s/%d", regionsSiblings, regionID)
 }
 
 // RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
@@ -191,6 +202,11 @@ func GetSchedulerConfigURIByName(name string) string {
 	return path.Join(SchedulerConfig, name, "list")
 }
 
+// GetCancelSchedulerJobURIByNameAndJobID returns the path of PD HTTP API to cancel the job of the given scheduler
+func GetCancelSchedulerJobURIByNameAndJobID(name string, jobID uint64) string {
+	return fmt.Sprintf("%s/%s/job?job-id=%d", SchedulerConfig, name, jobID)
+}
+
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)
@@ -230,6 +246,11 @@ func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
 // GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
 func GetKeyspaceMetaByNameURL(keyspaceName string) string {
 	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
+
+// GetKeyspaceMetaByIDURL returns the path of PD HTTP API to get keyspace meta by keyspace id.
+func GetKeyspaceMetaByIDURL(id uint32) string {
+	return fmt.Sprintf(GetKeyspaceMetaByID, id)
 }
 
 // GetDeleteSafePointURI returns the URI for delete safepoint service

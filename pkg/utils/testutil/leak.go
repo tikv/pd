@@ -20,7 +20,7 @@ import "go.uber.org/goleak"
 var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("github.com/syndtr/goleveldb/leveldb.(*DB).mpoolDrain"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccBalancerWrapper).watcher"),
-	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransportAndUnlock"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
 	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),

@@ -18,9 +18,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/slice"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestSlice(t *testing.T) {
 	re := require.New(t)
@@ -94,4 +99,34 @@ func TestSliceRemove(t *testing.T) {
 	is = []int64{1, 1, 1}
 	is = slice.Remove(is, 1)
 	re.Equal([]int64{}, is)
+}
+
+func TestSliceEqualWithoutOrder(t *testing.T) {
+	re := require.New(t)
+	re.True(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "a"}))
+	re.True(slice.EqualWithoutOrder([]string{}, []string{}))
+	re.False(slice.EqualWithoutOrder([]string{}, []string{"a"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "c"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b"}))
+	re.False(slice.EqualWithoutOrder([]string{"a"}, []string{"b", "c"}))
+}
+
+func TestSliceHasDupInSorted(t *testing.T) {
+	re := require.New(t)
+	re.False(slice.HasDupInSorted([]string{"a", "b", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "a", "c"}))
+	re.True(slice.HasDupInSorted([]string{"a", "b", "b"}))
+	re.False(slice.HasDupInSorted([]string(nil)))
+}
+
+func TestSliceSplitIntoBatches(t *testing.T) {
+	re := require.New(t)
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 6))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 5))
+	re.Equal([][]int{{1, 2, 3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 4))
+	re.Equal([][]int{{1, 2, 3}, {4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 3))
+	re.Equal([][]int{{1, 2}, {3, 4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 2))
+	re.Equal([][]int{{1}, {2}, {3}, {4}, {5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 1))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, 0))
+	re.Equal([][]int{{1, 2, 3, 4, 5}}, slice.SplitIntoBatches([]int{1, 2, 3, 4, 5}, -1))
 }

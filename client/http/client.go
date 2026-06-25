@@ -155,7 +155,7 @@ func (ci *clientInner) requestWithRetry(
 				continue
 			}
 			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
-			if err == nil || noNeedRetry(statusCode) {
+			if err == nil || noNeedRetryForRequest(reqInfo, statusCode) {
 				return err
 			}
 			log.Debug("[pd] http request url failed", append(logFields,
@@ -177,7 +177,7 @@ func (ci *clientInner) requestWithRetry(
 	// Set the retryable checker for the backoffer if it's not set.
 	bo.SetRetryableChecker(func(err error) bool {
 		// Backoffer also needs to check the status code to determine whether to retry.
-		return err != nil && !noNeedRetry(statusCode)
+		return err != nil && !noNeedRetryForRequest(reqInfo, statusCode)
 	}, false)
 	return bo.Exec(ctx, execFunc)
 }
@@ -186,6 +186,13 @@ func noNeedRetry(statusCode int) bool {
 	return statusCode == http.StatusNotFound ||
 		statusCode == http.StatusForbidden ||
 		statusCode == http.StatusBadRequest
+}
+
+func noNeedRetryForRequest(reqInfo *requestInfo, statusCode int) bool {
+	if noNeedRetry(statusCode) {
+		return true
+	}
+	return reqInfo.name == UpdateKeyspaceConfigName && statusCode == http.StatusConflict
 }
 
 func (ci *clientInner) doRequest(
@@ -220,7 +227,7 @@ func (ci *clientInner) doRequest(
 	resp, err := ci.cli.Do(req)
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
-		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
+		log.Warn("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return -1, errors.Trace(err)
 	}
 	ci.execDuration(name, time.Since(start))
@@ -251,7 +258,7 @@ func (ci *clientInner) doRequest(
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
-		log.Error("[pd] request failed with a non-200 status", logFields...)
+		log.Warn("[pd] request failed with a non-200 status", logFields...)
 		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s', body: '%s'", resp.Status, bs)
 	}
 
@@ -402,42 +409,4 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 		WithBackoffer(c.bo).
 		WithTargetURL(c.targetURL),
 		headerOpts...)
-}
-
-/* The following functions are only for test */
-// requestChecker is used to check the HTTP request sent by the client.
-type requestChecker func(req *http.Request) error
-
-// RoundTrip implements the `http.RoundTripper` interface.
-func (rc requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	return &http.Response{StatusCode: http.StatusOK}, rc(req)
-}
-
-// NewHTTPClientWithRequestChecker returns a http client with checker.
-func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
-	return &http.Client{
-		Transport: checker,
-	}
-}
-
-// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock service discovery.
-func newClientWithMockServiceDiscovery(
-	source string,
-	pdAddrs []string,
-	opts ...ClientOption,
-) Client {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &client{inner: newClientInner(ctx, cancel, source), callerID: defaultCallerID}
-	// Apply the options first.
-	for _, opt := range opts {
-		opt(c)
-	}
-	sd := sd.NewMockServiceDiscovery(pdAddrs, c.inner.tlsConf)
-	if err := sd.Init(); err != nil {
-		log.Error("[pd] init mock service discovery failed",
-			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
-		return nil
-	}
-	c.inner.init(sd)
-	return c
 }

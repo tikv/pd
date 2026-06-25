@@ -23,7 +23,13 @@ package timerutil
 import (
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestTimerPool(t *testing.T) {
 	var tp timerPool

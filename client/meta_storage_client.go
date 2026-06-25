@@ -20,11 +20,13 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
@@ -129,8 +131,8 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 }
 
 // Watch implements the MetaStorageClient interface.
-func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
-	eventCh := make(chan []*meta_storagepb.Event, 100)
+func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
+	eventCh := make(chan *metastorage.WatchResponse, 100)
 	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -159,16 +161,27 @@ func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaSto
 		}()
 		for {
 			resp, err := res.Recv()
-			failpoint.Inject("watchStreamError", func() {
-				err = errors.Errorf("fake error")
-			})
 			if err != nil {
+				log.Warn("watch stream closed", zap.Error(err))
 				return
+			}
+			events := resp.GetEvents()
+			var compactRevision int64
+			// If meets the compacted error, it requires the client to use the higher compact revision to watch again.
+			if header := resp.GetHeader(); header != nil && header.Error != nil && header.Error.Type == meta_storagepb.ErrorType_DATA_COMPACTED {
+				compactRevision = resp.GetCompactRevision()
+				log.Info("watch stream closed due to data compacted",
+					zap.Int64("required watch revision", compactRevision),
+					zap.String("err", header.Error.String()))
+			}
+			metaStorageResp := &metastorage.WatchResponse{
+				Events:          events,
+				CompactRevision: compactRevision,
 			}
 			select {
 			case <-ctx.Done():
 				return
-			case eventCh <- resp.GetEvents():
+			case eventCh <- metaStorageResp:
 			}
 		}
 	}()
@@ -198,6 +211,6 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOpt
 }
 
 // Watch implements the MetaStorageClient interface.
-func (c *client) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (c *client) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	return c.inner.Watch(ctx, key, opts...)
 }

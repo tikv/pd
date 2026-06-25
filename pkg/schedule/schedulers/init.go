@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 var registerOnce sync.Once
@@ -163,10 +164,13 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{
 			schedulerConfig:   &baseSchedulerConfig{},
-			StoreIDWithRanges: make(map[uint64][]core.KeyRange),
+			StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
+		}
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
 		}
 		conf.cluster = opController.GetCluster()
 		conf.removeSchedulerCb = removeSchedulerCb[0]
@@ -182,14 +186,39 @@ func schedulersRegister() {
 		}
 	})
 
+	// evict stopping store
+	RegisterSliceDecoderBuilder(types.EvictStoppingStoreScheduler, func([]string) ConfigDecoder {
+		return func(any) error {
+			return nil
+		}
+	})
+
 	RegisterScheduler(types.EvictSlowStoreScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := initEvictSlowStoreSchedulerConfig()
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
+		}
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	RegisterScheduler(types.EvictStoppingStoreScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := initEvictStoppingStoreSchedulerConfig()
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		if conf.Batch == 0 {
+			conf.Batch = EvictLeaderBatchSize
+		}
+		conf.cluster = opController.GetCluster()
+		sche := newEvictStoppingStoreScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
@@ -262,6 +291,9 @@ func schedulersRegister() {
 				return nil, err
 			}
 		}
+		if err := conf.validateLocked(); err != nil {
+			return nil, err
+		}
 		sche := newHotScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
@@ -296,7 +328,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := &grantLeaderSchedulerConfig{
 			schedulerConfig:   &baseSchedulerConfig{},
-			StoreIDWithRanges: make(map[uint64][]core.KeyRange),
+			StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
 		}
 		conf.cluster = opController.GetCluster()
 		conf.removeSchedulerCb = removeSchedulerCb[0]
@@ -496,24 +528,6 @@ func schedulersRegister() {
 		return sche, nil
 	})
 
-	// split bucket
-	RegisterSliceDecoderBuilder(types.SplitBucketScheduler, func([]string) ConfigDecoder {
-		return func(any) error {
-			return nil
-		}
-	})
-
-	RegisterScheduler(types.SplitBucketScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := initSplitBucketConfig()
-		if err := decoder(conf); err != nil {
-			return nil, err
-		}
-		sche := newSplitBucketScheduler(opController, conf)
-		conf.init(sche.GetName(), storage, conf)
-		return sche, nil
-	})
-
 	// transfer witness leader
 	RegisterSliceDecoderBuilder(types.TransferWitnessLeaderScheduler, func([]string) ConfigDecoder {
 		return func(any) error {
@@ -559,13 +573,13 @@ func schedulersRegister() {
 			if len(args) < 5 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 4")
 			}
-			roleString, err := url.QueryUnescape(args[0])
+			ruleString, err := url.QueryUnescape(args[0])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			role := core.NewRole(roleString)
-			if role == core.Unknown {
-				return errs.ErrQueryUnescape.FastGenByArgs("role")
+			rule := core.NewRule(ruleString)
+			if rule == core.Unknown {
+				return errs.ErrQueryUnescape.FastGenByArgs("rule must be leader-scatter, peer-scatter, learner-scatter")
 			}
 			engine, err := url.QueryUnescape(args[1])
 			if err != nil {
@@ -582,6 +596,9 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
 			}
+			if duration <= 0 {
+				return errs.ErrURLParse.FastGenByArgs("timeout must be greater than 0")
+			}
 			alias, err := url.QueryUnescape(args[3])
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
@@ -596,7 +613,7 @@ func schedulersRegister() {
 			}
 
 			job := &balanceRangeSchedulerJob{
-				Role:    role,
+				Rule:    rule,
 				Engine:  engine,
 				Timeout: duration,
 				Alias:   alias,
@@ -614,6 +631,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceRangeSchedulerConfig{
 			schedulerConfig: newBaseDefaultSchedulerConfig(),
+			jobs:            make([]*balanceRangeSchedulerJob, 0),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err

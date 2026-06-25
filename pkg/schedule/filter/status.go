@@ -51,4 +51,5 @@ var (
 	statusRegionWitnessPeer                 = plan.NewStatus(plan.StatusRegionNotMatchRule)
 	statusRegionLeaderSendSnapshotThrottled = plan.NewStatus(plan.StatusRegionSendSnapshotThrottled)
 	statusRegionInProgress                  = plan.NewStatus(plan.StatusRegionInProgress)
+	statusRegionAffinity                    = plan.NewStatus(plan.StatusRegionAffinity)
 )

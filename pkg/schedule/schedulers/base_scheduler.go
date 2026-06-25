@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"fmt"
-	"math/rand"
 	"net/http"
 	"time"
 
@@ -64,7 +63,6 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 // BaseScheduler is a basic scheduler for all other complex scheduler
 type BaseScheduler struct {
 	OpController *operator.Controller
-	R            *rand.Rand
 
 	name string
 	tp   types.CheckerSchedulerType
@@ -77,7 +75,7 @@ func NewBaseScheduler(
 	tp types.CheckerSchedulerType,
 	conf schedulerConfig,
 ) *BaseScheduler {
-	return &BaseScheduler{OpController: opController, tp: tp, conf: conf, R: rand.New(rand.NewSource(time.Now().UnixNano()))}
+	return &BaseScheduler{OpController: opController, tp: tp, conf: conf}
 }
 
 func (*BaseScheduler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -141,8 +139,12 @@ func (s *BaseScheduler) SetDisable(disable bool) error {
 
 // IsDefault returns if the scheduler is a default scheduler.
 func (s *BaseScheduler) IsDefault() bool {
-	if _, ok := s.conf.(defaultSchedulerConfig); ok {
-		return true
+	// Check if the scheduler is in the current DefaultSchedulers list
+	// which dynamically adjusts based on NextGen vs Classic
+	for _, schedulerType := range types.DefaultSchedulers {
+		if s.tp == schedulerType {
+			return true
+		}
 	}
 	return false
 }

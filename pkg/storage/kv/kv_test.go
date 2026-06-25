@@ -22,13 +22,19 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestEtcd(t *testing.T) {
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	kv := NewEtcdKVBase(client)
@@ -48,6 +54,7 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	re.NoError(kv.Close())
 }
 
 func TestMemKV(t *testing.T) {
@@ -175,7 +182,10 @@ func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...Ke
 	}
 }
 
-func testRawTxn(re *require.Assertions, kv Base) {
+func testRawTxn(re *require.Assertions, kv interface {
+	Base
+	RawTxnCapable
+}) {
 	// Test NotExists condition, putting in transaction.
 	res, err := kv.CreateRawTxn().If(
 		RawTxnCondition{

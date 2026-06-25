@@ -17,6 +17,7 @@ package schedulers
 import (
 	"math"
 
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -35,7 +36,7 @@ func (*rankV1) isAvailable(s *solution) bool {
 	return s.progressiveRank > 0
 }
 
-func (r *rankV1) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
+func (r *rankV1) checkByPriorityAndTolerance(loads statistics.Loads, f func(int) bool) bool {
 	switch {
 	case r.resourceTy == writeLeader:
 		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
@@ -46,7 +47,7 @@ func (r *rankV1) checkByPriorityAndTolerance(loads []float64, f func(int) bool) 
 	}
 }
 
-func (r *rankV1) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool {
+func (r *rankV1) checkHistoryLoadsByPriority(loads statistics.HistoryLoads, f func(int) bool) bool {
 	switch {
 	case r.resourceTy == writeLeader:
 		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)

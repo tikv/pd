@@ -20,9 +20,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // advance emulate the state machine clock moves forward by the given duration
 func (cb *CircuitBreaker) advance(duration time.Duration) {

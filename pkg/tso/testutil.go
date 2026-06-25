@@ -40,8 +40,8 @@ func (c *TestServiceConfig) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
-func (c *TestServiceConfig) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints field of TestServiceConfig.
+func (c *TestServiceConfig) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -55,8 +55,8 @@ func (c *TestServiceConfig) GetAdvertiseListenAddr() string {
 	return c.AdvertiseListenAddr
 }
 
-// GetLeaderLease returns the LeaderLease field of TestServiceConfig.
-func (c *TestServiceConfig) GetLeaderLease() int64 {
+// GetLease returns the LeaderLease field of TestServiceConfig.
+func (c *TestServiceConfig) GetLease() int64 {
 	return c.LeaderLease
 }
 

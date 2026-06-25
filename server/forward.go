@@ -30,7 +30,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -126,7 +128,7 @@ func (f *tsoForwarder) forwardTSORequest(
 		Header: &tsopb.RequestHeader{
 			ClusterId:       request.GetHeader().GetClusterId(),
 			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: request.GetCount(),
@@ -168,7 +170,7 @@ func (s *GrpcServer) handleTSOForwarding(
 	tsDeadlineCh chan<- *tsoutil.TSDeadline,
 ) (tsoStreamErr, sendErr error) {
 	// Get the latest TSO primary address.
-	targetHost, ok := s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+	targetHost, ok := s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 	if !ok || len(targetHost) == 0 {
 		return errors.WithStack(errs.ErrNotFoundTSOAddr), nil
 	}
@@ -282,6 +284,15 @@ func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.Cli
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
+func createRegionBucketsSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionBucketsClient, context.Context, context.CancelFunc, error) {
+	done := make(chan struct{})
+	forwardCtx, cancelForward := context.WithCancel(ctx)
+	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
+	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionBuckets(forwardCtx)
+	done <- struct{}{}
+	return forwardStream, forwardCtx, cancelForward, err
+}
+
 func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -355,6 +366,37 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
+func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_RegionBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
+	defer logutil.LogPanic()
+	defer close(errCh)
+	for {
+		resp, err := forwardStream.Recv()
+		if err == io.EOF {
+			errCh <- errors.WithStack(err)
+			return
+		}
+		if err != nil {
+			errCh <- errors.WithStack(err)
+			return
+		}
+
+		schedulingpbErr := resp.GetHeader().GetError()
+		if schedulingpbErr != nil {
+			// TODO: handle more error types if needed.
+			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
+				response := &pdpb.ReportBucketsResponse{
+					Header: grpcutil.NotBootstrappedHeader(),
+				}
+				if err := server.send(response); err != nil {
+					errCh <- errors.WithStack(err)
+					return
+				}
+			}
+		}
+		// ignore other error types or success responses for now.
+	}
+}
+
 func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient, server *bucketHeartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
@@ -387,7 +429,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 		return client.(*grpc.ClientConn), nil
 	}
 
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -434,13 +476,13 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsServiceIndependent(constant.TSOServiceName) {
+	if !s.IsServiceIndependent(mcs.TSOServiceName) {
 		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
@@ -471,7 +513,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}

@@ -44,7 +44,7 @@ type balanceWitnessSchedulerTestSuite struct {
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
-	suite.tc.SetRules([]*placement.Rule{
+	err := suite.tc.SetRules([]*placement.Rule{
 		{
 			GroupID: placement.DefaultGroupID,
 			ID:      placement.DefaultRuleID,
@@ -52,6 +52,7 @@ func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 			Count:   4,
 		},
 	})
+	re.NoError(err)
 	lb, err := CreateScheduler(types.BalanceWitnessScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceWitnessScheduler, []string{"", ""}), nil)
 	re.NoError(err)
 	suite.lb = lb

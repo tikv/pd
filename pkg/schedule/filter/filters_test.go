@@ -162,7 +162,6 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetEnablePlacementRules(true)
 	ruleManager := testCluster.RuleManager
-	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	err := ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "test",
@@ -198,6 +197,8 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 			LocationLabels: []string{"dc", "zone", "host"},
 		},
 	})
+	re.NoError(err)
+	err = ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	stores := []struct {
 		storeID     uint64
@@ -286,6 +287,16 @@ func TestStoreStateFilter(t *testing.T) {
 		{1, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{2, plan.StatusStoreBusy, plan.StatusStoreBusy},
 		{3, plan.StatusOK, plan.StatusOK},
+	}
+	check(store, testCases)
+
+	// Removed
+	store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	testCases = []testCase{
+		{0, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{1, plan.StatusStoreBusy, plan.StatusStoreRemoved},
+		{2, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{3, plan.StatusOK, plan.StatusStoreRemoved},
 	}
 	check(store, testCases)
 }
