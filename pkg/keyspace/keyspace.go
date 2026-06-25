@@ -308,18 +308,6 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
-	// assign meta-service group for the new keyspace if meta-service groups exist.
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
-	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.PickGroup(manager.ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
-	}
 	tracer.OnGetConfigFinished()
 
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
@@ -331,16 +319,15 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		StateChangedAt: request.CreateTime,
 		Config:         request.Config,
 	}
-	err = manager.saveNewKeyspace(keyspace)
-	if err != nil {
+	// Assign a meta-service group (if any exist) and save the keyspace atomically
+	// with respect to group deletion. The assignment is reflected in request.Config.
+	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	if err = manager.assignGroupAndSaveKeyspace(assignToMetaServiceGroup, &request.Config, keyspace); err != nil {
 		log.Warn("[create-keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
 			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
-		if assignToMetaServiceGroup {
-			manager.rollbackMetaServiceGroupAssignment(request.Config[MetaServiceGroupIDKey])
-		}
 		return nil, err
 	}
 	tracer.OnSaveKeyspaceMetaFinished()
@@ -468,17 +455,6 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
-	if assignToMetaServiceGroup {
-		metaServiceGroup, err := manager.mgm.PickGroup(manager.ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.Config == nil {
-			request.Config = make(map[string]string)
-		}
-		request.Config[MetaServiceGroupIDKey] = metaServiceGroup
-	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             id,
@@ -488,16 +464,15 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		StateChangedAt: request.CreateTime,
 		Config:         request.Config,
 	}
-	err = manager.saveNewKeyspace(keyspace)
-	if err != nil {
+	// Assign a meta-service group (if any exist) and save the keyspace atomically
+	// with respect to group deletion. The assignment is reflected in request.Config.
+	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	if err = manager.assignGroupAndSaveKeyspace(assignToMetaServiceGroup, &request.Config, keyspace); err != nil {
 		log.Warn("[keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
 			zap.String("keyspace-name", keyspace.GetName()),
 			zap.Error(err),
 		)
-		if assignToMetaServiceGroup {
-			manager.rollbackMetaServiceGroupAssignment(request.Config[MetaServiceGroupIDKey])
-		}
 		return nil, err
 	}
 	// Split keyspace region.
@@ -598,6 +573,39 @@ func (manager *Manager) rollbackMetaServiceGroupAssignment(groupID string) {
 			zap.String("meta-service-group", groupID),
 			zap.Error(err))
 	}
+}
+
+// assignGroupAndSaveKeyspace assigns a meta-service group to the keyspace (when
+// assign is true) and persists the keyspace metadata while holding the
+// meta-service group manager's read lock across both steps. This keeps the
+// selection and the persisted assignment atomic with respect to group deletion:
+// UpdateGroupsSafely takes the write lock, so a group cannot be removed in the
+// window between assignment and the keyspace being saved, which would otherwise
+// leave the keyspace referencing a non-existent group. config must point to
+// request.Config so the assigned group ID is visible to later create steps.
+func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[string]string, keyspace *keyspacepb.KeyspaceMeta) error {
+	if !assign {
+		return manager.saveNewKeyspace(keyspace)
+	}
+	manager.mgm.RLock()
+	defer manager.mgm.RUnlock()
+	groupID, err := manager.mgm.pickGroupLocked(manager.ctx)
+	if err != nil {
+		return err
+	}
+	if *config == nil {
+		*config = make(map[string]string)
+	}
+	(*config)[MetaServiceGroupIDKey] = groupID
+	keyspace.Config = *config
+	if err := manager.saveNewKeyspace(keyspace); err != nil {
+		// Roll back the reservation made by pickGroupLocked. This only performs
+		// store operations and does not take the mgm lock, so it is safe to call
+		// while still holding the read lock.
+		manager.rollbackMetaServiceGroupAssignment(groupID)
+		return err
+	}
+	return nil
 }
 
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding

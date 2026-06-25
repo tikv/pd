@@ -97,6 +97,14 @@ func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
 func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error) {
 	m.RLock()
 	defer m.RUnlock()
+	return m.pickGroupLocked(ctx)
+}
+
+// pickGroupLocked is PickGroup with the read lock already held by the caller.
+// Callers that need group selection and the subsequent keyspace metadata save to
+// be atomic with respect to group deletion (which takes the write lock) must
+// hold the read lock across both, e.g. via Manager.assignGroupAndSaveKeyspace.
+func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, error) {
 	var assignedGroup string
 	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
