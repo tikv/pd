@@ -196,7 +196,7 @@ func (m *MetaServiceGroupManager) UpdateGroupsSafely(
 	for _, id := range deletedGroups {
 		if assignmentCounts[id] > 0 {
 			m.Unlock()
-			return fmt.Errorf("cannot delete meta-service group with assigned keyspaces: %s", id)
+			return fmt.Errorf("%w: %s", ErrGroupHasAssignedKeyspaces, id)
 		}
 	}
 	if err := persist(); err != nil {

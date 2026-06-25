@@ -15,6 +15,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
@@ -124,7 +125,7 @@ func PatchMetaServiceGroups(c *gin.Context) {
 	}, func() {
 		svr.UpdateKeyspaceConfig(newCfg)
 	}); err != nil {
-		if strings.HasPrefix(err.Error(), "cannot delete meta-service group") {
+		if errors.Is(err, keyspace.ErrGroupHasAssignedKeyspaces) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}

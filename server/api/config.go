@@ -252,7 +252,12 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 	if manager == nil {
 		return errors.New("meta-service groups manager is not initialized")
 	}
-	newGroups := newCfg.GetMetaServiceGroups()
+	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
+	// the map persisted via newCfg and the map applied to the manager are the
+	// same reference. UpdateGroupsSafely trims it in place, and we must persist
+	// the trimmed values too. newCfg is a locally owned clone, so there is no
+	// aliasing with the live config.
+	newGroups := newCfg.MetaServiceGroups
 	deletedGroups := make([]string, 0)
 	for id := range oldCfg.GetMetaServiceGroups() {
 		if _, ok := newGroups[id]; !ok {
