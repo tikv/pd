@@ -405,6 +405,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		}
 		select {
 		case <-streamCtx.Done():
+			firstRequest.done <- errors.WithStack(streamCtx.Err())
 			connection.reset()
 			log.Info("[resource_manager] token stream is canceled")
 			continue
