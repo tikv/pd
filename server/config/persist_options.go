@@ -104,9 +104,6 @@ func (o *PersistOptions) UpdateScheduleConfig(storage endpoint.ConfigStorage, up
 	if err := update(cfg); err != nil {
 		return err
 	}
-	if reflect.DeepEqual(old, cfg) {
-		return nil
-	}
 	o.storeScheduleConfig(cfg)
 	if err := o.persistLocked(storage); err != nil {
 		o.storeScheduleConfig(old)
@@ -150,9 +147,6 @@ func (o *PersistOptions) UpdatePDServerConfig(storage endpoint.ConfigStorage, up
 	cfg := old.Clone()
 	if err := update(cfg); err != nil {
 		return err
-	}
-	if reflect.DeepEqual(old, cfg) {
-		return nil
 	}
 	o.storePDServerConfig(cfg)
 	if err := o.persistLocked(storage); err != nil {

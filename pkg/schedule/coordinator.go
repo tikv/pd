@@ -321,13 +321,13 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		}
 		if needRun {
 			log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
-			if err = c.schedulers.AddScheduler(s); err != nil {
+			if err = c.schedulers.AddScheduler(s, cfg.Args...); err != nil {
 				log.Error("can not add scheduler with independent configuration",
 					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
 		} else {
 			log.Info("create scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()))
-			if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+			if err = c.schedulers.AddSchedulerHandler(s, cfg.Args...); err != nil {
 				log.Error("can not add scheduler handler with independent configuration",
 					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}

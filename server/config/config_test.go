@@ -437,23 +437,6 @@ func TestUpdatePDServerConfigKeepsLatestFields(t *testing.T) {
 	re.Equal("none", reloaded.GetPDServerConfig().DashboardAddress)
 }
 
-func TestUpdateConfigSkipsUnchangedSave(t *testing.T) {
-	re := require.New(t)
-	opt, err := newTestScheduleOption()
-	re.NoError(err)
-
-	storage := newBlockingConfigStorage()
-	close(storage.releaseFirst)
-
-	re.NoError(opt.UpdateScheduleConfig(storage, func(*sc.ScheduleConfig) error {
-		return nil
-	}))
-	re.NoError(opt.UpdatePDServerConfig(storage, func(*PDServerConfig) error {
-		return nil
-	}))
-	re.Zero(storage.getSaveCount())
-}
-
 func TestPersistSerializesFullConfigSaves(t *testing.T) {
 	re := require.New(t)
 	opt, err := newTestScheduleOption()
@@ -580,12 +563,6 @@ func (s *blockingConfigStorage) savedConfig() *persistedConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.saved
-}
-
-func (s *blockingConfigStorage) getSaveCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.saveCount
 }
 
 func TestDashboardConfig(t *testing.T) {

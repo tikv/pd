@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+
 	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -104,6 +106,33 @@ func (suite *configTestSuite) TestConfigAll() {
 
 func (suite *configTestSuite) TestKeyspaceConfigUpdate() {
 	suite.env.RunTest(suite.checkKeyspaceConfigUpdate)
+}
+
+func (suite *configTestSuite) TestNoopConfigUpdateSkipsPersist() {
+	suite.env.RunTest(suite.checkNoopConfigUpdateSkipsPersist)
+}
+
+func (suite *configTestSuite) checkNoopConfigUpdateSkipsPersist(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	addr := fmt.Sprintf("%s/pd/api/v1/config", leaderServer.GetAddr())
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
+	}()
+
+	postData, err := json.Marshal(map[string]any{
+		"schedule.region-schedule-limit": leaderServer.GetServer().GetScheduleConfig().RegionScheduleLimit,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+
+	postData, err = json.Marshal(map[string]any{
+		"pd-server.dashboard-address": leaderServer.GetServer().GetPDServerConfig().DashboardAddress,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
 }
 
 func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestCluster) {
