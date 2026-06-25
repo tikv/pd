@@ -105,7 +105,7 @@ func (o *PersistOptions) UpdateScheduleConfig(storage endpoint.ConfigStorage, up
 		return err
 	}
 	o.storeScheduleConfig(cfg)
-	if err := o.Persist(storage); err != nil {
+	if err := o.persistLocked(storage); err != nil {
 		o.storeScheduleConfig(old)
 		return err
 	}
@@ -149,7 +149,7 @@ func (o *PersistOptions) UpdatePDServerConfig(storage endpoint.ConfigStorage, up
 		return err
 	}
 	o.storePDServerConfig(cfg)
-	if err := o.Persist(storage); err != nil {
+	if err := o.persistLocked(storage); err != nil {
 		o.storePDServerConfig(old)
 		return err
 	}
@@ -839,12 +839,20 @@ type persistedConfig struct {
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
 func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
-	o.GetScheduleConfig().StoreLimitVersion = "v2"
-	return o.Persist(storage)
+	return o.UpdateScheduleConfig(storage, func(cfg *sc.ScheduleConfig) error {
+		cfg.StoreLimitVersion = "v2"
+		return nil
+	})
 }
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+	return o.persistLocked(storage)
+}
+
+func (o *PersistOptions) persistLocked(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{
 		Config: &Config{
 			Schedule:        *o.GetScheduleConfig(),
