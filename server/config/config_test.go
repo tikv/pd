@@ -437,6 +437,23 @@ func TestUpdatePDServerConfigKeepsLatestFields(t *testing.T) {
 	re.Equal("none", reloaded.GetPDServerConfig().DashboardAddress)
 }
 
+func TestUpdateConfigSkipsUnchangedSave(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+
+	storage := newBlockingConfigStorage()
+	close(storage.releaseFirst)
+
+	re.NoError(opt.UpdateScheduleConfig(storage, func(*sc.ScheduleConfig) error {
+		return nil
+	}))
+	re.NoError(opt.UpdatePDServerConfig(storage, func(*PDServerConfig) error {
+		return nil
+	}))
+	re.Zero(storage.getSaveCount())
+}
+
 func TestPersistSerializesFullConfigSaves(t *testing.T) {
 	re := require.New(t)
 	opt, err := newTestScheduleOption()
@@ -451,7 +468,16 @@ func TestPersistSerializesFullConfigSaves(t *testing.T) {
 		})
 	}()
 
-	<-storage.firstStarted
+	releaseFirst := sync.OnceFunc(func() {
+		close(storage.releaseFirst)
+	})
+	defer releaseFirst()
+
+	select {
+	case <-storage.firstStarted:
+	case <-time.After(5 * time.Second):
+		re.FailNow("first config save did not start")
+	}
 
 	replication := opt.GetReplicationConfig().Clone()
 	replication.MaxReplicas = 5
@@ -463,11 +489,10 @@ func TestPersistSerializesFullConfigSaves(t *testing.T) {
 
 	select {
 	case <-storage.secondStarted:
-		// Before Persist used the shared config lock, this second save could run
-		// while the first stale full-config snapshot was still blocked.
+		re.FailNow("second config save started before the first save was released")
 	case <-time.After(100 * time.Millisecond):
 	}
-	close(storage.releaseFirst)
+	releaseFirst()
 
 	re.NoError(<-scheduleErrCh)
 	re.NoError(<-persistErrCh)
@@ -555,6 +580,12 @@ func (s *blockingConfigStorage) savedConfig() *persistedConfig {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.saved
+}
+
+func (s *blockingConfigStorage) getSaveCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveCount
 }
 
 func TestDashboardConfig(t *testing.T) {
