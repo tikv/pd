@@ -186,6 +186,8 @@ func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
 	re.Equal(4, h.capacity())
 }
 
+// newTestHistoryBuffer returns a history buffer backed by in-memory storage for
+// use in tests.
 func newTestHistoryBuffer(maxCapacity int) *historyBuffer {
 	return newHistoryBufferWithConfig(2, maxCapacity, 1, storage.NewStorageWithMemoryBackend())
 }

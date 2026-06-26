@@ -1958,7 +1958,7 @@ func (s *Server) leaderLoop() {
 	}
 }
 
-// This function returns true when this server is eligible
+// canCampaignAsRegionSyncerCaughtUp returns true when this server is eligible
 // to campaign for PD leadership from a region-syncer correctness standpoint:
 //   - region storage is not in use (regions live in etcd, no syncer needed), or
 //   - the syncer was never started on this process (single-node bootstrap, or

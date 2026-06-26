@@ -122,6 +122,8 @@ func (h *historyBuffer) capacity() int {
 	return h.size - 1
 }
 
+// record appends a region change to the history buffer, advancing the next
+// index and periodically persisting it to the backing storage.
 func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
@@ -396,6 +398,8 @@ func (h *historyBuffer) resizeLocked(newCapacity int) {
 	h.tail = keep % h.size
 }
 
+// getLocked returns the region recorded at the given history index, or nil if
+// the index is outside the retained window. The caller must hold the lock.
 func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 	if index < h.nextIndex() && index >= h.firstIndex() {
 		pos := (h.head + int(index-h.firstIndex())) % h.size

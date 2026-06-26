@@ -226,6 +226,8 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	return syncer
 }
 
+// historyBufferMaxSizeFromMemory returns the maximum history buffer size scaled
+// to the total system memory, bounded by the default and maximum sizes.
 func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
 	if totalMemory == 0 {
 		return defaultHistoryBufferSize
@@ -241,7 +243,7 @@ func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
 	return size
 }
 
-// This function seeds the in-memory historySynced
+// reloadHistorySyncedFromDurableState seeds the in-memory historySynced
 // flag from the persisted historyIndex so a node that previously completed
 // a sync isn't permanently locked out of campaigning after a restart
 // followed by a leader death mid-sync. A non-zero index only ever lands on
@@ -439,6 +441,10 @@ func (s *RegionSyncer) syncHistoryRegion(
 	return s.syncHistoryRegionLocked(ctx, request, syncStream, endIndex)
 }
 
+// syncHistoryRegionLocked serves a follower's history sync request: it replays
+// the buffered records in [request.StartIndex, endIndex), or falls back to a
+// full sync when the requested range is no longer available. The caller must
+// hold the stream's send lock.
 func (s *RegionSyncer) syncHistoryRegionLocked(
 	ctx context.Context,
 	request *pdpb.SyncRegionRequest,
@@ -486,6 +492,8 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 	return s.syncHistoryRecordsLocked(startIndex, records, syncStream, true)
 }
 
+// buildSyncRegionResponse builds a SyncRegionResponse carrying the given records
+// starting at startIndex.
 func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdpb.SyncRegionResponse {
 	regions := make([]*metapb.Region, len(records))
 	stats := make([]*pdpb.RegionStat, len(records))
@@ -542,6 +550,10 @@ func (*RegionSyncer) syncHistoryRecordsLocked(startIndex uint64, records []*core
 	})
 }
 
+// syncFullRegionsLocked streams a full snapshot of the leader's regions to a
+// follower, followed by any catch-up records and an end-of-history marker at the
+// leader's next index so the follower can commit. The caller must hold the
+// stream's send lock.
 func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, syncStream *regionSyncStream, syncStartIndex uint64) error {
 	releaseRetain := s.history.retainFrom(syncStartIndex)
 	defer releaseRetain()

@@ -114,6 +114,9 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
+// handleRegionSyncResponse applies one sync response from the leader to the
+// follower's region cache, storage, and history buffer. It returns whether the
+// response was handled and whether a full sync is still in progress.
 func (s *RegionSyncer) handleRegionSyncResponse(
 	ctx context.Context,
 	resp *pdpb.SyncRegionResponse,

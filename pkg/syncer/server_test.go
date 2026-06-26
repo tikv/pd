@@ -78,6 +78,8 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 	re.Equal(2, syncer.history.capacity())
 }
 
+// TestSyncHistoryRecordsSplitBatches verifies that history records are streamed
+// in batches followed by a trailing end-of-history marker.
 func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 	re := require.New(t)
 	syncer, _ := newTestRegionSyncer(t)
@@ -187,6 +189,9 @@ func syncFullRegionsForTest(ctx context.Context, syncer *RegionSyncer, syncStrea
 	return syncer.syncFullRegionsLocked(ctx, "pd-follower", syncStream, syncStartIndex)
 }
 
+// TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp verifies that records
+// appended while a full sync is in progress are still streamed to the follower
+// after the snapshot, followed by the end-of-history marker.
 func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	re := require.New(t)
 	bc := core.NewBasicCluster()
@@ -799,6 +804,9 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 	re.Equal(uint64(13), syncStream.getSendIndex())
 }
 
+// TestSyncHistoryRegionStopsAtSyncStartIndex verifies that an incremental
+// history replay stops at the sync start index and is followed by an
+// end-of-history marker.
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	re := require.New(t)
 	syncer := &RegionSyncer{history: newTestHistoryBuffer(defaultHistoryBufferSize)}
