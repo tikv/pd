@@ -187,6 +187,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 			if err != nil {
 				log.Debug("fail to fix missing TiFlash learner peer before replacing offline peer", errs.ZapError(err))
 			} else if op != nil {
+				ruleCheckerAddTiFlashLearnerCounter.Inc()
 				return op, nil
 			}
 			ruleCheckerReplaceOfflineCounter.Inc()
@@ -209,7 +210,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 func (c *RuleChecker) fixMissingTiFlashLearnerPeer(region *core.RegionInfo, fit *placement.RegionFit) (*operator.Operator, error) {
 	for _, rf := range fit.RuleFits {
 		if len(rf.Peers) < rf.Rule.Count && isTiFlashLearnerRule(rf.Rule) {
-			return c.addRulePeerWithOptions(region, fit, rf, false, false)
+			return c.addTiFlashLearnerPeer(region, fit, rf)
 		}
 	}
 	return nil, nil
@@ -232,6 +233,10 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 	return c.addRulePeerWithOptions(region, fit, rf, true, true)
 }
 
+func (c *RuleChecker) addTiFlashLearnerPeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
+	return c.addRulePeerWithOptions(region, fit, rf, false, false)
+}
+
 func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit, updateFilterState, allowReplacement bool) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
 	ruleStores := c.getRuleFitStores(rf)
@@ -244,7 +249,7 @@ func (c *RuleChecker) addRulePeerWithOptions(region *core.RegionInfo, fit *place
 			c.handleFilterState(region, filterByTempState)
 		}
 		if !allowReplacement {
-			return nil, errs.ErrNoStoreToAdd
+			return nil, errNoStoreToAdd
 		}
 		// try to replace an existing peer that matches the label constraints.
 		// issue: https://github.com/tikv/pd/issues/7185
