@@ -285,7 +285,16 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 		threshold = 5
 	})
 
-	for _, group := range groups {
+	sortedGroups := make([]*endpoint.KeyspaceGroup, len(groups))
+	copy(sortedGroups, groups)
+	sort.Slice(sortedGroups, func(i, j int) bool {
+		if len(sortedGroups[i].Keyspaces) == len(sortedGroups[j].Keyspaces) {
+			return sortedGroups[i].ID < sortedGroups[j].ID
+		}
+		return len(sortedGroups[i].Keyspaces) > len(sortedGroups[j].Keyspaces)
+	})
+
+	for _, group := range sortedGroups {
 		if group.IsSplitting() || group.IsMerging() {
 			continue
 		}
