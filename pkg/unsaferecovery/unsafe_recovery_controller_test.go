@@ -43,6 +43,226 @@ func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHear
 	}
 }
 
+func newTestRegionItemWithEpoch(id uint64, start, end string, confVer, version uint64, initialized bool) *regionItem {
+	region := &metapb.Region{
+		Id:          id,
+		StartKey:    []byte(start),
+		EndKey:      []byte(end),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: confVer, Version: version},
+	}
+	if initialized {
+		region.Peers = []*metapb.Peer{{Id: id + 1000, StoreId: 1}}
+	}
+	return &regionItem{
+		report: &pdpb.PeerReport{
+			RegionState: &raft_serverpb.RegionLocalState{Region: region},
+		},
+		storeID: 1,
+	}
+}
+
+func newTestRegionItem(id uint64, start, end string, initialized bool) *regionItem {
+	return newTestRegionItemWithEpoch(id, start, end, 1, 1, initialized)
+}
+
+func TestEmptyRegionIndex(t *testing.T) {
+	re := require.New(t)
+
+	index := &emptyRegionIndex{regions: []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).Region(),
+		newTestRegionItem(2, "f", "h", true).Region(),
+		newTestRegionItem(3, "z", "", true).Region(),
+	}}
+
+	re.Equal(uint64(1), index.findOverlap(newTestRegionItem(4, "a", "c", true).Region()).GetId())
+	re.Equal(uint64(2), index.findOverlap(newTestRegionItem(5, "g", "i", true).Region()).GetId())
+	re.Equal(uint64(3), index.findOverlap(newTestRegionItem(6, "z", "", true).Region()).GetId())
+	re.Nil(index.findOverlap(newTestRegionItem(7, "d", "f", true).Region()))
+}
+
+func TestFindOverlapPeerWithEmptyRegions(t *testing.T) {
+	re := require.New(t)
+
+	emptyRegions := []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).Region(),
+	}
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "a", "z", true)},
+		2: {newTestRegionItem(3, "b", "y", false)},
+	}
+	peer, emptyRegion := findOverlapPeerWithEmptyRegions(peersMap, emptyRegions)
+	re.Equal(uint64(2), peer.Region().GetId())
+	re.Equal(uint64(1), emptyRegion.GetId())
+
+	peer, emptyRegion = findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {newTestRegionItem(3, "b", "y", false)},
+	}, emptyRegions)
+	re.Nil(peer)
+	re.Nil(emptyRegion)
+}
+
+func TestFindOverlapPeerWithEmptyRegionsFastPath(t *testing.T) {
+	re := require.New(t)
+
+	emptyRegions := []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).Region(),
+	}
+	peer, emptyRegion := findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {
+			newTestRegionItemWithEpoch(2, "x", "z", 1, 10, true),
+			newTestRegionItemWithEpoch(3, "x", "z", 2, 10, true),
+		},
+	}, emptyRegions)
+	re.Nil(peer)
+	re.Nil(emptyRegion)
+
+	peer, emptyRegion = findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {
+			newTestRegionItemWithEpoch(2, "x", "z", 1, 10, true),
+			newTestRegionItemWithEpoch(3, "a", "z", 1, 10, true),
+		},
+	}, emptyRegions)
+	re.Equal(uint64(3), peer.Region().GetId())
+	re.Equal(uint64(1), emptyRegion.GetId())
+}
+
+func TestRemoveFailedStoresWithOptions(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	recoveryController := NewController(cluster)
+	err := recoveryController.RemoveFailedStoresWithOptions(nil, 60, true, RemoveFailedStoresOptions{
+		PlanExecutionTimeout: 5 * time.Minute,
+		DisableParanoidCheck: true,
+	})
+	re.NoError(err)
+	re.Equal(5*time.Minute, recoveryController.planExecutionTimeout)
+	re.True(recoveryController.disableParanoidCheck)
+	re.Contains(recoveryController.output[0].Details, "paranoid check disabled")
+	re.Contains(recoveryController.output[0].Details, "plan execution timeout 5m0s")
+
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.dispatchPlan(newStoreHeartbeat(1, nil), resp)
+	re.NotNil(resp.GetRecoveryPlan())
+	re.WithinDuration(time.Now().Add(5*time.Minute), recoveryController.storePlanExpires[1], time.Second)
+}
+
+func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "m", "", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	peersMap := map[uint64][]*regionItem{
+		2: {newTestRegionItem(2, "a", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+
+	recoveryController = NewController(cluster)
+	recoveryController.disableParanoidCheck = true
+	hasPlan, err = recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.True(hasPlan)
+	re.NoError(err)
+	re.Len(recoveryController.storeRecoveryPlans[1].GetCreates(), 1)
+}
+
+func TestCreateEmptyRegionTailParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "a", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "x", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionFullRangeParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "a", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newRegionTree(), peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionTailUsesTiKVStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(2, "6.0.0") {
+		if store.GetID() == 1 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil, 2: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, nil)
+	re.True(hasPlan)
+	re.NoError(err)
+	re.Nil(recoveryController.storeRecoveryPlans[1])
+	re.Len(recoveryController.storeRecoveryPlans[2].GetCreates(), 1)
+	re.Equal([]byte("m"), recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetStartKey())
+	re.Empty(recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetEndKey())
+}
+
 func hasQuorum(region *metapb.Region, failedStores []uint64) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0
