@@ -45,6 +45,8 @@ const (
 	dcLocationConfigEtcdPrefix = "dc-location"
 	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
 	campaignLeaderFrequencyTimes = 3
+
+	checkFailBackoffDuration = 200 * time.Millisecond
 )
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
@@ -229,15 +231,15 @@ func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) 
 // otherwise returns a bool which indicates if it is needed to check later.
 func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 	if err := m.PreCheckLeader(); err != nil {
-		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
-		time.Sleep(200 * time.Millisecond)
+		log.Warn("failed to pass pre-check, check pd leader later", errs.ZapError(err))
+		time.Sleep(checkFailBackoffDuration)
 		return nil, true
 	}
 
 	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
-		log.Error("getting pd leader meets error", errs.ZapError(err))
-		time.Sleep(200 * time.Millisecond)
+		log.Warn("getting pd leader meets error", errs.ZapError(err))
+		time.Sleep(checkFailBackoffDuration)
 		return nil, true
 	}
 	if leader == nil {
@@ -252,7 +254,7 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 		// Delete the leader itself and let others start a new election again.
 		if err = m.leadership.DeleteLeaderKey(); err != nil {
 			log.Error("deleting pd leader key meets error", errs.ZapError(err))
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(checkFailBackoffDuration)
 			return nil, true
 		}
 		// Return nil and false to make sure the campaign will start immediately.

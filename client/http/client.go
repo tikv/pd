@@ -249,7 +249,7 @@ func (ci *clientInner) doRequest(
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
-		log.Error("[pd] request failed with a non-200 status", logFields...)
+		log.Warn("[pd] request failed with a non-200 status", logFields...)
 		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s', body: '%s'", resp.Status, bs)
 	}
 
