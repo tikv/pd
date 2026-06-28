@@ -218,6 +218,7 @@ func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.Scat
 		return &schedulingpb.ScatterRegionsResponse{Header: header}, nil
 	}
 	percentage := 100
+	failedRegionIDs := make([]uint64, 0, len(failures))
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
@@ -227,10 +228,14 @@ func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.Scat
 			}
 			return r
 		}()))
+		for regionID := range failures {
+			failedRegionIDs = append(failedRegionIDs, regionID)
+		}
 	}
 	return &schedulingpb.ScatterRegionsResponse{
 		Header:             s.header(),
 		FinishedPercentage: uint64(percentage),
+		FailedRegionsId:    failedRegionIDs,
 	}, nil
 }
 
