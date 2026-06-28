@@ -165,6 +165,22 @@ func (s *StoreInfo) IsTiFlash() bool {
 	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlash)
 }
 
+<<<<<<< HEAD
+=======
+// IsTiFlashCompute returns true if the store is TiFlash compute node.
+func (s *StoreInfo) IsTiFlashCompute() bool {
+	return IsStoreContainLabel(s.GetMeta(), EngineKey, EngineTiFlashCompute)
+}
+
+// Engine returns the engine type of the store.
+func (s *StoreInfo) Engine() string {
+	if s.IsTiKV() {
+		return EngineTiKV
+	}
+	return EngineTiFlash
+}
+
+>>>>>>> c87b73a1e0 (statistics: delete cluster status metrics on store deletion (#9945))
 // IsUp returns true if store is serving or preparing.
 func (s *StoreInfo) IsUp() bool {
 	return s.IsServing() || s.IsPreparing()
