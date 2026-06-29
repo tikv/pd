@@ -462,9 +462,13 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		gcSafePoint             uint64
 	)
 
-	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	isTxnSafePointRouted, err := m.gcMetaStorage.IsTxnSafePointRouted(keyspaceID)
+	if err != nil {
+		return AdvanceTxnSafePointResult{}, err
+	}
+	err = m.gcMetaStorage.RunInTxnSafePointTransaction(keyspaceID, func(txnSafePointProvider endpoint.GCStateProvider, wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
-		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		oldTxnSafePoint, err1 = txnSafePointProvider.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
 			return err1
 		}
@@ -489,6 +493,9 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 			}
 
 			if barrier.IsExpired(now) {
+				if isTxnSafePointRouted {
+					continue
+				}
 				// Perform lazy delete to the expired GC barriers.
 				// WARNING: It might look like a reasonable optimization idea to perform the lazy-deletion in a lower
 				// frequency (instead of everytime checking it). However, it's UNSAFE considering the possibility of
@@ -547,7 +554,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(ctx context.Context, keyspaceID
 		// Txn safe point never decreases.
 		newTxnSafePoint = max(oldTxnSafePoint, minBlocker)
 
-		if downgradeCompatibleMode {
+		if downgradeCompatibleMode && !isTxnSafePointRouted {
 			err1 = wb.SetGCBarrier(keyspaceID, endpoint.NewGCBarrier(keypath.GCWorkerServiceSafePointID, newTxnSafePoint, nil))
 			if err1 != nil {
 				return err1

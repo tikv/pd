@@ -143,6 +143,14 @@ func (m *MetaServiceGroupManager) AttachEndpoints(keyspaceConfig map[string]stri
 	}
 }
 
+// GetGroupEndpoints returns the endpoints of the given meta-service group.
+func (m *MetaServiceGroupManager) GetGroupEndpoints(groupID string) (string, bool) {
+	m.RLock()
+	defer m.RUnlock()
+	endpoints, ok := m.metaServiceGroups[groupID]
+	return endpoints, ok && endpoints != ""
+}
+
 // GetGroups returns currently available meta-service groups.
 func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 	m.RLock()

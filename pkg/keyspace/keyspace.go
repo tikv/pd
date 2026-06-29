@@ -748,6 +748,15 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 	return meta, err
 }
 
+// GetMetaServiceGroupIDByKeyspaceID returns the meta-service group ID assigned to the keyspace.
+func (manager *Manager) GetMetaServiceGroupIDByKeyspaceID(keyspaceID uint32) (string, error) {
+	meta, err := manager.LoadKeyspaceByID(keyspaceID)
+	if err != nil {
+		return "", err
+	}
+	return meta.GetConfig()[MetaServiceGroupIDKey], nil
+}
+
 // Mutation represents a single operation to be applied on keyspace config.
 type Mutation struct {
 	Op    OpType

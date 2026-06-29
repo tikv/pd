@@ -178,6 +178,8 @@ type Server struct {
 	keyspaceGroupManager *keyspace.GroupManager
 	// meta-service group manager
 	metaServiceGroupManager *keyspace.MetaServiceGroupManager
+	// meta-service group GC storage provider
+	metaServiceGroupGCStorageProvider *endpoint.MetaServiceGroupGCStorageProvider
 	// metering writer
 	meteringWriter *metering.Writer
 	// for basicCluster operation.
@@ -555,7 +557,19 @@ func (s *Server) startServer(ctx context.Context) error {
 	} else {
 		log.Info("no metering config provided, the metering writer will not be started")
 	}
-	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
+	tlsConfig, err := s.cfg.Security.ToClientTLSConfig()
+	if err != nil {
+		return err
+	}
+	s.metaServiceGroupGCStorageProvider = endpoint.NewMetaServiceGroupGCStorageProvider(
+		s.keyspaceManager,
+		s.metaServiceGroupManager,
+		tlsConfig,
+	)
+	gcStateProvider := defaultStorage.GetGCStateProviderWithOptions(
+		endpoint.WithMetaServiceGroupStorageProvider(s.metaServiceGroupGCStorageProvider),
+	)
+	s.gcStateManager = gc.NewGCStateManager(gcStateProvider, s.cfg.PDServerCfg, s.keyspaceManager)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -611,6 +625,11 @@ func (s *Server) Close() {
 	}
 	if s.meteringWriter != nil {
 		s.meteringWriter.Stop()
+	}
+	if s.metaServiceGroupGCStorageProvider != nil {
+		if err := s.metaServiceGroupGCStorageProvider.Close(); err != nil {
+			log.Warn("failed to close meta-service group GC storage provider", errs.ZapError(err))
+		}
 	}
 
 	if s.client != nil {

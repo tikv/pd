@@ -697,6 +697,88 @@ func TestTxnSafePoint(t *testing.T) {
 	}
 }
 
+type testMetaServiceGroupIDProvider map[uint32]string
+
+func (p testMetaServiceGroupIDProvider) GetMetaServiceGroupIDByKeyspaceID(keyspaceID uint32) (string, error) {
+	return p[keyspaceID], nil
+}
+
+type testMetaServiceGroupResolver map[string]string
+
+func (r testMetaServiceGroupResolver) GetGroupEndpoints(groupID string) (string, bool) {
+	endpoints, ok := r[groupID]
+	return endpoints, ok
+}
+
+func TestTxnSafePointWithMetaServiceGroups(t *testing.T) {
+	re := require.New(t)
+	localStorage, localClean := newEtcdStorageEndpoint(t)
+	defer localClean()
+
+	group1Servers, group1Client, group1Clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer group1Clean()
+	group1Storage := NewStorageEndpoint(kv.NewEtcdKVBase(group1Client), nil)
+	group1Endpoints := group1Servers[0].Config().ListenClientUrls[0].String()
+
+	group2Servers, group2Client, group2Clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer group2Clean()
+	group2Storage := NewStorageEndpoint(kv.NewEtcdKVBase(group2Client), nil)
+	group2Endpoints := group2Servers[0].Config().ListenClientUrls[0].String()
+
+	metaStorageProvider := NewMetaServiceGroupGCStorageProvider(
+		testMetaServiceGroupIDProvider{
+			1001: "group-1",
+			1002: "group-2",
+		},
+		testMetaServiceGroupResolver{
+			"group-1": group1Endpoints,
+			"group-2": group2Endpoints,
+		},
+		nil,
+	)
+	defer func() {
+		re.NoError(metaStorageProvider.Close())
+	}()
+	provider := localStorage.GetGCStateProviderWithOptions(
+		WithMetaServiceGroupStorageProvider(metaStorageProvider),
+	)
+
+	re.NoError(provider.RunInTxnSafePointTransaction(1001, func(_ GCStateProvider, wb *GCStateWriteBatch) error {
+		return wb.SetTxnSafePoint(1001, 101)
+	}))
+	re.NoError(provider.RunInTxnSafePointTransaction(1002, func(_ GCStateProvider, wb *GCStateWriteBatch) error {
+		return wb.SetTxnSafePoint(1002, 202)
+	}))
+	re.NoError(provider.RunInTxnSafePointTransaction(1003, func(_ GCStateProvider, wb *GCStateWriteBatch) error {
+		return wb.SetTxnSafePoint(1003, 303)
+	}))
+
+	key1 := keypath.TxnSafePointPath(1001)
+	key2 := keypath.TxnSafePointPath(1002)
+	key3 := keypath.TxnSafePointPath(1003)
+	re.Equal("101", loadValue(re, group1Storage, key1))
+	re.Empty(loadValue(re, group2Storage, key1))
+	re.Empty(loadValue(re, localStorage, key1))
+
+	re.Equal("202", loadValue(re, group2Storage, key2))
+	re.Empty(loadValue(re, group1Storage, key2))
+	re.Empty(loadValue(re, localStorage, key2))
+
+	re.Equal("303", loadValue(re, localStorage, key3))
+	re.Empty(loadValue(re, group1Storage, key3))
+	re.Empty(loadValue(re, group2Storage, key3))
+
+	txnSafePoint, err := provider.LoadTxnSafePoint(1001)
+	re.NoError(err)
+	re.Equal(uint64(101), txnSafePoint)
+	txnSafePoint, err = provider.LoadTxnSafePoint(1002)
+	re.NoError(err)
+	re.Equal(uint64(202), txnSafePoint)
+	txnSafePoint, err = provider.LoadTxnSafePoint(1003)
+	re.NoError(err)
+	re.Equal(uint64(303), txnSafePoint)
+}
+
 func mustSaveKey(re *require.Assertions, se *StorageEndpoint, key string, value string) {
 	err := se.Save(key, value)
 	re.NoError(err)

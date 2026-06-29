@@ -245,13 +245,31 @@ func (b *GCBarrier) String() string {
 type GCStateStorage interface {
 	// GetGCStateProvider returns an GCStateProvider for reading and writing GC state data.
 	GetGCStateProvider() GCStateProvider
+	// GetGCStateProviderWithOptions returns an GCStateProvider with the given options.
+	GetGCStateProviderWithOptions(opts ...GCStateProviderOption) GCStateProvider
+}
+
+// GCStateProviderOption customizes a GCStateProvider.
+type GCStateProviderOption func(*GCStateProvider)
+
+// WithMetaServiceGroupStorageProvider sets the storage provider for keyspace-level
+// GC states that should be stored in external meta-service groups.
+func WithMetaServiceGroupStorageProvider(provider *MetaServiceGroupGCStorageProvider) GCStateProviderOption {
+	return func(p *GCStateProvider) {
+		p.metaServiceGroupStorageProvider = provider
+	}
 }
 
 // GetGCStateProvider returns an GCStateProvider for reading and writing GC state data.
 // GCStateProvider provides direct read/write to GC related metadata without maintaining the consistency or invariants.
 // It's only designed for internal use of GC. Avoid using it for other purposes.
 func (se *StorageEndpoint) GetGCStateProvider() GCStateProvider {
-	return newGCStateProvider(se)
+	return NewGCStateProvider(se)
+}
+
+// GetGCStateProviderWithOptions returns an GCStateProvider with the given options.
+func (se *StorageEndpoint) GetGCStateProviderWithOptions(opts ...GCStateProviderOption) GCStateProvider {
+	return NewGCStateProvider(se, opts...)
 }
 
 // GCStateProvider is a stateless wrapper over StorageEndpoint that provides methods for reading/writing GC states.
@@ -259,12 +277,22 @@ func (se *StorageEndpoint) GetGCStateProvider() GCStateProvider {
 // from the StorageEndpoint type and the Storage interface, making it less likely to be misused unintentionally when
 // the Storage or StorageEndpoint is used in other context.
 type GCStateProvider struct {
-	storage *StorageEndpoint
+	storage                         *StorageEndpoint
+	metaServiceGroupStorageProvider *MetaServiceGroupGCStorageProvider
+}
+
+// NewGCStateProvider creates a new GCStateProvider.
+func NewGCStateProvider(storage *StorageEndpoint, opts ...GCStateProviderOption) GCStateProvider {
+	provider := GCStateProvider{storage: storage}
+	for _, opt := range opts {
+		opt(&provider)
+	}
+	return provider
 }
 
 // newGCStateProvider creates a new GCStateProvider.
 func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
-	return GCStateProvider{storage: storage}
+	return NewGCStateProvider(storage)
 }
 
 // GCStateWriteBatch is the batch of write operations within a GCStateTransaction, which can be started by calling
@@ -324,8 +352,12 @@ func (p GCStateProvider) loadGCSafePointForKeyspaceLevelGC(keyspaceID uint32) (u
 
 // LoadTxnSafePoint loads the current transaction safe point of the given keyspaceID from storage.
 func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
+	storage, err := p.getTxnSafePointStorage(keyspaceID)
+	if err != nil {
+		return 0, err
+	}
 	key := keypath.TxnSafePointPath(keyspaceID)
-	value, err := p.storage.Load(key)
+	value, err := storage.Load(key)
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -334,6 +366,30 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
 	}
 	return txnSafePoint, err
+}
+
+func (p GCStateProvider) getTxnSafePointStorage(keyspaceID uint32) (*StorageEndpoint, error) {
+	if p.metaServiceGroupStorageProvider == nil {
+		return p.storage, nil
+	}
+	storage, routed, err := p.metaServiceGroupStorageProvider.GetStorage(keyspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if routed {
+		return storage, nil
+	}
+	return p.storage, nil
+}
+
+// IsTxnSafePointRouted returns whether the txn safe point of the keyspace is stored
+// in a meta-service group instead of the local storage.
+func (p GCStateProvider) IsTxnSafePointRouted(keyspaceID uint32) (bool, error) {
+	if p.metaServiceGroupStorageProvider == nil {
+		return false, nil
+	}
+	_, routed, err := p.metaServiceGroupStorageProvider.GetStorage(keyspaceID)
+	return routed, err
 }
 
 // LoadGCBarrier loads the GCBarrier of the given barrierID from storage.
@@ -435,8 +491,25 @@ func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string
 // In the transaction, reads can be performed on the GCStateProvider as usual, while writes should only be performed
 // through the GCStateWriteBatch.
 func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) error) error {
+	return runInGCStateTransactionOnStorage(p.storage, f)
+}
+
+// RunInTxnSafePointTransaction runs a transaction on the storage that holds
+// the txn safe point for the given keyspace.
+func (p GCStateProvider) RunInTxnSafePointTransaction(keyspaceID uint32, f func(GCStateProvider, *GCStateWriteBatch) error) error {
+	storage, err := p.getTxnSafePointStorage(keyspaceID)
+	if err != nil {
+		return err
+	}
+	txnSafePointProvider := NewGCStateProvider(storage)
+	return runInGCStateTransactionOnStorage(storage, func(wb *GCStateWriteBatch) error {
+		return f(txnSafePointProvider, wb)
+	})
+}
+
+func runInGCStateTransactionOnStorage(storage *StorageEndpoint, f func(wb *GCStateWriteBatch) error) error {
 	revisionKey := keypath.GCStateRevisionPath()
-	currentRevision, err := p.storage.Load(revisionKey)
+	currentRevision, err := storage.Load(revisionKey)
 	if err != nil {
 		return errors.AddStack(err)
 	}
@@ -474,7 +547,7 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 		})
 	}
 
-	txn, err := p.storage.createRawTxn()
+	txn, err := storage.createRawTxn()
 	if err != nil {
 		return errors.AddStack(err)
 	}
