@@ -135,7 +135,7 @@ func loadValue(re *require.Assertions, se *StorageEndpoint, key string) string {
 func TestGCStateJSONUtil(t *testing.T) {
 	se, clean := newEtcdStorageEndpoint(t)
 	defer clean()
-	p := newGCStateProvider(se)
+	p := NewGCStateProvider(se)
 	re := require.New(t)
 
 	writeJSON := func(key string, value any) {

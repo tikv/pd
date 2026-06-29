@@ -290,11 +290,6 @@ func NewGCStateProvider(storage *StorageEndpoint, opts ...GCStateProviderOption)
 	return provider
 }
 
-// newGCStateProvider creates a new GCStateProvider.
-func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
-	return NewGCStateProvider(storage)
-}
-
 // GCStateWriteBatch is the batch of write operations within a GCStateTransaction, which can be started by calling
 // GCStateProvider.RunInGCStateTransaction.
 type GCStateWriteBatch struct {
