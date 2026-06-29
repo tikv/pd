@@ -46,17 +46,24 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
-	// TiFlash labels will be ["engine": "tiflash"]
-	// So we need to merge the labels
 	storeLabels := map[string]string{
 		"zone": "zone1",
 	}
+	expectedLabels := make(map[string]string, len(firstStore.Store.Labels)+len(storeLabels))
 	for _, label := range firstStore.Store.Labels {
-		storeLabels[label.Key] = label.Value
+		re.NotNil(label)
+		expectedLabels[label.Key] = label.Value
 	}
+	for key, value := range storeLabels {
+		expectedLabels[key] = value
+	}
+	// SetStoreLabels merges labels server-side. Do not echo existing labels
+	// back in the request because "engine" is reserved for TiKV/TiFlash.
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 	defer func() {
-		re.NoError(pdHTTPCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
+		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+		defer cleanupCli.Close()
+		re.NoError(cleanupCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
 	}()
 
 	checkLabelsAreEqual := func() {
@@ -69,7 +76,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 			labelsMap[label.Key] = label.Value
 		}
 
-		for key, value := range storeLabels {
+		for key, value := range expectedLabels {
 			re.Equal(value, labelsMap[key])
 		}
 	}
@@ -78,5 +85,6 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	// Restart to reload the label
 	s.cluster.restart()
 	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	checkLabelsAreEqual()
 }
