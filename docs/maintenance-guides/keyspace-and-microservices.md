@@ -20,6 +20,18 @@ Microservices own:
 - TSO, scheduling, resource manager, router, and meta-storage servers
 - forwarding and fallback behavior between PD and independent services
 
+## Core Concepts
+
+- A keyspace is user-visible control-plane metadata with ID, name, state, and
+  config.
+- Keyspace group metadata drives TSO routing and keyspace movement.
+- Meta-service group assignment is stored with keyspace config and can affect
+  external meta-storage routing.
+- Microservices register endpoints in etcd and elect service primaries
+  independently from PD leadership.
+- Classic PD fallback must be explicit because it changes which process serves
+  TSO, scheduling, or resource-manager behavior.
+
 ## Architectural Views
 
 ### Keyspace metadata view
@@ -128,6 +140,24 @@ Signals to preserve:
 11. `pkg/mcs/scheduling/server/server.go`
 12. `pkg/mcs/resourcemanager/server/server.go`
 13. `pkg/mcs/router/server/server.go`
+
+## Glossary
+
+- Keyspace:
+  logical metadata namespace with ID, name, state, and config.
+- Default keyspace:
+  reserved keyspace used for normal non-serverless paths.
+- Keyspace group:
+  group of keyspaces assigned to TSO ownership and routing.
+- Meta-service group:
+  external meta-service assignment used by keyspace metadata.
+- Service registry:
+  etcd-backed record of available split-service endpoints.
+- Service primary:
+  elected owner for one split microservice.
+- Fallback:
+  mode where classic PD serves behavior when the split service is unavailable or
+  disabled.
 
 ## Review Checklist
 

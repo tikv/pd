@@ -19,6 +19,19 @@ Placement policy owns:
 It does not own operator execution. Operators consume placement decisions and
 belong to scheduling.
 
+## Core Concepts
+
+- Placement rules declare desired replica roles, counts, labels, key ranges, and
+  constraints.
+- `RuleManager` owns rule loading, validation, adjustment, default-rule
+  migration, and region fitting.
+- `RegionLabeler` maps key ranges to labels that can affect scheduling and API
+  behavior.
+- `affinity.Manager` overlays affinity group policy and has stricter lock-order
+  requirements than normal rule fitting.
+- Policy metadata is persisted and user-visible, so validation and deterministic
+  fit behavior are compatibility concerns.
+
 ## Architectural Views
 
 ### Placement rule view
@@ -133,6 +146,23 @@ Signals to preserve:
 10. `pkg/schedule/affinity/policy.go`
 11. `pkg/schedule/affinity/group.go`
 12. `pkg/schedule/checker/rule_checker.go`
+
+## Glossary
+
+- Placement rule:
+  declarative replica placement requirement.
+- Rule group:
+  namespace and ordering container for placement rules.
+- `RegionFit`:
+  fit result describing which peers satisfy rules and which are orphan peers.
+- Orphan peer:
+  peer that does not satisfy any placement rule.
+- Region label:
+  key-range label persisted as label-rule metadata.
+- Affinity group:
+  policy object that binds regions and stores for availability intent.
+- Range list:
+  indexed key-range structure used by region label matching.
 
 ## Review Checklist
 

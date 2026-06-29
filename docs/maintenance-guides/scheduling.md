@@ -20,6 +20,19 @@ own persistence details outside scheduler config and placement metadata.
 Detailed placement-rule, region-label, and affinity-policy maintenance lives in
 [placement-policy](./placement-policy.md).
 
+## Core Concepts
+
+- `Coordinator` owns the scheduler runtime: checkers, schedulers, operators,
+  heartbeat streams, scatter/split helpers, and diagnostics.
+- Checkers repair or preserve correctness; schedulers optimize balance or
+  policy goals.
+- Filters are part of correctness because they encode store health, labels,
+  state, and special eviction constraints.
+- Operators are stateful plans delivered through heartbeat responses and tracked
+  until finish, timeout, cancel, or replacement.
+- Classic PD scheduling and independent scheduling-service mode share concepts
+  but differ in lifecycle and fallback routing.
+
 ## Architectural Views
 
 ### Coordinator view
@@ -123,6 +136,24 @@ Signals to preserve:
 10. `pkg/schedule/placement/rule_manager.go`
 11. `pkg/schedule/placement/fit.go`
 12. `pkg/schedule/hbstream/heartbeat_streams.go`
+
+## Glossary
+
+- Coordinator:
+  scheduler runtime coordinator under `pkg/schedule`.
+- Checker:
+  component that scans cluster state for correctness work such as replicas,
+  learners, splits, and rules.
+- Scheduler:
+  component that creates balancing or policy-driven operators.
+- Filter:
+  candidate eligibility rule for store or region selection.
+- Operator:
+  ordered action plan with steps, kind, status, influence, and timeout.
+- Heartbeat stream:
+  channel used to send operator responses back to TiKV.
+- Pending processed region:
+  recently handled region tracked to avoid conflicting scheduling work.
 
 ## Review Checklist
 

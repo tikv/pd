@@ -16,6 +16,19 @@ Covered paths:
 This guide does not define scheduler or storage behavior, but API changes often
 need review with those subsystem guides.
 
+## Core Concepts
+
+- The API boundary includes gRPC, HTTP v1, HTTP v2, middleware, forwarding, and
+  the Go client submodule.
+- Request ownership can require PD leader, any PD member, or a specific
+  microservice primary.
+- gRPC `ResponseHeader` and HTTP error shapes are compatibility contracts with
+  TiKV, TiDB, tools, and external users.
+- Forwarding and redirect behavior must be bounded by context, timeout, and
+  service-discovery freshness.
+- Route labels, rate limiter labels, audit labels, metrics, and swagger/client
+  types should move with route changes.
+
 ## Architectural Views
 
 ### gRPC view
@@ -111,6 +124,23 @@ Signals to preserve:
 10. `client/servicediscovery/service_discovery.go`
 11. `client/http/client.go`
 12. `client/http/types.go`
+
+## Glossary
+
+- gRPC boundary:
+  protobuf-defined service methods implemented by `GrpcServer`.
+- HTTP v1:
+  legacy operational API under `server/api`.
+- HTTP v2:
+  newer API surface under `server/apiv2`.
+- Forwarding:
+  proxying or redirecting requests to the current leader or service primary.
+- `ResponseHeader`:
+  gRPC response metadata carrying cluster, leader, and error information.
+- Service discovery:
+  client-side or server-side lookup of PD and microservice endpoints.
+- Client submodule:
+  separate Go module under `client/` consumed by external callers.
 
 ## Review Checklist
 

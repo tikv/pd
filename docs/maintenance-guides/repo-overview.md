@@ -10,6 +10,18 @@ cross-component change.
 - Explain how major subsystems fit together and where ownership boundaries are.
 - Highlight repository-wide invariants, sequencing rules, and failure modes.
 - Serve as an index into the deeper subsystem guides in this directory.
+- Provide stable retrieval anchors for agents before they search subsystem code.
+
+## Agent Retrieval Notes
+
+- Use this file after [README](./README.md) and before opening a subsystem guide.
+- Match the change to the closest ownership boundary in
+  [Core Components And Boundaries](#core-components-and-boundaries).
+- Use [Core Concepts](#core-concepts) and [Glossary](#glossary) to disambiguate
+  overloaded PD terms such as leader, primary, region, keyspace, fallback, and
+  resource group.
+- Use [Change-Impact Matrix](#change-impact-matrix) to decide which additional
+  subsystem guides should be read before reviewing or editing code.
 
 ## System Context And External Dependencies
 
@@ -37,6 +49,29 @@ Operationally significant dependencies include:
 - TLS material and auth configuration
 - Prometheus metric scraping and HTTP/gRPC health probes
 - failpoint instrumentation in tests
+
+## Core Concepts
+
+- PD is the cluster control plane. It owns metadata, scheduling decisions, TSO,
+  service discovery, and resource-control metadata, but TiKV and TiDB execute
+  the data path.
+- Ownership state is split across several concepts: embedded etcd leader, PD
+  leader, TSO primary, scheduling primary, resource-manager primary, and plain
+  follower are not interchangeable.
+- Most correctness-sensitive state is either persisted in etcd, cached in
+  memory, watched from etcd, or exposed over gRPC/HTTP. A change can be local in
+  code but still change a metadata contract.
+- Request hot paths include TSO allocation, region heartbeat, store heartbeat,
+  scheduler operator dispatch, API forwarding, and resource-manager token
+  acquisition.
+- Fallback paths matter in microservice mode. Classic PD can provide TSO,
+  scheduling, and resource-manager behavior when independent services are absent
+  or disabled by configuration.
+- Region and store metadata are the shared input to statistics, placement,
+  scheduling, APIs, and follower sync. Preserve clone/snapshot semantics when
+  moving data across subsystem boundaries.
+- Startup order, leader lease state, and shutdown cleanup are correctness
+  concerns because serving state and background jobs are gated by leadership.
 
 ## Core Components And Boundaries
 
@@ -421,7 +456,36 @@ Useful companion docs in this repo:
   TiKV node or storage service identity reported to PD.
 - Operator:
   scheduler-produced action plan delivered to TiKV through heartbeat response.
+  Operators have type, steps, status, influence, and timeout semantics.
 - Placement rule:
   declarative replica placement contract.
+- PD member:
+  one PD process with embedded etcd identity, advertise URLs, and member
+  metadata.
+- Follower:
+  a PD member that is not the current PD leader. It may serve some read or
+  forwarded APIs but must not run leader-owned mutations.
+- Service primary:
+  the elected owner for a split microservice such as TSO, scheduling, or
+  resource manager.
+- TSO primary:
+  the service owner allowed to initialize allocators and serve timestamps for
+  its keyspace groups.
+- Epoch:
+  version metadata on regions used to reject stale region state and preserve
+  split/merge correctness.
+- Resource group:
+  TiDB-facing resource-control object whose RU settings are managed by PD.
+- RU:
+  request unit consumed and refilled by resource-manager token buckets.
+- Metadata contract:
+  persisted, watched, or API-visible state whose key path, value shape, timing,
+  or compatibility matters across components.
+- Hot path:
+  request or heartbeat path where extra storage IO, metric child creation, broad
+  locking, or logging can change cluster latency.
+- Fallback:
+  mode where classic PD serves behavior that could otherwise be served by an
+  independent microservice.
 - MCS:
   microservice mode components under `pkg/mcs/`.

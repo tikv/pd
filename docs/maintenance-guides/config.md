@@ -20,6 +20,16 @@ Config owns:
 Config does not own the side effects of every option. The subsystem that
 consumes a config value owns the corresponding runtime behavior.
 
+## Core Concepts
+
+- Static config is loaded from flags and TOML before the server starts.
+- Persisted options are stored through PD storage and reloaded by the leader.
+- Runtime side effects belong to the consuming subsystem, not to config parsing.
+- Dynamic config changes must keep storage, in-memory accessors, API responses,
+  and metrics aligned.
+- Some options are temporary or TTL-scoped; review the override lifetime before
+  changing reload behavior.
+
 ## Architectural Views
 
 ### Static config view
@@ -131,6 +141,22 @@ Signals to preserve:
 9. `pkg/schedule/config/config.go`
 10. `pkg/schedule/config/store_config.go`
 11. `pkg/mcs/resourcemanager/server/config.go`
+
+## Glossary
+
+- Static config:
+  startup-only configuration loaded from command line flags and TOML.
+- Persisted option:
+  dynamic setting saved in storage and exposed through `PersistOptions`.
+- Runtime side effect:
+  in-memory behavior that must change after a persisted option is updated.
+- TTL override:
+  temporary config value that expires after a configured lifetime.
+- Config provider:
+  shared interface used by subsystems to read current config safely.
+- Clone/store semantics:
+  pattern where config structs are copied before mutation and atomically
+  replaced for readers.
 
 ## Review Checklist
 

@@ -17,6 +17,17 @@ Member and election code owns:
 It does not own the business logic that becomes active after leadership is
 obtained. That belongs to server, TSO, cluster, scheduling, or resource manager.
 
+## Core Concepts
+
+- Embedded etcd leader, PD leader, and microservice primary are separate
+  ownership states with different serving guarantees.
+- `member.Member` owns PD member identity and PD leader campaign state.
+- `member.Participant` generalizes the election model for split-service
+  primaries.
+- Lease-backed serving checks are stronger than cached leader identity.
+- Watch loops must handle initial load, live updates, compaction, cancellation,
+  and retry without splitting ownership.
+
 ## Architectural Views
 
 ### PD member view
@@ -131,6 +142,23 @@ Signals to preserve:
 10. `pkg/mcs/resourcemanager/server/server.go`
 11. `pkg/mcs/utils/expected_primary.go`
 12. `pkg/utils/keypath`
+
+## Glossary
+
+- PD member:
+  one PD process identity backed by embedded etcd member metadata.
+- Embedded etcd leader:
+  raft leader of the embedded etcd cluster.
+- PD leader:
+  elected PD owner for leader-only cluster mutations and services.
+- Service primary:
+  elected owner for a microservice such as TSO or resource manager.
+- Lease:
+  time-bounded ownership proof used to decide whether serving is safe.
+- Expected primary:
+  coordination marker used by transfer APIs to steer primary ownership.
+- Loop watcher:
+  etcd watcher helper that performs an initial load and then consumes updates.
 
 ## Review Checklist
 

@@ -20,6 +20,19 @@ Resource manager owns:
 It does not own TiDB-side admission control, but TiDB relies on these contracts
 for resource group behavior.
 
+## Core Concepts
+
+- Resource manager owns PD-side resource-group metadata, RU token buckets,
+  service limits, and metering collection.
+- Token bucket state is runtime behavior; resource group metadata and states are
+  persisted contracts.
+- Metadata-write and state-write roles are separate and depend on embedded PD
+  versus independent resource-manager mode.
+- Metadata watcher initialization must produce the same cache meaning as full
+  storage load.
+- The default resource group and reserved keyspace behavior must stay
+  idempotent across startup, watch replay, and API writes.
+
 ## Architectural Views
 
 ### Manager view
@@ -147,6 +160,23 @@ Signals to preserve:
 10. `pkg/mcs/resourcemanager/metadataapi/config_service.go`
 11. `server/resource_group_metadata_manager.go`
 12. `server/resource_group_proxy_service.go`
+
+## Glossary
+
+- Resource group:
+  TiDB-facing control-plane object defining RU settings and behavior.
+- RU:
+  request unit consumed by SQL workload and refilled by token buckets.
+- Token bucket:
+  runtime structure that meters RU allocation to clients.
+- Service limit:
+  per-keyspace limit state used to bound resource-manager service behavior.
+- Write role:
+  policy deciding whether this manager can write metadata, state, or both.
+- Metadata watcher:
+  etcd watcher that keeps resource group caches in sync from events.
+- Metering:
+  collection and writing of resource usage records.
 
 ## Review Checklist
 

@@ -28,28 +28,45 @@ These files are part of the repository's maintenance surface.
 Each subsystem guide is expected to cover these domains:
 
 1. Purpose and scope
-2. Architectural views
-3. Process lifecycle and startup sequencing
-4. Data model and metadata contracts
-5. Observability and operational signals
-6. Change management guidance
-7. Reading map and companion docs
-8. Glossary
-9. Must-read file order
-10. Change-impact matrix or review checklist
+2. Core concepts
+3. Architectural views
+4. Process lifecycle and startup sequencing
+5. Data model and metadata contracts
+6. Observability and operational signals
+7. Change management guidance
+8. Reading map and companion docs when they add subsystem-specific context
+9. Glossary
+10. Must-read file order
+11. Change-impact matrix or review checklist
 
-The depth varies by subsystem size. Small glue packages can keep some sections
-short, but they should still be present.
+The depth varies by subsystem size. Small or focused guides can keep sections
+short. Reading-map material can be covered by `Must-Read File Order` and
+[repo-overview](./repo-overview.md), but `Core Concepts` and `Glossary` should
+remain present because they are the main retrieval anchors for agents and new
+reviewers.
 
 ## How To Use This Set
 
 - Start with [Repository Overview](./repo-overview.md) to understand layer
   boundaries.
 - Open the guide for the subsystem you are touching.
-- Use the "Must-Read File Order", "Change-Impact Matrix", and "Review
-  Checklist" sections first.
+- Use the "Core Concepts", "Glossary", "Must-Read File Order", and any
+  "Change-Impact Matrix" or "Review Checklist" sections first.
 - Treat every guide as a map, not a complete specification. The source of truth
   is still the code.
+
+## Agent Retrieval Entry Points
+
+Agents should treat this directory as a retrieval map:
+
+1. Read this file to classify the subsystem and find the matching guide.
+2. Read [repo-overview](./repo-overview.md) for cross-component ownership,
+   common terms, and change-impact routing.
+3. Read the subsystem guide's `Core Concepts` and `Glossary` before searching
+   code so terms like leader, primary, fallback, region, keyspace, and rule are
+   interpreted in the right PD context.
+4. Use the subsystem guide's `Must-Read File Order` as the first code-search
+   seed, then expand with `rg` from the concrete symbols listed there.
 
 ## System Map
 

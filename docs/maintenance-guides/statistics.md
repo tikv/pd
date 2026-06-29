@@ -17,6 +17,17 @@ Statistics owns:
 Statistics consumes `pkg/core` snapshots. It should not mutate the authoritative
 cluster cache.
 
+## Core Concepts
+
+- Statistics turns store and region snapshots into scheduler-visible signals.
+- `RegionStatistics` classifies health and placement status by region.
+- Store statistics aggregate capacity, leader/region counts, load, slow-store
+  state, and score inputs.
+- `HotCache` maintains read/write hot peer state asynchronously to avoid blocking
+  heartbeat paths.
+- Collector behavior can differ by engine or store type, especially TiKV versus
+  TiFlash.
+
 ## Architectural Views
 
 ### Region statistics view
@@ -128,6 +139,23 @@ Signals to preserve:
 9. `pkg/statistics/utils/kind.go`
 10. `server/cluster/cluster.go`
 11. `pkg/schedule/schedulers/hot_region.go`
+
+## Glossary
+
+- Region statistic:
+  classification of a region into health or placement buckets.
+- Store statistic:
+  aggregate view of store capacity, status, score, and load.
+- Hot cache:
+  read/write cache tracking hot peers and hotness transitions.
+- Hot peer:
+  region peer whose read or write flow exceeds hot thresholds.
+- Dimension:
+  named load component such as bytes, keys, query count, or CPU.
+- Collector:
+  translator from heartbeat input into comparable statistics.
+- Threshold:
+  calculated boundary used to decide whether a peer is hot or cold.
 
 ## Review Checklist
 

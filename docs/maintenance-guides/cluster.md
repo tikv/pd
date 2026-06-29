@@ -19,6 +19,19 @@ in-memory store/region model in `pkg/core/`.
 `pkg/core` owns the in-memory data structures and query interfaces used by
 schedulers, APIs, and statistics.
 
+## Core Concepts
+
+- `RaftCluster` is leader-owned cluster runtime state, not a raft
+  implementation.
+- `BasicCluster` is the in-memory store/region snapshot model consumed by
+  schedulers, APIs, and statistics.
+- Heartbeat processing separates validation, cache update, statistics, storage
+  persistence, and follower sync.
+- Region and store objects are snapshot-like. Prefer clone/update helpers over
+  mutating shared structures.
+- Service-independent mode changes whether classic PD or a split scheduling
+  service owns scheduling behavior.
+
 ## Architectural Views
 
 ### Metadata cache view
@@ -121,6 +134,24 @@ Signals to preserve:
 9. `pkg/statistics/region.go`
 10. `pkg/statistics/store.go`
 11. `pkg/storage/region_storage.go`
+
+## Glossary
+
+- `RaftCluster`:
+  PD's leader-owned cluster metadata and background-job coordinator.
+- `BasicCluster`:
+  in-memory store and region collection used by schedulers and APIs.
+- Region heartbeat:
+  TiKV report that updates region metadata, freshness, statistics, and operator
+  responses.
+- Store heartbeat:
+  TiKV report that updates store stats, state, slow-store signals, and limits.
+- Region epoch:
+  version metadata used to reject stale region state across splits and merges.
+- Follower sync:
+  propagation of region changes from the PD leader to follower PD members.
+- Service independent:
+  state indicating a split microservice owns behavior instead of classic PD.
 
 ## Review Checklist
 

@@ -18,6 +18,19 @@ TSO owns:
 TSO does not own transaction semantics in TiDB or storage MVCC in TiKV, but
 those systems depend on TSO monotonicity and availability.
 
+## Core Concepts
+
+- TSO correctness is monotonicity across leader changes, service-primary changes,
+  process restarts, and retries.
+- `Allocator` serves timestamps only after ownership and initialization are both
+  valid.
+- `timestampOracle` maintains the in-memory timestamp and persisted upper-bound
+  window.
+- Keyspace group mode routes TSO requests by keyspace group ownership, not only
+  by PD leadership.
+- Reset and logical overflow paths are correctness-sensitive because they change
+  the timestamp window.
+
 ## Architectural Views
 
 ### Embedded PD view
@@ -116,6 +129,23 @@ Signals to preserve:
 8. `pkg/mcs/tso/server/server.go`
 9. `pkg/mcs/tso/server/grpc_service.go`
 10. `client/client.go`
+
+## Glossary
+
+- TSO:
+  timestamp oracle used by TiDB transaction ordering.
+- Allocator:
+  component that initializes timestamp state and generates timestamps.
+- `timestampOracle`:
+  lower-level owner of persisted timestamp window and in-memory TSO state.
+- Physical time:
+  wall-clock component of a timestamp.
+- Logical time:
+  counter component used when multiple timestamps share the same physical time.
+- TSO primary:
+  elected service owner allowed to serve TSO in microservice mode.
+- Keyspace group:
+  group of keyspaces assigned to a TSO ownership unit.
 
 ## Review Checklist
 

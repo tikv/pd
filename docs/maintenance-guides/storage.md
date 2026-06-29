@@ -17,6 +17,19 @@ Storage owns:
 Storage does not decide scheduling, leadership, or API semantics. It provides
 the persistence contracts used by those subsystems.
 
+## Core Concepts
+
+- Most PD metadata is stored through etcd-backed storage and endpoint-specific
+  interfaces.
+- Region metadata can be routed through `coreStorage` to a local LevelDB-backed
+  region storage.
+- Key paths under `pkg/utils/keypath` are compatibility contracts, not local
+  implementation details.
+- `TryLoadRegionsOnce` prevents repeated full local-region loads after the
+  local backend has been selected.
+- Hot-region storage is a separate local persistence surface for historical hot
+  region data.
+
 ## Architectural Views
 
 ### Backend view
@@ -116,6 +129,23 @@ Signals to preserve:
 8. `pkg/storage/kv/etcd_kv.go`
 9. `pkg/storage/endpoint/endpoint.go`
 10. `pkg/utils/keypath`
+
+## Glossary
+
+- Default storage:
+  usually the etcd-backed `Storage` implementation used for most metadata.
+- Endpoint storage:
+  owner-specific storage interface under `pkg/storage/endpoint`.
+- `coreStorage`:
+  wrapper that routes region metadata to etcd or local region storage.
+- Region storage:
+  storage interface for loading, saving, deleting, and flushing region metadata.
+- Local region storage:
+  LevelDB-backed region metadata store under the PD data directory.
+- Key path:
+  etcd key layout helper that acts as a persisted compatibility boundary.
+- Hot-region storage:
+  local store for historical hot region records used by API and diagnostics.
 
 ## Review Checklist
 

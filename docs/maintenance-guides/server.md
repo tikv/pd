@@ -17,6 +17,19 @@ It does not own scheduler algorithms, region cache internals, or timestamp
 oracle rules. Those are covered by the scheduling, cluster, storage, and TSO
 guides.
 
+## Core Concepts
+
+- The server process is the orchestration root. It wires embedded etcd, member
+  identity, storage, TSO, keyspace managers, cluster state, APIs, and shutdown.
+- `startServer` initializes process-owned dependencies but does not mean this
+  member is the PD leader.
+- `leaderLoop` and `campaignLeader` gate leader-owned behavior through the PD
+  leader lease.
+- Service labels and rate limiters are initialized during startup and are part
+  of the external API boundary.
+- `Close` must handle partial startup and stop loops before closing shared
+  clients, storage, hot-region storage, metering, and callbacks.
+
 ## Architectural Views
 
 ### Bootstrap view
@@ -136,6 +149,25 @@ Signals to preserve:
 8. `pkg/member/member.go`
 9. `pkg/member/election.go`
 10. `pkg/utils/etcdutil`
+
+## Glossary
+
+- `CreateServer`:
+  builds an uninitialized server and installs handler/service hooks.
+- `Run`:
+  starts embedded etcd, initializes runtime dependencies, and starts loops.
+- `startServer`:
+  creates storage, allocators, managers, clusters, heartbeat streams, and
+  rate-limit state before serving.
+- `leaderLoop`:
+  long-running loop that observes leadership and campaigns when appropriate.
+- PD leader:
+  member with lease-backed ownership for cluster mutations and leader-only
+  services.
+- Embedded etcd:
+  etcd server hosted inside each classic PD process.
+- Close callback:
+  cleanup hook run after server-owned loops and core resources are stopped.
 
 ## Review Checklist
 
