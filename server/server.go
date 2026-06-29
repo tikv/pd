@@ -1214,6 +1214,20 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 
 // SetKeyspaceConfig sets the keyspace config information.
 func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, true)
+}
+
+// SetKeyspaceConfigWithoutKeyspaceManagerUpdate sets keyspace config without updating the keyspace manager.
+func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
+}
+
+// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
+	s.keyspaceManager.UpdateConfig(newCfg)
+}
+
+func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
 	if err := newCfg.Validate(); err != nil {
 		return err
 	}
@@ -1229,7 +1243,9 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(newCfg)
+	if updateKeyspaceManager {
+		s.keyspaceManager.UpdateConfig(newCfg)
+	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil

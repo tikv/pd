@@ -54,6 +54,10 @@ const (
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
 	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
+	// ErrGroupHasAssignedKeyspaces is returned when deleting a meta-service group
+	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
+	// map it to a 400 Bad Request via errors.Is.
+	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

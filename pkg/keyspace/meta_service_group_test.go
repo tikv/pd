@@ -196,3 +196,56 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 		re.Equal(0, counts[grp], "other original groups should remain at 0")
 	}
 }
+
+// TestUpdateGroupsSafelyUsesAuthoritativeCount verifies the delete guard relies
+// on the actual keyspace assignments rather than the persisted counter, so a
+// stale (drifted) counter cannot permanently block removing an empty group, and
+// a group with real keyspaces is still protected.
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeCount() {
+	re := suite.Require()
+	// Simulate a stale persisted counter: etcd-group-2 reports assigned keyspaces
+	// even though none actually reference it.
+	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.IncrementAssignmentCount(txn, "etcd-group-2", 3)
+	})
+	re.NoError(err)
+
+	// Authoritative scanner reports the real assignments.
+	actual := map[string]int{}
+	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		for id := range ids {
+			res[id] = actual[id]
+		}
+		return res, nil
+	})
+
+	// Deleting etcd-group-2 must succeed despite the stale positive counter.
+	groups := mockMetaServiceGroups()
+	delete(groups, "etcd-group-2")
+	persisted := false
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups, []string{"etcd-group-2"},
+		func() error { persisted = true; return nil }, nil)
+	re.NoError(err)
+	re.True(persisted, "deletion of an actually-empty group must be persisted")
+
+	// The persisted counter for the deleted group must be cleared, so re-adding
+	// the same ID later does not inherit the stale count.
+	var residual map[string]int
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var err error
+		residual, err = suite.manager.store.GetAssignmentCount(txn, map[string]string{"etcd-group-2": ""})
+		return err
+	})
+	re.NoError(err)
+	re.Equal(0, residual["etcd-group-2"], "deleted group's persisted count must be cleared")
+
+	// A group with real keyspaces must still be rejected.
+	actual["etcd-group-1"] = 1
+	groups2 := mockMetaServiceGroups()
+	delete(groups2, "etcd-group-1")
+	delete(groups2, "etcd-group-2")
+	err = suite.manager.UpdateGroupsSafely(suite.ctx, groups2, []string{"etcd-group-1"},
+		func() error { return nil }, nil)
+	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
+}

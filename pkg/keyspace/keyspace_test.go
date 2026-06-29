@@ -1082,3 +1082,34 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	suite.TearDownTest()
 	suite.TearDownSuite()
 }
+
+// TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a
+// stale pre-lock group check: if all meta-service groups are gone by the time
+// the lock is held, the keyspace is created without an assignment instead of
+// failing, while a present group is still assigned normally.
+func TestAssignGroupAndSaveKeyspace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+
+	// No groups available: assign=true (stale pre-check) must not fail creation.
+	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
+	cfg := map[string]string{}
+	ks := &keyspacepb.KeyspaceMeta{Id: 100, Name: "ks-stale-precheck", Config: cfg}
+	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
+	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
+	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
+	re.NoError(err)
+	re.Empty(loaded.GetConfig()[MetaServiceGroupIDKey])
+
+	// A present group is still assigned.
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
+	cfg2 := map[string]string{}
+	ks2 := &keyspacepb.KeyspaceMeta{Id: 101, Name: "ks-with-group", Config: cfg2}
+	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
+	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
+}
