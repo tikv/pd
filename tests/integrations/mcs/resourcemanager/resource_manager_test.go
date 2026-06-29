@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1519,9 +1520,21 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	_, err := cli.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 
-	g, err := cli.GetResourceGroup(suite.ctx, group.Name)
-	re.NoError(err)
-	re.Equal(group, g)
+	waitForResourceGroup := func(expected *rmpb.ResourceGroup, opts ...pd.GetResourceGroupOption) *rmpb.ResourceGroup {
+		var (
+			got    *rmpb.ResourceGroup
+			getErr error
+		)
+		testutil.Eventually(re, func() bool {
+			got, getErr = cli.GetResourceGroup(suite.ctx, expected.Name, opts...)
+			return getErr == nil && reflect.DeepEqual(expected, got)
+		}, testutil.WithTickInterval(50*time.Millisecond))
+		re.NoError(getErr)
+		re.Equal(expected, got)
+		return got
+	}
+
+	g := waitForResourceGroup(group)
 
 	// Test Resource Group Stats
 	testConsumption := &rmpb.Consumption{
@@ -1557,9 +1570,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	g.RUSettings.RU.Settings.FillRate = 12345
 	_, err = cli.ModifyResourceGroup(suite.ctx, g)
 	re.NoError(err)
-	g1, err := cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
-	re.Equal(g1, g)
+	waitForResourceGroup(g, pd.WithRUStats)
 
 	// test leader change
 	time.Sleep(250 * time.Millisecond)
