@@ -36,17 +36,18 @@ const (
 	// defaultMaxMergeRegionSize is the default maximum size of region when regions can be merged.
 	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
 	// to make it compatible with the default value of region size of tikv.
-	defaultMaxMergeRegionSize     = 54
-	defaultLeaderScheduleLimit    = 4
-	defaultRegionScheduleLimit    = 2048
-	defaultWitnessScheduleLimit   = 4
-	defaultReplicaScheduleLimit   = 64
-	defaultMergeScheduleLimit     = 8
-	defaultHotRegionScheduleLimit = 4
-	defaultAffinityScheduleLimit  = 0 // default to disable
-	defaultTolerantSizeRatio      = 0
-	defaultLowSpaceRatio          = 0.8
-	defaultHighSpaceRatio         = 0.7
+	defaultMaxMergeRegionSize        = 54
+	defaultLeaderScheduleLimit       = 4
+	defaultRegionScheduleLimit       = 2048
+	defaultWitnessScheduleLimit      = 4
+	defaultReplicaScheduleLimit      = 64
+	defaultMergeScheduleLimit        = 8
+	defaultHotRegionScheduleLimit    = 4
+	defaultAffinityScheduleLimit     = 0 // default to disable
+	defaultSplitScatterScheduleLimit = 4
+	defaultTolerantSizeRatio         = 0
+	defaultLowSpaceRatio             = 0.8
+	defaultHighSpaceRatio            = 0.7
 	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
 	// hot region.
 	defaultHotRegionCacheHitsThreshold = 3
@@ -116,6 +117,7 @@ const (
 	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
 	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
 	AffinityScheduleLimitKey       = "schedule.affinity-schedule-limit"
+	SplitScatterScheduleLimitKey   = "schedule.split-scatter-schedule-limit"
 	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
 	EnableLocationReplacement      = "schedule.enable-location-replacement"
 
@@ -216,6 +218,8 @@ type ScheduleConfig struct {
 	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
 	// AffinityScheduleLimit is the max coexist affinity schedules.
 	AffinityScheduleLimit uint64 `toml:"affinity-schedule-limit" json:"affinity-schedule-limit"`
+	// SplitScatterScheduleLimit is the max coexist internal split-scatter schedules. 0 means disabled.
+	SplitScatterScheduleLimit uint64 `toml:"split-scatter-schedule-limit" json:"split-scatter-schedule-limit"`
 	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
 	// If the number of times a region hits the hot cache is greater than this
 	// threshold, it is considered a hot region.
@@ -392,6 +396,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("affinity-schedule-limit") {
 		configutil.AdjustUint64(&c.AffinityScheduleLimit, defaultAffinityScheduleLimit)
+	}
+	if !meta.IsDefined("split-scatter-schedule-limit") {
+		configutil.AdjustUint64(&c.SplitScatterScheduleLimit, defaultSplitScatterScheduleLimit)
 	}
 	if !meta.IsDefined("hot-region-cache-hits-threshold") {
 		configutil.AdjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)

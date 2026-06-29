@@ -305,6 +305,7 @@ func (s *tsoStream) processRequests(
 	}
 	s.state.Store(prevState)
 
+	failpoint.InjectCall("pauseAfterTSORequestAttachedToStream")
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid

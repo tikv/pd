@@ -236,6 +236,7 @@ func (s *storeStatistics) collect() {
 	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit())
 	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit())
 	configs["affinity-schedule-limit"] = float64(s.opt.GetAffinityScheduleLimit())
+	configs["split-scatter-schedule-limit"] = float64(s.opt.GetSplitScatterScheduleLimit())
 	configs["max-replicas"] = float64(s.opt.GetMaxReplicas())
 	configs["high-space-ratio"] = s.opt.GetHighSpaceRatio()
 	configs["low-space-ratio"] = s.opt.GetLowSpaceRatio()

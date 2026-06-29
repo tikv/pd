@@ -1152,7 +1152,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if store == nil {
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
-			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
@@ -1743,21 +1743,13 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 		cli := forwardCli.getClient()
 		if cli != nil {
-			req := &schedulingpb.AskBatchSplitRequest{
-				Header: &schedulingpb.RequestHeader{
-					ClusterId: request.GetHeader().GetClusterId(),
-					SenderId:  request.GetHeader().GetSenderId(),
-				},
-				Region:     request.GetRegion(),
-				SplitCount: request.GetSplitCount(),
-			}
-			resp, err := cli.AskBatchSplit(ctx, req)
+			resp, err := cli.AskBatchSplit(ctx, newSchedulingAskBatchSplitRequest(request))
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return convertAskSplitResponse(resp), err
+				return convertAskBatchSplitResponse(resp), err
 			}
-			return convertAskSplitResponse(resp), nil
+			return convertAskBatchSplitResponse(resp), nil
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2169,26 +2161,30 @@ func invalidValue(msg string) *pdpb.ResponseHeader {
 }
 
 func convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
+	if header.GetError() == nil || header.GetError().GetType() == schedulingpb.ErrorType_OK {
+		return &pdpb.ResponseHeader{ClusterId: header.GetClusterId()}
+	}
+
+	message := header.GetError().GetMessage()
+	errorType := pdpb.ErrorType_UNKNOWN
 	switch header.GetError().GetType() {
 	case schedulingpb.ErrorType_UNKNOWN:
-		if strings.Contains(header.GetError().GetMessage(), "region not found") {
-			return &pdpb.ResponseHeader{
-				ClusterId: header.GetClusterId(),
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_REGION_NOT_FOUND,
-					Message: header.GetError().GetMessage(),
-				},
-			}
+		if strings.Contains(message, "region not found") {
+			errorType = pdpb.ErrorType_REGION_NOT_FOUND
 		}
-		return &pdpb.ResponseHeader{
-			ClusterId: header.GetClusterId(),
-			Error: &pdpb.Error{
-				Type:    pdpb.ErrorType_UNKNOWN,
-				Message: header.GetError().GetMessage(),
-			},
-		}
-	default:
-		return &pdpb.ResponseHeader{ClusterId: header.GetClusterId()}
+	case schedulingpb.ErrorType_NOT_BOOTSTRAPPED:
+		errorType = pdpb.ErrorType_NOT_BOOTSTRAPPED
+	case schedulingpb.ErrorType_ALREADY_BOOTSTRAPPED:
+		errorType = pdpb.ErrorType_ALREADY_BOOTSTRAPPED
+	case schedulingpb.ErrorType_INVALID_VALUE:
+		errorType = pdpb.ErrorType_INVALID_VALUE
+	}
+	return &pdpb.ResponseHeader{
+		ClusterId: header.GetClusterId(),
+		Error: &pdpb.Error{
+			Type:    errorType,
+			Message: message,
+		},
 	}
 }
 
@@ -2218,7 +2214,19 @@ func convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOp
 	}
 }
 
-func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
+func newSchedulingAskBatchSplitRequest(request *pdpb.AskBatchSplitRequest) *schedulingpb.AskBatchSplitRequest {
+	return &schedulingpb.AskBatchSplitRequest{
+		Header: &schedulingpb.RequestHeader{
+			ClusterId: request.GetHeader().GetClusterId(),
+			SenderId:  request.GetHeader().GetSenderId(),
+		},
+		Region:     request.GetRegion(),
+		SplitCount: request.GetSplitCount(),
+		Reason:     request.GetReason(),
+	}
+}
+
+func convertAskBatchSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
 	return &pdpb.AskBatchSplitResponse{
 		Header: convertHeader(resp.GetHeader()),
 		Ids:    resp.GetIds(),

@@ -65,6 +65,33 @@ var (
 			Name:      "patrol_region_channel_size",
 			Help:      "Size of patrol region channel.",
 		})
+	splitScatterPendingExpiredCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "split_scatter_pending_expired_total",
+			Help:      "Counter of expired split-scatter pending entries by whether they were selected for dispatch.",
+		}, []string{"attempted"})
+	splitScatterPendingDroppedCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "split_scatter_pending_dropped_total",
+			Help:      "Counter of split-scatter pending entries dropped by the capacity limit.",
+		})
+	splitScatterPendingGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "checker",
+			Name:      "split_scatter_pending",
+			Help:      "Number of split-scatter pending entries.",
+		})
+)
+
+// WithLabelValues is a heavy operation, pre-cache the label handles.
+var (
+	splitScatterPendingExpiredAttemptedCounter   = splitScatterPendingExpiredCounter.WithLabelValues("true")
+	splitScatterPendingExpiredUnattemptedCounter = splitScatterPendingExpiredCounter.WithLabelValues("false")
 )
 
 func init() {
@@ -74,27 +101,32 @@ func init() {
 	prometheus.MustRegister(patrolPhaseDuration)
 	prometheus.MustRegister(checkRegionDuration)
 	prometheus.MustRegister(patrolRegionChannelSize)
+	prometheus.MustRegister(splitScatterPendingExpiredCounter)
+	prometheus.MustRegister(splitScatterPendingDroppedCounter)
+	prometheus.MustRegister(splitScatterPendingGauge)
 }
 
 const (
 	// NOTE: these types are different from pkg/schedule/config/type.go,
 	// they are only used for prometheus metrics to keep the compatibility.
-	ruleChecker       = "rule_checker"
-	jointStateChecker = "joint_state_checker"
-	learnerChecker    = "learner_checker"
-	mergeChecker      = "merge_checker"
-	replicaChecker    = "replica_checker"
-	splitChecker      = "split_checker"
-	affinityChecker   = "affinity_checker"
+	ruleChecker         = "rule_checker"
+	jointStateChecker   = "joint_state_checker"
+	learnerChecker      = "learner_checker"
+	mergeChecker        = "merge_checker"
+	replicaChecker      = "replica_checker"
+	splitChecker        = "split_checker"
+	splitScatterChecker = "split_scatter_checker"
+	affinityChecker     = "affinity_checker"
 )
 
 const (
 	// patrol phases
-	phaseWaitForChannel = "wait_for_channel"
-	phaseCheckPriority  = "check_priority"
-	phaseCheckPending   = "check_pending"
-	phaseScanRegions    = "scan_regions"
-	phaseUpdateLabel    = "update_label_stats"
+	phaseWaitForChannel       = "wait_for_channel"
+	phaseCheckPriority        = "check_priority"
+	phaseCheckPending         = "check_pending"
+	phaseDispatchSplitScatter = "dispatch_split_scatter"
+	phaseScanRegions          = "scan_regions"
+	phaseUpdateLabel          = "update_label_stats"
 )
 
 // checkerControllerMetrics contains pre-created Prometheus metrics for the checker controller.
@@ -114,6 +146,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 		phaseWaitForChannel,
 		phaseCheckPriority,
 		phaseCheckPending,
+		phaseDispatchSplitScatter,
 		phaseScanRegions,
 		phaseUpdateLabel,
 	}
@@ -159,6 +192,10 @@ func mergeCheckerCounterWithEvent(event string) prometheus.Counter {
 
 func replicaCheckerCounterWithEvent(event string) prometheus.Counter {
 	return checkerCounter.WithLabelValues(replicaChecker, event)
+}
+
+func splitScatterCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(splitScatterChecker, event)
 }
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -243,8 +280,20 @@ var (
 	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
 	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
 
+	splitScatterDispatchDisabledCounter          = splitScatterCheckerCounterWithEvent("dispatch-disabled")
+	splitScatterDispatchScheduleLimitCounter     = splitScatterCheckerCounterWithEvent("dispatch-schedule-limit")
+	splitScatterDispatchRegionMissingCounter     = splitScatterCheckerCounterWithEvent("dispatch-region-missing")
+	splitScatterDispatchScheduleDisabledCounter  = splitScatterCheckerCounterWithEvent("dispatch-schedule-disabled")
+	splitScatterDispatchNotReplicatedCounter     = splitScatterCheckerCounterWithEvent("dispatch-not-fully-replicated")
+	splitScatterDispatchScatterFailedCounter     = splitScatterCheckerCounterWithEvent("dispatch-scatter-failed")
+	splitScatterDispatchStoreLimitCounter        = splitScatterCheckerCounterWithEvent("dispatch-store-limit")
+	splitScatterDispatchAddOperatorFailedCounter = splitScatterCheckerCounterWithEvent("dispatch-add-operator-failed")
+	splitScatterDispatchOperatorCreatedCounter   = splitScatterCheckerCounterWithEvent("dispatch-operator-created")
+	splitScatterDispatchNoOperatorNeededCounter  = splitScatterCheckerCounterWithEvent("dispatch-no-operator-needed")
+
 	affinityCheckerCounter                        = checkerCounter.WithLabelValues(affinityChecker, "check")
 	affinityCheckerPausedCounter                  = checkerCounter.WithLabelValues(affinityChecker, "paused")
+	affinityCheckerPlacementRulesDisabledCounter  = checkerCounter.WithLabelValues(affinityChecker, "placement-rules-disabled")
 	affinityCheckerRegionNoLeaderCounter          = checkerCounter.WithLabelValues(affinityChecker, "region-no-leader")
 	affinityCheckerGroupSchedulingDisabledCounter = checkerCounter.WithLabelValues(affinityChecker, "group-scheduling-disabled")
 	affinityCheckerNewOpCounter                   = checkerCounter.WithLabelValues(affinityChecker, "new-operator")

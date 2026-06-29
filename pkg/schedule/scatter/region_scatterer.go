@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -67,8 +66,15 @@ const (
 	maxSleepDuration     = time.Minute
 	initialSleepDuration = 100 * time.Millisecond
 	maxRetryLimit        = 30
-	scatterOperatorDesc  = "scatter-region"
+	// AdminScatterOperatorDesc is used by external admin/API scatter requests.
+	AdminScatterOperatorDesc = "scatter-region"
+	// InternalScatterOperatorDesc is used by PD-internal split-scatter dispatch.
+	InternalScatterOperatorDesc = "split-scatter-region"
 )
+
+type selectedStoreCounter interface {
+	Get(id uint64, group string) uint64
+}
 
 type selectedStores struct {
 	mu                syncutil.RWMutex
@@ -79,6 +85,38 @@ func newSelectedStores(ctx context.Context) *selectedStores {
 	return &selectedStores{
 		groupDistribution: cache.NewStringTTL(ctx, gcInterval, gcTTL),
 	}
+}
+
+type localSelectedStores struct {
+	groupDistribution map[string]map[uint64]uint64
+	seededGroups      map[string]struct{}
+}
+
+func newLocalSelectedStores() *localSelectedStores {
+	return &localSelectedStores{
+		groupDistribution: make(map[string]map[uint64]uint64),
+		seededGroups:      make(map[string]struct{}),
+	}
+}
+
+func cloneDistribution(distribution map[uint64]uint64) map[uint64]uint64 {
+	cloned := make(map[uint64]uint64, len(distribution))
+	for id, count := range distribution {
+		cloned[id] = count
+	}
+	return cloned
+}
+
+func decrementDistribution(distribution map[uint64]uint64, id uint64) {
+	count, ok := distribution[id]
+	if !ok {
+		return
+	}
+	if count <= 1 {
+		delete(distribution, id)
+		return
+	}
+	distribution[id] = count - 1
 }
 
 // Put plus count by storeID and group
@@ -124,6 +162,54 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 	return nil, false
 }
 
+// Get the count by storeID and group.
+func (s *localSelectedStores) Get(id uint64, group string) uint64 {
+	distribution, ok := s.groupDistribution[group]
+	if !ok {
+		return 0
+	}
+	count, ok := distribution[id]
+	if !ok {
+		return 0
+	}
+	return count
+}
+
+// InitGroupDistribution seeds the distribution for a group if the group has not
+// been tracked yet.
+func (s *localSelectedStores) InitGroupDistribution(group string, distribution map[uint64]uint64) bool {
+	if _, ok := s.groupDistribution[group]; ok {
+		return false
+	}
+	s.groupDistribution[group] = cloneDistribution(distribution)
+	s.seededGroups[group] = struct{}{}
+	return true
+}
+
+// Update records the group distribution after scattering one more region.
+// For seeded groups it applies the net old->new change. Otherwise it keeps the
+// historical scatter behavior and only counts the new placement.
+func (s *localSelectedStores) Update(group string, oldIDs, newIDs []uint64) {
+	distribution, ok := s.groupDistribution[group]
+	if !ok {
+		distribution = map[uint64]uint64{}
+	}
+	if s.isSeededGroup(group) {
+		for _, id := range oldIDs {
+			decrementDistribution(distribution, id)
+		}
+	}
+	for _, id := range newIDs {
+		distribution[id]++
+	}
+	s.groupDistribution[group] = distribution
+}
+
+func (s *localSelectedStores) isSeededGroup(group string) bool {
+	_, ok := s.seededGroups[group]
+	return ok
+}
+
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
 	ctx               context.Context
@@ -160,6 +246,18 @@ type engineContext struct {
 	selectedLeader *selectedStores
 }
 
+type localEngineContext struct {
+	filterFuncs    []filterFunc
+	selectedPeer   *localSelectedStores
+	selectedLeader *localSelectedStores
+}
+
+type scatterSelectionContext struct {
+	filterFuncs    []filterFunc
+	selectedPeer   selectedStoreCounter
+	selectedLeader selectedStoreCounter
+}
+
 func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineContext {
 	filterFuncs = append(filterFuncs, func() filter.Filter {
 		return &filter.StoreStateFilter{ActionScope: regionScatterName, MoveRegion: true, ScatterRegion: true, OperatorLevel: operatorPriorityLevel}
@@ -168,6 +266,143 @@ func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineCont
 		filterFuncs:    filterFuncs,
 		selectedPeer:   newSelectedStores(ctx),
 		selectedLeader: newSelectedStores(ctx),
+	}
+}
+
+func (ctx engineContext) asSelectionContext() scatterSelectionContext {
+	return scatterSelectionContext{
+		filterFuncs:    ctx.filterFuncs,
+		selectedPeer:   ctx.selectedPeer,
+		selectedLeader: ctx.selectedLeader,
+	}
+}
+
+func (ctx localEngineContext) asSelectionContext() scatterSelectionContext {
+	return scatterSelectionContext{
+		filterFuncs:    ctx.filterFuncs,
+		selectedPeer:   ctx.selectedPeer,
+		selectedLeader: ctx.selectedLeader,
+	}
+}
+
+func (r *RegionScatterer) getOrCreateSpecialEngineContext(engine string) engineContext {
+	if ctx, ok := r.specialEngines.Load(engine); ok {
+		return ctx.(engineContext)
+	}
+	ctx := newEngineContext(r.ctx, func() filter.Filter {
+		return filter.NewEngineFilter(r.name, placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: []string{engine}})
+	})
+	r.specialEngines.Store(engine, ctx)
+	return ctx
+}
+
+type scatterState struct {
+	ordinaryEngine localEngineContext
+	specialEngines map[string]localEngineContext
+}
+
+func (ctx engineContext) withEmptySelection() localEngineContext {
+	return localEngineContext{
+		filterFuncs:    ctx.filterFuncs,
+		selectedPeer:   newLocalSelectedStores(),
+		selectedLeader: newLocalSelectedStores(),
+	}
+}
+
+func (r *RegionScatterer) newScatterState() *scatterState {
+	return &scatterState{
+		ordinaryEngine: r.ordinaryEngine.withEmptySelection(),
+		specialEngines: make(map[string]localEngineContext),
+	}
+}
+
+func (s *scatterState) getSpecialEngine(engine string) (localEngineContext, bool) {
+	ctx, ok := s.specialEngines[engine]
+	return ctx, ok
+}
+
+func (r *RegionScatterer) getOrCreateSpecialEngineState(state *scatterState, engine string) localEngineContext {
+	if ctx, ok := state.getSpecialEngine(engine); ok {
+		return ctx
+	}
+	ctx := r.getOrCreateSpecialEngineContext(engine).withEmptySelection()
+	state.specialEngines[engine] = ctx
+	return ctx
+}
+
+// seedScatterStateByRange seeds the scatter group with the current live peer and
+// leader distribution of the specified key range.
+func (r *RegionScatterer) seedScatterStateByRange(state *scatterState, group string, startKey, endKey []byte) {
+	if group == "" || len(startKey) == 0 {
+		return
+	}
+	if state.ordinaryEngine.selectedPeer.isSeededGroup(group) {
+		return
+	}
+
+	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
+	ordinaryPeer := make(map[uint64]uint64)
+	ordinaryLeader := make(map[uint64]uint64)
+	specialPeer := make(map[string]map[uint64]uint64)
+	for _, store := range r.cluster.GetStores() {
+		if store == nil {
+			continue
+		}
+		storeID := store.GetID()
+		peerCount := uint64(r.cluster.GetStorePeerCountByRange(storeID, startKey, endKey))
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
+			if peerCount > 0 {
+				ordinaryPeer[storeID] = peerCount
+			}
+			if leaderCount := uint64(r.cluster.GetStoreLeaderCountByRange(storeID, startKey, endKey)); leaderCount > 0 {
+				ordinaryLeader[storeID] = leaderCount
+			}
+			continue
+		}
+		if peerCount == 0 {
+			continue
+		}
+
+		engine := store.GetLabelValue(core.EngineKey)
+		if _, ok := specialPeer[engine]; !ok {
+			specialPeer[engine] = make(map[uint64]uint64)
+		}
+		specialPeer[engine][storeID] = peerCount
+	}
+
+	state.ordinaryEngine.selectedPeer.InitGroupDistribution(group, ordinaryPeer)
+	state.ordinaryEngine.selectedLeader.InitGroupDistribution(group, ordinaryLeader)
+	for engine, distribution := range specialPeer {
+		ctx := r.getOrCreateSpecialEngineState(state, engine)
+		ctx.selectedPeer.InitGroupDistribution(group, distribution)
+	}
+}
+
+func (r *RegionScatterer) newInternalScatterState(group string, startKey, endKey []byte) *scatterState {
+	state := r.newScatterState()
+	r.seedScatterStateByRange(state, group, startKey, endKey)
+	r.applyRunningScatterOpsDelta(state, group)
+	return state
+}
+
+func (r *RegionScatterer) applyRunningScatterOpsDelta(state *scatterState, group string) {
+	if group == "" {
+		return
+	}
+	for _, op := range r.opController.GetOperators() {
+		if op == nil || op.Desc() != InternalScatterOperatorDesc {
+			continue
+		}
+		opGroup, ok := op.GetAdditionalInfo("group")
+		if !ok || opGroup != group {
+			continue
+		}
+		region := r.cluster.GetRegion(op.RegionID())
+		if region == nil || region.GetLeader() == nil {
+			continue
+		}
+		targetPeers, targetLeader := finalPlacementAfterOperator(region, op)
+		r.applyScatterStateDelta(state, region, targetPeers, targetLeader, group, false)
 	}
 }
 
@@ -286,6 +521,19 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 // Scatter relocates the region. If the group is defined, the regions' leader with the same group would be scattered
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
+	return r.scatterWithOptions(region, group, skipStoreLimit, false, nil)
+}
+
+// ScatterInternal relocates the region for PD-internal split-scatter dispatch.
+func (r *RegionScatterer) ScatterInternal(region *core.RegionInfo, group string, startKey, endKey []byte) (*operator.Operator, error) {
+	return r.scatterWithOptions(region, group, false, true, r.newInternalScatterState(group, startKey, endKey))
+}
+
+func (r *RegionScatterer) scatterWithOptions(region *core.RegionInfo, group string, skipStoreLimit bool, internalScatter bool, state *scatterState) (*operator.Operator, error) {
+	expectedDesc := AdminScatterOperatorDesc
+	if internalScatter {
+		expectedDesc = InternalScatterOperatorDesc
+	}
 	if !filter.IsRegionReplicated(r.cluster, region) {
 		r.addSuspectRegions(false, region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
@@ -299,7 +547,15 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 	if op := r.opController.GetOperator(region.GetID()); op != nil && op.GetPriorityLevel() >= operatorPriorityLevel {
 		val, exist := op.GetAdditionalInfo("group")
 		// If the existing operator is created by the same group scatterer, just skip creating a new one.
-		if strings.Contains(op.Desc(), scatterOperatorDesc) && exist && val == group {
+		if op.Desc() == expectedDesc && exist && val == group {
+			if !isSameRegionEpoch(op.RegionEpoch(), region.GetRegionEpoch()) {
+				scatterOperatorExistedCounter.Inc()
+				log.Debug("same group scatter operator epoch does not match",
+					zap.Uint64("region-id", region.GetID()),
+					zap.Reflect("operator-epoch", op.RegionEpoch()),
+					zap.Reflect("region-epoch", region.GetRegionEpoch()))
+				return nil, errors.Errorf("the operator of region %d already exist with different epoch", region.GetID())
+			}
 			scatterOperatorRunningCounter.Inc()
 			log.Debug("scatter operator is already running",
 				zap.Uint64("region-id", region.GetID()))
@@ -334,16 +590,30 @@ func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipSto
 		return nil, nil
 	}
 
-	if r.cluster.IsRegionHot(region) {
+	if !internalScatter && r.cluster.IsRegionHot(region) {
 		scatterSkipHotRegionCounter.Inc()
 		log.Warn("region too hot during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is hot", region.GetID())
 	}
 
-	return r.scatterRegion(region, group, skipStoreLimit)
+	return r.scatterRegionWithType(region, group, skipStoreLimit, internalScatter, state)
 }
 
-func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
+func (r *RegionScatterer) scatterRegionWithType(region *core.RegionInfo, group string, skipStoreLimit bool, internalScatter bool, state *scatterState) (*operator.Operator, error) {
+	desc := AdminScatterOperatorDesc
+	if internalScatter {
+		desc = InternalScatterOperatorDesc
+	}
+	ordinaryContext := r.ordinaryEngine.asSelectionContext()
+	getSpecialEngineContext := func(engine string) scatterSelectionContext {
+		return r.getOrCreateSpecialEngineContext(engine).asSelectionContext()
+	}
+	if state != nil {
+		ordinaryContext = state.ordinaryEngine.asSelectionContext()
+		getSpecialEngineContext = func(engine string) scatterSelectionContext {
+			return r.getOrCreateSpecialEngineState(state, engine).asSelectionContext()
+		}
+	}
 	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	ordinaryPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 	specialPeers := make(map[string]map[uint64]*metapb.Peer)
@@ -365,10 +635,29 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // selected StoreID set
-	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                    // StoreID allowed to become Leader
-	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
+	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
+	if internalScatter {
+		leader := region.GetLeader()
+		if leader == nil {
+			return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no source leader store found, region: %v", region))
+		}
+		leaderStoreID := leader.GetStoreId()
+		if !r.isAllowedLeaderSource(leaderStoreID) {
+			peer := region.GetStorePeer(leaderStoreID)
+			if peer == nil {
+				return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("source leader peer not found, region: %v", region))
+			}
+			targetPeers[leaderStoreID] = peer
+			selectedStores[leaderStoreID] = struct{}{}
+		}
+	}
+	scatterWithSameEngine := func(
+		peers map[uint64]*metapb.Peer,
+		context scatterSelectionContext,
+		collectLeaderCandidates bool,
+	) { // peers: StoreID -> Peer
 		filterLen := len(context.filterFuncs) + 2
 		filters := make([]filter.Filter, filterLen)
 		for i, filterFunc := range context.filterFuncs {
@@ -377,7 +666,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
 		for _, peer := range peers {
 			if _, ok := selectedStores[peer.GetStoreId()]; ok {
-				if allowLeader(oldFit, peer) {
+				if collectLeaderCandidates && allowLeader(oldFit, peer) {
 					leaderCandidateStores = append(leaderCandidateStores, peer.GetStoreId())
 				}
 				// It is both sourcePeer and targetPeer itself, no need to select.
@@ -390,7 +679,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 			}
 			filters[filterLen-1] = filter.NewPlacementSafeguard(r.name, r.cluster.GetSharedConfig(), r.cluster.GetBasicCluster(), r.cluster.GetRuleManager(), region, sourceStore, oldFit)
 			for {
-				newPeer := r.selectNewPeer(context, group, peer, filters)
+				newPeer := r.selectNewPeer(context, group, peer, filters, internalScatter)
 				targetPeers[newPeer.GetStoreId()] = newPeer
 				selectedStores[newPeer.GetStoreId()] = struct{}{}
 				// If the selected peer is a peer other than origin peer in this region,
@@ -398,7 +687,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 				// This origin peer re-selects.
 				if _, ok := peers[newPeer.GetStoreId()]; !ok || peer.GetStoreId() == newPeer.GetStoreId() {
 					selectedStores[peer.GetStoreId()] = struct{}{}
-					if allowLeader(oldFit, peer) {
+					if collectLeaderCandidates && allowLeader(oldFit, peer) {
 						leaderCandidateStores = append(leaderCandidateStores, newPeer.GetStoreId())
 					}
 					break
@@ -407,51 +696,109 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 		}
 	}
 
-	scatterWithSameEngine(ordinaryPeers, r.ordinaryEngine)
+	scatterWithSameEngine(ordinaryPeers, ordinaryContext, true)
+	for engine, peers := range specialPeers {
+		// Special-engine stores are only peer targets for now. Keep them out of
+		// leader candidates so leader selection still only considers ordinary stores.
+		scatterWithSameEngine(peers, getSpecialEngineContext(engine), false)
+	}
+	if internalScatter {
+		leaderCandidateStores = r.filterAllowedLeaderCandidateStores(region, targetPeers, leaderCandidateStores)
+	}
 	// FIXME: target leader only considers the ordinary stores, maybe we need to consider the
 	// special engine stores if the engine supports to become a leader. But now there is only
 	// one engine, tiflash, which does not support the leader, so don't consider it for now.
-	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, r.ordinaryEngine)
+	targetLeader, leaderStorePickedCount := r.selectAvailableLeaderStore(group, region, leaderCandidateStores, ordinaryContext, internalScatter)
 	if targetLeader == 0 {
 		scatterSkipNoLeaderCounter.Inc()
 		return nil, errs.ErrGetTargetStore.FastGenByArgs(fmt.Sprintf("no target leader store found, region: %v", region))
 	}
 
-	for engine, peers := range specialPeers {
-		ctx, ok := r.specialEngines.Load(engine)
-		if !ok {
-			ctx = newEngineContext(r.ctx, func() filter.Filter {
-				return filter.NewEngineFilter(r.name, placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: []string{engine}})
-			})
-			r.specialEngines.Store(engine, ctx)
-		}
-		scatterWithSameEngine(peers, ctx.(engineContext))
-	}
-
 	if isSameDistribution(region, targetPeers, targetLeader) {
 		scatterUnnecessaryCounter.Inc()
-		r.Put(targetPeers, targetLeader, group)
+		if state != nil {
+			r.applyScatterStateDelta(state, region, targetPeers, targetLeader, group, !internalScatter)
+		} else {
+			r.Put(targetPeers, targetLeader, group)
+		}
 		return nil, nil
 	}
-	op, err := operator.CreateScatterRegionOperator(scatterOperatorDesc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
+	createScatterOperator := operator.CreateScatterRegionOperator
+	if internalScatter {
+		createScatterOperator = operator.CreateNonAdminScatterRegionOperator
+	}
+	op, err := createScatterOperator(desc, r.cluster, region, targetPeers, targetLeader, skipStoreLimit)
 	if err != nil {
 		scatterFailCounter.Inc()
 		currentPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
 		for _, peer := range region.GetPeers() {
 			currentPeers[peer.GetStoreId()] = peer
 		}
-		r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		if state != nil {
+			r.applyScatterStateDelta(state, region, currentPeers, region.GetLeader().GetStoreId(), group, !internalScatter)
+		} else {
+			r.Put(currentPeers, region.GetLeader().GetStoreId(), group)
+		}
 		log.Debug("fail to create scatter region operator", errs.ZapError(err))
 		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
 	}
 	if op != nil {
 		scatterSuccessCounter.Inc()
-		r.Put(targetPeers, targetLeader, group)
+		if state == nil {
+			r.Put(targetPeers, targetLeader, group)
+		}
 		op.SetAdditionalInfo("group", group)
-		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
+		if !internalScatter {
+			op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
+		}
 		op.SetPriorityLevel(operatorPriorityLevel)
 	}
 	return op, nil
+}
+
+func (r *RegionScatterer) filterAllowedLeaderCandidateStores(
+	region *core.RegionInfo,
+	targetPeers map[uint64]*metapb.Peer,
+	candidateStores []uint64,
+) []uint64 {
+	if len(candidateStores) == 0 {
+		return candidateStores
+	}
+	filtered := candidateStores[:0]
+	leader := region.GetLeader()
+	if leader == nil {
+		return filtered
+	}
+	currentLeaderStoreID := leader.GetStoreId()
+	if !r.isAllowedLeaderSource(currentLeaderStoreID) {
+		for _, storeID := range candidateStores {
+			if storeID == currentLeaderStoreID {
+				return append(filtered, storeID)
+			}
+		}
+		return filtered
+	}
+	for _, storeID := range candidateStores {
+		peer := targetPeers[storeID]
+		if peer == nil {
+			continue
+		}
+		if operator.IsAllowedLeaderTarget(r.cluster, region, peer) {
+			filtered = append(filtered, storeID)
+		}
+	}
+	return filtered
+}
+
+func (r *RegionScatterer) isAllowedLeaderSource(storeID uint64) bool {
+	store := r.cluster.GetStore(storeID)
+	if store == nil {
+		return false
+	}
+	stateFilter := &filter.StoreStateFilter{ActionScope: r.name, TransferLeader: true}
+	return filter.NewCandidates([]*core.StoreInfo{store}).
+		FilterSource(r.cluster.GetSharedConfig(), nil, nil, stateFilter).
+		Len() > 0
 }
 
 func allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
@@ -483,13 +830,13 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 	return region.GetLeader().GetStoreId() == targetLeader
 }
 
-// selectNewPeer return the new peer which pick the fewest picked count.
+// selectNewPeer returns the new peer which pick the fewest picked count.
 // it keeps the origin peer if the origin store's pick count is equal the fewest pick.
 // it can be divided into three steps:
 // 1. found the max pick count and the min pick count.
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.
-func (r *RegionScatterer) selectNewPeer(context engineContext, group string, peer *metapb.Peer, filters []filter.Filter) *metapb.Peer {
+func (r *RegionScatterer) selectNewPeer(context scatterSelectionContext, group string, peer *metapb.Peer, filters []filter.Filter, internalScatter bool) *metapb.Peer {
 	stores := r.cluster.GetStores()
 	maxStoreTotalCount := uint64(0)
 	minStoreTotalCount := uint64(math.MaxUint64)
@@ -506,6 +853,7 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 	var newPeer *metapb.Peer
 	minCount := uint64(math.MaxUint64)
 	originStorePickedCount := uint64(math.MaxUint64)
+	bestStoreRegionCount := math.MaxInt
 	for _, store := range stores {
 		storeCount := context.selectedPeer.Get(store.GetID(), group)
 		if store.GetID() == peer.GetStoreId() {
@@ -514,17 +862,29 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
-		if storeCount < maxStoreTotalCount || maxStoreTotalCount == minStoreTotalCount {
-			if filter.Target(r.cluster.GetSharedConfig(), store, filters) {
-				if storeCount < minCount {
-					minCount = storeCount
-					newPeer = &metapb.Peer{
-						StoreId: store.GetID(),
-						Role:    peer.GetRole(),
-					}
-				}
-			}
+		if storeCount >= maxStoreTotalCount && maxStoreTotalCount != minStoreTotalCount {
+			continue
 		}
+		if !filter.Target(r.cluster.GetSharedConfig(), store, filters) {
+			continue
+		}
+		candidate := &metapb.Peer{
+			StoreId: store.GetID(),
+			Role:    peer.GetRole(),
+		}
+		storeRegionCount := store.GetRegionCount()
+		if storeCount < minCount ||
+			(internalScatter && storeCount == minCount &&
+				(storeRegionCount < bestStoreRegionCount ||
+					(storeRegionCount == bestStoreRegionCount && (newPeer == nil || store.GetID() < newPeer.GetStoreId())))) {
+			minCount = storeCount
+			newPeer = candidate
+			bestStoreRegionCount = storeRegionCount
+		}
+	}
+	if internalScatter && newPeer != nil && peer.GetStoreId() != newPeer.GetStoreId() &&
+		!peerMoveReducesSourceTargetGap(context.selectedPeer, group, peer.GetStoreId(), newPeer.GetStoreId()) {
+		return peer
 	}
 	if originStorePickedCount <= minCount {
 		return peer
@@ -535,33 +895,115 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 	return newPeer
 }
 
-// selectAvailableLeaderStore select the target leader store from the candidates. The candidates would be collected by
-// the existed peers store depended on the leader counts in the group level. Please use this func before scatter spacial engines.
+// selectAvailableLeaderStore selects the target leader store from candidate
+// peer stores after ordinary and special-engine peer scatter. Special-engine
+// stores are excluded from candidates because they cannot become leaders.
 func (r *RegionScatterer) selectAvailableLeaderStore(group string, region *core.RegionInfo,
-	leaderCandidateStores []uint64, context engineContext) (leaderID uint64, leaderStorePickedCount uint64) {
-	sourceStore := r.cluster.GetStore(region.GetLeader().GetStoreId())
-	if sourceStore == nil {
+	leaderCandidateStores []uint64, context scatterSelectionContext, internalScatter bool) (leaderID uint64, leaderStorePickedCount uint64) {
+	if r.cluster.GetStore(region.GetLeader().GetStoreId()) == nil {
 		log.Error("failed to get the store", zap.Uint64("store-id", region.GetLeader().GetStoreId()), errs.ZapError(errs.ErrGetSourceStore))
 		return 0, 0
 	}
 	minStoreGroupLeader := uint64(math.MaxUint64)
+	minStoreGroupPeer := uint64(math.MaxUint64)
 	id := uint64(0)
+	unusedAlternativeID := uint64(0)
+	unusedAlternativePeerCount := uint64(math.MaxUint64)
+	currentLeaderID := region.GetLeader().GetStoreId()
+	currentLeaderCanStay := false
 	for _, storeID := range leaderCandidateStores {
 		store := r.cluster.GetStore(storeID)
 		if store == nil {
 			continue
 		}
+		if storeID == currentLeaderID {
+			currentLeaderCanStay = true
+		}
 		storeGroupLeaderCount := context.selectedLeader.Get(storeID, group)
-		if minStoreGroupLeader > storeGroupLeaderCount {
+		storeGroupPeerCount := context.selectedPeer.Get(storeID, group)
+		if internalScatter && storeID != currentLeaderID && storeGroupLeaderCount == 0 {
+			if unusedAlternativeID == 0 || storeGroupPeerCount < unusedAlternativePeerCount ||
+				(storeGroupPeerCount == unusedAlternativePeerCount && storeID < unusedAlternativeID) {
+				unusedAlternativeID = storeID
+				unusedAlternativePeerCount = storeGroupPeerCount
+			}
+		}
+		if id == 0 || minStoreGroupLeader > storeGroupLeaderCount ||
+			(internalScatter && minStoreGroupLeader == storeGroupLeaderCount && minStoreGroupPeer > storeGroupPeerCount) {
 			minStoreGroupLeader = storeGroupLeaderCount
+			minStoreGroupPeer = storeGroupPeerCount
 			id = storeID
 		}
 	}
-	return id, minStoreGroupLeader
+	selectedID := id
+	if internalScatter && unusedAlternativeID != 0 {
+		selectedID = unusedAlternativeID
+	}
+	if selectedID == 0 {
+		return 0, 0
+	}
+	if internalScatter && currentLeaderCanStay && selectedID != currentLeaderID &&
+		!leaderMoveReducesSourceTargetGap(context.selectedLeader, group, currentLeaderID, selectedID) {
+		selectedID = currentLeaderID
+	}
+	return selectedID, context.selectedLeader.Get(selectedID, group)
+}
+
+func peerMoveReducesSourceTargetGap(selectedPeers selectedStoreCounter, group string, fromStoreID, toStoreID uint64) bool {
+	fromCount := selectedPeers.Get(fromStoreID, group)
+	toCount := selectedPeers.Get(toStoreID, group)
+	return fromCount > toCount+1
+}
+
+func leaderMoveReducesSourceTargetGap(selectedLeaders selectedStoreCounter, group string, fromStoreID, toStoreID uint64) bool {
+	fromCount := selectedLeaders.Get(fromStoreID, group)
+	toCount := selectedLeaders.Get(toStoreID, group)
+	// A zero source count means this group has no seeded/current leader history
+	// for the origin store, so keep the original scatter fallback behavior.
+	return fromCount == 0 || fromCount > toCount+1
+}
+
+func isSameRegionEpoch(left, right *metapb.RegionEpoch) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.GetVersion() == right.GetVersion() && left.GetConfVer() == right.GetConfVer()
+}
+
+// finalPlacementAfterOperator projects the final target placement of an
+// in-flight operator by walking its steps without considering partial execution
+// progress. This is a forward-looking estimate: the caller uses it to deduct the
+// operator's intended footprint from the next round of store selection, so the
+// estimate is intentionally the end state rather than the current half-done state.
+func finalPlacementAfterOperator(region *core.RegionInfo, op *operator.Operator) (map[uint64]*metapb.Peer, uint64) {
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))
+	for _, peer := range region.GetPeers() {
+		targetPeers[peer.GetStoreId()] = peer
+	}
+	targetLeader := region.GetLeader().GetStoreId()
+	if op == nil {
+		return targetPeers, targetLeader
+	}
+	for i := range op.Len() {
+		switch step := op.Step(i).(type) {
+		case operator.TransferLeader:
+			targetLeader = step.ToStore
+		case operator.AddPeer:
+			targetPeers[step.ToStore] = &metapb.Peer{StoreId: step.ToStore}
+		case operator.AddLearner:
+			targetPeers[step.ToStore] = &metapb.Peer{StoreId: step.ToStore}
+		case operator.RemovePeer:
+			delete(targetPeers, step.FromStore)
+		}
+	}
+	return targetPeers, targetLeader
 }
 
 // Put put the final distribution in the context no matter the operator was created
 func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint64, group string) {
+	if leaderStoreID == 0 {
+		return
+	}
 	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
 	// Group peers by the engine of their stores
 	for _, peer := range peers {
@@ -576,19 +1018,83 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 				strconv.FormatUint(storeID, 10),
 				strconv.FormatBool(false),
 				core.EngineTiKV).Inc()
-		} else {
-			engine := store.GetLabelValue(core.EngineKey)
-			ctx, _ := r.specialEngines.Load(engine)
-			ctx.(engineContext).selectedPeer.Put(storeID, group)
-			scatterDistributionCounter.WithLabelValues(
-				strconv.FormatUint(storeID, 10),
-				strconv.FormatBool(false),
-				engine).Inc()
+			continue
 		}
+		engine := store.GetLabelValue(core.EngineKey)
+		ctx := r.getOrCreateSpecialEngineContext(engine)
+		ctx.selectedPeer.Put(storeID, group)
+		scatterDistributionCounter.WithLabelValues(
+			strconv.FormatUint(storeID, 10),
+			strconv.FormatBool(false),
+			engine).Inc()
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
 	scatterDistributionCounter.WithLabelValues(
 		strconv.FormatUint(leaderStoreID, 10),
 		strconv.FormatBool(true),
 		core.EngineTiKV).Inc()
+}
+
+// applyScatterStateDelta records a local scatter state change after scattering a
+// region to the target placement. Metrics are only emitted when this delta
+// corresponds to a new scatter decision accepted in the current request/round.
+func (r *RegionScatterer) applyScatterStateDelta(state *scatterState, region *core.RegionInfo, targetPeers map[uint64]*metapb.Peer, targetLeader uint64, group string, recordMetrics bool) {
+	if state == nil || region == nil || region.GetLeader() == nil {
+		return
+	}
+	engineFilter := filter.NewEngineFilter(r.name, filter.NotSpecialEngines)
+	ordinaryOldStores := make([]uint64, 0, len(region.GetPeers()))
+	ordinaryNewStores := make([]uint64, 0, len(targetPeers))
+	specialOldStores := make(map[string][]uint64)
+	specialNewStores := make(map[string][]uint64)
+
+	classifyStore := func(storeID uint64, ordinary *[]uint64, special map[string][]uint64) string {
+		store := r.cluster.GetStore(storeID)
+		if store == nil {
+			return ""
+		}
+		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
+			*ordinary = append(*ordinary, storeID)
+			return core.EngineTiKV
+		}
+		engine := store.GetLabelValue(core.EngineKey)
+		special[engine] = append(special[engine], storeID)
+		return engine
+	}
+
+	for _, peer := range region.GetPeers() {
+		classifyStore(peer.GetStoreId(), &ordinaryOldStores, specialOldStores)
+	}
+	for _, peer := range targetPeers {
+		storeID := peer.GetStoreId()
+		engine := classifyStore(storeID, &ordinaryNewStores, specialNewStores)
+		if recordMetrics && engine != "" {
+			scatterDistributionCounter.WithLabelValues(
+				strconv.FormatUint(storeID, 10),
+				strconv.FormatBool(false),
+				engine).Inc()
+		}
+	}
+
+	state.ordinaryEngine.selectedPeer.Update(group, ordinaryOldStores, ordinaryNewStores)
+	specialEngines := make(map[string]struct{}, len(specialOldStores)+len(specialNewStores))
+	for engine := range specialOldStores {
+		specialEngines[engine] = struct{}{}
+	}
+	for engine := range specialNewStores {
+		specialEngines[engine] = struct{}{}
+	}
+	for engine := range specialEngines {
+		ctx := r.getOrCreateSpecialEngineState(state, engine)
+		ctx.selectedPeer.Update(group, specialOldStores[engine], specialNewStores[engine])
+	}
+
+	oldLeaderStoreID := region.GetLeader().GetStoreId()
+	state.ordinaryEngine.selectedLeader.Update(group, []uint64{oldLeaderStoreID}, []uint64{targetLeader})
+	if recordMetrics {
+		scatterDistributionCounter.WithLabelValues(
+			strconv.FormatUint(targetLeader, 10),
+			strconv.FormatBool(true),
+			core.EngineTiKV).Inc()
+	}
 }

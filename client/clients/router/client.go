@@ -458,7 +458,11 @@ func (c *Cli) updateMsConnection(ctx context.Context) {
 		}
 		// Store the stream connection context if it is successfully created.
 		if stream != nil {
-			c.msConCtxMgr.Store(cctx, cancel, url, stream)
+			if !c.msConCtxMgr.Store(cctx, cancel, url, stream) {
+				log.Info("[router] already exists router service stream connection", zap.String("url", url))
+				cancel()
+				continue
+			}
 			log.Info("[router] successfully established the router service stream connection", zap.String("url", url))
 		} else {
 			log.Warn("[router] failed to create the router service stream connection")
@@ -490,7 +494,11 @@ func (c *Cli) updateConnection(ctx context.Context) {
 		}
 		// Store the stream connection context if it is successfully created.
 		if stream != nil {
-			c.conCtxMgr.Store(cctx, cancel, url, stream)
+			if !c.conCtxMgr.Store(cctx, cancel, url, stream) {
+				log.Info("[router] already exists leader router stream connection", zap.String("url", url))
+				cancel()
+				return
+			}
 			log.Info("[router] successfully established the leader router stream connection", zap.String("url", url))
 		} else {
 			log.Warn("[router] failed to create the leader router stream connection")
@@ -519,7 +527,11 @@ func (c *Cli) updateConnection(ctx context.Context) {
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
-				c.conCtxMgr.Store(cctx, cancel, url, stream)
+				if !c.conCtxMgr.Store(cctx, cancel, url, stream) {
+					log.Info("[router] already exists router stream connection", zap.String("url", url))
+					cancel()
+					continue
+				}
 				log.Info("[router] successfully established the router stream connection", zap.String("url", url))
 			} else {
 				log.Warn("[router] failed to create the router stream connection")

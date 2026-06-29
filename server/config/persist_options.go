@@ -198,10 +198,22 @@ func (o *PersistOptions) GetAffinityScheduleLimit() uint64 {
 	return o.getTTLNumberOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
 }
 
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistOptions) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
+}
+
 // SetAffinityScheduleLimit sets the limit for affinity schedule.
 func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.AffinityScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
+// SetSplitScatterScheduleLimit sets the limit for split-scatter schedule.
+func (o *PersistOptions) SetSplitScatterScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.SplitScatterScheduleLimit = limit
 	o.SetScheduleConfig(v)
 }
 
@@ -251,6 +263,7 @@ var supportedTTLConfigs = []string{
 	sc.ReplicaRescheduleLimitKey,
 	sc.MergeScheduleLimitKey,
 	sc.HotRegionScheduleLimitKey,
+	sc.SplitScatterScheduleLimitKey,
 	sc.SchedulerMaxWaitingOperatorKey,
 	sc.EnableLocationReplacement,
 	sc.EnableTiKVSplitRegion,

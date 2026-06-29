@@ -118,7 +118,7 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
-	state, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
+	state, err := gcStateManager.GetGCState(constant.NullKeyspaceID, false)
 	re.NoError(err)
 	left := state.GCBarriers
 	leftSsps := make([]*endpoint.ServiceSafePoint, 0, len(left))

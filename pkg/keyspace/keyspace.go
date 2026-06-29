@@ -843,6 +843,31 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	return meta, nil
 }
 
+// RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
+func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
+	manager.metaLock.Lock(id)
+	defer manager.metaLock.Unlock(id)
+	if isProtectedKeyspaceID(id) {
+		return newModifyProtectedKeyspaceError()
+	}
+	meta, err := manager.store.LoadKeyspaceMeta(txn, id)
+	if err != nil {
+		return err
+	}
+	if meta == nil {
+		return errs.ErrKeyspaceNotFound
+	}
+	if meta.GetState() == keyspacepb.KeyspaceState_ENABLED || meta.GetState() == keyspacepb.KeyspaceState_DISABLED {
+		return errors.Errorf("cannot remove keyspace in state %s", meta.GetState().String())
+	}
+	err = manager.store.RemoveKeyspace(txn, id, meta.GetName())
+	if err == nil {
+		manager.keyspaceNameLookup.Delete(id)
+		manager.keyspaceStateLookup.Delete(id)
+	}
+	return err
+}
+
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {

@@ -206,7 +206,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID)))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.GetID()))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
@@ -248,13 +248,29 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue())
 }
 
-// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
-func (ls *Leadership) DeleteLeaderKey() error {
-	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+// DeleteLeaderKeyByRevision deletes the leader key only when its mod revision
+// is the same as the observed revision.
+func (ls *Leadership) DeleteLeaderKeyByRevision(revision int64) error {
+	return ls.removeLeaderKey(clientv3.Compare(clientv3.ModRevision(ls.leaderKey), "=", revision))
+}
+
+func (ls *Leadership) removeLeaderKey(cmp clientv3.Cmp) error {
+	resp, err := kv.NewSlowLogTxn(ls.client).
+		If(cmp).
+		Then(clientv3.OpDelete(ls.leaderKey)).
+		Else(clientv3.OpGet(ls.leaderKey)).
+		Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
+		if len(resp.Responses) == 1 && len(resp.Responses[0].GetResponseRange().Kvs) == 0 {
+			// The leader key has already gone. Treat it as deleted so the caller can
+			// continue campaigning without blocking on an idempotent cleanup.
+			ls.Reset()
+			log.Info("leader key has already been deleted", zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
+			return nil
+		}
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	// Reset the lease as soon as possible.

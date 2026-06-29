@@ -1472,7 +1472,7 @@ func (s *Server) IsServiceIndependent(name string) bool {
 }
 
 // DirectlyGetRaftCluster returns raft cluster directly.
-// Only used for test.
+// It bypasses the leader-running check for follower-local paths and tests.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }

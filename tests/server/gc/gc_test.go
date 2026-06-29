@@ -217,6 +217,13 @@ func TestGCOperations(t *testing.T) {
 			re.Equal(uint64(15), resp.GetGcState().GetGcBarriers()[0].GetBarrierTs())
 			re.Greater(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3500))
 			re.Less(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3601))
+
+			req.ExcludeGcBarriers = true
+			resp, err = grpcPDClient.GetGCState(ctx, req)
+			re.NoError(err)
+			re.NotNil(resp.Header)
+			re.Nil(resp.Header.Error)
+			re.Empty(resp.GetGcState().GetGcBarriers())
 		}
 	}
 
@@ -265,6 +272,15 @@ func TestGCOperations(t *testing.T) {
 		re.Equal(uint64(15), gcState.GetGcBarriers()[0].GetBarrierTs())
 		re.Greater(gcState.GetGcBarriers()[0].GetTtlSeconds(), int64(3500))
 		re.Less(gcState.GetGcBarriers()[0].GetTtlSeconds(), int64(3601))
+	}
+
+	req.ExcludeGcBarriers = true
+	resp, err = grpcPDClient.GetAllKeyspacesGCStates(ctx, req)
+	re.NoError(err)
+	re.NotNil(resp.Header)
+	re.Nil(resp.Header.Error)
+	for _, gcState := range resp.GetGcStates() {
+		re.Empty(gcState.GetGcBarriers())
 	}
 
 	// Global GC Barrier API
@@ -320,6 +336,18 @@ func TestGCOperations(t *testing.T) {
 		re.Equal("b2", resp.GetNewBarrierInfo().GetBarrierId())
 		re.Equal(uint64(24), resp.GetNewBarrierInfo().GetBarrierTs())
 		re.Equal(math.MaxInt64, int(resp.GetNewBarrierInfo().GetTtlSeconds()))
+	}
+
+	{
+		req := &pdpb.GetAllKeyspacesGCStatesRequest{
+			Header:                  header,
+			ExcludeGlobalGcBarriers: true,
+		}
+		resp, err := grpcPDClient.GetAllKeyspacesGCStates(ctx, req)
+		re.NoError(err)
+		re.NotNil(resp.Header)
+		re.Nil(resp.Header.Error)
+		re.Empty(resp.GetGlobalGcBarriers())
 	}
 
 	{

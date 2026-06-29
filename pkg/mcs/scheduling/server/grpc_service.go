@@ -34,6 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -153,7 +155,13 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		if time.Since(lastBind) > time.Minute {
-			s.hbStreams.BindStream(storeID, server)
+			streams := c.GetHeartbeatStreams()
+			if streams == nil {
+				resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
+				err := server.Send(resp)
+				return errors.WithStack(err)
+			}
+			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
 
@@ -213,7 +221,7 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 		if store == nil {
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
-			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
@@ -243,13 +251,17 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
-	if c == nil {
+	var metaWatcher *meta.Watcher
+	if c != nil {
+		metaWatcher = c.GetMetaWatcher()
+	}
+	if c == nil || metaWatcher == nil {
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	start := time.Now()
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
-		s.metaWatcher.GetStoreWatcher().ForceLoad()
+		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
 	storeID := request.GetStats().GetStoreId()
@@ -372,7 +384,16 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitCount := request.GetSplitCount()
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
-		return nil, err
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	region := c.GetRegion(reqRegion.GetId())
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
+		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
+		}, nil
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
@@ -440,6 +461,15 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// status may be left, and these regions need to be checked with higher
 	// priority.
 	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(false, recordRegions...)
+	if request.GetReason() == pdpb.SplitReason_LOAD {
+		newRegionIDs := recordRegions[:len(recordRegions)-1]
+		c.GetCoordinator().GetCheckerController().RecordSplitScatterBatch(
+			reqRegion.GetId(),
+			// Wait until PD observes the source region version advanced by the split.
+			reqRegion.GetRegionEpoch().GetVersion()+1,
+			newRegionIDs,
+		)
+	}
 
 	return &schedulingpb.AskBatchSplitResponse{
 		Header: wrapHeader(),
