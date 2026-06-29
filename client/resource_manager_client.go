@@ -23,10 +23,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -62,7 +62,7 @@ type ResourceManagerClient interface {
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error)
 }
 
 // GetResourceGroupOp represents available options when getting resource group.

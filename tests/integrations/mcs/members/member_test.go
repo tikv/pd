@@ -36,9 +36,13 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
+	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
 
 func TestMain(m *testing.M) {
@@ -462,6 +466,243 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
 	}
+}
+
+// mustSetupKeyspaceGroupWithoutKeyspaces creates a keyspace group that has no
+// keyspaces assigned, allocates TSO nodes for it, and waits until one of them
+// becomes the primary. It returns the primary's address.
+func (suite *memberTestSuite) mustSetupKeyspaceGroupWithoutKeyspaces(re *require.Assertions, groupID uint32) string {
+	// Create the keyspace group without members first, then use AllocNodes so that
+	// TSO nodes discover the group via etcd watch and elect a primary.
+	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:       groupID,
+				UserKind: endpoint.Standard.String(),
+			},
+		},
+	})
+
+	// Allocate nodes for the group via PD's AllocNodes API so TSO nodes can
+	// discover their membership through etcd and start campaigning for primary.
+	allocBody, err := json.Marshal(&handlers.AllocNodesForKeyspaceGroupParams{
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
+	})
+	re.NoError(err)
+	allocReq, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("%s/pd/api/v2/tso/keyspace-groups/%d/alloc", suite.backendEndpoints, groupID),
+		bytes.NewBuffer(allocBody))
+	re.NoError(err)
+	allocResp, err := tests.TestDialClient.Do(allocReq)
+	re.NoError(err)
+	re.Equal(http.StatusOK, allocResp.StatusCode)
+	allocResp.Body.Close()
+
+	// Wait until the group is loaded on a TSO node and has elected a primary.
+	var groupPrimary string
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[groupID]; ok && m.IsPrimary {
+				groupPrimary = tsoSvr.GetAddr()
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+	re.NotEmpty(groupPrimary)
+	return groupPrimary
+}
+
+// TestKeyspaceGroupMembersWithoutKeyspaces verifies that the keyspace-groups
+// members API returns a keyspace group that is served by the node but has no
+// keyspaces assigned. This guards against regressing back to GetKeyspaceGroups(),
+// which is built from the keyspace lookup table and would miss such a group, so
+// its primary would never be observed through this API.
+func (suite *memberTestSuite) TestKeyspaceGroupMembersWithoutKeyspaces() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// The group with no keyspaces must be returned by the members API, and its
+	// member list must not carry any keyspace.
+	members := mustGetKeyspaceGroupMembers(re, suite.tsoNodes[groupPrimary].(*tso.Server))
+	m, ok := members[testGroupID]
+	re.True(ok)
+	re.True(m.IsPrimary)
+	re.Empty(m.Group.Keyspaces)
+}
+
+// TestTransferPrimaryWithKeyspaceGroup tests that the transfer primary API accepts
+// a keyspace_group_id field and routes the transfer to the correct keyspace group.
+func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// Transfer primary within keyspace group 1 (random resign — new_primary left empty).
+	body := map[string]any{
+		"new_primary":       "",
+		"keyspace_group_id": testGroupID,
+	}
+	data, err := json.Marshal(body)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Wait for the primary of group 1 to move to a different node.
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return tsoSvr.GetAddr() != groupPrimary
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Transfer primary to a specific node within keyspace group 1.
+	var newPrimary string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && m.IsPrimary {
+			groupPrimary = tsoSvr.GetAddr()
+		} else if _, ok := members[testGroupID]; ok {
+			newPrimary = tsoSvr.Name()
+		}
+	}
+	re.NotEmpty(newPrimary)
+
+	body["new_primary"] = newPrimary
+	body["keyspace_group_id"] = testGroupID
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Verify the specified node becomes primary.
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			if tsoSvr.Name() != newPrimary {
+				continue
+			}
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Sending the transfer request to a non-primary member of the group should
+	// be forwarded to the group's primary and still succeed.
+	var nonPrimaryAddr string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && !m.IsPrimary {
+			nonPrimaryAddr = tsoSvr.GetAddr()
+			break
+		}
+	}
+	re.NotEmpty(nonPrimaryAddr)
+	body["new_primary"] = ""
+	body["keyspace_group_id"] = testGroupID
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	// The follower forwards the request to the group's primary. While a primary
+	// election is in flight the primary address can be briefly unavailable, so
+	// retry until the forwarded request succeeds.
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", nonPrimaryAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+
+	// Requesting transfer for a non-existent keyspace group should return 400.
+	body["keyspace_group_id"] = uint32(9999)
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// An empty request body must be rejected instead of silently falling back to
+	// a random transfer on the default keyspace group.
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", http.NoBody)
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+// TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary
+// request for the default keyspace group is still forwarded from a follower to
+// the primary and succeeds, preserving backward compatibility with the previous
+// ServiceRedirector behavior.
+func (suite *memberTestSuite) TestTransferPrimaryToDefaultGroupFollower() {
+	re := suite.Require()
+
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	// Pick a follower of the default keyspace group.
+	var followerAddr string
+	for addr := range suite.tsoAvailMembers {
+		if addr != primary {
+			followerAddr = addr
+			break
+		}
+	}
+	re.NotEmpty(followerAddr)
+
+	// Omit keyspace_group_id so it defaults to the default keyspace group (0).
+	// The follower should forward the request to the primary and succeed. Retry
+	// to ride over any in-flight primary election.
+	data, err := json.Marshal(map[string]any{"new_primary": ""})
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", followerAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {

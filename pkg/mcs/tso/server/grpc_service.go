@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -98,6 +100,15 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		clusterID := header.GetClusterId()
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
+		}
+		host := s.advertiseListenHost
+		if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+			if calleeID != host {
+				return status.Errorf(
+					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
+					s.GetAdvertiseListenAddr(), calleeID,
+				)
+			}
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
@@ -218,6 +229,15 @@ func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, er
 	}
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {
 		return tsopb.ErrorType_CLUSTER_MISMATCHED, errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
+	}
+	host := s.advertiseListenHost
+	if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+		if calleeID != host {
+			return tsopb.ErrorType_INVALID_VALUE, errors.Errorf(
+				"mismatch callee id, need %s but got %s",
+				s.GetAdvertiseListenAddr(), calleeID,
+			)
+		}
 	}
 	return tsopb.ErrorType_OK, nil
 }

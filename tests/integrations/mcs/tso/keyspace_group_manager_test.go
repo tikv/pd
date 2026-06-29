@@ -146,6 +146,38 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		serverList = append(serverList, s)
 	}
 
+	var modRevision uint64
+	findGroupByKeyspaceID := func(groupID uint32, keyspaceID uint32, addr string, requestModRevision uint64) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+		ctx, cancel := context.WithTimeout(suite.ctx, time.Second)
+		defer cancel()
+		conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(addr)
+		if err != nil {
+			return nil, err
+		}
+		req := tsopb.FindGroupByKeyspaceIDRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId:       clusterID,
+				KeyspaceId:      keyspaceID,
+				KeyspaceGroupId: groupID,
+			},
+			KeyspaceId:  keyspaceID,
+			ModRevision: requestModRevision,
+		}
+		return tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(ctx, &req)
+	}
+
+	waitGroupLoaded := func(groupID uint32, keyspaceID uint32, addr string) {
+		// waitKeyspaceReady only checks a serving primary; this test directly queries specific TSO nodes.
+		testutil.Eventually(re, func() bool {
+			resp, err := findGroupByKeyspaceID(groupID, keyspaceID, addr, modRevision)
+			if err != nil || resp == nil || resp.GetHeader().GetError() != nil {
+				return false
+			}
+			keyspaceGroup := resp.GetKeyspaceGroup()
+			return keyspaceGroup != nil && keyspaceGroup.GetId() == groupID
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}
+
 	handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
@@ -157,21 +189,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		},
 	})
 	suite.waitKeyspaceReady([]uint32{keyspaceGroupID}, keyspaceIDs)
-	var modRevision uint64
 	checkFn := func(groupID uint32, keyspaceID uint32, addr string, terr *tsopb.Error) (string, string) {
-		conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(addr)
-		re.NoError(err)
-		req := tsopb.FindGroupByKeyspaceIDRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       clusterID,
-				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: groupID,
-			},
-			KeyspaceId:  keyspaceID,
-			ModRevision: modRevision,
-		}
-		resp, err := tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(suite.ctx, &req)
+		resp, err := findGroupByKeyspaceID(groupID, keyspaceID, addr, modRevision)
 		if terr != nil {
+			re.NoError(err)
+			re.NotNil(resp)
 			re.Equal(terr, resp.GetHeader().GetError())
 			return "", ""
 		}
@@ -194,6 +216,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		}
 		return primaryAddress, secondAddress
 	}
+	for _, server := range serverList {
+		waitGroupLoaded(keyspaceGroupID, keyspaceIDs[0], server.GetAddr())
+	}
 	checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[1].GetAddr(), nil)
 	primaryAddress, secondAddress := checkFn(keyspaceGroupID, keyspaceIDs[0], serverList[0].GetAddr(), nil)
 	re.NotEmpty(secondAddress)
@@ -211,6 +236,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 	})
 	suite.waitKeyspaceReady([]uint32{newGroupID}, []uint32{keyspaceIDs[1], keyspaceIDs[2]})
 	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID)
+	waitGroupLoaded(newGroupID, keyspaceIDs[1], primaryAddress)
 	checkFn(newGroupID, keyspaceIDs[1], primaryAddress, nil)
 
 	// split again

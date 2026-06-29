@@ -684,6 +684,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 
 	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
+	}()
 	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
@@ -693,6 +696,11 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -706,11 +714,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Restart the TSO cluster
 	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
-	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
 func checkTSO(

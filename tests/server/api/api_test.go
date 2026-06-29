@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -875,6 +876,215 @@ func TestFollowerRegionAPIWithNoForward(t *testing.T) {
 	re.NoError(err)
 	re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
 	re.Contains(string(body), "TiKV cluster not bootstrapped")
+}
+
+func TestFollowerRegionResetCacheWithNoForward(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	regions := tests.InitRegions(3)
+	for _, region := range regions {
+		re.NoError(leader.GetRaftCluster().HandleRegionHeartbeat(region))
+	}
+	waitFollowerRegions(re, follower, regions)
+
+	t.Run("requires opt-in header for follower local reset", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(999)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		syncer := follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer()
+		syncer.StopSyncWithLeader()
+		re.False(syncer.IsRunning())
+
+		path := fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", staleRegion.GetID())
+		statusCode, body, err := requestDeleteFollowerRegionCacheWithHeaders(follower, path, http.Header{})
+		re.NoError(err)
+		re.Equal(http.StatusOK, statusCode, body)
+		re.Contains(body, "server cache")
+		re.False(syncer.IsRunning())
+		assertFollowerRegionStored(re, follower, staleRegion.GetID())
+
+		deleteFollowerRegionCache(re, follower, path)
+		testutil.Eventually(re, syncer.IsRunning)
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+
+	t.Run("deletes one stale follower region", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(1001)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		deleteFollowerRegionCache(re, follower, fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", staleRegion.GetID()))
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+
+	t.Run("deletes one storage-only stale follower region", func(t *testing.T) {
+		re := require.New(t)
+		storageOnlyRegion := newFollowerStaleRegion(1009)
+		injectFollowerStaleRegionStorageOnly(re, follower, storageOnlyRegion)
+		deleteFollowerRegionCache(re, follower, fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", storageOnlyRegion.GetID()))
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, storageOnlyRegion.GetID())
+	})
+
+	t.Run("deletes all stale follower regions", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(1019)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		storageOnlyRegion := newFollowerStaleRegion(1029)
+		injectFollowerStaleRegionStorageOnly(re, follower, storageOnlyRegion)
+		deleteFollowerRegionCache(re, follower, "/pd/api/v1/admin/cache/regions")
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+		assertFollowerRegionNotStored(re, follower, storageOnlyRegion.GetID())
+		assertFollowerRegionStored(re, follower, regions[len(regions)-1].GetID())
+	})
+
+	t.Run("serializes concurrent all-region reset requests", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(2009)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		deleteFollowerRegionCacheConcurrently(re, follower, "/pd/api/v1/admin/cache/regions")
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+}
+
+func newFollowerStaleRegion(regionID uint64) *core.RegionInfo {
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    []byte{2},
+		EndKey:      []byte{},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers: []*metapb.Peer{
+			{Id: regionID*10 + 1, StoreId: 1},
+			{Id: regionID*10 + 2, StoreId: 2},
+			{Id: regionID*10 + 3, StoreId: 3},
+		},
+	}
+	return core.NewRegionInfo(region, region.GetPeers()[0], core.SetSource(core.Storage))
+}
+
+func injectFollowerStaleRegion(re *require.Assertions, follower *tests.TestServer, region *core.RegionInfo) {
+	overlaps := follower.GetServer().GetBasicCluster().PutRegion(region)
+	re.NotEmpty(overlaps)
+	injectFollowerStaleRegionStorageOnly(re, follower, region)
+	re.NotNil(follower.GetServer().GetBasicCluster().GetRegion(region.GetID()))
+}
+
+func injectFollowerStaleRegionStorageOnly(re *require.Assertions, follower *tests.TestServer, region *core.RegionInfo) {
+	re.NoError(follower.GetServer().GetStorage().SaveRegion(region.GetMeta()))
+	re.NoError(follower.GetServer().GetStorage().Flush())
+}
+
+func deleteFollowerRegionCache(re *require.Assertions, follower *tests.TestServer, path string) {
+	statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
+	re.NoError(err)
+	re.Equal(http.StatusOK, statusCode, body)
+}
+
+func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tests.TestServer, path string) {
+	const requestCount = 2
+	var wg sync.WaitGroup
+	startCh := make(chan struct{})
+	errCh := make(chan error, requestCount)
+	for range requestCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startCh
+			statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if statusCode != http.StatusOK {
+				errCh <- fmt.Errorf("unexpected status %d: %s", statusCode, body)
+			}
+		}()
+	}
+	close(startCh)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		re.NoError(err)
+	}
+}
+
+func requestDeleteFollowerRegionCache(follower *tests.TestServer, path string) (int, string, error) {
+	return requestDeleteFollowerRegionCacheWithHeaders(follower, path, http.Header{
+		apiutil.PDAllowFollowerHandleHeader: {"true"},
+	})
+}
+
+func requestDeleteFollowerRegionCacheWithHeaders(follower *tests.TestServer, path string, headers http.Header) (int, string, error) {
+	req, err := http.NewRequest(http.MethodDelete, follower.GetAddr()+path, http.NoBody)
+	if err != nil {
+		return 0, "", err
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	resp, err := tests.TestDialClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", err
+	}
+	return resp.StatusCode, string(body), nil
+}
+
+func waitFollowerRegions(re *require.Assertions, follower *tests.TestServer, regions []*core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		bc := follower.GetServer().GetBasicCluster()
+		if len(bc.GetRegions()) != len(regions) {
+			return false
+		}
+		for _, region := range regions {
+			if bc.GetRegion(region.GetID()) == nil {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func assertFollowerRegionNotStored(re *require.Assertions, follower *tests.TestServer, regionID uint64) {
+	re.NoError(follower.GetServer().GetStorage().Flush())
+	region := &metapb.Region{}
+	ok, err := follower.GetServer().GetStorage().LoadRegion(regionID, region)
+	re.NoError(err)
+	re.False(ok)
+}
+
+func assertFollowerRegionStored(re *require.Assertions, follower *tests.TestServer, regionID uint64) {
+	re.NoError(follower.GetServer().GetStorage().Flush())
+	region := &metapb.Region{}
+	ok, err := follower.GetServer().GetStorage().LoadRegion(regionID, region)
+	re.NoError(err)
+	re.True(ok)
 }
 
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {

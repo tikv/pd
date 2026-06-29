@@ -900,9 +900,13 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithEmptyID() {
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
 		var result handlers.AffinityGroupsResponse
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=&ids=group-2", &result)
-		re.NoError(err)
-		re.Len(result.AffinityGroups, 1)
+		testutil.Eventually(re, func() bool {
+			result = handlers.AffinityGroupsResponse{}
+			err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=&ids=group-2", &result)
+			re.NoError(err)
+			_, ok := result.AffinityGroups["group-2"]
+			return len(result.AffinityGroups) == 1 && ok
+		})
 		re.Contains(result.AffinityGroups, "group-2")
 	})
 }
@@ -1052,8 +1056,10 @@ func (suite *affinityHandlerTestSuite) TestBatchDeleteWithForce() {
 		mustBatchDeleteAffinityGroups(re, serverAddr, &batchDeleteReq)
 
 		// Verify the group is deleted
-		statusCode, _ = doGetAffinityGroup(re, serverAddr, "force-delete")
-		re.Equal(http.StatusNotFound, statusCode)
+		testutil.Eventually(re, func() bool {
+			statusCode, _ = doGetAffinityGroup(re, serverAddr, "force-delete")
+			return statusCode == http.StatusNotFound
+		})
 	})
 }
 

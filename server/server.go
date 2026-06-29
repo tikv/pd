@@ -176,6 +176,8 @@ type Server struct {
 	keyspaceManager *keyspace.Manager
 	// keyspace group manager
 	keyspaceGroupManager *keyspace.GroupManager
+	// meta-service group manager
+	metaServiceGroupManager *keyspace.MetaServiceGroupManager
 	// metering writer
 	meteringWriter *metering.Writer
 	// for basicCluster operation.
@@ -202,6 +204,8 @@ type Server struct {
 	hotRegionStorage *storage.HotRegionStorage
 	// Store as map[string]*grpc.ClientConn
 	clientConns sync.Map
+
+	followerRegionResetMu sync.Mutex
 
 	tsoClientPool struct {
 		syncutil.RWMutex
@@ -238,6 +242,7 @@ type Server struct {
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
+	membersCache                     *membersCache
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -270,6 +275,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
+		membersCache:                    newMembersCache(membersCacheTTL),
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
@@ -528,7 +534,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	s.keyspaceManager = keyspace.NewKeyspaceManager(
+		s.ctx,
+		s.storage,
+		s.cluster,
+		keyspaceIDAllocator,
+		&s.cfg.Keyspace,
+		s.keyspaceGroupManager,
+		s.metaServiceGroupManager,
+	)
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
@@ -931,6 +946,155 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 	return s.basicCluster
 }
 
+// ResetFollowerRegionCache resets follower local region cache and restarts
+// region sync from the leader.
+func (s *Server) ResetFollowerRegionCache(regionIDs ...uint64) error {
+	if !s.persistOptions.IsUseRegionStorage() {
+		return errors.New("region storage is disabled")
+	}
+	s.followerRegionResetMu.Lock()
+	defer s.followerRegionResetMu.Unlock()
+
+	leader := s.GetLeader()
+	if leader == nil {
+		return errs.ErrLeaderNil.FastGenByArgs()
+	}
+	leaderURLs := leader.GetClientUrls()
+	if len(leaderURLs) == 0 {
+		return errors.New("pd leader has no client url")
+	}
+
+	syncer := s.cluster.GetRegionSyncer()
+	syncer.StopSyncWithLeader()
+	// Keep the follower connected even when the reset returns an error.
+	defer syncer.StartSyncWithLeader(leaderURLs[0])
+
+	var resetErr error
+	if err := s.storage.Flush(); err != nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	if len(regionIDs) == 0 {
+		if err := s.deleteFollowerRegionStorage(); resetErr == nil && err != nil {
+			resetErr = err
+		}
+		s.basicCluster.ResetRegionCache()
+	} else {
+		for _, regionID := range regionIDs {
+			if err := s.deleteFollowerRegion(regionID); resetErr == nil && err != nil {
+				resetErr = err
+			}
+		}
+	}
+	if err := s.storage.Flush(); err != nil && resetErr == nil {
+		resetErr = errors.Wrap(err, "flush follower region storage")
+	}
+	// Force a full sync after the local reset attempt so the follower can
+	// rebuild any cache entries that were removed before an error happened.
+	syncer.ResetHistoryIndex(0)
+
+	log.Info("reset follower region cache and restart region syncer",
+		zap.String("server", s.Name()),
+		zap.String("leader", leader.GetName()),
+		zap.Int("region-count", len(regionIDs)))
+	return resetErr
+}
+
+func (s *Server) deleteFollowerRegion(regionID uint64) error {
+	region := s.basicCluster.GetRegion(regionID)
+	if region == nil {
+		meta := &metapb.Region{}
+		ok, err := s.storage.LoadRegion(regionID, meta)
+		if err != nil {
+			return errors.Wrap(err, "load follower region from local storage")
+		}
+		if ok {
+			region = core.NewRegionInfo(meta, nil, core.SetSource(core.Storage))
+		}
+	}
+	if region != nil {
+		if err := s.deleteFollowerRegionMeta(region.GetMeta()); err != nil {
+			return err
+		}
+	}
+	s.basicCluster.RemoveRegionIfExist(regionID)
+	return nil
+}
+
+func (s *Server) deleteFollowerRegionStorage() error {
+	regionStorage := storage.RetrieveRegionStorage(s.storage)
+	regionKV, ok := regionStorage.(kv.Base)
+	if !ok {
+		return errors.New("region storage does not support range scan")
+	}
+
+	startID := uint64(0)
+	endKey := keypath.RegionPath(math.MaxUint64)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return s.ctx.Err()
+		default:
+		}
+
+		keys, _, err := regionKV.LoadRange(keypath.RegionPath(startID), endKey, endpoint.MaxKVRangeLimit)
+		if err != nil {
+			return errors.Wrap(err, "load follower regions from local storage")
+		}
+		var lastRegionID uint64
+		for _, key := range keys {
+			regionID, err := parseRegionIDFromStorageKey(key)
+			if err != nil {
+				return err
+			}
+			lastRegionID = regionID
+		}
+		if err := deleteFollowerRegionStorageKeys(s.ctx, regionKV, keys); err != nil {
+			return errors.Wrap(err, "delete follower regions from local storage")
+		}
+		if len(keys) < endpoint.MaxKVRangeLimit {
+			return nil
+		}
+		if lastRegionID == math.MaxUint64 {
+			return nil
+		}
+		startID = lastRegionID + 1
+	}
+}
+
+func deleteFollowerRegionStorageKeys(ctx context.Context, regionKV kv.Base, keys []string) error {
+	return regionKV.RunInTxn(ctx, func(txn kv.Txn) error {
+		for _, key := range keys {
+			if err := txn.Remove(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *Server) deleteFollowerRegionMeta(region *metapb.Region) error {
+	if err := s.storage.DeleteRegion(region); err != nil {
+		log.Warn("failed to delete follower region from local storage",
+			zap.String("server", s.Name()),
+			zap.Uint64("region-id", region.GetId()),
+			errs.ZapError(err))
+		return errors.Wrap(err, "delete follower region from local storage")
+	}
+	return nil
+}
+
+func parseRegionIDFromStorageKey(key string) (uint64, error) {
+	idx := strings.LastIndexByte(key, '/')
+	if idx < 0 || idx == len(key)-1 {
+		return 0, errors.Errorf("invalid region storage key %q", key)
+	}
+	regionID, err := strconv.ParseUint(key[idx+1:], 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "parse region storage key")
+	}
+	return regionID, nil
+}
+
 // GetPersistOptions returns the schedule option.
 func (s *Server) GetPersistOptions() *config.PersistOptions {
 	return s.persistOptions
@@ -972,6 +1136,11 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 	return s.keyspaceGroupManager
 }
 
+// GetMetaServiceGroupManager returns the meta-service group manager of server.
+func (s *Server) GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager {
+	return s.metaServiceGroupManager
+}
+
 // SetKeyspaceGroupManager sets the keyspace group manager of server.
 // Note: it is only used for test.
 func (s *Server) SetKeyspaceGroupManager(keyspaceGroupManager *keyspace.GroupManager) {
@@ -995,8 +1164,22 @@ func (s *Server) StartTimestamp() int64 {
 
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(false)
+}
+
+// ReloadMembers reloads PD server list and updates the cache.
+func (s *Server) ReloadMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(true)
+}
+
+func (s *Server) loadMembers(forceRefresh bool) ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	if s.membersCache != nil {
+		return s.membersCache.get(forceRefresh, func() ([]*pdpb.Member, error) {
+			return cluster.GetMembers(s.GetClient())
+		})
 	}
 	return cluster.GetMembers(s.GetClient())
 }
@@ -1030,22 +1213,41 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 }
 
 // SetKeyspaceConfig sets the keyspace config information.
-func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, true)
+}
+
+// SetKeyspaceConfigWithoutKeyspaceManagerUpdate sets keyspace config without updating the keyspace manager.
+func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
+}
+
+// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
+	s.keyspaceManager.UpdateConfig(newCfg)
+}
+
+func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
+	if err := newCfg.Validate(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetKeyspaceConfig()
-	s.persistOptions.SetKeyspaceConfig(&cfg)
+
+	if !s.persistOptions.CASKeyspaceConfig(oldCfg, newCfg) {
+		return errors.New("update keyspace config failed, because the keyspace config has been changed by other process, please retry")
+	}
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetKeyspaceConfig(old)
+		s.persistOptions.SetKeyspaceConfig(oldCfg)
 		log.Error("failed to update keyspace config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(&cfg)
-	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	if updateKeyspaceManager {
+		s.keyspaceManager.UpdateConfig(newCfg)
+	}
+
+	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 
@@ -1691,12 +1893,16 @@ func (s *Server) leaderLoop() {
 			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
+				s.followerRegionResetMu.Lock()
 				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
+				s.followerRegionResetMu.Unlock()
 			}
 			log.Info("start to watch pd leader", zap.Stringer("pd-leader", leader))
 			// WatchLeader will keep looping and never return unless the PD leader has changed.
 			leader.Watch(s.serverLoopCtx)
+			s.followerRegionResetMu.Lock()
 			syncer.StopSyncWithLeader()
+			s.followerRegionResetMu.Unlock()
 			log.Info("pd leader has changed, try to re-campaign a pd leader")
 		}
 

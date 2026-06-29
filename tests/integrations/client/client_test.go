@@ -1440,7 +1440,7 @@ func TestWatch(t *testing.T) {
 	go func() {
 		var events []*meta_storagepb.Event
 		for e := range ch {
-			events = append(events, e...)
+			events = append(events, e.Events...)
 			if len(events) >= 3 {
 				break
 			}
@@ -1554,7 +1554,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 			re.Equal(13, watchCount)
 			return
 		case res := <-ch:
-			for _, r := range res {
+			for _, r := range res.Events {
 				watchCount++
 				if r.GetType() == meta_storagepb.Event_DELETE {
 					re.Equal(watchPrefix+string(r.PrevKv.Value), string(r.Kv.Key))
