@@ -48,6 +48,7 @@ import (
 var (
 	_                                  *sc.ScheduleConfig = nil
 	resourceManagerControllerConfigURL                    = "/resource-manager/api/v1/config/controller"
+	errConfigNotUpdated                                   = errors.New("config is not updated")
 )
 
 type confHandler struct {
@@ -259,20 +260,21 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 	return err
 }
 
-func (h *confHandler) updateSchedule(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Schedule, key, value)
-	if err != nil {
-		return err
-	}
+func (h *confHandler) updateSchedule(_ *config.Config, key string, value any) error {
+	return ignoreConfigNotUpdated(h.svr.UpdateScheduleConfig(func(config *sc.ScheduleConfig) error {
+		updated, found, err := jsonutil.AddKeyValue(config, key, value)
+		if err != nil {
+			return err
+		}
 
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetScheduleConfig(config.Schedule)
-	}
-	return err
+		if !found {
+			return errors.Errorf("config item %s not found", key)
+		}
+		if !updated {
+			return errConfigNotUpdated
+		}
+		return nil
+	}))
 }
 
 func (h *confHandler) updateReplication(config *config.Config, key string, value any) error {
@@ -313,18 +315,26 @@ func (h *confHandler) updateReplicationModeConfig(config *config.Config, key []s
 	return err
 }
 
-func (h *confHandler) updatePDServerConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.PDServerCfg, key, value)
-	if err != nil {
-		return err
-	}
+func (h *confHandler) updatePDServerConfig(_ *config.Config, key string, value any) error {
+	return ignoreConfigNotUpdated(h.svr.UpdatePDServerConfig(func(config *config.PDServerConfig) error {
+		updated, found, err := jsonutil.AddKeyValue(config, key, value)
+		if err != nil {
+			return err
+		}
 
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
+		if !found {
+			return errors.Errorf("config item %s not found", key)
+		}
+		if !updated {
+			return errConfigNotUpdated
+		}
+		return nil
+	}))
+}
 
-	if updated {
-		err = h.svr.SetPDServerConfig(config.PDServerCfg)
+func ignoreConfigNotUpdated(err error) error {
+	if errors.Cause(err) == errConfigNotUpdated {
+		return nil
 	}
 	return err
 }
@@ -422,21 +432,23 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	config := h.svr.GetScheduleConfig()
-	err = json.Unmarshal(data, &config)
-	if err != nil {
+	var unmarshalErr error
+	err = h.svr.UpdateScheduleConfig(func(config *sc.ScheduleConfig) error {
+		unmarshalErr = json.Unmarshal(data, config)
+		return unmarshalErr
+	})
+	if unmarshalErr != nil {
 		var errCode errcode.ErrorCode
-		err = apiutil.TagJSONError(err)
-		if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		unmarshalErr = apiutil.TagJSONError(unmarshalErr)
+		if jsonErr, ok := errors.Cause(unmarshalErr).(apiutil.JSONError); ok {
 			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
 		} else {
-			errCode = errcode.NewInternalErr(err)
+			errCode = errcode.NewInternalErr(unmarshalErr)
 		}
 		apiutil.ErrorResp(h.rd, w, errCode)
 		return
 	}
-
-	if err := h.svr.SetScheduleConfig(*config); err != nil {
+	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

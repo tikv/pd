@@ -185,9 +185,7 @@ func (m *Manager) setNewAddress() {
 	}
 
 	// set new dashboard address
-	cfg := m.srv.GetPersistOptions().GetPDServerConfig().Clone()
-	cfg.DashboardAddress = m.members[minMemberIdx].GetClientUrls()[0]
-	if err := m.srv.SetPDServerConfig(*cfg); err != nil {
+	if err := m.srv.SetDashboardAddress(m.members[minMemberIdx].GetClientUrls()[0]); err != nil {
 		log.Warn("failed to set persist options")
 	}
 }

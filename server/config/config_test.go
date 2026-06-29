@@ -20,6 +20,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -409,6 +410,159 @@ dashboard-address = "foo"
 			re.Equal(test.dashboardAddress, cfg.PDServerCfg.DashboardAddress)
 		}
 	}
+}
+
+func TestUpdatePDServerConfigKeepsLatestFields(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	storage := storage.NewStorageWithMemoryBackend()
+
+	latest := opt.GetPDServerConfig().Clone()
+	latest.BlockSafePointV1 = true
+	opt.SetPDServerConfig(latest)
+
+	re.NoError(opt.UpdatePDServerConfig(storage, func(cfg *PDServerConfig) error {
+		cfg.DashboardAddress = "none"
+		return nil
+	}))
+
+	re.True(opt.GetPDServerConfig().BlockSafePointV1)
+	re.Equal("none", opt.GetPDServerConfig().DashboardAddress)
+
+	reloaded, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(storage))
+	re.True(reloaded.GetPDServerConfig().BlockSafePointV1)
+	re.Equal("none", reloaded.GetPDServerConfig().DashboardAddress)
+}
+
+func TestPersistSerializesFullConfigSaves(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+
+	storage := newBlockingConfigStorage()
+	scheduleErrCh := make(chan error, 1)
+	go func() {
+		scheduleErrCh <- opt.UpdateScheduleConfig(storage, func(cfg *sc.ScheduleConfig) error {
+			cfg.MaxSnapshotCount++
+			return nil
+		})
+	}()
+
+	releaseFirst := sync.OnceFunc(func() {
+		close(storage.releaseFirst)
+	})
+	defer releaseFirst()
+
+	select {
+	case <-storage.firstStarted:
+	case <-time.After(5 * time.Second):
+		re.FailNow("first config save did not start")
+	}
+
+	replication := opt.GetReplicationConfig().Clone()
+	replication.MaxReplicas = 5
+	opt.SetReplicationConfig(replication)
+	persistErrCh := make(chan error, 1)
+	go func() {
+		persistErrCh <- opt.Persist(storage)
+	}()
+
+	select {
+	case <-storage.secondStarted:
+		re.FailNow("second config save started before the first save was released")
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseFirst()
+
+	re.NoError(<-scheduleErrCh)
+	re.NoError(<-persistErrCh)
+	re.NoError(storage.err)
+	saved := storage.savedConfig()
+	re.NotNil(saved)
+	re.Equal(uint64(5), saved.Replication.MaxReplicas)
+}
+
+type blockingConfigStorage struct {
+	mu sync.Mutex
+
+	firstStarted  chan struct{}
+	releaseFirst  chan struct{}
+	secondStarted chan struct{}
+
+	saveCount int
+	saved     *persistedConfig
+	err       error
+}
+
+func newBlockingConfigStorage() *blockingConfigStorage {
+	return &blockingConfigStorage{
+		firstStarted:  make(chan struct{}),
+		releaseFirst:  make(chan struct{}),
+		secondStarted: make(chan struct{}),
+	}
+}
+
+func (*blockingConfigStorage) LoadConfig(any) (bool, error) {
+	return false, nil
+}
+
+func (s *blockingConfigStorage) SaveConfig(cfg any) error {
+	s.mu.Lock()
+	s.saveCount++
+	saveCount := s.saveCount
+	switch saveCount {
+	case 1:
+		close(s.firstStarted)
+	case 2:
+		close(s.secondStarted)
+	}
+	s.mu.Unlock()
+
+	if saveCount == 1 {
+		<-s.releaseFirst
+	}
+
+	data, err := json.Marshal(cfg)
+	if err == nil {
+		saved := &persistedConfig{Config: &Config{}}
+		err = json.Unmarshal(data, saved)
+		if err == nil {
+			s.mu.Lock()
+			s.saved = saved
+			s.mu.Unlock()
+		}
+	}
+	if err != nil {
+		s.mu.Lock()
+		s.err = err
+		s.mu.Unlock()
+	}
+	return err
+}
+
+func (*blockingConfigStorage) LoadAllSchedulerConfigs() (names, configs []string, err error) {
+	return nil, nil, nil
+}
+
+func (*blockingConfigStorage) LoadSchedulerConfig(string) (string, error) {
+	return "", nil
+}
+
+func (*blockingConfigStorage) SaveSchedulerConfig(string, []byte) error {
+	return nil
+}
+
+func (*blockingConfigStorage) RemoveSchedulerConfig(string) error {
+	return nil
+}
+
+func (s *blockingConfigStorage) savedConfig() *persistedConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saved
 }
 
 func TestDashboardConfig(t *testing.T) {

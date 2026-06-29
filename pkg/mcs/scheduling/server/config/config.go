@@ -19,6 +19,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -190,7 +191,8 @@ func (c *Config) Clone() *Config {
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
-	ttl *cache.TTLString
+	ttl      *cache.TTLString
+	configMu sync.Mutex
 	// Store the global configuration that is related to the scheduling.
 	clusterVersion unsafe.Pointer
 	schedule       atomic.Value
@@ -232,7 +234,10 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -252,6 +257,12 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+	o.storeScheduleConfig(cfg)
+}
+
+func (o *PersistConfig) storeScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
@@ -259,6 +270,24 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
 		o.tryNotifySchedulersUpdating()
 	}
+}
+
+// UpdateScheduleConfig updates the latest scheduling configuration.
+func (o *PersistConfig) UpdateScheduleConfig(storage endpoint.ConfigStorage, update func(*sc.ScheduleConfig) error) error {
+	o.configMu.Lock()
+	defer o.configMu.Unlock()
+
+	old := o.GetScheduleConfig()
+	cfg := old.Clone()
+	if err := update(cfg); err != nil {
+		return err
+	}
+	o.storeScheduleConfig(cfg)
+	if err := o.Persist(storage); err != nil {
+		o.storeScheduleConfig(old)
+		return err
+	}
+	return nil
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
