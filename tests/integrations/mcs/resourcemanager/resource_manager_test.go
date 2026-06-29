@@ -626,7 +626,14 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// Make sure the resource group active
-	meta, err = controller.GetResourceGroup(group.Name)
+	testutil.Eventually(re, func() bool {
+		meta, err = controller.GetResourceGroup(group.Name)
+		if err != nil || meta == nil {
+			return false
+		}
+		meta = controller.GetActiveResourceGroup(group.Name)
+		return meta != nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 	re.NotNil(meta)
 	re.NoError(err)
 	modifySettings(group, 30000)
@@ -635,7 +642,7 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	re.Contains(resp, "Success!")
 	testutil.Eventually(re, func() bool {
 		meta = controller.GetActiveResourceGroup(group.Name)
-		return meta.RUSettings.RU.Settings.FillRate == uint64(30000)
+		return meta != nil && meta.RUSettings.RU.Settings.FillRate == uint64(30000)
 	}, testutil.WithTickInterval(100*time.Millisecond))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
 
@@ -1520,7 +1527,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	_, err := cli.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 
-	waitForResourceGroup := func(expected *rmpb.ResourceGroup, opts ...pd.GetResourceGroupOption) *rmpb.ResourceGroup {
+	waitForResourceGroup := func(expected *rmpb.ResourceGroup, opts ...pd.GetResourceGroupOption) {
 		var (
 			got    *rmpb.ResourceGroup
 			getErr error
@@ -1531,10 +1538,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		}, testutil.WithTickInterval(50*time.Millisecond))
 		re.NoError(getErr)
 		re.Equal(expected, got)
-		return got
 	}
 
-	g := waitForResourceGroup(group)
+	waitForResourceGroup(group)
 
 	// Test Resource Group Stats
 	testConsumption := &rmpb.Consumption{
@@ -1562,7 +1568,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	})
 	re.NoError(err)
 	time.Sleep(10 * time.Millisecond)
-	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	g, err := cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.Equal(g.RUStats, testConsumption)
 
