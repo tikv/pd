@@ -20,8 +20,9 @@ import (
 	"net/http"
 	"time"
 
-	perrors "github.com/pingcap/errors"
 	"github.com/unrolled/render"
+
+	perrors "github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/unsaferecovery"
