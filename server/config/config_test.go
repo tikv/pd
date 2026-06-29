@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
@@ -79,6 +80,127 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(5, newOpt.GetMaxReplicas())
 	re.Equal(uint64(10), newOpt.GetMaxSnapshotCount())
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
+}
+
+func TestReloadDefaultStoreLimit(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().DefaultStoreLimit)
+
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(opt.Persist(storage))
+
+	// Simulate a restarted process whose package-level default goes back to the built-in value.
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	newOpt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(newOpt.Reload(storage))
+
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}
+	re.Equal(expected, newOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(expected, newOpt.GetStoreLimit(100))
+
+	newOpt.SetStoreLimit(101, storelimit.RemovePeer, 70)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70}, newOpt.GetStoreLimit(101))
+
+	cfg := newOpt.GetScheduleConfig().Clone()
+	cfg.DefaultStoreLimit.AddPeer = 0
+	newOpt.SetScheduleConfig(cfg)
+	re.NoError(newOpt.Persist(storage))
+
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	reloadedOpt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
+}
+
+func TestDefaultStoreLimitAdjust(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	cases := []struct {
+		name   string
+		config string
+		expect sc.StoreLimitConfig
+	}{
+		{
+			name: "preserve explicit zero",
+			config: `
+[schedule.default-store-limit]
+add-peer = 0
+remove-peer = 60
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
+		},
+		{
+			name: "store balance rate backfills undefined field",
+			config: `
+[schedule]
+store-balance-rate = 50
+
+[schedule.default-store-limit]
+add-peer = 0
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 50},
+		},
+		{
+			name: "explicit default store limit wins over store balance rate",
+			config: `
+[schedule]
+store-balance-rate = 50
+
+[schedule.default-store-limit]
+add-peer = 60
+remove-peer = 70
+`,
+			expect: sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 70},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			cfg := NewConfig()
+			meta, err := toml.Decode(testCase.config, cfg)
+			require.NoError(t, err)
+			require.NoError(t, cfg.Adjust(&meta, false))
+			require.Equal(t, testCase.expect, cfg.Schedule.DefaultStoreLimit)
+		})
+	}
+
+	schedule := &sc.ScheduleConfig{StoreBalanceRate: 50}
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 50, RemovePeer: 50}, schedule.DefaultStoreLimit)
+
+	schedule = &sc.ScheduleConfig{
+		StoreBalanceRate: 50,
+		DefaultStoreLimit: sc.StoreLimitConfig{
+			AddPeer:    0,
+			RemovePeer: 60,
+		},
+	}
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
 }
 
 func TestReloadUpgrade(t *testing.T) {

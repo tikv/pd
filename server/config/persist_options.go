@@ -390,19 +390,20 @@ func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()
+	defaultStoreLimit := v.GetDefaultStoreLimit()
 	var slc sc.StoreLimitConfig
 	var rate float64
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = defaultStoreLimit.RemovePeer
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = defaultStoreLimit.AddPeer
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
@@ -417,12 +418,14 @@ func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
+		v.DefaultStoreLimit.AddPeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
+		v.DefaultStoreLimit.RemovePeer = ratePerMin
 		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
@@ -494,10 +497,7 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	limitCfg := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
-	}
+	limitCfg := cfg.GetDefaultStoreLimit()
 	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
