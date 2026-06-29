@@ -104,6 +104,12 @@ func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error)
 	return m.pickGroupLocked(ctx)
 }
 
+// hasGroupsLocked reports whether any meta-service group is currently available.
+// The caller must hold the read lock.
+func (m *MetaServiceGroupManager) hasGroupsLocked() bool {
+	return len(m.metaServiceGroups) > 0
+}
+
 // pickGroupLocked is PickGroup with the read lock already held by the caller.
 // Callers that need group selection and the subsequent keyspace metadata save to
 // be atomic with respect to group deletion (which takes the write lock) must

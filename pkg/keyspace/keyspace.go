@@ -589,6 +589,12 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	}
 	manager.mgm.RLock()
 	defer manager.mgm.RUnlock()
+	// Re-check under the lock: the pre-lock check may be stale if a concurrent
+	// PATCH deleted the last group in the meantime. In that case create the
+	// keyspace without a meta-service group instead of failing the creation.
+	if !manager.mgm.hasGroupsLocked() {
+		return manager.saveNewKeyspace(keyspace)
+	}
 	groupID, err := manager.mgm.pickGroupLocked(manager.ctx)
 	if err != nil {
 		return err
