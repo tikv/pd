@@ -137,9 +137,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 	defer cli.Close()
 	re.NotNil(cli)
 	clusterID := cli.GetClusterID(suite.ctx)
-	defer func() {
-		cli.Close()
-	}()
 	servers := suite.tsoCluster.GetServers()
 	serverList := make([]*tso.Server, 0)
 	for _, s := range servers {

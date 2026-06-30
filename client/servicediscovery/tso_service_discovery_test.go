@@ -36,7 +36,7 @@ func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimary(t *testing.T) {
 	}
 	k.modRevision.Store(10)
 
-	oldPrimaryURL, primarySwitched, success := k.update(
+	oldPrimaryURL, primarySwitched, metaChanged := k.update(
 		newGroup,
 		"http://primary-2",
 		[]string{"http://secondary-2"},
@@ -46,7 +46,7 @@ func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimary(t *testing.T) {
 
 	re.Empty(oldPrimaryURL)
 	re.False(primarySwitched)
-	re.False(success)
+	re.False(metaChanged)
 	re.Equal("http://primary-1", k.primaryURL)
 	re.Equal([]string{"http://secondary-1"}, k.secondaryURLs)
 	re.Equal([]string{"http://primary-1", "http://secondary-1"}, k.urls)
@@ -65,7 +65,7 @@ func TestKeyspaceGroupSvcDiscoveryUpdateUpdatesAllFieldsOnFreshRevision(t *testi
 	}
 	k.modRevision.Store(10)
 
-	oldPrimaryURL, primarySwitched, success := k.update(
+	oldPrimaryURL, primarySwitched, metaChanged := k.update(
 		newGroup,
 		"http://primary-2",
 		[]string{"http://secondary-2"},
@@ -75,7 +75,7 @@ func TestKeyspaceGroupSvcDiscoveryUpdateUpdatesAllFieldsOnFreshRevision(t *testi
 
 	re.Equal("http://primary-1", oldPrimaryURL)
 	re.True(primarySwitched)
-	re.True(success)
+	re.True(metaChanged)
 	re.Equal("http://primary-2", k.primaryURL)
 	re.Equal([]string{"http://secondary-2"}, k.secondaryURLs)
 	re.Equal([]string{"http://primary-2", "http://secondary-2"}, k.urls)

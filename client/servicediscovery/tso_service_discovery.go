@@ -56,6 +56,10 @@ const (
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 
+// errNoPrimaryURL is returned when the queried TSO node knows the keyspace group meta
+// but does not serve its allocator, so no primary URL is available from that node.
+var errNoPrimaryURL = errors.New("no primary url found in the keyspace group")
+
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
 type keyspaceGroupSvcDiscovery struct {
@@ -628,8 +632,6 @@ func (c *tsoServiceDiscovery) updateMemberInner(tsoServerURL string) error {
 	}
 	return nil
 }
-
-var errNoPrimaryURL = errors.New("no primary url found in the keyspace group")
 
 // Query the keyspace group info from the tso server by the keyspace ID. The server side will return
 // the info of the keyspace group to which this keyspace belongs.
