@@ -12,20 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils_test
+package utils
 
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -36,164 +32,88 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-const (
-	testPrimaryName   = "tso-primary"
-	testPrimaryAddr   = "http://127.0.0.1:10001"
-	testSecondaryName = "tso-secondary"
-	testSecondaryAddr = "http://127.0.0.1:10002"
-)
-
-func TestTransferPrimary(t *testing.T) {
-	tests := []struct {
-		name                string
-		oldPrimary          string
-		newPrimary          string
-		expectedPrimary     string
-		keepExpectedPrimary bool
-	}{
-		{
-			name:                "self transfer by name keeps expected primary lease",
-			oldPrimary:          testPrimaryName,
-			newPrimary:          testPrimaryName,
-			expectedPrimary:     testPrimaryAddr,
-			keepExpectedPrimary: true,
-		},
-		{
-			name:                "self transfer by address keeps expected primary lease",
-			oldPrimary:          testPrimaryName,
-			newPrimary:          testPrimaryAddr,
-			expectedPrimary:     testPrimaryAddr,
-			keepExpectedPrimary: true,
-		},
-		{
-			name:            "random transfer excludes old primary by name",
-			oldPrimary:      testPrimaryName,
-			expectedPrimary: testSecondaryAddr,
-		},
-		{
-			name:            "random transfer excludes old primary by address",
-			oldPrimary:      testPrimaryAddr,
-			expectedPrimary: testSecondaryAddr,
-		},
-		{
-			name:            "explicit transfer selects target by name",
-			oldPrimary:      testPrimaryName,
-			newPrimary:      testSecondaryName,
-			expectedPrimary: testSecondaryAddr,
-		},
-		{
-			name:            "explicit transfer selects target by address",
-			oldPrimary:      testPrimaryName,
-			newPrimary:      testSecondaryAddr,
-			expectedPrimary: testSecondaryAddr,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := newTransferPrimaryTestEnv(t)
-			before := env.getExpectedPrimary(t)
-			re := require.New(t)
-			re.Equal(testPrimaryAddr, before.value)
-			re.Equal(int64(env.lease.GetID()), before.lease)
-
-			err := mcsutils.TransferPrimary(env.client, env.lease, constant.TSOServiceName,
-				tt.oldPrimary, tt.newPrimary, 0, map[string]bool{
-					testPrimaryAddr:   true,
-					testSecondaryAddr: true,
-				})
-			re.NoError(err)
-
-			after := env.getExpectedPrimary(t)
-			re.Equal(tt.expectedPrimary, after.value)
-			if tt.keepExpectedPrimary {
-				re.Equal(before.modRevision, after.modRevision)
-				re.Equal(before.lease, after.lease)
-				return
-			}
-			re.NotEqual(before.modRevision, after.modRevision)
-			re.NotEqual(before.lease, after.lease)
-		})
-	}
-}
-
-type transferPrimaryTestEnv struct {
-	ctx                 context.Context
-	client              *clientv3.Client
-	lease               *election.Lease
-	expectedPrimaryPath string
-}
-
-type expectedPrimary struct {
-	value       string
-	modRevision int64
-	lease       int64
-}
-
-func newTransferPrimaryTestEnv(t *testing.T) *transferPrimaryTestEnv {
-	t.Helper()
+// TestDeleteExpectedPrimaryFlagRevokesLease reconstructs the corner case from issue
+// #10875. The expected primary flag is bound to an etcd lease; if the key were
+// deleted while its lease lingered, a later campaign would read an empty flag, skip
+// the affinity guard, and then fail with ErrEtcdTxnConflict against the still-present
+// leader key. DeleteExpectedPrimaryFlag must therefore remove both the key and its
+// lease, so the "key deleted but lease persists" state can never exist.
+func TestDeleteExpectedPrimaryFlagRevokesLease(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	t.Cleanup(clean)
+	defer clean()
 
-	keypath.SetClusterID(uint64(time.Now().UnixNano()))
-	t.Cleanup(keypath.ResetClusterID)
+	ctx := context.Background()
+	msParam := &keypath.MsParam{ServiceName: constant.SchedulingServiceName}
+	path := keypath.ExpectedPrimaryPath(msParam)
+	const value = "http://127.0.0.1:2379"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	t.Cleanup(cancel)
-
-	putRegistryEntry(t, ctx, client, testPrimaryName, testPrimaryAddr)
-	putRegistryEntry(t, ctx, client, testSecondaryName, testSecondaryAddr)
-
-	lease := election.NewLease(client, "tso expected primary 00000")
-	re.NoError(lease.Grant(constant.DefaultLease))
-	t.Cleanup(func() {
-		_ = lease.Close()
-	})
-
-	expectedPrimaryPath := keypath.ExpectedPrimaryPath(&keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
-		GroupID:     0,
-	})
-	_, err := client.Put(ctx, expectedPrimaryPath, testPrimaryAddr, clientv3.WithLease(lease.GetID()))
+	// Mark the flag bound to a fresh lease, exactly as TransferPrimary does.
+	grantResp, err := client.Grant(ctx, constant.TransferPrimaryLeaseMultiplier*constant.DefaultLease)
 	re.NoError(err)
+	leaseID := grantResp.ID
+	re.NoError(markExpectedPrimaryFlag(client, msParam, &primaryData{raw: value, output: value}, leaseID))
 
-	return &transferPrimaryTestEnv{
-		ctx:                 ctx,
-		client:              client,
-		lease:               lease,
-		expectedPrimaryPath: expectedPrimaryPath,
-	}
+	// Sanity: the key exists and is bound to the lease.
+	getResp, err := client.Get(ctx, path)
+	re.NoError(err)
+	re.Len(getResp.Kvs, 1)
+	re.Equal(int64(leaseID), getResp.Kvs[0].Lease)
+
+	// The newly elected primary cleans up the flag once it wins.
+	DeleteExpectedPrimaryFlag(client, msParam, value)
+
+	// The key is gone...
+	getResp, err = client.Get(ctx, path)
+	re.NoError(err)
+	re.Empty(getResp.Kvs)
+	// ...and so is its lease: TimeToLive returns -1 for a revoked/expired lease, which
+	// is the guarantee that the #10875 "key deleted but lease persists" state is gone.
+	ttlResp, err := client.TimeToLive(ctx, leaseID)
+	re.NoError(err)
+	re.Equal(int64(-1), ttlResp.TTL)
 }
 
-func (env *transferPrimaryTestEnv) getExpectedPrimary(t *testing.T) expectedPrimary {
-	t.Helper()
+// TestDeleteExpectedPrimaryFlagSkipsOnValueMismatch ensures the conditional delete
+// does not clobber a newer transfer. If a second transfer has already rewritten the
+// flag (with its own lease) while this primary was winning, the stale winner must
+// leave both the key and the newer lease intact.
+func TestDeleteExpectedPrimaryFlagSkipsOnValueMismatch(t *testing.T) {
 	re := require.New(t)
-	resp, err := env.client.Get(env.ctx, env.expectedPrimaryPath)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx := context.Background()
+	msParam := &keypath.MsParam{ServiceName: constant.SchedulingServiceName}
+	path := keypath.ExpectedPrimaryPath(msParam)
+
+	// A newer transfer points the flag at "newer" with its own lease.
+	grantResp, err := client.Grant(ctx, constant.TransferPrimaryLeaseMultiplier*constant.DefaultLease)
 	re.NoError(err)
-	re.Len(resp.Kvs, 1)
-	kv := resp.Kvs[0]
-	return expectedPrimary{
-		value:       string(kv.Value),
-		modRevision: kv.ModRevision,
-		lease:       kv.Lease,
-	}
+	leaseID := grantResp.ID
+	re.NoError(markExpectedPrimaryFlag(client, msParam, &primaryData{raw: "newer", output: "newer"}, leaseID))
+
+	// A primary that campaigned for the older value tries to clean up; it must not.
+	DeleteExpectedPrimaryFlag(client, msParam, "older")
+
+	getResp, err := client.Get(ctx, path)
+	re.NoError(err)
+	re.Len(getResp.Kvs, 1)
+	re.Equal("newer", string(getResp.Kvs[0].Value))
+	ttlResp, err := client.TimeToLive(ctx, leaseID)
+	re.NoError(err)
+	re.Positive(ttlResp.TTL)
 }
 
-func putRegistryEntry(
-	t *testing.T,
-	ctx context.Context,
-	client *clientv3.Client,
-	name string,
-	serviceAddr string,
-) {
-	t.Helper()
-	entry := discovery.ServiceRegistryEntry{
-		Name:        name,
-		ServiceAddr: serviceAddr,
-	}
-	serializedValue, err := entry.Serialize()
-	require.NoError(t, err)
-	_, err = client.Put(ctx, keypath.RegistryPath(constant.TSOServiceName, serviceAddr), serializedValue)
-	require.NoError(t, err)
+// TestIsSamePrimary covers the matching used by TransferPrimary to skip a
+// self-transfer (#10970): a member matches by either its name or its service
+// address, and an empty target never matches.
+func TestIsSamePrimary(t *testing.T) {
+	re := require.New(t)
+	entry := discovery.ServiceRegistryEntry{Name: "tso-1", ServiceAddr: "http://127.0.0.1:2379"}
+	re.True(isSamePrimary(entry, "tso-1"))                  // match by name
+	re.True(isSamePrimary(entry, "http://127.0.0.1:2379"))  // match by service address
+	re.False(isSamePrimary(entry, "tso-2"))                 // different name
+	re.False(isSamePrimary(entry, "http://127.0.0.1:2380")) // different address
+	re.False(isSamePrimary(entry, ""))                      // empty target never matches
 }
