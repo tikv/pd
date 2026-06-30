@@ -911,7 +911,6 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitPr
 }
 
 func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
-	re := require.New(t)
 	cases := []struct {
 		name     string
 		maxCount uint32
@@ -955,6 +954,7 @@ func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
 			groups := make([]*endpoint.KeyspaceGroup, 0, len(tc.groupIDs))
 			for _, id := range tc.groupIDs {
 				groups = append(groups, &endpoint.KeyspaceGroup{ID: id})
