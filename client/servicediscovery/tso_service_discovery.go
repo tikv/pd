@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"strconv"
 	"strings"
@@ -55,6 +56,10 @@ const (
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 
+// errNoPrimaryURL is returned when the queried TSO node knows the keyspace group meta
+// but does not serve its allocator, so no primary URL is available from that node.
+var errNoPrimaryURL = errors.New("no primary url found in the keyspace group")
+
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
 type keyspaceGroupSvcDiscovery struct {
@@ -78,25 +83,27 @@ func (k *keyspaceGroupSvcDiscovery) getModRevision() uint64 {
 	return k.modRevision.Load()
 }
 
+// metaChanged indicates whether the keyspace group meta has been updated,
+// it doesn't include the change of primary URLs.
 func (k *keyspaceGroupSvcDiscovery) update(
 	keyspaceGroup *tsopb.KeyspaceGroup,
 	newPrimaryURL string,
 	secondaryURLs, urls []string,
 	modRevision uint64,
-) (oldPrimaryURL string, primarySwitched, success bool) {
+) (oldPrimaryURL string, primarySwitched, metaChanged bool) {
 	k.Lock()
 	defer k.Unlock()
+	// the mod revision just ensures the member use is the latest one, and the primary can't be protected by the mod revision.
 	if k.getModRevision() > modRevision {
 		return "", false, false
 	}
-	success = true
 	// If the new primary URL is empty, we don't switch the primary URL.
 	oldPrimaryURL = k.primaryURL
 	if len(newPrimaryURL) > 0 {
 		primarySwitched = !strings.EqualFold(oldPrimaryURL, newPrimaryURL)
 		k.primaryURL = newPrimaryURL
 	}
-
+	metaChanged = true
 	if !reflect.DeepEqual(k.secondaryURLs, secondaryURLs) {
 		k.secondaryURLs = secondaryURLs
 	}
@@ -482,9 +489,31 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		return err
 	}
 
+	failpoint.Inject("tsoServerURLOverride", func(val failpoint.Value) {
+		if val, ok := val.(string); ok {
+			tsoServerURL = val
+		}
+	})
+
+	err = c.updateMemberInner(tsoServerURL)
+	// the url is not one of the group members, so it can't get the primary URL but can get the keyspace meta info.
+	// If met errNoPrimaryURL error, it should try to get primary url from the member url.
+	if errors.ErrorEqual(err, errNoPrimaryURL) {
+		urls := c.getSecondaryURLs()
+		if len(urls) == 0 {
+			return err
+		}
+		url := urls[rand.IntN(len(urls))]
+		err = c.updateMemberInner(url)
+	}
+	return err
+}
+
+func (c *tsoServiceDiscovery) updateMemberInner(tsoServerURL string) error {
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
 	var modRevision uint64
+	var err error
 	curModRevision := c.keyspaceGroupSD.getModRevision()
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, modRevision, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout, c.keyspaceGroupSD.getModRevision())
@@ -579,12 +608,9 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 	}
 
-	oldPrimary, primarySwitched, success :=
+	oldPrimary, primarySwitched, metaChanged :=
 		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls, modRevision)
-	if !success {
-		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
-		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
-	}
+
 	if primarySwitched {
 		log.Info("[tso] updated keyspace group service discovery info",
 			zap.Uint32("keyspace-id-in-request", keyspaceID),
@@ -598,7 +624,11 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	// Even if the primary URL is empty, we still updated other returned info above, including the
 	// keyspace group info and the secondary url.
 	if len(primaryURL) == 0 {
-		return errors.New("no primary URL found")
+		return errNoPrimaryURL
+	}
+	if !metaChanged {
+		log.Warn("[tso] failed to update keyspace group, met stale keyspace group info", zap.Uint64("modRevision", modRevision))
+		return errors.Errorf("keyspace group modRevision is stale, current modRevision: %d, new modRevision: %d", c.keyspaceGroupSD.getModRevision(), modRevision)
 	}
 	return nil
 }
