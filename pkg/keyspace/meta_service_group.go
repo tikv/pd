@@ -227,28 +227,48 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 }
 
 func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
-	statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
-	if err != nil {
-		return err
-	}
-	if status, exists := statusMap[oldGroupID]; exists {
-		// guard against underflow if the count is already 0, e.g. after a
-		// manual reset via PatchStatus; a negative count would otherwise be
-		// preferred by findMinMetaGroup and skew load balancing.
-		if status.AssignmentCount > 0 {
-			status.AssignmentCount--
-		}
-		if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
+	// Load only the affected groups instead of the whole m.metaServiceGroups map:
+	// some callers (e.g. RemoveKeyspace) reach this without holding the
+	// meta-service group lock, so reading the shared map here would race with
+	// UpdateGroupsSafely.
+	if oldGroupID != "" {
+		status, err := m.loadGroupStatus(txn, oldGroupID)
+		if err != nil {
 			return err
 		}
+		// Only persist a decrement when the group still has assignments. A deleted
+		// group's status key is already removed, so skipping avoids recreating a
+		// stale zero-value status; a count of 0 needs no change anyway. This also
+		// guards against underflow after a manual reset via PatchStatus, which
+		// would otherwise make findMinMetaGroup prefer the group.
+		if status.AssignmentCount > 0 {
+			status.AssignmentCount--
+			if err := m.store.SaveMetaServiceGroupStatus(txn, oldGroupID, status); err != nil {
+				return err
+			}
+		}
 	}
-	if status, exists := statusMap[newGroupID]; exists {
+	if newGroupID != "" {
+		status, err := m.loadGroupStatus(txn, newGroupID)
+		if err != nil {
+			return err
+		}
 		status.AssignmentCount++
 		if err := m.store.SaveMetaServiceGroupStatus(txn, newGroupID, status); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// loadGroupStatus loads the persisted status of a single meta-service group
+// within txn, without touching the shared m.metaServiceGroups map.
+func (m *MetaServiceGroupManager) loadGroupStatus(txn kv.Txn, groupID string) (*endpoint.MetaServiceGroupStatus, error) {
+	statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{groupID: ""})
+	if err != nil {
+		return nil, err
+	}
+	return statusMap[groupID], nil
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.
