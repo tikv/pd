@@ -241,6 +241,12 @@ func getHealth(c *gin.Context) {
 	}
 	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
 	if err != nil {
+		// The allocator is absent on this node, e.g. it has watched the keyspace group meta
+		// but does not serve the allocator for the default keyspace group.
+		if errs.ErrGetAllocator.Equal(err) {
+			c.String(http.StatusNotFound, "allocator not found")
+			return
+		}
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
