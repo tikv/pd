@@ -268,14 +268,8 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 	if len(groups) == 0 {
 		return
 	}
-	var maxID uint32
-	for _, g := range groups {
-		if g.ID > maxID {
-			maxID = g.ID
-		}
-	}
-	nextID := maxID + 1
-	if nextID >= mcs.MaxKeyspaceGroupCountInUse {
+	nextID, ok := findNextAvailableKeyspaceGroupID(groups, mcs.MaxKeyspaceGroupCountInUse)
+	if !ok {
 		log.Warn("no available keyspace group id for auto-split, max id reached",
 			zap.Uint32("max-keyspace-group-count-in-use", mcs.MaxKeyspaceGroupCountInUse))
 		return
@@ -338,6 +332,26 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 			zap.Int("keyspaces-moved", len(keyspacesToMove)))
 		return
 	}
+}
+
+// findNextAvailableKeyspaceGroupID returns the smallest unused keyspace group ID in
+// [1, maxCount). Group 0 is reserved for the default keyspace group.
+func findNextAvailableKeyspaceGroupID(groups []*endpoint.KeyspaceGroup, maxCount uint32) (uint32, bool) {
+	if maxCount <= 1 {
+		return 0, false
+	}
+	used := make(map[uint32]struct{}, len(groups))
+	for _, g := range groups {
+		if g.ID < maxCount {
+			used[g.ID] = struct{}{}
+		}
+	}
+	for id := uint32(1); id < maxCount; id++ {
+		if _, exists := used[id]; !exists {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
