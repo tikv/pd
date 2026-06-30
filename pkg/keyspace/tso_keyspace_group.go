@@ -262,7 +262,7 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 	}
 	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
-		log.Error("failed to load keyspace groups for auto-split patrol", zap.Error(err))
+		log.Error("failed to load all keyspace groups", zap.Error(err))
 		return
 	}
 	if len(groups) == 0 {

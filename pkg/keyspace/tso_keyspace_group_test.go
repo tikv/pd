@@ -954,15 +954,14 @@ func TestFindNextAvailableKeyspaceGroupID(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
 			groups := make([]*endpoint.KeyspaceGroup, 0, len(tc.groupIDs))
 			for _, id := range tc.groupIDs {
 				groups = append(groups, &endpoint.KeyspaceGroup{ID: id})
 			}
 			gotID, gotOK := findNextAvailableKeyspaceGroupID(groups, tc.maxCount)
-			re.Equal(tc.wantOK, gotOK)
+			require.Equal(t, tc.wantOK, gotOK)
 			if tc.wantOK {
-				re.Equal(tc.wantID, gotID)
+				require.Equal(t, tc.wantID, gotID)
 			}
 		})
 	}
