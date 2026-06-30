@@ -21,8 +21,10 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -38,8 +40,10 @@ import (
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
@@ -73,6 +77,36 @@ type resourceManagerClientTestSuite struct {
 
 	rmCleanup  func()
 	tsoCleanup func()
+}
+
+type watchCountingResourceGroupProvider struct {
+	pd.Client
+	mu            sync.Mutex
+	watchTimes    int
+	firstRevision int64
+}
+
+func (p *watchCountingResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
+	p.mu.Lock()
+	op := opt.MetaStorageOp{}
+	for _, opt := range opts {
+		opt(&op)
+	}
+	if op.Revision > 0 {
+		if p.firstRevision == 0 {
+			p.firstRevision = op.Revision
+		} else if op.Revision == p.firstRevision {
+			p.watchTimes++
+		}
+	}
+	p.mu.Unlock()
+	return p.Client.Watch(ctx, key, opts...)
+}
+
+func (p *watchCountingResourceGroupProvider) getWatchTimes() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.watchTimes
 }
 
 func (suite *resourceManagerClientTestSuite) setupPDClient(re *require.Assertions) pd.Client {
@@ -522,6 +556,74 @@ func (suite *resourceManagerClientTestSuite) TearDownTest() {
 	suite.cleanupResourceGroups(re)
 }
 
+func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupControllerWatchCount() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+
+	// This test overwrites the shared controller config key, so save the
+	// original value and restore it afterwards to avoid polluting other tests.
+	originalConfig, err := suite.client.Get(ctx, pd.ControllerConfigPathPrefixBytes)
+	re.NoError(err)
+	defer func() {
+		if len(originalConfig.GetKvs()) == 0 {
+			_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, []byte("{}"))
+			re.NoError(err)
+			return
+		}
+		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
+		_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, originalConfig.GetKvs()[0].GetValue())
+		re.NoError(err)
+	}()
+
+	minRevision := int64(0)
+	maxRevision := int64(0)
+	for i := range 3 {
+		res, err := suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, i), []byte("{}"))
+		re.NoError(err)
+		if i == 0 {
+			minRevision = res.GetHeader().GetRevision()
+		}
+		maxRevision = res.GetHeader().GetRevision()
+	}
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError", fmt.Sprintf("return(%d)", maxRevision)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/watchStreamError", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/staleRevision", fmt.Sprintf("return(%d)", minRevision)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/metastorage/server/watchChannelError"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/watchStreamError"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/staleRevision"))
+		cancel()
+	}()
+
+	provider := &watchCountingResourceGroupProvider{Client: suite.client}
+	rgController, err := controller.NewResourceGroupController(
+		ctx, 1, provider, nil, 1, controller.EnableSingleGroupByKeyspace())
+	re.NoError(err)
+	rgController.Start(ctx)
+	defer func() {
+		re.NoError(rgController.Stop())
+		cancel()
+	}()
+	re.NotEqual(controller.RUVersionV2, rgController.GetRUVersion())
+	config := controller.DefaultConfig()
+	config.RUVersionPolicy = &controller.RUVersionPolicy{
+		Default: controller.RUVersionV1,
+		Overrides: map[uint32]controller.RUVersion{
+			1: controller.RUVersionV2,
+		},
+	}
+	configBytes, err := json.Marshal(config)
+	re.NoError(err)
+	// trigger resource group controller to watch config changes.
+	_, err = suite.client.Put(ctx, pd.ControllerConfigPathPrefixBytes, configBytes)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		return rgController.GetRUVersion() == controller.RUVersionV2
+	})
+	watchTimes := provider.getWatchTimes()
+	re.Zero(watchTimes)
+}
+
 func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.Assertions) {
 	cli := suite.client
 	groups, err := cli.ListResourceGroups(suite.ctx)
@@ -530,6 +632,9 @@ func (suite *resourceManagerClientTestSuite) cleanupResourceGroups(re *require.A
 		deleteResp, err := cli.DeleteResourceGroup(suite.ctx, group.GetName())
 		if group.Name == server.DefaultResourceGroupName {
 			re.Contains(err.Error(), "cannot delete reserved group")
+			continue
+		}
+		if err != nil && strings.Contains(err.Error(), "resource group does not exist") {
 			continue
 		}
 		re.NoError(err)
@@ -576,12 +681,16 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		re.NoError(err)
 		re.Contains(resp, "Success!")
 
-		// Make sure the resource group active
-		meta, err = controller.GetResourceGroup(group.Name)
-		re.NotNil(meta)
-		re.NoError(err)
-		meta = controller.GetActiveResourceGroup(group.Name)
-		re.NotNil(meta)
+		// Under standalone RM discovery, metadata writes are applied on PD first and
+		// become visible to the RM controller after the watcher catches up.
+		testutil.Eventually(re, func() bool {
+			meta, err = controller.GetResourceGroup(group.Name)
+			if err != nil || meta == nil {
+				return false
+			}
+			meta = controller.GetActiveResourceGroup(group.Name)
+			return meta != nil
+		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 	// Mock modify resource groups
 	modifySettings := func(gs *rmpb.ResourceGroup, fillRate uint64) {
@@ -1326,8 +1435,14 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-		re.NoError(err)
+		var gresp *rmpb.ResourceGroup
+		testutil.Eventually(re, func() bool {
+			gresp, err = cli.GetResourceGroup(suite.ctx, tcase.name)
+			if err != nil || gresp.GetName() != tcase.name {
+				return false
+			}
+			return !tcase.modifySuccess || reflect.DeepEqual(group, gresp)
+		}, testutil.WithTickInterval(50*time.Millisecond))
 		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
 			re.Equal(group, gresp)
@@ -1349,8 +1464,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
-				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name))
+				expectedErr := fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name)
+				testutil.Eventually(re, func() bool {
+					_, err = cli.GetResourceGroup(suite.ctx, g.Name)
+					return err != nil && err.Error() == expectedErr
+				}, testutil.WithTickInterval(50*time.Millisecond))
+				re.EqualError(err, expectedErr)
 			}
 
 			// to test the deletion of persistence
@@ -1520,6 +1639,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		SqlLayerCpuTimeMs: 40.0,
 		KvReadRpcCount:    5,
 		KvWriteRpcCount:   6,
+		TikvRUV2:          1.5,
+		TidbRUV2:          2.5,
+		TiflashRUV2:       3.5,
 	}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, &rmpb.TokenBucketsRequest{
 		Requests: []*rmpb.TokenBucketRequest{

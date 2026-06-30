@@ -131,7 +131,8 @@ func (a *Allocator) allocatorUpdater() {
 				continue
 			}
 			if err := a.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
+				log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
+					append(a.logFields, errs.ZapError(err))...)
 				a.Reset(true)
 				// To wait for the allocator to be re-initialized next time.
 				continue

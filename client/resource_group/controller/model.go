@@ -237,6 +237,7 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.WriteCrossAzTrafficBytes += custom2.WriteCrossAzTrafficBytes
 	custom1.TikvRUV2 += custom2.TikvRUV2
 	custom1.TidbRUV2 += custom2.TidbRUV2
+	custom1.TiflashRUV2 += custom2.TiflashRUV2
 }
 
 func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
@@ -289,6 +290,10 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.TidbRUV2 = now.TidbRUV2 - last.TidbRUV2
 		last.TidbRUV2 = now.TidbRUV2
 	}
+	if now.TiflashRUV2 > last.TiflashRUV2 {
+		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
+		last.TiflashRUV2 = now.TiflashRUV2
+	}
 	return delta
 }
 
@@ -308,13 +313,15 @@ func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.WriteCrossAzTrafficBytes -= custom2.WriteCrossAzTrafficBytes
 	custom1.TikvRUV2 -= custom2.TikvRUV2
 	custom1.TidbRUV2 -= custom2.TidbRUV2
+	custom1.TiflashRUV2 -= custom2.TiflashRUV2
 }
 
 func equalRU(custom1 rmpb.Consumption, custom2 rmpb.Consumption) bool {
 	return custom1.RRU == custom2.RRU &&
 		custom1.WRU == custom2.WRU &&
 		custom1.TikvRUV2 == custom2.TikvRUV2 &&
-		custom1.TidbRUV2 == custom2.TidbRUV2
+		custom1.TidbRUV2 == custom2.TidbRUV2 &&
+		custom1.TiflashRUV2 == custom2.TiflashRUV2
 }
 
 // getSQLProcessCPUTime returns the cumulative user+system time (in ms) since the process start.

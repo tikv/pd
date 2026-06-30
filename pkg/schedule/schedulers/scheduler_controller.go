@@ -296,6 +296,12 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
+	c.RLock()
+	if c.cluster == nil {
+		c.RUnlock()
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	c.RUnlock()
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
@@ -429,8 +435,13 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 		s, ok := c.schedulers[types.TransferWitnessLeaderScheduler.String()]
 		c.RUnlock()
 		if ok {
+			regionC := RecvRegionInfo(s.Scheduler)
+			if regionC == nil {
+				log.Warn("invalid scheduler type for transfer witness leader", zap.String("scheduler", s.GetName()))
+				return
+			}
 			select {
-			case RecvRegionInfo(s.Scheduler) <- region:
+			case regionC <- region:
 			default:
 				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
 			}

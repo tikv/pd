@@ -335,12 +335,20 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 
 // GetProgressByID returns the progress details for a given store ID.
 func (h *Handler) GetProgressByID(storeID uint64) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByID(storeID)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByID(storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
 func (h *Handler) GetProgressByAction(action string) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByAction(action)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByAction(action)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
@@ -425,6 +433,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
+				FlowCPU:        hotPeerStat.CPURate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
 				StartKey:       string(region.GetStartKey()),

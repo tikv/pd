@@ -87,8 +87,19 @@ func KeepExpectedPrimaryAlive(
 	msParam *keypath.MsParam,
 	m *member.Participant) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary",
-		zap.String("service", msParam.ServiceName), zap.String("primary-value", m.ParticipantString()))
+		zap.String("service", msParam.ServiceName),
+		zap.Uint32("group-id", msParam.GroupID),
+		zap.String("primary-value", m.ParticipantString()))
+	// For TSO, include msParam.GroupID in the purpose so per-keyspace-group
+	// expected primary leases get distinct Prometheus labels and distinct slots
+	// in localTTLRemainingCollector. A single TSO process can be primary for
+	// multiple keyspace groups; without the GroupID suffix their leases all
+	// collapse onto one series. Non-TSO services only ever have one expected
+	// primary lease, so the GroupID suffix would just be noise (0).
 	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
+	if msParam.ServiceName == constant.TSOServiceName {
+		service = fmt.Sprintf("%s %05d", service, msParam.GroupID)
+	}
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
@@ -97,7 +108,7 @@ func KeepExpectedPrimaryAlive(
 		raw:    m.MemberValue(),
 		output: m.ParticipantString(),
 	}
-	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.GetID())
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		if closeErr := lease.Close(); closeErr != nil {

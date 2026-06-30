@@ -114,5 +114,8 @@ func scheduleTransferWitnessLeader(name string, cluster sche.SchedulerCluster, r
 
 // RecvRegionInfo receives a checked region from coordinator
 func RecvRegionInfo(s Scheduler) chan<- *core.RegionInfo {
-	return s.(*transferWitnessLeaderScheduler).regions
+	if scheduler, ok := s.(*transferWitnessLeaderScheduler); ok {
+		return scheduler.regions
+	}
+	return nil
 }

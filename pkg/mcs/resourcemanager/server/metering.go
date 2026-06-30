@@ -31,7 +31,9 @@ const (
 	meteringDataOLAPRUField              = "olap_ru"
 	meteringDataWriteBytesField          = "write_bytes"
 	meteringDataCrossAZTrafficBytesField = "cross_az_traffic_bytes"
-	meteringDataRUV2Field                = "ru_v2"
+	meteringDataTiDBRUV2Field            = "tidb_ru_v2"
+	meteringDataTiKVRUV2Field            = "tikv_ru_v2"
+	meteringDataTiFlashRUV2Field         = "tiflash_ru_v2"
 )
 
 type ruMetering struct {
@@ -39,10 +41,14 @@ type ruMetering struct {
 	olapRU              float64
 	writeBytes          uint64
 	crossAZTrafficBytes uint64
-	ruV2                float64
+	tidbRUV2            float64
+	tikvRUV2            float64
+	tiflashRUV2         float64
 }
 
 func (rm *ruMetering) add(consumption *consumptionItem) {
+	// Keep the legacy oltp/olap buckets unchanged for compatibility, and
+	// expose the finer-grained experimental RUv2 breakdown separately.
 	ru := consumption.RRU + consumption.WRU
 	if consumption.isTiFlash {
 		rm.olapRU += ru
@@ -51,7 +57,9 @@ func (rm *ruMetering) add(consumption *consumptionItem) {
 	}
 	rm.writeBytes += uint64(consumption.WriteBytes)
 	rm.crossAZTrafficBytes += consumption.ReadCrossAzTrafficBytes + consumption.WriteCrossAzTrafficBytes
-	rm.ruV2 += consumption.TikvRUV2 + consumption.TidbRUV2
+	rm.tidbRUV2 += consumption.TidbRUV2
+	rm.tikvRUV2 += consumption.TikvRUV2
+	rm.tiflashRUV2 += consumption.TiflashRUV2
 }
 
 func (rm *ruMetering) oltpMeteringValue() common.MeteringValue {
@@ -70,8 +78,16 @@ func (rm *ruMetering) crossAZTrafficBytesMeteringValue() common.MeteringValue {
 	return metering.NewBytesValue(rm.crossAZTrafficBytes)
 }
 
-func (rm *ruMetering) ruV2MeteringValue() common.MeteringValue {
-	return metering.NewRUValue(rm.ruV2)
+func (rm *ruMetering) tidbRUV2MeteringValue() common.MeteringValue {
+	return metering.NewRUValue(rm.tidbRUV2)
+}
+
+func (rm *ruMetering) tikvRUV2MeteringValue() common.MeteringValue {
+	return metering.NewRUValue(rm.tikvRUV2)
+}
+
+func (rm *ruMetering) tiflashRUV2MeteringValue() common.MeteringValue {
+	return metering.NewRUValue(rm.tiflashRUV2)
 }
 
 var _ metering.Collector = (*ruCollector)(nil)
@@ -130,7 +146,9 @@ func (c *ruCollector) Aggregate() []map[string]any {
 			meteringDataOLAPRUField:              ruMetering.olapMeteringValue(),
 			meteringDataWriteBytesField:          ruMetering.writeBytesMeteringValue(),
 			meteringDataCrossAZTrafficBytesField: ruMetering.crossAZTrafficBytesMeteringValue(),
-			meteringDataRUV2Field:                ruMetering.ruV2MeteringValue(),
+			meteringDataTiDBRUV2Field:            ruMetering.tidbRUV2MeteringValue(),
+			meteringDataTiKVRUV2Field:            ruMetering.tikvRUV2MeteringValue(),
+			meteringDataTiFlashRUV2Field:         ruMetering.tiflashRUV2MeteringValue(),
 		})
 	}
 	return records

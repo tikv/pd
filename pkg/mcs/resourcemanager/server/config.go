@@ -112,6 +112,19 @@ type RUVersionPolicy struct {
 	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
 }
 
+func (p *RUVersionPolicy) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if p == nil {
+		return DefaultRUVersion
+	}
+	if version, ok := p.Overrides[keyspaceID]; ok {
+		return version
+	}
+	if p.Default > 0 {
+		return p.Default
+	}
+	return DefaultRUVersion
+}
+
 // validate checks that all RU version values in the policy are positive.
 func (p *RUVersionPolicy) validate() error {
 	if p == nil {
@@ -161,7 +174,20 @@ type ControllerConfig struct {
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 
+	// PushMetricsAddress is the address to push metrics.
+	PushMetricsAddress string `toml:"push-metrics-address" json:"push-metrics-address"`
+
+	// PushMetricsInterval is the interval to push metrics.
+	PushMetricsInterval typeutil.Duration `toml:"push-metrics-interval" json:"push-metrics-interval"`
+
 	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
+}
+
+func (rmc *ControllerConfig) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if rmc == nil {
+		return DefaultRUVersion
+	}
+	return rmc.RUVersionPolicy.getKeyspaceRUVersion(keyspaceID)
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
@@ -178,6 +204,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
+	}
+	if rmc.PushMetricsAddress != "" && rmc.PushMetricsInterval.Duration <= 0 {
+		log.Warn("push-metrics-address is set but push-metrics-interval is invalid, metrics push disabled")
+		rmc.PushMetricsAddress = ""
 	}
 	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)

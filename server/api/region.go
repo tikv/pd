@@ -77,6 +77,11 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
+	failpoint.Inject("RejectGetRegionByIDWhenAccessLeader", func() {
+		if h.svr.GetMember().IsServing() {
+			regionInfo = nil
+		}
+	})
 	if regionInfo == nil {
 		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return
@@ -140,9 +145,9 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 //	@Router		/regions/replicated [get]
 func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	rawStartKey := vars["startKey"]
-	rawEndKey := vars["endKey"]
-	state, err := h.Handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
+	startKeyHex := vars["startKey"]
+	endKeyHex := vars["endKey"]
+	state, err := h.Handler.CheckRegionsReplicated(startKeyHex, endKeyHex)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -756,8 +761,8 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	rawStartKey, ok1 := input["start_key"].(string)
-	rawEndKey, ok2 := input["end_key"].(string)
+	startKeyHex, ok1 := input["start_key"].(string)
+	endKeyHex, ok2 := input["end_key"].(string)
 	if !ok1 || !ok2 {
 		h.rd.JSON(w, http.StatusBadRequest, "start_key or end_key is not string")
 		return
@@ -769,12 +774,12 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 		return
 	}
 
-	err = h.Handler.AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey, limit)
+	err = h.Handler.AccelerateRegionsScheduleInRange(startKeyHex, endKeyHex, limit)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
+	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", startKeyHex, endKeyHex))
 }
 
 // AccelerateRegionsScheduleInRanges accelerates regions scheduling in given ranges.
@@ -804,19 +809,19 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
 	var startKeys, endKeys [][]byte
 	for _, rg := range input {
-		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		startKey, startKeyHex, err := apiutil.ParseKey("start_key", rg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		endKey, endKeyHex, err := apiutil.ParseKey("end_key", rg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		startKeys = append(startKeys, startKey)
 		endKeys = append(endKeys, endKey)
-		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", startKeyHex, endKeyHex))
 	}
 	err = h.Handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
 	if err != nil {
@@ -857,8 +862,8 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	rawStartKey, ok1 := input["start_key"].(string)
-	rawEndKey, ok2 := input["end_key"].(string)
+	startKeyHex, ok1 := input["start_key"].(string)
+	endKeyHex, ok2 := input["end_key"].(string)
 	group, _ := input["group"].(string)
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
@@ -867,7 +872,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 
 	opsCount, failures, err := func() (int, map[uint64]error, error) {
 		if ok1 && ok2 {
-			return h.ScatterRegionsByRange(rawStartKey, rawEndKey, group, retryLimit)
+			return h.ScatterRegionsByRange(startKeyHex, endKeyHex, group, retryLimit)
 		}
 		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
 		if !ok {
@@ -903,16 +908,29 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]any)
-	if len(rawSplitKeys) < 1 {
+	splitKeyValues, ok := s.([]any)
+	if !ok {
+		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be an array.")
+		return
+	}
+	if len(splitKeyValues) < 1 {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
+	}
+	splitKeyHexes := make([]string, 0, len(splitKeyValues))
+	for _, splitKeyValue := range splitKeyValues {
+		splitKeyHex, ok := splitKeyValue.(string)
+		if !ok {
+			h.rd.JSON(w, http.StatusBadRequest, "split_keys should contain only strings.")
+			return
+		}
+		splitKeyHexes = append(splitKeyHexes, splitKeyHex)
 	}
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
 		retryLimit = int(rl)
 	}
-	s, err := h.Handler.SplitRegions(r.Context(), rawSplitKeys, retryLimit)
+	s, err := h.Handler.SplitRegions(r.Context(), splitKeyHexes, retryLimit)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

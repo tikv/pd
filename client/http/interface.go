@@ -120,6 +120,8 @@ type Client interface {
 
 	/* Keyspace interface */
 
+	// UpdateKeyspaceConfig patches the keyspace config and returns the updated keyspace meta.
+	UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
 	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a global gc worker to calculate a global gc safe point.
@@ -1143,25 +1145,38 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// UpdateKeyspaceGCManagementType patches the keyspace config.
-func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
-	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
+func (c *client) patchKeyspaceConfig(ctx context.Context, reqName, keyspaceName string, params any) (*keyspacepb.KeyspaceMeta, error) {
+	var tempMeta tempKeyspaceMeta
+	keyspaceConfigPatchJSON, err := json.Marshal(params)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	return c.request(ctx, newRequestInfo().
-		WithName(UpdateKeyspaceGCManagementTypeName).
+	err = c.request(ctx, newRequestInfo().
+		WithName(reqName).
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
-		WithBody(keyspaceConfigPatchJSON))
+		WithBody(keyspaceConfigPatchJSON).
+		WithResp(&tempMeta))
+	if err != nil {
+		return nil, err
+	}
+	return tempMeta.toPB()
+}
+
+// UpdateKeyspaceConfig patches the keyspace config.
+func (c *client) UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error) {
+	return c.patchKeyspaceConfig(ctx, UpdateKeyspaceConfigName, keyspaceName, params)
+}
+
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	_, err := c.patchKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
+	return err
 }
 
 // GetKeyspaceMetaByName get the given keyspace meta.
 func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
-	var (
-		tempKeyspaceMeta tempKeyspaceMeta
-		keyspaceMetaPB   keyspacepb.KeyspaceMeta
-	)
+	var tempKeyspaceMeta tempKeyspaceMeta
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
 		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
@@ -1172,28 +1187,12 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		return nil, err
 	}
 
-	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
-	if err != nil {
-		return nil, err
-	}
-
-	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
-		Name:           tempKeyspaceMeta.Name,
-		Id:             tempKeyspaceMeta.ID,
-		Config:         tempKeyspaceMeta.Config,
-		CreatedAt:      tempKeyspaceMeta.CreatedAt,
-		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
-		State:          keyspaceState,
-	}
-	return &keyspaceMetaPB, nil
+	return tempKeyspaceMeta.toPB()
 }
 
 // GetKeyspaceMetaByID get the given keyspace meta.
 func (c *client) GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
-	var (
-		tempKeyspaceMeta tempKeyspaceMeta
-		keyspaceMetaPB   keyspacepb.KeyspaceMeta
-	)
+	var tempKeyspaceMeta tempKeyspaceMeta
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByIDName).
 		WithURI(GetKeyspaceMetaByIDURL(keyspaceID)).
@@ -1204,20 +1203,7 @@ func (c *client) GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*k
 		return nil, err
 	}
 
-	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
-	if err != nil {
-		return nil, err
-	}
-
-	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
-		Name:           tempKeyspaceMeta.Name,
-		Id:             tempKeyspaceMeta.ID,
-		Config:         tempKeyspaceMeta.Config,
-		CreatedAt:      tempKeyspaceMeta.CreatedAt,
-		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
-		State:          keyspaceState,
-	}
-	return &keyspaceMetaPB, nil
+	return tempKeyspaceMeta.toPB()
 }
 
 // GetGCSafePoint gets the GC safe point list.

@@ -183,7 +183,7 @@ func checkIsolationLabel(cmd *cobra.Command, args []string) {
 				stores = append(stores, s)
 			}
 		}
-		isolationLabel := statistics.GetRegionLabelIsolation(stores, locationLabels)
+		isolationLabel, _ := statistics.GetRegionLabelIsolation(stores, locationLabels)
 		if len(checkLabel) == 0 || isolationLabel == checkLabel {
 			regionMap[region.ID] = isolationLabel
 			labelCount[isolationLabel]++

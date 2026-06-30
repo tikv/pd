@@ -34,7 +34,7 @@ func TestCancelFunc(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := NewManager[int]()
 	url := "test-url"
-	manager.Store(ctx, cancel, url, 1)
+	re.True(manager.Store(ctx, cancel, url, 1))
 	re.True(manager.Exist(url))
 	manager.GC(func(url string) bool {
 		return url == "test-url"
@@ -53,7 +53,7 @@ func TestManager(t *testing.T) {
 	manager := NewManager[int]()
 
 	re.False(manager.Exist("test-url"))
-	manager.Store(ctx, cancel, "test-url", 1)
+	re.True(manager.Store(ctx, cancel, "test-url", 1))
 	re.True(manager.Exist("test-url"))
 
 	cctx := manager.RandomlyPick()
@@ -61,19 +61,19 @@ func TestManager(t *testing.T) {
 	re.Equal(1, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, cancel, "test-url", 2)
+	re.False(manager.Store(ctx, cancel, "test-url", 2))
 	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(1, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, cancel, "test-url", 2, true)
+	re.True(manager.Store(ctx, cancel, "test-url", 2, true))
 	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(2, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, cancel, "test-another-url", 3)
+	re.True(manager.Store(ctx, cancel, "test-another-url", 3))
 	pickedCount := make(map[string]int)
 	for range 1000 {
 		cctx = manager.RandomlyPick()
@@ -91,14 +91,15 @@ func TestManager(t *testing.T) {
 	re.True(manager.Exist("test-another-url"))
 	re.Equal(3, manager.GetConnectionCtx("test-another-url").Stream)
 
-	manager.CleanAllAndStore(ctx, cancel, "test-url", 1)
+	re.True(manager.CleanAllAndStore(ctx, cancel, "test-url", 1))
 	re.True(manager.Exist("test-url"))
+	re.False(manager.CleanAllAndStore(ctx, cancel, "test-url", 2))
 	re.Equal(1, manager.GetConnectionCtx("test-url").Stream)
 	re.False(manager.Exist("test-another-url"))
 	re.Nil(manager.GetConnectionCtx("test-another-url"))
 
 	manager.Store(ctx, cancel, "test-another-url", 3)
-	manager.CleanAllAndStore(ctx, cancel, "test-unique-url", 4)
+	re.True(manager.CleanAllAndStore(ctx, cancel, "test-unique-url", 4))
 	re.True(manager.Exist("test-unique-url"))
 	re.Equal(4, manager.GetConnectionCtx("test-unique-url").Stream)
 	re.False(manager.Exist("test-url"))

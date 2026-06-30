@@ -926,7 +926,9 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leader := cluster.GetServer(leaderName)
 	re.NoError(leader.BootstrapCluster())
 	addr := fmt.Sprintf("%s/pd/api/v1/config?ttlSecond=5", leader.GetAddr())
 	postData, err := json.Marshal(map[string]any{
@@ -945,23 +947,34 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 	resp, err := leader.GetHTTPClient().Post(addr, "application/json", bytes.NewBuffer(postData))
 	resp.Body.Close()
 	re.NoError(err)
-	time.Sleep(2 * time.Second)
-	re.NoError(leader.Destroy())
-	time.Sleep(2 * time.Second)
-	leader = cluster.GetServer(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		return options != nil &&
+			options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled()
+	})
+	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	newLeaderName := cluster.WaitLeader()
+	re.NotEmpty(newLeaderName)
+	re.NotEqual(leaderName, newLeaderName)
+	leader = cluster.GetServer(newLeaderName)
 	re.NotNil(leader)
-	options := leader.GetPersistOptions()
-	re.NotNil(options)
-	re.Equal(uint64(999), options.GetMaxSnapshotCount())
-	re.False(options.IsLocationReplacementEnabled())
-	re.Equal(uint64(999), options.GetMaxMergeRegionSize())
-	re.Equal(uint64(999), options.GetMaxMergeRegionKeys())
-	re.Equal(uint64(999), options.GetSchedulerMaxWaitingOperator())
-	re.Equal(uint64(999), options.GetLeaderScheduleLimit())
-	re.Equal(uint64(999), options.GetRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetHotRegionScheduleLimit())
-	re.Equal(uint64(999), options.GetReplicaScheduleLimit())
-	re.Equal(uint64(999), options.GetMergeScheduleLimit())
+	testutil.Eventually(re, func() bool {
+		options := leader.GetPersistOptions()
+		if options == nil {
+			return false
+		}
+		return options.GetMaxSnapshotCount() == 999 &&
+			!options.IsLocationReplacementEnabled() &&
+			options.GetMaxMergeRegionSize() == 999 &&
+			options.GetMaxMergeRegionKeys() == 999 &&
+			options.GetSchedulerMaxWaitingOperator() == 999 &&
+			options.GetLeaderScheduleLimit() == 999 &&
+			options.GetRegionScheduleLimit() == 999 &&
+			options.GetHotRegionScheduleLimit() == 999 &&
+			options.GetReplicaScheduleLimit() == 999 &&
+			options.GetMergeScheduleLimit() == 999
+	})
 }
 
 func TestCloseClient(t *testing.T) {
@@ -1427,7 +1440,7 @@ func TestWatch(t *testing.T) {
 	go func() {
 		var events []*meta_storagepb.Event
 		for e := range ch {
-			events = append(events, e...)
+			events = append(events, e.Events...)
 			if len(events) >= 3 {
 				break
 			}
@@ -1541,7 +1554,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 			re.Equal(13, watchCount)
 			return
 		case res := <-ch:
-			for _, r := range res {
+			for _, r := range res.Events {
 				watchCount++
 				if r.GetType() == meta_storagepb.Event_DELETE {
 					re.Equal(watchPrefix+string(r.PrevKv.Value), string(r.Kv.Key))
@@ -2057,10 +2070,12 @@ func (*clientStatefulTestSuite) waitForGCBarrierExpiring(re *require.Assertions,
 // checkGCBarrier checks whether the specified GC barrier has the specified barrier TS. This function assumes the
 // barrier TS is never 0, and passing 0 means asserting the GC barrier does not exist.
 func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspaceID uint32, barrierID string, expectedBarrierTS uint64) {
-	gcState, err := s.client.GetGCStatesClient(keyspaceID).GetGCState(context.Background())
+	gcState, err := s.client.GetGCStatesClient(keyspaceID).GetGCState(context.Background(), gc.ExcludeGCBarriers(false))
+	re.NoError(err)
+	gcBarriers, err := gcState.GetGCBarriers()
 	re.NoError(err)
 	found := false
-	for _, b := range gcState.GCBarriers {
+	for _, b := range gcBarriers {
 		if b.BarrierID == barrierID {
 			if found {
 				re.Failf("duplicated barrier ID found in the GC states", "barrierID: %s, GC state: %+v", barrierID, gcState)
@@ -2083,10 +2098,15 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 // checkGlobalGCBarrier checks whether the specified global GC barrier has the specified barrier TS.
 // This function assumes the barrier TS is never 0, and passing 0 means asserting the GC barrier does not exist.
 func (s *clientStatefulTestSuite) checkGlobalGCBarrier(re *require.Assertions, barrierID string, expectedBarrierTS uint64) {
-	gcStates, err := s.client.GetGCStatesClient(constants.NullKeyspaceID).GetAllKeyspacesGCStates(context.Background())
+	gcStates, err := s.client.GetGCStatesClient(constants.NullKeyspaceID).GetAllKeyspacesGCStates(
+		context.Background(),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+	re.NoError(err)
+	globalGCBarriers, err := gcStates.GetGlobalGCBarriers()
 	re.NoError(err)
 	found := false
-	for _, b := range gcStates.GlobalGCBarriers {
+	for _, b := range globalGCBarriers {
 		if b.BarrierID == barrierID {
 			if found {
 				re.Failf("duplicated barrier ID found in the global GC barriers", "barrierID: %s", barrierID)
@@ -2159,7 +2179,7 @@ func (s *clientStatefulTestSuite) testUpdateServiceGCSafePointImpl(keyspaceID ui
 	// Suppress the unuseful lint warning.
 	//nolint:unparam
 	loadServiceGCSafePointByServiceID := func(serviceID string) *endpoint.ServiceSafePoint {
-		gcStates, err := s.srv.GetGCStateManager().GetGCState(keyspaceID)
+		gcStates, err := s.srv.GetGCStateManager().GetGCState(keyspaceID, false)
 		re.NoError(err)
 		for _, b := range gcStates.GCBarriers {
 			if b.BarrierID == serviceID {
@@ -2441,6 +2461,12 @@ func (s *clientStatefulTestSuite) TestGCBarriers() {
 		re.Equal("b1", b.BarrierID)
 		re.Equal(uint64(10), b.BarrierTS)
 		re.Equal(int64(math.MaxInt64), int64(b.TTL))
+		// Test GetGCState's behavior of excluding GC barriers by default.
+		state, err := cli.GetGCState(ctx)
+		re.NoError(err)
+		re.False(state.HasGCBarriers())
+		_, err = state.GetGCBarriers()
+		re.Error(err)
 		s.checkGCBarrier(re, keyspaceID, "b1", 10)
 
 		// Allows advancing to a value below the GC barrier.
@@ -2693,21 +2719,31 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	res, err := cli.GetAllKeyspacesGCStates(ctx)
 	re.NoError(err)
-	re.Len(res.GlobalGCBarriers, 1)
-	re.Equal("b1", res.GlobalGCBarriers[0].BarrierID)
-	re.Equal(uint64(10), res.GlobalGCBarriers[0].BarrierTS)
-	re.Equal(time.Duration(math.MaxInt64), res.GlobalGCBarriers[0].TTL)
+	re.False(res.HasGlobalGCBarriers())
+	_, err = res.GetGlobalGCBarriers()
+	re.Error(err)
+
+	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGlobalGCBarriers(false))
+	re.NoError(err)
+	globalGCBarriers, err := res.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Len(globalGCBarriers, 1)
+	re.Equal("b1", globalGCBarriers[0].BarrierID)
+	re.Equal(uint64(10), globalGCBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), globalGCBarriers[0].TTL)
 
 	_, err = cli.SetGlobalGCBarrier(ctx, "b2", 12, 2*time.Second)
 	re.NoError(err)
-	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
-	re.Len(res.GlobalGCBarriers, 2)
-	re.Equal("b2", res.GlobalGCBarriers[1].BarrierID)
-	re.Equal(uint64(12), res.GlobalGCBarriers[1].BarrierTS)
+	globalGCBarriers, err = res.GetGlobalGCBarriers()
+	re.NoError(err)
+	re.Len(globalGCBarriers, 2)
+	re.Equal("b2", globalGCBarriers[1].BarrierID)
+	re.Equal(uint64(12), globalGCBarriers[1].BarrierTS)
 	// Returned TTL is rounded to seconds, so it can be exactly 1s here.
-	re.GreaterOrEqual(res.GlobalGCBarriers[1].TTL, time.Second)
-	re.LessOrEqual(res.GlobalGCBarriers[1].TTL, 2*time.Second)
+	re.GreaterOrEqual(globalGCBarriers[1].TTL, time.Second)
+	re.LessOrEqual(globalGCBarriers[1].TTL, 2*time.Second)
 
 	cli1 := s.client.GetGCStatesClient(1)
 	_, err = cli1.SetGCBarrier(ctx, "b3", 13, math.MaxInt64)
@@ -2716,22 +2752,34 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	state, ok := res.GCStates[1]
 	re.True(ok)
-	re.Equal("b3", state.GCBarriers[0].BarrierID)
-	re.Equal(uint64(13), state.GCBarriers[0].BarrierTS)
-	re.Equal(time.Duration(math.MaxInt64), state.GCBarriers[0].TTL)
+	re.False(state.HasGCBarriers())
+	_, err = state.GetGCBarriers()
+	re.Error(err)
+
+	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGCBarriers(false), gc.ExcludeGlobalGCBarriers(false))
+	re.NoError(err)
+	state, ok = res.GCStates[1]
+	re.True(ok)
+	gcBarriers, err := state.GetGCBarriers()
+	re.NoError(err)
+	re.Equal("b3", gcBarriers[0].BarrierID)
+	re.Equal(uint64(13), gcBarriers[0].BarrierTS)
+	re.Equal(time.Duration(math.MaxInt64), gcBarriers[0].TTL)
 
 	cli2 := s.client.GetGCStatesClient(2)
 	_, err = cli2.SetGCBarrier(ctx, "b4", 14, 3*time.Second)
 	re.NoError(err)
-	res, err = cli.GetAllKeyspacesGCStates(ctx)
+	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGCBarriers(false), gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
 	state, ok = res.GCStates[2]
 	re.True(ok)
-	re.Equal("b4", state.GCBarriers[0].BarrierID)
-	re.Equal(uint64(14), state.GCBarriers[0].BarrierTS)
+	gcBarriers, err = state.GetGCBarriers()
+	re.NoError(err)
+	re.Equal("b4", gcBarriers[0].BarrierID)
+	re.Equal(uint64(14), gcBarriers[0].BarrierTS)
 	// Returned TTL is rounded to seconds, so it can be exactly 2s here.
-	re.GreaterOrEqual(state.GCBarriers[0].TTL, 2*time.Second)
-	re.LessOrEqual(state.GCBarriers[0].TTL, 3*time.Second)
+	re.GreaterOrEqual(gcBarriers[0].TTL, 2*time.Second)
+	re.LessOrEqual(gcBarriers[0].TTL, 3*time.Second)
 }
 
 func TestDecodeHttpKeyRange(t *testing.T) {

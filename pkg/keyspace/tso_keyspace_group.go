@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -470,6 +471,85 @@ func (m *GroupManager) GetGroupByKeyspaceID(id uint32) (uint32, error) {
 	return 0, errs.ErrKeyspaceNotInAnyKeyspaceGroup
 }
 
+// RemoveKeyspacesFromGroup removes the specified keyspaces from the given keyspace group.
+// If a keyspace is not in the group, it will be skipped (no error).
+// It returns the updated keyspace group and any error encountered.
+func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, keyspaceIDs []uint32) (*endpoint.KeyspaceGroup, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	var (
+		kg  *endpoint.KeyspaceGroup
+		err error
+	)
+
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		// Load the keyspace group
+		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
+		if err != nil {
+			return err
+		}
+		if kg == nil {
+			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(groupID)
+		}
+		if kg.IsSplitting() {
+			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(groupID)
+		}
+		if kg.IsMerging() {
+			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(groupID)
+		}
+
+		// Build a set of keyspaces to remove (excluding protected bootstrap/system keyspace)
+		toRemove := make(map[uint32]struct{})
+		for _, ksID := range keyspaceIDs {
+			// Keep the protected bootstrap/system keyspace in the default group.
+			if isProtectedKeyspaceID(ksID) {
+				continue
+			}
+			// Only add if it exists in the group (skip if not present)
+			if slice.Contains(kg.Keyspaces, ksID) {
+				toRemove[ksID] = struct{}{}
+			}
+		}
+
+		// If nothing to remove, return nil to skip update
+		if len(toRemove) == 0 {
+			return nil
+		}
+
+		// Filter out keyspaces to remove
+		newKeyspaces := make([]uint32, 0, len(kg.Keyspaces)-len(toRemove))
+		for _, ks := range kg.Keyspaces {
+			if _, shouldRemove := toRemove[ks]; !shouldRemove {
+				newKeyspaces = append(newKeyspaces, ks)
+			} else {
+				err = km.RemoveKeyspace(txn, ks)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		kg.Keyspaces = newKeyspaces
+
+		// Save the updated keyspace group
+		return m.store.SaveKeyspaceGroup(txn, kg)
+	}); err != nil {
+		return nil, err
+	}
+
+	// Update the cache
+	userKind := endpoint.StringUserKind(kg.UserKind)
+	m.groups[userKind].Put(kg)
+
+	return kg, nil
+}
+
+var failpointOnce sync.Once
+
+// updateKeyspaceForGroupTxnOp returns a txn op (and a post-commit callback) that
+// adds/removes the keyspace to/from the keyspace group within the keyspace
+// creation transaction, so the group membership is committed atomically with the
+// keyspace meta.
 func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, id string, keyspaceID uint32, mutation int) (txnOp, txnCb, error) {
 	if m == nil {
 		return nil, nil, nil
@@ -478,6 +558,12 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	if err != nil {
 		return nil, nil, err
 	}
+	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
+		failpointOnce.Do(func() {
+			addrs := val.(string)
+			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+		})
+	})
 	m.Lock()
 	kg := m.groups[userKind].Get(uint32(groupID))
 	m.Unlock()
@@ -549,6 +635,7 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	var updateOld, updateNew bool
 	if !slice.Contains(newKG.Keyspaces, keyspaceID) {
 		newKG.Keyspaces = append(newKG.Keyspaces, keyspaceID)
+		slices.Sort(newKG.Keyspaces)
 		updateNew = true
 	}
 
@@ -561,6 +648,7 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
 		if updateOld {
 			oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
+			slices.Sort(oldKG.Keyspaces)
 		}
 		if updateNew {
 			newKG.Keyspaces = slice.Remove(newKG.Keyspaces, keyspaceID)

@@ -421,50 +421,29 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	re.Equal(100, bundle.Index)
 	re.True(bundle.Override, "Override should be true to override default rules")
 
-	// Verify rules
+	// Verify txn rule
 	rules := bundle.Rules
-	re.Len(rules, 2, "should have 2 rules (raw and txn)")
+	re.Len(rules, 1, "should have 1 txn rule")
 
-	// Check first rule (raw key space)
-	rule1 := rules[0]
-	re.Equal(groupID, rule1.GroupID)
-	re.Equal(fmt.Sprintf("keyspace-%d-rule", keyspaceID), rule1.ID)
-	re.Equal("voter", string(rule1.Role))
-	re.Equal(3, rule1.Count)
-	// Verify StartKey and EndKey match the keyspace boundaries
-	regionBound := keyspace.MakeRegionBound(keyspaceID)
-	expectedStartKey := hex.EncodeToString(regionBound.RawLeftBound)
-	expectedEndKey := hex.EncodeToString(regionBound.RawRightBound)
-	actualStartKey := hex.EncodeToString(rule1.StartKey)
-	actualEndKey := hex.EncodeToString(rule1.EndKey)
-	re.Equal(expectedStartKey, actualStartKey, "raw rule StartKey should match keyspace boundary")
-	re.Equal(expectedEndKey, actualEndKey, "raw rule EndKey should match keyspace boundary")
-
-	// Verify label constraints
-	re.Len(rule1.LabelConstraints, 1)
-	re.Equal(labelKey, rule1.LabelConstraints[0].Key)
-	re.Equal("in", string(rule1.LabelConstraints[0].Op))
-	re.Equal([]string{labelValue}, rule1.LabelConstraints[0].Values)
-
-	// Check second rule (txn key space)
-	rule2 := rules[1]
-	re.Equal(groupID, rule2.GroupID)
-	re.Equal(fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID), rule2.ID)
-	re.Equal("voter", string(rule2.Role))
-	re.Equal(3, rule2.Count)
+	rule := rules[0]
+	re.Equal(groupID, rule.GroupID)
+	re.Equal(fmt.Sprintf("keyspace-%d-rule-txn", keyspaceID), rule.ID)
+	re.Equal("voter", string(rule.Role))
+	re.Equal(3, rule.Count)
 	// Verify txn key space StartKey and EndKey
+	regionBound := keyspace.MakeRegionBound(keyspaceID)
 	expectedTxnStartKey := hex.EncodeToString(regionBound.TxnLeftBound)
 	expectedTxnEndKey := hex.EncodeToString(regionBound.TxnRightBound)
-	actualTxnStartKey := hex.EncodeToString(rule2.StartKey)
-	actualTxnEndKey := hex.EncodeToString(rule2.EndKey)
+	actualTxnStartKey := hex.EncodeToString(rule.StartKey)
+	actualTxnEndKey := hex.EncodeToString(rule.EndKey)
 	re.Equal(expectedTxnStartKey, actualTxnStartKey, "txn rule StartKey should match keyspace boundary")
 	re.Equal(expectedTxnEndKey, actualTxnEndKey, "txn rule EndKey should match keyspace boundary")
 
 	// Verify label constraints
-	re.Len(rule2.LabelConstraints, 1)
-	re.Equal("keyspace", rule2.LabelConstraints[0].Key)
-	re.Equal("in", string(rule2.LabelConstraints[0].Op))
-	re.Equal([]string{labelValue}, rule2.LabelConstraints[0].Values)
+	re.Len(rule.LabelConstraints, 1)
+	re.Equal(labelKey, rule.LabelConstraints[0].Key)
+	re.Equal("in", string(rule.LabelConstraints[0].Op))
+	re.Equal([]string{labelValue}, rule.LabelConstraints[0].Values)
 
 	// Verify rules are applied to the region we created earlier
 	re.NotNil(region, "region should exist")
@@ -479,7 +458,7 @@ func (suite *keyspaceTestSuite) TestSetPlacement() {
 	re.Len(regionFit.RuleFits, 1, "should only have one rule fit due to Override=true")
 	appliedRule := regionFit.RuleFits[0]
 	re.Equal(groupID, appliedRule.Rule.GroupID, "applied rule should be from our custom keyspace group")
-	re.Equal(rule2.ID, appliedRule.Rule.ID, "applied rule should be the txn rule")
+	re.Equal(rule.ID, appliedRule.Rule.ID, "applied rule should be the txn rule")
 	re.Len(appliedRule.Rule.LabelConstraints, 1)
 	re.Equal(labelKey, appliedRule.Rule.LabelConstraints[0].Key)
 	re.Equal(labelValue, appliedRule.Rule.LabelConstraints[0].Values[0])
@@ -533,7 +512,7 @@ func (suite *keyspaceTestSuite) TestRevertPlacement() {
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
 	re.Equal(groupID, bundle.ID)
-	re.Len(bundle.Rules, 2)
+	re.Len(bundle.Rules, 1)
 	// Verify the label constraints
 	re.Equal(labelKey, bundle.Rules[0].LabelConstraints[0].Key)
 	re.Equal(labelValue, bundle.Rules[0].LabelConstraints[0].Values[0])
@@ -644,7 +623,7 @@ func (suite *keyspaceTestSuite) TestSetPlacementWithTiFlash() {
 	// Verify keyspace bundle exists and targets TiKV stores
 	groupID := fmt.Sprintf("keyspace-%d", keyspaceID)
 	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
-	re.Len(bundle.Rules, 2, "keyspace should have 2 voter rules (raw + txn)")
+	re.Len(bundle.Rules, 1, "keyspace should have 1 txn voter rule")
 	re.True(bundle.Override)
 	for _, rule := range bundle.Rules {
 		re.Equal(placement.Voter, rule.Role, "keyspace rules should be voter role")
@@ -793,7 +772,7 @@ func (suite *keyspaceTestSuite) TestSetPlacementMultipleLabels() {
 	bundle := leaderServer.GetRaftCluster().GetRuleManager().GetGroupBundle(groupID)
 	re.Equal(groupID, bundle.ID)
 	re.True(bundle.Override, "Override should be true to override default rules")
-	re.Len(bundle.Rules, 2, "should have 2 rules (raw and txn)")
+	re.Len(bundle.Rules, 1, "should have 1 txn rule")
 
 	// Check both rules have both label constraints
 	for _, rule := range bundle.Rules {

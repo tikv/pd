@@ -35,6 +35,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -54,7 +55,7 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 	return mockProvider
 }
 
@@ -101,9 +102,9 @@ func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	args := m.Called(ctx, key, opts)
-	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
+	return args.Get(0).(chan *metastorage.WatchResponse), args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
@@ -170,18 +171,17 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	require.Equal(t, c2.mu.consumption, &totalConsumption)
 	c2.mu.Unlock()
 
-	controller.ReportTiKVRUV2Consumption("test-group", 3.0)
-	controller.ReportTiDBRUV2Consumption("test-group", 4.0)
+	controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
 	c2.mu.Lock()
 	totalConsumption.TikvRUV2 += 3.0
 	totalConsumption.TidbRUV2 += 4.0
+	totalConsumption.TiflashRUV2 += 5.0
 	require.Equal(t, c2.mu.consumption, &totalConsumption)
 	c2.mu.Unlock()
 
 	// test report with unknown group
 	controller.ReportConsumption("unknown-name", delta)
-	controller.ReportTiKVRUV2Consumption("unknown-name", 1.0)
-	controller.ReportTiDBRUV2Consumption("unknown-name", 1.0)
+	controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
 
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)
@@ -554,7 +554,7 @@ func TestRUVersionFromInitialControllerConfig(t *testing.T) {
 		},
 	}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 
 	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
 	re.NoError(err)
@@ -573,9 +573,9 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
 
-	watchConfigChan := make(chan []*meta_storagepb.Event, 1)
+	watchConfigChan := make(chan *metastorage.WatchResponse, 1)
 	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, mock.Anything).Return(watchConfigChan, nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42)
 	re.NoError(err)
@@ -591,11 +591,11 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 		},
 	}
 	val, _ := json.Marshal(configWithPolicy)
-	watchConfigChan <- []*meta_storagepb.Event{
-		{
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
 			Type: meta_storagepb.Event_PUT,
 			Kv:   &meta_storagepb.KeyValue{Value: val},
-		},
+		}},
 	}
 	testutil.Eventually(re, func() bool {
 		return controller.GetRUVersion() == 3
@@ -604,11 +604,11 @@ func TestRUVersionWatchViaControllerConfig(t *testing.T) {
 	// Case 2: Config without RUVersionPolicy (nil) resets to default
 	configNoPolicy := &Config{}
 	val, _ = json.Marshal(configNoPolicy)
-	watchConfigChan <- []*meta_storagepb.Event{
-		{
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
 			Type: meta_storagepb.Event_PUT,
 			Kv:   &meta_storagepb.KeyValue{Value: val},
-		},
+		}},
 	}
 	testutil.Eventually(re, func() bool {
 		return controller.GetRUVersion() == 1 // Reset to default

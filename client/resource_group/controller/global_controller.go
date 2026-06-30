@@ -322,26 +322,28 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
-		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
+
+		failpoint.Inject("staleRevision", func(val failpoint.Value) {
+			if rev, ok := val.(int); ok {
+				cfgRevision = int64(rev)
+			}
+		})
+		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
@@ -363,7 +365,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -373,7 +375,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -416,8 +418,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
-					metaRevision = item.Kv.ModRevision
+				for _, item := range resp.Events {
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -467,7 +468,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				if resp.CompactRevision > cfgRevision {
+					cfgRevision = resp.CompactRevision
+				}
+				for _, item := range resp.Events {
 					cfgRevision = item.Kv.ModRevision
 					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
@@ -815,26 +819,17 @@ func (c *ResourceGroupsController) ReportConsumption(resourceGroupName string, c
 	gc.addRUConsumption(consumption)
 }
 
-// ReportTiKVRUV2Consumption is used to report the experimental TiKV-side v2 RU consumption.
+// ReportRUV2Consumption is used to report the experimental v2 RU consumption
+// split by engine (TiKV, TiDB, TiFlash).
 // RUv2 is only recorded for observation purposes without actual token deduction.
-func (c *ResourceGroupsController) ReportTiKVRUV2Consumption(resourceGroupName string, ruv2 float64) {
-	c.reportRUV2Consumption(resourceGroupName, ruv2, 0)
-}
-
-// ReportTiDBRUV2Consumption is used to report the experimental TiDB-side v2 RU consumption.
-// RUv2 is only recorded for observation purposes without actual token deduction.
-func (c *ResourceGroupsController) ReportTiDBRUV2Consumption(resourceGroupName string, ruv2 float64) {
-	c.reportRUV2Consumption(resourceGroupName, 0, ruv2)
-}
-
-func (c *ResourceGroupsController) reportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2 float64) {
+func (c *ResourceGroupsController) ReportRUV2Consumption(resourceGroupName string, tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
 	gc, ok := c.loadGroupController(resourceGroupName)
 	if !ok {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
 		return
 	}
 
-	gc.addRUV2Consumption(tikvRUV2, tidbRUV2)
+	gc.addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2)
 }
 
 // IsDegraded returns whether the controller is in degraded mode.

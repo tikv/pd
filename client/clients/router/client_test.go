@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
@@ -37,6 +38,21 @@ func newMockRegionResponse(id uint64) *pdpb.RegionResponse {
 		Leader:  &metapb.Peer{Id: id},
 		Buckets: &metapb.Buckets{},
 	}
+}
+
+// newTestRequest builds a *Request directly for finisher tests, mirroring the
+// invariants that the production newRequest guarantees: a non-nil options and a
+// buffered done channel. Callers set key/prevKey/id afterwards.
+func newTestRequest(ctx context.Context, opts ...opt.GetRegionOption) *Request {
+	req := &Request{
+		requestCtx: ctx,
+		options:    &opt.GetRegionOp{},
+		done:       make(chan error, 1),
+	}
+	for _, o := range opts {
+		o(req.options)
+	}
+	return req
 }
 
 func TestRequestFinisherNoDataRace(t *testing.T) {
@@ -61,31 +77,22 @@ func TestRequestFinisherNoDataRace(t *testing.T) {
 
 	// Requests that use `key`.
 	for range 2 {
-		req := &Request{
-			requestCtx: ctx,
-			key:        []byte("dummy-key"),
-			done:       make(chan error, 1),
-		}
+		req := newTestRequest(ctx)
+		req.key = []byte("dummy-key")
 		requests = append(requests, req)
 	}
 
 	// Requests that use `prevKey`.
 	for range 2 {
-		req := &Request{
-			requestCtx: ctx,
-			prevKey:    []byte("dummy-prev-key"),
-			done:       make(chan error, 1),
-		}
+		req := newTestRequest(ctx)
+		req.prevKey = []byte("dummy-prev-key")
 		requests = append(requests, req)
 	}
 
 	// Requests that use `id`.
 	for _, id := range []uint64{1, 2} {
-		req := &Request{
-			requestCtx: ctx,
-			id:         id,
-			done:       make(chan error, 1),
-		}
+		req := newTestRequest(ctx)
+		req.id = id
 		requests = append(requests, req)
 	}
 
@@ -104,4 +111,40 @@ func TestRequestFinisherNoDataRace(t *testing.T) {
 	for idx, req := range requests {
 		re.Equal([]byte{byte(idx + 1)}, req.region.Meta.StartKey)
 	}
+}
+
+// TestRequestFinisherClearsUnrequestedBuckets verifies that buckets are only
+// returned to requests that actually asked for them. `NeedBuckets` is a
+// batch-wide flag in the QueryRegion request, so when any request in a batch
+// sets it, the response carries buckets for every region in the batch. The
+// finisher must drop those buckets for the requests that did not ask, matching
+// the per-request semantics of the unary GetRegion path.
+func TestRequestFinisherClearsUnrequestedBuckets(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+
+	// The response carries buckets for every region, simulating a batch where
+	// at least one request set NeedBuckets.
+	resp := &pdpb.QueryRegionResponse{
+		RegionsById: map[uint64]*pdpb.RegionResponse{
+			1: newMockRegionResponse(1),
+			2: newMockRegionResponse(2),
+		},
+	}
+
+	reqWithBuckets := newTestRequest(ctx, opt.WithBuckets())
+	reqWithBuckets.id = 1
+	reqWithoutBuckets := newTestRequest(ctx)
+	reqWithoutBuckets.id = 2
+
+	finisher := requestFinisher(resp)
+	finisher(0, reqWithBuckets, nil)
+	re.NoError(<-reqWithBuckets.done)
+	finisher(1, reqWithoutBuckets, nil)
+	re.NoError(<-reqWithoutBuckets.done)
+
+	// The request that asked for buckets keeps them.
+	re.NotNil(reqWithBuckets.region.Buckets)
+	// The request that did not ask for buckets must not receive them.
+	re.Nil(reqWithoutBuckets.region.Buckets)
 }

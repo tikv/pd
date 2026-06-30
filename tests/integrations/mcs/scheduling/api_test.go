@@ -299,6 +299,14 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/split"), []byte(body),
 		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
+	for _, body := range []string{
+		`{"split_keys":"not-an-array"}`,
+		`{"split_keys":[1]}`,
+	} {
+		err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/split"), []byte(body),
+			testutil.Status(re, http.StatusBadRequest), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
+		re.NoError(err)
+	}
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a2"))), nil,
 		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)

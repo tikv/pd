@@ -17,16 +17,21 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -142,6 +147,172 @@ func TestBatchEvict(t *testing.T) {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
 	})
+	sl.(*evictLeaderScheduler).conf.Batch = maxEvictLeaderBatchSize
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == maxEvictLeaderBatchSize
+	})
+}
+
+func TestEvictLeaderBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": maxEvictLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": maxEvictLeaderBatchSize + 1})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": 1.5})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": "abc"})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.Equal(maxEvictLeaderBatchSize, sl.(*evictLeaderScheduler).conf.getBatch())
+}
+
+func TestEvictLeaderInvalidBatchKeepsLeaderTransferState(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	re.NoError(sl.PrepareConfig(tc))
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+
+	body, err := json.Marshal(map[string]any{"store_id": 1, "batch": "abc"})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.False(tc.GetStore(1).AllowLeaderTransferIn())
+
+	body, err = json.Marshal(map[string]any{"store_id": 2, "batch": "abc"})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	sl.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal("\"invalid argument for 'batch': expected a number, got string\"\n", resp.Body.String())
+	re.True(tc.GetStore(2).AllowLeaderTransferIn())
+}
+
+func TestEvictLeaderAddWaitingOperatorLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		maxWaiting int
+		expected   int
+	}{
+		{name: "default-waiting-limit", maxWaiting: 0, expected: 5},
+		{name: "batch-sized-waiting-limit", maxWaiting: maxEvictLeaderBatchSize, expected: maxEvictLeaderBatchSize},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, opt, cluster, oc := prepareSchedulersTest(false)
+			t.Cleanup(cancel)
+			if tc.maxWaiting > 0 {
+				cfg := opt.GetScheduleConfig().Clone()
+				cfg.SchedulerMaxWaitingOperator = uint64(tc.maxWaiting)
+				opt.SetScheduleConfig(cfg)
+			}
+
+			cluster.AddLeaderStore(1, 0)
+			cluster.AddLeaderStore(2, 0)
+			cluster.AddLeaderStore(3, 0)
+			ops := newEvictLeaderOperators(t, cluster, maxEvictLeaderBatchSize)
+			re.Equal(tc.expected, oc.AddWaitingOperator(ops...))
+		})
+	}
+}
+
+func newEvictLeaderOperators(tb testing.TB, cluster *mockcluster.Cluster, count int) []*operator.Operator {
+	tb.Helper()
+	ops := make([]*operator.Operator, 0, count)
+	for i := range count {
+		region := cluster.AddLeaderRegion(uint64(i+1), 1, 2, 3)
+		op, err := operator.CreateTransferLeaderOperator(types.EvictLeaderScheduler.String(), cluster, region, 2, []uint64{2, 3}, operator.OpLeader)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+func BenchmarkEvictLeaderScheduleBatch(b *testing.B) {
+	tc, _, sl := prepareEvictLeaderBatchScenario(b, 0)
+
+	totalOps := 0
+	b.ResetTimer()
+	for range b.N {
+		ops, _ := sl.Schedule(tc, false)
+		if len(ops) == 0 {
+			b.Fatal("expected evict leader operators")
+		}
+		totalOps += len(ops)
+	}
+	elapsed := b.Elapsed().Seconds()
+	b.ReportMetric(float64(totalOps)/elapsed, "ops/s")
+	b.ReportMetric(float64(totalOps)*60/elapsed, "ops/min")
+}
+
+func prepareEvictLeaderBatchScenario(tb testing.TB, maxWaiting int) (*mockcluster.Cluster, *operator.Controller, Scheduler) {
+	restoreLogger := log.ReplaceGlobals(zap.NewNop(), nil)
+	tb.Cleanup(restoreLogger)
+
+	cancel, opt, tc, oc := prepareSchedulersTest(false)
+	tb.Cleanup(cancel)
+	if maxWaiting > 0 {
+		cfg := opt.GetScheduleConfig().Clone()
+		cfg.SchedulerMaxWaitingOperator = uint64(maxWaiting)
+		opt.SetScheduleConfig(cfg)
+	}
+
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	regionCount := maxEvictLeaderBatchSize * 100
+	for i := range regionCount {
+		tc.AddLeaderRegion(uint64(i+1), 1, 2, 3)
+	}
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	if err != nil {
+		tb.Fatal(err)
+	}
+	sl.(*evictLeaderScheduler).conf.Batch = maxEvictLeaderBatchSize
+	return tc, oc, sl
 }
 
 func TestEvictLeaderSchedulerCompatibility(t *testing.T) {

@@ -352,7 +352,12 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	// Check if the update is supported.
 	for _, mutation := range mutations {
 		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
-			err = errs.ErrUnsupportedOperationInKeyspace
+			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("keyspace level GC")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if mutation.Key == keyspace.RegionBoundType {
+			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
