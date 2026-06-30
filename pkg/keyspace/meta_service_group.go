@@ -178,6 +178,9 @@ func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, 
 // It returns the assigned meta-service group and an error if any.
 // only used for testing now, as it doesn't guarantee the atomicity of select and update. UpdateAssignment should be used in production code instead.
 func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) (string, error) {
+	if count < 0 {
+		return "", ErrInvalidAssignmentCount
+	}
 	m.RLock()
 	defer m.RUnlock()
 	var assignedGroup string
@@ -209,6 +212,15 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 	if newGroupID != "" {
 		if _, ok := m.metaServiceGroups[newGroupID]; !ok {
 			return ErrUnknownMetaServiceGroup
+		}
+		// Disabled groups are skipped by automatic assignment, so reject moving a
+		// keyspace into one to keep manual reassignment consistent with it.
+		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{newGroupID: ""})
+		if err != nil {
+			return err
+		}
+		if status := statusMap[newGroupID]; status == nil || !status.Enabled {
+			return ErrMetaServiceGroupDisabled
 		}
 	}
 	return m.updateAssignmentTxn(txn, oldGroupID, newGroupID)

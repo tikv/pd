@@ -17,6 +17,7 @@ package keyspace
 import (
 	"bytes"
 	"context"
+	goerrors "errors"
 	"strconv"
 	"sync"
 	"time"
@@ -606,6 +607,12 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	}
 	groupID, err := manager.mgm.pickGroupLocked(manager.ctx)
 	if err != nil {
+		if goerrors.Is(err, errNoAvailableMetaServiceGroups) {
+			// Groups exist but none are enabled: create the keyspace without a
+			// meta-service group assignment instead of failing the creation, the
+			// same way a concurrently-emptied group set is tolerated above.
+			return manager.saveNewKeyspace(keyspace)
+		}
 		return err
 	}
 	if *config == nil {

@@ -64,6 +64,7 @@ type MetaServiceGroupStatus struct {
 // @Produce  json
 // @Success  200  {array}   MetaServiceGroupStatus    "List of all meta-service groups after patch"
 // @Failure  400  {string}  string                    "Bad request (invalid JSON or invalid operation)"
+// @Failure  409  {string}  string                    "Conflicting concurrent update, retryable"
 // @Failure  500  {string}  string                    "Internal server error"
 // @Router   /meta-service-groups [patch]
 func PatchMetaServiceGroups(c *gin.Context) {
@@ -134,6 +135,12 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
+		if errors.Is(err, errs.ErrEtcdTxnConflict) {
+			// A concurrent group update or assignment lost the etcd txn compare;
+			// this is a retryable conflict rather than an internal error.
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -174,11 +181,13 @@ func GetMetaServiceGroups(c *gin.Context) {
 //
 // @Tags     meta-service-groups
 // @Summary  Patch meta-service groups status.
+// @Param    id    path  string  true  "Meta-service group ID"
 // @Param    body  body  object  true  "Patch for meta-service status"
 // @Produce  json
 // @Success  200  {array}   MetaServiceGroupStatus    "List of all meta-service groups after patch"
 // @Failure  400  {string}  string                    "Bad request (invalid JSON or invalid operation)"
 // @Failure  404  {string}  string                    "The meta-service group does not exist"
+// @Failure  409  {string}  string                    "Conflicting concurrent update, retryable"
 // @Failure  500  {string}  string                    "Internal server error"
 // @Router   /meta-service-groups/{id}/status [patch]
 func PatchMetaServiceGroupStatus(c *gin.Context) {
@@ -203,6 +212,12 @@ func PatchMetaServiceGroupStatus(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
+		if errors.Is(err, errs.ErrEtcdTxnConflict) {
+			// A concurrent status patch or assignment lost the etcd txn compare;
+			// this is a retryable conflict rather than an internal error.
+			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -223,15 +238,19 @@ func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGr
 
 	status := make([]MetaServiceGroupStatus, 0, len(currentGroups))
 	for id, addresses := range currentGroups {
-		var assignedKeyspaces int
-		if s := statuses[id]; s != nil {
-			assignedKeyspaces = s.AssignmentCount
+		// GetGroups and GetStatus take the lock separately, so a freshly added
+		// group may be missing from statuses. Synthesize a default status so the
+		// enabled state and assignment count stay consistent instead of emitting
+		// a partial object.
+		s := statuses[id]
+		if s == nil {
+			s = &endpoint.MetaServiceGroupStatus{}
 		}
 		status = append(status, MetaServiceGroupStatus{
 			ID:                id,
 			Addresses:         addresses,
-			Status:            statuses[id],
-			AssignedKeyspaces: assignedKeyspaces,
+			Status:            s,
+			AssignedKeyspaces: s.AssignmentCount,
 		})
 	}
 	// sort for deterministic output
