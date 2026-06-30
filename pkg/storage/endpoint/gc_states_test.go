@@ -718,7 +718,7 @@ func TestTxnSafePointWithMetaServiceGroups(t *testing.T) {
 	group1Servers, group1Client, group1Clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer group1Clean()
 	group1Storage := NewStorageEndpoint(kv.NewEtcdKVBase(group1Client), nil)
-	group1Endpoints := group1Servers[0].Config().ListenClientUrls[0].String()
+	group1Endpoints := group1Servers[0].Config().ListenClientUrls[0].Host
 
 	group2Servers, group2Client, group2Clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer group2Clean()

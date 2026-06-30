@@ -115,7 +115,11 @@ func (p *MetaServiceGroupGCStorageProvider) getOrCreateStorage(groupID, endpoint
 		return cached.storage, nil
 	}
 
-	urls, err := etcdtypes.NewURLs(strings.Split(endpoints, ","))
+	normalizedEndpoints, err := normalizeMetaServiceGroupEndpoints(endpoints, p.tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	urls, err := etcdtypes.NewURLs(normalizedEndpoints)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +139,30 @@ func (p *MetaServiceGroupGCStorageProvider) getOrCreateStorage(groupID, endpoint
 		_ = old.client.Close()
 	}
 	return storage, nil
+}
+
+func normalizeMetaServiceGroupEndpoints(endpoints string, tlsConfig *tls.Config) ([]string, error) {
+	scheme := "http://"
+	if tlsConfig != nil {
+		scheme = "https://"
+	}
+
+	rawEndpoints := strings.Split(endpoints, ",")
+	normalizedEndpoints := make([]string, 0, len(rawEndpoints))
+	for _, endpoint := range rawEndpoints {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		if !strings.Contains(endpoint, "://") {
+			endpoint = scheme + endpoint
+		}
+		normalizedEndpoints = append(normalizedEndpoints, endpoint)
+	}
+	if len(normalizedEndpoints) == 0 {
+		return nil, errors.New("meta-service group endpoints are empty")
+	}
+	return normalizedEndpoints, nil
 }
 
 // Close closes all cached etcd clients.
