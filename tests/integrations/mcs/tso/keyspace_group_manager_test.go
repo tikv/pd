@@ -159,17 +159,16 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 	})
 	suite.waitKeyspaceReady([]uint32{keyspaceGroupID}, keyspaceIDs)
 
-	req := tsopb.FindGroupByKeyspaceIDRequest{
-		Header: &tsopb.RequestHeader{
-			ClusterId:       clusterID,
-			KeyspaceId:      keyspaceIDs[0],
-			KeyspaceGroupId: keyspaceGroupID,
-		},
-		KeyspaceId:  keyspaceIDs[0],
-		ModRevision: 0,
-	}
-
-	checkFn := func() {
+	checkFn := func(groupID, keyspaceID uint32) {
+		req := tsopb.FindGroupByKeyspaceIDRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId:       clusterID,
+				KeyspaceId:      keyspaceID,
+				KeyspaceGroupId: groupID,
+			},
+			KeyspaceId:  keyspaceID,
+			ModRevision: 0,
+		}
 		for i, server := range serverList {
 			conn, err := cli.GetServiceDiscovery().GetOrCreateGRPCConn(server.GetAddr())
 			re.NoError(err)
@@ -177,6 +176,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 			re.NoError(err)
 			re.Nil(resp.GetHeader().GetError())
 			members := resp.KeyspaceGroup.Members
+			re.Equal(groupID, resp.KeyspaceGroup.Id)
 			re.Len(resp.KeyspaceGroup.Members, 2)
 			foundLeader := false
 			for _, member := range members {
@@ -191,7 +191,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 				re.False(foundLeader)
 			}
 
-			cli := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceIDs[0], []string{suite.pdLeaderServer.GetAddr()},
+			cli := utils.SetupClientWithKeyspaceID(suite.ctx, re, keyspaceID, []string{suite.pdLeaderServer.GetAddr()},
 				opt.WithForwardingOption(true))
 			re.NotNil(cli)
 			inner, ok := cli.(interface{ GetTSOServiceDiscovery() sd.ServiceDiscovery })
@@ -201,11 +201,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 			discovery := inner.GetTSOServiceDiscovery()
 			re.NoError(discovery.CheckMemberChanged())
 			re.NotEmpty(discovery.GetServingURL())
+			re.Equal(groupID, discovery.GetKeyspaceGroupID())
 			re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/tsoServerURLOverride"))
 			cli.Close()
 		}
 	}
-	checkFn()
+	checkFn(keyspaceGroupID, keyspaceIDs[0])
 
 	// split keyspaceID-1 and keyspaceID-2 into new keyspace group
 	newGroupID := suite.allocID()
@@ -215,7 +216,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 	})
 	suite.waitKeyspaceReady([]uint32{newGroupID}, []uint32{keyspaceIDs[1], keyspaceIDs[2]})
 	handlersutil.MustFinishSplitKeyspaceGroup(re, suite.pdLeaderServer, newGroupID)
-	checkFn()
+	// keyspaceID-0 still belongs to the source group, keyspaceID-1 now belongs to the new group.
+	checkFn(keyspaceGroupID, keyspaceIDs[0])
+	checkFn(newGroupID, keyspaceIDs[1])
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
