@@ -299,12 +299,12 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 		if count <= threshold {
 			continue
 		}
-		// Split about half of the keyspaces to the new group (excluding default keyspace).
+		// Split about half of the keyspaces to the new group (excluding protected bootstrap/system keyspace).
 		splitIdx := count / 2
 		keyspacesToMove := make([]uint32, 0, count-splitIdx)
 		for i := splitIdx; i < count; i++ {
 			kid := group.Keyspaces[i]
-			if kid == constant.DefaultKeyspaceID {
+			if isProtectedKeyspaceID(kid) {
 				continue
 			}
 			keyspacesToMove = append(keyspacesToMove, kid)

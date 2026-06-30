@@ -1063,10 +1063,14 @@ func (suite *keyspaceGroupTestSuite) TestDoPatrolKeyspaceGroupSizeForAutoSplitSk
 	re := suite.Require()
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	// Use a synthetic malformed state to cover the defensive branch where the tail half
-	// contains only default-keyspace entries, so there is nothing valid to move.
+	// contains only protected bootstrap/system keyspace entries, so there is nothing valid to move.
 	keyspaces := make([]uint32, 0, defaultKeyspaceCountSplitThreshold+1)
 	keyspaces = append(keyspaces, buildSequentialKeyspaces(1, defaultKeyspaceCountSplitThreshold/2)...)
-	keyspaces = append(keyspaces, make([]uint32, defaultKeyspaceCountSplitThreshold/2+1)...)
+	tail := make([]uint32, defaultKeyspaceCountSplitThreshold/2+1)
+	for i := range tail {
+		tail[i] = GetBootstrapKeyspaceID()
+	}
+	keyspaces = append(keyspaces, tail...)
 	savePatrolTestKeyspaceGroups(suite.ctx, suite.T(), store, &endpoint.KeyspaceGroup{
 		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
