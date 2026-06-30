@@ -46,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
@@ -738,14 +737,12 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 				_ = s.Destroy()
 			}
 
+			// Regenerate all ports before building any server configs. Generate reads
+			// every initial server's peer URL when composing the initial cluster.
+			c.config.regenerateInitialServerURLs()
+
 			// Recreate servers with new ports
 			for _, conf := range c.config.InitialServers {
-				// Regenerate config to get new ports
-				conf.ClientURLs = tempurl.Alloc()
-				conf.PeerURLs = tempurl.Alloc()
-				conf.AdvertiseClientURLs = conf.ClientURLs
-				conf.AdvertisePeerURLs = conf.PeerURLs
-
 				// Use the original opts passed during cluster creation
 				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
 				serverConf, err := conf.Generate(allOpts...)

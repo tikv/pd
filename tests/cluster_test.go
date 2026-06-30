@@ -54,3 +54,29 @@ func TestClassifyInitialServersError(t *testing.T) {
 	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
 }
+
+func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	config := newClusterConfig(3)
+	oldPeerURLs := []string{
+		"http://127.0.0.1:1",
+		"http://127.0.0.1:2",
+		"http://127.0.0.1:3",
+	}
+	for i, server := range config.InitialServers {
+		server.PeerURLs = oldPeerURLs[i]
+	}
+
+	config.regenerateInitialServerURLs()
+	initialCluster := config.getServerAddrs()
+	for i, server := range config.InitialServers {
+		re.NotEqual(oldPeerURLs[i], server.PeerURLs)
+	}
+	for _, server := range config.InitialServers {
+		conf, err := server.Generate()
+		re.NoError(err)
+		re.Equal(initialCluster, conf.InitialCluster)
+	}
+}
