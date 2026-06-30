@@ -257,6 +257,33 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 	re.ErrorIs(err, ErrGroupHasAssignedKeyspaces)
 }
 
+func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() {
+	re := suite.Require()
+	_, err := suite.manager.AssignToGroup(suite.ctx, -1)
+	re.ErrorIs(err, ErrInvalidAssignmentCount)
+}
+
+func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
+	re := suite.Require()
+	// Groups are disabled by default, so reassigning a keyspace into one must be
+	// rejected.
+	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
+	})
+	re.ErrorIs(err, ErrMetaServiceGroupDisabled)
+	// An unknown group is still rejected as unknown.
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.reassignKeyspaceLocked(txn, "", "nonexistent")
+	})
+	re.ErrorIs(err, ErrUnknownMetaServiceGroup)
+	// Once enabled, the reassignment succeeds.
+	suite.enableAllGroups()
+	err = suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
+	})
+	re.NoError(err)
+}
+
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 	re := suite.Require()
 	enabled := true
