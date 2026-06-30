@@ -234,10 +234,47 @@ func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
 		return errors.Errorf("config item %s not found", key)
 	}
 
-	if updated {
-		err = h.svr.SetKeyspaceConfig(oldCfg, newCfg)
+	if !updated {
+		return nil
 	}
-	return err
+	// Meta-service group changes must go through the same safe update path as the
+	// dedicated /meta-service-groups endpoint, which holds the manager lock and
+	// rejects removing a group that still has assigned keyspaces. Updating them
+	// via the plain config path would bypass that guard.
+	if key == "meta-service-groups" {
+		return h.updateMetaServiceGroups(oldCfg, newCfg)
+	}
+	return h.svr.SetKeyspaceConfig(oldCfg, newCfg)
+}
+
+func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceConfig) error {
+	manager := h.svr.GetMetaServiceGroupManager()
+	if manager == nil {
+		return errors.New("meta-service groups manager is not initialized")
+	}
+	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
+	// the map persisted via newCfg and the map applied to the manager are the
+	// same reference. newCfg is a locally owned clone, so there is no aliasing
+	// with the live config.
+	newGroups := newCfg.MetaServiceGroups
+	// Normalize (trim/dedup) before computing deletedGroups. Otherwise a
+	// whitespace-padded ID (e.g. " g ") for an existing group g would not match
+	// the already-normalized key in oldCfg, so g would be wrongly classified as a
+	// deletion and rejected by UpdateGroupsSafely when it still has keyspaces.
+	if err := config.AdjustMetaServiceGroups(newGroups); err != nil {
+		return err
+	}
+	deletedGroups := make([]string, 0)
+	for id := range oldCfg.GetMetaServiceGroups() {
+		if _, ok := newGroups[id]; !ok {
+			deletedGroups = append(deletedGroups, id)
+		}
+	}
+	return manager.UpdateGroupsSafely(h.svr.Context(), newGroups, deletedGroups, func() error {
+		return h.svr.SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg)
+	}, func() {
+		h.svr.UpdateKeyspaceConfig(newCfg)
+	})
 }
 
 func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) error {

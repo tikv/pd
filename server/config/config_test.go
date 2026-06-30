@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -328,6 +327,23 @@ disable-make-up-replica = false
 	re.Error(err)
 }
 
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
+}
+
 func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
@@ -585,21 +601,54 @@ func TestRateLimitClone(t *testing.T) {
 	re.Zero(gdc.ConcurrencyLimit)
 }
 
-func TestKeyspaceConfigClone(t *testing.T) {
-	re := require.New(t)
-	cfg := &KeyspaceConfig{
-		PreAlloc:                 []string{"keyspace-1"},
-		MetaServiceGroups:        map[string]string{"group-1": "http://127.0.0.1:2379"},
-		CheckRegionSplitInterval: typeutil.NewDuration(10 * time.Millisecond),
-		WaitRegionSplitTimeout:   typeutil.NewDuration(1 * time.Minute),
+func TestAdjustMetaServiceGroups(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groups    map[string]string
+		expected  map[string]string
+		expectErr bool
+		errorMsg  string
+	}{
+		{
+			name:     "trim group ID and endpoint",
+			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+		},
+		{
+			name:     "multiple groups",
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+		},
+		{
+			name:      "empty group ID after trim",
+			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
+		},
+		{
+			name:      "empty endpoint after trim",
+			groups:    map[string]string{"group-1": " "},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
+		},
+		{
+			name:      "duplicate group ID after trim",
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
+		},
 	}
 
-	re.NoError(cfg.Validate())
-	clone := cfg.Clone()
-	clone.MetaServiceGroups[""] = "http://127.0.0.1:2380"
-	re.Error(clone.Validate())
-
-	clone1 := cfg.Clone()
-	clone1.MetaServiceGroups["group-1"] = ""
-	re.Error(clone1.Validate())
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			err := AdjustMetaServiceGroups(testCase.groups)
+			if testCase.expectErr {
+				re.EqualError(err, testCase.errorMsg)
+				return
+			}
+			re.NoError(err)
+			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
 }

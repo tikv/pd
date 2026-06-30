@@ -15,7 +15,10 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"testing"
 
@@ -56,6 +59,7 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.cleanup = cancel
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.MetaServiceGroups = mockMetaServiceGroups()
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	suite.cluster = cluster
 	re.NoError(err)
@@ -94,6 +98,54 @@ func collectStatus(re *require.Assertions, keyspaces []*keyspacepb.KeyspaceMeta)
 	return collectedStatuses
 }
 
+// TestUpdateMetaServiceGroupsViaConfigAPI verifies that changing
+// meta-service-groups through the generic /config API is routed through the
+// MetaServiceGroupManager (UpdateGroupsSafely) rather than directly mutating the
+// keyspace manager. The /config payload is merged into the existing config, so
+// groups can be added or updated, and the change is reflected by the v2 API.
+func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI() {
+	re := suite.Require()
+	// Adding a new group through /config should succeed and be visible via v2 API.
+	added := mockMetaServiceGroups()
+	added["etcd-group-x"] = "etcd-group-x.example.local"
+	code, body := suite.setMetaServiceGroupsViaConfig(re, added)
+	re.Equal(http.StatusOK, code, body)
+	groups := mustLoadMetaServiceGroups(re, suite.server)
+	re.Len(groups, len(added))
+	var x *handlers.MetaServiceGroupStatus
+	for _, group := range groups {
+		if group.ID == "etcd-group-x" {
+			x = group
+		}
+	}
+	re.NotNil(x, "etcd-group-x should be added via /config")
+	re.Equal("etcd-group-x.example.local", x.Addresses)
+
+	// Updating an existing group's address through /config should also work.
+	added["etcd-group-x"] = "etcd-group-x-modified.example.local"
+	code, body = suite.setMetaServiceGroupsViaConfig(re, added)
+	re.Equal(http.StatusOK, code, body)
+	groups = mustLoadMetaServiceGroups(re, suite.server)
+	for _, group := range groups {
+		if group.ID == "etcd-group-x" {
+			re.Equal("etcd-group-x-modified.example.local", group.Addresses)
+		}
+	}
+}
+
+func (suite *metaServiceGroupTestSuite) setMetaServiceGroupsViaConfig(re *require.Assertions, groups map[string]string) (int, string) {
+	payload, err := json.Marshal(map[string]any{"keyspace.meta-service-groups": groups})
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+"/pd/api/v1/config", bytes.NewBuffer(payload))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	return resp.StatusCode, string(data)
+}
+
 func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	re := suite.Require()
 	// Default keyspace must not contain any meta-service group config.
@@ -115,18 +167,15 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
 	}
 	// Add two more meta-service groups.
-	newGroups := []*handlers.AddMetaServiceGroupRequest{
-		{
-			ID:        "etcd-group-4",
-			Addresses: "etcd-group-4.tidb-serverless.cluster.svc.local",
-		},
-		{
-			ID:        "etcd-group-5",
-			Addresses: "etcd-group-5.tidb-serverless.cluster.svc.local",
-		},
+	addr4 := "etcd-group-4.tidb-serverless.cluster.svc.local"
+	addr5 := "etcd-group-5.tidb-serverless.cluster.svc.local"
+	patch := map[string]*string{
+		"etcd-group-4": &addr4,
+		"etcd-group-5": &addr5,
 	}
-	groups = mustAddMetaServiceGroups(re, suite.server, newGroups)
-	re.Equal(len(groups), len(mockMetaServiceGroups())+len(newGroups))
+
+	groups = mustPatchMetaServiceGroups(re, suite.server, patch)
+	re.Equal(len(groups), len(mockMetaServiceGroups())+len(patch))
 	// Newly assigned meta-service group should have no assigned keyspace.
 	for _, group := range groups {
 		if collectedGroups[group.ID] == nil {
@@ -145,27 +194,54 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 		// Make sure keyspaces are relatively evenly distributed among meta-service groups.
 		re.InDelta(collectedStatus.AssignedKeyspaces, len(keyspaces)/len(groups), 1)
 	}
-	// Add the same keyspace group should result in error.
-	code, _ := tryAddMetaServiceGroups(re, suite.server, newGroups)
-	re.Equal(http.StatusBadRequest, code)
+	// Modify address of etcd-group-1
+	newAddr := "etcd-group-1-modified.tidb-serverless.cluster.svc.local"
+	modifyPatch := map[string]*string{
+		"etcd-group-1": &newAddr,
+	}
+	groups = mustPatchMetaServiceGroups(re, suite.server, modifyPatch)
+	found := false
+	for _, group := range groups {
+		if group.ID == "etcd-group-1" {
+			found = true
+			re.Equal(newAddr, group.Addresses)
+		}
+	}
+	re.True(found, "etcd-group-1 should exist after modify")
 
-	// Empty fields should be rejected.
-	code, _ = tryAddMetaServiceGroups(re, suite.server, []*handlers.AddMetaServiceGroupRequest{{
-		ID:        "",
-		Addresses: "etcd-group-6.tidb-serverless.cluster.svc.local",
-	}})
-	re.Equal(http.StatusBadRequest, code)
+	// Deleting a group with assigned keyspaces should be rejected.
+	rejectPatch := map[string]*string{
+		"etcd-group-2": nil,
+	}
+	mustPatchMetaServiceGroupsFail(re, suite.server, rejectPatch)
 
-	// Duplicates within the same request should be rejected.
-	code, _ = tryAddMetaServiceGroups(re, suite.server, []*handlers.AddMetaServiceGroupRequest{
-		{
-			ID:        "etcd-group-6",
-			Addresses: "etcd-group-6.tidb-serverless.cluster.svc.local",
-		},
-		{
-			ID:        "etcd-group-6",
-			Addresses: "etcd-group-6-dup.tidb-serverless.cluster.svc.local",
-		},
+	// Deleting etcd-group-4 should also be rejected once it has assigned keyspaces.
+	deletePatch := map[string]*string{
+		"etcd-group-4": nil,
+	}
+	mustPatchMetaServiceGroupsFail(re, suite.server, deletePatch)
+
+	// A top-level JSON null body should be rejected rather than treated as a no-op.
+	mustPatchMetaServiceGroupsRawFail(re, suite.server, []byte("null"))
+
+	// Duplicated group IDs after normalization should be rejected.
+	normalizedDuplicateAddr := "etcd-group-6.tidb-serverless.cluster.svc.local"
+	normalizedDuplicatePatch := map[string]*string{
+		"etcd-group-6":   &normalizedDuplicateAddr,
+		" etcd-group-6 ": nil, //nolint:gocritic // The whitespace is intentional to verify ID normalization.
+	}
+	mustPatchMetaServiceGroupsFail(re, suite.server, normalizedDuplicatePatch)
+
+	// Delete a newly-added group with no assigned keyspaces.
+	unusedAddr := "etcd-group-unused.tidb-serverless.cluster.svc.local"
+	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
+		"etcd-group-unused": &unusedAddr,
 	})
-	re.Equal(http.StatusBadRequest, code)
+	re.Len(groups, len(collectedGroups)+1)
+	groups = mustPatchMetaServiceGroups(re, suite.server, map[string]*string{
+		"etcd-group-unused": nil,
+	})
+	for _, group := range groups {
+		re.NotEqual("etcd-group-unused", group.ID)
+	}
 }

@@ -26,6 +26,7 @@ import (
 type MetaServiceGroupStorage interface {
 	IncrementAssignmentCount(txn kv.Txn, id string, delta int) error
 	GetAssignmentCount(txn kv.Txn, ids map[string]string) (map[string]int, error)
+	RemoveAssignmentCount(txn kv.Txn, id string) error
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
@@ -50,6 +51,13 @@ func (*StorageEndpoint) GetAssignmentCount(txn kv.Txn, ids map[string]string) (m
 		counts[id] = count
 	}
 	return counts, nil
+}
+
+// RemoveAssignmentCount removes the persisted assignment count of the designated
+// meta-service group, so re-adding a group with the same ID later starts fresh
+// instead of inheriting a stale count.
+func (*StorageEndpoint) RemoveAssignmentCount(txn kv.Txn, id string) error {
+	return txn.Remove(keypath.MetaServiceGroupAssignmentCountPath(id))
 }
 
 func loadAssignmentCount(txn kv.Txn, id string) (int, error) {

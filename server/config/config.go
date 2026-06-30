@@ -458,7 +458,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	c.Keyspace.adjust(configMetaData.Child("keyspace"))
+	if err := c.Keyspace.adjust(configMetaData.Child("keyspace")); err != nil {
+		return err
+	}
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
@@ -893,18 +895,10 @@ func (c *KeyspaceConfig) Validate() error {
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
 	}
-	for groupID, endpoint := range c.MetaServiceGroups {
-		if strings.TrimSpace(groupID) == "" {
-			return errors.New("[keyspace] meta-service group ID cannot be empty")
-		}
-		if strings.TrimSpace(endpoint) == "" {
-			return errors.New("[keyspace] meta-service group addresses cannot be empty")
-		}
-	}
 	return nil
 }
 
-func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("wait-region-split") {
 		c.WaitRegionSplit = true
 	}
@@ -914,6 +908,36 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
 	}
+
+	return AdjustMetaServiceGroups(c.MetaServiceGroups)
+}
+
+// AdjustMetaServiceGroups validates and adjusts the meta-service groups configuration.
+func AdjustMetaServiceGroups(metaGroups map[string]string) error {
+	dict := make(map[string]string, len(metaGroups))
+	for groupID, endpoint := range metaGroups {
+		id := strings.TrimSpace(groupID)
+		if id == "" {
+			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
+		address := strings.TrimSpace(endpoint)
+		if address == "" {
+			return errors.New("[keyspace] meta-service group addresses cannot be empty")
+		}
+		if _, ok := dict[id]; ok {
+			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID cannot be duplicated: %s", id))
+		}
+		dict[id] = address
+	}
+	// Clear the original map and copy the validated values back to it.
+	for groupID := range metaGroups {
+		delete(metaGroups, groupID)
+	}
+	for groupID, endpoint := range dict {
+		metaGroups[groupID] = endpoint
+	}
+
+	return nil
 }
 
 // Clone makes a deep copy of the keyspace config.
