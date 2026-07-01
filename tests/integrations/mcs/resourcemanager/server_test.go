@@ -28,7 +28,6 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
@@ -49,7 +48,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 
-	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
+	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), "")
 	addr := s.GetAddr()
 	defer cleanup()
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s})

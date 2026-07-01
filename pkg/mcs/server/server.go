@@ -45,6 +45,7 @@ type BaseServer struct {
 	clientConns sync.Map
 	secure      bool
 	muxListener net.Listener
+	listenAddr  string
 	// Callback functions for different stages
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
@@ -158,12 +159,39 @@ func (bs *BaseServer) InitListener(tlsCfg *grpcutil.TLSConfig, listenAddr string
 	} else {
 		bs.muxListener, err = net.Listen(constant.TCPNetworkStr, listenURL.Host)
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	bs.listenAddr = buildActualListenAddr(listenURL, bs.muxListener.Addr())
+	return nil
 }
 
 // GetListener returns the listener.
 func (bs *BaseServer) GetListener() net.Listener {
 	return bs.muxListener
+}
+
+// GetActualListenAddr returns the listener address after binding.
+func (bs *BaseServer) GetActualListenAddr() string {
+	return bs.listenAddr
+}
+
+// ResolveListenAddr returns actualListenAddr only when listenAddr points at a
+// kernel-selected port.
+func ResolveListenAddr(listenAddr, actualListenAddr string) string {
+	if hasZeroPort(listenAddr) {
+		return actualListenAddr
+	}
+	return listenAddr
+}
+
+// ResolveAdvertiseListenAddr returns actualListenAddr when advertiseAddr was left
+// unspecified or still points at a kernel-selected port.
+func ResolveAdvertiseListenAddr(advertiseAddr, actualListenAddr string) string {
+	if advertiseAddr == "" || hasZeroPort(advertiseAddr) {
+		return actualListenAddr
+	}
+	return advertiseAddr
 }
 
 // IsSecure checks if the server enable TLS.
@@ -185,4 +213,31 @@ func (bs *BaseServer) CloseClientConns() {
 		}
 		return true
 	})
+}
+
+func buildActualListenAddr(listenURL *url.URL, addr net.Addr) string {
+	host, _, err := net.SplitHostPort(listenURL.Host)
+	if err != nil || host == "" {
+		host, _, _ = net.SplitHostPort(addr.String())
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	_, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return listenURL.String()
+	}
+	actualURL := *listenURL
+	actualURL.Host = net.JoinHostPort(host, port)
+	return actualURL.String()
+}
+
+func hasZeroPort(addr string) bool {
+	parsed, err := url.Parse(addr)
+	host := addr
+	if err == nil && parsed.Host != "" {
+		host = parsed.Host
+	}
+	_, port, err := net.SplitHostPort(host)
+	return err == nil && port == "0"
 }

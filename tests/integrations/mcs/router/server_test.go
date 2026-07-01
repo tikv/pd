@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
 	rs "github.com/tikv/pd/pkg/mcs/router/server"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -78,7 +77,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
 	// make pd client can work
-	_, suite.tsoCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	_, suite.tsoCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 
 	regions := tests.InitRegions(10)
 	for _, region := range regions {
@@ -116,7 +115,7 @@ func (suite *serverTestSuite) SetupTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/router/server/speedUpMemberLoop", `return(true)`))
 	var err error
-	suite.routerServer, suite.routerCleanup, err = tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	suite.routerServer, suite.routerCleanup, err = tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, "")
 	re.NoError(err)
 	// check sync work well
 	testutil.Eventually(re, func() bool {

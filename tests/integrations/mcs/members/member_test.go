@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -89,7 +88,7 @@ func (suite *memberTestSuite) SetupTest() {
 	nodes := make(map[string]bs.Server)
 	// mock 3 tso nodes, which is more than the default replica count(DefaultKeyspaceGroupReplicaCount).
 	for range 3 {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
@@ -109,7 +108,7 @@ func (suite *memberTestSuite) SetupTest() {
 	// Scheduling
 	nodes = make(map[string]bs.Server)
 	for range 3 {
-		s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
@@ -121,7 +120,7 @@ func (suite *memberTestSuite) SetupTest() {
 	// resource manager
 	nodes = make(map[string]bs.Server)
 	for range 3 {
-		s, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
