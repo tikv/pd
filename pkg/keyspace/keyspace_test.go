@@ -1133,13 +1133,16 @@ func TestAssignMetaServiceGroupTxnOp(t *testing.T) {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
-	// runAssign mimics the real create path: it holds the meta-service group
-	// manager's read lock for the whole transaction and runs the assignment op.
+	// runAssign mimics the real create path: the assignment op runs inside the
+	// transaction while the meta-service group manager's read lock is held, and
+	// the post-commit callback runs only after the lock has been released (the
+	// callback re-acquires the read lock via AttachEndpoints, so running it while
+	// still holding the lock would be a recursive RLock).
 	runAssign := func(manager *Manager, keyspace *keyspacepb.KeyspaceMeta) error {
-		manager.mgm.RLock()
-		defer manager.mgm.RUnlock()
 		op, cb := manager.assignMetaServiceGroupTxnOp(keyspace)
+		manager.mgm.RLock()
 		err := manager.store.RunInTxn(ctx, op)
+		manager.mgm.RUnlock()
 		cb(err)
 		return err
 	}
