@@ -257,7 +257,7 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (sc *schedulingController) GetStoresLoads() map[uint64][]float64 {
+func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return sc.hotStat.GetStoresLoads()
 }
 
@@ -469,6 +469,9 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 
 // IsPrepared return true if the prepare checker is ready.
 func (sc *schedulingController) IsPrepared() bool {
+	if sc == nil || sc.coordinator == nil {
+		return false
+	}
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetPrepareChecker().IsPrepared()

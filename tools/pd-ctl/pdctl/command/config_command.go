@@ -63,6 +63,7 @@ func NewConfigCommand() *cobra.Command {
 	conf.AddCommand(NewSetConfigCommand())
 	conf.AddCommand(NewDeleteConfigCommand())
 	conf.AddCommand(NewPlacementRulesCommand())
+	conf.AddCommand(NewAffinityCommand())
 	return conf
 }
 
@@ -155,7 +156,7 @@ func NewShowServerConfigCommand() *cobra.Command {
 	}
 }
 
-// NewShowReplicationConfigCommand return a show all subcommand of show subcommand
+// NewShowServiceMiddlewareConfigCommand return a show all subcommand of show subcommand
 func NewShowServiceMiddlewareConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "service-middleware",
@@ -372,6 +373,8 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		val = value
+	} else if key == "max-replicas" {
+		checkMaxReplicas(cmd, val.(float64))
 	}
 	data[key] = val
 	reqData, err := json.Marshal(data)
@@ -384,6 +387,25 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 		return err
 	}
 	return nil
+}
+
+func checkMaxReplicas(cmd *cobra.Command, newReplica float64) {
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
+	if err != nil {
+		cmd.Printf("Failed to get config when checking config: %s\n", err)
+		return
+	}
+	oldConfig := make(map[string]any)
+	err = json.Unmarshal([]byte(r), &oldConfig)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal config when checking config: %s\n", err)
+		return
+	}
+	oldReplica, ok := oldConfig["max-replicas"].(float64)
+	if ok && newReplica < oldReplica {
+		cmd.Printf("Setting max-replica to %v which is less than the current replicas (%v). This may pose a risk. Please confirm the setting.\n", newReplica, oldReplica)
+	}
 }
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
@@ -492,11 +514,12 @@ func setServiceMiddlewareCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if args[0] == "rate-limit" {
+	switch args[0] {
+	case "rate-limit":
 		input["type"] = "label"
 		postJSON(cmd, serviceMiddlewareConfigPrefix+"/rate-limit", input)
 		return
-	} else if args[0] == "grpc-rate-limit" {
+	case "grpc-rate-limit":
 		postJSON(cmd, serviceMiddlewareConfigPrefix+"/grpc-rate-limit", input)
 		return
 	}

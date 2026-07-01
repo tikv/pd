@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -48,15 +49,24 @@ const (
 // the refresh interval should be less than store heartbeat interval to keep the next calculate must use the latest threshold.
 var ThresholdsUpdateInterval = 8 * time.Second
 
-// Denoising is an option to calculate flow base on the real heartbeats. Should
-// only turn off by the simulator and the test.
-var Denoising = true
+// denoising is an option to calculate flow base on the real heartbeats.
+var denoising uint32 = 1
+
+func isDenoisingEnabled() bool {
+	return atomic.LoadUint32(&denoising) == 1
+}
+
+// DisableDenoising disables the denoising feature.
+// It is used for the simulator and test.
+func DisableDenoising() {
+	atomic.CompareAndSwapUint32(&denoising, 1, 0)
+}
 
 type thresholds struct {
 	updatedTime time.Time
 	rates       []float64
 	topNLen     int
-	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
+	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for cpu, 4 is for total length.
 }
 
 // HotPeerCache saves the hot peer's statistics.
@@ -135,30 +145,6 @@ func (f *HotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
 	f.metrics[storeID][action].Inc()
 }
 
-func (f *HotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
-	regionHeartbeatIntervalHist.Observe(float64(interval))
-	if interval == 0 {
-		return
-	}
-	// TODO: use unified metrics. (keep backward compatibility at the same time)
-	for _, k := range f.kind.RegionStats() {
-		switch k {
-		case utils.RegionReadBytes:
-			readByteHist.Observe(loads[int(k)])
-		case utils.RegionReadKeys:
-			readKeyHist.Observe(loads[int(k)])
-		case utils.RegionWriteBytes:
-			writeByteHist.Observe(loads[int(k)])
-		case utils.RegionWriteKeys:
-			writeKeyHist.Observe(loads[int(k)])
-		case utils.RegionWriteQueryNum:
-			writeQueryHist.Observe(loads[int(k)])
-		case utils.RegionReadQueryNum:
-			readQueryHist.Observe(loads[int(k)])
-		}
-	}
-}
-
 // CollectExpiredItems collects expired items, mark them as needDelete and puts them into inherit items
 func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 	regionID := region.GetID()
@@ -181,11 +167,10 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // Notice: CheckPeerFlow couldn't be used concurrently.
 // CheckPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
 func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Peer, deltaLoads []float64, interval uint64) []*HotPeerStat {
-	if Denoising && interval < HotRegionReportMinInterval { // for test or simulator purpose
+	if isDenoisingEnabled() && interval < HotRegionReportMinInterval { // for test or simulator purpose
 		return nil
 	}
 
-	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
 
 	regionPeers := region.GetPeers()
@@ -240,7 +225,7 @@ func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 // CheckColdPeer checks the collect the un-heartbeat peer and maintain it.
 func (f *HotPeerCache) CheckColdPeer(storeID uint64, reportRegions map[uint64]*core.RegionInfo, interval uint64) (ret []*HotPeerStat) {
 	// for test or simulator purpose
-	if Denoising && interval < HotRegionReportMinInterval {
+	if isDenoisingEnabled() && interval < HotRegionReportMinInterval {
 		return
 	}
 	previousHotStat, ok := f.regionsOfStore[storeID]
@@ -289,6 +274,7 @@ func (f *HotPeerCache) collectMetrics() {
 		thresholds.metrics[utils.ByteDim].Set(thresholds.rates[utils.ByteDim])
 		thresholds.metrics[utils.KeyDim].Set(thresholds.rates[utils.KeyDim])
 		thresholds.metrics[utils.QueryDim].Set(thresholds.rates[utils.QueryDim])
+		thresholds.metrics[utils.CPUDim].Set(thresholds.rates[utils.CPUDim])
 		thresholds.metrics[utils.DimLen].Set(float64(thresholds.topNLen))
 	}
 }
@@ -318,6 +304,7 @@ func (f *HotPeerCache) calcHotThresholds(storeID uint64) []float64 {
 				utils.ByteDim:  hotCacheStatusGauge.WithLabelValues("byte-rate-threshold", store, kind),
 				utils.KeyDim:   hotCacheStatusGauge.WithLabelValues("key-rate-threshold", store, kind),
 				utils.QueryDim: hotCacheStatusGauge.WithLabelValues("query-rate-threshold", store, kind),
+				utils.CPUDim:   hotCacheStatusGauge.WithLabelValues("cpu-rate-threshold", store, kind),
 				utils.DimLen:   hotCacheStatusGauge.WithLabelValues("total_length", store, kind),
 			},
 		}
@@ -445,7 +432,11 @@ func (f *HotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			if dim != nil {
+				newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
+			} else {
+				newItem.rollingLoads = append(newItem.rollingLoads, nil)
+			}
 		}
 		newItem.allowInherited = false
 	} else {
@@ -508,7 +499,7 @@ func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 		initItem(newItem, f.kind.DefaultAntiCount())
 	}
 	newItem.actionType = utils.Add
-	newItem.rollingLoads = make([]*dimStat, len(regionStats))
+	newItem.rollingLoads = make([]*dimStat, utils.DimLen)
 	for i, k := range regionStats {
 		ds := newDimStat(f.interval())
 		ds.add(deltaLoads[k], interval)

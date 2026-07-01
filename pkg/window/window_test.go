@@ -1,6 +1,3 @@
-// The MIT License (MIT)
-// Copyright (c) 2022 go-kratos Project Authors.
-//
 // Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,13 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The MIT License (MIT)
+// Copyright (c) 2022 go-kratos Project Authors.
+
 package window
 
 import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestWindowResetWindow(t *testing.T) {
 	re := require.New(t)

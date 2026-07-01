@@ -18,14 +18,13 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -33,11 +32,15 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 const (
-	clusterID = uint64(20240117)
-	rulesNum  = 16384
+	rulesNum = 16384
 )
 
 func TestLoadLargeRules(t *testing.T) {
@@ -54,7 +57,7 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
@@ -68,7 +71,6 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
@@ -84,26 +86,32 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
-	cfg.Dir = filepath.Join(os.TempDir(), "/pd_tests")
+	cfg := etcdutil.NewTestEtcdConfig()
+	var err error
+	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
+	re.NoError(err)
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls)
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
+	ops := make([]clientv3.Op, 0, etcdutil.MaxEtcdTxnOps)
 	for i := 1; i < rulesNum+1; i++ {
-		rule := &labeler.LabelRule{
-			ID:       "test_" + strconv.Itoa(i),
-			Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
-			RuleType: labeler.KeyRange,
-			Data:     keyspace.MakeKeyRanges(uint32(i)),
-		}
+		rule := keyspace.MakeTxnLabelRule(uint32(i))
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
-		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
+		key := keypath.RegionLabelKeyPath(rule.ID)
+		ops = append(ops, clientv3.OpPut(key, string(value)))
+		if len(ops) == etcdutil.MaxEtcdTxnOps {
+			_, err = client.Txn(ctx).Then(ops...).Commit()
+			re.NoError(err)
+			ops = ops[:0]
+		}
+	}
+	if len(ops) > 0 {
+		_, err = client.Txn(ctx).Then(ops...).Commit()
 		re.NoError(err)
 	}
 

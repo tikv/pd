@@ -35,22 +35,30 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 	}
 }
 
-// @Tags     stats
-// @Summary  Get region statistics of a specified range.
-// @Param    start_key  query  string  true   "Start key"
-// @Param    end_key    query  string  true   "End key"
-// @Param    count      query  bool    false  "Whether only count the number of regions"
-// @Produce  json
-// @Success  200  {object}  statistics.RegionStats
-// @Router   /stats/region [get]
+// GetRegionStatus gets the region statistics of a specified range.
+//
+//	@Tags		stats
+//	@Summary	Get region statistics of a specified range.
+//	@Param		start_key	query	string	true	"Start key"
+//	@Param		end_key		query	string	true	"End key"
+//	@Param		count		query	bool	false	"Whether only count the number of regions"
+//	@Param		use_hot		query	bool	false	"Whether use hot region statistics"
+//	@Param		engine		query	string	false	"Engine type"
+//	@Produce	json
+//	@Success	200	{object}	statistics.RegionStats
+//	@Router		/stats/region [get]
 func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	var stats *statistics.RegionStats
 	if r.URL.Query().Has("count") {
 		stats = rc.GetRegionStatsCount([]byte(startKey), []byte(endKey))
+	} else if r.URL.Query().Has("use_hot") {
+		engine := r.URL.Query().Get("engine")
+		stats = rc.GetHotRegionStatusByRange([]byte(startKey), []byte(endKey), engine)
 	} else {
 		stats = rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey))
 	}
+
 	h.rd.JSON(w, http.StatusOK, stats)
 }

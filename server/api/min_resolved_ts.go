@@ -38,21 +38,24 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 	}
 }
 
+// MinResolvedTS is the response type for min resolved ts.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type minResolvedTS struct {
+type MinResolvedTS struct {
 	IsRealTime          bool              `json:"is_real_time,omitempty"`
 	MinResolvedTS       uint64            `json:"min_resolved_ts"`
 	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
 	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
-// @Tags     min_store_resolved_ts
-// @Summary  Get store-level min resolved ts.
-// @Produce      json
-// @Success      200    {array}   minResolvedTS
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure      500    {string}  string  "PD server failed to proceed the request."
-// @Router   /min-resolved-ts/{store_id} [get]
+// GetStoreMinResolvedTS gets the store-level min resolved ts.
+//
+//	@Tags		min_store_resolved_ts
+//	@Summary	Get store-level min resolved ts.
+//	@Produce	json
+//	@Success	200	{array}		MinResolvedTS
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := getCluster(r)
 	idStr := mux.Vars(r)["store_id"]
@@ -63,27 +66,33 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 	}
 	value := c.GetStoreMinResolvedTS(storeID)
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
+	h.rd.JSON(w, http.StatusOK, MinResolvedTS{
 		MinResolvedTS:   value,
 		PersistInterval: persistInterval,
 		IsRealTime:      persistInterval.Duration != 0,
 	})
 }
 
-// @Tags         min_resolved_ts
-// @Summary      Get cluster-level min resolved ts and optionally store-level min resolved ts.
-// @Description  Optionally, we support a query parameter `scope`
+// GetMinResolvedTS gets the cluster-level min resolved ts and optionally store-level min resolved ts.
+//
+//	@Tags			min_resolved_ts
+//	@Summary		Get cluster-level min resolved ts and optionally store-level min resolved ts.
+//	@Description	Optionally, we support a query parameter `scope`
+//
 // to get store-level min resolved ts by specifying a list of store IDs.
+//
 //   - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
+//
 //   - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+//
 //   - When scope given a list of stores, min_resolved_ts will be provided for each store
 //     and the scope-specific min_resolved_ts will be returned.
 //
-// @Produce  json
-// @Param        scope  query     string  false  "Scope of the min resolved ts: comma-separated list of store IDs (e.g., '1,2,3')."  default(cluster)
-// @Success  200  {array}   minResolvedTS
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router       /min-resolved-ts [get]
+//     @Produce		json
+//     @Param			scope	query		string	false	"Scope of the min resolved ts: comma-separated list of store IDs (e.g., '1,2,3')."	default(cluster)
+//     @Success		200		{array}		MinResolvedTS
+//     @Failure		500		{string}	string	"PD server failed to proceed the request."
+//     @Router			/min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := getCluster(r)
 	scopeMinResolvedTS := c.GetMinResolvedTS()
@@ -119,7 +128,7 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
+	h.rd.JSON(w, http.StatusOK, MinResolvedTS{
 		MinResolvedTS:       scopeMinResolvedTS,
 		PersistInterval:     persistInterval,
 		IsRealTime:          persistInterval.Duration != 0,

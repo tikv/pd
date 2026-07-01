@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,19 +39,20 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/integrations/mcs"
+	"github.com/tikv/pd/tests/integrations/mcs/utils"
 )
 
 func TestMain(m *testing.M) {
@@ -75,7 +77,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -110,7 +112,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 	re.NoError(err)
 	cc.Close()
 
@@ -156,20 +158,24 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isMultiTimelinesEnabled*/)
-	checkTSOPath(re, false /*isMultiTimelinesEnabled*/)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	}()
+	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
+	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isMultiTimelinesEnabled bool) {
+func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isMultiTimelinesEnabled {
-		cluster, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.Microservice.EnableMultiTimelines = true
+	if isKeyspaceGroupEnabled {
+		cluster, err = tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
@@ -184,7 +190,7 @@ func checkTSOPath(re *require.Assertions, isMultiTimelinesEnabled bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isMultiTimelinesEnabled {
+	if isKeyspaceGroupEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -193,14 +199,16 @@ func checkTSOPath(re *require.Assertions, isMultiTimelinesEnabled bool) {
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
 
-	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
-	defer cli.Close()
-	physical, logical, err := cli.GetTS(ctx)
-	re.NoError(err)
-	ts := tsoutil.ComposeTS(physical, logical)
-	re.NotEmpty(ts)
-	// After we request the tso server, etcd still has only one key related to the timestamp.
-	re.Equal(1, getEtcdTimestampKeyNum(re, client))
+	if !kerneltype.IsNextGen() {
+		cli := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+		defer cli.Close()
+		physical, logical, err := cli.GetTS(ctx)
+		re.NoError(err)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.NotEmpty(ts)
+		// After we request the tso server, etcd still has only one key related to the timestamp.
+		re.Equal(1, getEtcdTimestampKeyNum(re, client))
+	}
 }
 
 func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int {
@@ -209,7 +217,7 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	var count int
 	for _, kv := range resp.Kvs {
 		key := strings.TrimSpace(string(kv.Key))
-		if !strings.HasSuffix(key, keypath.TimestampKey) {
+		if !strings.HasSuffix(key, "timestamp") {
 			continue
 		}
 		count++
@@ -217,7 +225,7 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	return count
 }
 
-type pdForward struct {
+type PDServiceForward struct {
 	re               *require.Assertions
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -227,19 +235,13 @@ type pdForward struct {
 	pdClient         pd.Client
 }
 
-func NewPDForward(re *require.Assertions, enableMultiTimelines ...bool) pdForward {
-	suite := pdForward{
+func NewPDServiceForward(re *require.Assertions) PDServiceForward {
+	suite := PDServiceForward{
 		re: re,
-	}
-	isMultiTimelinesEnabled := true
-	if len(enableMultiTimelines) > 0 {
-		isMultiTimelinesEnabled = enableMultiTimelines[0]
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, _ string) {
-		conf.Microservice.EnableMultiTimelines = isMultiTimelinesEnabled
-	})
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -260,51 +262,30 @@ func NewPDForward(re *require.Assertions, enableMultiTimelines ...bool) pdForwar
 	return suite
 }
 
-func (suite *pdForward) ShutDown() {
+func (suite *PDServiceForward) ShutDown() {
 	suite.pdClient.Close()
 	re := suite.re
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
-	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 		re.NoError(err)
-		re.Empty(endpoints)
-	}
+		return len(endpoints) == 0
+	})
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
-// TestForwardTSO tests the behavior of forwarding TSO requests to the TSO server in non-serverless env.
-func TestForwardTSO(t *testing.T) {
+func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
-	// non-serverless env should disable multi-timelines
-	suite := NewPDForward(re, false)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
-	// If EnableTSODynamicSwitching is false, the tso server will be provided by PD.
-	// The tso server won't affect the PD.
-	suite.checkAvailableTSO(re)
-
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
-	re.NoError(err)
-	defer tc.Destroy()
-	tc.WaitForDefaultPrimaryServing(re)
-	suite.checkAvailableTSO(re)
-
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
 	cfg := leaderServer.GetMicroserviceConfig().Clone()
-	cfg.EnableTSODynamicSwitching = true
-	leaderServer.SetMicroserviceConfig(*cfg)
-	suite.checkAvailableTSO(re)
-}
-
-// TestForwardTSOWithMultipleTimelines tests the behavior of forwarding TSO requests to the TSO server in serverless env.
-func TestForwardTSOWithMultipleTimelines(t *testing.T) {
-	re := require.New(t)
-	suite := NewPDForward(re)
-	defer suite.ShutDown()
+	cfg.EnableTSODynamicSwitching = false
+	err := leaderServer.SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
@@ -316,7 +297,7 @@ func TestForwardTSOWithMultipleTimelines(t *testing.T) {
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -325,21 +306,22 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	// can use the tso-related interface with old primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with old primary again
-	tc.AddServer(oldPrimary)
+	err = tc.AddServer(oldPrimary)
+	re.NoError(err)
 	suite.checkAvailableTSO(re)
 	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
@@ -347,8 +329,8 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	time.Sleep(time.Duration(mcs.DefaultLease) * time.Second) // wait for leader lease timeout
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -356,7 +338,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -365,7 +347,8 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	for range 10 {
-		tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		err = tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+		re.NoError(err)
 		tc.WaitForDefaultPrimaryServing(re)
 		var err error
 		for range 3 { // try 3 times
@@ -382,7 +365,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 
 func TestResignAPIPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -396,7 +379,8 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	}()
 
 	for range 10 {
-		suite.pdLeader.ResignLeader()
+		err = suite.pdLeader.ResignLeader()
+		re.NoError(err)
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 		suite.backendEndpoints = suite.pdLeader.GetAddr()
 		_, _, err = suite.pdClient.GetTS(suite.ctx)
@@ -406,12 +390,12 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
 		// try to update gc safe point
-		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
+		min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1) //nolint:staticcheck
 		re.NoError(err)
 		re.Equal(uint64(0), min)
 	})
@@ -419,7 +403,7 @@ func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -433,15 +417,17 @@ func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
-		_, _, err := suite.pdClient.GetTS(suite.ctx)
+		// Replace GetTS with GetTSAsync to avoid retry
+		resp := suite.pdClient.GetTSAsync(suite.ctx)
+		_, _, err := resp.Wait()
 		re.Error(err)
 	})
 }
 
-func (suite *pdForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
+func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
 	re := suite.re
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
@@ -460,8 +446,8 @@ func (suite *pdForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
 	re.NotEmpty(follower)
 
 	// write follower's address to cache to simulate cache is not updated.
-	suite.pdLeader.GetServer().SetServicePrimaryAddr(constant.TSOServiceName, follower)
-	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	suite.pdLeader.GetServer().SetServicePrimaryAddr(mcs.TSOServiceName, follower)
+	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(ok)
 	re.Equal(follower, errorAddr)
 
@@ -470,14 +456,15 @@ func (suite *pdForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
 
 	// test tso request will success after cache is updated
 	suite.checkAvailableTSO(re)
-	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
+	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, mcs.TSOServiceName)
 	re.True(exist2)
 	re.NotEqual(errorAddr, newPrimary)
 	re.Equal(oldPrimary, newPrimary)
 	tc.Destroy()
 }
 
-func (suite *pdForward) addRegions() {
+func (suite *PDServiceForward) addRegions() {
+	re := suite.re
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
 	for i := range 3 {
@@ -487,28 +474,29 @@ func (suite *pdForward) addRegions() {
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		re.NoError(err)
 	}
 }
 
-func (suite *pdForward) checkUnavailableTSO(re *require.Assertions) {
+func (suite *PDServiceForward) checkUnavailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.Error(err)
 	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
+	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1) //nolint:staticcheck
 	re.Error(err)
 	// try to set external ts
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
 	re.Error(err)
 }
 
-func (suite *pdForward) checkAvailableTSO(re *require.Assertions) {
-	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
+func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
+	utils.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
 	// try to update gc safe point
-	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1)
+	min, err := suite.pdClient.UpdateServiceGCSafePoint(context.Background(), "a", 1000, 1) //nolint:staticcheck
 	re.NoError(err)
 	re.Equal(uint64(0), min)
 	// try to set external ts
@@ -516,6 +504,90 @@ func (suite *pdForward) checkAvailableTSO(re *require.Assertions) {
 	re.NoError(err)
 	err = suite.pdClient.SetExternalTimestamp(suite.ctx, ts+1)
 	re.NoError(err)
+}
+
+func TestForwardTsoConcurrently(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	wg := sync.WaitGroup{}
+	for i := range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pdClient, err := pd.NewClientWithContext(
+				context.Background(),
+				caller.TestComponent,
+				[]string{suite.backendEndpoints},
+				pd.SecurityOption{})
+			re.NoError(err)
+			re.NotNil(pdClient)
+			defer pdClient.Close()
+			for range 10 {
+				testutil.Eventually(re, func() bool {
+					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
+					return err == nil && min == 0
+				})
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkForwardTsoConcurrently(b *testing.B) {
+	re := require.New(b)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	initClients := func(num int) []pd.Client {
+		var clients []pd.Client
+		for range num {
+			pdClient, err := pd.NewClientWithContext(context.Background(),
+				caller.TestComponent,
+				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+			re.NoError(err)
+			re.NotNil(pdClient)
+			clients = append(clients, pdClient)
+		}
+		return clients
+	}
+
+	concurrencyLevels := []int{1, 2, 5, 10, 20}
+	for _, clientsNum := range concurrencyLevels {
+		clients := initClients(clientsNum)
+		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
+			wg := sync.WaitGroup{}
+			b.ResetTimer()
+			for range b.N {
+				for i, client := range clients {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for range 1000 {
+							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1) //nolint:staticcheck
+							re.NoError(err)
+							re.Equal(uint64(0), min)
+						}
+					}()
+				}
+			}
+			wg.Wait()
+		})
+		for _, c := range clients {
+			c.Close()
+		}
+	}
 }
 
 type CommonTestSuite struct {
@@ -538,7 +610,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -560,10 +632,10 @@ func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, mcs.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, mcs.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}
@@ -602,15 +674,17 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.Join(suite.ctx)
+	s, err := suite.cluster.JoinWithKeyspaceGroup(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
 	// transfer leader to the new server
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 	check()
-	suite.pdLeader.ResignLeader()
+	err = suite.pdLeader.ResignLeader()
+	re.NoError(err)
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 }
 
@@ -624,7 +698,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestCluster(ctx, 1,
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = true
 		},
@@ -656,7 +730,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is not providing TSO service
 	testutil.Eventually(re, func() bool {
-		allocator := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator()
+		allocator := pdLeader.GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
 	})
 
@@ -666,16 +740,17 @@ func TestTSOServiceSwitch(t *testing.T) {
 	// Disable TSO switching
 	cfg := pdLeader.GetServer().GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 
 	tsoCluster.Destroy()
 
 	// Wait for the configuration change to take effect
 	time.Sleep(300 * time.Millisecond)
-	// PD should provide TSO service
+	// Verify PD is not providing TSO service multiple times
 	for range 10 {
 		err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1)
-		re.NoError(err, "TSO service should not be available")
+		re.Error(err, "TSO service should not be available")
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -683,9 +758,10 @@ func TestTSOServiceSwitch(t *testing.T) {
 	cfg = pdLeader.GetServer().GetMicroserviceConfig().Clone()
 
 	cfg.EnableTSODynamicSwitching = true
-	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	err = pdLeader.GetServer().SetMicroserviceConfig(*cfg)
+	re.NoError(err)
 
-	// Wait for PD to detect the change, PD will keep providing TSO service
+	// Wait for PD to detect the change
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing

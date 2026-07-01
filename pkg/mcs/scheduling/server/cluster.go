@@ -1,8 +1,27 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,11 +38,17 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -46,17 +71,30 @@ type Cluster struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	*core.BasicCluster
-	persistConfig     *config.PersistConfig
-	ruleManager       *placement.RuleManager
-	labelerManager    *labeler.RegionLabeler
-	regionStats       *statistics.RegionStatistics
-	labelStats        *statistics.LabelStatistics
-	hotStat           *statistics.HotStat
+	persistConfig   *config.PersistConfig
+	ruleManager     *placement.RuleManager
+	keyRangeManager *keyrange.Manager
+	labelerManager  *labeler.RegionLabeler
+	affinityManager *affinity.Manager
+	regionStats     *statistics.RegionStatistics
+	labelStats      *statistics.LabelStatistics
+	hotStat         *statistics.HotStat
+	// runtimeMu protects the runtime resources which are created after the cluster is created,
+	// and cleaned up before the cluster is closed.
+	runtimeMu         sync.RWMutex
 	storage           storage.Storage
+	hbStreams         *hbstream.HeartbeatStreams
+	metaWatcher       *meta.Watcher
+	configWatcher     *config.Watcher
+	ruleWatcher       *rule.Watcher
+	affinityWatcher   *mcsaffinity.Watcher
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
 	running           atomic.Bool
+
+	backendAddress string
+	httpClient     *http.Client
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -69,7 +107,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
-	collectWaitTime       = time.Minute
+	requestInterval       = 10 * time.Second
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -87,34 +125,53 @@ func NewCluster(
 	basicCluster *core.BasicCluster,
 	hbStreams *hbstream.HeartbeatStreams,
 	checkMembershipCh chan struct{},
+	httpClient *http.Client,
+	backendAddress string,
 ) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
+		storage.Close()
+		hbStreams.Close()
 		cancel()
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
+	affinityManager, err := affinity.NewManager(ctx, storage, basicCluster, persistConfig, labelerManager)
+	if err != nil {
+		storage.Close()
+		hbStreams.Close()
+		cancel()
+		return nil, err
+	}
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
+		keyRangeManager:   keyrange.NewManager(),
 		labelerManager:    labelerManager,
+		affinityManager:   affinityManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
+		hbStreams:         hbStreams,
 		checkMembershipCh: checkMembershipCh,
+		httpClient:        httpClient,
+		backendAddress:    backendAddress,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
+
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel(), true)
 	if err != nil {
+		storage.Close()
+		hbStreams.Close()
 		cancel()
 		return nil, err
 	}
@@ -149,6 +206,9 @@ func (c *Cluster) GetLabelStats() *statistics.LabelStatistics {
 
 // GetBasicCluster returns the basic cluster.
 func (c *Cluster) GetBasicCluster() *core.BasicCluster {
+	if c == nil {
+		return nil
+	}
 	return c.BasicCluster
 }
 
@@ -162,9 +222,19 @@ func (c *Cluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
 }
 
+// GetKeyRangeManager returns the key range manager
+func (c *Cluster) GetKeyRangeManager() *keyrange.Manager {
+	return c.keyRangeManager
+}
+
 // GetRegionLabeler returns the region labeler.
 func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.labelerManager
+}
+
+// GetAffinityManager returns the affinity manager.
+func (c *Cluster) GetAffinityManager() *affinity.Manager {
+	return c.affinityManager
 }
 
 // GetRegionSplitter returns the region splitter.
@@ -178,7 +248,7 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (c *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
 }
 
@@ -213,7 +283,92 @@ func (c *Cluster) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*bu
 
 // GetStorage returns the storage.
 func (c *Cluster) GetStorage() storage.Storage {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
 	return c.storage
+}
+
+// GetHeartbeatStreams returns the heartbeat streams.
+func (c *Cluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.hbStreams
+}
+
+// GetMetaWatcher returns the meta watcher.
+func (c *Cluster) GetMetaWatcher() *meta.Watcher {
+	if c == nil {
+		return nil
+	}
+	c.runtimeMu.RLock()
+	defer c.runtimeMu.RUnlock()
+	return c.metaWatcher
+}
+
+// SetRuntimeResources installs the cluster-scoped runtime resources after they are created.
+func (c *Cluster) SetRuntimeResources(
+	metaWatcher *meta.Watcher,
+	configWatcher *config.Watcher,
+	ruleWatcher *rule.Watcher,
+	affinityWatcher *mcsaffinity.Watcher,
+) {
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
+	c.metaWatcher = metaWatcher
+	c.configWatcher = configWatcher
+	c.ruleWatcher = ruleWatcher
+	c.affinityWatcher = affinityWatcher
+}
+
+func (c *Cluster) stopCluster() {
+	c.StopBackgroundJobs()
+	c.cleanupRuntimeResources()
+}
+
+func (c *Cluster) cleanupRuntimeResources() {
+	c.runtimeMu.Lock()
+	affinityWatcher := c.affinityWatcher
+	ruleWatcher := c.ruleWatcher
+	metaWatcher := c.metaWatcher
+	configWatcher := c.configWatcher
+	hbStreams := c.hbStreams
+	storage := c.storage
+	c.affinityWatcher = nil
+	c.ruleWatcher = nil
+	c.metaWatcher = nil
+	c.configWatcher = nil
+	c.hbStreams = nil
+	c.storage = nil
+	c.runtimeMu.Unlock()
+
+	now := time.Now()
+	if affinityWatcher != nil {
+		affinityWatcher.Close()
+	}
+	if ruleWatcher != nil {
+		ruleWatcher.Close()
+	}
+	if metaWatcher != nil {
+		metaWatcher.Close()
+	}
+	if configWatcher != nil {
+		configWatcher.Close()
+	}
+	if storage != nil {
+		storage.Close()
+	}
+	if hbStreams != nil {
+		start := time.Now()
+		hbStreams.Close()
+		log.Info("close stream takes", zap.Duration("cost", time.Since(start)))
+	}
+	log.Info("clean up runtime resources takes", zap.Duration("cost", time.Since(now)))
 }
 
 // GetCheckerConfig returns the checker config.
@@ -225,20 +380,25 @@ func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.per
 // GetStoreConfig returns the store config.
 func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
 
-// AllocID allocates a new ID.
-func (c *Cluster) AllocID() (uint64, error) {
+// AllocID allocates new IDs.
+func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	client, err := c.getPDLeaderClient()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
+	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
+
+	failpoint.Inject("allocIDNonBatch", func() {
+		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
+	})
+	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()
-		return 0, err
+		return 0, 0, err
 	}
-	return resp.GetId(), nil
+	return resp.GetId(), resp.GetCount(), nil
 }
 
 func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
@@ -283,6 +443,7 @@ func (c *Cluster) updateScheduler() {
 	// Make sure the check will be triggered once later.
 	trySend(notifier)
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	defer c.persistConfig.ClearSchedulersUpdatingNotifier(notifier)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -314,7 +475,15 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
-			schedulerType := types.ConvertOldStrToType[scheduler.Type]
+			// Skip the scheduler if it is disabled.
+			if scheduler.Disable {
+				continue
+			}
+			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
+			if !ok {
+				log.Error("scheduler not found", zap.String("type", scheduler.Type))
+				continue
+			}
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),
@@ -331,7 +500,7 @@ func (c *Cluster) updateScheduler() {
 			}
 			name := s.GetName()
 			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
-				log.Info("scheduler has already existed, skip adding it",
+				log.Debug("scheduler has already existed, skip adding it",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
@@ -347,13 +516,14 @@ func (c *Cluster) updateScheduler() {
 				zap.String("scheduler-name", name),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
-		// Remove the deleted schedulers.
+		// Remove the deleted schedulers or disabled schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
-			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == oldType
-			}) {
+			shouldKeep := slice.AnyOf(latestSchedulersConfig, func(i int) bool {
+				return latestSchedulersConfig[i].Type == oldType && !latestSchedulersConfig[i].Disable
+			})
+			if shouldKeep {
 				continue
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
@@ -411,14 +581,8 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
-
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
-	c.PutStore(newStore)
-	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.PutStore(store, core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.hotStat.Observe(storeID, stats)
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
@@ -442,6 +606,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			continue
 		}
 		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+		regionReadCPU := statistics.RegionReadCPUUsage(peerStat)
 		loads := []float64{
 			utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
 			utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
@@ -449,6 +614,8 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteBytes:    0,
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
+			utils.RegionReadCPU:       regionReadCPU * float64(interval),
+			utils.RegionWriteCPU:      0,
 		}
 		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
 			stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
@@ -493,12 +660,43 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	// force wait for 1 minute to make prepare checker won't be directly skipped
-	runCollectWaitTime := collectWaitTime
-	failpoint.Inject("changeRunCollectWaitTime", func() {
-		runCollectWaitTime = 1 * time.Second
-	})
-	c.coordinator.RunUntilStop(runCollectWaitTime)
+	c.coordinator.RunUntilStop()
+}
+
+// GetPrepareRegionCount returns the count of regions that are in prepare state.
+func (c *Cluster) GetPrepareRegionCount() (int, error) {
+	return c.getPrepareRegionCountFromPD()
+}
+
+func (c *Cluster) getPrepareRegionCountFromPD() (int, error) {
+	backendAddresses := strings.Split(c.backendAddress, ",")
+	var backendAddress string
+	if len(backendAddresses) >= 1 {
+		backendAddress = backendAddresses[0]
+	}
+
+	url := fmt.Sprintf("%s/pd/api/v1/regions/count", backendAddress)
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		return 0, err
+	}
+
+	var regionsInfo response.RegionsInfo
+	if err := json.Unmarshal(body, &regionsInfo); err != nil {
+		return 0, err
+	}
+	return regionsInfo.Count, nil
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
@@ -562,17 +760,19 @@ func (c *Cluster) StartBackgroundJobs() {
 	c.running.Store(true)
 }
 
-// StopBackgroundJobs stops background jobs.
+// StopBackgroundJobs stops background jobs, these jobs is created by NewCluster.
 func (c *Cluster) StopBackgroundJobs() {
-	if !c.running.Load() {
+	// always cancel the context to stop the background jobs, even if the cluster is not running, to avoid goroutine leak.
+	if c.cancel != nil {
+		c.cancel()
+	}
+	if !c.running.CompareAndSwap(true, false) {
 		return
 	}
-	c.running.Store(false)
 	c.coordinator.Stop()
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
-	c.cancel()
 	c.wg.Wait()
 }
 
@@ -587,6 +787,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
+	defer tracer.Release()
 	var taskRunner, miscRunner, logRunner ratelimit.Runner
 	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
@@ -674,13 +875,15 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
-		ctx.TaskRunner.RunTask(
-			regionID,
-			ratelimit.HandleOverlaps,
-			func(ctx context.Context) {
-				cluster.HandleOverlaps(ctx, c, overlaps)
-			},
-		)
+		if len(overlaps) > 0 {
+			ctx.TaskRunner.RunTask(
+				regionID,
+				ratelimit.HandleOverlaps,
+				func(ctx context.Context) {
+					cluster.HandleOverlaps(ctx, c, overlaps)
+				},
+			)
+		}
 	}
 	tracer.OnSaveCacheFinished()
 	if hasRegionStats {
@@ -695,6 +898,34 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	}
 
 	tracer.OnCollectRegionStatsFinished()
+	return nil
+}
+
+// HandleRegionBuckets processes region buckets from client
+func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
+	if err := c.processRegionBuckets(b); err != nil {
+		return err
+	}
+
+	c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	return nil
+}
+
+// processRegionBuckets update the bucket information.
+func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
+	region := c.GetRegion(buckets.GetRegionId())
+	if region == nil {
+		return errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	// use CAS to update the bucket information.
+	// the two request(A:3,B:2) get the same region and need to update the buckets.
+	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
+	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
+	for range 3 {
+		if success := region.CompareAndSetReportBuckets(buckets); success {
+			return nil
+		}
+	}
 	return nil
 }
 

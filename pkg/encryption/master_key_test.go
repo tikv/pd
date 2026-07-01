@@ -111,7 +111,8 @@ func TestNewFileMasterKeyMissingFile(t *testing.T) {
 func TestNewFileMasterKeyNotHexString(t *testing.T) {
 	re := require.New(t)
 	path := filepath.Join(t.TempDir(), "key")
-	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
+	err := os.WriteFile(path, []byte("not-a-hex-string"), 0600)
+	re.NoError(err)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -119,14 +120,15 @@ func TestNewFileMasterKeyNotHexString(t *testing.T) {
 			},
 		},
 	}
-	_, err := NewMasterKey(config, nil)
+	_, err = NewMasterKey(config, nil)
 	re.Error(err)
 }
 
 func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 	re := require.New(t)
 	path := filepath.Join(t.TempDir(), "key")
-	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
+	err := os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
+	re.NoError(err)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -134,7 +136,7 @@ func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 			},
 		},
 	}
-	_, err := NewMasterKey(config, nil)
+	_, err = NewMasterKey(config, nil)
 	re.Error(err)
 }
 
@@ -142,7 +144,8 @@ func TestNewFileMasterKey(t *testing.T) {
 	re := require.New(t)
 	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	path := filepath.Join(t.TempDir(), "key")
-	os.WriteFile(path, []byte(key), 0600)
+	err := os.WriteFile(path, []byte(key), 0600)
+	re.NoError(err)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{

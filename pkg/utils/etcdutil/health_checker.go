@@ -62,6 +62,8 @@ type healthChecker struct {
 	// the checked healthy endpoints dynamically and periodically.
 	client *clientv3.Client
 
+	clientOpts []CreateEtcdClientOpt
+
 	endpointCountState prometheus.Gauge
 }
 
@@ -70,14 +72,16 @@ func initHealthChecker(
 	tickerInterval time.Duration,
 	tlsConfig *tls.Config,
 	client *clientv3.Client,
-	source string,
+	purpose EtcdClientPurpose,
+	opts ...CreateEtcdClientOpt,
 ) {
 	healthChecker := &healthChecker{
-		source:             source,
+		source:             string(purpose),
 		tickerInterval:     tickerInterval,
 		tlsConfig:          tlsConfig,
 		client:             client,
-		endpointCountState: etcdStateGauge.WithLabelValues(source, endpointLabel),
+		clientOpts:         opts,
+		endpointCountState: etcdStateGauge.WithLabelValues(string(purpose), endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()
@@ -151,7 +155,7 @@ func (checker *healthChecker) close() {
 	checker.healthyClients.Range(func(_, value any) bool {
 		healthyCli := value.(*healthyClient)
 		healthyCli.healthState.Set(0)
-		healthyCli.Client.Close()
+		healthyCli.Close()
 		return true
 	})
 }
@@ -168,7 +172,7 @@ type healthProbe struct {
 }
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
-func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, bool) {
+func (checker *healthChecker) patrol(ctx context.Context) (lastEps, pickedEps []string, changed bool) {
 	var (
 		count   = checker.clientCount()
 		probeCh = make(chan healthProbe, count)
@@ -209,10 +213,8 @@ func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, b
 	})
 	wg.Wait()
 	close(probeCh)
-	var (
-		lastEps   = checker.client.Endpoints()
-		pickedEps = checker.pickEps(probeCh)
-	)
+	lastEps = checker.client.Endpoints()
+	pickedEps = checker.pickEps(probeCh)
 	if len(pickedEps) > 0 {
 		checker.updateEvictedEps(lastEps, pickedEps)
 		pickedEps = checker.filterEps(pickedEps)
@@ -364,7 +366,7 @@ func (checker *healthChecker) update() {
 	for ep := range epMap {
 		client := checker.loadClient(ep)
 		if client == nil {
-			checker.initClient(ep)
+			checker.initClient(ep, checker.clientOpts...)
 			continue
 		}
 		since := time.Since(client.lastHealth)
@@ -415,8 +417,8 @@ func (checker *healthChecker) loadClient(ep string) *healthyClient {
 	return nil
 }
 
-func (checker *healthChecker) initClient(ep string) {
-	client, err := newClient(checker.tlsConfig, ep)
+func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt) {
+	client, err := newClient(checker.tlsConfig, []string{ep}, opts...)
 	if err != nil {
 		log.Error("failed to create etcd healthy client",
 			zap.String("endpoint", ep),
@@ -454,7 +456,7 @@ func (checker *healthChecker) removeClient(ep string) {
 func (checker *healthChecker) syncURLs() (eps []string) {
 	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client)
 	if err != nil {
-		log.Error("failed to list members",
+		log.Warn("failed to list members",
 			zap.String("source", checker.source),
 			errs.ZapError(err))
 		return nil

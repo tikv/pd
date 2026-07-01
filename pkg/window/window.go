@@ -1,6 +1,3 @@
-// The MIT License (MIT)
-// Copyright (c) 2022 go-kratos Project Authors.
-//
 // Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// The MIT License (MIT)
+// Copyright (c) 2022 go-kratos Project Authors.
 
 package window
 

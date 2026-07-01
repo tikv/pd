@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -44,10 +45,12 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
+	GetRegionSiblingsByID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
+	GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
@@ -67,8 +70,11 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
+	CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -78,6 +84,7 @@ type Client interface {
 	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	DeletePlacementRuleBundleByGroup(context.Context, string) error
 	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
 	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
 	SetPlacementRuleGroup(context.Context, *RuleGroup) error
@@ -98,6 +105,8 @@ type Client interface {
 	ResetBaseAllocID(context.Context, uint64) error
 	SetSnapshotRecoveringMark(context.Context) error
 	DeleteSnapshotRecoveringMark(context.Context) error
+	SetPitrRestoreModeMark(context.Context) error
+	DeletePitrRestoreModeMark(context.Context) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
@@ -106,16 +115,44 @@ type Client interface {
 	/* Microservice interfaces */
 	GetMicroserviceMembers(context.Context, string) ([]MicroserviceMember, error)
 	GetMicroservicePrimary(context.Context, string) (string, error)
+	CreateOperators(context.Context, map[string]any) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
 
+	// UpdateKeyspaceConfig patches the keyspace config and returns the updated keyspace meta.
+	UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
 	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a global gc worker to calculate a global gc safe point.
 	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
+	GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error)
+
+	/* Affinity group interfaces */
+
+	// CreateAffinityGroups creates one or more affinity groups with key ranges.
+	// The affinityGroups parameter is a map from group ID to a list of key ranges.
+	// Use options to customize behavior (for example, skipping existing groups).
+	CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error)
+	// GetAffinityGroup gets an affinity group by group ID.
+	GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error)
+	// GetAffinityGroups gets affinity groups by group IDs.
+	// When groupIDs is empty, it returns all affinity groups.
+	GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error)
+	// GetAllAffinityGroups gets all affinity groups.
+	GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error)
+	// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
+	UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error)
+	// DeleteAffinityGroup deletes an affinity group by group ID.
+	DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error
+	// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
+	BatchDeleteAffinityGroups(ctx context.Context, groupIDs []string, force bool) error
+	// AddAffinityGroupKeyRanges adds key ranges to affinity groups.
+	AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error)
+	// RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.
+	RemoveAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -271,6 +308,20 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 	return state, nil
 }
 
+// GetRegionSiblingsByID gets the regions sibling info by ID.
+func (c *client) GetRegionSiblingsByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
+	var regions RegionsInfo
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionSiblingsByID).
+		WithURI(RegionSiblingsByID(regionID)).
+		WithMethod(http.MethodGet).
+		WithResp(&regions))
+	if err != nil {
+		return nil, err
+	}
+	return &regions, nil
+}
+
 // GetHotReadRegions gets the hot read region statistics info.
 func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
@@ -317,6 +368,44 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+// GetRegionDistributionByKeyRange gets the region distribution by key range.
+func (c *client) GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionStats RegionStats
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionStats))
+	if err != nil {
+		return nil, err
+	}
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
@@ -646,6 +735,14 @@ func (c *client) DeletePlacementRule(ctx context.Context, group, id string) erro
 		WithMethod(http.MethodDelete))
 }
 
+// DeletePlacementRuleBundleByGroup deletes the placement rule bundle by group.
+func (c *client) DeletePlacementRuleBundleByGroup(ctx context.Context, group string) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePlacementRuleBundleByGroupName).
+		WithURI(PlacementRuleBundleByGroup(group)).
+		WithMethod(http.MethodDelete))
+}
+
 // GetAllPlacementRuleGroups gets all placement rule groups.
 func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
 	var ruleGroups []*RuleGroup
@@ -768,6 +865,42 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(GetSchedulerConfigURIByName(name)).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// CancelSchedulerJob cancels the specified scheduler job.
+func (c *client) CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(cancelSchedulerJobName).
+		WithURI(GetCancelSchedulerJobURIByNameAndJobID(name, jobID)).
+		WithMethod(http.MethodDelete))
+}
+
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerNameWithInput).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
 	inputJSON, err := json.Marshal(map[string]any{
@@ -884,6 +1017,22 @@ func (c *client) DeleteSnapshotRecoveringMark(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
+// SetPitrRestoreModeMark sets the pitr restore mode mark.
+func (c *client) SetPitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(setPitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
+		WithMethod(http.MethodPost))
+}
+
+// DeletePitrRestoreModeMark deletes the pitr restore mode mark.
+func (c *client) DeletePitrRestoreModeMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePitrRestoreModeMarkName).
+		WithURI(PitrRestoreModeMark).
+		WithMethod(http.MethodDelete))
+}
+
 // SetSchedulerDelay sets the delay of given scheduler.
 func (c *client) SetSchedulerDelay(ctx context.Context, scheduler string, delaySec int64) error {
 	m := map[string]int64{
@@ -914,7 +1063,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 	if len(storeIDs) != 0 {
 		storeIDStrs := make([]string, len(storeIDs))
 		for idx, id := range storeIDs {
-			storeIDStrs[idx] = fmt.Sprintf("%d", id)
+			storeIDStrs[idx] = strconv.FormatUint(id, 10)
 		}
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}
@@ -975,6 +1124,19 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 	return ver.Version, err
 }
 
+// CreateOperators creates the operators.
+func (c *client) CreateOperators(ctx context.Context, input map[string]any) error {
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createOperators).
+		WithURI(operators).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 // DeleteOperators deletes the running operators.
 func (c *client) DeleteOperators(ctx context.Context) error {
 	return c.request(ctx, newRequestInfo().
@@ -983,25 +1145,38 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// UpdateKeyspaceGCManagementType patches the keyspace config.
-func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
-	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
+func (c *client) patchKeyspaceConfig(ctx context.Context, reqName, keyspaceName string, params any) (*keyspacepb.KeyspaceMeta, error) {
+	var tempMeta tempKeyspaceMeta
+	keyspaceConfigPatchJSON, err := json.Marshal(params)
 	if err != nil {
-		return errors.Trace(err)
+		return nil, errors.Trace(err)
 	}
-	return c.request(ctx, newRequestInfo().
-		WithName(UpdateKeyspaceGCManagementTypeName).
+	err = c.request(ctx, newRequestInfo().
+		WithName(reqName).
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
-		WithBody(keyspaceConfigPatchJSON))
+		WithBody(keyspaceConfigPatchJSON).
+		WithResp(&tempMeta))
+	if err != nil {
+		return nil, err
+	}
+	return tempMeta.toPB()
+}
+
+// UpdateKeyspaceConfig patches the keyspace config.
+func (c *client) UpdateKeyspaceConfig(ctx context.Context, keyspaceName string, params *UpdateKeyspaceConfigParams) (*keyspacepb.KeyspaceMeta, error) {
+	return c.patchKeyspaceConfig(ctx, UpdateKeyspaceConfigName, keyspaceName, params)
+}
+
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	_, err := c.patchKeyspaceConfig(ctx, UpdateKeyspaceGCManagementTypeName, keyspaceName, keyspaceGCmanagementType)
+	return err
 }
 
 // GetKeyspaceMetaByName get the given keyspace meta.
 func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
-	var (
-		tempKeyspaceMeta tempKeyspaceMeta
-		keyspaceMetaPB   keyspacepb.KeyspaceMeta
-	)
+	var tempKeyspaceMeta tempKeyspaceMeta
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
 		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
@@ -1012,20 +1187,23 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		return nil, err
 	}
 
-	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	return tempKeyspaceMeta.toPB()
+}
+
+// GetKeyspaceMetaByID get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByID(ctx context.Context, keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	var tempKeyspaceMeta tempKeyspaceMeta
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByIDName).
+		WithURI(GetKeyspaceMetaByIDURL(keyspaceID)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
 	if err != nil {
 		return nil, err
 	}
 
-	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
-		Name:           tempKeyspaceMeta.Name,
-		Id:             tempKeyspaceMeta.ID,
-		Config:         tempKeyspaceMeta.Config,
-		CreatedAt:      tempKeyspaceMeta.CreatedAt,
-		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
-		State:          keyspaceState,
-	}
-	return &keyspaceMetaPB, nil
+	return tempKeyspaceMeta.toPB()
 }
 
 // GetGCSafePoint gets the GC safe point list.
@@ -1054,4 +1232,225 @@ func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (strin
 		return msg, err
 	}
 	return msg, nil
+}
+
+type createAffinityGroupsOptions struct {
+	skipExistCheck bool
+}
+
+// CreateAffinityGroupsOption customizes CreateAffinityGroups behavior.
+type CreateAffinityGroupsOption func(*createAffinityGroupsOptions)
+
+// WithSkipExistCheck skips existing groups and creates the rest.
+func WithSkipExistCheck() CreateAffinityGroupsOption {
+	return func(opts *createAffinityGroupsOptions) {
+		if opts == nil {
+			return
+		}
+		opts.skipExistCheck = true
+	}
+}
+
+// CreateAffinityGroups creates one or more affinity groups with key ranges.
+func (c *client) CreateAffinityGroups(ctx context.Context, affinityGroups map[string][]AffinityGroupKeyRange, opts ...CreateAffinityGroupsOption) (map[string]*AffinityGroupState, error) {
+	options := &createAffinityGroupsOptions{}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(options)
+	}
+
+	reqGroups := make(map[string]CreateAffinityGroupInput, len(affinityGroups))
+	for groupID, ranges := range affinityGroups {
+		reqGroups[groupID] = CreateAffinityGroupInput{Ranges: ranges}
+	}
+	req := CreateAffinityGroupsRequest{AffinityGroups: reqGroups}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	uri := AffinityGroups
+	if options.skipExistCheck {
+		uri = AffinityGroups + "?skip_exist_check=true"
+	}
+	err = c.request(ctx, newRequestInfo().
+		WithName("CreateAffinityGroups").
+		WithURI(uri).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// GetAffinityGroup gets an affinity group by group ID.
+func (c *client) GetAffinityGroup(ctx context.Context, groupID string) (*AffinityGroupState, error) {
+	var state AffinityGroupState
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroup").
+		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithMethod(http.MethodGet).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// GetAffinityGroups gets affinity groups by group IDs.
+// When groupIDs is empty, it returns all affinity groups.
+func (c *client) GetAffinityGroups(ctx context.Context, groupIDs []string) (map[string]*AffinityGroupState, error) {
+	if len(groupIDs) == 0 {
+		return c.GetAllAffinityGroups(ctx)
+	}
+
+	var query strings.Builder
+	for i, id := range groupIDs {
+		if i > 0 {
+			query.WriteByte('&')
+		}
+		query.WriteString("ids=")
+		query.WriteString(url.QueryEscape(id))
+	}
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAffinityGroups").
+		WithURI(fmt.Sprintf("%s?%s", AffinityGroups, query.String())).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// GetAllAffinityGroups gets all affinity groups.
+func (c *client) GetAllAffinityGroups(ctx context.Context) (map[string]*AffinityGroupState, error) {
+	var resp AffinityGroupsResponse
+	err := c.request(ctx, newRequestInfo().
+		WithName("GetAllAffinityGroups").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodGet).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// UpdateAffinityGroupPeers updates the leader and voter stores of an affinity group.
+func (c *client) UpdateAffinityGroupPeers(ctx context.Context, groupID string, leaderStoreID uint64, voterStoreIDs []uint64) (*AffinityGroupState, error) {
+	req := UpdateAffinityGroupPeersRequest{
+		LeaderStoreID: leaderStoreID,
+		VoterStoreIDs: voterStoreIDs,
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var state AffinityGroupState
+	err = c.request(ctx, newRequestInfo().
+		WithName("UpdateAffinityGroupPeers").
+		WithURI(fmt.Sprintf(AffinityGroupByID, groupID)).
+		WithMethod(http.MethodPut).
+		WithBody(reqJSON).
+		WithResp(&state))
+	if err != nil {
+		return nil, err
+	}
+	return &state, nil
+}
+
+// DeleteAffinityGroup deletes an affinity group by group ID.
+func (c *client) DeleteAffinityGroup(ctx context.Context, groupID string, force bool) error {
+	uri := fmt.Sprintf(AffinityGroupByID, groupID)
+	if force {
+		uri = fmt.Sprintf("%s?force=true", uri)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName("DeleteAffinityGroup").
+		WithURI(uri).
+		WithMethod(http.MethodDelete))
+}
+
+// BatchDeleteAffinityGroups deletes multiple affinity groups in batch.
+func (c *client) BatchDeleteAffinityGroups(ctx context.Context, groupIDs []string, force bool) error {
+	req := BatchDeleteAffinityGroupsRequest{
+		IDs:   groupIDs,
+		Force: force,
+	}
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	// Use POST with ?delete query parameter for batch deletion
+	url := AffinityGroups + "?delete"
+	return c.request(ctx, newRequestInfo().
+		WithName("BatchDeleteAffinityGroups").
+		WithURI(url).
+		WithMethod(http.MethodPost).
+		WithBody(reqJSON))
+}
+
+// AddAffinityGroupKeyRanges adds key ranges to affinity groups.
+func (c *client) AddAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
+	// Convert to the request format
+	add := make([]GroupRangesModification, 0, len(groupKeyRanges))
+	for groupID, ranges := range groupKeyRanges {
+		add = append(add, GroupRangesModification{
+			ID:     groupID,
+			Ranges: ranges,
+		})
+	}
+	req := BatchModifyAffinityGroupsRequest{Add: add}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("AddAffinityGroupKeyRanges").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
+}
+
+// RemoveAffinityGroupKeyRanges removes key ranges from affinity groups.
+func (c *client) RemoveAffinityGroupKeyRanges(ctx context.Context, groupKeyRanges map[string][]AffinityGroupKeyRange) (map[string]*AffinityGroupState, error) {
+	// Convert to the request format
+	remove := make([]GroupRangesModification, 0, len(groupKeyRanges))
+	for groupID, ranges := range groupKeyRanges {
+		remove = append(remove, GroupRangesModification{
+			ID:     groupID,
+			Ranges: ranges,
+		})
+	}
+	req := BatchModifyAffinityGroupsRequest{Remove: remove}
+
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var resp AffinityGroupsResponse
+	err = c.request(ctx, newRequestInfo().
+		WithName("RemoveAffinityGroupKeyRanges").
+		WithURI(AffinityGroups).
+		WithMethod(http.MethodPatch).
+		WithBody(reqJSON).
+		WithResp(&resp))
+	if err != nil {
+		return nil, err
+	}
+	return resp.AffinityGroups, nil
 }

@@ -33,6 +33,7 @@ const (
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
+	defaultEnableRouterClient                    = true
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -49,6 +50,9 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
+	// EnableRouterClient is the router client option.
+	// It is stored as bool.
+	EnableRouterClient
 
 	dynamicOptionCount
 )
@@ -70,6 +74,8 @@ type Option struct {
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
 	EnableTSOFollowerProxyCh chan struct{}
+	EnableFollowerHandleCh   chan struct{}
+	EnableRouterClientCh     chan struct{}
 }
 
 // NewOption creates a new PD client option with the default values set.
@@ -78,6 +84,8 @@ func NewOption() *Option {
 		Timeout:                  defaultPDTimeout,
 		MaxRetryTimes:            maxInitClusterRetries,
 		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		EnableFollowerHandleCh:   make(chan struct{}, 1),
+		EnableRouterClientCh:     make(chan struct{}, 1),
 		InitMetrics:              true,
 	}
 
@@ -85,6 +93,7 @@ func NewOption() *Option {
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
 	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
+	co.dynamicOptions[EnableRouterClient].Store(defaultEnableRouterClient)
 	return co
 }
 
@@ -94,18 +103,17 @@ func (o *Option) SetMaxTSOBatchWaitInterval(interval time.Duration) error {
 	if interval < 0 || interval > 10*time.Millisecond {
 		return errors.New("[pd] invalid max TSO batch wait interval, should be between 0 and 10ms")
 	}
-	old := o.GetMaxTSOBatchWaitInterval()
-	if interval != old {
-		o.dynamicOptions[MaxTSOBatchWaitInterval].Store(interval)
-	}
+	o.dynamicOptions[MaxTSOBatchWaitInterval].CompareAndSwap(o.GetMaxTSOBatchWaitInterval(), interval)
 	return nil
 }
 
 // SetEnableFollowerHandle set the Follower Handle option.
 func (o *Option) SetEnableFollowerHandle(enable bool) {
-	old := o.GetEnableFollowerHandle()
-	if enable != old {
-		o.dynamicOptions[EnableFollowerHandle].Store(enable)
+	if o.dynamicOptions[EnableFollowerHandle].CompareAndSwap(!enable, enable) {
+		select {
+		case o.EnableFollowerHandleCh <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -121,9 +129,7 @@ func (o *Option) GetMaxTSOBatchWaitInterval() time.Duration {
 
 // SetEnableTSOFollowerProxy sets the TSO Follower Proxy option.
 func (o *Option) SetEnableTSOFollowerProxy(enable bool) {
-	old := o.GetEnableTSOFollowerProxy()
-	if enable != old {
-		o.dynamicOptions[EnableTSOFollowerProxy].Store(enable)
+	if o.dynamicOptions[EnableTSOFollowerProxy].CompareAndSwap(!enable, enable) {
 		select {
 		case o.EnableTSOFollowerProxyCh <- struct{}{}:
 		default:
@@ -138,15 +144,27 @@ func (o *Option) GetEnableTSOFollowerProxy() bool {
 
 // SetTSOClientRPCConcurrency sets the TSO client RPC concurrency option.
 func (o *Option) SetTSOClientRPCConcurrency(value int) {
-	old := o.GetTSOClientRPCConcurrency()
-	if value != old {
-		o.dynamicOptions[TSOClientRPCConcurrency].Store(value)
-	}
+	o.dynamicOptions[TSOClientRPCConcurrency].CompareAndSwap(o.GetTSOClientRPCConcurrency(), value)
 }
 
 // GetTSOClientRPCConcurrency gets the TSO client RPC concurrency option.
 func (o *Option) GetTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
+}
+
+// SetEnableRouterClient sets the router client option.
+func (o *Option) SetEnableRouterClient(enable bool) {
+	if o.dynamicOptions[EnableRouterClient].CompareAndSwap(!enable, enable) {
+		select {
+		case o.EnableRouterClientCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// GetEnableRouterClient gets the router client option.
+func (o *Option) GetEnableRouterClient() bool {
+	return o.dynamicOptions[EnableRouterClient].Load().(bool)
 }
 
 // ClientOption configures client.
@@ -210,9 +228,24 @@ func WithBackoffer(bo *retry.Backoffer) ClientOption {
 	}
 }
 
+// WithEnableRouterClient configures the client with router client option.
+func WithEnableRouterClient(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableRouterClient(enable)
+	}
+}
+
+// WithEnableFollowerHandle configures the client with allow follower handle option.
+func WithEnableFollowerHandle(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableFollowerHandle(enable)
+	}
+}
+
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
-	ExcludeTombstone bool
+	ExcludeTombstone         bool
+	AllowRouterServiceHandle bool
 }
 
 // GetStoreOption configures GetStoreOp.
@@ -221,6 +254,18 @@ type GetStoreOption func(*GetStoreOp)
 // WithExcludeTombstone excludes tombstone stores from the result.
 func WithExcludeTombstone() GetStoreOption {
 	return func(op *GetStoreOp) { op.ExcludeTombstone = true }
+}
+
+// WithAllowRouterServiceHandleStoreRequest means that client can use router service to handle this store request.
+func WithAllowRouterServiceHandleStoreRequest() GetStoreOption {
+	return func(op *GetStoreOp) { op.AllowRouterServiceHandle = true }
+}
+
+// WithPDLeaderHandleStoreRequestOnly means the store request must be handled by PD leader.
+func WithPDLeaderHandleStoreRequestOnly() GetStoreOption {
+	return func(op *GetStoreOp) {
+		op.AllowRouterServiceHandle = false
+	}
 }
 
 // RegionsOp represents available options when operate regions
@@ -253,6 +298,7 @@ type GetRegionOp struct {
 	NeedBuckets                  bool
 	AllowFollowerHandle          bool
 	OutputMustContainAllKeyRange bool
+	AllowRouterServiceHandle     bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -268,9 +314,22 @@ func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.AllowFollowerHandle = true }
 }
 
+// WithAllowRouterServiceHandle means that client can use router service to handle this request.
+func WithAllowRouterServiceHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.AllowRouterServiceHandle = true }
+}
+
 // WithOutputMustContainAllKeyRange means the output must contain all key ranges.
 func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
+}
+
+// WithAllowPDLeaderOnly means the request must be handled by PD leader.
+func WithAllowPDLeaderOnly() GetRegionOption {
+	return func(op *GetRegionOp) {
+		op.AllowRouterServiceHandle = false
+		op.AllowFollowerHandle = false
+	}
 }
 
 // MetaStorageOp represents available options when using meta storage client.

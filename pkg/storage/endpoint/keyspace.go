@@ -34,6 +34,7 @@ const (
 	SpaceIDBase = 10
 	// spaceIDBitSizeMax is the max bitSize of spaceID.
 	// It's currently set to 24 (3bytes).
+	// In kv encode, the first byte is represented by r/x, which means txn kv/raw kv, so there are 24 bits left.
 	spaceIDBitSizeMax = 24
 )
 
@@ -43,6 +44,7 @@ type KeyspaceStorage interface {
 	LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error)
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
+	RemoveKeyspace(txn kv.Txn, id uint32, name string) error
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
@@ -81,6 +83,17 @@ func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	idPath := keypath.KeyspaceIDPath(name)
 	idVal := strconv.FormatUint(uint64(id), SpaceIDBase)
 	return txn.Save(idPath, idVal)
+}
+
+// RemoveKeyspace removes keyspace meta and keyspace ID mapping.
+func (*StorageEndpoint) RemoveKeyspace(txn kv.Txn, id uint32, name string) error {
+	idPath := keypath.KeyspaceMetaPath(id)
+	err := txn.Remove(idPath)
+	if err != nil {
+		return err
+	}
+	namePath := keypath.KeyspaceIDPath(name)
+	return txn.Remove(namePath)
 }
 
 // LoadKeyspaceID loads keyspace ID from the path specified by keyspace name.

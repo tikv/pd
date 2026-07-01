@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -163,6 +164,17 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	b.useJointConsensus = supportConfChangeV2 && b.GetSharedConfig().IsUseJointConsensus()
 	b.err = err
 	return b
+}
+
+// IsAllowedLeaderTarget checks whether the peer can be selected as a
+// non-forced target leader by the operator builder.
+func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	b := NewBuilder("check-target-leader", ci, region)
+	if b.err != nil {
+		return false
+	}
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
+	return b.allowLeader(peer, false)
 }
 
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
@@ -490,7 +502,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				id, err := b.AllocID()
+				id, _, err := b.AllocID(1)
 				if err != nil {
 					return "", err
 				}
@@ -524,7 +536,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	// it will demote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) <= 1 &&
-		len(b.toDemote) == 0 && !(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
+		len(b.toDemote) == 0 && (len(b.toRemove) != 1 || len(b.targetPeers) != 1) {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
 		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
@@ -660,25 +672,49 @@ func (b *Builder) setTargetLeaderIfNotExist() {
 		b.preferOldPeerAsLeader,
 	}
 
-	for _, targetLeaderStoreID := range b.targetPeers.IDs() {
-		peer := b.targetPeers[targetLeaderStoreID]
+	for _, candidateStoreID := range b.targetPeers.IDs() {
+		peer := b.targetPeers[candidateStoreID]
 		if !b.allowLeader(peer, b.forceTargetLeader) {
 			continue
 		}
 		// if role info is given, store having role follower should not be target leader.
-		if role, ok := b.expectedRoles[targetLeaderStoreID]; ok && role == placement.Follower {
+		if role, ok := b.expectedRoles[candidateStoreID]; ok && role == placement.Follower {
 			continue
 		}
 		if b.targetLeaderStoreID == 0 {
-			b.targetLeaderStoreID = targetLeaderStoreID
+			b.targetLeaderStoreID = candidateStoreID
 			continue
 		}
+		indistinguishable := true
+	compare_loop:
 		for _, f := range leaderPreferFuncs {
-			if best, next := f(b.targetLeaderStoreID), f(targetLeaderStoreID); best < next {
-				b.targetLeaderStoreID = targetLeaderStoreID
-				break
+			if best, next := f(b.targetLeaderStoreID), f(candidateStoreID); best < next {
+				b.targetLeaderStoreID = candidateStoreID
+				indistinguishable = false
+				break compare_loop
 			} else if best > next {
-				break
+				indistinguishable = false
+				break compare_loop
+			}
+		}
+		// If all comparison functions consider these two stores are indistinguishable,
+		// we use leader score as the final tie breaker.
+		if indistinguishable {
+			current := b.GetBasicCluster().GetStore(b.targetLeaderStoreID)
+			candidate := b.GetBasicCluster().GetStore(candidateStoreID)
+
+			currentCountScore := current.LeaderScore(constant.ByCount, 0)
+			candidateCountScore := candidate.LeaderScore(constant.ByCount, 0)
+
+			if currentCountScore > candidateCountScore {
+				b.targetLeaderStoreID = candidateStoreID
+			} else if currentCountScore == candidateCountScore {
+				currentSizeScore := current.LeaderScore(constant.BySize, 0)
+				candidateSizeScore := candidate.LeaderScore(constant.BySize, 0)
+
+				if currentSizeScore > candidateSizeScore {
+					b.targetLeaderStoreID = candidateStoreID
+				}
 			}
 		}
 	}
@@ -846,7 +882,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	}
 
 	// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
-	if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
+	if !needEnter || len(step.PromoteLearners)+len(step.DemoteVoters) != 1 {
 		b.steps = append(b.steps, ChangePeerV2Leave(step))
 	}
 }

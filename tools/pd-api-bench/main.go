@@ -96,7 +96,7 @@ func main() {
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -385,6 +385,7 @@ func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 			CertPath: cfg.CertPath,
 			KeyPath:  cfg.KeyPath,
 		},
+		//nolint:staticcheck
 		opt.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,

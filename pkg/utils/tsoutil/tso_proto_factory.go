@@ -58,7 +58,7 @@ func (*PDProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc
 
 type stream interface {
 	// process sends a request and receives the response through the stream
-	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32) (response, error)
+	process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32) (tsoResp, error)
 }
 
 type tsoStream struct {
@@ -66,7 +66,7 @@ type tsoStream struct {
 }
 
 // process sends a request and receives the response through the stream
-func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32) (response, error) {
+func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32) (tsoResp, error) {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
@@ -90,7 +90,7 @@ type pdStream struct {
 }
 
 // process sends a request and receives the response through the stream
-func (s *pdStream) process(clusterID uint64, count, _, _ uint32) (response, error) {
+func (s *pdStream) process(clusterID uint64, count, _, _ uint32) (tsoResp, error) {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,

@@ -15,7 +15,14 @@
 package endpoint
 
 import (
+	"encoding/json"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/encryption"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
@@ -25,6 +32,8 @@ import (
 type StorageEndpoint struct {
 	kv.Base
 	encryptionKeyManager *encryption.Manager
+	// nextRegionID is the next region ID to be reloaded
+	nextRegionID uint64
 }
 
 // NewStorageEndpoint creates a new base storage endpoint with the given KV and encryption key manager.
@@ -36,5 +45,66 @@ func NewStorageEndpoint(
 	return &StorageEndpoint{
 		kvBase,
 		encryptionKeyManager,
+		0,
 	}
+}
+
+func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
+	rawTxnCapable, ok := se.Base.(kv.RawTxnCapable)
+	if !ok {
+		return nil, errors.New("storage endpoint does not support raw transaction")
+	}
+	return rawTxnCapable.CreateRawTxn(), nil
+}
+
+// loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
+func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
+	value, err := se.Load(key)
+	if err != nil {
+		var empty T
+		return empty, err
+	}
+	if value == "" {
+		var empty T
+		return empty, nil
+	}
+	var data T
+	if err = json.Unmarshal([]byte(value), &data); err != nil {
+		return data, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return data, nil
+}
+
+// loadJSON loads keys with the given prefix from the StorageEndpoint, and parses them as JSON into type T.
+// Returns the loaded keys and the parsed values as type T.
+// If `limit` is non-zero, it at most returns `limit` items.
+func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []T, error) {
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil, nil
+	}
+
+	data := make([]T, 0, len(keys))
+	for i := range keys {
+		var item T
+		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
+			return nil, nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+		}
+		data = append(data, item)
+	}
+	return keys, data, nil
+}
+
+// NextRegionID returns the next region ID to be reloaded, only for test
+func (se *StorageEndpoint) NextRegionID() uint64 {
+	return se.nextRegionID
+}
+
+// ResetRegionID resets the next region ID to 0, only for test
+func (se *StorageEndpoint) ResetRegionID() {
+	se.nextRegionID = 0
 }

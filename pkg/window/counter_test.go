@@ -1,6 +1,3 @@
-// The MIT License (MIT)
-// Copyright (c) 2022 go-kratos Project Authors.
-//
 // Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+// The MIT License (MIT)
+// Copyright (c) 2022 go-kratos Project Authors.
 
 package window
 
@@ -149,7 +149,7 @@ func BenchmarkRollingCounterIncr(b *testing.B) {
 	}
 	r := NewRollingCounter(opts)
 	b.ResetTimer()
-	for i := 0; i <= b.N; i++ {
+	for range b.N + 1 {
 		r.Add(1)
 	}
 }
@@ -162,12 +162,12 @@ func BenchmarkRollingCounterReduce(b *testing.B) {
 		BucketDuration: bucketDuration,
 	}
 	r := NewRollingCounter(opts)
-	for i := 0; i <= 10; i++ {
+	for range 11 {
 		r.Add(1)
 		time.Sleep(time.Millisecond * 500)
 	}
 	b.ResetTimer()
-	for i := 0; i <= b.N; i++ {
+	for range b.N + 1 {
 		var _ = r.Reduce(func(i Iterator) float64 {
 			var result float64
 			for i.Next() {

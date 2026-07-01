@@ -15,8 +15,12 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -32,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/server"
 )
 
@@ -49,16 +54,18 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
-// @Tags     scheduler
-// @Summary  List all created schedulers by status.
-// @Produce  json
-// @Success  200  {array}   string
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /schedulers [get]
+// GetSchedulers lists all schedulers.
+//
+//	@Tags		scheduler
+//	@Summary	List all created schedulers by status.
+//	@Produce	json
+//	@Success	200	{array}		string
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/schedulers [get]
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	_, needTS := r.URL.Query()["timestamp"]
-	output, err := h.Handler.GetSchedulerByStatus(status, needTS)
+	output, err := h.GetSchedulerByStatus(status, needTS)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -66,16 +73,18 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 	h.r.JSON(w, http.StatusOK, output)
 }
 
+// CreateScheduler creates a scheduler.
 // FIXME: details of input json body params
-// @Tags     scheduler
-// @Summary  Create a scheduler.
-// @Accept   json
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The scheduler is created."
-// @Failure  400  {string}  string  "Bad format request."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /schedulers [post]
+//
+//	@Tags		scheduler
+//	@Summary	Create a scheduler.
+//	@Accept		json
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The scheduler is created."
+//	@Failure	400	{string}	string	"Bad format request."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/schedulers [post]
 func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -99,6 +108,60 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch tp {
+	case types.BalanceRangeScheduler:
+		exist, _ := h.IsSchedulerExisted(name)
+		if exist {
+			handler, err := h.GetSchedulerConfigHandler()
+			if err == nil && handler != nil {
+				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+				r.Method = http.MethodPut
+				data, err := json.Marshal(input)
+				if err != nil {
+					h.r.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+
+				r.Body = io.NopCloser(bytes.NewBuffer(data))
+				handler.ServeHTTP(w, r)
+				return
+			}
+			if err != nil {
+				h.r.JSON(w, http.StatusNotAcceptable, err.Error())
+				return
+			}
+			h.r.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
+			return
+		}
+		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := apiutil.CollectStringOption("engine", input, collector); err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		defaultTimeout := "30m"
+		if err := apiutil.CollectStringOption("timeout", input, collector); err != nil {
+			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
+				collector(defaultTimeout)
+			} else {
+				h.r.JSON(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+
+		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		keys, err := keyutil.DecodeHTTPKeyRanges(input)
+		if err != nil {
+			h.r.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		args = append(args, keys...)
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -186,21 +249,23 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
-// @Tags     scheduler
-// @Summary  Delete a scheduler.
-// @Param    name  path  string  true  "The name of the scheduler."
-// @Produce  json
-// @Success  200  {string}  string  "The scheduler is removed."
-// @Failure  404  {string}  string  "The scheduler is not found."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /schedulers/{name} [delete]
+// DeleteScheduler deletes a scheduler.
+//
+//	@Tags		scheduler
+//	@Summary	Delete a scheduler.
+//	@Param		name	path	string	true	"The name of the scheduler."
+//	@Produce	json
+//	@Success	200	{string}	string	"The scheduler is removed."
+//	@Failure	404	{string}	string	"The scheduler is not found."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/schedulers/{name} [delete]
 func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
@@ -230,31 +295,37 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
-	deleteURL, err := url.JoinPath(h.GetAddr(), "pd", server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
+	deleteURL, err := url.JoinPath(h.GetAddr(), server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), deleteURL)
 	if err != nil {
-		h.r.JSON(w, resp.StatusCode, err.Error())
+		status := http.StatusInternalServerError
+		if resp != nil {
+			status = resp.StatusCode
+		}
+		h.r.JSON(w, status, err.Error())
 		return
 	}
 	defer resp.Body.Close()
 	h.r.JSON(w, resp.StatusCode, nil)
 }
 
+// PauseOrResumeScheduler pauses or resumes a scheduler.
 // FIXME: details of input json body params
-// @Tags     scheduler
-// @Summary  Pause or resume a scheduler.
-// @Accept   json
-// @Param    name  path  string  true  "The name of the scheduler."
-// @Param    body  body  object  true  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
-// @Failure  400  {string}  string  "Bad format request."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /schedulers/{name} [post]
+//
+//	@Tags		scheduler
+//	@Summary	Pause or resume a scheduler.
+//	@Accept		json
+//	@Param		name	path	string	true	"The name of the scheduler."
+//	@Param		body	body	object	true	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"Pause or resume the scheduler successfully."
+//	@Failure	400	{string}	string	"Bad format request."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/schedulers/{name} [post]
 func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http.Request) {
 	var input map[string]int64
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
@@ -310,5 +381,9 @@ func (h *schedulerConfigHandler) handleSchedulerConfig(w http.ResponseWriter, r 
 		sh.ServeHTTP(w, r)
 		return
 	}
-	h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
+	if err != nil {
+		h.rd.JSON(w, http.StatusNotAcceptable, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusNotAcceptable, "scheduler config handler is unavailable")
 }

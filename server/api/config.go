@@ -28,9 +28,11 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -43,7 +45,10 @@ import (
 
 // This line is to ensure the package `sc` could always be imported so that
 // the swagger could generate the right definitions for the config structs.
-var _ *sc.ScheduleConfig = nil
+var (
+	_                                  *sc.ScheduleConfig = nil
+	resourceManagerControllerConfigURL                    = "/resource-manager/api/v1/config/controller"
+)
 
 type confHandler struct {
 	svr *server.Server
@@ -57,12 +62,27 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 	}
 }
 
-// @Tags     config
-// @Summary  Get full config.
-// @Produce  json
-// @Success  200  {object}  config.Config
-// @Router   /config [get]
+// GetConfig gets the full config.
+//
+//	@Tags		config
+//	@Summary	Get full config.
+//	@Produce	json
+//	@Success	200	{object}	config.Config
+//	@Router		/config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.svr.GetMember().IsServing() {
+		localCfg := h.svr.GetConfig()
+		leaderCfg, err := h.getLeaderConfig()
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		mergedCfg := localCfg
+		mergedCfg.Replication = leaderCfg.Replication
+		mergedCfg.Schedule = leaderCfg.Schedule
+		h.rd.JSON(w, http.StatusOK, mergedCfg)
+		return
+	}
 	cfg := h.svr.GetConfig()
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
@@ -79,12 +99,14 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
-// @Tags     config
-// @Summary  Get default config.
-// @Produce  json
-// @Success  200  {object}  config.Config
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/default [get]
+// GetDefaultConfig gets the default config.
+//
+//	@Tags		config
+//	@Summary	Get default config.
+//	@Produce	json
+//	@Success	200	{object}	config.Config
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/default [get]
 func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, _ *http.Request) {
 	config := config.NewConfig()
 	err := config.Adjust(nil, false)
@@ -95,17 +117,19 @@ func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, config)
 }
 
+// SetConfig sets the config.
 // FIXME: details of input json body params
-// @Tags     config
-// @Summary  Update a config item.
-// @Accept   json
-// @Param    ttlSecond  query  integer  false  "ttl param is only for BR and lightning now. Don't use it."
-// @Param    body       body   object   false  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The config is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config [post]
+//
+//	@Tags		config
+//	@Summary	Update a config item.
+//	@Accept		json
+//	@Param		ttlSecond	query	integer	false	"ttl param is only for BR and lightning now. Don't use it."
+//	@Param		body		body	object	false	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The config is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config [post]
 func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
 	data, err := io.ReadAll(r.Body)
@@ -185,16 +209,23 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 	case "cluster-version":
 		return h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
+		// todo:  use apiv2 handlers instead to update keyspace related config,
+		// since the logic is more complex and may involve multiple config items update in one request,
+		// e.g. add/remove meta-service group.
 	case "keyspace":
-		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
+		return h.updateKeyspaceConfig(kp[len(kp)-1], value)
 	case "micro-service":
 		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
+	case "controller":
+		return h.updateControllerConfig(kp[len(kp)-1], value)
 	}
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Keyspace, key, value)
+func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
+	oldCfg := h.svr.GetPersistOptions().GetKeyspaceConfig()
+	newCfg := oldCfg.Clone()
+	updated, found, err := jsonutil.AddKeyValue(newCfg, key, value)
 	if err != nil {
 		return err
 	}
@@ -203,10 +234,47 @@ func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, va
 		return errors.Errorf("config item %s not found", key)
 	}
 
-	if updated {
-		err = h.svr.SetKeyspaceConfig(config.Keyspace)
+	if !updated {
+		return nil
 	}
-	return err
+	// Meta-service group changes must go through the same safe update path as the
+	// dedicated /meta-service-groups endpoint, which holds the manager lock and
+	// rejects removing a group that still has assigned keyspaces. Updating them
+	// via the plain config path would bypass that guard.
+	if key == "meta-service-groups" {
+		return h.updateMetaServiceGroups(oldCfg, newCfg)
+	}
+	return h.svr.SetKeyspaceConfig(oldCfg, newCfg)
+}
+
+func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceConfig) error {
+	manager := h.svr.GetMetaServiceGroupManager()
+	if manager == nil {
+		return errors.New("meta-service groups manager is not initialized")
+	}
+	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
+	// the map persisted via newCfg and the map applied to the manager are the
+	// same reference. newCfg is a locally owned clone, so there is no aliasing
+	// with the live config.
+	newGroups := newCfg.MetaServiceGroups
+	// Normalize (trim/dedup) before computing deletedGroups. Otherwise a
+	// whitespace-padded ID (e.g. " g ") for an existing group g would not match
+	// the already-normalized key in oldCfg, so g would be wrongly classified as a
+	// deletion and rejected by UpdateGroupsSafely when it still has keyspaces.
+	if err := config.AdjustMetaServiceGroups(newGroups); err != nil {
+		return err
+	}
+	deletedGroups := make([]string, 0)
+	for id := range oldCfg.GetMetaServiceGroups() {
+		if _, ok := newGroups[id]; !ok {
+			deletedGroups = append(deletedGroups, id)
+		}
+	}
+	return manager.UpdateGroupsSafely(h.svr.Context(), newGroups, deletedGroups, func() error {
+		return h.svr.SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg)
+	}, func() {
+		h.svr.UpdateKeyspaceConfig(newCfg)
+	})
 }
 
 func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) error {
@@ -220,6 +288,9 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 	}
 
 	if updated {
+		if key == "enable-resource-manager-fallback" {
+			return errors.Errorf("cannot update config item %s dynamically", key)
+		}
 		err = h.svr.SetMicroserviceConfig(config.Microservice)
 	}
 	return err
@@ -332,11 +403,13 @@ func getConfigMap(cfg map[string]any, key []string, value any) map[string]any {
 	return cfg
 }
 
-// @Tags     config
-// @Summary  Get schedule config.
-// @Produce  json
-// @Success  200  {object}  sc.ScheduleConfig
-// @Router   /config/schedule [get]
+// GetScheduleConfig gets the schedule config.
+//
+//	@Tags		config
+//	@Summary	Get schedule config.
+//	@Produce	json
+//	@Success	200	{object}	sc.ScheduleConfig
+//	@Router		/config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
@@ -353,16 +426,18 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
-// @Tags     config
-// @Summary  Update a schedule config item.
-// @Accept   json
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The config is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Failure  503  {string}  string  "PD server has no leader."
-// @Router   /config/schedule [post]
+// SetScheduleConfig sets the schedule config.
+//
+//	@Tags		config
+//	@Summary	Update a schedule config item.
+//	@Accept		json
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The config is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Failure	503	{string}	string	"PD server has no leader."
+//	@Router		/config/schedule [post]
 func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
@@ -405,12 +480,18 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags     config
-// @Summary  Get replication config.
-// @Produce  json
-// @Success  200  {object}  sc.ReplicationConfig
-// @Router   /config/replicate [get]
+// GetReplicationConfig gets the replication config.
+//
+//	@Tags		config
+//	@Summary	Get replication config.
+//	@Produce	json
+//	@Success	200	{object}	sc.ReplicationConfig
+//	@Router		/config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
+	failpoint.Inject("getReplicationConfigFailed", func(v failpoint.Value) {
+		code := v.(int)
+		h.rd.JSON(w, code, "get config failed")
+	})
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
 		cfg, err := h.getSchedulingServerConfig()
@@ -424,16 +505,18 @@ func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
-// @Tags     config
-// @Summary  Update a replication config item.
-// @Accept   json
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The config is updated."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Failure  503  {string}  string  "PD server has no leader."
-// @Router   /config/replicate [post]
+// SetReplicationConfig sets the replication config.
+//
+//	@Tags		config
+//	@Summary	Update a replication config item.
+//	@Accept		json
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The config is updated."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Failure	503	{string}	string	"PD server has no leader."
+//	@Router		/config/replicate [post]
 func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
@@ -447,24 +530,28 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags     config
-// @Summary  Get label property config.
-// @Produce  json
-// @Success  200  {object}  config.LabelPropertyConfig
-// @Router   /config/label-property [get]
+// GetLabelPropertyConfig gets the label property config.
+//
+//	@Tags		config
+//	@Summary	Get label property config.
+//	@Produce	json
+//	@Success	200	{object}	config.LabelPropertyConfig
+//	@Router		/config/label-property [get]
 func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }
 
-// @Tags     config
-// @Summary  Update label property config item.
-// @Accept   json
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The config is updated."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Failure  503  {string}  string  "PD server has no leader."
-// @Router   /config/label-property [post]
+// SetLabelPropertyConfig sets the label property config.
+//
+//	@Tags		config
+//	@Summary	Update label property config item.
+//	@Accept		json
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The config is updated."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Failure	503	{string}	string	"PD server has no leader."
+//	@Router		/config/label-property [post]
 func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -487,24 +574,28 @@ func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Requ
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
-// @Tags     config
-// @Summary  Get cluster version.
-// @Produce  json
-// @Success  200  {object}  semver.Version
-// @Router   /config/cluster-version [get]
+// GetClusterVersion gets the cluster version.
+//
+//	@Tags		config
+//	@Summary	Get cluster version.
+//	@Produce	json
+//	@Success	200	{object}	semver.Version
+//	@Router		/config/cluster-version [get]
 func (h *confHandler) GetClusterVersion(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
 }
 
-// @Tags     config
-// @Summary  Update cluster version.
-// @Accept   json
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The cluster version is updated."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Failure  503  {string}  string  "PD server has no leader."
-// @Router   /config/cluster-version [post]
+// SetClusterVersion sets the cluster version.
+//
+//	@Tags		config
+//	@Summary	Update cluster version.
+//	@Accept		json
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The cluster version is updated."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Failure	503	{string}	string	"PD server has no leader."
+//	@Router		/config/cluster-version [post]
 func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) {
 	input := make(map[string]string)
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -524,23 +615,27 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
 }
 
-// @Tags     config
-// @Summary  Get replication mode config.
-// @Produce  json
-// @Success  200  {object}  config.ReplicationModeConfig
-// @Router   /config/replication-mode [get]
+// GetReplicationModeConfig gets the replication mode config.
+//
+//	@Tags		config
+//	@Summary	Get replication mode config.
+//	@Produce	json
+//	@Success	200	{object}	config.ReplicationModeConfig
+//	@Router		/config/replication-mode [get]
 func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationModeConfig())
 }
 
-// @Tags     config
-// @Summary  Set replication mode config.
-// @Accept   json
-// @Param    body  body  object  string  "json params"
-// @Produce  json
-// @Success  200  {string}  string  "The replication mode config is updated."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/replication-mode [post]
+// SetReplicationModeConfig sets the replication mode config.
+//
+//	@Tags		config
+//	@Summary	Set replication mode config.
+//	@Accept		json
+//	@Param		body	body	object	string	"json params"
+//	@Produce	json
+//	@Success	200	{string}	string	"The replication mode config is updated."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/config/replication-mode [post]
 func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
 	config := h.svr.GetReplicationModeConfig()
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &config); err != nil {
@@ -554,13 +649,39 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
 }
 
-// @Tags     config
-// @Summary  Get PD server config.
-// @Produce  json
-// @Success  200  {object}  config.PDServerConfig
-// @Router   /config/pd-server [get]
+// GetPDServerConfig gets the PD server config.
+//
+//	@Tags		config
+//	@Summary	Get PD server config.
+//	@Produce	json
+//	@Success	200	{object}	config.PDServerConfig
+//	@Router		/config/pd-server [get]
 func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
+}
+
+func (h *confHandler) getLeaderConfig() (*config.Config, error) {
+	addrs := h.svr.GetMember().GetServingUrls()
+	if len(addrs) == 0 {
+		return nil, errs.ErrLeaderNil.FastGenByArgs()
+	}
+	addr := addrs[0]
+	url := fmt.Sprintf("%s/pd/api/v1/config", addr)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.ErrSendRequest.FastGenByArgs(resp.StatusCode)
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var leaderConfig config.Config
+	err = json.Unmarshal(b, &leaderConfig)
+	return &leaderConfig, err
 }
 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
@@ -569,11 +690,7 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 		return nil, errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.GetJSONWithoutBody(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return nil, err
 	}
@@ -591,4 +708,42 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 		return nil, err
 	}
 	return &schedulingServerConfig, nil
+}
+
+func (h *confHandler) updateControllerConfig(key string, value any) error {
+	k := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rm.ControllerConfig{}), key)
+	if k == "" {
+		return errors.Errorf("controller config item %s not found", key)
+	}
+	// Don't allow updating child items, only allow updating top-level items.
+	if k != key {
+		return errors.Errorf("can't update controller child item %s, only top-level items are allowed", key)
+	}
+	addrs := h.svr.GetMember().GetServingUrls()
+	if len(addrs) == 0 {
+		return errs.ErrLeaderNil.FastGenByArgs()
+	}
+	addr := addrs[0]
+	url := fmt.Sprintf("%s%s", addr, resourceManagerControllerConfigURL)
+
+	body := map[string]any{
+		key: value,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+
+	resp, err := apiutil.PostJSON(h.svr.GetHTTPClient(), url, data)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return errors.Errorf("failed to update controller config: %s", string(b))
+	}
+
+	return nil
 }

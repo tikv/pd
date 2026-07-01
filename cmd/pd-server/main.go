@@ -27,9 +27,11 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	rm_redirector "github.com/tikv/pd/pkg/mcs/resourcemanager/redirector"
+	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	router "github.com/tikv/pd/pkg/mcs/router/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/memory"
@@ -44,16 +46,12 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-
-	// register microservice API
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
 )
 
 const (
-	// Only serverless use this variable, we can use it to determine whether the PD supports multiple timelines.
-	// The name is a little misleading, but it's kept for backward compatibility.
+	apiMode        = "api"
+	tsoMode        = "tso"
+	rmMode         = "resource-manager"
 	serviceModeEnv = "PD_SERVICE_MODE"
 )
 
@@ -67,7 +65,8 @@ func main() {
 	addFlags(rootCmd)
 	rootCmd.AddCommand(NewServiceCommand())
 
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stdout)
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
 		exit(1)
@@ -78,10 +77,12 @@ func main() {
 func NewServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "services <mode>",
-		Short: "Run services, for example, tso, scheduling",
+		Short: "Run services, for example, tso, scheduling, router, resource-manager",
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
+	cmd.AddCommand(NewResourceManagerServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
+	cmd.AddCommand(NewRouterServiceCommand())
 	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
 }
@@ -89,7 +90,7 @@ func NewServiceCommand() *cobra.Command {
 // NewTSOServiceCommand returns the tso service command.
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tso",
+		Use:   tsoMode,
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
@@ -128,13 +129,54 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	return cmd
 }
 
+// NewResourceManagerServiceCommand returns the resource manager service command.
+func NewResourceManagerServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   rmMode,
+		Short: "Run the resource manager service",
+		Run:   resource_manager.CreateServerWrapper,
+	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for resource management service")
+	cmd.Flags().StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
+	return cmd
+}
+
+// NewRouterServiceCommand returns the router service command.
+func NewRouterServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "router",
+		Short: "Run the router service",
+		Run:   router.CreateServerWrapper,
+	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this router member")
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
+	cmd.Flags().StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
+	return cmd
+}
+
 // NewPDServiceCommand returns the PD service command.
-// We can use pd directly. This command is kept for backward compatibility.
 func NewPDServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "api",
+		Use:   apiMode,
 		Short: "Run the PD service",
-		Run:   createServerWrapper,
+		Run:   createPDServiceWrapper,
 	}
 	addFlags(cmd)
 	return cmd
@@ -161,7 +203,20 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
+func createPDServiceWrapper(cmd *cobra.Command, args []string) {
+	start(cmd, args, cmd.CalledAs())
+}
+
 func createServerWrapper(cmd *cobra.Command, args []string) {
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == apiMode {
+		start(cmd, args, apiMode)
+	} else {
+		start(cmd, args)
+	}
+}
+
+func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -171,10 +226,6 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 		return
 	}
 	err = cfg.Parse(flagSet)
-	mode := os.Getenv(serviceModeEnv)
-	if len(mode) != 0 && strings.ToLower(mode) == "api" {
-		cfg.Microservice.EnableMultiTimelines = true
-	}
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -201,7 +252,7 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -215,11 +266,11 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-
-	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
-	metricutil.Push(&cfg.Metric)
+	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+	metricutil.EnablePyroscope()
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
@@ -227,13 +278,16 @@ func createServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// Creates server.
-	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
+	if len(services) > 0 && !cfg.Microservice.IsResourceManagerFallbackEnabled() {
+		// redirect http requests for resource manager in API mode
+		serviceBuilders = append(serviceBuilders, rm_redirector.NewHandler)
+	}
+	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}

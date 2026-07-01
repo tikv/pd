@@ -29,9 +29,10 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -62,9 +63,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1, func(conf *config.Config, _ string) {
-		conf.Microservice.EnableMultiTimelines = true
-	})
+	suite.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)
@@ -73,7 +72,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	suite.backendEndpoints = pdLeaderServer.GetAddr()
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 }
 
@@ -96,7 +95,7 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	re.True(defaultGroupMember.IsPrimary)
 	primaryMember, err := primary.GetMember(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
+	re.Equal(primaryMember.(*member.Participant).GetPrimaryID(), defaultGroupMember.PrimaryID)
 }
 
 func (suite *tsoAPITestSuite) TestForwardResetTS() {
@@ -139,12 +138,13 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdCluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
+		conf.Keyspace.WaitRegionSplit = false
 	})
-	defer pdCluster.Destroy()
+	defer cluster.Destroy()
 	re.NoError(err)
-	addr := pdCluster.GetConfig().GetClientURL()
+	addr := cluster.GetConfig().GetClientURL()
 	ch := make(chan struct{})
 	defer close(ch)
 	clusterCh := make(chan *tests.TestTSOCluster)
@@ -157,11 +157,11 @@ func TestTSOServerStartFirst(t *testing.T) {
 		clusterCh <- tsoCluster
 		ch <- struct{}{}
 	}()
-	err = pdCluster.RunInitialServers()
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := pdCluster.WaitLeader()
+	leaderName := cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	pdLeaderServer := pdCluster.GetServer(leaderName)
+	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
 	tsoCluster := <-clusterCh
@@ -202,9 +202,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Microservice.EnableMultiTimelines = true
-	})
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
@@ -231,6 +229,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
+	// If close tso server, it should try forward to tso server, but return error in non-serverless env.
 	ttc.Destroy()
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
@@ -265,6 +264,7 @@ func (suite *tsoAPITestSuite) TestStatus() {
 	re.Equal(versioninfo.PDBuildTS, s.BuildTS)
 	re.Equal(versioninfo.PDGitHash, s.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, s.Version)
+	re.Equal(versioninfo.PDKernelType, s.KernelType)
 }
 
 func (suite *tsoAPITestSuite) TestConfig() {
@@ -283,4 +283,76 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.Equal(cfg.GetTSOSaveInterval(), primary.GetConfig().GetTSOSaveInterval())
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
+}
+
+func (suite *tsoAPITestSuite) TestHealth() {
+	re := suite.Require()
+
+	s := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	})
+	resp, err := tests.TestDialClient.Get(s.GetConfig().GetAdvertiseListenAddr() + "/health")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
+// TestForwardingBehavior specifically tests the API forwarding logic.
+func (suite *tsoAPITestSuite) TestForwardingBehavior() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
+	var follower *tso.Server
+	for _, srv := range suite.tsoCluster.GetServers() {
+		if srv.Name() != primary.Name() {
+			follower = srv
+			break
+		}
+	}
+	re.NotNil(follower)
+	re.True(primary.IsServing())
+	re.False(follower.IsServing())
+	re.NotEqual(follower.GetConfig().GetListenAddr(), primary.GetConfig().GetListenAddr())
+
+	followerAddr := follower.GetAddr()
+	followerURL := func(path string) string {
+		return fmt.Sprintf("%s%s%s", followerAddr, apis.APIPathPrefix, path)
+	}
+
+	// Test: PUT /admin/log should be handled by the follower locally.
+	logURL := followerURL("/admin/log")
+	level := "debug"
+	logPayload, err := json.Marshal(level)
+	re.NoError(err)
+	req, _ := http.NewRequest(http.MethodPut, logURL, bytes.NewBuffer(logPayload))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+
+	// Test: GET /config should be handled by the follower locally.
+	configURL := followerURL("/config")
+	var followerCfg tso.Config
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, configURL, &followerCfg)
+	re.NoError(err)
+	re.Equal(follower.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.NotEqual(primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
+	re.Equal(level, followerCfg.Log.Level)
+
+	// Test: GET /keyspace-groups/members should be handled by the follower locally.
+	membersURL := followerURL("/keyspace-groups/members")
+	var kgms map[uint32]*apis.KeyspaceGroupMember
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, membersURL, &kgms)
+	re.NoError(err)
+	re.Len(kgms, 1)
+	kgm := kgms[constant.DefaultKeyspaceGroupID]
+	re.NotNil(kgm)
+	re.Len(kgm.Member.ListenUrls, 1)
+	respListenURL := kgm.Member.ListenUrls[0]
+	re.Equal(follower.GetConfig().GetListenAddr(), respListenURL)
+	re.NotEqual(primary.GetConfig().GetListenAddr(), respListenURL)
+	re.False(kgm.IsPrimary)
 }

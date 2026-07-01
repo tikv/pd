@@ -16,10 +16,12 @@ package tso
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/server/config"
 )
 
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
@@ -72,23 +74,14 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 	}
 }
 
-func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
+func TestTimeStamp(t *testing.T) {
 	re := require.New(t)
-
-	compiledRegexp := keypath.GetCompiledNonDefaultIDRegexp()
-
-	rightCases := []struct {
-		path string
-		id   uint32
-	}{
-		{path: "/ms/0/tso/keyspace_groups/election/00001/primary", id: 1},
-		{path: "/ms/0/tso/keyspace_groups/election/12345/primary", id: 12345},
-		{path: "/ms/0/tso/keyspace_groups/election/99999/primary", id: 99999},
+	oracle := timestampOracle{
+		saveInterval: config.DefaultTSOSaveInterval + time.Second,
 	}
-
-	for _, tt := range rightCases {
-		id, err := ExtractKeyspaceGroupIDFromPath(compiledRegexp, tt.path)
-		re.Equal(tt.id, id)
-		re.NoError(err)
-	}
+	re.Equal(config.DefaultTSOSaveInterval, oracle.getStorageTimeout())
+	oracle.saveInterval = config.DefaultTSOSaveInterval
+	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
+	oracle.saveInterval = config.DefaultTSOSaveInterval - 2*time.Second
+	re.Equal(config.DefaultTSOSaveInterval-time.Second, oracle.getStorageTimeout())
 }

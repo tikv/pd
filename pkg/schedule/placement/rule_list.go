@@ -31,10 +31,12 @@ func checkApplyRules(rules []*Rule) error {
 	leaderCount := 0
 	voterCount := 0
 	for _, rule := range rules {
-		if rule.Role == Leader {
+		switch rule.Role {
+		case Leader:
 			leaderCount += rule.Count
-		} else if rule.Role == Voter {
+		case Voter:
 			voterCount += rule.Count
+		default:
 		}
 		if leaderCount > 1 {
 			return errors.New("multiple leader replicas")

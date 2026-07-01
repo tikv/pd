@@ -16,82 +16,152 @@ package storage
 
 import (
 	"context"
-	"path"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+const (
+	testGroupID     = uint32(1)
+	testLeaderKey   = "test-leader-key"
+	testLeaderValue = "test-leader-value"
+)
+
+var defaultContext = context.Background()
+
+func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	storage = NewStorageWithEtcdBackend(client)
+	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
+	err := leadership.Campaign(60, testLeaderValue)
+	require.NoError(t, err)
+	return storage, clean, leadership
+}
+
+func TestSaveTimestampWithTimeout(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
+	}()
+	storage, clean, leadership := prepare(t)
+	defer clean()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership, false)
+	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(keypath.TimestampKey, expectedTS)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership, false)
 	re.NoError(err)
-	ts, err := storage.LoadTimestamp("")
+	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(expectedTS, ts)
 }
 
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(keypath.TimestampKey, globalTS1)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership, false)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS2)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership, false)
 	re.Error(err)
 
-	ts, err := storage.LoadTimestamp("")
+	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS1, ts)
 }
 
-func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
+func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re := require.New(t)
-	storage, client, clean := newTestStorageWithClient(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 
-	tsoPrimaryPath := keypath.LeaderPath(&keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
-		GroupID:     constant.DefaultKeyspaceGroupID,
-	})
+	// testLeaderKey -> testLeaderValue
 	globalTS := time.Now().Round(0)
-	re.NoError(storage.SaveTimestamp(keypath.TimestampKey, globalTS, tsoPrimaryPath))
-	ts, err := storage.LoadTimestamp("")
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
+	re.NoError(err)
+	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
-	_, err = client.Put(context.Background(), tsoPrimaryPath, "tso-primary")
+	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{}, false)
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
+	re.Equal(globalTS, ts)
 
-	nextTS := globalTS.Add(time.Second)
-	err = storage.SaveTimestamp(keypath.TimestampKey, nextTS, tsoPrimaryPath)
-	re.Error(err)
-	re.Contains(err.Error(), "tso microservice primary exists, pd must yield embedded tso")
-	ts, err = storage.LoadTimestamp("")
+	// testLeaderKey -> ""
+	err = storage.Save(leadership.GetLeaderKey(), "")
+	re.NoError(err)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> non-existent
+	err = storage.Remove(leadership.GetLeaderKey())
+	re.NoError(err)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> testLeaderValue
+	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	re.NoError(err)
+	globalTS = globalTS.Add(time.Second)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
+	re.NoError(err)
+	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 }
 
-func newTestStorage(t *testing.T) (Storage, func()) {
-	storage, _, clean := newTestStorageWithClient(t)
-	return storage, clean
-}
+func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
 
-func newTestStorageWithClient(t *testing.T) (Storage, *clientv3.Client, func()) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	return NewStorageWithEtcdBackend(client, rootPath), client, clean
+	globalTS := time.Now().Round(0)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, true)
+	re.NoError(err)
+
+	tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	})
+	err = storage.Save(tsoPrimaryPath, "tso-primary")
+	re.NoError(err)
+
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, true)
+	re.ErrorContains(err, "tso microservice primary exists")
+
+	ts, err := storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
+	re.NoError(err)
 }

@@ -58,7 +58,7 @@ func makeStores() StoreSet {
 }
 
 // example: "1111_leader,1234,2111_learner"
-func makeRegion(def string) *core.RegionInfo {
+func makeRegion(def string) (*core.RegionInfo, error) {
 	var regionMeta metapb.Region
 	var leader *metapb.Peer
 	for _, peerDef := range strings.Split(def, ",") {
@@ -67,22 +67,32 @@ func makeRegion(def string) *core.RegionInfo {
 			splits := strings.Split(peerDef, "_")
 			idStr, role = splits[0], PeerRoleType(splits[1])
 		}
-		id, _ := strconv.Atoi(idStr)
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			return nil, err
+		}
 		peer := &metapb.Peer{Id: uint64(id), StoreId: uint64(id), Role: role.MetaPeerRole()}
 		regionMeta.Peers = append(regionMeta.Peers, peer)
 		if role == Leader {
 			leader = peer
 		}
 	}
-	return core.NewRegionInfo(&regionMeta, leader)
+	return core.NewRegionInfo(&regionMeta, leader), nil
 }
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"
 // count role constraints location_labels
-func makeRule(def string) *Rule {
-	var rule Rule
+func makeRule(def string) (*Rule, error) {
+	var (
+		rule Rule
+		err  error
+	)
 	splits := strings.Split(def, "/")
-	rule.Count, _ = strconv.Atoi(splits[0])
+	rule.Count, err = strconv.Atoi(splits[0])
+	if err != nil {
+		return nil, err
+	}
+
 	rule.Role = PeerRoleType(splits[1])
 	// only support k=v type constraint
 	for _, c := range strings.Split(splits[2], ",") {
@@ -97,7 +107,7 @@ func makeRule(def string) *Rule {
 		})
 	}
 	rule.LocationLabels = strings.Split(splits[3], ",")
-	return &rule
+	return &rule, nil
 }
 
 func checkPeerMatch(peers []*metapb.Peer, expect string) bool {
@@ -152,10 +162,13 @@ func TestReplace(t *testing.T) {
 		{"1111_leader,1121,1131", []string{"1/leader/host=host1/host", "1/voter/host=host2/host", "1/voter/host=host3/host"}, 1111, 1121, false},
 	}
 	for _, tc := range testCases {
-		region := makeRegion(tc.region)
+		region, err := makeRegion(tc.region)
+		re.NoError(err)
 		rules := make([]*Rule, 0, len(tc.rules))
 		for _, r := range tc.rules {
-			rules = append(rules, makeRule(r))
+			rule, err := makeRule(r)
+			re.NoError(err)
+			rules = append(rules, rule)
 		}
 		rf := fitRegion(stores.GetStores(), region, rules, false)
 		re.True(rf.IsSatisfied())
@@ -197,10 +210,13 @@ func TestFitRegion(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		region := makeRegion(testCase.region)
+		region, err := makeRegion(testCase.region)
+		re.NoError(err)
 		rules := make([]*Rule, 0, len(testCase.rules))
 		for _, r := range testCase.rules {
-			rules = append(rules, makeRule(r))
+			rule, err := makeRule(r)
+			re.NoError(err)
+			rules = append(rules, rule)
 		}
 		rf := fitRegion(stores.GetStores(), region, rules, false)
 		expects := strings.Split(testCase.fitPeers, "/")

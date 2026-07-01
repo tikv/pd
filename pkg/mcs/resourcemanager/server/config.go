@@ -17,17 +17,15 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -71,8 +69,6 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -93,6 +89,71 @@ type Config struct {
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
 	Controller ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
+}
+
+// RUVersion represents an RU calculation version.
+type RUVersion = int32
+
+const (
+	// RUVersionV1 is the default RU calculation version.
+	RUVersionV1 RUVersion = 1
+	// RUVersionV2 is the new RU calculation version with detailed metrics.
+	RUVersionV2 RUVersion = 2
+)
+
+// DefaultRUVersion is the default RU calculation version used when no policy is configured.
+const DefaultRUVersion = RUVersionV1
+
+// RUVersionPolicy configures which RU calculation version to use per keyspace.
+type RUVersionPolicy struct {
+	Default   RUVersion            `json:"default"`
+	Overrides map[uint32]RUVersion `json:"overrides,omitempty"`
+}
+
+func (p *RUVersionPolicy) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if p == nil {
+		return DefaultRUVersion
+	}
+	if version, ok := p.Overrides[keyspaceID]; ok {
+		return version
+	}
+	if p.Default > 0 {
+		return p.Default
+	}
+	return DefaultRUVersion
+}
+
+// validate checks that all RU version values in the policy are positive.
+func (p *RUVersionPolicy) validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.Default <= 0 {
+		return fmt.Errorf("ru-version-policy default must be positive, got %d", p.Default)
+	}
+	for ks, v := range p.Overrides {
+		if v <= 0 {
+			return fmt.Errorf("ru-version-policy override for keyspace %d must be positive, got %d", ks, v)
+		}
+	}
+	return nil
+}
+
+// Clone returns a deep copy of the RU version policy.
+func (p *RUVersionPolicy) Clone() *RUVersionPolicy {
+	if p == nil {
+		return nil
+	}
+	clone := &RUVersionPolicy{Default: p.Default}
+	if p.Overrides != nil {
+		clone.Overrides = make(map[uint32]RUVersion, len(p.Overrides))
+		for keyspaceID, version := range p.Overrides {
+			clone.Overrides[keyspaceID] = version
+		}
+	}
+	return clone
 }
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
@@ -112,6 +173,21 @@ type ControllerConfig struct {
 
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
+
+	// PushMetricsAddress is the address to push metrics.
+	PushMetricsAddress string `toml:"push-metrics-address" json:"push-metrics-address"`
+
+	// PushMetricsInterval is the interval to push metrics.
+	PushMetricsInterval typeutil.Duration `toml:"push-metrics-interval" json:"push-metrics-interval"`
+
+	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
+}
+
+func (rmc *ControllerConfig) getKeyspaceRUVersion(keyspaceID uint32) RUVersion {
+	if rmc == nil {
+		return DefaultRUVersion
+	}
+	return rmc.RUVersionPolicy.getKeyspaceRUVersion(keyspaceID)
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
@@ -128,6 +204,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
+	}
+	if rmc.PushMetricsAddress != "" && rmc.PushMetricsInterval.Duration <= 0 {
+		log.Warn("push-metrics-address is set but push-metrics-interval is invalid, metrics push disabled")
+		rmc.PushMetricsAddress = ""
 	}
 	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
@@ -233,20 +313,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.Validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
-
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
-	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	if err := c.Security.Encryption.Adjust(); err != nil {
@@ -254,7 +324,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLease)
 
 	return nil
 }
@@ -272,8 +342,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -290,25 +360,4 @@ func (c *Config) GetAdvertiseListenAddr() string {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
-}
-
-// Validate is used to validate if some configurations are right.
-func (c *Config) Validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }

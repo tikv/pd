@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -75,6 +75,7 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 func (suite *serverRegisterTestSuite) TestServerRegister() {
 	for range 3 {
 		suite.checkServerRegister(constant.TSOServiceName)
+		suite.checkServerRegister(constant.ResourceManagerServiceName)
 	}
 }
 
@@ -88,7 +89,8 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
-	returnedEntry.Deserialize([]byte(endpoints[0]))
+	err = returnedEntry.Deserialize([]byte(endpoints[0]))
+	re.NoError(err)
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
@@ -109,6 +111,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
 	suite.checkServerPrimaryChange(constant.TSOServiceName, 3)
+	suite.checkServerPrimaryChange(constant.ResourceManagerServiceName, 3)
 }
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
@@ -156,6 +159,12 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	switch serviceName {
 	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.ResourceManagerServiceName:
+		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	case constant.RouterServiceName:
+		server, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		re.NoError(err)
+		return server, cleanup
 	default:
 		return nil, nil
 	}

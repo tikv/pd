@@ -16,8 +16,6 @@ package join_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,8 +55,6 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd2.Run()
 	re.NoError(err)
-	_, err = os.Stat(filepath.Join(pd2.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
 	re.NotEmpty(cluster.WaitLeader())
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
@@ -72,8 +68,6 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd3.Run()
 	re.NoError(err)
-	_, err = os.Stat(filepath.Join(pd3.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
 	re.NotEmpty(cluster.WaitLeader())
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
@@ -165,4 +159,22 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(pd2.Stop())
 	re.NoError(pd2.Destroy())
 	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
+}
+
+// A PD joins itself.
+func TestPDJoinsItself(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Get a server config and modify it to join itself
+	cfg := cluster.GetConfig().InitialServers[0]
+	serverCfg, err := cfg.Generate()
+	re.NoError(err)
+	serverCfg.Join = serverCfg.AdvertiseClientUrls
+	re.Error(join.PrepareJoinCluster(serverCfg))
 }

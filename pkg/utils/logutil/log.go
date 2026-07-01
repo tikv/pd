@@ -72,12 +72,12 @@ func StringToZapLogLevel(level string) zapcore.Level {
 
 // SetupLogger setup the logger.
 func SetupLogger(
-	logConfig log.Config,
+	logConfig *log.Config,
 	logger **zap.Logger,
 	logProps **log.ZapProperties,
 	redactInfoLogType RedactInfoLogType,
 ) error {
-	lg, p, err := log.InitLogger(&logConfig, zap.AddStacktrace(zapcore.FatalLevel))
+	lg, p, err := log.InitLogger(logConfig, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return errs.ErrInitLogger.Wrap(err)
 	}

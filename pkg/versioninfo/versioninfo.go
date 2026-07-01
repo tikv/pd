@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 // Status is the status of PD server.
@@ -33,6 +34,7 @@ type Status struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
+	KernelType     string `json:"kernel_type"`
 }
 
 const (
@@ -47,6 +49,7 @@ var (
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
 	PDEdition        = CommunityEdition
+	PDKernelType     = kerneltype.KernelType // KernelType is Next Generation or Classic, see doc.go for more info.
 )
 
 // ParseVersion wraps semver.NewVersion and handles compatibility issues.
@@ -94,12 +97,30 @@ func IsFeatureSupported(clusterVersion *semver.Version, f Feature) bool {
 	return IsCompatible(minSupportVersion, *clusterVersion)
 }
 
+var (
+	hotScheduleWithCPUMinVersion   = MustParseVersion("8.5.7")
+	hotScheduleWithCPUv9MinVersion = MustParseVersion("9.0.0-beta.1")
+)
+
+// IsHotScheduleWithCPUSupported returns whether TiKV reports CPU info for hot scheduling.
+func IsHotScheduleWithCPUSupported(clusterVersion *semver.Version) bool {
+	if clusterVersion == nil {
+		return false
+	}
+	// TiKV <= 8.5.6 and < 9.0.0-beta.1 do not report CPU usage.
+	if clusterVersion.Major >= 9 {
+		return !clusterVersion.LessThan(*hotScheduleWithCPUv9MinVersion)
+	}
+	return !clusterVersion.LessThan(*hotScheduleWithCPUMinVersion)
+}
+
 // Log prints the version information of the PD with the specific service mode.
 func Log(serviceMode string) {
 	mode := strings.ToUpper(serviceMode)
 	log.Info(fmt.Sprintf("Welcome to Placement Driver (%s)", mode))
 	log.Info(mode, zap.String("release-version", PDReleaseVersion))
 	log.Info(mode, zap.String("edition", PDEdition))
+	log.Info(mode, zap.String("kernel-type", PDKernelType))
 	log.Info(mode, zap.String("git-hash", PDGitHash))
 	log.Info(mode, zap.String("git-branch", PDGitBranch))
 	log.Info(mode, zap.String("utc-build-time", PDBuildTS))
@@ -109,6 +130,7 @@ func Log(serviceMode string) {
 func Print() {
 	fmt.Println("Release Version:", PDReleaseVersion)
 	fmt.Println("Edition:", PDEdition)
+	fmt.Println("Kernel Type:", PDKernelType)
 	fmt.Println("Git Commit Hash:", PDGitHash)
 	fmt.Println("Git Branch:", PDGitBranch)
 	fmt.Println("UTC Build Time: ", PDBuildTS)

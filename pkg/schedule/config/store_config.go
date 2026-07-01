@@ -116,7 +116,7 @@ func (c *StoreConfig) GetRegionSplitKeys() uint64 {
 	if c == nil || c.RegionSplitKeys == 0 {
 		return defaultRegionSplitKey
 	}
-	return uint64(c.Coprocessor.RegionSplitKeys)
+	return uint64(c.RegionSplitKeys)
 }
 
 // GetRegionMaxKeys returns the region split keys
@@ -132,7 +132,7 @@ func (c *StoreConfig) IsEnableRegionBucket() bool {
 	if c == nil {
 		return false
 	}
-	return c.Coprocessor.EnableRegionBucket
+	return c.EnableRegionBucket
 }
 
 // IsRaftKV2 returns true if the raft kv is v2.
@@ -140,7 +140,7 @@ func (c *StoreConfig) IsRaftKV2() bool {
 	if c == nil {
 		return false
 	}
-	return c.Storage.Engine == RaftstoreV2
+	return c.Engine == RaftstoreV2
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.
@@ -148,12 +148,12 @@ func (c *StoreConfig) SetRegionBucketEnabled(enabled bool) {
 	if c == nil {
 		return
 	}
-	c.Coprocessor.EnableRegionBucket = enabled
+	c.EnableRegionBucket = enabled
 }
 
 // GetRegionBucketSize returns region bucket size if enable region buckets.
 func (c *StoreConfig) GetRegionBucketSize() uint64 {
-	if c == nil || !c.Coprocessor.EnableRegionBucket {
+	if c == nil || !c.EnableRegionBucket {
 		return 0
 	}
 	if len(c.RegionBucketSize) == 0 {

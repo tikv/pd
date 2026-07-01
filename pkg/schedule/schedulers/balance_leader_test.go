@@ -15,15 +15,20 @@
 package schedulers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -35,13 +40,20 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
 func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
-	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
+	keyRanges1, err := getKeyRanges([]string{"a", "b", "c", "d"})
+	re.NoError(err)
 	conf := &balanceLeaderSchedulerConfig{
 		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
 			Ranges: keyRanges1,
@@ -52,10 +64,36 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re.Equal(conf.Batch, conf2.Batch)
 	re.Equal(conf.Ranges, conf2.Ranges)
 
-	keyRanges2, _ := getKeyRanges([]string{"e", "f", "g", "h"})
+	keyRanges2, err := getKeyRanges([]string{"e", "f", "g", "h"})
+	re.NoError(err)
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
+}
+
+func TestBalanceLeaderBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize + 1})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
 }
 
 type balanceLeaderSchedulerTestSuite struct {
@@ -424,7 +462,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NotEmpty(ops)
 	re.Len(ops, 1)
 	re.Len(ops[0].Counters, 1)
-	re.Len(ops[0].FinishedCounters, 1)
+	re.Len(ops[0].FinishedCounters, 2)
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"h", "n"}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
@@ -449,6 +487,14 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
+
+	kye := keyutil.NewKeyRange("a", "g")
+	suite.tc.KeyRangeManager.Append([]keyutil.KeyRange{kye})
+	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	ops, _ = lb.Schedule(suite.tc, false)
+	re.Empty(ops)
+	suite.tc.KeyRangeManager.Delete([]keyutil.KeyRange{kye})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
@@ -522,6 +568,28 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestBatchBalance() {
 		regions[op.RegionID()] = struct{}{}
 	}
 	re.Len(regions, 4)
+}
+
+func TestBalanceLeaderMaxBatchSchedule(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, MaxBalanceLeaderBatchSize*10)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	for i := 1; i <= MaxBalanceLeaderBatchSize*20; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	lb.(*balanceLeaderScheduler).conf.Batch = MaxBalanceLeaderBatchSize
+
+	testutil.Eventually(re, func() bool {
+		ops, _ := lb.Schedule(tc, false)
+		return len(ops) == MaxBalanceLeaderBatchSize
+	})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
@@ -624,7 +692,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
+		leader := rand.IntN(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
 			meta.Peers[leader],
@@ -671,11 +739,11 @@ func BenchmarkCandidateStores(b *testing.B) {
 	defer cancel()
 
 	for id := uint64(1); id < uint64(10000); id++ {
-		leaderCount := int(rand.Int31n(10000))
+		leaderCount := int(rand.Int32N(10000))
 		tc.AddLeaderStore(id, leaderCount)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		updateAndResortStoresInCandidateStores(tc)
 	}
 }
@@ -691,9 +759,9 @@ func updateAndResortStoresInCandidateStores(tc *mockcluster.Cluster) {
 	for id, store := range stores {
 		offsets := cs.binarySearchStores(store)
 		if id%2 == 1 {
-			deltaMap[store.GetID()] = int64(rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(rand.Int32N(10000))
 		} else {
-			deltaMap[store.GetID()] = int64(-rand.Int31n(10000))
+			deltaMap[store.GetID()] = int64(-rand.Int32N(10000))
 		}
 		cs.resortStoreWithPos(offsets[0])
 	}

@@ -26,13 +26,19 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestSecurity(t *testing.T) {
 	re := require.New(t)
@@ -43,7 +49,7 @@ func TestSecurity(t *testing.T) {
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	tls, err := cfg.Security.ToTLSConfig()
+	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
 }
@@ -116,7 +122,7 @@ func TestReloadUpgrade2(t *testing.T) {
 	newOpt, err := newTestScheduleOption()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	re.Equal("", newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
+	re.Empty(newOpt.GetScheduleConfig().RegionScoreFormulaVersion) // formulaVersion keep old value when reloading.
 }
 
 func TestValidation(t *testing.T) {
@@ -166,13 +172,17 @@ leader-schedule-limit = 0
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
-	flagSet.Parse(nil)
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
+	err := flagSet.Parse(nil)
+	re.NoError(err)
 	cfg := NewConfig()
-	err := cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
 	re.NoError(err)
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 
 	// When invalid, use default values.
@@ -189,6 +199,9 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	re.True(cfg.PreVote)
 	re.Equal("info", cfg.Log.Level)
+	re.Equal(300, cfg.Log.File.MaxSize)
+	re.Equal(0, cfg.Log.File.MaxDays)
+	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
@@ -247,15 +260,22 @@ tso-update-physical-interval = "15s"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+	re.Equal(MaxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
 	cfgData = `
 [log]
 level = "debug"
+
+[log.file]
+max-size = 100
+max-days = 10
+max-backups = 5
 `
 	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
-	flagSet.Parse(nil)
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
+	err = flagSet.Parse(nil)
+	re.NoError(err)
 	cfg = NewConfig()
 	err = cfg.Parse(flagSet)
 	re.NoError(err)
@@ -264,6 +284,9 @@ level = "debug"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 	re.Equal("debug", cfg.Log.Level)
+	re.Equal(100, cfg.Log.File.MaxSize)
+	re.Equal(10, cfg.Log.File.MaxDays)
+	re.Equal(5, cfg.Log.File.MaxBackups)
 }
 
 func TestMigrateFlags(t *testing.T) {
@@ -286,6 +309,7 @@ enable-remove-extra-replica = false
 `)
 	re.NoError(err)
 	re.Equal(math.MaxInt8, cfg.PDServerCfg.FlowRoundByDigit)
+	re.True(cfg.PDServerCfg.EnableGOGCTuner)
 	re.True(cfg.Schedule.EnableReplaceOfflineReplica)
 	re.False(cfg.Schedule.EnableRemoveDownReplica)
 	re.False(cfg.Schedule.EnableMakeUpReplica)
@@ -301,6 +325,23 @@ enable-make-up-replica = false
 disable-make-up-replica = false
 `)
 	re.Error(err)
+}
+
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
 }
 
 func TestPDServerConfig(t *testing.T) {
@@ -465,24 +506,60 @@ hot-regions-write-interval= "30m"
 	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
 }
 
+func TestMaxStorePreparingTime(t *testing.T) {
+	re := require.New(t)
+	cfgData := ``
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(48*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "40h"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(40*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "0s"
+`
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(0*time.Second, cfg.Schedule.MaxStorePreparingTime.Duration)
+}
+
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
-	cfg.Adjust(nil, false)
+	err := cfg.Adjust(nil, false)
+	re.NoError(err)
 	re.Equal(cfg, cfg.Clone())
 
 	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
 	schedule := &sc.ScheduleConfig{}
-	schedule.Adjust(emptyConfigMetaData, false)
+	err = schedule.Adjust(emptyConfigMetaData, false)
+	re.NoError(err)
 	re.Equal(schedule, schedule.Clone())
 
 	replication := &sc.ReplicationConfig{}
-	replication.Adjust(emptyConfigMetaData)
+	err = replication.Adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
-	pdServer.adjust(emptyConfigMetaData)
+	err = pdServer.adjust(emptyConfigMetaData)
+	re.NoError(err)
 	re.Equal(pdServer, pdServer.Clone())
 
 	replicationMode := &ReplicationModeConfig{}
@@ -522,4 +599,56 @@ func TestRateLimitClone(t *testing.T) {
 	}
 	gdc := gCfg.LimiterConfig["test"]
 	re.Zero(gdc.ConcurrencyLimit)
+}
+
+func TestAdjustMetaServiceGroups(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groups    map[string]string
+		expected  map[string]string
+		expectErr bool
+		errorMsg  string
+	}{
+		{
+			name:     "trim group ID and endpoint",
+			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+		},
+		{
+			name:     "multiple groups",
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+		},
+		{
+			name:      "empty group ID after trim",
+			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
+		},
+		{
+			name:      "empty endpoint after trim",
+			groups:    map[string]string{"group-1": " "},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
+		},
+		{
+			name:      "duplicate group ID after trim",
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			err := AdjustMetaServiceGroups(testCase.groups)
+			if testCase.expectErr {
+				re.EqualError(err, testCase.errorMsg)
+				return
+			}
+			re.NoError(err)
+			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
 }

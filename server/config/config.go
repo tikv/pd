@@ -34,6 +34,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/pingcap/metering_sdk/config"
 
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
@@ -164,6 +165,8 @@ type Config struct {
 	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+
+	Metering config.MeteringConfig `toml:"metering" json:"metering"`
 }
 
 // NewConfig creates a new config.
@@ -172,7 +175,7 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = int64(3)
+	defaultLeaderLease             = int64(5)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB
@@ -213,8 +216,6 @@ const (
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
-	defaultEnableWitness       = false
-	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 
@@ -223,11 +224,13 @@ const (
 	defaultMaxConcurrentTSOProxyStreamings = 5000
 	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
-	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
+	// DefaultTSOSaveInterval is the default value of the config `TSOSaveInterval`.
+	DefaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
-	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
+	MaxTSOUpdatePhysicalInterval = 10 * time.Second
+	minTSOUpdatePhysicalInterval = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 	defaultLogLevel  = "info"
@@ -238,7 +241,7 @@ const (
 	defaultServerMemoryLimitGCTrigger = 0.7
 	minServerMemoryLimitGCTrigger     = 0.5
 	maxServerMemoryLimitGCTrigger     = 0.99
-	defaultEnableGOGCTuner            = false
+	defaultEnableGOGCTuner            = true
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
@@ -248,9 +251,9 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback = true
-	// In serverless environment, the default value of `enable-tso-dynamic-switching` is always false.
-	defaultEnableTSODynamicSwitching = false
+	defaultEnableSchedulingFallback      = true
+	defaultEnableTSODynamicSwitching     = false
+	defaultEnableResourceManagerFallback = true
 )
 
 var (
@@ -398,11 +401,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
 
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
+	configutil.AdjustDuration(&c.TSOSaveInterval, DefaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
-	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
-		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = MaxTSOUpdatePhysicalInterval
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}
@@ -455,7 +458,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	c.Keyspace.adjust(configMetaData.Child("keyspace"))
+	if err := c.Keyspace.adjust(configMetaData.Child("keyspace")); err != nil {
+		return err
+	}
 
 	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
@@ -646,8 +651,8 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
-// GetLeaderLease returns the leader lease.
-func (c *Config) GetLeaderLease() int64 {
+// GetLease returns the leader lease.
+func (c *Config) GetLease() int64 {
 	return c.LeaderLease
 }
 
@@ -745,6 +750,7 @@ type DashboardConfig struct {
 	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
 	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
 	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	TempDir               string `toml:"temp-dir" json:"temp-dir"`
 	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
 	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
 	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
@@ -824,27 +830,12 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroserviceConfig is the configuration for microservice.
 type MicroserviceConfig struct {
-	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
-	// TODO: Currently, we have following combinations for tso:
-	//
-	// There could be the following scenarios for non-serverless:
-	// 1. microservice + single timelines
-	// 2. non-microservice
-	// we use `enable-tso-dynamic-switch` to control whether we enable microservice or not.
-	// non-serverless doesn't support multiple timelines but support dynamic switch.
-	//
-	// There could be the following scenarios for serverless:
-	// 1. microservice + single timelines
-	// 2. microservice + multiple timelines
-	// 3. non-microservice
-	// we use `enable-multi-timelines` to control whether we enable microservice or not.
-	// serverless supports multiple timelines but doesn't support dynamic switch.
-	//
-	// Besides, the current implementation for both serverless and non-serverless rely on keyspace group which should be independent of the microservice.
-	// We should separate the keyspace group from the microservice later.
+	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
-	// TODO: use it to replace system variable.
-	EnableMultiTimelines bool
+	// If EnableResourceManagerFallback is false, resource manager service only
+	// works when api service is healthy. Please make sure api service is highly
+	// available before disabling this option.
+	EnableResourceManagerFallback bool `toml:"enable-resource-manager-fallback" json:"enable-resource-manager-fallback,string"`
 }
 
 func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -853,6 +844,9 @@ func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("enable-tso-dynamic-switching") {
 		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
+	}
+	if !meta.IsDefined("enable-resource-manager-fallback") {
+		c.EnableResourceManagerFallback = defaultEnableResourceManagerFallback
 	}
 }
 
@@ -872,10 +866,9 @@ func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
 }
 
-// IsMultiTimelinesEnabled returns whether to enable multi-timelines.
-// TODO: use it to replace system variable.
-func (c *MicroserviceConfig) IsMultiTimelinesEnabled() bool {
-	return c.EnableMultiTimelines
+// IsResourceManagerFallbackEnabled returns whether to enable resource manager service fallback to api service.
+func (c *MicroserviceConfig) IsResourceManagerFallbackEnabled() bool {
+	return c.EnableResourceManagerFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
@@ -888,6 +881,9 @@ type KeyspaceConfig struct {
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+	// MetaServiceGroups is the available external meta-service groups.
+	// The key is the meta-service group name, and the value is the corresponding endpoint.
+	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -902,7 +898,7 @@ func (c *KeyspaceConfig) Validate() error {
 	return nil
 }
 
-func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("wait-region-split") {
 		c.WaitRegionSplit = true
 	}
@@ -912,19 +908,56 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
 	}
+
+	return AdjustMetaServiceGroups(c.MetaServiceGroups)
+}
+
+// AdjustMetaServiceGroups validates and adjusts the meta-service groups configuration.
+func AdjustMetaServiceGroups(metaGroups map[string]string) error {
+	dict := make(map[string]string, len(metaGroups))
+	for groupID, endpoint := range metaGroups {
+		id := strings.TrimSpace(groupID)
+		if id == "" {
+			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
+		address := strings.TrimSpace(endpoint)
+		if address == "" {
+			return errors.New("[keyspace] meta-service group addresses cannot be empty")
+		}
+		if _, ok := dict[id]; ok {
+			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID cannot be duplicated: %s", id))
+		}
+		dict[id] = address
+	}
+	// Clear the original map and copy the validated values back to it.
+	for groupID := range metaGroups {
+		delete(metaGroups, groupID)
+	}
+	for groupID, endpoint := range dict {
+		metaGroups[groupID] = endpoint
+	}
+
+	return nil
 }
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
-	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
 	cfg := *c
-	cfg.PreAlloc = preAlloc
+	cfg.PreAlloc = append(c.PreAlloc[:0:0], c.PreAlloc...)
+	if c.MetaServiceGroups != nil {
+		cfg.MetaServiceGroups = make(map[string]string, len(c.MetaServiceGroups))
+		for name, endpoint := range c.MetaServiceGroups {
+			cfg.MetaServiceGroups[name] = endpoint
+		}
+	}
 	return &cfg
 }
 
 // GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
 func (c *KeyspaceConfig) GetPreAlloc() []string {
-	return c.PreAlloc
+	ret := make([]string, len(c.PreAlloc))
+	copy(ret, c.PreAlloc)
+	return ret
 }
 
 // ToWaitRegionSplit returns whether to wait for the region split to complete.
@@ -940,4 +973,18 @@ func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
 // GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
 func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
+}
+
+// GetMetaServiceGroups returns the current meta-service-group configuration.
+func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
+	ret := make(map[string]string, len(c.MetaServiceGroups))
+	for name, endpoint := range c.MetaServiceGroups {
+		ret[name] = endpoint
+	}
+	return ret
+}
+
+// SetMetaServiceGroups updates the current meta-service-group configuration.
+func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
+	c.MetaServiceGroups = metaServiceGroups
 }

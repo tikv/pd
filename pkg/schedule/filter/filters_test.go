@@ -4,13 +4,14 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package filter
 
 import (
@@ -161,7 +162,6 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetEnablePlacementRules(true)
 	ruleManager := testCluster.RuleManager
-	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	err := ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "test",
@@ -197,6 +197,8 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 			LocationLabels: []string{"dc", "zone", "host"},
 		},
 	})
+	re.NoError(err)
+	err = ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	re.NoError(err)
 	stores := []struct {
 		storeID     uint64
@@ -287,6 +289,38 @@ func TestStoreStateFilter(t *testing.T) {
 		{3, plan.StatusOK, plan.StatusOK},
 	}
 	check(store, testCases)
+
+	// Removed
+	store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	testCases = []testCase{
+		{0, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{1, plan.StatusStoreBusy, plan.StatusStoreRemoved},
+		{2, plan.StatusStoreRemoved, plan.StatusStoreRemoved},
+		{3, plan.StatusOK, plan.StatusStoreRemoved},
+	}
+	check(store, testCases)
+}
+
+func TestHotRegionEvictedTargetFilter(t *testing.T) {
+	re := require.New(t)
+	filter := NewHotRegionEvictedTargetFilter("")
+	opt := mockconfig.NewTestOptions()
+
+	testCases := []struct {
+		name      string
+		store     *core.StoreInfo
+		targetRes plan.StatusCode
+	}{
+		{name: "normal", store: core.NewStoreInfoWithLabel(1, map[string]string{}), targetRes: plan.StatusOK},
+		{name: "slow-store", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SlowStoreEvicted()), targetRes: plan.StatusStoreRejectLeader},
+		{name: "stopping-store", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.StoppingStoreEvicted()), targetRes: plan.StatusStoreRejectLeader},
+		{name: "slow-trend", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SlowTrendEvicted()), targetRes: plan.StatusStoreRejectLeader},
+	}
+
+	for _, testCase := range testCases {
+		re.Equal(plan.StatusOK, filter.Source(opt, testCase.store).StatusCode, testCase.name)
+		re.Equal(testCase.targetRes, filter.Target(opt, testCase.store).StatusCode, testCase.name)
+	}
 }
 
 func TestStoreStateFilterReason(t *testing.T) {
@@ -473,6 +507,16 @@ func TestSpecialUseFilter(t *testing.T) {
 	}
 }
 
+func TestSpecialEngine(t *testing.T) {
+	re := require.New(t)
+	tiflash := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	tikv := core.NewStoreInfoWithLabel(2, map[string]string{core.EngineKey: core.EngineTiKV})
+	re.True(SpecialEngines.MatchStore(tiflash))
+	re.False(SpecialEngines.MatchStore(tikv))
+	re.True(NotSpecialEngines.MatchStore(tikv))
+	re.False(NotSpecialEngines.MatchStore(tiflash))
+}
+
 func BenchmarkCloneRegionTest(b *testing.B) {
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
@@ -493,7 +537,7 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateKeys(20),
 	)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

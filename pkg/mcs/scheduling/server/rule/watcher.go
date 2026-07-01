@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -25,13 +26,13 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Watcher is used to watch the PD for any Placement Rule changes.
@@ -40,10 +41,6 @@ type Watcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// ruleCommonPathPrefix:
-	//  - Key: /pd/{cluster_id}/rule
-	//  - Value: placement.Rule or placement.RuleGroup
-	ruleCommonPathPrefix string
 	// rulesPathPrefix:
 	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
 	//   - Value: placement.Rule
@@ -88,7 +85,6 @@ func NewWatcher(
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            etcdClient,
@@ -99,30 +95,32 @@ func NewWatcher(
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	err = rw.initializeRegionLabelWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	return rw, nil
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	var suspectKeyRanges *core.KeyRanges
+	var suspectKeyRanges *keyutil.KeyRanges
 
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
-		suspectKeyRanges = &core.KeyRanges{}
+		suspectKeyRanges = &keyutil.KeyRanges{}
 		return nil
 	}
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -139,7 +137,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			return nil
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
 			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -158,8 +156,8 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
+			log.Debug("delete placement rule", zap.String("key", key))
+			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
 			}
@@ -173,8 +171,8 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("delete placement rule group", zap.String("key", key))
-			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
+			log.Debug("delete placement rule group", zap.String("key", key))
+			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
 			// Update the suspect key ranges
@@ -200,7 +198,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-watcher", rw.ruleCommonPathPrefix,
+		"scheduling-rule-watcher",
+		// Watch placement.Rule or placement.RuleGroup
+		keypath.RuleCommonPathPrefix(),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
@@ -211,11 +211,15 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
-	prefixToTrim := rw.regionLabelPathPrefix + "/"
+	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.regionLabeler.Lock()
+		for i := range suspectKeyRanges {
+			suspectKeyRanges[i] = nil // avoid memory leak
+		}
+		suspectKeyRanges = suspectKeyRanges[:0]
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -224,22 +228,46 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRuleLocked(rule)
+		err = rw.regionLabeler.SetLabelRuleLocked(rule)
+		if err == nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+		}
+		return err
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
+		log.Debug("delete region label rule", zap.String("key", key))
+		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)
+		rule := rw.regionLabeler.GetLabelRuleLocked(id)
+		err := rw.regionLabeler.DeleteLabelRuleLocked(id)
+		if err == nil && rule != nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+		}
+		return err
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
 		rw.regionLabeler.BuildRangeListLocked()
+		if rw.checkerController == nil {
+			return errors.New("checker controller is nil")
+		}
+		for _, kr := range suspectKeyRanges {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
 		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
+		"scheduling-region-label-watcher",
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(rw.regionLabelPathPrefix, "/"),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
@@ -253,4 +281,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 func (rw *Watcher) Close() {
 	rw.cancel()
 	rw.wg.Wait()
+	if rw.checkerController != nil {
+		rw.checkerController.ClearSuspectKeyRanges()
+	}
 }

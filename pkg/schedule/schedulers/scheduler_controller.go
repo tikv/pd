@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -121,7 +120,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 		if !s.IsPaused() && !c.cluster.IsSchedulingHalted() {
 			allowScheduler = 1
 		}
-		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
+		schedulerStatusGauge.WithLabelValues(s.GetName(), "allow").Set(allowScheduler)
 	}
 	c.RUnlock()
 	ruleMgr := c.cluster.GetRuleManager()
@@ -209,13 +208,13 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
-	if err := s.Scheduler.PrepareConfig(c.cluster); err != nil {
+	if err := s.PrepareConfig(c.cluster); err != nil {
 		return err
 	}
 
 	c.wg.Add(1)
 	go c.runScheduler(s)
-	c.schedulers[s.Scheduler.GetName()] = s
+	c.schedulers[s.GetName()] = s
 	if err := scheduler.SetDisable(false); err != nil {
 		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
 			errs.ZapError(err))
@@ -225,7 +224,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
-	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.GetType(), args)
+	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
 	return nil
 }
 
@@ -242,7 +241,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 	}
 
 	conf := c.cluster.GetSchedulerConfig()
-	conf.RemoveSchedulerCfg(s.Scheduler.GetType())
+	conf.RemoveSchedulerCfg(s.GetType())
 	if err := conf.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
@@ -297,10 +296,22 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
-	if exist, _ := c.IsSchedulerExisted(name); !exist {
-		return fmt.Errorf("scheduler %s is not existed", name)
+	c.RLock()
+	if c.cluster == nil {
+		c.RUnlock()
+		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	return c.GetScheduler(name).ReloadConfig()
+	c.RUnlock()
+	if exist, _ := c.IsSchedulerExisted(name); !exist {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	scheduler := c.GetScheduler(name)
+	if scheduler == nil {
+		// Scheduler exists in handlers but not in schedulers map, which means it's a handler-only scheduler
+		// Handler-only schedulers don't have config reloading capability
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return scheduler.ReloadConfig()
 }
 
 // IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
@@ -342,7 +353,7 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.GetType()), nil
+	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.GetType()), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.
@@ -363,7 +374,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer s.Scheduler.CleanConfig(c.cluster)
+	defer s.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()
@@ -376,13 +387,13 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 			}
 			if op := s.Schedule(diagnosable); len(op) > 0 {
 				added := c.opController.AddWaitingOperator(op...)
-				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.GetName()))
+				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(s.GetInterval())
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
-				zap.String("scheduler-name", s.Scheduler.GetName()),
+				zap.String("scheduler-name", s.GetName()),
 				errs.ZapError(s.Ctx().Err()))
 			return
 		}
@@ -424,8 +435,13 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 		s, ok := c.schedulers[types.TransferWitnessLeaderScheduler.String()]
 		c.RUnlock()
 		if ok {
+			regionC := RecvRegionInfo(s.Scheduler)
+			if regionC == nil {
+				log.Warn("invalid scheduler type for transfer witness leader", zap.String("scheduler", s.GetName()))
+				return
+			}
 			select {
-			case RecvRegionInfo(s.Scheduler) <- region:
+			case regionC <- region:
 			default:
 				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
 			}
@@ -434,7 +450,7 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 }
 
 // GetAllSchedulerConfigs returns all scheduler configs.
-func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
+func (c *Controller) GetAllSchedulerConfigs() (sches, configs []string, err error) {
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
@@ -498,7 +514,7 @@ retry:
 		}
 
 		// If we have schedule, reset interval to the minimal interval.
-		s.nextInterval = s.Scheduler.GetMinInterval()
+		s.nextInterval = s.GetMinInterval()
 		for i := 0; i < len(ops); i++ {
 			region := s.cluster.GetRegion(ops[i].RegionID())
 			if region == nil {
@@ -522,7 +538,7 @@ retry:
 		}
 		return ops
 	}
-	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
+	s.nextInterval = s.GetNextInterval(s.nextInterval)
 	return nil
 }
 
@@ -544,7 +560,7 @@ func (s *ScheduleController) SetInterval(interval time.Duration) {
 
 // AllowSchedule returns if a scheduler is allowed to
 func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
-	if !s.Scheduler.IsScheduleAllowed(s.cluster) {
+	if !s.IsScheduleAllowed(s.cluster) {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromStatus(Pending)
 		}

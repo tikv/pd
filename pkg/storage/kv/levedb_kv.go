@@ -53,10 +53,10 @@ func (kv *LevelDBKV) Load(key string) (string, error) {
 }
 
 // LoadRange gets a range of value for a given key range.
-func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) ([]string, []string, error) {
+func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) (keys, values []string, err error) {
 	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
-	keys := make([]string, 0, limit)
-	values := make([]string, 0, limit)
+	keys = make([]string, 0, limit)
+	values = make([]string, 0, limit)
 	count := 0
 	for iter.Next() {
 		if limit > 0 && count >= limit {

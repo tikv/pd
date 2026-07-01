@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -95,7 +96,7 @@ func (bo *Backoffer) Exec(
 			return errors.Trace(ctx.Err())
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
-				testBackOffExecuteFlag = true
+				testBackOffExecuteFlag.Store(true)
 			})
 		}
 		after.Stop()
@@ -181,11 +182,11 @@ func (bo *Backoffer) resetBackoff() {
 }
 
 // Only used for test.
-var testBackOffExecuteFlag = false
+var testBackOffExecuteFlag atomic.Bool
 
 // TestBackOffExecute Only used for test.
 func TestBackOffExecute() bool {
-	return testBackOffExecuteFlag
+	return testBackOffExecuteFlag.Load()
 }
 
 func getFunctionName(f any) string {

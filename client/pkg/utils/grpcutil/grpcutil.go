@@ -17,6 +17,7 @@ package grpcutil
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/url"
 	"sync"
 	"time"
@@ -78,7 +79,7 @@ func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
 func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		cb := circuitbreaker.FromContext(ctx)
-		if cb == nil {
+		if cb == nil || !cb.IsEnabled() {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
 		err := cb.Execute(func() (circuitbreaker.Overloading, error) {
@@ -145,6 +146,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	})
 
 	do = append(do, opt, retryOpt, cbOpt, backoffOpts)
+	// TODO: use grpc.NewClient instead of grpc.DialContext.
+	//nolint:staticcheck
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
@@ -221,4 +224,25 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 	cc = conn.(*grpc.ClientConn)
 	log.Debug("use existing connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 	return cc, nil
+}
+
+// GetCalleeID returns the callee ID extracted from the given advertise address.
+// The callee ID is used to identify the callee in gRPC communication, and it is usually the host:port of the advertise address. If the advertise address is invalid, it will panic.
+func GetCalleeID(addr string) string {
+	parsed, err := url.Parse(addr)
+	callerID := ""
+	if err != nil {
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
+			return ""
+		}
+		callerID = addr
+	} else {
+		callerID = parsed.Host
+		if callerID == "" {
+			if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+				callerID = addr
+			}
+		}
+	}
+	return callerID
 }

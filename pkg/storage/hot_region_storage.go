@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -80,6 +80,7 @@ type HistoryHotRegion struct {
 	HotRegionType string  `json:"hot_region_type"`
 	HotDegree     int64   `json:"hot_degree"`
 	FlowBytes     float64 `json:"flow_bytes"`
+	FlowCPU       float64 `json:"flow_cpu"`
 	KeyRate       float64 `json:"key_rate"`
 	QueryRate     float64 `json:"query_rate"`
 	StartKey      string  `json:"start_key"`
@@ -323,7 +324,7 @@ func (h *HotRegionStorage) flush() error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	if err := h.LevelDBKV.Write(batch, nil); err != nil {
+	if err := h.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	h.batchHotInfo = make(map[string]*HistoryHotRegion)
@@ -367,6 +368,7 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 		if len(it.iters) == 1 {
 			return nil, nil
 		}
+		it.iters[0] = nil // avoid memory leak
 		it.iters = it.iters[1:]
 		iter = it.iters[0]
 	}

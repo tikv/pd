@@ -15,6 +15,8 @@
 package id
 
 import (
+	"math"
+
 	"github.com/prometheus/client_golang/prometheus"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -22,11 +24,13 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 type label string
@@ -36,6 +40,9 @@ const (
 	DefaultLabel label = "idalloc"
 	// KeyspaceLabel is the label for keyspace id allocator.
 	KeyspaceLabel label = "keyspace-idAlloc"
+
+	// DefaultAllocStep is the default step size for id allocation.
+	DefaultAllocStep = uint64(1000)
 )
 
 // Allocator is the allocator to generate unique ID.
@@ -43,14 +50,12 @@ type Allocator interface {
 	// SetBase set base id
 	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
-	Alloc() (uint64, error)
+	Alloc(count uint32) (uint64, uint32, error)
 	// Rebase resets the base for the allocator from the persistent window boundary,
 	// which also resets the end of the allocator. (base, end) is the range that can
 	// be allocated in memory.
 	Rebase() error
 }
-
-const defaultAllocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
@@ -58,11 +63,12 @@ type allocatorImpl struct {
 	base uint64
 	end  uint64
 
-	client  *clientv3.Client
-	label   label
-	member  string
-	step    uint64
-	metrics *metrics
+	client       *clientv3.Client
+	label        label
+	member       string
+	step         uint64
+	metrics      *metrics
+	effectiveEnd uint64
 }
 
 // metrics is a collection of idAllocator's metrics.
@@ -88,25 +94,42 @@ func NewAllocator(params *AllocatorParams) Allocator {
 		metrics: &metrics{idGauge: idGauge.WithLabelValues(string(params.Label))},
 	}
 	if allocator.step == 0 {
-		allocator.step = defaultAllocStep
+		allocator.step = DefaultAllocStep
 	}
+	var effectiveEnd uint64
+	effectiveEnd = math.MaxUint64
+	if params.Label == KeyspaceLabel {
+		if kerneltype.IsNextGen() {
+			effectiveEnd = constant.ReservedKeyspaceIDStart - 1 // Last allocable ID for NextGen
+		} else {
+			effectiveEnd = uint64(constant.MaxValidKeyspaceID) // Last allocable ID for non NextGen
+		}
+	}
+	allocator.effectiveEnd = effectiveEnd
 	return allocator
 }
 
 // Alloc returns a new id.
-func (alloc *allocatorImpl) Alloc() (uint64, error) {
+func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	if alloc.base == alloc.end {
-		if err := alloc.rebaseLocked(true); err != nil {
-			return 0, err
+	for range count {
+		// If current base is already at or beyond the effective end,
+		// we need to return an error.
+		if alloc.base >= alloc.effectiveEnd {
+			return 0, 0, errs.ErrIDExhausted.FastGenByArgs()
 		}
+		if alloc.base == alloc.end {
+			if err := alloc.rebaseLocked(true); err != nil {
+				return 0, 0, err
+			}
+		}
+
+		alloc.base++
 	}
 
-	alloc.base++
-
-	return alloc.base, nil
+	return alloc.base, count, nil
 }
 
 // SetBase sets the base.
@@ -114,6 +137,10 @@ func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
+	// Ensure the newBase is valid.
+	if newBase >= alloc.effectiveEnd {
+		return errs.ErrIDExhausted.FastGenByArgs()
+	}
 	// set current end to new base, rebaseLocked will change it later.
 	alloc.end = newBase
 
@@ -138,7 +165,7 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		key = keypath.AllocIDPath()
 	}
 
-	leaderPath := keypath.LeaderPath(nil)
+	leaderPath := keypath.ElectionPath(nil)
 	var (
 		cmps = []clientv3.Cmp{clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member)}
 		end  uint64
@@ -165,7 +192,13 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		end = alloc.end
 	}
 
-	end += alloc.step
+	// make sure the end is not beyond the effective end
+	if end+alloc.step > alloc.effectiveEnd {
+		end = alloc.effectiveEnd
+	} else {
+		end += alloc.step
+	}
+
 	value := typeutil.Uint64ToBytes(end)
 	txn := kv.NewSlowLogTxn(alloc.client)
 	resp, err := txn.If(cmps...).Then(clientv3.OpPut(key, string(value))).Commit()

@@ -21,23 +21,33 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
+	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type memberTestSuite struct {
 	suite.Suite
@@ -50,9 +60,10 @@ type memberTestSuite struct {
 
 	// We only test `DefaultKeyspaceGroupID` here.
 	// tsoAvailMembers is used to check the tso members which in the DefaultKeyspaceGroupID.
-	tsoAvailMembers map[string]bool
-	tsoNodes        map[string]bs.Server
-	schedulingNodes map[string]bs.Server
+	tsoAvailMembers      map[string]bool
+	tsoNodes             map[string]bs.Server
+	schedulingNodes      map[string]bs.Server
+	resourceManagerNodes map[string]bs.Server
 }
 
 func TestMemberTestSuite(t *testing.T) {
@@ -107,6 +118,18 @@ func (suite *memberTestSuite) SetupTest() {
 	tests.WaitForPrimaryServing(re, nodes)
 	suite.schedulingNodes = nodes
 
+	// resource manager
+	nodes = make(map[string]bs.Server)
+	for range 3 {
+		s, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		nodes[s.GetAddr()] = s
+		suite.cleanupFunc = append(suite.cleanupFunc, func() {
+			cleanup()
+		})
+	}
+	tests.WaitForPrimaryServing(re, nodes)
+	suite.resourceManagerNodes = nodes
+
 	suite.cleanupFunc = append(suite.cleanupFunc, func() {
 		cancel()
 	})
@@ -133,6 +156,10 @@ func (suite *memberTestSuite) TestMembers() {
 	members, err = suite.pdClient.GetMicroserviceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
+
+	members, err = suite.pdClient.GetMicroserviceMembers(suite.ctx, "resource_manager")
+	re.NoError(err)
+	re.Len(members, 3)
 }
 
 func (suite *memberTestSuite) TestPrimary() {
@@ -144,6 +171,10 @@ func (suite *memberTestSuite) TestPrimary() {
 	primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.NotEmpty(primary)
+
+	primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, "resource_manager")
+	re.NoError(err)
+	re.NotEmpty(primary)
 }
 
 func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
@@ -152,7 +183,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -160,6 +191,8 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -182,7 +215,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 
 func (suite *memberTestSuite) TestTransferPrimary() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -190,6 +223,8 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		// Test resign primary by random
@@ -198,8 +233,9 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = ""
-		data, _ := json.Marshal(newPrimaryData)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -229,8 +265,9 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			}
 		}
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ = json.Marshal(newPrimaryData)
-		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err = json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -247,8 +284,9 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		// Test transfer primary to a non-exist node
 		newPrimary = "http://"
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ = json.Marshal(newPrimaryData)
-		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err = json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusInternalServerError, resp.StatusCode)
@@ -258,7 +296,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -266,6 +304,8 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -284,8 +324,9 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		}
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ := json.Marshal(newPrimaryData)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -312,7 +353,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -320,6 +361,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -340,8 +383,9 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = newPrimary
-		data, _ := json.Marshal(newPrimaryData)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -367,7 +411,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	supportedServices := []string{"tso", "scheduling"}
+	supportedServices := []string{"tso", "scheduling", "resource_manager"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
 		switch service {
@@ -375,6 +419,8 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 			nodes = suite.tsoNodes
 		case "scheduling":
 			nodes = suite.schedulingNodes
+		case "resource_manager":
+			nodes = suite.resourceManagerNodes
 		}
 
 		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
@@ -395,8 +441,9 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		newPrimaryData := make(map[string]any)
 		newPrimaryData["new_primary"] = ""
-		data, _ := json.Marshal(newPrimaryData)
-		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+		data, err := json.Marshal(newPrimaryData)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -419,6 +466,243 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
 	}
+}
+
+// mustSetupKeyspaceGroupWithoutKeyspaces creates a keyspace group that has no
+// keyspaces assigned, allocates TSO nodes for it, and waits until one of them
+// becomes the primary. It returns the primary's address.
+func (suite *memberTestSuite) mustSetupKeyspaceGroupWithoutKeyspaces(re *require.Assertions, groupID uint32) string {
+	// Create the keyspace group without members first, then use AllocNodes so that
+	// TSO nodes discover the group via etcd watch and elect a primary.
+	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:       groupID,
+				UserKind: endpoint.Standard.String(),
+			},
+		},
+	})
+
+	// Allocate nodes for the group via PD's AllocNodes API so TSO nodes can
+	// discover their membership through etcd and start campaigning for primary.
+	allocBody, err := json.Marshal(&handlers.AllocNodesForKeyspaceGroupParams{
+		Replica: mcs.DefaultKeyspaceGroupReplicaCount,
+	})
+	re.NoError(err)
+	allocReq, err := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("%s/pd/api/v2/tso/keyspace-groups/%d/alloc", suite.backendEndpoints, groupID),
+		bytes.NewBuffer(allocBody))
+	re.NoError(err)
+	allocResp, err := tests.TestDialClient.Do(allocReq)
+	re.NoError(err)
+	re.Equal(http.StatusOK, allocResp.StatusCode)
+	allocResp.Body.Close()
+
+	// Wait until the group is loaded on a TSO node and has elected a primary.
+	var groupPrimary string
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[groupID]; ok && m.IsPrimary {
+				groupPrimary = tsoSvr.GetAddr()
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+	re.NotEmpty(groupPrimary)
+	return groupPrimary
+}
+
+// TestKeyspaceGroupMembersWithoutKeyspaces verifies that the keyspace-groups
+// members API returns a keyspace group that is served by the node but has no
+// keyspaces assigned. This guards against regressing back to GetKeyspaceGroups(),
+// which is built from the keyspace lookup table and would miss such a group, so
+// its primary would never be observed through this API.
+func (suite *memberTestSuite) TestKeyspaceGroupMembersWithoutKeyspaces() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// The group with no keyspaces must be returned by the members API, and its
+	// member list must not carry any keyspace.
+	members := mustGetKeyspaceGroupMembers(re, suite.tsoNodes[groupPrimary].(*tso.Server))
+	m, ok := members[testGroupID]
+	re.True(ok)
+	re.True(m.IsPrimary)
+	re.Empty(m.Group.Keyspaces)
+}
+
+// TestTransferPrimaryWithKeyspaceGroup tests that the transfer primary API accepts
+// a keyspace_group_id field and routes the transfer to the correct keyspace group.
+func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// Transfer primary within keyspace group 1 (random resign — new_primary left empty).
+	body := map[string]any{
+		"new_primary":       "",
+		"keyspace_group_id": testGroupID,
+	}
+	data, err := json.Marshal(body)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Wait for the primary of group 1 to move to a different node.
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return tsoSvr.GetAddr() != groupPrimary
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Transfer primary to a specific node within keyspace group 1.
+	var newPrimary string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && m.IsPrimary {
+			groupPrimary = tsoSvr.GetAddr()
+		} else if _, ok := members[testGroupID]; ok {
+			newPrimary = tsoSvr.Name()
+		}
+	}
+	re.NotEmpty(newPrimary)
+
+	body["new_primary"] = newPrimary
+	body["keyspace_group_id"] = testGroupID
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Verify the specified node becomes primary.
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			if tsoSvr.Name() != newPrimary {
+				continue
+			}
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	// Sending the transfer request to a non-primary member of the group should
+	// be forwarded to the group's primary and still succeed.
+	var nonPrimaryAddr string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && !m.IsPrimary {
+			nonPrimaryAddr = tsoSvr.GetAddr()
+			break
+		}
+	}
+	re.NotEmpty(nonPrimaryAddr)
+	body["new_primary"] = ""
+	body["keyspace_group_id"] = testGroupID
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	// The follower forwards the request to the group's primary. While a primary
+	// election is in flight the primary address can be briefly unavailable, so
+	// retry until the forwarded request succeeds.
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", nonPrimaryAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+
+	// Requesting transfer for a non-existent keyspace group should return 400.
+	body["keyspace_group_id"] = uint32(9999)
+	data, err = json.Marshal(body)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+
+	// An empty request body must be rejected instead of silently falling back to
+	// a random transfer on the default keyspace group.
+	resp, err = tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", http.NoBody)
+	re.NoError(err)
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+	resp.Body.Close()
+}
+
+// TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary
+// request for the default keyspace group is still forwarded from a follower to
+// the primary and succeeds, preserving backward compatibility with the previous
+// ServiceRedirector behavior.
+func (suite *memberTestSuite) TestTransferPrimaryToDefaultGroupFollower() {
+	re := suite.Require()
+
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	// Pick a follower of the default keyspace group.
+	var followerAddr string
+	for addr := range suite.tsoAvailMembers {
+		if addr != primary {
+			followerAddr = addr
+			break
+		}
+	}
+	re.NotEmpty(followerAddr)
+
+	// Omit keyspace_group_id so it defaults to the default keyspace group (0).
+	// The follower should forward the request to the primary and succeed. Retry
+	// to ride over any in-flight primary election.
+	data, err := json.Marshal(map[string]any{"new_primary": ""})
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(
+			fmt.Sprintf("%s/tso/api/v1/primary/transfer", followerAddr),
+			"application/json", bytes.NewBuffer(data))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(200*time.Millisecond))
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {

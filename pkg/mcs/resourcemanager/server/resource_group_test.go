@@ -1,3 +1,17 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -12,7 +26,7 @@ import (
 
 func TestPatchResourceGroup(t *testing.T) {
 	re := require.New(t)
-	rg := &ResourceGroup{Name: "test", Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(nil)}
+	rg := &ResourceGroup{Name: testResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: NewRequestUnitSettings(testResourceGroupName, nil)}
 	testCaseRU := []struct {
 		patchJSONString  string
 		expectJSONString string
@@ -38,10 +52,49 @@ func TestPatchResourceGroup(t *testing.T) {
 }
 
 func TestClone(t *testing.T) {
-	for i := 0; i <= 10; i++ {
+	re := require.New(t)
+	for range 11 {
 		var rg ResourceGroup
-		gofakeit.Struct(&rg)
+		re.NoError(gofakeit.Struct(&rg))
 		rgClone := rg.Clone(true)
-		require.EqualValues(t, &rg, rgClone)
+		require.Equal(t, &rg, rgClone)
 	}
+}
+
+func TestApplySettingsWithoutTokenPatch(t *testing.T) {
+	re := require.New(t)
+	rg := &ResourceGroup{
+		Name: testResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &RequestUnitSettings{
+			RU: &GroupTokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+				GroupTokenBucketState: GroupTokenBucketState{
+					Tokens:             123.0,
+					overrideFillRate:   -1,
+					overrideBurstLimit: -1,
+				},
+			},
+		},
+	}
+	patch := &rmpb.ResourceGroup{
+		Name: testResourceGroupName,
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   500,
+					BurstLimit: 800,
+				},
+				Tokens: 999.0,
+			},
+		},
+	}
+	re.NoError(rg.ApplySettings(patch))
+	re.Equal(float64(500), rg.getFillRate())
+	re.Equal(int64(800), rg.getBurstLimit())
+	re.Equal(123.0, rg.getRUToken())
 }

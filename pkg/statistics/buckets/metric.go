@@ -19,15 +19,6 @@ import (
 )
 
 var (
-	bucketsHotDegreeHist = prometheus.NewHistogram(
-		prometheus.HistogramOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "buckets_hot_degree_hist",
-			Help:      "Bucketed histogram of bucket hot degree",
-			Buckets:   prometheus.LinearBuckets(-20, 2, 20), // [-20 20]
-		})
-
 	bucketsTaskDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -39,6 +30,5 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(bucketsHotDegreeHist)
 	prometheus.MustRegister(bucketsTaskDuration)
 }

@@ -64,7 +64,7 @@ func (f *RegionFit) Replace(srcStoreID uint64, dstStore *core.StoreInfo) bool {
 		return false
 	}
 
-	score := isolationStoreScore(srcStoreID, dstStore, fit.stores, fit.Rule.LocationLabels)
+	score := isolationStoreScore(srcStoreID, dstStore, fit.Stores, fit.Rule.LocationLabels)
 	// restore the source store.
 	return fit.IsolationScore <= score
 }
@@ -120,6 +120,11 @@ func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 	return f.regionStores
 }
 
+// GetRules returns the rules that are used to fit the region.
+func (f *RegionFit) GetRules() []*Rule {
+	return f.rules
+}
+
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
 	Rule *Rule `json:"rule"`
@@ -133,8 +138,8 @@ type RuleFit struct {
 	// isolated. A larger value is better.
 	IsolationScore float64 `json:"isolation-score"`
 	WitnessScore   int     `json:"witness-score"`
-	// stores is the stores that the peers are placed in.
-	stores []*core.StoreInfo
+	// Stores is the stores that the peers are placed in.
+	Stores []*core.StoreInfo `json:"-"`
 }
 
 // IsSatisfied returns if the rule is properly satisfied.
@@ -257,7 +262,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		// 3. Don't select leader as witness.
 		// 4. Not selected by other rules.
 		for _, p := range w.peers {
-			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && !(p.isLeader && w.supportWitness && w.rules[index].IsWitness) {
+			if !p.selected && MatchLabelConstraints(p.store, w.rules[index].LabelConstraints) && (!p.isLeader || !w.supportWitness || !w.rules[index].IsWitness) {
 				candidates = append(candidates, p)
 			}
 		}
@@ -366,7 +371,7 @@ func newRuleFit(rule *Rule, peers []*fitPeer, supportWitness bool) *RuleFit {
 	rf := &RuleFit{Rule: rule, IsolationScore: isolationScore(peers, rule.LocationLabels), WitnessScore: witnessScore(peers, supportWitness && rule.IsWitness)}
 	for _, p := range peers {
 		rf.Peers = append(rf.Peers, p.Peer)
-		rf.stores = append(rf.stores, p.store)
+		rf.Stores = append(rf.Stores, p.store)
 		if !p.matchRoleStrict(rule.Role) ||
 			(supportWitness && (p.IsWitness != rule.IsWitness)) ||
 			(!supportWitness && p.IsWitness) {

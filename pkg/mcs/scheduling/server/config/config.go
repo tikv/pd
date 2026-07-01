@@ -17,10 +17,8 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -30,7 +28,6 @@ import (
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
@@ -60,8 +57,6 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
@@ -134,27 +129,17 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
-
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = mcsconstant.DefaultEnableGRPCGateway
-	}
 
 	c.adjustLog(configMetaData.Child("log"))
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
@@ -175,8 +160,8 @@ func (c *Config) GetName() string {
 	return c.Name
 }
 
-// GeBackendEndpoints returns the BackendEndpoints
-func (c *Config) GeBackendEndpoints() string {
+// GetBackendEndpoints returns the BackendEndpoints
+func (c *Config) GetBackendEndpoints() string {
 	return c.BackendEndpoints
 }
 
@@ -193,27 +178,6 @@ func (c *Config) GetAdvertiseListenAddr() string {
 // GetTLSConfig returns the TLS config.
 func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
-}
-
-// validate is used to validate if some configurations are right.
-func (c *Config) validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }
 
 // Clone creates a copy of current config.
@@ -233,7 +197,7 @@ type PersistConfig struct {
 	replication    atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
+	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
 }
 
@@ -251,16 +215,30 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 }
 
 // SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan struct{}) {
 	o.schedulersUpdatingNotifier.Store(notifier)
 }
 
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+// ClearSchedulersUpdatingNotifier clears the schedulers updating notifier if it
+// still matches the given notifier.
+func (o *PersistConfig) ClearSchedulersUpdatingNotifier(notifier chan struct{}) {
+	if notifier == nil {
+		return
+	}
+	current := o.getSchedulersUpdatingNotifier()
+	if current != notifier {
+		return
+	}
+	var empty chan struct{}
+	o.schedulersUpdatingNotifier.CompareAndSwap(current, empty)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan struct{} {
 	v := o.schedulersUpdatingNotifier.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(chan<- struct{})
+	return v.(chan struct{})
 }
 
 func (o *PersistConfig) tryNotifySchedulersUpdating() {
@@ -268,7 +246,11 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	// Scheduler update notifications are coalesced; one pending signal is enough.
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -340,6 +322,16 @@ func (o *PersistConfig) GetMaxReplicas() int {
 // IsPlacementRulesEnabled returns if the placement rules is enabled.
 func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
+}
+
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistConfig) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistConfig) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
 }
 
 // GetLowSpaceRatio returns the low space ratio.
@@ -521,53 +513,21 @@ func (o *PersistConfig) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	defer func() {
-		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
-		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
-	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
+	limitCfg := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	defer func() {
-		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		} else if typ == storelimit.AddPeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
-		}
-	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
@@ -595,6 +555,12 @@ func (o *PersistConfig) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistConfig) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+// A zero value means the affinity merge is disabled.
+func (o *PersistConfig) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
@@ -802,25 +768,6 @@ func (o *PersistConfig) getTTLBool(key string) (result bool, contains bool, err 
 
 func (o *PersistConfig) getTTLBoolOr(key string, defaultValue bool) bool {
 	if v, ok, err := o.getTTLBool(key); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
-	}
-	return defaultValue
-}
-
-func (o *PersistConfig) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.GetTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
-func (o *PersistConfig) getTTLFloatOr(key string, defaultValue float64) float64 {
-	if v, ok, err := o.getTTLFloat(key); ok {
 		if err == nil {
 			return v
 		}

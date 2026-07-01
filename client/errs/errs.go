@@ -35,9 +35,16 @@ func IsLeaderChange(err error) bool {
 	errMsg := err.Error()
 	return strings.Contains(errMsg, NoLeaderErr) ||
 		strings.Contains(errMsg, NotLeaderErr) ||
-		strings.Contains(errMsg, MismatchLeaderErr) ||
 		strings.Contains(errMsg, NotServedErr) ||
 		strings.Contains(errMsg, NotPrimaryErr)
+}
+
+// IsCalleeMismatch checks whether the error is caused by callee ID mismatch.
+func IsCalleeMismatch(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), MismatchCalleeIDErr)
 }
 
 // IsNetworkError returns true if the error is a network error.

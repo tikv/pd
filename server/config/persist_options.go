@@ -16,10 +16,8 @@ package config
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -138,6 +136,11 @@ func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 	o.keyspace.Store(cfg)
 }
 
+// CASKeyspaceConfig compares and swaps the keyspace configuration.
+func (o *PersistOptions) CASKeyspaceConfig(oldCfg, newCfg *KeyspaceConfig) bool {
+	return o.keyspace.CompareAndSwap(oldCfg, newCfg)
+}
+
 // GetMicroserviceConfig returns the microservice configuration.
 func (o *PersistOptions) GetMicroserviceConfig() *MicroserviceConfig {
 	return o.microservice.Load().(*MicroserviceConfig)
@@ -195,6 +198,30 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// GetAffinityScheduleLimit returns the limit for affinity schedule.
+func (o *PersistOptions) GetAffinityScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.AffinityScheduleLimitKey, o.GetScheduleConfig().AffinityScheduleLimit)
+}
+
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistOptions) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
+}
+
+// SetAffinityScheduleLimit sets the limit for affinity schedule.
+func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.AffinityScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
+// SetSplitScatterScheduleLimit sets the limit for split-scatter schedule.
+func (o *PersistOptions) SetSplitScatterScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.SplitScatterScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
@@ -241,11 +268,10 @@ var supportedTTLConfigs = []string{
 	sc.ReplicaRescheduleLimitKey,
 	sc.MergeScheduleLimitKey,
 	sc.HotRegionScheduleLimitKey,
+	sc.SplitScatterScheduleLimitKey,
 	sc.SchedulerMaxWaitingOperatorKey,
 	sc.EnableLocationReplacement,
 	sc.EnableTiKVSplitRegion,
-	sc.DefaultAddPeer,
-	sc.DefaultRemovePeer,
 }
 
 // IsSupportedTTLConfig checks whether a key is a supported config item with ttl
@@ -255,7 +281,7 @@ func IsSupportedTTLConfig(key string) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(key, "add-peer-") || strings.HasPrefix(key, "remove-peer-")
+	return false
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
@@ -271,6 +297,11 @@ func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
 	return o.getTTLNumberOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+}
+
+// GetMaxAffinityMergeRegionSize returns the max affinity merge region size.
+func (o *PersistOptions) GetMaxAffinityMergeRegionSize() uint64 {
+	return o.GetScheduleConfig().GetMaxAffinityMergeRegionSize()
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
@@ -339,6 +370,13 @@ func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
 	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxAffinityMergeRegionSize sets the max affinity merge region size.
+func (o *PersistOptions) SetMaxAffinityMergeRegionSize(maxAffinityMergeRegionSize uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
 	o.SetScheduleConfig(v)
 }
 
@@ -452,53 +490,21 @@ func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
 
 // GetStoreLimit returns the limit of a store.
 func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitConfig) {
-	defer func() {
-		returnSC.RemovePeer = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returnSC.RemovePeer)
-		returnSC.AddPeer = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returnSC.AddPeer)
-	}()
 	if limit, ok := o.GetScheduleConfig().StoreLimit[storeID]; ok {
 		return limit
 	}
 	cfg := o.GetScheduleConfig().Clone()
-	sc := sc.StoreLimitConfig{
+	limitCfg := sc.StoreLimitConfig{
 		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
 		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
-	v, ok1, err := o.getTTLFloat("default-add-peer")
-	if err != nil {
-		log.Warn("failed to parse default-add-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetAddPeer := ok1 && err == nil
-	if canSetAddPeer {
-		returnSC.AddPeer = v
-	}
-
-	v, ok2, err := o.getTTLFloat("default-remove-peer")
-	if err != nil {
-		log.Warn("failed to parse default-remove-peer from PersistOptions's ttl storage", zap.Error(err))
-	}
-	canSetRemovePeer := ok2 && err == nil
-	if canSetRemovePeer {
-		returnSC.RemovePeer = v
-	}
-
-	if canSetAddPeer || canSetRemovePeer {
-		return returnSC
-	}
-	cfg.StoreLimit[storeID] = sc
+	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
 	return o.GetScheduleConfig().StoreLimit[storeID]
 }
 
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistOptions) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
-	defer func() {
-		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		} else if typ == storelimit.AddPeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
-		}
-	}()
 	limit := o.GetStoreLimit(storeID)
 	switch typ {
 	case storelimit.AddPeer:
@@ -933,25 +939,6 @@ func (o *PersistOptions) getTTLBoolOr(key string, defaultValue bool) bool {
 	return defaultValue
 }
 
-func (o *PersistOptions) getTTLFloat(key string) (float64, bool, error) {
-	stringForm, ok := o.GetTTLData(key)
-	if !ok {
-		return 0, false, nil
-	}
-	r, err := strconv.ParseFloat(stringForm, 64)
-	return r, true, err
-}
-
-func (o *PersistOptions) getTTLFloatOr(key string, defaultValue float64) float64 {
-	if v, ok, err := o.getTTLFloat(key); ok {
-		if err == nil {
-			return v
-		}
-		log.Warn("failed to parse "+key+" from PersistOptions's ttl storage", zap.Error(err))
-	}
-	return defaultValue
-}
-
 // GetTTLData returns if there is a TTL data for a given key.
 func (o *PersistOptions) GetTTLData(key string) (string, bool) {
 	if o.ttl == nil {
@@ -983,18 +970,6 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		o.ttl.PutWithTTL(key, value, time.Duration(resp.TTL)*time.Second)
 	}
 	return nil
-}
-
-// SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clientv3.Client, typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
-	var err error
-	switch typ {
-	case storelimit.AddPeer:
-		err = o.SetTTLData(ctx, client, "default-add-peer", fmt.Sprint(ratePerMin), ttl)
-	case storelimit.RemovePeer:
-		err = o.SetTTLData(ctx, client, "default-remove-peer", fmt.Sprint(ratePerMin), ttl)
-	}
-	return err
 }
 
 var haltSchedulingStatus = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")

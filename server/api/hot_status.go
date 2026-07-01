@@ -39,24 +39,28 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 	}
 }
 
-// @Tags     hotspot
-// @Summary  List the hot write regions.
-// @Produce  json
-// @Success  200  {object}  statistics.StoreHotPeersInfos
-// @Failure  400  {string}  string  "The request is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /hotspot/regions/write [get]
+// GetHotWriteRegions lists the hot write regions.
+//
+//	@Tags		hotspot
+//	@Summary	List the hot write regions.
+//	@Produce	json
+//	@Success	200	{object}	statistics.StoreHotPeersInfos
+//	@Failure	400	{string}	string	"The request is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
 	h.getHotRegions(utils.Write, w, r)
 }
 
-// @Tags     hotspot
-// @Summary  List the hot read regions.
-// @Produce  json
-// @Success  200  {object}  statistics.StoreHotPeersInfos
-// @Failure  400  {string}  string  "The request is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /hotspot/regions/read [get]
+// GetHotReadRegions lists the hot read regions.
+//
+//	@Tags		hotspot
+//	@Summary	List the hot read regions.
+//	@Produce	json
+//	@Success	200	{object}	statistics.StoreHotPeersInfos
+//	@Failure	400	{string}	string	"The request is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
 	h.getHotRegions(utils.Read, w, r)
 }
@@ -96,12 +100,14 @@ func (h *hotStatusHandler) getHotRegions(typ utils.RWType, w http.ResponseWriter
 	h.rd.JSON(w, http.StatusOK, hotRegions)
 }
 
-// @Tags     hotspot
-// @Summary  List the hot stores.
-// @Produce  json
-// @Success  200  {object}  handler.HotStoreStats
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /hotspot/stores [get]
+// GetHotStores lists the hot stores.
+//
+//	@Tags		hotspot
+//	@Summary	List the hot stores.
+//	@Produce	json
+//	@Success	200	{object}	handler.HotStoreStats
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, _ *http.Request) {
 	stats, err := h.Handler.GetHotStores()
 	if err != nil {
@@ -111,12 +117,14 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, _ *http.Request) 
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
-// @Tags     hotspot
-// @Summary  List the hot buckets.
-// @Produce  json
-// @Success  200  {object}  handler.HotBucketsResponse
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /hotspot/buckets [get]
+// GetHotBuckets lists the hot buckets.
+//
+//	@Tags		hotspot
+//	@Summary	List the hot buckets.
+//	@Produce	json
+//	@Success	200	{object}	handler.HotBucketsResponse
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/hotspot/buckets [get]
 func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
 	regionIDs := r.URL.Query()["region_id"]
 	ids := make([]uint64, len(regionIDs))
@@ -133,14 +141,16 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, ret)
 }
 
-// @Tags     hotspot
-// @Summary  List the history hot regions.
-// @Accept   json
-// @Produce  json
-// @Success  200  {object}  storage.HistoryHotRegions
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /hotspot/regions/history [get]
+// GetHistoryHotRegions lists the history hot regions.
+//
+//	@Tags		hotspot
+//	@Summary	List the history hot regions.
+//	@Accept		json
+//	@Produce	json
+//	@Success	200	{object}	storage.HistoryHotRegions
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Router		/hotspot/regions/history [get]
 func (h *hotStatusHandler) GetHistoryHotRegions(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()

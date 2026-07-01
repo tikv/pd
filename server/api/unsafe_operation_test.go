@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2026 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,89 +15,100 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
 	"testing"
+	"time"
 
-	"github.com/stretchr/testify/suite"
-
-	"github.com/pingcap/kvproto/pkg/metapb"
-
-	"github.com/tikv/pd/pkg/unsaferecovery"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
+	"github.com/stretchr/testify/require"
 )
 
-type unsafeOperationTestSuite struct {
-	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+func TestParsePlanExecutionTimeout(t *testing.T) {
+	re := require.New(t)
+
+	timeout, err := parsePlanExecutionTimeout(map[string]any{})
+	re.NoError(err)
+	re.Zero(timeout)
+
+	timeout, err = parsePlanExecutionTimeout(map[string]any{"plan-execution-timeout": float64(300)})
+	re.NoError(err)
+	re.Equal(5*time.Minute, timeout)
+
+	timeout, err = parsePlanExecutionTimeout(map[string]any{
+		"plan-execution-timeout": maxPlanExecutionTimeoutSeconds,
+	})
+	re.NoError(err)
+	re.Equal(time.Duration(int64(maxPlanExecutionTimeoutSeconds))*time.Second, timeout)
+
+	for _, input := range []map[string]any{
+		{"plan-execution-timeout": float64(0)},
+		{"plan-execution-timeout": float64(-1)},
+		{"plan-execution-timeout": 1.5},
+		{"plan-execution-timeout": maxPlanExecutionTimeoutSeconds + 1},
+		{"plan-execution-timeout": "60"},
+	} {
+		_, err = parsePlanExecutionTimeout(input)
+		re.Error(err)
+	}
+
+	_, err = parsePlanExecutionTimeout(map[string]any{
+		"plan-execution-timeout": float64(300),
+		"plan_execution_timeout": float64(600),
+	})
+	re.EqualError(err, "plan-execution-timeout is specified multiple times")
 }
 
-func TestUnsafeOperationTestSuite(t *testing.T) {
-	suite.Run(t, new(unsafeOperationTestSuite))
+func TestParseTimeout(t *testing.T) {
+	re := require.New(t)
+
+	timeout, err := parseTimeout(map[string]any{})
+	re.NoError(err)
+	re.Equal(uint64(600), timeout)
+
+	timeout, err = parseTimeout(map[string]any{"timeout": float64(300)})
+	re.NoError(err)
+	re.Equal(uint64(300), timeout)
+
+	timeout, err = parseTimeout(map[string]any{"timeout": maxPlanExecutionTimeoutSeconds})
+	re.NoError(err)
+	re.Equal(uint64(maxPlanExecutionTimeoutSeconds), timeout)
+
+	for _, input := range []map[string]any{
+		{"timeout": float64(0)},
+		{"timeout": float64(-1)},
+		{"timeout": 1.5},
+		{"timeout": maxPlanExecutionTimeoutSeconds + 1},
+		{"timeout": "60"},
+	} {
+		_, err = parseTimeout(input)
+		re.EqualError(err, "timeout is invalid")
+	}
 }
 
-func (suite *unsafeOperationTestSuite) SetupTest() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+func TestParseDisableParanoidCheck(t *testing.T) {
+	re := require.New(t)
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
-}
-
-func (suite *unsafeOperationTestSuite) TearDownTest() {
-	suite.cleanup()
-}
-
-func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
-	re := suite.Require()
-
-	input := map[string]any{"stores": []uint64{}}
-	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
-		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
+	disableParanoidCheck, err := parseDisableParanoidCheck(map[string]any{})
 	re.NoError(err)
+	re.False(disableParanoidCheck)
 
-	input = map[string]any{"stores": []string{"abc", "def"}}
-	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
-		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
+	disableParanoidCheck, err = parseDisableParanoidCheck(map[string]any{"disable-paranoid-check": true})
 	re.NoError(err)
+	re.True(disableParanoidCheck)
 
-	input = map[string]any{"stores": []uint64{1, 2}}
-	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
-		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
+	disableParanoidCheck, err = parseDisableParanoidCheck(map[string]any{"disable_paranoid_check": false})
 	re.NoError(err)
+	re.False(disableParanoidCheck)
 
-	input = map[string]any{"stores": []uint64{1}}
-	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
-	re.NoError(err)
+	for _, input := range []map[string]any{
+		{"disable-paranoid-check": "true"},
+		{"disable_paranoid_check": 1},
+	} {
+		_, err = parseDisableParanoidCheck(input)
+		re.Error(err)
+	}
 
-	// Test show
-	var output []unsaferecovery.StageOutput
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
-	re.NoError(err)
-}
-
-func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
-	re := suite.Require()
-
-	input := map[string]any{"auto-detect": false}
-	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
-		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
-	re.NoError(err)
-
-	input = map[string]any{"auto-detect": true}
-	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
-	re.NoError(err)
+	_, err = parseDisableParanoidCheck(map[string]any{
+		"disable-paranoid-check": true,
+		"disable_paranoid_check": false,
+	})
+	re.EqualError(err, "disable-paranoid-check is specified multiple times")
 }

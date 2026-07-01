@@ -15,12 +15,13 @@
 package serverapi
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -48,7 +49,6 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		next(w, r)
 		return
 	}
-
 	http.Error(w, "no service", http.StatusServiceUnavailable)
 }
 
@@ -75,15 +75,16 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 type redirector struct {
 	s *server.Server
 
-	microserviceRedirectRules []*microserviceRedirectRule
+	microserviceRedirectRules []RedirectRule
 }
 
-type microserviceRedirectRule struct {
-	matchPath         string
-	targetPath        string
-	targetServiceName string
-	matchMethods      []string
-	filter            func(*http.Request) bool
+// RedirectRule describes how to match and rewrite microservice paths.
+type RedirectRule struct {
+	MatchPath         string
+	TargetPath        string
+	TargetServiceName string
+	MatchMethods      []string
+	Filter            func(*http.Request) bool
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
@@ -102,24 +103,38 @@ type RedirectorOption func(*redirector)
 func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 	methods []string, filters ...func(*http.Request) bool) RedirectorOption {
 	return func(s *redirector) {
-		rule := &microserviceRedirectRule{
-			matchPath:         matchPath,
-			targetPath:        targetPath,
-			targetServiceName: targetServiceName,
-			matchMethods:      methods,
+		rule := RedirectRule{
+			MatchPath:         matchPath,
+			TargetPath:        targetPath,
+			TargetServiceName: targetServiceName,
+			MatchMethods:      methods,
 		}
 		if len(filters) > 0 {
-			rule.filter = filters[0]
+			rule.Filter = filters[0]
 		}
 		s.microserviceRedirectRules = append(s.microserviceRedirectRules, rule)
 	}
 }
 
 func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsServiceIndependent(constant.TSOServiceName) && !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
-		return false, ""
-	}
-	if len(h.microserviceRedirectRules) == 0 {
+	return MatchMicroserviceRedirect(
+		r,
+		h.microserviceRedirectRules,
+		h.s.IsKeyspaceGroupEnabled(),
+		h.s.IsServiceIndependent,
+		h.s.GetServicePrimaryAddr)
+}
+
+// MatchMicroserviceRedirect checks rules, rewrites path in-place, and returns (matched, targetAddr).
+// If matched but no primary is available, it returns matched=true with empty addr so caller can handle the redirect error.
+func MatchMicroserviceRedirect(
+	r *http.Request,
+	rules []RedirectRule,
+	isKeyspaceGroupEnabled bool,
+	isServiceIndependent func(string) bool,
+	getPrimary func(context.Context, string) (string, bool),
+) (bool, string) {
+	if !isKeyspaceGroupEnabled || len(rules) == 0 {
 		return false, ""
 	}
 	if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
@@ -128,54 +143,74 @@ func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, stri
 	// Remove trailing '/' from the URL path
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
-	for _, rule := range h.microserviceRedirectRules {
+	for _, rule := range rules {
 		// Now we only support checking the scheduling service whether it is independent
-		if rule.targetServiceName == constant.SchedulingServiceName {
-			if !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
-				continue
-			}
+		if rule.TargetServiceName == constant.SchedulingServiceName && !isServiceIndependent(constant.SchedulingServiceName) {
+			continue
 		}
-		if strings.HasPrefix(r.URL.Path, rule.matchPath) &&
-			slice.Contains(rule.matchMethods, r.Method) {
-			if rule.filter != nil && !rule.filter(r) {
-				continue
-			}
-			// we check the service primary addr here,
-			// if the service is not available, we will return ErrRedirect by returning an empty addr.
-			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
-			if !ok || addr == "" {
-				log.Warn("failed to get the service primary addr when trying to match redirect rules",
-					zap.String("path", r.URL.Path), zap.String("addr", addr),
-					zap.String("target", rule.targetServiceName))
-				return true, ""
-			}
-			// If the URL contains escaped characters, use RawPath instead of Path
-			origin := r.URL.Path
-			path := r.URL.Path
-			if r.URL.RawPath != "" {
-				path = r.URL.RawPath
-			}
-			// Extract parameters from the URL path
-			// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
-			//      matchPath  = /pd/api/v1/operators
-			//      targetPath = /scheduling/api/v1/operators
-			//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
-			pathParams := strings.TrimPrefix(path, rule.matchPath)
-			pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
-			if len(pathParams) > 0 {
-				r.URL.Path = rule.targetPath + "/" + pathParams
-			} else {
-				r.URL.Path = rule.targetPath
-			}
-			log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
-				zap.String("target", addr), zap.String("method", r.Method))
-			return true, addr
+		if !strings.HasPrefix(r.URL.Path, rule.MatchPath) || !slice.Contains(rule.MatchMethods, r.Method) {
+			continue
 		}
+		if rule.Filter != nil && !rule.Filter(r) {
+			continue
+		}
+		// we check the service primary addr here,
+		// if the service is not available, we will return ErrRedirect by returning an empty addr.
+		addr, ok := getPrimary(r.Context(), rule.TargetServiceName)
+		if !ok || addr == "" {
+			log.Warn("failed to get the service primary addr when trying to match redirect rules",
+				zap.String("path", r.URL.Path))
+			return true, ""
+		}
+		// If the URL contains escaped characters, use RawPath instead of Path
+		origin := r.URL.Path
+		path := r.URL.Path
+		if r.URL.RawPath != "" {
+			path = r.URL.RawPath
+		}
+		// Extract parameters from the URL path
+		// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
+		//      matchPath  = /pd/api/v1/operators
+		//      targetPath = /scheduling/api/v1/operators
+		//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
+		pathParams := strings.TrimPrefix(path, rule.MatchPath)
+		pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
+		if len(pathParams) > 0 {
+			r.URL.Path = rule.TargetPath + "/" + pathParams
+		} else {
+			r.URL.Path = rule.TargetPath
+		}
+		log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+			zap.String("target", addr), zap.String("method", r.Method))
+		return true, addr
 	}
 	return false, ""
 }
 
+var localOnlyPaths = []string{
+	"/pd/api/v1/admin/log",
+	"/pd/api/v1/status",
+	"/pd/api/v1/health",
+	"/pd/api/v1/ping",
+	"/pd/api/v1/version",
+	"/pd/api/v1/debug/pprof",
+}
+
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+	// Special case: GET /config should always be handled locally on followers
+	// to return a merged view of local and cluster configurations.
+	// POST /config should still be forwarded to the leader to update cluster-wide config.
+	if r.URL.Path == "/pd/api/v1/config" && r.Method == http.MethodGet {
+		next(w, r)
+		return
+	}
+	for _, path := range localOnlyPaths {
+		if strings.HasPrefix(r.URL.Path, path) {
+			next(w, r)
+			return
+		}
+	}
+
 	redirectToMicroservice, targetAddr := h.matchMicroserviceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 
@@ -184,7 +219,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	if (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroservice {
+	if (allowFollowerHandle || h.s.GetMember().IsServing()) && !redirectToMicroservice {
 		next(w, r)
 		return
 	}
@@ -217,7 +252,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		// If the leader is the current server now, we can handle the request directly.
-		if h.s.GetMember().IsLeader() || leader.GetName() == h.s.Name() {
+		if h.s.GetMember().IsServing() || leader.GetName() == h.s.Name() {
 			next(w, r)
 			return
 		}
@@ -225,7 +260,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	} else {
 		// Prevent more than one redirection among PD.
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+		log.Warn("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return
 	}

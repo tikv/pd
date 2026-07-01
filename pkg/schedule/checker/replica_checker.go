@@ -16,8 +16,6 @@ package checker
 
 import (
 	"fmt"
-	"math/rand"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -49,7 +47,6 @@ type ReplicaChecker struct {
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
 	pendingProcessedRegions *cache.TTLUint64
-	r                       *rand.Rand
 }
 
 // NewReplicaChecker creates a replica checker.
@@ -58,7 +55,6 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 		cluster:                 cluster,
 		conf:                    conf,
 		pendingProcessedRegions: pendingProcessedRegions,
-		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -166,7 +162,7 @@ func (c *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	}
 	log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 	regionStores := c.cluster.GetRegionStores(region)
-	target, filterByTempState := c.strategy(c.r, region).SelectStoreToAdd(regionStores)
+	target, filterByTempState := c.strategy(region).SelectStoreToAdd(regionStores)
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		replicaCheckerNoTargetStoreCounter.Inc()
@@ -195,7 +191,7 @@ func (c *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	}
 	log.Debug("region has more than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
 	regionStores := c.cluster.GetRegionStores(region)
-	old := c.strategy(c.r, region).SelectStoreToRemove(regionStores)
+	old := c.strategy(region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		replicaCheckerNoWorstPeerCounter.Inc()
 		c.pendingProcessedRegions.Put(region.GetID(), nil)
@@ -214,7 +210,7 @@ func (c *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 		return nil
 	}
 
-	strategy := c.strategy(c.r, region)
+	strategy := c.strategy(region)
 	regionStores := c.cluster.GetRegionStores(region)
 	oldStore := strategy.SelectStoreToRemove(regionStores)
 	if oldStore == 0 {
@@ -243,10 +239,12 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
 		op, err := operator.CreateRemovePeerOperator(removeExtra, c.cluster, operator.OpReplica, region, storeID)
 		if err != nil {
-			if status == offlineStatus {
+			switch status {
+			case offlineStatus:
 				replicaCheckerRemoveExtraOfflineFailedCounter.Inc()
-			} else if status == downStatus {
+			case downStatus:
 				replicaCheckerRemoveExtraDownFailedCounter.Inc()
+			default:
 			}
 			return nil
 		}
@@ -254,12 +252,14 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	}
 
 	regionStores := c.cluster.GetRegionStores(region)
-	target, filterByTempState := c.strategy(c.r, region).SelectStoreToFix(regionStores, storeID)
+	target, filterByTempState := c.strategy(region).SelectStoreToFix(regionStores, storeID)
 	if target == 0 {
-		if status == offlineStatus {
+		switch status {
+		case offlineStatus:
 			replicaCheckerNoStoreOfflineCounter.Inc()
-		} else if status == downStatus {
+		case downStatus:
 			replicaCheckerNoStoreDownCounter.Inc()
+		default:
 		}
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
@@ -271,23 +271,24 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	op, err := operator.CreateMovePeerOperator(replace, c.cluster, region, operator.OpReplica, storeID, newPeer)
 	if err != nil {
-		if status == offlineStatus {
+		switch status {
+		case offlineStatus:
 			replicaCheckerReplaceOfflineFailedCounter.Inc()
-		} else if status == downStatus {
+		case downStatus:
 			replicaCheckerReplaceDownFailedCounter.Inc()
+		default:
 		}
 		return nil
 	}
 	return op
 }
 
-func (c *ReplicaChecker) strategy(r *rand.Rand, region *core.RegionInfo) *ReplicaStrategy {
+func (c *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
 		checkerName:    c.Name(),
 		cluster:        c.cluster,
 		locationLabels: c.conf.GetLocationLabels(),
 		isolationLevel: c.conf.GetIsolationLevel(),
 		region:         region,
-		r:              r,
 	}
 }

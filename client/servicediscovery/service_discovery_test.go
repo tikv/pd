@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -43,6 +44,10 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type testGRPCServer struct {
 	pb.UnimplementedGreeterServer
@@ -134,6 +139,18 @@ func TestServiceClientClientTestSuite(t *testing.T) {
 	suite.Run(t, new(serviceClientTestSuite))
 }
 
+func TestServiceClientGetClientConnReturnsNilAfterClose(t *testing.T) {
+	re := require.New(t)
+
+	conn, err := grpc.Dial("localhost:0", grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
+	re.NoError(err)
+
+	client := &serviceClient{conn: conn}
+	re.NotNil(client.GetClientConn())
+	re.NoError(conn.Close())
+	re.Nil(client.GetClientConn())
+}
+
 func (suite *serviceClientTestSuite) SetupSuite() {
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
@@ -142,8 +159,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
 	for range 10 {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))     //nolint:staticcheck
+		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
 				tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
@@ -159,7 +176,7 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	suite.NotNil(suite.leaderClient)
+	suite.Require().NotNil(suite.leaderClient)
 }
 
 func (suite *serviceClientTestSuite) TearDownTest() {
@@ -400,7 +417,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &serviceDiscovery{option: opt.NewOption()}
+	cli := &serviceDiscovery{callbacks: newServiceCallbacks(), option: opt.NewOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
@@ -422,6 +439,7 @@ func TestGRPCDialOption(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
 	cli := &serviceDiscovery{
+		callbacks:         newServiceCallbacks(),
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
@@ -429,7 +447,7 @@ func TestGRPCDialOption(t *testing.T) {
 		option:            opt.NewOption(),
 	}
 	cli.urls.Store([]string{"tmp://test.url:5255"})
-	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)

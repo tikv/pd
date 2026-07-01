@@ -15,15 +15,22 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestConfigBasic(t *testing.T) {
 	re := require.New(t)
@@ -36,8 +43,7 @@ func TestConfigBasic(t *testing.T) {
 	re.True(strings.HasPrefix(cfg.GetName(), defaultName))
 	re.Equal(defaultBackendEndpoints, cfg.BackendEndpoints)
 	re.Equal(defaultListenAddr, cfg.ListenAddr)
-	re.Equal(constant.DefaultLeaderLease, cfg.LeaderLease)
-	re.True(cfg.EnableGRPCGateway)
+	re.Equal(constant.DefaultLease, cfg.LeaderLease)
 	re.Equal(defaultTSOSaveInterval, cfg.TSOSaveInterval.Duration)
 	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(defaultMaxResetTSGap, cfg.MaxResetTSGap.Duration)
@@ -53,10 +59,10 @@ func TestConfigBasic(t *testing.T) {
 	cfg.MaxResetTSGap.Duration = time.Duration(1) * time.Hour
 
 	re.Equal("test-name", cfg.GetName())
-	re.Equal("test-endpoints", cfg.GeBackendEndpoints())
+	re.Equal("test-endpoints", cfg.GetBackendEndpoints())
 	re.Equal("test-listen-addr", cfg.GetListenAddr())
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
-	re.Equal(int64(123), cfg.GetLeaderLease())
+	re.Equal(int64(123), cfg.GetLease())
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
@@ -84,12 +90,72 @@ max-gap-reset-ts = "1h"
 	re.NoError(err)
 
 	re.Equal("tso-test-name", cfg.GetName())
-	re.Equal("test-endpoints", cfg.GeBackendEndpoints())
+	re.Equal("test-endpoints", cfg.GetBackendEndpoints())
 	re.Equal("test-listen-addr", cfg.GetListenAddr())
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
-	re.Equal("/var/lib/tso", cfg.DataDir)
-	re.Equal(int64(123), cfg.GetLeaderLease())
+	re.Equal(int64(123), cfg.GetLease())
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
+}
+
+func TestGetAdvertiseListenHost(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+
+	tests := []struct {
+		name          string
+		advertiseAddr string
+		expectedHost  string
+		panic         bool
+	}{
+		{
+			name:          "valid http address",
+			advertiseAddr: "http://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+		{
+			name:          "valid https address",
+			advertiseAddr: "https://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+		{
+			name:          "valid address without scheme",
+			advertiseAddr: "localhost:2379",
+			expectedHost:  "localhost:2379",
+			panic:         false,
+		},
+		{
+			name:          "empty address",
+			advertiseAddr: "",
+			expectedHost:  "",
+			panic:         false,
+		},
+		{
+			name:          "valid IPv4 address without scheme",
+			advertiseAddr: "127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(*testing.T) {
+			cfg := &Config{
+				AdvertiseListenAddr: tt.advertiseAddr,
+			}
+			if tt.panic {
+				re.Panics(func() {
+					CreateServer(ctx, cfg)
+				}, "expected panic for invalid advertise listen address")
+			} else {
+				svr := CreateServer(ctx, cfg)
+				re.Equal(tt.expectedHost, svr.advertiseListenHost)
+			}
+		})
+	}
 }
