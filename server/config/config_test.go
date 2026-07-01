@@ -637,6 +637,12 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
 		},
+		{
+			name:      "group ID with slash is rejected",
+			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID contains invalid characters, only letters, digits, '-' and '_' are allowed: group/1",
+		},
 	}
 
 	for _, testCase := range testCases {

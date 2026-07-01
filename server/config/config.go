@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -912,6 +913,19 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) error {
 	return AdjustMetaServiceGroups(c.MetaServiceGroups)
 }
 
+// metaServiceGroupIDPattern restricts meta-service group IDs to URL-safe
+// characters so that a group is always addressable via the
+// /meta-service-groups/{id}/status endpoint (a '/' would otherwise split the
+// path and make the group impossible to patch).
+var metaServiceGroupIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// IsValidMetaServiceGroupID reports whether id is a well-formed meta-service
+// group ID: URL-safe so it stays addressable via the
+// /meta-service-groups/{id}/status endpoint.
+func IsValidMetaServiceGroupID(id string) bool {
+	return metaServiceGroupIDPattern.MatchString(id)
+}
+
 // AdjustMetaServiceGroups validates and adjusts the meta-service groups configuration.
 func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 	dict := make(map[string]string, len(metaGroups))
@@ -919,6 +933,9 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 		id := strings.TrimSpace(groupID)
 		if id == "" {
 			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
+		if !IsValidMetaServiceGroupID(id) {
+			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID contains invalid characters, only letters, digits, '-' and '_' are allowed: %s", id))
 		}
 		address := strings.TrimSpace(endpoint)
 		if address == "" {

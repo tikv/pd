@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -103,6 +104,13 @@ func PatchMetaServiceGroups(c *gin.Context) {
 		if addresses == nil {
 			normalizedPatch[trimmedID] = nil
 			continue
+		}
+		// Reject IDs that are not URL-safe on add/update: such a group could be
+		// created but never patched via /meta-service-groups/{id}/status. Deletes
+		// (nil above) are still allowed so any legacy bad group can be removed.
+		if !config.IsValidMetaServiceGroupID(trimmedID) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, "group ID contains invalid characters, only letters, digits, '-' and '_' are allowed")
+			return
 		}
 		trimmedAddresses := strings.TrimSpace(*addresses)
 		if trimmedAddresses == "" {

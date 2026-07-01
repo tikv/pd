@@ -237,6 +237,13 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	// A top-level JSON null body should be rejected rather than treated as a no-op.
 	mustPatchMetaServiceGroupsRawFail(re, suite.server, []byte("null"))
 
+	// A group ID with a '/' would not be addressable via /{id}/status, so it is
+	// rejected on add/update.
+	invalidIDAddr := "etcd-group-x.tidb-serverless.cluster.svc.local"
+	mustPatchMetaServiceGroupsFail(re, suite.server, map[string]*string{
+		"etcd/group/x": &invalidIDAddr,
+	})
+
 	// Duplicated group IDs after normalization should be rejected.
 	normalizedDuplicateAddr := "etcd-group-6.tidb-serverless.cluster.svc.local"
 	normalizedDuplicatePatch := map[string]*string{
