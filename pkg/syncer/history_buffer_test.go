@@ -186,10 +186,86 @@ func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
 	re.Equal(4, h.capacity())
 }
 
+// newTestHistoryBuffer returns a history buffer backed by in-memory storage for
+// use in tests.
 func newTestHistoryBuffer(maxCapacity int) *historyBuffer {
 	return newHistoryBufferWithConfig(2, maxCapacity, 1, storage.NewStorageWithMemoryBackend())
 }
 
 func newHistoryBufferTestRegion(regionID uint64) *core.RegionInfo {
 	return core.NewRegionInfo(&metapb.Region{Id: regionID}, nil)
+}
+
+// TestCatchupCommitRollback exercises the catch-up gating semantics added
+// for the leader-election gate: a half-applied catch-up that is cut short
+// must not leave a non-zero persisted index behind, and a clean end-of-
+// history must commit the new index atomically.
+func TestCatchupCommitRollback(t *testing.T) {
+	re := require.New(t)
+	var regions []*core.RegionInfo
+	for i := range 10 {
+		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i + 1)}, nil))
+	}
+
+	// Fresh member: nothing persisted, in-memory index starts at 0.
+	kvMem := kv.NewMemoryKV()
+	h := newHistoryBufferWithConfig(100, 100, 1, kvMem)
+	re.Equal(uint64(0), h.nextIndex())
+	s, err := kvMem.Load(historyKey)
+	re.NoError(err)
+	re.Empty(s)
+
+	// Apply a catch-up batch without persisting. In-memory index advances
+	// but the on-disk index must stay at 0.
+	for _, r := range regions[:5] {
+		h.recordNoPersist(r)
+	}
+	re.Equal(uint64(5), h.nextIndex())
+	s, err = kvMem.Load(historyKey)
+	re.NoError(err)
+	re.Empty(s)
+
+	// Simulate leader failover before end-of-history: rollback must wipe
+	// the buffered records and restore the in-memory index to the last
+	// persisted value (0 here).
+	h.rollback()
+	re.Equal(uint64(0), h.nextIndex())
+	re.Equal(0, h.len())
+	re.Nil(h.get(0))
+	re.Nil(h.get(4))
+
+	// Re-attempt the catch-up against a new leader. This time we receive
+	// the end-of-history marker, so commit() persists the index.
+	for _, r := range regions[:5] {
+		h.recordNoPersist(r)
+	}
+	h.commit()
+	re.Equal(uint64(5), h.nextIndex())
+	s, err = kvMem.Load(historyKey)
+	re.NoError(err)
+	re.Equal("5", s)
+
+	// After a successful commit, a subsequent rollback (e.g., the next
+	// sync session ends without its own end-of-history marker before any
+	// further records arrive) must keep the committed index intact.
+	h.rollback()
+	re.Equal(uint64(5), h.nextIndex())
+	s, err = kvMem.Load(historyKey)
+	re.NoError(err)
+	re.Equal("5", s)
+
+	// A fresh buffer built against the same KV must see the committed
+	// index — this is the StartIndex the next sync session would send.
+	h2 := newHistoryBufferWithConfig(100, 100, 1, kvMem)
+	re.Equal(uint64(5), h2.nextIndex())
+
+	// Records appended after the committed point and rolled back again
+	// must not leak past the committed index.
+	for _, r := range regions[5:] {
+		h2.recordNoPersist(r)
+	}
+	re.Equal(uint64(10), h2.nextIndex())
+	h2.rollback()
+	re.Equal(uint64(5), h2.nextIndex())
+	re.Equal(0, h2.len())
 }

@@ -78,6 +78,8 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 	re.Equal(2, syncer.history.capacity())
 }
 
+// TestSyncHistoryRecordsSplitBatches verifies that history records are streamed
+// in batches followed by a trailing end-of-history marker.
 func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 	re := require.New(t)
 	syncer, _ := newTestRegionSyncer(t)
@@ -87,15 +89,21 @@ func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 	}
 	stream := newMockSyncRegionsServer()
 	syncStream := newRegionSyncStream(stream, 10)
-	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
+	// Buffer the two record batches plus the trailing end-of-history marker so
+	// the synchronous syncHistoryRecords below never blocks on Send.
+	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 3)
 
 	re.NoError(syncer.syncHistoryRecords(10, records, syncStream))
 	first := <-stream.sendCh
 	second := <-stream.sendCh
+	marker := <-stream.sendCh
 	re.Equal(uint64(10), first.GetStartIndex())
 	re.Len(first.GetRegions(), maxSyncRegionBatchSize)
 	re.Equal(uint64(10+maxSyncRegionBatchSize), second.GetStartIndex())
 	re.Len(second.GetRegions(), 1)
+	// The end-of-history marker carries the next index and no regions.
+	re.Empty(marker.GetRegions())
+	re.Equal(uint64(10+len(records)), marker.GetStartIndex())
 
 	closedStream := &testServerStream{}
 	closedSyncStream := newRegionSyncStream(closedStream, 10)
@@ -181,6 +189,9 @@ func syncFullRegionsForTest(ctx context.Context, syncer *RegionSyncer, syncStrea
 	return syncer.syncFullRegionsLocked(ctx, "pd-follower", syncStream, syncStartIndex)
 }
 
+// TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp verifies that records
+// appended while a full sync is in progress are still streamed to the follower
+// after the snapshot, followed by the end-of-history marker.
 func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	re := require.New(t)
 	bc := core.NewBasicCluster()
@@ -222,8 +233,11 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	re.NoError(syncer.sendDownstream(context.Background(), "pd-follower", syncStream, false))
 	responses := stream.sentResponses()
 	re.Len(responses, 4)
-	re.Equal(liveStartIndex, responses[2].GetStartIndex())
+	// responses[2] is the end-of-history marker emitted after the catch-up
+	// (empty regions, carrying the caught-up index).
 	re.Empty(responses[2].GetRegions())
+	re.Equal(liveStartIndex, responses[2].GetStartIndex())
+	// responses[3] is the live record appended during catch-up, sent downstream.
 	re.Equal(liveStartIndex, responses[3].GetStartIndex())
 	re.Equal([]*metapb.Region{{Id: 102}}, responses[3].GetRegions())
 	re.Equal(liveStartIndex+1, syncStream.getSendIndex())
@@ -790,6 +804,9 @@ func TestDrainDownstreamSendsPendingRecordsSerially(t *testing.T) {
 	re.Equal(uint64(13), syncStream.getSendIndex())
 }
 
+// TestSyncHistoryRegionStopsAtSyncStartIndex verifies that an incremental
+// history replay stops at the sync start index and is followed by an
+// end-of-history marker.
 func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	re := require.New(t)
 	syncer := &RegionSyncer{history: newTestHistoryBuffer(defaultHistoryBufferSize)}
@@ -810,8 +827,14 @@ func TestSyncHistoryRegionStopsAtSyncStartIndex(t *testing.T) {
 	err := syncer.syncHistoryRegion(context.Background(), request, syncStream, syncStartIndex)
 
 	re.NoError(err)
-	re.Equal(uint64(10), stream.lastResponse().GetStartIndex())
-	re.Equal([]*metapb.Region{{Id: 1}}, stream.lastResponse().GetRegions())
+	responses := stream.sentResponses()
+	re.Len(responses, 2)
+	// Replay stops before syncStartIndex: only region 1 (at index 10), not region 2.
+	re.Equal(uint64(10), responses[0].GetStartIndex())
+	re.Equal([]*metapb.Region{{Id: 1}}, responses[0].GetRegions())
+	// Followed by the end-of-history marker at syncStartIndex.
+	re.Empty(responses[1].GetRegions())
+	re.Equal(syncStartIndex, responses[1].GetStartIndex())
 }
 
 type testServerStream struct {

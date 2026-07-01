@@ -112,6 +112,16 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	// regionSyncerCampaignGrace bounds how long a member will refuse to campaign
+	// without a leader in the cluster because its region syncer has not caught up.
+	// This prevents a permanently leaderless cluster (the gate's circular dependency:
+	// a follower cannot finish syncing once the leader it would sync from is
+	// gone).
+	// It is set to the floor of the lost-PD-leader re-election timeout
+	// (randomTimeout in leaderLoop, whose minimum is lostPDLeaderMaxTimeoutSecs
+	// seconds plus lostPDLeaderReElectionFactor*ElectionInterval).
+	regionSyncerCampaignGrace = lostPDLeaderMaxTimeoutSecs * time.Second
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1867,6 +1877,12 @@ func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
+	// gateBlockedSince records when this server first got blocked from
+	// campaigning by the region-syncer gate while leaderless; it bounds that
+	// wait via regionSyncerCampaignGrace. Reset whenever a leader exists or we
+	// proceed to campaign.
+	var gateBlockedSince time.Time
+
 	for {
 		if s.IsClosed() {
 			log.Info("server is closed, return PD leader loop")
@@ -1886,6 +1902,9 @@ func (s *Server) leaderLoop() {
 			continue
 		}
 		if leader != nil {
+			// A leader exists to (re)sync from, so the gate's leaderless grace
+			// no longer applies; reset it.
+			gateBlockedSince = time.Time{}
 			err := s.reloadConfigFromKV()
 			if err != nil {
 				log.Error("reload config failed", errs.ZapError(err))
@@ -1937,8 +1956,89 @@ func (s *Server) leaderLoop() {
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
+		// Refuse to campaign until the region syncer has caught up to the
+		// previous leader. Without this gate, a freshly joined follower
+		// whose syncer never produced a populated local store can win
+		// leadership immediately after the leader dies and serve a
+		// partial/empty region set until TiKV heartbeats repopulate it.
+		// `HasAttemptedSync` distinguishes "I was a follower" from "I
+		// started fresh and there is no leader to sync from" (the latter
+		// must be allowed to campaign so the cluster can bootstrap).
+		if !s.canCampaignAsRegionSyncerCaughtUp() {
+			if gateBlockedSince.IsZero() {
+				gateBlockedSince = time.Now()
+			}
+			if blocked := time.Since(gateBlockedSince); blocked < regionSyncerCampaignGrace {
+				log.Warn("skip campaigning of pd leader: region syncer has not caught up to the previous leader",
+					zap.String("server-name", s.Name()),
+					zap.Uint64("member-id", s.member.ID()),
+					zap.Duration("blocked-for", blocked))
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			// Leaderless past the grace window with no caught-up member taking
+			// over: campaign anyway to restore availability rather than stay
+			// blocked forever. Any region gap on the new leader is repopulated
+			// by TiKV heartbeats.
+			log.Warn("region syncer has not caught up but campaign grace elapsed; campaigning to avoid a leaderless cluster",
+				zap.String("server-name", s.Name()),
+				zap.Uint64("member-id", s.member.ID()),
+				zap.Duration("grace", regionSyncerCampaignGrace))
+		}
+		gateBlockedSince = time.Time{}
 		s.campaignLeader()
 	}
+}
+
+// canCampaignAsRegionSyncerCaughtUp returns true when this server is eligible
+// to campaign for PD leadership from a region-syncer correctness standpoint:
+//   - region storage is not in use (regions live in etcd, no syncer needed), or
+//   - the syncer was never started on this process (single-node bootstrap, or
+//     no leader has ever existed to sync from), or
+//   - the syncer has at some point observed that it was caught up to a
+//     leader's history (and thus the local region storage is durable), or
+//   - no leader has published any committed regions yet (a fresh or empty
+//     cluster, where there is nothing to be behind on).
+//
+// Otherwise this is a member that has been syncing from a leader that has
+// region data but has not yet confirmed catch-up, so it must wait rather than
+// win leadership with a stale/empty store ahead of its caught-up peers.
+func (s *Server) canCampaignAsRegionSyncerCaughtUp() bool {
+	if !s.persistOptions.IsUseRegionStorage() {
+		return true
+	}
+	syncer := s.cluster.GetRegionSyncer()
+	if syncer == nil {
+		return true
+	}
+	if !syncer.HasAttemptedSync() {
+		return true
+	}
+	if syncer.IsHistorySynced() {
+		return true
+	}
+	// Not history-synced this session. Consult the durable region count the
+	// leader published so we neither deadlock the election nor let an empty
+	// member win.
+	committed, err := s.storage.LoadRegionSyncerCommittedRegionCount()
+	if err != nil {
+		// Missing state is already handled as committed == 0 by the storage
+		// endpoint. Any real error here means we cannot prove this member is
+		// safe to lead yet, so keep the gate closed.
+		log.Warn("failed to load committed region count, skipping campaign",
+			zap.String("server-name", s.Name()), errs.ZapError(err))
+		return false
+	}
+	// committed == 0 means a fresh or empty cluster: nothing to be behind on.
+	// Note: the committed value could be reduced to a boolean "cluster has committed regions"
+	// flag. We keep the published region count for now until we are certain the magnitude is
+	// never needed (e.g. for a future tolerance/threshold policy).
+	if committed == 0 {
+		return true
+	}
+	// The cluster has committed regions and this member has not confirmed
+	// catch-up: it is behind, so it must not campaign yet.
+	return false
 }
 
 func (s *Server) campaignLeader() {
