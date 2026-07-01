@@ -135,8 +135,9 @@ func (c *Controller) CollectSchedulerMetrics() {
 	if labelerMgr == nil {
 		return
 	}
-	regionLabelStatusGauge.WithLabelValues("rule_count").Set(float64(labelerMgr.GetRulesCount()))
-	regionLabelStatusGauge.WithLabelValues("range_count").Set(float64(labelerMgr.GetKeyRangesCount()))
+	ruleCnt, keyRangeCnt := labelerMgr.GetRuleAndKeyRangeCounts()
+	regionLabelStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+	regionLabelStatusGauge.WithLabelValues("range_count").Set(float64(keyRangeCnt))
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.

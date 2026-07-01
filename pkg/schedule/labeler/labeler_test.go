@@ -106,17 +106,21 @@ func TestGetSetRule(t *testing.T) {
 	defer cancel()
 	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
+	assertLabelerCounts := func(ruleCount, keyRangeCount int) {
+		actualRuleCount, actualKeyRangeCount := labeler.GetRuleAndKeyRangeCounts()
+		re.Equal(ruleCount, actualRuleCount)
+		re.Equal(keyRangeCount, actualKeyRangeCount)
+	}
 	rules := []*LabelRule{
 		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: MakeKeyRanges("1234", "5678")},
 		{ID: "rule2", Labels: []RegionLabel{{Key: "k2", Value: "v2"}}, RuleType: "key-range", Data: MakeKeyRanges("ab12", "cd12")},
-		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: MakeKeyRanges("abcd", "efef")},
+		{ID: "rule3", Labels: []RegionLabel{{Key: "k3", Value: "v3"}}, RuleType: "key-range", Data: MakeKeyRanges("abcd", "efef", "f000", "ffff")},
 	}
 	for _, r := range rules {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
-	re.Equal(3, labeler.GetRulesCount())
-	re.Equal(3, labeler.GetKeyRangesCount())
+	assertLabelerCounts(3, 4)
 
 	allRules := labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
@@ -129,8 +133,7 @@ func TestGetSetRule(t *testing.T) {
 	err = labeler.DeleteLabelRule("rule2")
 	re.NoError(err)
 	re.Nil(labeler.GetLabelRule("rule2"))
-	re.Equal(2, labeler.GetRulesCount())
-	re.Equal(2, labeler.GetKeyRangesCount())
+	assertLabelerCounts(2, 3)
 	byIDs, err = labeler.GetLabelRules([]string{"rule1", "rule2"})
 	re.NoError(err)
 	re.Equal([]*LabelRule{rules[0]}, byIDs)
@@ -146,8 +149,7 @@ func TestGetSetRule(t *testing.T) {
 	re.NoError(err)
 	allRules = labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
-	re.Equal(2, labeler.GetRulesCount())
-	re.Equal(2, labeler.GetKeyRangesCount())
+	assertLabelerCounts(2, 3)
 	for id, rule := range allRules {
 		expectSameRules(re, rule, rules[id+1])
 	}
@@ -158,8 +160,7 @@ func TestGetSetRule(t *testing.T) {
 		re.NoError(err)
 	}
 	re.Empty(labeler.GetAllLabelRules())
-	re.Zero(labeler.GetRulesCount())
-	re.Zero(labeler.GetKeyRangesCount())
+	assertLabelerCounts(0, 0)
 }
 
 func TestTxnWithEtcd(t *testing.T) {
@@ -380,6 +381,11 @@ func TestLabelerRuleTTL(t *testing.T) {
 	defer cancel()
 	labeler, err := NewRegionLabeler(ctx, store, time.Minute)
 	re.NoError(err)
+	assertLabelerCounts := func(ruleCount, keyRangeCount int) {
+		actualRuleCount, actualKeyRangeCount := labeler.GetRuleAndKeyRangeCounts()
+		re.Equal(ruleCount, actualRuleCount)
+		re.Equal(keyRangeCount, actualKeyRangeCount)
+	}
 	rules := []*LabelRule{
 		{
 			ID: "rule1",
@@ -417,8 +423,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
-	re.Equal(3, labeler.GetRulesCount())
-	re.Equal(3, labeler.GetKeyRangesCount())
+	assertLabelerCounts(3, 3)
 	// get rule with "rule2".
 	re.NotNil(labeler.GetLabelRule("rule2"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"))
@@ -428,8 +433,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 		labels := labeler.GetRegionLabels(region)
 		return len(labels) == 2
 	})
-	re.Equal(2, labeler.GetRulesCount())
-	re.Equal(2, labeler.GetKeyRangesCount())
+	assertLabelerCounts(2, 2)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
 	// rule2 should be existed since `GetRegionLabels` won't clear it physically.
