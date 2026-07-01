@@ -115,6 +115,8 @@ func TestGetSetRule(t *testing.T) {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
+	re.Equal(3, labeler.GetRulesCount())
+	re.Equal(3, labeler.GetKeyRangesCount())
 
 	allRules := labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
@@ -127,6 +129,8 @@ func TestGetSetRule(t *testing.T) {
 	err = labeler.DeleteLabelRule("rule2")
 	re.NoError(err)
 	re.Nil(labeler.GetLabelRule("rule2"))
+	re.Equal(2, labeler.GetRulesCount())
+	re.Equal(2, labeler.GetKeyRangesCount())
 	byIDs, err = labeler.GetLabelRules([]string{"rule1", "rule2"})
 	re.NoError(err)
 	re.Equal([]*LabelRule{rules[0]}, byIDs)
@@ -142,6 +146,8 @@ func TestGetSetRule(t *testing.T) {
 	re.NoError(err)
 	allRules = labeler.GetAllLabelRules()
 	sort.Slice(allRules, func(i, j int) bool { return allRules[i].ID < allRules[j].ID })
+	re.Equal(2, labeler.GetRulesCount())
+	re.Equal(2, labeler.GetKeyRangesCount())
 	for id, rule := range allRules {
 		expectSameRules(re, rule, rules[id+1])
 	}
@@ -152,6 +158,8 @@ func TestGetSetRule(t *testing.T) {
 		re.NoError(err)
 	}
 	re.Empty(labeler.GetAllLabelRules())
+	re.Zero(labeler.GetRulesCount())
+	re.Zero(labeler.GetKeyRangesCount())
 }
 
 func TestTxnWithEtcd(t *testing.T) {
@@ -409,6 +417,8 @@ func TestLabelerRuleTTL(t *testing.T) {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
+	re.Equal(3, labeler.GetRulesCount())
+	re.Equal(3, labeler.GetKeyRangesCount())
 	// get rule with "rule2".
 	re.NotNil(labeler.GetLabelRule("rule2"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"))
@@ -418,6 +428,8 @@ func TestLabelerRuleTTL(t *testing.T) {
 		labels := labeler.GetRegionLabels(region)
 		return len(labels) == 2
 	})
+	re.Equal(2, labeler.GetRulesCount())
+	re.Equal(2, labeler.GetKeyRangesCount())
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
 	// rule2 should be existed since `GetRegionLabels` won't clear it physically.

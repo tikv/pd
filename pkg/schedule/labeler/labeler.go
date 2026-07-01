@@ -218,6 +218,38 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 	return rules
 }
 
+// GetRulesCount returns the number of effective label rules.
+func (l *RegionLabeler) GetRulesCount() int {
+	l.RLock()
+	defer l.RUnlock()
+
+	now := time.Now()
+	count := 0
+	for _, rule := range l.labelRules {
+		if filterExpiredLabels(rule, now) != nil {
+			count++
+		}
+	}
+	return count
+}
+
+// GetKeyRangesCount returns the number of effective key ranges.
+func (l *RegionLabeler) GetKeyRangesCount() int {
+	l.RLock()
+	defer l.RUnlock()
+
+	now := time.Now()
+	count := 0
+	for _, rule := range l.labelRules {
+		filteredRule := filterExpiredLabels(rule, now)
+		if filteredRule == nil {
+			continue
+		}
+		count += len(filteredRule.GetKeyRanges())
+	}
+	return count
+}
+
 // GetLabelRules returns the rules that match the given ids.
 func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	l.RLock()
