@@ -299,6 +299,12 @@ func (s *GrpcServer) GetMinTS(
 		err = internalErr
 	} else {
 		minTS, err = s.GetMinTSFromTSOService()
+		if err != nil && len(s.keyspaceGroupManager.GetTSOServiceAddrs()) == 0 {
+			if ts, handled, internalErr := s.switchTSOProviderToPDAndGenerateEmbeddedTSO(ctx, 1); handled || internalErr != nil {
+				minTS = &ts
+				err = internalErr
+			}
+		}
 	}
 	if err != nil {
 		return &pdpb.GetMinTSResponse{
@@ -703,6 +709,17 @@ func (s *GrpcServer) generateEmbeddedTSOWithGate(ctx context.Context, count uint
 		return generateErr
 	})
 	return ts, handled, err
+}
+
+func (s *GrpcServer) switchTSOProviderToPDAndGenerateEmbeddedTSO(ctx context.Context, count uint32) (pdpb.Timestamp, bool, error) {
+	raftCluster := s.DirectlyGetRaftCluster()
+	if raftCluster == nil {
+		return pdpb.Timestamp{}, false, errs.ErrNotStarted
+	}
+	if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
+		return pdpb.Timestamp{}, true, err
+	}
+	return s.generateEmbeddedTSOWithGate(ctx, count)
 }
 
 func (s *GrpcServer) generateEmbeddedTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {

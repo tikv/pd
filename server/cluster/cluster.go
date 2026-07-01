@@ -555,19 +555,38 @@ func (c *RaftCluster) isDefaultTSOPrimaryReady() bool {
 		ServiceName: constant.TSOServiceName,
 		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
 	}
+	primaryPath := keypath.ElectionPath(msParam)
+	expectedPrimaryPath := keypath.ExpectedPrimaryPath(msParam)
 	// The TSO primary election key is written before its allocator is initialized.
-	// expected_primary is kept alive only after initialization, so require both.
-	return c.hasEtcdKey(keypath.ElectionPath(msParam), "TSO primary") &&
-		c.hasEtcdKey(keypath.ExpectedPrimaryPath(msParam), "TSO expected primary")
+	// expected_primary is kept alive only after initialization, so require both
+	// keys to exist and to point to the same primary.
+	primary, ok := c.getEtcdValue(primaryPath, "TSO primary")
+	if !ok {
+		return false
+	}
+	expectedPrimary, ok := c.getEtcdValue(expectedPrimaryPath, "TSO expected primary")
+	if !ok {
+		return false
+	}
+	if primary != expectedPrimary {
+		log.Debug("TSO primary is not ready",
+			zap.String("primary-path", primaryPath),
+			zap.String("expected-primary-path", expectedPrimaryPath))
+		return false
+	}
+	return true
 }
 
-func (c *RaftCluster) hasEtcdKey(path, name string) bool {
+func (c *RaftCluster) getEtcdValue(path, name string) (string, bool) {
 	resp, err := etcdutil.EtcdKVGet(c.etcdClient, path)
 	if err != nil {
 		log.Warn("failed to check "+name, zap.String("path", path), errs.ZapError(err))
-		return false
+		return "", false
 	}
-	return len(resp.Kvs) > 0
+	if len(resp.Kvs) == 0 {
+		return "", false
+	}
+	return string(resp.Kvs[0].Value), true
 }
 
 // RunEmbeddedTSORequest runs a local TSO request only when TSO is currently
@@ -588,7 +607,7 @@ func (c *RaftCluster) SwitchTSOProviderToPD() error {
 	if c.isKeyspaceGroupEnabled && c.opt != nil && !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 		return nil
 	}
-	return c.switchTSOProviderToPD()
+	return c.switchTSOProviderToPDLocked()
 }
 
 func (c *RaftCluster) isTSOServiceIndependent() bool {
@@ -602,6 +621,10 @@ func (c *RaftCluster) switchTSOProviderToPD() error {
 	if c.isTSOAllocatorInitialized() && !c.IsServiceIndependent(constant.TSOServiceName) {
 		return nil
 	}
+	return c.switchTSOProviderToPDLocked()
+}
+
+func (c *RaftCluster) switchTSOProviderToPDLocked() error {
 	c.tsoSwitchMu.Lock()
 	defer c.tsoSwitchMu.Unlock()
 	if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -620,6 +643,9 @@ func (c *RaftCluster) switchTSOProviderToTSO() {
 	}
 	c.tsoSwitchMu.Lock()
 	defer c.tsoSwitchMu.Unlock()
+	if !c.isDefaultTSOPrimaryReady() {
+		return
+	}
 	c.stopTSOJobsIfNeeded()
 	if !c.IsServiceIndependent(constant.TSOServiceName) {
 		log.Info("TSO is provided by TSO server")

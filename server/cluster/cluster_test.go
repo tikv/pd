@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -63,6 +64,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -2449,6 +2452,30 @@ func TestRunEmbeddedTSORequestSkipsWhenDynamicSwitchingDisabled(t *testing.T) {
 	re.NoError(err)
 	re.False(handled)
 	re.False(called)
+}
+
+func TestDefaultTSOPrimaryReadyRequiresExpectedPrimaryMatch(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	c := &RaftCluster{etcdClient: client}
+	msParam := &keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	}
+	primaryPath := keypath.ElectionPath(msParam)
+	expectedPrimaryPath := keypath.ExpectedPrimaryPath(msParam)
+
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err := client.Put(context.Background(), primaryPath, "primary-a")
+	re.NoError(err)
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err = client.Put(context.Background(), expectedPrimaryPath, "primary-b")
+	re.NoError(err)
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err = client.Put(context.Background(), expectedPrimaryPath, "primary-a")
+	re.NoError(err)
+	re.True(c.isDefaultTSOPrimaryReady())
 }
 
 // Create n stores (0..n).
