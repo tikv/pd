@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -170,11 +171,22 @@ func (t *timestampOracle) syncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
+	var last time.Time
+	var err error
+	// For non-default keyspace groups, read all timestamps to get the maximum
+	// to ensure TSO monotonicity.
+	if constant.DefaultKeyspaceGroupID != t.keyspaceGroupID && t.keyspaceGroupID > 0 {
+		log.Info("loading max timestamp from all keyspace groups for non-default group",
+			zap.Uint32("keyspace-group-id", t.keyspaceGroupID))
+		last, err = t.storage.LoadMaxTimestampAllGroups()
+	} else {
+		last, err = t.storage.LoadTimestamp(t.keyspaceGroupID)
+	}
 	if err != nil {
 		return err
 	}
 	lastSavedTime := t.getLastSavedTime()
+
 	// We could skip the synchronization if the following conditions are met:
 	//   1. The timestamp in memory has been initialized.
 	//   2. The last saved timestamp in etcd is not zero.
@@ -192,6 +204,10 @@ func (t *timestampOracle) syncTimestamp() error {
 		t.metrics.skipSyncEvent.Inc()
 		return nil
 	}
+
+	log.Info("loaded timestamp for synchronization",
+		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+		zap.Time("last-timestamp", last))
 
 	next := time.Now()
 	failpoint.Inject("fallBackSync", func() {
