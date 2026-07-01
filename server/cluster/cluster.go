@@ -438,14 +438,27 @@ func (c *RaftCluster) checkTSOService() {
 	}
 
 	servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-	if err != nil || len(servers) == 0 {
+	if err != nil || len(servers) == 0 || !c.isDefaultTSOPrimaryAvailable() {
 		if err := c.switchToInternalTSO(); err != nil {
 			log.Error("failed to switch to internal TSO", errs.ZapError(err))
 			return
 		}
-	} else if len(servers) > 0 {
+	} else {
 		c.switchToExternalTSO()
 	}
+}
+
+func (c *RaftCluster) isDefaultTSOPrimaryAvailable() bool {
+	tsoPrimaryPath := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     constant.DefaultKeyspaceGroupID,
+	})
+	resp, err := etcdutil.EtcdKVGet(c.etcdClient, tsoPrimaryPath)
+	if err != nil {
+		log.Warn("failed to check default TSO primary", errs.ZapError(err))
+		return false
+	}
+	return len(resp.Kvs) > 0
 }
 
 func (c *RaftCluster) switchToInternalTSO() error {

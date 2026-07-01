@@ -33,7 +33,7 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
-	SaveTimestamp(key string, ts time.Time) error
+	SaveTimestamp(key string, ts time.Time, tsoPrimaryPath ...string) error
 	DeleteTimestamp(key string) error
 }
 
@@ -70,9 +70,27 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	return maxTSWindow, nil
 }
 
+type rawTxn interface {
+	LoadRaw(key string) (string, error)
+}
+
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
+func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time, tsoPrimaryPath ...string) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		if len(tsoPrimaryPath) > 0 && len(tsoPrimaryPath[0]) > 0 {
+			raw, ok := txn.(rawTxn)
+			if !ok {
+				return errors.New("tso primary check is only supported by etcd storage")
+			}
+			tsoPrimary, err := raw.LoadRaw(tsoPrimaryPath[0])
+			if err != nil {
+				return err
+			}
+			if len(tsoPrimary) != 0 {
+				return errors.Errorf("tso microservice primary exists, pd must yield embedded tso")
+			}
+		}
+
 		value, err := txn.Load(key)
 		if err != nil {
 			return err

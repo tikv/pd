@@ -74,9 +74,19 @@ type timestampOracle struct {
 	tsoMux *tsoObject
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
+	// tsoPrimaryCheckPath is set only for PD embedded TSO. It fences timestamp
+	// window writes once a TSO microservice primary exists.
+	tsoPrimaryCheckPath string
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	if len(t.tsoPrimaryCheckPath) != 0 {
+		return t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), ts, t.tsoPrimaryCheckPath)
+	}
+	return t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), ts)
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -178,7 +188,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+	if err = t.saveTimestamp(save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -246,7 +256,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -329,7 +339,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.String("timestamp-path", keypath.TimestampPath(t.tsPath)),

@@ -140,6 +140,7 @@ type AllocatorManager struct {
 	storage                endpoint.TSOStorage
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
+	checkTSOPrimary        bool
 	// leaderLease defines the time within which a TSO primary/leader must update its TTL
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
 	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
@@ -156,6 +157,7 @@ func NewAllocatorManager(
 	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
+	checkTSOPrimary bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
@@ -167,6 +169,7 @@ func NewAllocatorManager(
 		storage:                storage,
 		saveInterval:           cfg.GetTSOSaveInterval(),
 		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
+		checkTSOPrimary:        checkTSOPrimary,
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),

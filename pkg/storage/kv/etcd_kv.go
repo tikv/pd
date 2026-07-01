@@ -239,6 +239,15 @@ func (txn *etcdTxn) Remove(key string) error {
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
 	key = path.Join(txn.kv.rootPath, key)
+	return txn.loadFullKey(key)
+}
+
+// LoadRaw loads an absolute etcd key and adds it as a transaction condition.
+func (txn *etcdTxn) LoadRaw(key string) (string, error) {
+	return txn.loadFullKey(key)
+}
+
+func (txn *etcdTxn) loadFullKey(key string) (string, error) {
 	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
 	if err != nil {
 		return "", err

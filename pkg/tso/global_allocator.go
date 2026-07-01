@@ -110,6 +110,12 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
 	}
+	if am.checkTSOPrimary {
+		oracle.tsoPrimaryCheckPath = keypath.LeaderPath(&keypath.MsParam{
+			ServiceName: constant.TSOServiceName,
+			GroupID:     constant.DefaultKeyspaceGroupID,
+		})
+	}
 	return oracle
 }
 

@@ -15,13 +15,16 @@
 package storage
 
 import (
+	"context"
 	"path"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -55,8 +58,40 @@ func TestTimestampTxn(t *testing.T) {
 	re.Equal(globalTS1, ts)
 }
 
+func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, client, clean := newTestStorageWithClient(t)
+	defer clean()
+
+	tsoPrimaryPath := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     constant.DefaultKeyspaceGroupID,
+	})
+	globalTS := time.Now().Round(0)
+	re.NoError(storage.SaveTimestamp(keypath.TimestampKey, globalTS, tsoPrimaryPath))
+	ts, err := storage.LoadTimestamp("")
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	_, err = client.Put(context.Background(), tsoPrimaryPath, "tso-primary")
+	re.NoError(err)
+
+	nextTS := globalTS.Add(time.Second)
+	err = storage.SaveTimestamp(keypath.TimestampKey, nextTS, tsoPrimaryPath)
+	re.Error(err)
+	re.Contains(err.Error(), "tso microservice primary exists, pd must yield embedded tso")
+	ts, err = storage.LoadTimestamp("")
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+}
+
 func newTestStorage(t *testing.T) (Storage, func()) {
+	storage, _, clean := newTestStorageWithClient(t)
+	return storage, clean
+}
+
+func newTestStorageWithClient(t *testing.T) (Storage, *clientv3.Client, func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	return NewStorageWithEtcdBackend(client, rootPath), clean
+	return NewStorageWithEtcdBackend(client, rootPath), client, clean
 }
