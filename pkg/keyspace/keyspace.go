@@ -381,9 +381,15 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		return nil, err
 	}
 	addTxn(op, cb)
-	groupID, err := strconv.ParseUint(config[TSOKeyspaceGroupIDKey], 10, 64)
-	if err != nil {
-		return nil, err
+	// In classic mode the keyspace group manager is nil, so the config carries no
+	// TSO keyspace group id. Fall back to the default keyspace group id (0), which
+	// here is only used to serialize the creation transaction.
+	var groupID uint64
+	if gid := config[TSOKeyspaceGroupIDKey]; gid != "" {
+		groupID, err = strconv.ParseUint(gid, 10, 64)
+		if err != nil {
+			return nil, err
+		}
 	}
 	err = manager.runCreateKeyspaceTxn(assignToMetaServiceGroup, uint32(groupID), txnOps)
 	for _, cb := range txnCbs {
