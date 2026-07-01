@@ -2476,6 +2476,20 @@ func TestDefaultTSOPrimaryReadyRequiresExpectedPrimaryMatch(t *testing.T) {
 	_, err = client.Put(context.Background(), expectedPrimaryPath, "primary-a")
 	re.NoError(err)
 	re.True(c.isDefaultTSOPrimaryReady())
+
+	called := 0
+	c.tsoServiceReadyFunc = func(context.Context) bool {
+		called++
+		return false
+	}
+	re.False(c.isDefaultTSOPrimaryReady())
+	re.Equal(1, called)
+	c.tsoServiceReadyFunc = func(context.Context) bool {
+		called++
+		return true
+	}
+	re.True(c.isDefaultTSOPrimaryReady())
+	re.Equal(2, called)
 }
 
 // Create n stores (0..n).

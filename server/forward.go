@@ -483,6 +483,45 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 	return false
 }
 
+func (s *GrpcServer) checkDefaultTSOServiceReady(ctx context.Context) bool {
+	targetHost, ok := s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
+	if !ok || len(targetHost) == 0 {
+		return false
+	}
+	clientConn, err := s.getDelegateClient(ctx, targetHost)
+	if err != nil {
+		log.Debug("failed to probe TSO service", zap.String("tso-addr", targetHost), errs.ZapError(err))
+		return false
+	}
+	forwardStream, _, cancelForward, err := createTSOForwardStream(ctx, clientConn)
+	if err != nil {
+		s.closeDelegateClient(targetHost)
+		log.Debug("failed to create TSO probe stream", zap.String("tso-addr", targetHost), errs.ZapError(err))
+		return false
+	}
+	defer cancelForward()
+	request := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       keypath.ClusterID(),
+			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+		},
+		Count: 1,
+	}
+	if err := forwardStream.Send(request); err != nil {
+		s.closeDelegateClient(targetHost)
+		log.Debug("failed to send TSO probe request", zap.String("tso-addr", targetHost), errs.ZapError(err))
+		return false
+	}
+	resp, err := forwardStream.Recv()
+	if err != nil {
+		s.closeDelegateClient(targetHost)
+		log.Debug("failed to receive TSO probe response", zap.String("tso-addr", targetHost), errs.ZapError(err))
+		return false
+	}
+	return resp.GetTimestamp() != nil
+}
+
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	if ts, handled, err := s.generateEmbeddedTSOWithGate(ctx, 1); handled || err != nil {
 		return ts, err
@@ -517,25 +556,32 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		}
 		return false
 	}
+	tryFallbackToPD := func() (pdpb.Timestamp, bool) {
+		ts, handled, err := s.switchTSOProviderToPDAndGenerateEmbeddedTSO(ctx, 1)
+		if handled && err == nil {
+			return ts, true
+		}
+		if err != nil {
+			log.Warn("failed to switch TSO provider back to PD after TSO forwarding failed", errs.ZapError(err))
+		}
+		return pdpb.Timestamp{}, false
+	}
 	for i := range maxRetryTimesRequestTSOServer {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
-			raftCluster := s.DirectlyGetRaftCluster()
-			if raftCluster != nil {
-				if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
-					log.Warn("failed to switch TSO provider back to PD after TSO primary is missing", errs.ZapError(err))
-				}
-				if ts, handled, err := s.generateEmbeddedTSOWithGate(ctx, 1); handled || err != nil {
-					return ts, err
-				}
+			if ts, ok := tryFallbackToPD(); ok {
+				return ts, nil
 			}
 			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)
 		if err != nil {
+			if ts, ok := tryFallbackToPD(); ok {
+				return ts, nil
+			}
 			return pdpb.Timestamp{}, err
 		}
 		start := time.Now()
@@ -548,6 +594,9 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 			}
 			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			forwardStream.Unlock()
+			if ts, ok := tryFallbackToPD(); ok {
+				return ts, nil
+			}
 			return pdpb.Timestamp{}, err
 		}
 		ts, err = forwardStream.Recv()
@@ -558,11 +607,17 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 				continue
 			}
 			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			if ts, ok := tryFallbackToPD(); ok {
+				return ts, nil
+			}
 			return pdpb.Timestamp{}, err
 		}
 		return *ts.GetTimestamp(), nil
 	}
 	log.Error("get global tso from tso primary server failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	if ts, ok := tryFallbackToPD(); ok {
+		return ts, nil
+	}
 	return pdpb.Timestamp{}, err
 }
 

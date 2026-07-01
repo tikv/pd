@@ -101,6 +101,7 @@ const (
 	gcTombstoneInterval            = 30 * 24 * time.Hour
 	schedulingServiceCheckInterval = 10 * time.Second
 	tsoServiceCheckInterval        = 100 * time.Millisecond
+	tsoServiceReadyCheckTimeout    = time.Second
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
@@ -196,6 +197,7 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	tsoSwitchMu              sync.RWMutex
+	tsoServiceReadyFunc      func(context.Context) bool
 	hbstreams                *hbstream.HeartbeatStreams
 	tsoAllocator             *tso.Allocator
 
@@ -527,13 +529,16 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO dynamic switching is enabled, resuming TSO service checks")
 			}
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-			if err != nil || len(servers) == 0 || !c.isDefaultTSOPrimaryReady() {
+			if err != nil || len(servers) == 0 || !c.isDefaultTSOPrimaryEtcdReady() {
 				if err := c.switchTSOProviderToPD(); err != nil {
 					log.Error("failed to start TSO jobs", errs.ZapError(err))
 					return
 				}
-			} else {
+			} else if c.IsServiceIndependent(constant.TSOServiceName) || c.isDefaultTSOServiceReady() {
 				c.switchTSOProviderToTSO()
+			} else if err := c.switchTSOProviderToPD(); err != nil {
+				log.Error("failed to start TSO jobs", errs.ZapError(err))
+				return
 			}
 		} else {
 			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateDisabled)
@@ -551,6 +556,26 @@ func (c *RaftCluster) checkTSOService() {
 }
 
 func (c *RaftCluster) isDefaultTSOPrimaryReady() bool {
+	if !c.isDefaultTSOPrimaryEtcdReady() {
+		return false
+	}
+	return c.isDefaultTSOServiceReady()
+}
+
+func (c *RaftCluster) isDefaultTSOServiceReady() bool {
+	if c.tsoServiceReadyFunc == nil {
+		return true
+	}
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, tsoServiceReadyCheckTimeout)
+	defer cancel()
+	return c.tsoServiceReadyFunc(checkCtx)
+}
+
+func (c *RaftCluster) isDefaultTSOPrimaryEtcdReady() bool {
 	msParam := &keypath.MsParam{
 		ServiceName: constant.TSOServiceName,
 		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
@@ -587,6 +612,12 @@ func (c *RaftCluster) getEtcdValue(path, name string) (string, bool) {
 		return "", false
 	}
 	return string(resp.Kvs[0].Value), true
+}
+
+// SetTSOServiceReadyFunc sets the callback used to probe whether the default
+// TSO service is ready to serve requests before switching traffic to it.
+func (c *RaftCluster) SetTSOServiceReadyFunc(fn func(context.Context) bool) {
+	c.tsoServiceReadyFunc = fn
 }
 
 // RunEmbeddedTSORequest runs a local TSO request only when TSO is currently
@@ -643,7 +674,7 @@ func (c *RaftCluster) switchTSOProviderToTSO() {
 	}
 	c.tsoSwitchMu.Lock()
 	defer c.tsoSwitchMu.Unlock()
-	if !c.isDefaultTSOPrimaryReady() {
+	if !c.isDefaultTSOPrimaryEtcdReady() {
 		return
 	}
 	c.stopTSOJobsIfNeeded()

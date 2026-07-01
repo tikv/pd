@@ -30,7 +30,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -299,10 +298,10 @@ func (s *GrpcServer) GetMinTS(
 		err = internalErr
 	} else {
 		minTS, err = s.GetMinTSFromTSOService()
-		if err != nil && len(s.keyspaceGroupManager.GetTSOServiceAddrs()) == 0 {
-			if ts, handled, internalErr := s.switchTSOProviderToPDAndGenerateEmbeddedTSO(ctx, 1); handled || internalErr != nil {
+		if err != nil {
+			if ts, handled, internalErr := s.switchTSOProviderToPDAndGenerateEmbeddedTSO(ctx, 1); handled && internalErr == nil {
 				minTS = &ts
-				err = internalErr
+				err = nil
 			}
 		}
 	}
@@ -523,6 +522,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
+requestLoop:
 	for {
 		var (
 			request *pdpb.TsoRequest
@@ -620,12 +620,19 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 			return errs.ErrUnknown(err)
 		}
-		tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
-		if tsoStreamErr != nil {
-			if isErrNotFoundTSOAddr(tsoStreamErr) {
-				if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
-					log.Warn("failed to switch TSO provider back to PD after TSO primary is missing", errs.ZapError(err))
+		for retry := range maxRetryTimesRequestTSOServer {
+			if retry > 0 {
+				time.Sleep(retryIntervalRequestTSOServer)
+			}
+			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
+			if tsoStreamErr == nil {
+				if err != nil {
+					return err
 				}
+				continue requestLoop
+			}
+			if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
+				log.Warn("failed to switch TSO provider back to PD after TSO forwarding failed", errs.ZapError(err))
 			}
 			needRebuildConnection := grpcutil.NeedRebuildConnection(tsoStreamErr)
 			forwardHost := forwarder.host
@@ -650,12 +657,15 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				if err := stream.Send(response); err != nil {
 					return errors.WithStack(err)
 				}
-				continue
+				continue requestLoop
 			}
-			return tsoStreamErr
-		}
-		if err != nil {
-			return err
+			if needRebuildConnection {
+				s.closeDelegateClient(forwardHost)
+			}
+			forwarder.reset()
+			if retry == maxRetryTimesRequestTSOServer-1 {
+				return tsoStreamErr
+			}
 		}
 	}
 }
@@ -672,12 +682,6 @@ func (s *GrpcServer) acquireTSOForwardingSlot() (func(), error) {
 	return func() {
 		s.concurrentTSOProxyStreamings.Add(-1)
 	}, nil
-}
-
-func isErrNotFoundTSOAddr(err error) bool {
-	cause := errors.Cause(err)
-	return status.Code(cause) == status.Code(errs.ErrNotFoundTSOAddr) &&
-		status.Convert(cause).Message() == status.Convert(errs.ErrNotFoundTSOAddr).Message()
 }
 
 func (s *GrpcServer) generateEmbeddedTSOResponse(ctx context.Context, request *pdpb.TsoRequest) (*pdpb.TsoResponse, error) {
