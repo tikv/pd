@@ -403,12 +403,15 @@ func (td *tsoDispatcher) processRequests(
 ) error {
 	// `done` must be guaranteed to be eventually called.
 	var (
-		requests     = tbc.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
+		requests = tbc.GetCollectedRequests()
+		spans    = make([]opentracing.Span, 0, len(requests))
 	)
+	traceCtx := context.Background()
+	if len(requests) > 0 {
+		traceCtx = requests[0].requestCtx
+	}
+	traceRegion := trace.StartRegion(traceCtx, "pdclient.tsoReqSendBatch")
 	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend"))
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
 			spans = append(spans, span.Tracer().StartSpan("pdclient.processRequests", opentracing.ChildOf(span.Context())))
 		}
@@ -417,9 +420,7 @@ func (td *tsoDispatcher) processRequests(
 		for i := len(spans) - 1; i >= 0; i-- {
 			spans[i].Finish()
 		}
-		for i := len(traceRegions) - 1; i >= 0; i-- {
-			traceRegions[i].End()
-		}
+		traceRegion.End()
 	}()
 
 	var (
