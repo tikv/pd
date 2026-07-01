@@ -30,6 +30,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -293,15 +294,11 @@ func (s *GrpcServer) GetMinTS(
 	}
 
 	var minTS *pdpb.Timestamp
-	if s.IsServiceIndependent(constant.TSOServiceName) {
-		minTS, err = s.GetMinTSFromTSOService()
-	} else {
-		start := time.Now()
-		ts, internalErr := s.tsoAllocator.GenerateTSO(ctx, 1)
-		if internalErr == nil {
-			tsoHandleDuration.Observe(time.Since(start).Seconds())
-		}
+	if ts, handled, internalErr := s.generateEmbeddedTSOWithGate(ctx, 1); handled || internalErr != nil {
 		minTS = &ts
+		err = internalErr
+	} else {
+		minTS, err = s.GetMinTSFromTSOService()
 	}
 	if err != nil {
 		return &pdpb.GetMinTSResponse{
@@ -495,10 +492,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	if done != nil {
 		defer done()
 	}
-	if s.IsServiceIndependent(constant.TSOServiceName) {
-		tsoForwardStreamCounter.Inc()
-		return s.forwardToTSOService(stream)
-	}
 
 	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
@@ -506,11 +499,16 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	var (
 		// The following are tso forward stream related variables.
 		tsoRequestProxyCtx context.Context
-		forwarder          = newTSOForwarder(stream)
+		proxyStream        = &tsoServer{stream: stream}
+		forwarder          = newTSOForwarder(proxyStream)
 		tsoStreamErr       error
+		releaseForwardSlot func()
 	)
 
 	defer func() {
+		if releaseForwardSlot != nil {
+			releaseForwardSlot()
+		}
 		forwarder.cancel()
 		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
 			s.closeDelegateClient(forwarder.host)
@@ -526,7 +524,11 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		)
 
 		if tsoRequestProxyCtx == nil {
-			request, err = stream.Recv()
+			if s.IsServiceIndependent(constant.TSOServiceName) {
+				request, err = proxyStream.recv(s.GetTSOProxyRecvFromClientTimeout())
+			} else {
+				request, err = stream.Recv()
+			}
 		} else {
 			// if we forward requests to TSO proxy we can't block on the next request in the stream
 			// as proxy might fail on the previous request, and we need to return the error to client
@@ -577,43 +579,139 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			continue
 		}
 
-		if s.IsServiceIndependent(constant.TSOServiceName) {
-			if request.GetCount() == 0 {
-				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-				return errs.ErrUnknown(err)
-			}
-			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
-			if tsoStreamErr != nil {
-				return tsoStreamErr
+		raftCluster := s.DirectlyGetRaftCluster()
+		if raftCluster == nil {
+			return errs.ErrNotStarted
+		}
+		var response *pdpb.TsoResponse
+		handled, err := raftCluster.RunEmbeddedTSORequest(func() error {
+			var generateErr error
+			response, generateErr = s.generateEmbeddedTSOResponse(ctx, request)
+			return generateErr
+		})
+		if handled {
+			if releaseForwardSlot != nil {
+				releaseForwardSlot()
+				releaseForwardSlot = nil
 			}
 			if err != nil {
 				return err
 			}
+			if err := stream.Send(response); err != nil {
+				return errors.WithStack(err)
+			}
 			continue
 		}
 
-		start := time.Now()
-		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
-			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
+		if releaseForwardSlot == nil {
+			releaseForwardSlot, err = s.acquireTSOForwardingSlot()
+			if err != nil {
+				return err
+			}
+			tsoForwardStreamCounter.Inc()
 		}
-		count := request.GetCount()
-		tsoBatchSize.Observe(float64(count))
-		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
-		task.End()
-		tsoHandleDuration.Observe(time.Since(start).Seconds())
-		if err != nil {
+		if request.GetCount() == 0 {
+			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 			return errs.ErrUnknown(err)
 		}
-		response := &pdpb.TsoResponse{
-			Header:    grpcutil.WrapHeader(),
-			Timestamp: &ts,
-			Count:     count,
+		tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
+		if tsoStreamErr != nil {
+			if isErrNotFoundTSOAddr(tsoStreamErr) {
+				if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
+					log.Warn("failed to switch TSO provider back to PD after TSO primary is missing", errs.ZapError(err))
+				}
+			}
+			needRebuildConnection := grpcutil.NeedRebuildConnection(tsoStreamErr)
+			forwardHost := forwarder.host
+			handled, err = raftCluster.RunEmbeddedTSORequest(func() error {
+				forwarder.reset()
+				var generateErr error
+				response, generateErr = s.generateEmbeddedTSOResponse(ctx, request)
+				return generateErr
+			})
+			if handled {
+				if releaseForwardSlot != nil {
+					releaseForwardSlot()
+					releaseForwardSlot = nil
+				}
+				if needRebuildConnection {
+					s.closeDelegateClient(forwardHost)
+				}
+				tsoStreamErr = nil
+				if err != nil {
+					return err
+				}
+				if err := stream.Send(response); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
+			}
+			return tsoStreamErr
 		}
-		if err := stream.Send(response); err != nil {
-			return errors.WithStack(err)
+		if err != nil {
+			return err
 		}
 	}
+}
+
+func (s *GrpcServer) acquireTSOForwardingSlot() (func(), error) {
+	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
+	if maxConcurrentTSOProxyStreamings < 0 {
+		return func() {}, nil
+	}
+	if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
+		s.concurrentTSOProxyStreamings.Add(-1)
+		return nil, errors.WithStack(errs.ErrMaxCountTSOProxyRoutinesExceeded)
+	}
+	return func() {
+		s.concurrentTSOProxyStreamings.Add(-1)
+	}, nil
+}
+
+func isErrNotFoundTSOAddr(err error) bool {
+	cause := errors.Cause(err)
+	return status.Code(cause) == status.Code(errs.ErrNotFoundTSOAddr) &&
+		status.Convert(cause).Message() == status.Convert(errs.ErrNotFoundTSOAddr).Message()
+}
+
+func (s *GrpcServer) generateEmbeddedTSOResponse(ctx context.Context, request *pdpb.TsoRequest) (*pdpb.TsoResponse, error) {
+	if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+		return nil, errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
+	}
+	count := request.GetCount()
+	tsoBatchSize.Observe(float64(count))
+	ts, err := s.generateEmbeddedTSO(ctx, count)
+	if err != nil {
+		return nil, errs.ErrUnknown(err)
+	}
+	return &pdpb.TsoResponse{
+		Header:    grpcutil.WrapHeader(),
+		Timestamp: &ts,
+		Count:     count,
+	}, nil
+}
+
+func (s *GrpcServer) generateEmbeddedTSOWithGate(ctx context.Context, count uint32) (pdpb.Timestamp, bool, error) {
+	raftCluster := s.DirectlyGetRaftCluster()
+	if raftCluster == nil {
+		return pdpb.Timestamp{}, false, errs.ErrNotStarted
+	}
+	var ts pdpb.Timestamp
+	handled, err := raftCluster.RunEmbeddedTSORequest(func() error {
+		var generateErr error
+		ts, generateErr = s.generateEmbeddedTSO(ctx, count)
+		return generateErr
+	})
+	return ts, handled, err
+}
+
+func (s *GrpcServer) generateEmbeddedTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+	start := time.Now()
+	ctx, task := trace.NewTask(ctx, "tso")
+	ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
+	task.End()
+	tsoHandleDuration.Observe(time.Since(start).Seconds())
+	return ts, err
 }
 
 // Bootstrap implements gRPC PDServer.

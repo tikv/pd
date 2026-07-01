@@ -47,20 +47,17 @@ func (s *GrpcServer) forwardToTSOService(stream pdpb.PD_TsoServer) error {
 		forwarder    = newTSOForwarder(server)
 		tsoStreamErr error
 	)
+	releaseForwardSlot, err := s.acquireTSOForwardingSlot()
+	if err != nil {
+		return err
+	}
 	defer func() {
-		s.concurrentTSOProxyStreamings.Add(-1)
+		releaseForwardSlot()
 		forwarder.cancel()
 		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
 			s.closeDelegateClient(forwarder.host)
 		}
 	}()
-
-	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
-	if maxConcurrentTSOProxyStreamings >= 0 {
-		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
-			return errors.WithStack(errs.ErrMaxCountTSOProxyRoutinesExceeded)
-		}
-	}
 
 	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
@@ -118,6 +115,17 @@ func (f *tsoForwarder) cancel() {
 	if f != nil && f.canceller != nil {
 		f.canceller()
 	}
+}
+
+func (f *tsoForwarder) reset() {
+	if f == nil {
+		return
+	}
+	f.cancel()
+	f.stream = nil
+	f.ctx = nil
+	f.canceller = nil
+	f.host = ""
 }
 
 // forwardTSORequest sends the TSO request with the current forward stream.
@@ -476,8 +484,8 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsServiceIndependent(mcs.TSOServiceName) {
-		return s.tsoAllocator.GenerateTSO(ctx, 1)
+	if ts, handled, err := s.generateEmbeddedTSOWithGate(ctx, 1); handled || err != nil {
+		return ts, err
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
@@ -515,6 +523,15 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		}
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, mcs.TSOServiceName)
 		if !ok || forwardedHost == "" {
+			raftCluster := s.DirectlyGetRaftCluster()
+			if raftCluster != nil {
+				if err := raftCluster.SwitchTSOProviderToPD(); err != nil {
+					log.Warn("failed to switch TSO provider back to PD after TSO primary is missing", errs.ZapError(err))
+				}
+				if ts, handled, err := s.generateEmbeddedTSOWithGate(ctx, 1); handled || err != nil {
+					return ts, err
+				}
+			}
 			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)

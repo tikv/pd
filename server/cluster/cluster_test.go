@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -2357,6 +2358,97 @@ func newTestRaftCluster(
 	}
 	rc.schedulingController = newSchedulingController(rc.ctx, rc.BasicCluster, rc.opt, rc.ruleManager)
 	return rc
+}
+
+func TestRunEmbeddedTSORequestFencesProviderSwitch(t *testing.T) {
+	re := require.New(t)
+	c := &RaftCluster{}
+	entered := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	resultCh := make(chan struct {
+		handled bool
+		err     error
+	}, 1)
+	go func() {
+		handled, err := c.RunEmbeddedTSORequest(func() error {
+			close(entered)
+			<-releaseRequest
+			return nil
+		})
+		resultCh <- struct {
+			handled bool
+			err     error
+		}{handled: handled, err: err}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("embedded TSO request did not start")
+	}
+
+	switchAcquired := make(chan struct{})
+	releaseSwitch := make(chan struct{})
+	go func() {
+		c.tsoSwitchMu.Lock()
+		defer c.tsoSwitchMu.Unlock()
+		close(switchAcquired)
+		<-releaseSwitch
+	}()
+
+	select {
+	case <-switchAcquired:
+		t.Fatal("provider switch acquired the lock while an embedded TSO request was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseRequest)
+	select {
+	case result := <-resultCh:
+		re.True(result.handled)
+		re.NoError(result.err)
+	case <-time.After(time.Second):
+		t.Fatal("embedded TSO request did not finish")
+	}
+	select {
+	case <-switchAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("provider switch did not acquire the lock after the request finished")
+	}
+	close(releaseSwitch)
+}
+
+func TestRunEmbeddedTSORequestSkipsIndependentTSO(t *testing.T) {
+	re := require.New(t)
+	c := &RaftCluster{}
+	c.SetServiceIndependent(mcsconstant.TSOServiceName)
+	called := false
+	handled, err := c.RunEmbeddedTSORequest(func() error {
+		called = true
+		return nil
+	})
+	re.NoError(err)
+	re.False(handled)
+	re.False(called)
+}
+
+func TestRunEmbeddedTSORequestSkipsWhenDynamicSwitchingDisabled(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.GetMicroserviceConfig().EnableTSODynamicSwitching = false
+	c := &RaftCluster{
+		isKeyspaceGroupEnabled: true,
+		opt:                    opt,
+	}
+	called := false
+	handled, err := c.RunEmbeddedTSORequest(func() error {
+		called = true
+		return nil
+	})
+	re.NoError(err)
+	re.False(handled)
+	re.False(called)
 }
 
 // Create n stores (0..n).
