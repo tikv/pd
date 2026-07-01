@@ -34,6 +34,7 @@ const (
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
 	defaultEnableRouterClient                    = true
+	defaultTSOTimeout                            = 15 * time.Second
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -63,6 +64,7 @@ type Option struct {
 	// Static options.
 	GRPCDialOptions   []grpc.DialOption
 	Timeout           time.Duration
+	TSOTimeout         time.Duration
 	MaxRetryTimes     int
 	EnableForwarding  bool
 	UseTSOServerProxy bool
@@ -82,11 +84,12 @@ type Option struct {
 func NewOption() *Option {
 	co := &Option{
 		Timeout:                  defaultPDTimeout,
+		TSOTimeout:               defaultTSOTimeout,
 		MaxRetryTimes:            maxInitClusterRetries,
 		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
 		EnableFollowerHandleCh:   make(chan struct{}, 1),
-		EnableRouterClientCh:     make(chan struct{}, 1),
-		InitMetrics:              true,
+		EnableRouterClientCh:      make(chan struct{}, 1),
+		InitMetrics:               true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -182,6 +185,33 @@ func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
 	return func(op *Option) {
 		op.Timeout = timeout
 	}
+}
+
+// WithCustomTSOTimeoutOption configures the client with TSO timeout option.
+// This timeout affects how long TSO requests will wait before timing out.
+// The TSO timeout can also be affected by the backoffer if set via WithBackoffer.
+func WithCustomTSOTimeoutOption(timeout time.Duration) ClientOption {
+	return func(op *Option) {
+		op.TSOTimeout = timeout
+	}
+}
+
+// GetTSOTimeout returns the effective TSO timeout considering the backoffer's total time limit.
+// If a backoffer is set with a non-zero total time, the TSO timeout will be capped by that limit.
+// This allows tidb_backoff_weight to indirectly affect TSO timeout via the backoffer.
+func (o *Option) GetTSOTimeout() time.Duration {
+	tsoTimeout := o.TSOTimeout
+	if tsoTimeout <= 0 {
+		tsoTimeout = o.Timeout
+	}
+	// If backoffer has a total time limit, cap the TSO timeout accordingly
+	if o.Backoffer != nil {
+		backofferTotal := o.Backoffer.TotalTime()
+		if backofferTotal > 0 && backofferTotal < tsoTimeout {
+			return backofferTotal
+		}
+	}
+	return tsoTimeout
 }
 
 // WithForwardingOption configures the client with forwarding option.
