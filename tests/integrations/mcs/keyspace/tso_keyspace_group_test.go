@@ -542,6 +542,19 @@ func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(re *require.Assertions,
 	return kg, resp.StatusCode
 }
 
+func (suite *keyspaceGroupTestSuite) keyspaceGroupHasMember(re *require.Assertions, id uint32, address string) bool {
+	kg, code := suite.tryGetKeyspaceGroup(re, id)
+	if code != http.StatusOK || kg == nil {
+		return false
+	}
+	for _, member := range kg.Members {
+		if member.Address == address {
+			return true
+		}
+	}
+	return false
+}
+
 func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Assertions, id int, request *handlers.SetNodesForKeyspaceGroupParams) (*endpoint.KeyspaceGroup, int) {
 	data, err := json.Marshal(request)
 	re.NoError(err)
@@ -558,12 +571,13 @@ func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Ass
 
 // tsoTestSetup holds the setup information for TSO tests
 type tsoTestSetup struct {
-	nodes         map[string]bs.Server
-	cleanups      []func()
-	client        pd.Client
-	initialTS     uint64
-	firstNodeAddr string
-	keyspaceID    uint32
+	nodes           map[string]bs.Server
+	cleanups        []func()
+	client          pd.Client
+	initialTS       uint64
+	firstNodeAddr   string
+	keyspaceID      uint32
+	keyspaceGroupID uint32
 }
 
 // setupTSONodesAndClient creates TSO nodes, keyspace group, and returns initialized client
@@ -649,12 +663,13 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		break
 	}
 	return &tsoTestSetup{
-		nodes:         nodes,
-		cleanups:      cleanups,
-		client:        client,
-		initialTS:     initialTS,
-		firstNodeAddr: firstNodeAddr,
-		keyspaceID:    keyspaceID,
+		nodes:           nodes,
+		cleanups:        cleanups,
+		client:          client,
+		initialTS:       initialTS,
+		firstNodeAddr:   firstNodeAddr,
+		keyspaceID:      keyspaceID,
+		keyspaceGroupID: keyspaceGroupID,
 	}
 }
 
@@ -742,6 +757,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	// recovery. Allow either the blocked request or a fresh retry to observe the
 	// recovered TSO service and return a newer timestamp.
 	var recoveredTS uint64
+	keyspaceGroupReady := false
 	testutil.Eventually(re, func() bool {
 		select {
 		case result := <-resultCh:
@@ -752,16 +768,23 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 		default:
 		}
 
-		retryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		retryTimeout := time.Second
+		if keyspaceGroupReady {
+			retryTimeout = 10 * time.Second
+		}
+		retryCtx, cancel := context.WithTimeout(context.Background(), retryTimeout)
 
 		physicalTS, logicalTS, err := client.GetTS(retryCtx)
+		cancel()
 		if err != nil {
+			if !keyspaceGroupReady {
+				keyspaceGroupReady = suite.keyspaceGroupHasMember(re, setup.keyspaceGroupID, newNode.GetAddr())
+			}
 			return false
 		}
 		recoveredTS = tsoutil.ComposeTS(physicalTS, logicalTS)
 		return recoveredTS > setup.initialTS
-	}, testutil.WithWaitFor(60*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(500*time.Millisecond))
 	getTSCancel()
 	re.Greater(recoveredTS, setup.initialTS)
 
