@@ -75,7 +75,7 @@ type regionSyncStream struct {
 	}
 	// sendMu serializes the logical send flow.
 	sendMu struct {
-		syncutil.Mutex
+		sync.Mutex
 	}
 	sendIndex atomic.Uint64
 	notifyCh  chan bool

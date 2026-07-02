@@ -804,7 +804,9 @@ func TestBindStreamWaitsForAppendHistoryRecordsBoundary(t *testing.T) {
 
 	syncer.mu.RLock()
 	bindResultCh := make(chan uint64, 1)
+	bindDoneCh := make(chan struct{})
 	go func() {
+		defer close(bindDoneCh)
 		syncStream, syncStartIndex := syncer.bindStreamForSync("pd2", stream)
 		defer syncer.unbindStream("pd2", syncStream)
 		bindResultCh <- syncStartIndex
@@ -820,6 +822,7 @@ func TestBindStreamWaitsForAppendHistoryRecordsBoundary(t *testing.T) {
 	syncer.mu.RUnlock()
 
 	re.Equal(uint64(13), <-bindResultCh)
+	<-bindDoneCh
 }
 
 func TestAppendHistoryRecordsDoesNotWaitForBusyDownstream(t *testing.T) {
