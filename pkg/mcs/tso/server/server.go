@@ -175,7 +175,9 @@ func (s *Server) Run() (err error) {
 			}
 		}
 		if err != nil && s.GetListener() != nil {
-			_ = s.GetListener().Close()
+			if closeErr := s.GetListener().Close(); closeErr != nil {
+				log.Warn("failed to close listener", errs.ZapError(closeErr))
+			}
 		}
 	}()
 

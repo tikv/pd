@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/url"
 	"testing"
 
@@ -34,7 +35,9 @@ func TestInitListenerWithKernelSelectedPort(t *testing.T) {
 	re := require.New(t)
 	svr := NewBaseServer(context.Background())
 	re.NoError(svr.InitListener(&grpcutil.TLSConfig{}, "http://127.0.0.1:0"))
-	defer svr.GetListener().Close()
+	defer func() {
+		re.NoError(svr.GetListener().Close())
+	}()
 
 	actual := svr.GetActualListenAddr()
 	u, err := url.Parse(actual)
@@ -54,4 +57,22 @@ func TestResolveAdvertiseListenAddr(t *testing.T) {
 	require.Equal(t, actualAddr, ResolveAdvertiseListenAddr("http://127.0.0.1:0", actualAddr))
 	require.Equal(t, actualAddr, ResolveAdvertiseListenAddr("127.0.0.1:0", actualAddr))
 	require.Equal(t, "http://127.0.0.1:23456", ResolveAdvertiseListenAddr("http://127.0.0.1:23456", actualAddr))
+}
+
+func TestBuildActualListenAddrPreservesUnspecifiedAddressFamily(t *testing.T) {
+	re := require.New(t)
+
+	listenURL, err := url.Parse("http://0.0.0.0:0")
+	re.NoError(err)
+	re.Equal("http://127.0.0.1:12345", buildActualListenAddr(listenURL, &net.TCPAddr{
+		IP:   net.ParseIP("0.0.0.0"),
+		Port: 12345,
+	}))
+
+	listenURL, err = url.Parse("http://[::]:0")
+	re.NoError(err)
+	re.Equal("http://[::1]:12345", buildActualListenAddr(listenURL, &net.TCPAddr{
+		IP:   net.ParseIP("::"),
+		Port: 12345,
+	}))
 }

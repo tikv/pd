@@ -221,7 +221,11 @@ func buildActualListenAddr(listenURL *url.URL, addr net.Addr) string {
 		host, _, _ = net.SplitHostPort(addr.String())
 	}
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
-		host = "127.0.0.1"
+		if ip.To4() == nil {
+			host = "::1"
+		} else {
+			host = "127.0.0.1"
+		}
 	}
 	_, port, err := net.SplitHostPort(addr.String())
 	if err != nil {
