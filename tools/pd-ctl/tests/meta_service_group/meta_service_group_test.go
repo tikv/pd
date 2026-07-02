@@ -170,7 +170,7 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsertInvalidInput() {
 	re.Contains(string(output), "address cannot contain empty segment")
 }
 
-func (suite *metaServiceGroupCLITestSuite) findGroup(groups []*handlers.MetaServiceGroupStatus, id string) *handlers.MetaServiceGroupStatus {
+func findGroup(groups []*handlers.MetaServiceGroupStatus, id string) *handlers.MetaServiceGroupStatus {
 	for _, g := range groups {
 		if g.ID == id {
 			return g
@@ -192,14 +192,14 @@ func (suite *metaServiceGroupCLITestSuite) TestSetEnabled() {
 	re.NoError(err)
 	var groups []*handlers.MetaServiceGroupStatus
 	re.NoError(json.Unmarshal(output, &groups))
-	re.True(suite.findGroup(groups, "group-0").Status.Enabled)
-	re.False(suite.findGroup(groups, "group-1").Status.Enabled)
+	re.True(findGroup(groups, "group-0").Status.Enabled)
+	re.False(findGroup(groups, "group-1").Status.Enabled)
 
 	// set-enabled false disables it again.
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "false")
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &groups))
-	re.False(suite.findGroup(groups, "group-0").Status.Enabled)
+	re.False(findGroup(groups, "group-0").Status.Enabled)
 }
 
 func (suite *metaServiceGroupCLITestSuite) TestSetAssignmentCount() {
@@ -212,7 +212,7 @@ func (suite *metaServiceGroupCLITestSuite) TestSetAssignmentCount() {
 	re.NoError(err)
 	var groups []*handlers.MetaServiceGroupStatus
 	re.NoError(json.Unmarshal(output, &groups))
-	g := suite.findGroup(groups, "group-0")
+	g := findGroup(groups, "group-0")
 	re.Equal(10, g.Status.AssignmentCount)
 	// Enabled state is preserved across an assignment-count patch.
 	re.True(g.Status.Enabled)

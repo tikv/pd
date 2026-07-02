@@ -105,11 +105,11 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			normalizedPatch[trimmedID] = nil
 			continue
 		}
-		// Reject IDs that are not URL-safe on add/update: such a group could be
-		// created but never patched via /meta-service-groups/{id}/status. Deletes
-		// (nil above) are still allowed so any legacy bad group can be removed.
+		// Reject IDs that are not URL-safe on add/update: a '/' would make the
+		// group unpatchable via /meta-service-groups/{id}/status. Deletes (nil
+		// above) are still allowed so any legacy bad group can be removed.
 		if !config.IsValidMetaServiceGroupID(trimmedID) {
-			c.AbortWithStatusJSON(http.StatusBadRequest, "group ID contains invalid characters, only letters, digits, '-' and '_' are allowed")
+			c.AbortWithStatusJSON(http.StatusBadRequest, "group ID cannot contain '/'")
 			return
 		}
 		trimmedAddresses := strings.TrimSpace(*addresses)

@@ -641,7 +641,12 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 			name:      "group ID with slash is rejected",
 			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
 			expectErr: true,
-			errorMsg:  "[keyspace] meta-service group ID contains invalid characters, only letters, digits, '-' and '_' are allowed: group/1",
+			errorMsg:  "[keyspace] meta-service group ID cannot contain '/': group/1",
+		},
+		{
+			name:     "group ID with other special characters is allowed",
+			groups:   map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+			expected: map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
 		},
 	}
 
