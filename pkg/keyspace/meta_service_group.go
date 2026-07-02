@@ -104,14 +104,17 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	}
 	m.RLock()
 	defer m.RUnlock()
+	// Validate existence against the in-memory group set under the lock, then
+	// touch only the target group's status in the txn. Loading every group would
+	// widen the etcd compare set so an unrelated concurrent assignment could make
+	// this patch fail with a spurious txn conflict.
+	if _, ok := m.metaServiceGroups[groupID]; !ok {
+		return ErrUnknownMetaServiceGroup
+	}
 	return m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		statusMap, err := m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
+		status, err := m.loadGroupStatus(txn, groupID)
 		if err != nil {
 			return err
-		}
-		status, exists := statusMap[groupID]
-		if !exists {
-			return ErrUnknownMetaServiceGroup
 		}
 		if patch.AssignmentCount != nil {
 			status.AssignmentCount = *patch.AssignmentCount

@@ -169,3 +169,75 @@ func (suite *metaServiceGroupCLITestSuite) TestUpsertInvalidInput() {
 	re.NoError(err)
 	re.Contains(string(output), "address cannot contain empty segment")
 }
+
+func (suite *metaServiceGroupCLITestSuite) findGroup(groups []*handlers.MetaServiceGroupStatus, id string) *handlers.MetaServiceGroupStatus {
+	for _, g := range groups {
+		if g.ID == id {
+			return g
+		}
+	}
+	return nil
+}
+
+func (suite *metaServiceGroupCLITestSuite) TestSetEnabled() {
+	re := suite.Require()
+	// Groups are disabled by default.
+	for _, g := range suite.mustListGroups() {
+		re.NotNil(g.Status)
+		re.False(g.Status.Enabled)
+	}
+
+	// set-enabled flips only the target group.
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "true")
+	re.NoError(err)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(output, &groups))
+	re.True(suite.findGroup(groups, "group-0").Status.Enabled)
+	re.False(suite.findGroup(groups, "group-1").Status.Enabled)
+
+	// set-enabled false disables it again.
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "false")
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &groups))
+	re.False(suite.findGroup(groups, "group-0").Status.Enabled)
+}
+
+func (suite *metaServiceGroupCLITestSuite) TestSetAssignmentCount() {
+	re := suite.Require()
+
+	// Enable the group first, then set its assignment count.
+	_, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "true")
+	re.NoError(err)
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "group-0", "10")
+	re.NoError(err)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(output, &groups))
+	g := suite.findGroup(groups, "group-0")
+	re.Equal(10, g.Status.AssignmentCount)
+	// Enabled state is preserved across an assignment-count patch.
+	re.True(g.Status.Enabled)
+}
+
+func (suite *metaServiceGroupCLITestSuite) TestSetStatusInvalidInput() {
+	re := suite.Require()
+
+	// Invalid boolean for set-enabled is reported by the CLI.
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "notabool")
+	re.NoError(err)
+	re.Contains(string(output), "Invalid value for enabled flag")
+
+	// Invalid integer for set-assignment-count is reported by the CLI.
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "group-0", "notanint")
+	re.NoError(err)
+	re.Contains(string(output), "Invalid value for assignment count")
+
+	// Negative assignment count is rejected by the server (HTTP 400).
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "--", "group-0", "-1")
+	re.NoError(err)
+	re.Contains(string(output), "assignment count must be non-negative")
+
+	// Patching an unknown group is rejected by the server (HTTP 404).
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "nonexistent-group", "true")
+	re.NoError(err)
+	re.Contains(string(output), "unknown meta-service group")
+}
