@@ -590,7 +590,7 @@ func TestSendRegionSyncResponseSerializesStreamSendAfterTimeout(t *testing.T) {
 	closeSendDone := make(chan error, 1)
 	go func() {
 		close(closeSendStarted)
-		closeSendDone <- syncStream.send(&pdpb.SyncRegionResponse{
+		closeSendDone <- syncStream.sendStream(&pdpb.SyncRegionResponse{
 			Header: &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 		})
 	}()

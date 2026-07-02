@@ -124,12 +124,6 @@ func (s *regionSyncStream) checkOpen() error {
 	}
 }
 
-func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.sendStream(regions)
-}
-
 func (s *regionSyncStream) sendStreamIfOpen(regions *pdpb.SyncRegionResponse) error {
 	s.stream.Lock()
 	defer s.stream.Unlock()
