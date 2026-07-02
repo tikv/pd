@@ -535,12 +535,26 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
+	memberIDs := make([]string, 0, len(cluster.GetServers()))
+	for _, server := range cluster.GetServers() {
+		memberIDs = append(memberIDs, fmt.Sprintf("%d", server.GetServerID()))
+	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", strings.Join(memberIDs, ","))))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	leaderFailpointsDisabled := false
+	disableLeaderFailpoints := func() {
+		if leaderFailpointsDisabled {
+			return
+		}
+		leaderFailpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	}
 	failpointsDisabled := false
 	disableFailpoints := func() {
 		if failpointsDisabled {
@@ -549,23 +563,29 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		failpointsDisabled = true
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+		disableLeaderFailpoints()
 	}
 	defer disableFailpoints()
 	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
 	// Trying to get TSO should fail with "not leader" error.
-	testutil.Eventually(re, func() bool {
+	getTSError := func() error {
 		_, _, err := pdClient.GetTS(ctx)
+		return err
+	}
+	testutil.Eventually(re, func() bool {
+		err := getTSError()
 		return err != nil && strings.Contains(err.Error(), "not leader")
-	})
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(20*time.Millisecond))
+	disableLeaderFailpoints()
+	for range 10 {
+		re.ErrorContains(getTSError(), "not leader")
+	}
 	disableFailpoints()
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
 		_, _, err := pdClient.GetTS(ctx)
 		return err == nil
-	})
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {

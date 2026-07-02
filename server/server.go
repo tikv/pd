@@ -1814,8 +1814,20 @@ func (s *Server) campaignLeader() {
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
 	defer s.stopRaftCluster()
-	failpoint.Inject("rebaseErr", func() {
-		failpoint.Return()
+	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
+		if enabled, ok := val.(bool); ok && enabled {
+			failpoint.Return()
+		}
+		memberString, ok := val.(string)
+		if !ok {
+			return
+		}
+		for _, memberIDString := range strings.Split(memberString, ",") {
+			memberID, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
+			if err == nil && s.member.ID() == memberID {
+				failpoint.Return()
+			}
+		}
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
