@@ -789,6 +789,20 @@ func TestSeedGroupDistributionByRange(t *testing.T) {
 	re.Equal(group, val)
 }
 
+func TestInternalScatterAllowsWhenReadCPUIsBelowLowWatermark(t *testing.T) {
+	re := require.New(t)
+	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)
+	setUnifiedReadPoolThreadCount(tc, 12)
+	setStoreReadCPU(tc, 1, 500)
+	setStoreReadCPU(tc, 4, 50)
+
+	op, err := scatterer.ScatterInternal(region, "below-read-pool-low-watermark", []byte("a"), []byte("z"))
+	re.NoError(err)
+	re.NotNil(op)
+	_, targetLeader := finalPlacementAfterOperator(region, op)
+	re.Equal(uint64(4), targetLeader)
+}
+
 func TestInternalScatterSkipsWhenReadCPUIsBalanced(t *testing.T) {
 	re := require.New(t)
 	scatterer, tc, region := newInternalScatterReadCPUTestFixture(t)

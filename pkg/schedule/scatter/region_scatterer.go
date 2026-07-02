@@ -76,6 +76,7 @@ const (
 	initialSleepDuration                  = 100 * time.Millisecond
 	maxRetryLimit                         = 30
 	splitScatterReadCPUUsagePerCore       = 100.0
+	splitScatterReadPoolLowWatermark      = 0.30
 	splitScatterReadPoolPressureThreshold = 0.70
 	// Only let internal split-scatter proceed by count when the current leader
 	// store is meaningfully busier than the chosen target leader store.
@@ -892,6 +893,18 @@ func isReadPoolUnderPressure(
 	return readCPU >= float64(readPoolThreadCount)*splitScatterReadCPUUsagePerCore*splitScatterReadPoolPressureThreshold
 }
 
+func readPoolUsageRatio(
+	storeID uint64,
+	readCPUByStore map[uint64]float64,
+	readPoolThreadCount uint64,
+	pendingReadCPU float64,
+) float64 {
+	if readPoolThreadCount == 0 {
+		return 0
+	}
+	return (readCPUByStore[storeID] + pendingReadCPU) / (float64(readPoolThreadCount) * splitScatterReadCPUUsagePerCore)
+}
+
 func observeNoLeaderTargetMetrics(internalScatter, blockedByReadPoolPressure bool) {
 	if internalScatter && blockedByReadPoolPressure {
 		scatterSkipReadPoolPressureCounter.Inc()
@@ -1086,6 +1099,11 @@ func shouldSkipInternalScatterByBalancedReadCPU(
 	if sourceLeader == targetLeader {
 		return false
 	}
+	regionReadCPU := float64(region.GetReadCPUUsage())
+	targetProjectedRatio := readPoolUsageRatio(targetLeader, readCPUByStore, readPoolThreadCount, regionReadCPU)
+	if targetProjectedRatio < splitScatterReadPoolLowWatermark {
+		return false
+	}
 	sourceReadCPU, ok := readCPUByStore[sourceLeader]
 	if !ok {
 		return false
@@ -1094,7 +1112,6 @@ func shouldSkipInternalScatterByBalancedReadCPU(
 	if !ok {
 		return false
 	}
-	regionReadCPU := float64(region.GetReadCPUUsage())
 	sourceReadCPU -= regionReadCPU
 	if sourceReadCPU < 0 {
 		sourceReadCPU = 0
