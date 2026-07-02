@@ -157,6 +157,20 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return err
 	}
 
+	if newPrimary != "" {
+		for _, member := range entries {
+			if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+				continue
+			}
+			if isSamePrimary(member, newPrimary) && isSamePrimary(member, oldPrimary) {
+				log.Info("skip transferring primary to itself",
+					zap.String("service", serviceName),
+					zap.String("primary", oldPrimary))
+				return nil
+			}
+		}
+	}
+
 	// Do nothing when I am the only member of cluster.
 	if len(entries) == 1 {
 		return errors.Errorf("no valid secondary to transfer primary, the only member is %s", entries[0].Name)
@@ -168,7 +182,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
 			continue
 		}
-		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
+		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && isSamePrimary(member, newPrimary)) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
 	}
@@ -202,4 +216,8 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}
 	return nil
+}
+
+func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
+	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
 }
