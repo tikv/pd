@@ -17,7 +17,7 @@ package keypath
 import (
 	"fmt"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 // GCStateRevisionPath returns the key path for storing the revision of GC state data.
@@ -53,6 +53,16 @@ func GCBarrierPath(keyspaceID uint32, barrierID string) string {
 		return fmt.Sprintf(unifiedGCBarrierPathFormat, ClusterID(), barrierID)
 	}
 	return fmt.Sprintf(keyspaceLevelGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
+}
+
+// GlobalGCBarrierPrefix returns the prefix of the paths of global GC barriers.
+func GlobalGCBarrierPrefix() string {
+	return fmt.Sprintf(globalGCBarrierPathPrefix, ClusterID())
+}
+
+// GlobalGCBarrierPath returns the key path of global GC barrier with given barrierID.
+func GlobalGCBarrierPath(barrierID string) string {
+	return fmt.Sprintf(globalGCBarrierPathFormat, ClusterID(), barrierID)
 }
 
 // ServiceGCSafePointPrefix returns the prefix of the paths of service safe points. It internally shares the same data

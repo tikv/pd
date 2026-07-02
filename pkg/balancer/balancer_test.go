@@ -15,11 +15,16 @@
 package balancer
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestBalancerPutAndDelete(t *testing.T) {
 	re := require.New(t)

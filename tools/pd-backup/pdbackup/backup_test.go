@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,7 +34,7 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -64,7 +64,7 @@ type backupTestSuite struct {
 }
 
 func TestBackupTestSuite(t *testing.T) {
-	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	servers, etcdClient, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
 
 	server, serverConfig := setupServer()

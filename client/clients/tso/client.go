@@ -16,7 +16,7 @@ package tso
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
@@ -198,11 +198,15 @@ func (c *Cli) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
 	if len(url) == 0 {
 		log.Fatal("[tso] the tso leader should exist")
 	}
-	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
-	if !ok {
+	cc, err := c.svcDiscovery.GetOrCreateGRPCConn(url)
+	if err != nil {
+		log.Warn("[tso] failed to get tso leader client connection",
+			zap.String("serving-url", url),
+			errs.ZapError(err),
+		)
 		return nil, url
 	}
-	return cc.(*grpc.ClientConn), url
+	return cc, url
 }
 
 func (c *Cli) updateTSOLeaderURL(url string) error {
@@ -228,7 +232,7 @@ func (c *Cli) backupClientConn() (*grpc.ClientConn, string) {
 		err error
 	)
 	for range urls {
-		url := urls[rand.Intn(len(urls))]
+		url := urls[rand.IntN(len(urls))]
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
 		}
@@ -305,7 +309,7 @@ func (c *Cli) updateConnectionCtxs(ctx context.Context) bool {
 		createTSOConnection = c.tryConnectToTSOWithProxy
 	}
 	if err := createTSOConnection(ctx); err != nil {
-		log.Error("[tso] update connection contexts failed", errs.ZapError(err))
+		log.Warn("[tso] update connection contexts failed", errs.ZapError(err))
 		return false
 	}
 	return true
@@ -331,9 +335,8 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
-			cctx, cancel := context.WithCancel(ctx)
 			// Just trigger the clean up of the stale connection contexts.
-			c.conCtxMgr.CleanAllAndStore(cctx, cancel, url)
+			c.conCtxMgr.GC(func(curURL string) bool { return curURL != url })
 			return nil
 		}
 		if cc != nil {
@@ -344,7 +347,12 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
 			if stream != nil && err == nil {
-				c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+				failpoint.InjectCall("pauseBeforeBackgroundStoreTSOLeaderStream")
+				stored := c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+				failpoint.InjectCall("notifyAfterBackgroundStoreTSOLeaderStream")
+				if !stored {
+					cancel()
+				}
 				return nil
 			}
 
@@ -386,10 +394,13 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 			if err == nil {
 				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
 				addr := tlsutil.TrimHTTPPrefix(backupURL)
+				if !c.conCtxMgr.CleanAllAndStore(cctx, cancel, backupURL, stream) {
+					cancel()
+					return nil
+				}
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
-				c.conCtxMgr.CleanAllAndStore(cctx, cancel, backupURL, stream)
 				return nil
 			}
 			cancel()
@@ -434,7 +445,9 @@ func (c *Cli) checkLeader(
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("url", url))
-					c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
+					if !c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream) {
+						cancel()
+					}
 					return
 				}
 			}
@@ -488,7 +501,10 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 				addrTrim := tlsutil.TrimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			c.conCtxMgr.Store(cctx, cancel, addr, stream)
+			if !c.conCtxMgr.Store(cctx, cancel, addr, stream) {
+				log.Info("[tso] already exists tso stream", zap.String("addr", addr))
+				cancel()
+			}
 			continue
 		}
 		log.Error("[tso] create the tso stream failed",
@@ -535,7 +551,7 @@ func (c *Cli) tryCreateTSODispatcher() {
 	if len(url) == 0 {
 		return
 	}
-	dispatcher := newTSODispatcher(c.ctx, defaultMaxTSOBatchSize, c)
+	dispatcher := newTSODispatcher(c.ctx, c)
 	c.wg.Add(1)
 	go dispatcher.handleDispatcher(&c.wg)
 	// Try to set the dispatcher atomically.
@@ -548,7 +564,7 @@ func (c *Cli) tryCreateTSODispatcher() {
 func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 	if c.getDispatcher() == nil {
 		err := errs.ErrClientGetTSO.FastGenByArgs("tso dispatcher is not ready")
-		log.Error("[tso] dispatch tso request error", errs.ZapError(err))
+		log.Warn("[tso] dispatch tso request error", errs.ZapError(err))
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		// New dispatcher could be created in the meantime, which is retryable.
 		return true, err

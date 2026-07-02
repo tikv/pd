@@ -19,12 +19,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	mrand "math/rand"
-	"sort"
+	mrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -33,8 +34,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -162,7 +162,7 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
@@ -217,11 +217,44 @@ func TestInherit(t *testing.T) {
 		if testCase.originExists {
 			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
 			origin.approximateSize = int64(testCase.originSize)
+			origin.approximateKeys = 1
 		}
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.approximateSize = int64(testCase.size)
+		r.approximateKeys = 1
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
+	}
+
+	// case for approximateKeys
+	// New logic: keys are only inherited when size==0
+	keysTestCases := []struct {
+		originExists bool
+		originSize   int64
+		originKeys   int64
+		size         int64
+		keys         int64
+		expectKeys   int64
+	}{
+		{false, 0, 0, 0, 0, 0},     // no origin, size=0, keys=0 -> keys remain 0 (size set to 1 only)
+		{false, 0, 0, 1, 0, 0},     // no origin, size=1, keys=0 -> keys remain 0 (no inheritance)
+		{false, 0, 0, 1, 100, 100}, // no origin, size=1, keys=100 -> keys remain 100
+		{true, 1, 50, 1, 100, 100}, // origin exists, size=1, keys=100 -> keys remain 100
+		{true, 10, 100, 0, 0, 100}, // origin exists, size=0, keys=0 -> inherit both (size=10, keys=100)
+		{true, 5, 200, 0, 0, 200},  // origin exists, size=0, keys=0 -> inherit both (size=5, keys=200)
+	}
+	for _, testCase := range keysTestCases {
+		var origin *RegionInfo
+		if testCase.originExists {
+			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin.approximateSize = testCase.originSize
+			origin.approximateKeys = testCase.originKeys
+		}
+		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r.approximateSize = testCase.size
+		r.approximateKeys = testCase.keys
+		r.Inherit(origin, false)
+		re.Equal(testCase.expectKeys, r.approximateKeys)
 	}
 
 	// bucket
@@ -235,7 +268,8 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin.UpdateBuckets(d.originBuckets, nil)
 		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
@@ -246,6 +280,28 @@ func TestInherit(t *testing.T) {
 			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
 		}
 	}
+
+	origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	origin.reportBuckets = unsafe.Pointer(&metapb.Buckets{
+		Version: 1,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	})
+
+	// region hasn't bucket meta, report buckets should be inherited.
+	new := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+	new.Inherit(origin, true)
+	re.Equal(uint64(1), new.GetReportBuckets().Version)
+
+	// region has bucket meta, report buckets should be inherited also.
+	new1 := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(&metapb.Buckets{
+		Version: 2,
+		Keys:    [][]byte{{'a'}, {'b'}},
+	}))
+	new1.Inherit(origin, true)
+	re.Equal(uint64(1), new1.GetReportBuckets().Version)
 }
 
 func TestRegionRoundingFlow(t *testing.T) {
@@ -466,9 +522,11 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
 	}()
-	regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
@@ -641,7 +699,7 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
-		region.UpdateBuckets(buckets, region.GetBuckets())
+		region.UpdateBuckets(buckets, nil)
 	}
 	if region.GetBuckets().GetVersion() != uint64(b.N-1) {
 		b.Fatal("update buckets failed")
@@ -674,8 +732,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
-		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		ranges := []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -689,11 +747,11 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
-		ranges = []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		ranges = []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -819,7 +877,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	b.RunParallel(
 		func(pb *testing.PB) {
 			for pb.Next() {
-				item := items[mrand.Intn(len(items))]
+				item := items[mrand.IntN(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegion(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
@@ -834,23 +892,25 @@ const (
 	keyLength = 100
 )
 
-func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
+var baseID = atomic.Uint64{}
+
+func newRegionInfoIDRandom() *RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
 	)
 	// Randomly select a peer as the leader.
-	leaderIdx := mrand.Intn(peerNum)
+	leaderIdx := mrand.IntN(peerNum)
 	for i := range peerNum {
-		id, _, _ := idAllocator.Alloc(1)
+		id := baseID.Add(1)
 		// Randomly distribute the peers to different stores.
-		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
+		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.IntN(storeNum) + 1)}
 		if i == leaderIdx {
 			leader = p
 		}
 		peers = append(peers, p)
 	}
-	regionID, _, _ := idAllocator.Alloc(1)
+	regionID := baseID.Add(1)
 	return NewRegionInfo(
 		&metapb.Region{
 			Id:       regionID,
@@ -875,8 +935,7 @@ func randomBytes(n int) []byte {
 
 func BenchmarkAddRegion(b *testing.B) {
 	regions := NewRegionsInfo()
-	idAllocator := mockid.NewIDAllocator()
-	items := generateRegionItems(idAllocator, 10000000)
+	items := generateRegionItems(10000000)
 	b.ResetTimer()
 	for i := range b.N {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
@@ -885,10 +944,9 @@ func BenchmarkAddRegion(b *testing.B) {
 }
 
 func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
-	idAllocator := mockid.NewIDAllocator()
 	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
 		regions := NewRegionsInfo()
-		items := generateRegionItems(idAllocator, size)
+		items := generateRegionItems(size)
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -913,7 +971,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from a non-empty `*RegionsInfo` with different regions,
 		// which means the regions are most likely overlapped.
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
-			items = generateRegionItems(idAllocator, size)
+			items = generateRegionItems(size)
 			b.ResetTimer()
 			for range b.N {
 				for idx := range items {
@@ -924,10 +982,10 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 	}
 }
 
-func generateRegionItems(idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
+func generateRegionItems(size int) []*RegionInfo {
 	items := make([]*RegionInfo, size)
 	for i := range size {
-		items[i] = newRegionInfoIDRandom(idAllocator)
+		items[i] = newRegionInfoIDRandom()
 	}
 	return items
 }
@@ -957,7 +1015,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
-	flowRoundDivisor := 3
+	flowRoundDivisor := uint64(3)
 	b.ResetTimer()
 	for range b.N {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
@@ -974,11 +1032,13 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 	updateRegion := func(item *RegionInfo) {
 		// old way
 		ctx := ContextTODO()
-		regionsOld.AtomicCheckAndPutRegion(ctx, item)
+		_, err := regionsOld.AtomicCheckAndPutRegion(ctx, item)
+		re.NoError(err)
 		// new way
 		newItem := item.Clone()
 		ctx = ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, newItem)
+		_, err = regionsNew.CheckAndPutRootTree(ctx, newItem)
+		re.NoError(err)
 		regionsNew.CheckAndPutSubTree(newItem)
 	}
 	checksEquivalence := func() {
@@ -1079,7 +1139,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	// Old way
 	{
 		ctx := ContextTODO()
-		regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
+		_, err := regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
+		re.NoError(err)
 		re.Equal(int32(2), regionPendingItemA.GetRef())
 		// check new item
 		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemA, regionPendingItemA)
@@ -1087,7 +1148,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		re.True(saveCache)
 		re.False(saveKV)
 		// update cache
-		regionsOld.AtomicCheckAndPutRegion(ctx, regionItemA)
+		_, err = regionsOld.AtomicCheckAndPutRegion(ctx, regionItemA)
+		re.NoError(err)
 		re.Equal(int32(2), regionItemA.GetRef())
 	}
 
@@ -1095,10 +1157,12 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	{
 		// root tree part in order, and updated in order, updated regionPendingItemB first, then regionItemB
 		ctx := ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, regionPendingItemB)
+		_, err := regionsNew.CheckAndPutRootTree(ctx, regionPendingItemB)
+		re.NoError(err)
 		re.Equal(int32(1), regionPendingItemB.GetRef())
 		ctx = ContextTODO()
-		regionsNew.CheckAndPutRootTree(ctx, regionItemB)
+		_, err = regionsNew.CheckAndPutRootTree(ctx, regionItemB)
+		re.NoError(err)
 		re.Equal(int32(1), regionItemB.GetRef())
 		re.Equal(int32(0), regionPendingItemB.GetRef())
 
@@ -1148,6 +1212,37 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 	re.Equal(int32(2), region.GetRef())
 }
 
+func TestCntRefAfterFlowOnlyUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx := ContextTODO()
+	regions := NewRegionsInfo()
+
+	// Initial put: the region lives in both the root tree and the subtree, so ref == 2.
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetWrittenBytes(100))
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+
+	// Flow-only heartbeat: same range and peers, only the flow differs. This mirrors
+	// processRegionHeartbeat: a synchronous root tree update plus an async subtree update.
+	flowOnly := region.Clone(SetWrittenBytes(999))
+	re.True(region.rangeEqualsTo(flowOnly))
+	re.True(region.peersEqualTo(flowOnly))
+	_, err := regions.CheckAndPutRootTree(ctx, flowOnly)
+	re.NoError(err)
+	regions.CheckAndPutSubTree(flowOnly)
+
+	// The region is still present in the subtree and is the live cached object,
+	// so its ref must stay at 2 (root tree + overlapTree).
+	re.Equal(1, regions.GetStoreLeaderCount(1))
+	re.Same(flowOnly, regions.GetRegion(1))
+	re.Equal(int32(2), flowOnly.GetRef())
+
+	// A redundant subtree update (the origin.GetRef() < 2 repair path) must not break the count.
+	regions.CheckAndPutSubTree(regions.GetRegion(1))
+	re.Equal(int32(2), regions.GetRegion(1).GetRef())
+}
+
 func TestScanRegion(t *testing.T) {
 	var (
 		re                   = require.New(t)
@@ -1157,11 +1252,11 @@ func TestScanRegion(t *testing.T) {
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1224,9 +1319,9 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 
 	for limit := 1; limit <= 18; limit++ {
-		KeyRanges := NewKeyRanges([]KeyRange{
-			NewKeyRange("a", "b"),
-			NewKeyRange("b0", ""), // ensure the key ranges are not merged
+		KeyRanges := keyutil.NewKeyRanges([]keyutil.KeyRange{
+			keyutil.NewKeyRange("a", "b"),
+			keyutil.NewKeyRange("b0", ""), // ensure the key ranges are not merged
 		})
 		resp, err := regions.BatchScanRegions(KeyRanges, WithLimit(limit))
 		re.NoError(err)
@@ -1322,45 +1417,6 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
 }
 
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		rule  string
-		peers []*metapb.Peer
-	}{
-		{
-			rule:  "leader-scatter",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			rule:  "peer-scatter",
-			peers: []*metapb.Peer{learner, leader, follower1, follower2},
-		},
-		{
-			rule:  "learner-scatter",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			rule:  "witness-scatter",
-			peers: nil,
-		},
-	} {
-		role := NewRule(v.rule)
-		peers := region.GetPeersByRule(role)
-		sort.Slice(peers, func(i, j int) bool {
-			return peers[i].Id <= peers[j].Id
-		})
-		re.Equal(v.peers, peers, role)
-	}
-}
-
 func TestCodecRule(t *testing.T) {
 	re := require.New(t)
 	for _, v := range []string{"leader", "peer", "learner", "witness"} {
@@ -1374,5 +1430,193 @@ func TestCodecRule(t *testing.T) {
 		var rule2 Rule
 		re.NoError(json.Unmarshal(body, &rule2))
 		re.Equal(rule.String(), rule2.String())
+	}
+}
+
+func TestRegionCount(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("c")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("e"), []byte("g")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("g"), []byte("i")))
+	for _, key := range [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f"), []byte("g"), []byte("h"), []byte("")} {
+		count := regions.GetRegionCount([]byte("a"), key)
+		scanCount := len(regions.ScanRegions([]byte("a"), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount([]byte(""), key)
+		scanCount = len(regions.ScanRegions([]byte(""), key, 100))
+		re.Equal(count, scanCount, "endKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte("i"))
+		scanCount = len(regions.ScanRegions(key, []byte("i"), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
+
+		count = regions.GetRegionCount(key, []byte(""))
+		scanCount = len(regions.ScanRegions(key, []byte(""), 100))
+		re.Equal(count, scanCount, "startKey: %s", key)
+	}
+}
+
+func TestResetRegionCache(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	// Create and add some regions
+	region1 := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	region2 := NewTestRegionInfo(2, 1, []byte("b"), []byte("c"))
+	region3 := NewTestRegionInfo(3, 1, []byte("c"), []byte("d"))
+
+	// Put regions to populate all the maps and trees
+	regions.CheckAndPutRegion(region1)
+	regions.CheckAndPutRegion(region2)
+	regions.CheckAndPutRegion(region3)
+
+	// Verify that regions are populated
+	re.Equal(3, regions.GetTotalRegionCount())
+	re.NotNil(regions.GetRegion(1))
+	re.NotNil(regions.GetRegion(2))
+	re.NotNil(regions.GetRegion(3))
+
+	// Verify that subRegions is populated
+	re.NotEmpty(regions.subRegions)
+
+	// Reset the cache
+	regions.ResetRegionCache()
+
+	// Verify that all fields are properly reset
+	re.Equal(0, regions.GetTotalRegionCount())
+	re.Nil(regions.GetRegion(1))
+	re.Nil(regions.GetRegion(2))
+	re.Nil(regions.GetRegion(3))
+
+	// Verify that subRegions is properly reset
+	re.Empty(regions.subRegions)
+
+	// Verify that all other maps are reset
+	re.Empty(regions.leaders)
+	re.Empty(regions.followers)
+	re.Empty(regions.learners)
+	re.Empty(regions.witnesses)
+	re.Empty(regions.pendingPeers)
+
+	// Verify that trees are reset
+	re.Equal(0, regions.tree.length())
+	re.Equal(0, regions.overlapTree.length())
+
+	// Verify that we can add new regions after reset
+	newRegion := NewTestRegionInfo(4, 1, []byte("d"), []byte("e"))
+	regions.CheckAndPutRegion(newRegion)
+	re.Equal(1, regions.GetTotalRegionCount())
+	re.NotNil(regions.GetRegion(4))
+}
+
+func TestGetBucketMeta(t *testing.T) {
+	re := require.New(t)
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("d"))
+	re.Nil(region.GetBuckets())
+	origin := NewTestRegionInfo(1, 2, []byte("a"), []byte("d"))
+	bucket := &metapb.Buckets{
+		RegionId: 100,
+		Version:  1,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	origin.UpdateBuckets(bucket, nil)
+	re.Equal(uint64(1), origin.GetBuckets().GetVersion())
+	region.Inherit(origin, true)
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+
+	// Inherit false if region has bucket meta
+	bucket1 := &metapb.Buckets{
+		RegionId: 100,
+		Version:  2,
+		Keys:     [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	re.True(origin.UpdateBuckets(bucket1, origin.GetBuckets()))
+	re.Equal(uint64(2), origin.GetBuckets().GetVersion())
+	region.bucketMeta = &metapb.BucketMeta{
+		Version: 1,
+		Keys:    [][]byte{[]byte("a"), []byte("b"), []byte("d")},
+	}
+	region.Inherit(origin, true)
+	// Inherit false if region
+	re.Equal(uint64(1), region.GetBuckets().GetVersion())
+}
+
+func BenchmarkQueryRegions(b *testing.B) {
+	regionSizes := []int{100, 1000, 10000, 100000}
+	querySizes := []int{10, 50, 100, 500, 1000}
+
+	for _, regionSize := range regionSizes {
+		regions := NewRegionsInfo()
+		var regionIDs []uint64
+		var keys [][]byte
+		var prevKeys [][]byte
+
+		for i := range regionSize {
+			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+			startKey := []byte(fmt.Sprintf("%20d", i*10))
+			endKey := []byte(fmt.Sprintf("%20d", (i+1)*10))
+			region := NewRegionInfo(&metapb.Region{
+				Id:       uint64(i + 1),
+				Peers:    []*metapb.Peer{peer},
+				StartKey: startKey,
+				EndKey:   endKey,
+			}, peer)
+			regions.CheckAndPutRegion(region)
+			regionIDs = append(regionIDs, uint64(i+1))
+			keys = append(keys, startKey)
+			prevKeys = append(prevKeys, endKey)
+		}
+
+		for _, querySize := range querySizes {
+			if querySize > regionSize {
+				continue
+			}
+
+			queryIDs := make([]uint64, querySize)
+			queryKeys := make([][]byte, querySize)
+			queryPrevKeys := make([][]byte, querySize)
+			step := regionSize / querySize
+			for i := range querySize {
+				idx := i * step
+				queryIDs[i] = regionIDs[idx]
+				queryKeys[i] = keys[idx]
+				queryPrevKeys[i] = prevKeys[idx]
+			}
+
+			b.Run(fmt.Sprintf("QueryByKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(queryKeys, nil, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByPrevKeys_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, queryPrevKeys, nil, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryByIDs_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(nil, nil, queryIDs, false)
+				}
+			})
+
+			b.Run(fmt.Sprintf("QueryMixed_regions=%d_queries=%d", regionSize, querySize), func(b *testing.B) {
+				halfSize := querySize / 2
+				mixedKeys := queryKeys[:halfSize]
+				mixedPrevKeys := queryPrevKeys[:halfSize]
+				mixedIDs := queryIDs[:halfSize]
+				b.ResetTimer()
+				for range b.N {
+					regions.QueryRegions(mixedKeys, mixedPrevKeys, mixedIDs, false)
+				}
+			})
+		}
 	}
 }

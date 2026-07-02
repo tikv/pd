@@ -27,7 +27,7 @@ type storeCollector interface {
 	// filter determines whether the Store needs to be handled by itself.
 	filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool
 	// getLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
-	getLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64)
+	getLoads(storeLoads StoreKindLoads, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads)
 }
 
 type tikvCollector struct{}
@@ -41,7 +41,7 @@ func (tikvCollector) engine() string {
 }
 
 func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool {
-	if info.IsTiFlash() {
+	if !info.IsTiKV() {
 		return false
 	}
 	switch kind {
@@ -53,13 +53,13 @@ func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) 
 	return false
 }
 
-func (tikvCollector) getLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64) {
-	loads = make([]float64, utils.DimLen)
+func (tikvCollector) getLoads(storeLoads StoreKindLoads, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
 	switch rwTy {
 	case utils.Read:
 		loads[utils.ByteDim] = storeLoads[utils.StoreReadBytes]
 		loads[utils.KeyDim] = storeLoads[utils.StoreReadKeys]
 		loads[utils.QueryDim] = storeLoads[utils.StoreReadQuery]
+		loads[utils.CPUDim] = storeLoads[utils.StoreReadCPU]
 	case utils.Write:
 		switch kind {
 		case constant.LeaderKind:
@@ -96,13 +96,14 @@ func (tiflashCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKin
 	case constant.LeaderKind:
 		return false
 	case constant.RegionKind:
-		return info.IsTiFlash()
+		// Only TiFlash write nodes should be included in hot region scheduling.
+		// TiFlash compute nodes don't store data and shouldn't be scheduled.
+		return info.IsTiFlashWrite()
 	}
 	return false
 }
 
-func (c tiflashCollector) getLoads(storeLoads, peerLoadSum []float64, rwTy utils.RWType, kind constant.ResourceKind) (loads []float64) {
-	loads = make([]float64, utils.DimLen)
+func (c tiflashCollector) getLoads(storeLoads StoreKindLoads, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
 	switch rwTy {
 	case utils.Read:
 		// TODO: Need TiFlash StoreHeartbeat support

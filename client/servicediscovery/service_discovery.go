@@ -26,8 +26,10 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/connectivity"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
@@ -123,6 +125,8 @@ type ServiceDiscovery interface {
 	GetAllServiceClients() []ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given url.
 	GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error)
+	// RemoveClientConn removes and closes the gRPC connection of the given URL.
+	RemoveClientConn(url string)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
@@ -249,7 +253,11 @@ func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 
 // GetClientConn implements ServiceClient.
 func (c *serviceClient) GetClientConn() *grpc.ClientConn {
-	if c == nil {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	// If the connection is in Shutdown state, it means the connection is closed and we should not reuse it.
+	if c.conn.GetState() == connectivity.Shutdown {
 		return nil
 	}
 	return c.conn
@@ -398,6 +406,13 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 	return
 }
 
+func (c *serviceBalancer) clean() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = nil
+	c.totalNode = 0
+}
+
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
 
@@ -436,6 +451,8 @@ type serviceDiscovery struct {
 	tlsCfg               *tls.Config
 	// Client option.
 	option *opt.Option
+
+	flight singleflight.Group
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -467,6 +484,7 @@ func NewServiceDiscovery(
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
+		flight:               singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
@@ -548,7 +566,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		}
 		err := bo.Exec(ctx, c.updateMember)
 		if err != nil {
-			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update member", zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}
 }
@@ -578,8 +596,8 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		case <-ticker.C:
 		}
 		if err := c.checkServiceModeChanged(); err != nil {
-			log.Error("[pd] failed to update service mode",
-				zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
+			log.Warn("[pd] failed to update service mode",
+				zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
 			c.ScheduleCheckMemberChanged() // check if the leader changed
 		}
 	}
@@ -635,7 +653,7 @@ func (c *serviceDiscovery) Close() {
 		log.Info("[pd] close service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
-				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+				log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 			}
 			c.clientConns.Delete(key)
 			return true
@@ -912,18 +930,31 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
-	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
-	if err != nil {
+	key := "GetClusterInfo-" + url
+	r := c.flight.DoChan(key, func() (any, error) {
+		return pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
+	})
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		clusterInfo := val.(*pdpb.GetClusterInfoResponse)
+		if clusterInfo.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
+		}
+		return clusterInfo, nil
+	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
-	if clusterInfo.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
-	}
-	return clusterInfo, nil
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
@@ -935,18 +966,31 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
-	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
-	if err != nil {
+	key := "GetMembers-" + url
+	r := c.flight.DoChan(key, func() (any, error) {
+		return pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
+	})
+	select {
+	case res := <-r:
+		err = res.Err
+		if err != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		val := res.Val
+		members := val.(*pdpb.GetMembersResponse)
+		if members.GetHeader().GetError() != nil {
+			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
+			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		}
+		return members, nil
+	case <-ctx.Done():
+		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
-	if members.GetHeader().GetError() != nil {
-		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
-	}
-	return members, nil
 }
 
 func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
@@ -964,7 +1008,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
 	c.callbacks.onMembersChanged()
-	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
+	log.Info("[pd] update member urls", zap.Strings("old-sorted-urls", oldURLs), zap.Strings("new-sorted-urls", urls))
 }
 
 func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
@@ -1000,7 +1044,7 @@ func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint
 				// Now we don't apply ServiceClient for TSO Follower Proxy, so just keep the all URLs.
 				followerURLs = append(followerURLs, member.GetClientUrls()...)
 
-				// FIXME: How to safely compare urls(also for leader)? For now, only allows one client url.
+				// FIXME: How to safely compare sortedUrls(also for leader)? For now, only allows one client url.
 				url := tlsutil.PickMatchedURL(member.GetClientUrls(), c.tlsCfg)
 				if client, ok := c.followers.Load(url); ok {
 					if client.(*serviceClient).GetClientConn() == nil {
@@ -1037,7 +1081,7 @@ func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint
 }
 
 func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
-	// FIXME: How to safely compare leader urls? For now, only allows one client url.
+	// FIXME: How to safely compare leader sortedUrls? For now, only allows one client url.
 	leaderURL := tlsutil.PickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
 	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
@@ -1066,4 +1110,15 @@ func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *p
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
+}
+
+// RemoveClientConn removes and closes the grpc client connection of the given URL.
+func (c *serviceDiscovery) RemoveClientConn(url string) {
+	cc, ok := c.clientConns.LoadAndDelete(url)
+	if !ok {
+		return
+	}
+	if err := cc.(*grpc.ClientConn).Close(); err != nil {
+		log.Warn("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+	}
 }

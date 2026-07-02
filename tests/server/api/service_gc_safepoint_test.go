@@ -15,6 +15,7 @@
 package api
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -63,33 +65,47 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	leader := cluster.GetLeaderServer()
 	sspURL := leader.GetAddr() + "/pd/api/v1/gc/safepoint"
 
-	storage := leader.GetServer().GetStorage()
+	gcStateManager := leader.GetServer().GetGCStateManager()
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID: "a",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
+				ServiceID:  "a",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  10,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "b",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
+				ServiceID:  "b",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  20,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 			{
-				ServiceID: "c",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
+				ServiceID:  "c",
+				ExpiredAt:  now.Unix() + 10,
+				SafePoint:  30,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  1,
+				KeyspaceID: constant.NullKeyspaceID,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+	// Skip writing the "gc_worker" one.
+	for _, ssp := range list.ServiceGCSafepoints[:3] {
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(constant.NullKeyspaceID, ssp.ServiceID, ssp.SafePoint, 10, now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	res, err := tests.TestDialClient.Get(sspURL)
 	re.NoError(err)
@@ -99,10 +115,33 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	re.NoError(err)
 	re.Equal(list, listResp)
 
+	// The following delete bypasses GCStateManager and writes storage directly.
+	// Subsequent reads through both the manager and the public HTTP endpoint
+	// should still reflect the deletion.
 	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
-	left, err := storage.LoadAllServiceGCSafePoints()
+	state, err := gcStateManager.GetGCState(constant.NullKeyspaceID, false)
 	re.NoError(err)
-	re.Equal(list.ServiceGCSafepoints[1:], left)
+	left := state.GCBarriers
+	leftSsps := make([]*endpoint.ServiceSafePoint, 0, len(left))
+	for _, barrier := range left {
+		leftSsps = append(leftSsps, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
+	}
+	// Exclude the gc_worker as it's not included in GetGCState's result.
+	re.Equal(list.ServiceGCSafepoints[1:3], leftSsps)
+
+	resAfterDelete, err := tests.TestDialClient.Get(sspURL)
+	re.NoError(err)
+	defer resAfterDelete.Body.Close()
+	listRespAfterDelete := &api.ListServiceGCSafepoint{}
+	err = apiutil.ReadJSON(resAfterDelete.Body, listRespAfterDelete)
+	re.NoError(err)
+	// Also verify the public HTTP view, not only the direct GCStateManager read.
+	expectedAfterDelete := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints:   list.ServiceGCSafepoints[1:],
+		GCSafePoint:           list.GCSafePoint,
+		MinServiceGcSafepoint: list.MinServiceGcSafepoint,
+	}
+	re.Equal(expectedAfterDelete, listRespAfterDelete)
 }

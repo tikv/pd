@@ -15,6 +15,7 @@
 package metricutil
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"time"
@@ -68,7 +69,7 @@ func camelCaseToSnakeCase(str string) string {
 }
 
 // prometheusPushClient pushes metrics to Prometheus Pushgateway.
-func prometheusPushClient(job, addr string, interval time.Duration) {
+func prometheusPushClient(ctx context.Context, job, addr string, interval time.Duration) {
 	defer logutil.LogPanic()
 
 	pusher := push.New(addr, job).
@@ -81,12 +82,18 @@ func prometheusPushClient(job, addr string, interval time.Duration) {
 			log.Error("could not push metrics to Prometheus Pushgateway", errs.ZapError(errs.ErrPrometheusPushMetrics, err))
 		}
 
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			log.Info("stop Prometheus push client")
+			return
+		case <-time.After(interval):
+			// continue to push metrics
+		}
 	}
 }
 
 // Push metrics in background.
-func Push(cfg *MetricConfig) {
+func Push(ctx context.Context, cfg *MetricConfig) {
 	if cfg.PushInterval.Duration == zeroDuration || len(cfg.PushAddress) == 0 {
 		log.Info("disable Prometheus push client")
 		return
@@ -95,7 +102,7 @@ func Push(cfg *MetricConfig) {
 	log.Info("start Prometheus push client")
 
 	interval := cfg.PushInterval.Duration
-	go prometheusPushClient(cfg.PushJob, cfg.PushAddress, interval)
+	go prometheusPushClient(ctx, cfg.PushJob, cfg.PushAddress, interval)
 }
 
 func instanceName() string {

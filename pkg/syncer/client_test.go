@@ -20,17 +20,25 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // For issue https://github.com/tikv/pd/issues/3936
 func TestLoadRegion(t *testing.T) {
@@ -38,6 +46,7 @@ func TestLoadRegion(t *testing.T) {
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
+	defer re.NoError(rs.Close())
 
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -47,7 +56,8 @@ func TestLoadRegion(t *testing.T) {
 		core.NewBasicCluster(),
 	)
 	for i := range 30 {
-		rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
+		err = rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
+		re.NoError(err)
 	}
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", "return(true)"))
 	defer func() {
@@ -68,6 +78,7 @@ func TestErrorCode(t *testing.T) {
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
+	defer re.NoError(rs.Close())
 	server := mockserver.NewMockServer(
 		context.Background(),
 		nil,
@@ -84,4 +95,26 @@ func TestErrorCode(t *testing.T) {
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())
+}
+
+func TestHandleRegionSyncResponseSkipsErrorResponse(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t)
+	syncer.history.resetWithIndex(10)
+	syncer.streamingRunning.Store(true)
+
+	handled, fullSyncing := syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
+		Header: &pdpb.ResponseHeader{
+			ClusterId: keypath.ClusterID(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: "server stopped, close the region syncer client",
+			},
+		},
+	}, nil, nil, false)
+
+	re.False(handled)
+	re.False(fullSyncing)
+	re.Equal(uint64(10), syncer.history.getNextIndex())
+	re.False(syncer.IsRunning())
 }

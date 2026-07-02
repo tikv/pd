@@ -16,7 +16,7 @@ package schedulers
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +70,7 @@ func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool)
 	// empty region case
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
+		leader := rand.IntN(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
 			meta.Peers[leader],

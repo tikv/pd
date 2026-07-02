@@ -16,7 +16,7 @@ package schedulers
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
@@ -41,6 +41,7 @@ const (
 	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
 	maxHotScheduleInterval  = 20 * time.Second
+	defaultPendingWeight    = 1.0
 	defaultPendingAmpFactor = 2.0
 	defaultStddevThreshold  = 0.1
 	defaultTopnPosition     = 10
@@ -74,7 +75,6 @@ type baseHotScheduler struct {
 	regionPendings map[uint64]*pendingInfluence
 	// types is the resource types that the scheduler considers.
 	types           []resourceType
-	r               *rand.Rand
 	updateReadTime  time.Time
 	updateWriteTime time.Time
 }
@@ -88,8 +88,7 @@ func newBaseHotScheduler(
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen, sampleDuration, sampleInterval),
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.types = append(ret.types, ty)
@@ -144,10 +143,25 @@ func (s *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterva
 	s.stHistoryLoads = s.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
+func (s *baseHotScheduler) getEffectivePendingWeight() float64 {
+	if conf, ok := s.conf.(*hotRegionSchedulerConfig); ok {
+		pendingWeight := conf.getPendingWeight()
+		if pendingWeight < defaultPendingWeight {
+			log.Warn("pending-weight is less than default, fallback to default",
+				zap.Float64("pendingWeight", pendingWeight),
+				zap.Float64("defaultPendingWeight", defaultPendingWeight))
+			return defaultPendingWeight
+		}
+		return pendingWeight
+	}
+	return defaultPendingWeight
+}
+
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
 func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+	pendingWeight := s.getEffectivePendingWeight()
 	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
 			from := storeInfos[from]
@@ -160,6 +174,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 				continue
 			}
 
+			weight *= pendingWeight
 			if from != nil && weight > 0 {
 				from.AddInfluence(&p.origin, -weight)
 			}
@@ -180,7 +195,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 }
 
 func (s *baseHotScheduler) randomType() resourceType {
-	return s.types[s.r.Int()%len(s.types)]
+	return s.types[rand.Int()%len(s.types)]
 }
 
 type hotScheduler struct {
@@ -214,18 +229,29 @@ func (s *hotScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &hotRegionSchedulerConfig{}
+	newCfg := &hotRegionSchedulerConfig{
+		hotRegionSchedulerParam: s.conf.hotRegionSchedulerParam,
+	}
+	newCfg.ReadPriorities = append([]string(nil), s.conf.ReadPriorities...)
+	newCfg.WriteLeaderPriorities = append([]string(nil), s.conf.WriteLeaderPriorities...)
+	newCfg.WritePeerPriorities = append([]string(nil), s.conf.WritePeerPriorities...)
 	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	if err := newCfg.validateLocked(); err != nil {
 		return err
 	}
 	s.conf.MinHotByteRate = newCfg.MinHotByteRate
 	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
 	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MinHotCPURate = newCfg.MinHotCPURate
 	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	s.conf.PendingWeight = newCfg.PendingWeight
 	s.conf.MaxPeerNum = newCfg.MaxPeerNum
 	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
 	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
 	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CPURateRankStepRatio = newCfg.CPURateRankStepRatio
 	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
 	s.conf.GreatDecRatio = newCfg.GreatDecRatio
 	s.conf.MinorDecRatio = newCfg.MinorDecRatio
@@ -387,8 +413,8 @@ type rank interface {
 	calcProgressiveRank()
 	betterThan(*solution) bool
 	rankToDimString() string
-	checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool
-	checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool
+	checkByPriorityAndTolerance(loads statistics.Loads, f func(int) bool) bool
+	checkHistoryLoadsByPriority(loads statistics.HistoryLoads, f func(int) bool) bool
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]

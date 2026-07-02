@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -25,13 +26,13 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Watcher is used to watch the PD for any Placement Rule changes.
@@ -94,23 +95,25 @@ func NewWatcher(
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	err = rw.initializeRegionLabelWatcher()
 	if err != nil {
+		rw.Close()
 		return nil, err
 	}
 	return rw, nil
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	var suspectKeyRanges *core.KeyRanges
+	var suspectKeyRanges *keyutil.KeyRanges
 
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
-		suspectKeyRanges = &core.KeyRanges{}
+		suspectKeyRanges = &keyutil.KeyRanges{}
 		return nil
 	}
 
@@ -208,10 +211,15 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
+	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.regionLabeler.Lock()
+		for i := range suspectKeyRanges {
+			suspectKeyRanges[i] = nil // avoid memory leak
+		}
+		suspectKeyRanges = suspectKeyRanges[:0]
 		return nil
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -220,16 +228,38 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRuleLocked(rule)
+		err = rw.regionLabeler.SetLabelRuleLocked(rule)
+		if err == nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+		}
+		return err
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Debug("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
+		id := strings.TrimPrefix(key, rw.regionLabelPathPrefix)
+		rule := rw.regionLabeler.GetLabelRuleLocked(id)
+		err := rw.regionLabeler.DeleteLabelRuleLocked(id)
+		if err == nil && rule != nil {
+			krs := rule.GetKeyRanges()
+			if krs != nil {
+				suspectKeyRanges = append(suspectKeyRanges, krs...)
+			}
+		}
+		return err
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
 		rw.regionLabeler.BuildRangeListLocked()
+		if rw.checkerController == nil {
+			return errors.New("checker controller is nil")
+		}
+		for _, kr := range suspectKeyRanges {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
 		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
@@ -251,4 +281,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 func (rw *Watcher) Close() {
 	rw.cancel()
 	rw.wg.Wait()
+	if rw.checkerController != nil {
+		rw.checkerController.ClearSuspectKeyRanges()
+	}
 }

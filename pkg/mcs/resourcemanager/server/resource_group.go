@@ -17,6 +17,7 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -29,6 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
+
+// overrideFillRateToleranceRate is the tolerance rate to override the fill rate, i.e., the fill rate will only
+// be overridden if the new fill rate exceeds the original fill rate by this specified tolerance rate.
+const overrideFillRateToleranceRate = 0.05
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
@@ -56,7 +61,7 @@ func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
 	}
 	var ru *GroupTokenBucket
 	if rus.RU != nil {
-		ru = rus.RU.Clone()
+		ru = rus.RU.clone()
 	}
 	return &RequestUnitSettings{
 		RU: ru,
@@ -64,9 +69,9 @@ func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
 }
 
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.
-func NewRequestUnitSettings(tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
+func NewRequestUnitSettings(resourceGroupName string, tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
 	return &RequestUnitSettings{
-		RU: NewGroupTokenBucket(tokenBucket),
+		RU: NewGroupTokenBucket(resourceGroupName, tokenBucket),
 	}
 }
 
@@ -116,16 +121,81 @@ func (rg *ResourceGroup) getPriority() float64 {
 	return float64(rg.Priority)
 }
 
-func (rg *ResourceGroup) getFillRate() float64 {
+// getFillRate returns the fill rate of the resource group.
+// It will ignore the override fill rate and return the fill rate setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getFillRate(ignoreOverride ...bool) float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.Settings.FillRate)
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getFillRateSetting()
+	}
+	return rg.RUSettings.RU.getFillRate()
 }
 
-func (rg *ResourceGroup) getBurstLimit() float64 {
+func (rg *ResourceGroup) getOverrideFillRate() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
-	return float64(rg.RUSettings.RU.Settings.BurstLimit)
+	return rg.RUSettings.RU.overrideFillRate
+}
+
+func (rg *ResourceGroup) overrideFillRate(new float64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideFillRateLocked(new)
+}
+
+func (rg *ResourceGroup) overrideFillRateLocked(new float64) {
+	original := rg.RUSettings.RU.overrideFillRate
+	// If the fill rate has not been set before or the new value is negative,
+	// set it to the new fill rate directly without checking the tolerance.
+	if original < 0 || new < 0 {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+	// If the new fill rate exceeds the original by more than the allowed tolerance,
+	// override it.
+	if math.Abs(new-original) > original*overrideFillRateToleranceRate {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+}
+
+// getBurstLimit returns the burst limit of the resource group.
+// It will ignore the override burst limit and return the burst limit setting if the `ignoreOverride` is true.
+func (rg *ResourceGroup) getBurstLimit(ignoreOverride ...bool) int64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.getBurstLimitLocked(ignoreOverride...)
+}
+
+func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
+	if len(ignoreOverride) > 0 && ignoreOverride[0] {
+		return rg.RUSettings.RU.getBurstLimitSetting()
+	}
+	return rg.RUSettings.RU.getBurstLimit()
+}
+
+func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.RUSettings.RU.overrideBurstLimit
+}
+
+func (rg *ResourceGroup) overrideBurstLimit(new int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideBurstLimitLocked(new)
+}
+
+func (rg *ResourceGroup) overrideBurstLimitLocked(new int64) {
+	rg.RUSettings.RU.overrideBurstLimit = new
+}
+
+func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLimit int64) {
+	rg.Lock()
+	defer rg.Unlock()
+	rg.overrideFillRateLocked(fillRate)
+	rg.overrideBurstLimitLocked(burstLimit)
 }
 
 // PatchSettings patches the resource group settings.
@@ -134,7 +204,18 @@ func (rg *ResourceGroup) getBurstLimit() float64 {
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 	rg.Lock()
 	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, true)
+}
 
+// ApplySettings applies the resource group settings only.
+// It does not patch token delta.
+func (rg *ResourceGroup) ApplySettings(metaGroup *rmpb.ResourceGroup) error {
+	rg.Lock()
+	defer rg.Unlock()
+	return rg.patchSettingsLocked(metaGroup, false)
+}
+
+func (rg *ResourceGroup) patchSettingsLocked(metaGroup *rmpb.ResourceGroup, patchTokens bool) error {
 	if metaGroup.GetMode() != rg.Mode {
 		return errors.New("only support reconfigure in same mode, maybe you should delete and create a new one")
 	}
@@ -150,7 +231,11 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 		if settings == nil {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
-		rg.RUSettings.RU.patch(settings.GetRU())
+		if patchTokens {
+			rg.RUSettings.RU.patch(settings.GetRU())
+		} else {
+			rg.RUSettings.RU.applySettings(settings.GetRU())
+		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
@@ -171,9 +256,9 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
 		if group.GetRUSettings() == nil {
-			rg.RUSettings = NewRequestUnitSettings(nil)
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, nil)
 		} else {
-			rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+			rg.RUSettings = NewRequestUnitSettings(rg.Name, group.GetRUSettings().GetRU())
 		}
 		if group.RUStats != nil {
 			rg.RUConsumption = group.RUStats
@@ -189,19 +274,40 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+	grt *groupRUTracker, sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
-
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
+	// Inject the group RU tracker into the resource group.
+	if rg.RUSettings.RU.grt == nil {
+		rg.RUSettings.RU.grt = grt
+	}
+	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	if tb == nil {
+		return nil
+	}
+	// Then, try to apply the service limit.
+	grantedTokens := tb.GetTokens()
+	limitedTokens, minTrickleTimeMs := sl.applyServiceLimit(now, grantedTokens)
+	if limitedTokens < grantedTokens {
+		tb.Tokens = limitedTokens
+		// Retain the unused tokens for the later requests if it has a burst limit.
+		if rg.getBurstLimitLocked() > 0 {
+			rg.RUSettings.RU.reservedServiceTokens += grantedTokens - limitedTokens
+		}
+	}
+	if trickleTimeMs < minTrickleTimeMs {
+		trickleTimeMs = minTrickleTimeMs
+	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
 // IntoProtoResourceGroup converts a ResourceGroup to a rmpb.ResourceGroup.
-func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
+func (rg *ResourceGroup) IntoProtoResourceGroup(keyspaceID uint32) *rmpb.ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
 
@@ -216,6 +322,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			},
 			RunawaySettings:    rg.Runaway,
 			BackgroundSettings: rg.Background,
+			KeyspaceId:         &rmpb.KeyspaceIDValue{Value: keyspaceID},
 		}
 
 		if rg.RUConsumption != nil {
@@ -231,9 +338,9 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
-	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
+func (rg *ResourceGroup) persistSettings(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
+	metaGroup := rg.IntoProtoResourceGroup(keyspaceID)
+	return storage.SaveResourceGroupSetting(keyspaceID, rg.Name, metaGroup)
 }
 
 // GroupStates is the tokens set of a resource group.
@@ -257,7 +364,7 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 	case rmpb.GroupMode_RUMode: // RU mode
 		consumption := *rg.RUConsumption
 		tokens := &GroupStates{
-			RU:            rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+			RU:            rg.RUSettings.RU.GroupTokenBucketState.clone(),
 			RUConsumption: &consumption,
 		}
 		return tokens
@@ -296,10 +403,15 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.SqlLayerCpuTimeMs += c.SqlLayerCpuTimeMs
 	rc.KvReadRpcCount += c.KvReadRpcCount
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
+	rc.ReadCrossAzTrafficBytes += c.ReadCrossAzTrafficBytes
+	rc.WriteCrossAzTrafficBytes += c.WriteCrossAzTrafficBytes
+	rc.TikvRUV2 += c.TikvRUV2
+	rc.TidbRUV2 += c.TidbRUV2
+	rc.TiflashRUV2 += c.TiflashRUV2
 }
 
 // persistStates persists the resource group tokens.
-func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
+func (rg *ResourceGroup) persistStates(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
 	states := rg.GetGroupStates()
-	return storage.SaveResourceGroupStates(rg.Name, states)
+	return storage.SaveResourceGroupStates(keyspaceID, rg.Name, states)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -46,14 +47,16 @@ const (
 	// If you want to increase balance speed more, please increase above-mentioned param.
 	BalanceLeaderBatchSize = 4
 	// MaxBalanceLeaderBatchSize is maximum of balance leader batch size
-	MaxBalanceLeaderBatchSize = 10
+	MaxBalanceLeaderBatchSize = 100
 
 	transferIn  = "transfer-in"
 	transferOut = "transfer-out"
 )
 
+var invalidBalanceLeaderBatchSizeMsg = "invalid batch size which should be an integer between 1 and " + strconv.Itoa(MaxBalanceLeaderBatchSize)
+
 type balanceLeaderSchedulerParam struct {
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -79,7 +82,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			if err := json.Unmarshal(oldConfig, param); err != nil {
 				return http.StatusInternalServerError, err.Error()
 			}
-			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
+			return http.StatusBadRequest, invalidBalanceLeaderBatchSizeMsg
 		}
 		conf.balanceLeaderSchedulerParam = *param
 		if err := conf.save(); err != nil {
@@ -100,13 +103,13 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 }
 
 func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
-	return conf.Batch >= 1 && conf.Batch <= 10
+	return conf.Batch >= 1 && conf.Batch <= MaxBalanceLeaderBatchSize
 }
 
 func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceLeaderSchedulerParam{
 		Ranges: ranges,
@@ -120,10 +123,10 @@ func (conf *balanceLeaderSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *balanceLeaderSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *balanceLeaderSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }
@@ -428,8 +431,16 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), s.conf.getRanges()),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			// todo: check all key ranges not only the first
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		balanceLeaderNoLeaderRegionCounter.Inc()
@@ -472,8 +483,15 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), s.conf.getRanges()),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+	rs := s.conf.getRanges()
+	if s.GetName() == types.BalanceLeaderScheduler.String() {
+		km := solver.GetKeyRangeManager()
+		if !km.IsEmpty() {
+			rs = km.GetNonOverlappingKeyRanges(&rs[0])
+		}
+	}
+	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -497,7 +515,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	}
 	// Check if the source store is available as a source.
 	conf := solver.GetSchedulerConfig()
-	if filter.NewCandidates(s.R, []*core.StoreInfo{solver.Source}).
+	if filter.NewCandidates([]*core.StoreInfo{solver.Source}).
 		FilterSource(conf, nil, s.filterCounter, s.filters...).Len() == 0 {
 		log.Debug("store cannot be used as source", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.Source.GetID()))
 		balanceLeaderNoSourceStoreCounter.Inc()
@@ -509,7 +527,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(s.filters, leaderFilter)
 	}
-	target := filter.NewCandidates(s.R, []*core.StoreInfo{solver.Target}).
+	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, s.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {
@@ -549,7 +567,8 @@ func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 		balanceLeaderNewOpCounter,
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), solver.targetMetricLabel()),
+		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.sourceMetricLabel(), "out"),
+		balanceDirectionCounter.WithLabelValues(s.GetName(), solver.targetMetricLabel(), "in"),
 	)
 	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

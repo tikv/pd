@@ -21,16 +21,28 @@ import (
 	"github.com/opentracing/opentracing-go"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 )
 
+const (
+	// KeyspaceConfigGCManagementType is the key for GC management type in keyspace config.
+	KeyspaceConfigGCManagementType = "gc_management_type"
+	// KeyspaceConfigGCManagementTypeKeyspaceLevel is the value representing keyspace level GC in keyspace config.
+	KeyspaceConfigGCManagementTypeKeyspaceLevel = "keyspace_level"
+	// KeyspaceConfigGCManagementTypeUnified is the value representing unified GC in keyspace config.
+	KeyspaceConfigGCManagementTypeUnified = "unified"
+)
+
 // KeyspaceClient manages keyspace metadata.
 type KeyspaceClient interface {
 	// LoadKeyspace load and return target keyspace's metadata.
 	LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error)
+	// LoadKeyspaceByID loads and returns target keyspace's metadata by ID.
+	LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
 	// WatchKeyspaces watches keyspace meta changes.
@@ -49,6 +61,27 @@ func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
 
 // LoadKeyspace loads and returns target keyspace's metadata.
 func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error) {
+	// Failpoint: return a hardcoded keyspace meta for testing
+	// When enabled, this bypasses the gRPC LoadKeyspace call
+	failpoint.Inject("mockLoadKeyspace", func(val failpoint.Value) {
+		if enabled, ok := val.(bool); ok && enabled {
+			// Create a hardcoded keyspace meta for keyspace_1
+			now := time.Now().Unix()
+			mockKeyspaceMeta := &keyspacepb.KeyspaceMeta{
+				Id:             1,
+				Name:           name,
+				CreatedAt:      now,
+				StateChangedAt: now,
+				State:          keyspacepb.KeyspaceState_ENABLED,
+				Config: map[string]string{
+					"user_kind":             "standard",
+					"tso_keyspace_group_id": "1",
+				},
+			}
+			failpoint.Return(mockKeyspaceMeta, nil)
+		}
+	})
+
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspace", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -77,6 +110,41 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	if resp.Header.GetError() != nil {
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace %s failed: %s", name, resp.Header.GetError().String())
+	}
+
+	return resp.Keyspace, nil
+}
+
+// LoadKeyspaceByID loads and returns target keyspace's metadata by ID.
+func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspaceByID", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { metrics.CmdDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+	req := &keyspacepb.LoadKeyspaceByIDRequest{
+		Header: c.requestHeader(),
+		Id:     id,
+	}
+	protoClient := c.keyspaceClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.LoadKeyspaceByID(ctx, req)
+	cancel()
+
+	if err != nil {
+		metrics.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
+		return nil, err
+	}
+
+	if resp.Header.GetError() != nil {
+		metrics.CmdFailedDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds())
+		return nil, errors.Errorf("Load keyspace id %d failed: %s", id, resp.Header.GetError().String())
 	}
 
 	return resp.Keyspace, nil
@@ -169,4 +237,12 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	}
 
 	return resp.Keyspaces, nil
+}
+
+// IsKeyspaceUsingKeyspaceLevelGC checks on a specific keyspace meta and returns whether keyspace level GC is enabled
+// for this keyspace.
+// Nil value, which may occur for the null keyspace, are considered unified GC and this function returns false for this
+// case.
+func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
+	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel
 }

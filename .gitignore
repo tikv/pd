@@ -31,3 +31,9 @@ embedded_assets_handler.go
 *.bin
 third_bin
 tmp*
+.specstory/
+.cursorindexingignore
+.gocache/
+!.claude/
+.claude/*
+!.claude/skills

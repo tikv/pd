@@ -42,9 +42,11 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
@@ -90,7 +92,6 @@ type Server struct {
 
 	cfg           *config.Config
 	persistConfig *config.PersistConfig
-	basicCluster  *core.BasicCluster
 
 	// for the primary election of scheduling
 	participant *member.Participant
@@ -98,7 +99,7 @@ type Server struct {
 	service           *Service
 	checkMembershipCh chan struct{}
 
-	// primaryCallbacks will be called after the server becomes leader.
+	// primaryCallbacks will be called after the server becomes primary.
 	primaryCallbacks     []func(context.Context) error
 	primaryExitCallbacks []func()
 
@@ -106,14 +107,10 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster   *Cluster
-	hbStreams *hbstream.HeartbeatStreams
-	storage   *endpoint.StorageEndpoint
+	cluster atomic.Value // *Cluster
 
-	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -162,6 +159,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -220,12 +218,15 @@ func (s *Server) updatePDMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
-					if status.Leader != curLeader {
-						log.Info("switch leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+				cluster := s.GetCluster()
+				if cluster != nil {
+					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+						if status.Leader != curLeader {
+							log.Info("switch PD leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						}
+						curLeader = ep.ID
+						break
 					}
-					curLeader = ep.ID
-					break
 				}
 			}
 		}
@@ -244,13 +245,13 @@ func (s *Server) primaryElectionLoop() {
 		default:
 		}
 
-		primary, checkAgain := s.participant.CheckLeader()
+		primary, checkAgain := s.participant.CheckPrimary()
 		if checkAgain {
 			continue
 		}
 		if primary != nil {
 			log.Info("start to watch the primary", zap.Stringer("scheduling-primary", primary))
-			// Watch will keep looping and never return unless the primary/leader has changed.
+			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(s.serverLoopCtx)
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
@@ -263,19 +264,19 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.Uint64("member-id", s.participant.ID()),
-				zap.String("cur-member-value", s.participant.MemberValue()))
+				zap.Uint64("participant-id", s.participant.ID()),
+				zap.String("cur-participant-value", s.participant.ParticipantString()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		s.campaignLeader()
+		s.campaignPrimary()
 	}
 }
 
-func (s *Server) campaignLeader() {
-	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
+func (s *Server) campaignPrimary() {
+	log.Info("start to campaign the primary", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
+	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
@@ -289,15 +290,15 @@ func (s *Server) campaignLeader() {
 
 	// Start keepalive the leadership and enable Scheduling service.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
-	var resetLeaderOnce sync.Once
-	defer resetLeaderOnce.Do(func() {
+	var resetPrimaryOnce sync.Once
+	defer resetPrimaryOnce.Do(func() {
 		cancel()
-		s.participant.ResetLeader()
+		s.participant.Resign()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
 
 	// maintain the leadership, after this, Scheduling could be ready to provide service.
-	s.participant.KeepLeader(ctx)
+	s.participant.GetLeadership().Keep(ctx)
 	log.Info("campaign scheduling primary ok", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
 
 	log.Info("triggering the primary callback functions")
@@ -317,25 +318,25 @@ func (s *Server) campaignLeader() {
 	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
 		s.cfg.LeaderLease, &keypath.MsParam{
 			ServiceName: constant.SchedulingServiceName,
-		}, s.participant.MemberValue())
+		}, s.participant)
 	if err != nil {
 		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
 		return
 	}
 	s.participant.SetExpectedPrimaryLease(lease)
-	s.participant.EnableLeader()
+	s.participant.PromoteSelf()
 
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
-	defer leaderTicker.Stop()
+	primaryTicker := time.NewTicker(constant.PrimaryTickInterval)
+	defer primaryTicker.Stop()
 
 	for {
 		select {
-		case <-leaderTicker.C:
-			if !s.participant.IsLeader() {
-				log.Info("no longer a primary/leader because lease has expired, the scheduling primary/leader will step down")
+		case <-primaryTicker.C:
+			if !s.participant.IsServing() {
+				log.Info("no longer a primary because lease has expired, the scheduling primary will step down")
 				return
 			}
 		case <-ctx.Done():
@@ -357,6 +358,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing scheduling server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}
@@ -379,9 +381,9 @@ func (s *Server) Close() {
 	log.Info("scheduling server is closed")
 }
 
-// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
+// IsServing returns whether the server is the primary.
 func (s *Server) IsServing() bool {
-	return !s.IsClosed() && s.participant.IsLeader()
+	return !s.IsClosed() && s.participant.IsServing()
 }
 
 // IsClosed checks if the server loop is closed
@@ -389,12 +391,12 @@ func (s *Server) IsClosed() bool {
 	return s != nil && atomic.LoadInt64(&s.isRunning) == 0
 }
 
-// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceReadyCallback adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
 }
 
-// AddServiceExitCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+// AddServiceExitCallback adds callbacks when the server becomes the primary.
 func (s *Server) AddServiceExitCallback(callbacks ...func()) {
 	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
@@ -406,12 +408,19 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
-	return s.cluster
+	cluster := s.cluster.Load()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.(*Cluster)
 }
 
 // GetBasicCluster returns the basic cluster.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
-	return s.basicCluster
+	if cluster := s.GetCluster(); cluster != nil {
+		return cluster.GetBasicCluster()
+	}
+	return nil
 }
 
 // GetCoordinator returns the coordinator.
@@ -443,9 +452,9 @@ func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
 }
 
-// GetLeaderListenUrls gets service endpoints from the leader in election group.
-func (s *Server) GetLeaderListenUrls() []string {
-	return s.participant.GetLeaderListenUrls()
+// GetServingUrls gets service endpoints.
+func (s *Server) GetServingUrls() []string {
+	return s.participant.GetServingUrls()
 }
 
 func (s *Server) startServer() (err error) {
@@ -464,7 +473,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, "primary election")
+	s.participant.InitInfo(p, constant.SchedulingServiceName+" primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
@@ -491,56 +500,113 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(context.Context) error {
-	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	err := s.startMetaConfWatcher()
+func (s *Server) startCluster(ctx context.Context) error {
+	basicCluster := core.NewBasicCluster()
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+
+	var (
+		hbStreams       *hbstream.HeartbeatStreams
+		configWatcher   *config.Watcher
+		metaWatcher     *meta.Watcher
+		ruleWatcher     *rule.Watcher
+		affinityWatcher *affinity.Watcher
+		cluster         *Cluster
+		err             error
+	)
+
+	var initSucceeded bool
+	defer func() {
+		if initSucceeded {
+			return
+		}
+		// make sure cancel context done when some initialization step failed, to avoid goroutine leak in cluster.
+		if cluster != nil {
+			cluster.stopCluster()
+		}
+		// clean new sources
+		if hbStreams != nil {
+			hbStreams.Close()
+			hbStreams = nil
+		}
+		if configWatcher != nil {
+			configWatcher.Close()
+			configWatcher = nil
+		}
+		if metaWatcher != nil {
+			metaWatcher.Close()
+			metaWatcher = nil
+		}
+		if ruleWatcher != nil {
+			ruleWatcher.Close()
+			ruleWatcher = nil
+		}
+		if affinityWatcher != nil {
+			affinityWatcher.Close()
+			affinityWatcher = nil
+		}
+		if storage != nil {
+			storage.Close()
+		}
+	}()
+	metaWatcher, configWatcher, err = s.startMetaConfWatcher(ctx, basicCluster, storage)
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh)
+	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	cluster, err = NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	storage = nil
+	hbStreams = nil
 	if err != nil {
 		return err
 	}
-	// Inject the cluster components into the config watcher after the scheduler controller is created.
-	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
-	// Start the rule watcher after the cluster is created.
-	err = s.startRuleWatcher()
+
+	am := cluster.GetAffinityManager()
+	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
+	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
 	if err != nil {
 		return err
 	}
-	s.cluster.StartBackgroundJobs()
+	affinityWatcher, err = affinity.NewWatcher(ctx, s.GetClient(), am)
+	if err != nil {
+		return err
+	}
+
+	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
+	// Set watchers to nil to avoid being closed in defer when cluster initialization is successful,
+	// since cluster will take over the ownership of these watchers and close them when stopping cluster.
+	metaWatcher = nil
+	configWatcher = nil
+	ruleWatcher = nil
+	affinityWatcher = nil
+	cluster.StartBackgroundJobs()
+	s.cluster.Store(cluster)
+	initSucceeded = true
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.cluster.StopBackgroundJobs()
-	s.stopWatcher()
-}
-
-func (s *Server) startMetaConfWatcher() (err error) {
-	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
-	if err != nil {
-		return err
+	if cluster := s.GetCluster(); cluster != nil {
+		s.cluster.Store((*Cluster)(nil))
+		cluster.stopCluster()
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
+}
+
+func (s *Server) startMetaConfWatcher(
+	ctx context.Context,
+	basicCluster *core.BasicCluster,
+	storage *endpoint.StorageEndpoint,
+) (metaWatcher *meta.Watcher, configWatcher *config.Watcher, err error) {
+	metaWatcher, err = meta.NewWatcher(ctx, s.GetClient(), basicCluster)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return err
-}
-
-func (s *Server) startRuleWatcher() (err error) {
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
-	return err
-}
-
-func (s *Server) stopWatcher() {
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
+	if err != nil {
+		metaWatcher.Close()
+		return nil, nil, err
+	}
+	return metaWatcher, configWatcher, nil
 }
 
 // GetPersistConfig returns the persist config.
@@ -555,6 +621,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.Schedule = *s.persistConfig.GetScheduleConfig().Clone()
 	cfg.Replication = *s.persistConfig.GetReplicationConfig().Clone()
 	cfg.ClusterVersion = *s.persistConfig.GetClusterVersion()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	return cfg
 }
 
@@ -610,9 +677,9 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	log.Info("scheduling service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
 	ctx, cancel := context.WithCancel(context.Background())
+	metricutil.Push(ctx, &cfg.Metric)
+
 	svr := CreateServer(ctx, cfg)
 
 	sc := make(chan os.Signal, 1)

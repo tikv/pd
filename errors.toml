@@ -6,9 +6,59 @@ error = '''
 KMS error
 '''
 
+["PD:affinity:ErrAffinityGroupConflict"]
+error = '''
+affinity group %s cannot appear in both add and remove operations in the same request
+'''
+
+["PD:affinity:ErrAffinityGroupContent"]
+error = '''
+invalid affinity group content, %s
+'''
+
+["PD:affinity:ErrAffinityGroupExist"]
+error = '''
+affinity group %s already exists
+'''
+
+["PD:affinity:ErrAffinityGroupNotFound"]
+error = '''
+affinity group %s not found
+'''
+
+["PD:affinity:ErrAffinityInternal"]
+error = '''
+affinity internal error
+'''
+
+["PD:affinity:ErrEmptyRequest"]
+error = '''
+%s
+'''
+
+["PD:affinity:ErrInvalidGroupID"]
+error = '''
+invalid group id %s: should contain only letters (a-z, A-Z), numbers (0-9), hyphens (-) and underscores (_), and be 1-64 characters long
+'''
+
+["PD:affinity:ErrInvalidKeyFormat"]
+error = '''
+invalid hex %s key '%s' for group '%s'
+'''
+
+["PD:affinity:ErrInvalidLabelRuleFormat"]
+error = '''
+invalid label rule data format %s
+'''
+
 ["PD:apiutil:ErrOptionNotExist"]
 error = '''
 the option %s does not exist
+'''
+
+["PD:apiutil:ErrOptionTypeInvalid"]
+error = '''
+the type of option %s is invalid
 '''
 
 ["PD:apiutil:ErrRedirect"]
@@ -144,21 +194,6 @@ invalid argument for %s: %v
 ["PD:core:ErrNoStoreForRegionLeader"]
 error = '''
 can not remove store %d since there are no extra up store to store the leader
-'''
-
-["PD:core:ErrPauseLeaderTransferIn"]
-error = '''
-store %v is paused for leader transfer in
-'''
-
-["PD:core:ErrPauseLeaderTransferOut"]
-error = '''
-store %v is paused for leader transfer out
-'''
-
-["PD:core:ErrSlowStoreEvicted"]
-error = '''
-store %v is evicted as a slow store
 '''
 
 ["PD:core:ErrSlowTrendEvicted"]
@@ -381,11 +416,6 @@ error = '''
 etcd move leader error
 '''
 
-["PD:etcd:ErrEtcdTLSConfig"]
-error = '''
-etcd TLS config error
-'''
-
 ["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
 etcd transaction failed, conflicted and rolled back
@@ -398,7 +428,7 @@ internal etcd transaction error occurred
 
 ["PD:etcd:ErrEtcdTxnResponse"]
 error = '''
-etcd transaction returned invalid response: %v
+etcd transaction returned unexpected response: %v
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]
@@ -443,12 +473,17 @@ trying to set a GC barrier on ts %d which is already behind the txn safe point %
 
 ["PD:gc:ErrGCOnInvalidKeyspace"]
 error = '''
-trying to manage GC in keyspace %v where keyspace level GC is not enabled
+trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled
 '''
 
 ["PD:gc:ErrGCSafePointExceedsTxnSafePoint"]
 error = '''
 trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
+'''
+
+["PD:gc:ErrGlobalGCBarrierTSBehindTxnSafePoint"]
+error = '''
+trying to set a global GC barrier on ts %d which is already behind the txn safe point %d of keyspace %s
 '''
 
 ["PD:gc:ErrReservedGCBarrierID"]
@@ -496,6 +531,11 @@ error = '''
 security config error: %s
 '''
 
+["PD:grpcutil:ErrTLSConfig"]
+error = '''
+TLS config error
+'''
+
 ["PD:hex:ErrHexDecodingString"]
 error = '''
 decode string %s error
@@ -514,6 +554,11 @@ send HTTP request failed
 ["PD:http:ErrWriteHTTPBody"]
 error = '''
 write HTTP body failed
+'''
+
+["PD:idalloc:ErrIDExhausted"]
+error = '''
+id exhausted
 '''
 
 ["PD:ioutil:ErrIORead"]
@@ -541,6 +586,11 @@ error = '''
 unknown operation
 '''
 
+["PD:keyspace:ErrKeyspaceConfigPreconditionFailed"]
+error = '''
+keyspace config precondition failed, %s
+'''
+
 ["PD:keyspace:ErrKeyspaceExists"]
 error = '''
 keyspace already exists
@@ -559,6 +609,11 @@ keyspace group %v is in merging state
 ["PD:keyspace:ErrKeyspaceGroupInSplit"]
 error = '''
 keyspace group %v is in split state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupModRevisionStale"]
+error = '''
+keyspace group mod revision is stale
 '''
 
 ["PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"]
@@ -614,6 +669,11 @@ cannot modify default keyspace's state
 ["PD:keyspace:ErrModifyDefaultKeyspaceGroup"]
 error = '''
 default keyspace group cannot be modified
+'''
+
+["PD:keyspace:ErrModifyReservedKeyspace"]
+error = '''
+cannot modify reserved keyspace's state
 '''
 
 ["PD:keyspace:ErrNoAvailableNode"]
@@ -689,6 +749,11 @@ etcd leader not found
 ["PD:member:ErrMarshalMember"]
 error = '''
 marshal member failed
+'''
+
+["PD:member:ErrMarshalParticipant"]
+error = '''
+marshal participant failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]
@@ -843,7 +908,17 @@ the %s resource group does not exist
 
 ["PD:resourcemanager:ErrInvalidGroup"]
 error = '''
-invalid group settings, please check the group name, priority and the number of resources
+invalid group settings, please check %s
+'''
+
+["PD:resourcemanager:ErrKeyspaceNotExists"]
+error = '''
+the keyspace does not exist with id %d
+'''
+
+["PD:resourcemanager:ErrKeyspaceNotExistsByName"]
+error = '''
+keyspace not found with name: %s
 '''
 
 ["PD:scatter:ErrEmptyRegion"]
@@ -881,6 +956,11 @@ error = '''
 unknown interval growth type error
 '''
 
+["PD:scheduler:ErrNoStoreToBeSelected"]
+error = '''
+no store to be selected
+'''
+
 ["PD:scheduler:ErrScheduleConfigNotExist"]
 error = '''
 the config does not exist
@@ -893,7 +973,7 @@ wrong scheduler config %s
 
 ["PD:scheduler:ErrSchedulerCreateFuncNotRegistered"]
 error = '''
-create func of %v is not registered
+create func is not registered
 '''
 
 ["PD:scheduler:ErrSchedulerDuplicated"]

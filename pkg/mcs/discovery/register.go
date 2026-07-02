@@ -30,7 +30,7 @@ import (
 )
 
 // DefaultLeaseInSeconds is the default lease time in seconds.
-const DefaultLeaseInSeconds = 3
+const DefaultLeaseInSeconds = 5
 
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {

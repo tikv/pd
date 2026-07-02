@@ -175,10 +175,11 @@ func TestSetAfterGet(t *testing.T) {
 	store, manager := newTestManager(t, false)
 	rule := manager.GetRule(DefaultGroupID, DefaultRuleID)
 	rule.Count = 1
-	manager.SetRule(rule)
+	err := manager.SetRule(rule)
+	re.NoError(err)
 
 	m2 := NewRuleManager(context.Background(), store, nil, nil)
-	err := m2.Initialize(100, []string{}, "", false)
+	err = m2.Initialize(100, []string{}, "", false)
 	re.NoError(err)
 	rule = m2.GetRule(DefaultGroupID, DefaultRuleID)
 	re.Equal(1, rule.Count)
@@ -203,7 +204,8 @@ func TestKeys(t *testing.T) {
 
 	toDelete := []RuleOp{}
 	for _, r := range rules {
-		manager.SetRule(r)
+		err := manager.SetRule(r)
+		re.NoError(err)
 		toDelete = append(toDelete, RuleOp{
 			Rule:             r,
 			Action:           RuleOpDel,
@@ -211,15 +213,18 @@ func TestKeys(t *testing.T) {
 		})
 	}
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {DefaultGroupID, DefaultRuleID}})
-	manager.Batch(toDelete)
+	err := manager.Batch(toDelete)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{DefaultGroupID, DefaultRuleID}})
 
 	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
 		&Rule{GroupID: "3", ID: "5", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
-	manager.SetRules(rules)
+	err = manager.SetRules(rules)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}, {DefaultGroupID, DefaultRuleID}})
 
-	manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}})
 
 	splitKeys := [][]string{
@@ -283,21 +288,26 @@ func TestKeys(t *testing.T) {
 }
 
 func TestDeleteByIDPrefix(t *testing.T) {
+	re := require.New(t)
 	_, manager := newTestManager(t, false)
-	manager.SetRules([]*Rule{
+	err := manager.SetRules([]*Rule{
 		{GroupID: "g1", ID: "foo1", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "foo1", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "foobar", Role: Voter, Count: 1},
 		{GroupID: "g2", ID: "baz2", Role: Voter, Count: 1},
 	})
-	manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
+
+	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}, {"g2", "foo1"}, {"g2", "foobar"}})
 
-	manager.Batch([]RuleOp{{
+	err = manager.Batch([]RuleOp{{
 		Rule:             &Rule{GroupID: "g2", ID: "foo"},
 		Action:           RuleOpDel,
 		DeleteByIDPrefix: true,
 	}})
+	re.NoError(err)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}})
 }
 

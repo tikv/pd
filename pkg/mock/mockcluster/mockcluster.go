@@ -32,7 +32,9 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
@@ -55,7 +57,9 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	KeyRangeManager *keyrange.Manager
 	*labeler.RegionLabeler
+	AffinityManager *affinity.Manager
 	*statistics.HotStat
 	*config.PersistOptions
 	pendingProcessedRegions map[uint64]struct{}
@@ -73,6 +77,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
+		KeyRangeManager:         keyrange.NewManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}
@@ -82,6 +87,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	// It should be updated to the latest feature version.
 	c.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
 	c.RegionLabeler, _ = labeler.NewRegionLabeler(ctx, c.Storage, time.Second*5)
+	c.AffinityManager, _ = affinity.NewManager(c.ctx, c.GetStorage(), c, c.GetSharedConfig(), c.RegionLabeler)
 	return c
 }
 
@@ -125,6 +131,9 @@ func (mc *Cluster) AllocID(uint32) (uint64, uint32, error) {
 	return mc.Alloc(1)
 }
 
+// GetPrepareRegionCount returns the count of regions that are in prepare state.
+func (*Cluster) GetPrepareRegionCount() (int, error) { return 0, nil }
+
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (*Cluster) UpdateRegionsLabelLevelStats(_ []*core.RegionInfo) {}
 
@@ -136,7 +145,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 }
 
 // GetStoresLoads gets stores load statistics.
-func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	mc.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }
@@ -205,7 +214,10 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
 		mc.RuleManager = placement.NewRuleManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
-		mc.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
+		err := mc.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
+		if err != nil {
+			log.Info("failed to initialize rule manager", errs.ZapError(err))
+		}
 	}
 }
 
@@ -214,9 +226,19 @@ func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
 }
 
+// GetKeyRangeManager returns the key range manager of the cluster.
+func (mc *Cluster) GetKeyRangeManager() *keyrange.Manager {
+	return mc.KeyRangeManager
+}
+
 // GetRegionLabeler returns the region labeler of the cluster.
 func (mc *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return mc.RegionLabeler
+}
+
+// GetAffinityManager returns the affinity manager of the cluster.
+func (mc *Cluster) GetAffinityManager() *affinity.Manager {
+	return mc.AffinityManager
 }
 
 // SetStoreUp sets store state to be up.
@@ -760,9 +782,13 @@ func (mc *Cluster) newMockRegionInfo(regionID uint64, leaderStoreID uint64, othe
 	var followerStoreIDs []uint64
 	var learnerStoreIDs []uint64
 	for _, storeID := range otherPeerStoreIDs {
-		if store := mc.GetStore(storeID); store != nil && store.IsTiFlash() {
+		store := mc.GetStore(storeID)
+		if store == nil {
+			continue
+		}
+		if store.IsTiFlashWrite() {
 			learnerStoreIDs = append(learnerStoreIDs, storeID)
-		} else {
+		} else if store.IsTiKV() {
 			followerStoreIDs = append(followerStoreIDs, storeID)
 		}
 	}

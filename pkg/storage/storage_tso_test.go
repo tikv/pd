@@ -15,10 +15,13 @@
 package storage
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
@@ -31,8 +34,10 @@ const (
 	testLeaderValue = "test-leader-value"
 )
 
+var defaultContext = context.Background()
+
 func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	storage = NewStorageWithEtcdBackend(client)
 	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
 	err := leadership.Campaign(60, testLeaderValue)
@@ -40,12 +45,26 @@ func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.
 	return storage, clean, leadership
 }
 
+func TestSaveTimestampWithTimeout(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/slowTxn", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/kv/slowTxn"))
+	}()
+	storage, clean, leadership := prepare(t)
+	defer clean()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
+	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(testGroupID, expectedTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -57,11 +76,11 @@ func TestTimestampTxn(t *testing.T) {
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(testGroupID, globalTS1, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(testGroupID, globalTS2, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership)
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp(testGroupID)
@@ -76,38 +95,41 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 
 	// testLeaderKey -> testLeaderValue
 	globalTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
-	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), &election.Leadership{})
+	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{})
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> ""
-	storage.Save(leadership.GetLeaderKey(), "")
-	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.Save(leadership.GetLeaderKey(), "")
+	re.NoError(err)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> non-existent
-	storage.Remove(leadership.GetLeaderKey())
-	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.Remove(leadership.GetLeaderKey())
+	re.NoError(err)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
 	// testLeaderKey -> testLeaderValue
-	storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	re.NoError(err)
 	globalTS = globalTS.Add(time.Second)
-	err = storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
 	re.NoError(err)
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)

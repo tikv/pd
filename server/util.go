@@ -21,7 +21,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
-	"github.com/urfave/negroni"
+	"github.com/urfave/negroni/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"

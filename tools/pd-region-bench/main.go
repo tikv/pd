@@ -19,7 +19,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/signal"
 	"strings"
@@ -134,6 +134,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	if *enableRouterClient {
 		opts = append(opts, opt.WithEnableRouterClient(true))
 	}
+	//nolint:staticcheck
 	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    grpcKeepaliveTime,
@@ -290,11 +291,7 @@ func (r regionReqType) String() string {
 func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int, durCh chan<- time.Duration) {
 	defer s.wg.Done()
 	pdCli := s.pdClients[clientIdx]
-	// Create a local random generator to reduce contention.
-	var (
-		r     = rand.New(rand.NewSource(time.Now().UnixNano() + int64(clientIdx)))
-		start time.Time
-	)
+	var start time.Time
 
 	for {
 		select {
@@ -302,8 +299,8 @@ func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int, durCh cha
 			return
 		default:
 		}
-		durationSeed := r.Intn(100)
-		regionSeed := r.Intn(*regionCount)
+		durationSeed := rand.IntN(100)
+		regionSeed := rand.IntN(*regionCount)
 		reqType := regionReqType(durationSeed % 3)
 
 		// Wait for a random delay.

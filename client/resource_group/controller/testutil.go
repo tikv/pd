@@ -22,17 +22,21 @@ import "time"
 
 // TestRequestInfo is used to test the request info interface.
 type TestRequestInfo struct {
-	isWrite    bool
-	writeBytes uint64
-	storeID    uint64
+	isWrite     bool
+	writeBytes  uint64
+	numReplicas int64
+	storeID     uint64
+	accessType  AccessLocationType
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
-func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64) *TestRequestInfo {
+func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64, locationType AccessLocationType) *TestRequestInfo {
 	return &TestRequestInfo{
-		isWrite:    isWrite,
-		writeBytes: writeBytes,
-		storeID:    storeID,
+		isWrite:     isWrite,
+		writeBytes:  writeBytes,
+		numReplicas: 1,
+		storeID:     storeID,
+		accessType:  locationType,
 	}
 }
 
@@ -52,8 +56,18 @@ func (tri *TestRequestInfo) StoreID() uint64 {
 }
 
 // ReplicaNumber implements the RequestInfo interface.
-func (*TestRequestInfo) ReplicaNumber() int64 {
-	return 1
+func (tri *TestRequestInfo) ReplicaNumber() int64 {
+	return tri.numReplicas
+}
+
+// RequestSize implements the RequestSize interface.
+func (tri *TestRequestInfo) RequestSize() uint64 {
+	return tri.writeBytes
+}
+
+// AccessLocationType implements the AccessLocationType interface.
+func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
+	return tri.accessType
 }
 
 // TestResponseInfo is used to test the response info interface.
@@ -85,4 +99,9 @@ func (tri *TestResponseInfo) KVCPU() time.Duration {
 // Succeed implements the ResponseInfo interface.
 func (tri *TestResponseInfo) Succeed() bool {
 	return tri.succeed
+}
+
+// ResponseSize implements the ResponseSize interface.
+func (tri *TestResponseInfo) ResponseSize() uint64 {
+	return tri.readBytes
 }

@@ -45,6 +45,8 @@ type Operation struct {
 	SplitRegion     *pdpb.SplitRegion
 	ChangePeerV2    *pdpb.ChangePeerV2
 	SwitchWitnesses *pdpb.BatchSwitchWitness
+	// PD requires preventing the auto-splitting of this region.
+	ChangeSplit *pdpb.ChangeSplit
 }
 
 // HeartbeatStream is an interface.
@@ -124,6 +126,14 @@ func (s *HeartbeatStreams) run() {
 	}
 
 	for {
+		// We need to check the context in each loop to make sure we can exit timely when the stream is closed.
+		select {
+		case <-s.hbStreamCtx.Done():
+			log.Info("heartbeat stream is closed, stop running")
+			return
+		default:
+		}
+
 		select {
 		case update := <-s.streamCh:
 			s.streams[update.storeID] = update.stream
@@ -132,7 +142,7 @@ func (s *HeartbeatStreams) run() {
 			storeLabel := strconv.FormatUint(storeID, 10)
 			store := s.storeInformer.GetStore(storeID)
 			if store == nil {
-				log.Error("failed to get store",
+				log.Warn("failed to get store",
 					zap.Uint64("region-id", msg.GetRegionId()),
 					zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 				delete(s.streams, storeID)
@@ -141,7 +151,7 @@ func (s *HeartbeatStreams) run() {
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
-					log.Error("send heartbeat message fail",
+					log.Warn("send heartbeat message fail",
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
 					delete(s.streams, storeID)
 					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
@@ -158,7 +168,7 @@ func (s *HeartbeatStreams) run() {
 			for storeID, stream := range s.streams {
 				store := s.storeInformer.GetStore(storeID)
 				if store == nil {
-					log.Error("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
+					log.Warn("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 					delete(s.streams, storeID)
 					continue
 				}
@@ -175,6 +185,7 @@ func (s *HeartbeatStreams) run() {
 				}
 			}
 		case <-s.hbStreamCtx.Done():
+			log.Info("heartbeat stream is closed, stop running")
 			return
 		}
 	}
@@ -219,6 +230,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	default:
 		resp = &pdpb.RegionHeartbeatResponse{
@@ -232,6 +244,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 			SplitRegion:     op.SplitRegion,
 			ChangePeerV2:    op.ChangePeerV2,
 			SwitchWitnesses: op.SwitchWitnesses,
+			ChangeSplit:     op.ChangeSplit,
 		}
 	}
 

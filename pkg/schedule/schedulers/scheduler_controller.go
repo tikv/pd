@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -297,10 +296,22 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
-	if exist, _ := c.IsSchedulerExisted(name); !exist {
-		return fmt.Errorf("scheduler %s is not existed", name)
+	c.RLock()
+	if c.cluster == nil {
+		c.RUnlock()
+		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	return c.GetScheduler(name).ReloadConfig()
+	c.RUnlock()
+	if exist, _ := c.IsSchedulerExisted(name); !exist {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	scheduler := c.GetScheduler(name)
+	if scheduler == nil {
+		// Scheduler exists in handlers but not in schedulers map, which means it's a handler-only scheduler
+		// Handler-only schedulers don't have config reloading capability
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+	return scheduler.ReloadConfig()
 }
 
 // IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
@@ -424,8 +435,13 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 		s, ok := c.schedulers[types.TransferWitnessLeaderScheduler.String()]
 		c.RUnlock()
 		if ok {
+			regionC := RecvRegionInfo(s.Scheduler)
+			if regionC == nil {
+				log.Warn("invalid scheduler type for transfer witness leader", zap.String("scheduler", s.GetName()))
+				return
+			}
 			select {
-			case RecvRegionInfo(s.Scheduler) <- region:
+			case regionC <- region:
 			default:
 				log.Warn("drop transfer witness leader due to recv region channel full", zap.Uint64("region-id", region.GetID()))
 			}

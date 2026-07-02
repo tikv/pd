@@ -31,14 +31,21 @@ package btree
 import (
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sort"
 	"sync"
 	"testing"
 
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // perm returns a random permutation of n Int items in the range [0, n).
 func perm(n int) (out []Int) {

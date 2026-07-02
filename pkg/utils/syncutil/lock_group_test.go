@@ -15,12 +15,17 @@
 package syncutil
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func TestLockGroup(t *testing.T) {
 	re := require.New(t)

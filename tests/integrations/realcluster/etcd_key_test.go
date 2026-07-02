@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 type etcdKeySuite struct {
@@ -74,6 +75,7 @@ var (
 		"/pd//scheduler_config/balance-leader-scheduler",
 		"/pd//scheduler_config/balance-region-scheduler",
 		"/pd//scheduler_config/evict-slow-store-scheduler",
+		"/pd//scheduler_config/evict-stopping-store-scheduler",
 		"/pd//timestamp",
 		"/pd//tso/keyspace_groups/membership/", // ms
 		"/pd/cluster_id",
@@ -108,7 +110,7 @@ func (s *etcdKeySuite) TestEtcdKey() {
 	}
 	t := s.T()
 	//  call `UpdateGCSafePoint` to create the key `/pd//gc/safe_point`.
-	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1)
+	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
 	re.NoError(err)
 	endpoints := getPDEndpoints(re)
 
@@ -122,7 +124,7 @@ func (s *etcdKeySuite) TestEtcdKey() {
 
 	if s.mode == "ms" {
 		testutil.Eventually(re, func() bool {
-			keys, err := getEtcdKey(endpoints[0], "/ms")
+			keys, err := getEtcdKey(endpoints[0], constant.MicroserviceRootPath)
 			if err != nil {
 				return false
 			}

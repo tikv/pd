@@ -17,6 +17,7 @@ package apiutil
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -46,16 +47,16 @@ import (
 )
 
 const (
-	// componentSignatureKey is used for http request header key to identify component signature.
 	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
 	// This is kept for backward compatibility.
+	// componentSignatureKey is used for http request header key to identify component signature.
 	componentSignatureKey = "component"
 	// anonymousValue identifies anonymous request source
 	anonymousValue = "anonymous"
 
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
-	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD locally.
 	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle" // #nosec G101
 	// XForwardedForHeader is used to mark the client IP.
 	XForwardedForHeader = "X-Forwarded-For"
@@ -65,6 +66,8 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
+	// XPDHandleHeader is used to mark whether this request is handled by the PD.
+	XPDHandleHeader = "X-PD-Handle-By"
 	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
 	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
@@ -236,12 +239,32 @@ func GetJSON(client *http.Client, url string, data []byte) (*http.Response, erro
 	return client.Do(req)
 }
 
+// GetJSONWithoutBody is used to do get request without body
+func GetJSONWithoutBody(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 // PatchJSON is used to do patch request
 func PatchJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPatch, url, bytes.NewBuffer(data))
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Content-Type", "application/json")
+	return client.Do(req)
+}
+
+// PutJSON is used to do put request
+func PutJSON(client *http.Client, url string, data []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	return client.Do(req)
 }
 
@@ -254,6 +277,15 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 // DoDelete is used to send delete request and return http response code.
 func DoDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+// DoDeleteWithContext is used to send delete request with context and return http response.
+func DoDeleteWithContext(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -311,64 +343,37 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 	return errs.ErrOptionNotExist.FastGenByArgs(option)
 }
 
-// CollectKeyRangesOption is used to collect key ranges using from input map for given option
-func CollectKeyRangesOption(input map[string]any, collectors ...func(v string)) error {
-	startKeyStr, ok := input["start-key"].(string)
+// CollectStringOption is used to collect string using from input map for given option
+func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
+	v, exist := input[option]
+	if !exist {
+		return errs.ErrOptionNotExist.FastGenByArgs(option)
+	}
+	str, ok := v.(string)
 	if !ok {
-		return errs.ErrInvalidArgument.FastGenByArgs("start-key")
+		return errs.ErrOptionTypeInvalid.FastGenByArgs(option)
 	}
-	endKeyStr, ok := input["end-key"].(string)
-	if !ok {
-		return errs.ErrInvalidArgument.FastGenByArgs("end-key")
-	}
-	startKeys := strings.Split(startKeyStr, ",")
-	endKeys := strings.Split(endKeyStr, ",")
-	if len(startKeys) != len(endKeys) {
-		return errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
-	}
-	for i := range startKeys {
-		startKey, err := url.QueryUnescape(startKeys[i])
-		if err != nil {
-			return err
-		}
-		endKey, err := url.QueryUnescape(endKeys[i])
-		if err != nil {
-			return err
-		}
-		for _, c := range collectors {
-			c(startKey)
-			c(endKey)
-		}
+	for _, c := range collectors {
+		c(str)
 	}
 	return nil
 }
 
-// CollectStringOption is used to collect string using from input map for given option
-func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
-	if v, ok := input[option].(string); ok {
-		for _, c := range collectors {
-			c(v)
-		}
-		return nil
-	}
-	return errs.ErrOptionNotExist.FastGenByArgs(option)
-}
-
-// ParseKey is used to parse interface into []byte and string
+// ParseKey decodes a hex-encoded key string and returns the decoded key with the original hex string.
 func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
 	}
-	rawKey, ok := k.(string)
+	keyHex, ok := k.(string)
 	if !ok {
 		return nil, "", fmt.Errorf("bad format %s", name)
 	}
-	returned, err := hex.DecodeString(rawKey)
+	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
 	}
-	return returned, rawKey, nil
+	return key, keyHex, nil
 }
 
 // ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".
@@ -497,7 +502,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 		resp, err := p.client.Do(r)
 		if err != nil {
-			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
+			log.Warn("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
 		var reader io.ReadCloser
@@ -535,7 +540,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		resp.Body.Close()
 		reader.Close()
 		if err != nil {
-			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
+			log.Warn("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
 			continue
 		}

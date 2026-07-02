@@ -17,7 +17,6 @@ package schedulers
 import (
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -25,12 +24,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type shuffleLeaderSchedulerConfig struct {
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
@@ -75,7 +75,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	shuffleLeaderCounter.Inc()
-	targetStore := filter.NewCandidates(s.R, cluster.GetStores()).
+	targetStore := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
