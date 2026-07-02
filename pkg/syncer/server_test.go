@@ -666,7 +666,7 @@ func TestBroadcastUsesIndependentDownstreamIndexes(t *testing.T) {
 	records := []*core.RegionInfo{newTestRegion(1), newTestRegion(2)}
 	pd2SyncStream := newRegionSyncStream(pd2Stream, 10)
 	pd3SyncStream := newRegionSyncStream(pd3Stream, 10)
-	pd3SyncStream.advanceSendIndex(1)
+	pd3SyncStream.sendIndex.Add(1)
 	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
 		"pd2": pd2SyncStream,
 		"pd3": pd3SyncStream,
@@ -763,7 +763,7 @@ func TestAppendHistoryRecordsKeepsSlowestDownstreamWindow(t *testing.T) {
 	re := require.New(t)
 	pd2SyncStream := newRegionSyncStream(&testServerStream{}, 10)
 	pd3SyncStream := newRegionSyncStream(&testServerStream{}, 10)
-	pd3SyncStream.advanceSendIndex(2)
+	pd3SyncStream.sendIndex.Add(2)
 	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
 		"pd2": pd2SyncStream,
 		"pd3": pd3SyncStream,
@@ -892,7 +892,7 @@ func TestRemovedStreamDoesNotKeepHistoryWindow(t *testing.T) {
 	})
 	re.Equal(8, syncer.history.capacity())
 
-	fastSyncStream.advanceSendIndex(3)
+	fastSyncStream.sendIndex.Add(3)
 	syncer.unbindStream("slow", slowSyncStream)
 	minIndex, ok := syncer.minDownstreamSendIndex()
 	re.True(ok)

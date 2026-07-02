@@ -102,16 +102,6 @@ func (s *regionSyncStream) getSendIndex() uint64 {
 	return s.sendIndex.Load()
 }
 
-func (s *regionSyncStream) advanceSendIndex(count uint64) {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	s.advanceSendIndexLocked(count)
-}
-
-func (s *regionSyncStream) advanceSendIndexLocked(count uint64) {
-	s.sendIndex.Add(count)
-}
-
 func (s *regionSyncStream) notify(keepAlive bool) {
 	select {
 	case s.notifyCh <- keepAlive:
@@ -581,7 +571,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
 			return err
 		}
-		syncStream.advanceSendIndexLocked(uint64(len(records)))
+		syncStream.sendIndex.Add(uint64(len(records)))
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
@@ -696,7 +686,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 			return sentRecords, errors.Errorf("send region sync response failed")
 		}
-		stream.advanceSendIndexLocked(uint64(len(records)))
+		stream.sendIndex.Add(uint64(len(records)))
 		sentRecords = true
 	}
 }
