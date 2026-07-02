@@ -50,9 +50,12 @@ func (s *rebootPDSuite) TestReloadLabel() {
 		"zone": "zone1",
 	}
 	expectedLabels := make(map[string]string, len(firstStore.Store.Labels)+len(storeLabels))
+	originalZone, hasOriginalZone := "", false
 	for _, label := range firstStore.Store.Labels {
-		re.NotNil(label)
 		expectedLabels[label.Key] = label.Value
+		if label.Key == "zone" {
+			originalZone, hasOriginalZone = label.Value, true
+		}
 	}
 	for key, value := range storeLabels {
 		expectedLabels[key] = value
@@ -61,8 +64,16 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	// back in the request because "engine" is reserved for TiKV/TiFlash.
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 	defer func() {
+		// The restarted client is closed before this cleanup runs because defers
+		// run in LIFO order, so use a fresh client to restore the store labels.
 		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 		defer cleanupCli.Close()
+		if hasOriginalZone {
+			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+				"zone": originalZone,
+			}))
+			return
+		}
 		re.NoError(cleanupCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
 	}()
 
@@ -72,7 +83,6 @@ func (s *rebootPDSuite) TestReloadLabel() {
 
 		labelsMap := make(map[string]string)
 		for _, label := range resp.Store.Labels {
-			re.NotNil(label)
 			labelsMap[label.Key] = label.Value
 		}
 
