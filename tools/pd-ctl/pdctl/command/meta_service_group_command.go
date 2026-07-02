@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -191,7 +192,7 @@ func newSetMetaServiceGroupEnabledFunc(cmd *cobra.Command, args []string) {
 		cmd.PrintErrln("Failed to marshal request:", err)
 		return
 	}
-	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+groupID+"/status", http.MethodPatch,
+	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+url.PathEscape(groupID)+"/status", http.MethodPatch,
 		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
 	if err != nil {
 		cmd.PrintErrln("Failed to set meta-service group enabled status:", err)
@@ -225,7 +226,7 @@ func newSetMetaServiceGroupAssignmentCountFunc(cmd *cobra.Command, args []string
 		cmd.PrintErrln("Failed to marshal request:", err)
 		return
 	}
-	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+groupID+"/status", http.MethodPatch,
+	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+url.PathEscape(groupID)+"/status", http.MethodPatch,
 		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
 	if err != nil {
 		cmd.PrintErrln("Failed to set meta-service group assignment count:", err)

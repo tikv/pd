@@ -241,3 +241,22 @@ func (suite *metaServiceGroupCLITestSuite) TestSetStatusInvalidInput() {
 	re.NoError(err)
 	re.Contains(string(output), "unknown meta-service group")
 }
+
+// TestSetStatusEscapesSpecialCharID verifies that a group ID containing
+// URL-special characters (allowed by the server, which only rejects '/') is
+// still addressable through pd-ctl, which escapes the ID into the request path.
+func (suite *metaServiceGroupCLITestSuite) TestSetStatusEscapesSpecialCharID() {
+	re := suite.Require()
+	specialID := "group a?b#c%d"
+	_, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "upsert",
+		"--group", specialID+"=addr-special.example.com")
+	re.NoError(err)
+
+	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", specialID, "true")
+	re.NoError(err)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(output, &groups))
+	g := findGroup(groups, specialID)
+	re.NotNil(g)
+	re.True(g.Status.Enabled)
+}
