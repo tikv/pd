@@ -96,6 +96,18 @@ func (m *mockConfig) GetMetaServiceGroups() map[string]string {
 	return m.MetaServiceGroups
 }
 
+type assignmentHookStorage struct {
+	*endpoint.StorageEndpoint
+	beforeIncrementAssignment func()
+}
+
+func (s *assignmentHookStorage) IncrementAssignmentCount(txn kv.Txn, id string, delta int) error {
+	if s.beforeIncrementAssignment != nil {
+		s.beforeIncrementAssignment()
+	}
+	return s.StorageEndpoint.IncrementAssignmentCount(txn, id, delta)
+}
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -469,6 +481,100 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	delete(updated.Config, GCManagementType)
 	delete(updated.Config, RegionBoundType)
 	checkMutations(re, nil, updated.Config, mutations)
+}
+
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigHoldsMetaServiceGroupReadLockUntilAssignmentTxnDone() {
+	re := suite.Require()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := &assignmentHookStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+	}
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	re.NoError(manager.Bootstrap())
+
+	const keyspaceName = "msg_race"
+	_, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       keyspaceName,
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+
+	mgm := NewMetaServiceGroupManager(store, map[string]string{
+		"meta-service-group-1": "http://127.0.0.1:2379",
+	})
+	manager.mgm = mgm
+
+	assignmentStarted := make(chan struct{})
+	releaseAssignment := make(chan struct{})
+	var (
+		assignmentOnce sync.Once
+		releaseOnce    sync.Once
+	)
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseAssignment)
+		})
+	}
+	defer release()
+	store.beforeIncrementAssignment = func() {
+		assignmentOnce.Do(func() {
+			close(assignmentStarted)
+			<-releaseAssignment
+		})
+	}
+
+	updateDone := make(chan error, 1)
+	go func() {
+		_, err := manager.UpdateKeyspaceConfig(keyspaceName, []*Mutation{
+			{Op: OpPut, Key: MetaServiceGroupIDKey, Value: "meta-service-group-1"},
+		})
+		updateDone <- err
+	}()
+
+	select {
+	case <-assignmentStarted:
+	case <-time.After(time.Second):
+		re.FailNow("assignment update did not start")
+	}
+
+	lockAttemptStarted := make(chan struct{})
+	lockAcquired := make(chan struct{})
+	go func() {
+		close(lockAttemptStarted)
+		mgm.Lock()
+		close(lockAcquired)
+		mgm.Unlock()
+	}()
+	<-lockAttemptStarted
+
+	writerAcquiredEarly := false
+	select {
+	case <-lockAcquired:
+		writerAcquiredEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		re.FailNow("meta-service group write lock was not released")
+	}
+
+	select {
+	case err := <-updateDone:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		re.FailNow("keyspace config update did not finish")
+	}
+	re.False(writerAcquiredEarly, "meta-service group write lock should wait for assignment transaction")
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigWithPreconditions() {
