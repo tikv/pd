@@ -1901,7 +1901,9 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 }
 
 func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) float64 {
-	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
+	topology := getTopology()
+	defer putTopology(topology)
+	validLabels, sameLocationStoreNum, isMatch := buildTopology(topology, store, stores, locationLabels, count)
 	weight := 1.0
 	topo := topology
 	if isMatch {
@@ -1932,10 +1934,10 @@ var (
 	}
 )
 
-// LabelPairs is pre-allocated buffer for sorting labels
+// LabelPairs is pre-allocated buffer for sorting labels.
 type LabelPairs struct {
-	pairs    []*metapb.StoreLabel
-	usedSize int
+	pairs        []*metapb.StoreLabel
+	pooledLabels []*metapb.StoreLabel
 }
 
 var labelPairsPool = sync.Pool{
@@ -1946,17 +1948,17 @@ var labelPairsPool = sync.Pool{
 	},
 }
 
-// getSortedLabels returns sorted store labels. Both returned slice and contained labels are from pool.
+// getSortedLabels returns sorted store labels. Missing labels are borrowed from the pool.
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) *LabelPairs {
 	// Get label pairs from pool
 	labelPairs := labelPairsPool.Get().(*LabelPairs)
-	labelPairs.usedSize = 0
 
 	// Reset but keep capacity
 	if cap(labelPairs.pairs) < len(locationLabels) {
 		labelPairs.pairs = make([]*metapb.StoreLabel, 0, len(locationLabels))
 	}
 	labelPairs.pairs = labelPairs.pairs[:0]
+	labelPairs.pooledLabels = labelPairs.pooledLabels[:0]
 
 	// Build sorted labels
 	for _, ll := range locationLabels {
@@ -1964,19 +1966,17 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 		for _, sl := range storeLabels {
 			if ll == sl.Key {
 				labelPairs.pairs = append(labelPairs.pairs, sl)
-				labelPairs.usedSize++
 				find = true
 				break
 			}
 		}
 
 		if !find {
-			// Get label from pool
 			label := storeLabelPool.Get().(*metapb.StoreLabel)
 			label.Key = ll
 			label.Value = ""
 			labelPairs.pairs = append(labelPairs.pairs, label)
-			labelPairs.usedSize++
+			labelPairs.pooledLabels = append(labelPairs.pooledLabels, label)
 		}
 	}
 
@@ -1985,19 +1985,15 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 
 // putSortedLabels puts the label pairs back to pool
 func putSortedLabels(pairs *LabelPairs) {
-	// Return empty labels to pool
-	for i := range pairs.usedSize {
-		label := pairs.pairs[i]
-		if label.Value == "" {
-			label.Key = ""
-			label.Value = ""
-			storeLabelPool.Put(label)
-		}
+	for _, label := range pairs.pooledLabels {
+		label.Key = ""
+		label.Value = ""
+		storeLabelPool.Put(label)
 	}
 
 	// Clear references but keep capacity
 	pairs.pairs = pairs.pairs[:0]
-	pairs.usedSize = 0
+	pairs.pooledLabels = pairs.pooledLabels[:0]
 
 	labelPairsPool.Put(pairs)
 }
@@ -2020,31 +2016,24 @@ var (
 )
 
 // buildTopology builds the store topology graph and returns:
-// - topology: a map representing the store topology
 // - validLabels: filtered valid location labels
 // - sameLocationStoreNum: number of stores in the same location
 // - isMatch: whether the location matches exactly
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
-	// 1. Get topology map from object pool
-	topology := topologyPool.Get().(map[string]any)
-	defer func() {
-		cleanTopology(topology)
-		topologyPool.Put(topology)
-	}()
-
-	// 2. Get counter from object pool
+func buildTopology(topology map[string]any, s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) ([]string, float64, bool) {
 	labelCount := labelCountPool.Get().(*[]int)
 	defer labelCountPool.Put(labelCount)
 
-	// Reset counter
-	for i := range (*labelCount)[:len(locationLabels)] {
+	if cap(*labelCount) < len(locationLabels) {
+		*labelCount = make([]int, len(locationLabels))
+	} else {
+		*labelCount = (*labelCount)[:len(locationLabels)]
+	}
+	for i := range *labelCount {
 		(*labelCount)[i] = 0
 	}
 
-	// Track number of stores in same location
 	sameLocationStoreNum := 1.0
 
-	// 3. Build topology graph
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
 			sortedLabels := getSortedLabels(store.GetLabels(), locationLabels)
@@ -2053,10 +2042,9 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 		}
 	}
 
-	// 4. Determine valid label levels
 	validLabels := locationLabels
 	var isMatch bool
-	for i, c := range (*labelCount)[:len(locationLabels)] {
+	for i, c := range *labelCount {
 		if count/c == 0 {
 			validLabels = validLabels[:i]
 			break
@@ -2068,7 +2056,6 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 		}
 	}
 
-	// 5. Calculate number of stores in same location
 	for _, store := range stores {
 		if store.GetID() == s.GetID() {
 			continue
@@ -2078,7 +2065,7 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 		}
 	}
 
-	return topology, validLabels, sameLocationStoreNum, isMatch
+	return validLabels, sameLocationStoreNum, isMatch
 }
 
 func updateTopology(topology map[string]any, sortedLabels *LabelPairs, labelCount []int) {
@@ -2089,11 +2076,7 @@ func updateTopology(topology map[string]any, sortedLabels *LabelPairs, labelCoun
 	topo := topology
 	for i, l := range sortedLabels.pairs {
 		if _, exist := topo[l.Value]; !exist {
-			// Get new map from pool and clean it
-			m := topologyPool.Get().(map[string]any)
-			for k := range m {
-				delete(m, k)
-			}
+			m := getTopology()
 			topo[l.Value] = m
 			labelCount[i]++
 		}
@@ -2110,6 +2093,18 @@ func cleanTopology(topology map[string]any) {
 		delete(topology, k)
 	}
 }
+
+func getTopology() map[string]any {
+	topology := topologyPool.Get().(map[string]any)
+	cleanTopology(topology)
+	return topology
+}
+
+func putTopology(topology map[string]any) {
+	cleanTopology(topology)
+	topologyPool.Put(topology)
+}
+
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
 	storeLabel := strconv.FormatUint(storeID, 10)
 	var progressName string

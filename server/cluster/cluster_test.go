@@ -1680,6 +1680,45 @@ func TestTopologyWeight4(t *testing.T) {
 	re.Equal(1.0/3, getStoreTopoWeight(store4, stores, labels, 3))
 }
 
+func TestTopologyWeightWithPartialValidLabels(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"zone", "rack"}
+	store1 := core.NewStoreInfoWithLabel(1, map[string]string{"zone": "z1", "rack": "r1"})
+	store2 := core.NewStoreInfoWithLabel(2, map[string]string{"zone": "z1", "rack": "r2"})
+	store3 := core.NewStoreInfoWithLabel(3, map[string]string{"zone": "z2", "rack": "r3"})
+	store4 := core.NewStoreInfoWithLabel(4, map[string]string{"zone": "z2", "rack": "r4"})
+	stores := []*core.StoreInfo{store1, store2, store3, store4}
+
+	re.Equal(1.0/2/2, getStoreTopoWeight(store1, stores, labels, 3))
+}
+
+func TestTopologyWeightWithEmptyStoreLabelValue(t *testing.T) {
+	re := require.New(t)
+
+	store := core.NewStoreInfoWithLabel(1, map[string]string{"zone": ""})
+
+	_ = getStoreTopoWeight(store, []*core.StoreInfo{store}, []string{"zone"}, 3)
+
+	re.Equal("zone", store.GetLabels()[0].Key)
+}
+
+func TestTopologyWeightWithManyLocationLabels(t *testing.T) {
+	re := require.New(t)
+
+	labels := make([]string, 17)
+	storeLabels := make(map[string]string, len(labels))
+	for i := range labels {
+		labels[i] = fmt.Sprintf("label-%d", i)
+		storeLabels[labels[i]] = fmt.Sprintf("value-%d", i)
+	}
+	store := core.NewStoreInfoWithLabel(1, storeLabels)
+
+	re.NotPanics(func() {
+		_ = getStoreTopoWeight(store, []*core.StoreInfo{store}, labels, 3)
+	})
+}
+
 func TestCalculateStoreSize1(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -4027,11 +4066,46 @@ func BenchmarkBuildTopology(b *testing.B) {
 			b.ReportAllocs()
 
 			for range b.N {
+				topology := getTopology()
 				buildTopology(
+					topology,
 					stores[0],
 					stores,
 					locationLabels,
 					3,
+				)
+				putTopology(topology)
+			}
+		})
+	}
+}
+
+var benchmarkStoreTopoWeight float64
+
+func BenchmarkGetStoreTopoWeight(b *testing.B) {
+	testCases := []struct {
+		name       string
+		storeCount int
+	}{
+		{"Small-10-Stores", 10},
+		{"Medium-100-Stores", 100},
+		{"Large-1000-Stores", 1000},
+	}
+
+	locationLabels := []string{"zone", "rack", "host"}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			stores := generateTestStores(tc.storeCount)
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for range b.N {
+				benchmarkStoreTopoWeight = getStoreTopoWeight(
+					stores[0],
+					stores,
+					locationLabels,
+					4,
 				)
 			}
 		})
