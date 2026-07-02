@@ -411,12 +411,16 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			err = errors.New("failpoint triggered: waitSplitKeyspaceFailed")
 		})
 		if err != nil {
-			log.Warn("[create-keyspace] failed to wait keyspace region split",
+			// Best-effort: the keyspace metadata, keyspace-group membership and region
+			// label rule are already committed atomically, and the region will be
+			// split by the coordinator's patrol regardless. Failing the creation here
+			// would be misleading — the keyspace already exists, so a retry would only
+			// hit ErrKeyspaceExists. Log and return the created keyspace instead.
+			log.Warn("[create-keyspace] wait keyspace region split failed; keyspace is created and will be split by patrol",
 				zap.Uint32("keyspace-id", keyspace.GetId()),
 				zap.String("keyspace-name", keyspace.GetName()),
 				zap.Error(err),
 			)
-			return nil, err
 		}
 	}
 
@@ -665,23 +669,6 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
 	return meta, err
-}
-
-// CheckKeyspaceState checks the keyspace state and update it to disabled if the keyspace region is not split yet.
-func (manager *Manager) CheckKeyspaceState(meta *keyspacepb.KeyspaceMeta) {
-	if manager == nil {
-		return
-	}
-	if meta == nil {
-		return
-	}
-	if meta.State != keyspacepb.KeyspaceState_ENABLED {
-		return
-	}
-	if !manager.CheckKeyspaceRegionBound(meta) {
-		meta.State = keyspacepb.KeyspaceState_DISABLED
-		return
-	}
 }
 
 // LoadKeyspaceByID returns the keyspace specified by id.
