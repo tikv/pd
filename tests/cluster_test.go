@@ -15,6 +15,7 @@
 package tests
 
 import (
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -22,7 +23,9 @@ import (
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
@@ -60,23 +63,52 @@ func TestRegenerateInitialServerURLsKeepsInitialClusterConsistent(t *testing.T) 
 
 	re := require.New(t)
 	config := newClusterConfig(3)
-	oldPeerURLs := []string{
-		"http://127.0.0.1:1",
-		"http://127.0.0.1:2",
-		"http://127.0.0.1:3",
-	}
-	for i, server := range config.InitialServers {
-		server.PeerURLs = oldPeerURLs[i]
+	cleanupClusterConfig(t, config)
+	cluster := &TestCluster{
+		config: config,
+		opts: []ConfigOption{
+			func(conf *serverconfig.Config, _ string) {
+				conf.InitialClusterToken = "retry-token"
+			},
+		},
 	}
 
-	config.regenerateInitialServerURLs()
-	initialCluster := config.getServerAddrs()
-	for i, server := range config.InitialServers {
-		re.NotEqual(oldPeerURLs[i], server.PeerURLs)
+	regenerateServerURLs := func(server *serverConfig) {
+		server.ClientURLs = tempurl.Alloc()
+		server.PeerURLs = tempurl.Alloc()
+		server.AdvertiseClientURLs = server.ClientURLs
+		server.AdvertisePeerURLs = server.PeerURLs
 	}
+
+	regenerateServerURLs(config.InitialServers[0])
+	firstConf, err := config.InitialServers[0].Generate(WithGCTuner(false))
+	re.NoError(err)
+	regenerateServerURLs(config.InitialServers[1])
+	secondConf, err := config.InitialServers[1].Generate(WithGCTuner(false))
+	re.NoError(err)
+	re.NotEqual(firstConf.InitialCluster, secondConf.InitialCluster)
+
+	serverConfs, err := cluster.regenerateInitialServerConfigs()
+	re.NoError(err)
+	re.Len(serverConfs, len(config.InitialServers))
+
+	expectedInitialCluster := config.getServerAddrs()
 	for _, server := range config.InitialServers {
-		conf, err := server.Generate()
-		re.NoError(err)
-		re.Equal(initialCluster, conf.InitialCluster)
+		re.Contains(expectedInitialCluster, server.PeerURLs)
+	}
+	for _, conf := range serverConfs {
+		re.Equal(expectedInitialCluster, conf.InitialCluster)
+		re.Equal("retry-token", conf.InitialClusterToken)
+		re.False(conf.PDServerCfg.EnableGOGCTuner)
+	}
+}
+
+func cleanupClusterConfig(t *testing.T, config *clusterConfig) {
+	t.Helper()
+	for _, server := range config.InitialServers {
+		dataDir := server.DataDir
+		t.Cleanup(func() {
+			require.NoError(t, os.RemoveAll(dataDir))
+		})
 	}
 }

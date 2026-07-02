@@ -702,6 +702,21 @@ func (c *TestCluster) RunInitialServers() error {
 	return c.runInitialServersWithRetry(defaultMaxRetryTimes)
 }
 
+func (c *TestCluster) regenerateInitialServerConfigs() ([]*config.Config, error) {
+	c.config.regenerateInitialServerURLs()
+
+	serverConfs := make([]*config.Config, 0, len(c.config.InitialServers))
+	allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
+	for _, conf := range c.config.InitialServers {
+		serverConf, err := conf.Generate(allOpts...)
+		if err != nil {
+			return nil, err
+		}
+		serverConfs = append(serverConfs, serverConf)
+	}
+	return serverConfs, nil
+}
+
 // runInitialServersWithRetry starts to run servers with port conflict handling.
 func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 	if maxRetries <= 0 {
@@ -739,22 +754,19 @@ func (c *TestCluster) runInitialServersWithRetry(maxRetries int) error {
 
 			// Regenerate all ports before building any server configs. Generate reads
 			// every initial server's peer URL when composing the initial cluster.
-			c.config.regenerateInitialServerURLs()
+			serverConfs, err := c.regenerateInitialServerConfigs()
+			if err != nil {
+				return err
+			}
 
 			// Recreate servers with new ports
-			for _, conf := range c.config.InitialServers {
-				// Use the original opts passed during cluster creation
-				allOpts := append([]ConfigOption{WithGCTuner(false)}, c.opts...)
-				serverConf, err := conf.Generate(allOpts...)
-				if err != nil {
-					return err
-				}
-
+			for i, serverConf := range serverConfs {
 				// Use the original services passed during cluster creation
 				s, err := NewTestServer(c.ctx, serverConf, c.services)
 				if err != nil {
 					return err
 				}
+				conf := c.config.InitialServers[i]
 				c.servers[conf.Name] = s
 			}
 
