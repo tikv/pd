@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -1009,6 +1010,51 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
 	added := controller.AddWaitingOperator(newWaitingOp)
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsPreventsStaleDispatch() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 0)
+	region := cluster.AddLeaderRegion(1, 1, 2)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(op.Start())
+	controller.SetOperator(op)
+
+	dispatchReady := make(chan struct{})
+	continueDispatch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/operator/cancelOperatorBeforeDispatch", func() {
+		close(dispatchReady)
+		<-continueDispatch
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/cancelOperatorBeforeDispatch"))
+	}()
+
+	dispatchFinished := make(chan struct{})
+	go func() {
+		defer close(dispatchFinished)
+		controller.Dispatch(region, DispatchFromHeartBeat, nil)
+	}()
+
+	select {
+	case <-dispatchReady:
+	case <-time.After(time.Second):
+		re.FailNow("dispatch did not reach the pre-send failpoint")
+	}
+	controller.CancelAllOperators(AdminStop)
+	close(continueDispatch)
+	select {
+	case <-dispatchFinished:
+	case <-time.After(time.Second):
+		re.FailNow("dispatch did not finish")
+	}
+	re.Equal(CANCELED, op.Status())
+	re.Zero(reflect.ValueOf(stream).Elem().FieldByName("msgCh").Len())
 }
 
 func (suite *operatorControllerTestSuite) TestCancelAllOperatorsWaitsPromotingOperator() {

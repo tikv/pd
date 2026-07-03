@@ -167,7 +167,8 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if source == DispatchFromHeartBeat && oc.checkStaleOperator(op, step, region) {
 				return
 			}
-			oc.SendScheduleCommand(region, step, source)
+			failpoint.InjectCall("cancelOperatorBeforeDispatch")
+			oc.sendScheduleCommandIfCurrent(region, op, step, source)
 		case SUCCESS:
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
@@ -872,6 +873,16 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 			return true
 		})
 	return operators
+}
+
+func (oc *Controller) sendScheduleCommandIfCurrent(region *core.RegionInfo, op *Operator, step OpStep, source string) {
+	// Keep the final current-operator check and send serialized with bulk cancellation.
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if oc.GetOperator(region.GetID()) != op || op.Status() != STARTED {
+		return
+	}
+	oc.SendScheduleCommand(region, step, source)
 }
 
 // SendScheduleCommand sends a command to the region.
