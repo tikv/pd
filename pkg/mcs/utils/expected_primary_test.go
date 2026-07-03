@@ -144,6 +144,52 @@ func TestTransferPrimaryRandomKeepsExistingBehavior(t *testing.T) {
 	re.NotEqual(beforeResp.Kvs[0].Lease, afterResp.Kvs[0].Lease)
 }
 
+func TestTransferPrimaryRandomExcludesOldPrimaryByServiceAddress(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	keypath.SetClusterID(uint64(time.Now().UnixNano()))
+	defer keypath.ResetClusterID()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	const (
+		primaryName   = "tso-primary"
+		primaryAddr   = "http://127.0.0.1:10001"
+		secondaryName = "tso-secondary"
+		secondaryAddr = "http://127.0.0.1:10002"
+	)
+	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
+	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
+
+	lease := election.NewLease(client, "tso expected primary 00000")
+	re.NoError(lease.Grant(constant.DefaultLease))
+	defer func() {
+		_ = lease.Close()
+	}()
+
+	expectedPrimaryPath := keypath.ExpectedPrimaryPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     0,
+	})
+	_, err := client.Put(ctx, expectedPrimaryPath, primaryAddr, clientv3.WithLease(leaseID(lease)))
+	re.NoError(err)
+
+	err = mcsutils.TransferPrimary(client, lease, constant.TSOServiceName,
+		primaryAddr, "", 0, map[string]bool{
+			primaryAddr:   true,
+			secondaryAddr: true,
+		})
+	re.NoError(err)
+
+	afterResp, err := client.Get(ctx, expectedPrimaryPath)
+	re.NoError(err)
+	re.Len(afterResp.Kvs, 1)
+	re.Equal(secondaryAddr, string(afterResp.Kvs[0].Value))
+}
+
 func putRegistryEntry(
 	ctx context.Context,
 	re *require.Assertions,
