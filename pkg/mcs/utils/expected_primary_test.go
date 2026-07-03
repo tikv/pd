@@ -36,175 +36,166 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-func TestTransferPrimaryToSelfKeepsExpectedPrimaryLease(t *testing.T) {
-	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+const (
+	testPrimaryName   = "tso-primary"
+	testPrimaryAddr   = "http://127.0.0.1:10001"
+	testSecondaryName = "tso-secondary"
+	testSecondaryAddr = "http://127.0.0.1:10002"
+)
 
-	keypath.SetClusterID(uint64(time.Now().UnixNano()))
-	defer keypath.ResetClusterID()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	const (
-		primaryName   = "tso-primary"
-		primaryAddr   = "http://127.0.0.1:10001"
-		secondaryName = "tso-secondary"
-		secondaryAddr = "http://127.0.0.1:10002"
-	)
-	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
-	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
-
-	lease := election.NewLease(client, "tso expected primary 00000")
-	re.NoError(lease.Grant(constant.DefaultLease))
-	defer func() {
-		_ = lease.Close()
-	}()
-
-	msParam := &keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
-		GroupID:     0,
+func TestTransferPrimary(t *testing.T) {
+	tests := []struct {
+		name                string
+		oldPrimary          string
+		newPrimary          string
+		expectedPrimary     string
+		keepExpectedPrimary bool
+	}{
+		{
+			name:                "self transfer by name keeps expected primary lease",
+			oldPrimary:          testPrimaryName,
+			newPrimary:          testPrimaryName,
+			expectedPrimary:     testPrimaryAddr,
+			keepExpectedPrimary: true,
+		},
+		{
+			name:                "self transfer by address keeps expected primary lease",
+			oldPrimary:          testPrimaryName,
+			newPrimary:          testPrimaryAddr,
+			expectedPrimary:     testPrimaryAddr,
+			keepExpectedPrimary: true,
+		},
+		{
+			name:            "random transfer excludes old primary by name",
+			oldPrimary:      testPrimaryName,
+			expectedPrimary: testSecondaryAddr,
+		},
+		{
+			name:            "random transfer excludes old primary by address",
+			oldPrimary:      testPrimaryAddr,
+			expectedPrimary: testSecondaryAddr,
+		},
+		{
+			name:            "explicit transfer selects target by name",
+			oldPrimary:      testPrimaryName,
+			newPrimary:      testSecondaryName,
+			expectedPrimary: testSecondaryAddr,
+		},
+		{
+			name:            "explicit transfer selects target by address",
+			oldPrimary:      testPrimaryName,
+			newPrimary:      testSecondaryAddr,
+			expectedPrimary: testSecondaryAddr,
+		},
 	}
-	expectedPrimaryPath := keypath.ExpectedPrimaryPath(msParam)
-	_, err := client.Put(ctx, expectedPrimaryPath, primaryAddr, clientv3.WithLease(leaseID(lease)))
-	re.NoError(err)
 
-	beforeResp, err := client.Get(ctx, expectedPrimaryPath)
-	re.NoError(err)
-	re.Len(beforeResp.Kvs, 1)
-	oldExpectedPrimary := beforeResp.Kvs[0]
-	re.Equal(int64(leaseID(lease)), oldExpectedPrimary.Lease)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := newTransferPrimaryTestEnv(t)
+			before := env.getExpectedPrimary(t)
+			re := require.New(t)
+			re.Equal(testPrimaryAddr, before.value)
+			re.Equal(int64(leaseID(env.lease)), before.lease)
 
-	err = mcsutils.TransferPrimary(client, lease, constant.TSOServiceName,
-		primaryName, primaryName, 0, map[string]bool{
-			primaryAddr:   true,
-			secondaryAddr: true,
+			err := mcsutils.TransferPrimary(env.client, env.lease, constant.TSOServiceName,
+				tt.oldPrimary, tt.newPrimary, 0, map[string]bool{
+					testPrimaryAddr:   true,
+					testSecondaryAddr: true,
+				})
+			re.NoError(err)
+
+			after := env.getExpectedPrimary(t)
+			re.Equal(tt.expectedPrimary, after.value)
+			if tt.keepExpectedPrimary {
+				re.Equal(before.modRevision, after.modRevision)
+				re.Equal(before.lease, after.lease)
+				return
+			}
+			re.NotEqual(before.modRevision, after.modRevision)
+			re.NotEqual(before.lease, after.lease)
 		})
-	re.NoError(err)
-
-	afterResp, err := client.Get(ctx, expectedPrimaryPath)
-	re.NoError(err)
-	re.Len(afterResp.Kvs, 1)
-	currentExpectedPrimary := afterResp.Kvs[0]
-	re.Equal(string(oldExpectedPrimary.Value), string(currentExpectedPrimary.Value))
-	re.Equal(oldExpectedPrimary.ModRevision, currentExpectedPrimary.ModRevision)
-	re.Equal(oldExpectedPrimary.Lease, currentExpectedPrimary.Lease)
+	}
 }
 
-func TestTransferPrimaryRandomKeepsExistingBehavior(t *testing.T) {
+type transferPrimaryTestEnv struct {
+	ctx                 context.Context
+	client              *clientv3.Client
+	lease               *election.Lease
+	expectedPrimaryPath string
+}
+
+type expectedPrimary struct {
+	value       string
+	modRevision int64
+	lease       int64
+}
+
+func newTransferPrimaryTestEnv(t *testing.T) *transferPrimaryTestEnv {
+	t.Helper()
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 
 	keypath.SetClusterID(uint64(time.Now().UnixNano()))
-	defer keypath.ResetClusterID()
+	t.Cleanup(keypath.ResetClusterID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	t.Cleanup(cancel)
 
-	const (
-		primaryName   = "tso-primary"
-		primaryAddr   = "http://127.0.0.1:10001"
-		secondaryName = "tso-secondary"
-		secondaryAddr = "http://127.0.0.1:10002"
-	)
-	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
-	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
+	putRegistryEntry(t, ctx, client, testPrimaryName, testPrimaryAddr)
+	putRegistryEntry(t, ctx, client, testSecondaryName, testSecondaryAddr)
 
 	lease := election.NewLease(client, "tso expected primary 00000")
 	re.NoError(lease.Grant(constant.DefaultLease))
-	defer func() {
+	t.Cleanup(func() {
 		_ = lease.Close()
-	}()
+	})
 
 	expectedPrimaryPath := keypath.ExpectedPrimaryPath(&keypath.MsParam{
 		ServiceName: constant.TSOServiceName,
 		GroupID:     0,
 	})
-	_, err := client.Put(ctx, expectedPrimaryPath, primaryAddr, clientv3.WithLease(leaseID(lease)))
+	_, err := client.Put(ctx, expectedPrimaryPath, testPrimaryAddr, clientv3.WithLease(leaseID(lease)))
 	re.NoError(err)
 
-	beforeResp, err := client.Get(ctx, expectedPrimaryPath)
-	re.NoError(err)
-	re.Len(beforeResp.Kvs, 1)
-
-	err = mcsutils.TransferPrimary(client, lease, constant.TSOServiceName,
-		primaryName, "", 0, map[string]bool{
-			primaryAddr:   true,
-			secondaryAddr: true,
-		})
-	re.NoError(err)
-
-	afterResp, err := client.Get(ctx, expectedPrimaryPath)
-	re.NoError(err)
-	re.Len(afterResp.Kvs, 1)
-	re.Equal(secondaryAddr, string(afterResp.Kvs[0].Value))
-	re.NotEqual(beforeResp.Kvs[0].ModRevision, afterResp.Kvs[0].ModRevision)
-	re.NotEqual(beforeResp.Kvs[0].Lease, afterResp.Kvs[0].Lease)
+	return &transferPrimaryTestEnv{
+		ctx:                 ctx,
+		client:              client,
+		lease:               lease,
+		expectedPrimaryPath: expectedPrimaryPath,
+	}
 }
 
-func TestTransferPrimaryRandomExcludesOldPrimaryByServiceAddress(t *testing.T) {
+func (env *transferPrimaryTestEnv) getExpectedPrimary(t *testing.T) expectedPrimary {
+	t.Helper()
 	re := require.New(t)
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
-
-	keypath.SetClusterID(uint64(time.Now().UnixNano()))
-	defer keypath.ResetClusterID()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	const (
-		primaryName   = "tso-primary"
-		primaryAddr   = "http://127.0.0.1:10001"
-		secondaryName = "tso-secondary"
-		secondaryAddr = "http://127.0.0.1:10002"
-	)
-	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
-	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
-
-	lease := election.NewLease(client, "tso expected primary 00000")
-	re.NoError(lease.Grant(constant.DefaultLease))
-	defer func() {
-		_ = lease.Close()
-	}()
-
-	expectedPrimaryPath := keypath.ExpectedPrimaryPath(&keypath.MsParam{
-		ServiceName: constant.TSOServiceName,
-		GroupID:     0,
-	})
-	_, err := client.Put(ctx, expectedPrimaryPath, primaryAddr, clientv3.WithLease(leaseID(lease)))
+	resp, err := env.client.Get(env.ctx, env.expectedPrimaryPath)
 	re.NoError(err)
-
-	err = mcsutils.TransferPrimary(client, lease, constant.TSOServiceName,
-		primaryAddr, "", 0, map[string]bool{
-			primaryAddr:   true,
-			secondaryAddr: true,
-		})
-	re.NoError(err)
-
-	afterResp, err := client.Get(ctx, expectedPrimaryPath)
-	re.NoError(err)
-	re.Len(afterResp.Kvs, 1)
-	re.Equal(secondaryAddr, string(afterResp.Kvs[0].Value))
+	re.Len(resp.Kvs, 1)
+	kv := resp.Kvs[0]
+	return expectedPrimary{
+		value:       string(kv.Value),
+		modRevision: kv.ModRevision,
+		lease:       kv.Lease,
+	}
 }
 
 func putRegistryEntry(
+	t *testing.T,
 	ctx context.Context,
-	re *require.Assertions,
 	client *clientv3.Client,
 	name string,
 	serviceAddr string,
 ) {
+	t.Helper()
 	entry := discovery.ServiceRegistryEntry{
 		Name:        name,
 		ServiceAddr: serviceAddr,
 	}
 	serializedValue, err := entry.Serialize()
-	re.NoError(err)
+	require.NoError(t, err)
 	_, err = client.Put(ctx, keypath.RegistryPath(constant.TSOServiceName, serviceAddr), serializedValue)
-	re.NoError(err)
+	require.NoError(t, err)
 }
 
 func leaseID(lease *election.Lease) clientv3.LeaseID {
