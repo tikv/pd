@@ -1052,10 +1052,9 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
-	// Decrement the meta-service group assignment count in the same txn so the
-	// persisted counter stays in sync with the keyspaces actually referencing the
-	// group. Without this, removed keyspaces leak count and could permanently
-	// block deleting an otherwise-empty group.
+	// Keep the meta-service group assignment accounting in sync within the same
+	// txn. Without this, removed keyspaces leak count and could permanently block
+	// deleting an otherwise-empty group.
 	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
 }
 
@@ -1105,6 +1104,13 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
+// unassignKeyspaceFromMetaServiceGroup removes the keyspace's meta-service group
+// binding within txn: it drops MetaServiceGroupIDKey from the config and, when a
+// meta-service group manager is configured, decrements the persisted assignment
+// count. Once the config key is removed and persisted, a subsequent call is a
+// no-op, so the removal and tombstone paths can both invoke it without
+// double-counting. Callers must hold the keyspace metaLock so meta is not
+// mutated concurrently.
 func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
 	groupID := meta.GetConfig()[MetaServiceGroupIDKey]
 	if groupID == "" {

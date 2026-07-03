@@ -1151,4 +1151,14 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
+
+	// Removing the already-tombstoned keyspace must not decrement the counter
+	// again: the group binding was cleared and persisted during the tombstone
+	// transition, so unassignment is a no-op and the count stays at zero.
+	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return manager.RemoveKeyspace(txn, updated.GetId())
+	}))
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
 }
