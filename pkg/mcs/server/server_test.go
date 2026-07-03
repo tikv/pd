@@ -55,7 +55,8 @@ func TestResolveAdvertiseListenAddr(t *testing.T) {
 
 	require.Equal(t, actualAddr, ResolveAdvertiseListenAddr("", actualAddr))
 	require.Equal(t, actualAddr, ResolveAdvertiseListenAddr("http://127.0.0.1:0", actualAddr))
-	require.Equal(t, actualAddr, ResolveAdvertiseListenAddr("127.0.0.1:0", actualAddr))
+	require.Equal(t, "http://10.0.0.5:12345", ResolveAdvertiseListenAddr("http://10.0.0.5:0", actualAddr))
+	require.Equal(t, "127.0.0.1:12345", ResolveAdvertiseListenAddr("127.0.0.1:0", actualAddr))
 	require.Equal(t, "http://127.0.0.1:23456", ResolveAdvertiseListenAddr("http://127.0.0.1:23456", actualAddr))
 }
 

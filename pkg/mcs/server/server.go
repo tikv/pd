@@ -186,10 +186,14 @@ func ResolveListenAddr(listenAddr, actualListenAddr string) string {
 }
 
 // ResolveAdvertiseListenAddr returns actualListenAddr when advertiseAddr was left
-// unspecified or still points at a kernel-selected port.
+// unspecified. If advertiseAddr points at a kernel-selected port, it preserves
+// the explicit advertise host and replaces only the port.
 func ResolveAdvertiseListenAddr(advertiseAddr, actualListenAddr string) string {
-	if advertiseAddr == "" || hasZeroPort(advertiseAddr) {
+	if advertiseAddr == "" {
 		return actualListenAddr
+	}
+	if hasZeroPort(advertiseAddr) {
+		return replacePort(advertiseAddr, actualListenAddr)
 	}
 	return advertiseAddr
 }
@@ -237,11 +241,43 @@ func buildActualListenAddr(listenURL *url.URL, addr net.Addr) string {
 }
 
 func hasZeroPort(addr string) bool {
+	_, port, ok := splitHostPort(addr)
+	return ok && port == "0"
+}
+
+func replacePort(addr, actualListenAddr string) string {
+	_, actualPort, ok := splitHostPort(actualListenAddr)
+	if !ok {
+		return actualListenAddr
+	}
+
+	parsed, err := url.Parse(addr)
+	if err == nil && parsed.Host != "" {
+		host, _, ok := splitHostPort(parsed.Host)
+		if !ok {
+			return actualListenAddr
+		}
+		parsed.Host = net.JoinHostPort(host, actualPort)
+		return parsed.String()
+	}
+
+	host, _, ok := splitHostPort(addr)
+	if !ok {
+		return actualListenAddr
+	}
+	return net.JoinHostPort(host, actualPort)
+}
+
+func splitHostPort(addr string) (string, string, bool) {
 	parsed, err := url.Parse(addr)
 	host := addr
 	if err == nil && parsed.Host != "" {
 		host = parsed.Host
 	}
 	_, port, err := net.SplitHostPort(host)
-	return err == nil && port == "0"
+	if err != nil {
+		return "", "", false
+	}
+	host, _, err = net.SplitHostPort(host)
+	return host, port, err == nil
 }
