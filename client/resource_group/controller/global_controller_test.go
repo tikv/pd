@@ -385,7 +385,6 @@ func TestGetResourceGroup(t *testing.T) {
 func TestGetResourceGroupRuntimeState(t *testing.T) {
 	testCases := []struct {
 		name                            string
-		initialBurstLimit               int64
 		responseBurstLimit              int64
 		sendResponse                    bool
 		resourceGroupName               string
@@ -394,12 +393,10 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 	}{
 		{
 			name:              "unknown before first token response",
-			initialBurstLimit: -1,
 			resourceGroupName: "test-group",
 		},
 		{
 			name:               "unlimited response remains burstable",
-			initialBurstLimit:  -1,
 			responseBurstLimit: -1,
 			sendResponse:       true,
 			resourceGroupName:  "test-group",
@@ -407,7 +404,6 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 		},
 		{
 			name:               "override limited burst from token response",
-			initialBurstLimit:  -1,
 			responseBurstLimit: 100,
 			sendResponse:       true,
 			resourceGroupName:  "test-group",
@@ -418,7 +414,6 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 		},
 		{
 			name:               "unknown resource group",
-			initialBurstLimit:  -1,
 			responseBurstLimit: 100,
 			sendResponse:       true,
 			resourceGroupName:  "unknown",
@@ -436,7 +431,7 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
 							FillRate:   1000,
-							BurstLimit: tc.initialBurstLimit,
+							BurstLimit: -1,
 						},
 					},
 				},
@@ -464,6 +459,10 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 						},
 					},
 				})
+				// Mirror the main loop, which refreshes the derived state
+				// (e.g. burstable) after handling token bucket responses.
+				gc.updateRunState()
+				gc.updateAvgRequestResourcePerSec()
 			}
 
 			state, ok := controller.GetResourceGroupRuntimeState(tc.resourceGroupName)

@@ -818,11 +818,11 @@ type ResourceGroupRuntimeState struct {
 // local state for the group.
 func (c *ResourceGroupsController) GetResourceGroupRuntimeState(resourceGroupName string) (ResourceGroupRuntimeState, bool) {
 	gc, ok := c.loadGroupController(resourceGroupName)
-	if !ok || gc.tombstone.Load() || !gc.run.initialRequestCompleted.Load() || gc.run.requestUnitTokens == nil || gc.run.requestUnitTokens.limiter == nil {
+	if !ok || gc.tombstone.Load() || !gc.initialRequestCompleted.Load() {
 		return ResourceGroupRuntimeState{}, false
 	}
 	return ResourceGroupRuntimeState{
-		HasLimitedBurst: gc.run.requestUnitTokens.limiter.GetBurst() >= 0,
+		HasLimitedBurst: !gc.burstable.Load(),
 	}, true
 }
 
