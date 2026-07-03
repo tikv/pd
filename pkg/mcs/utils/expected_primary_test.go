@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -28,7 +29,12 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestTransferPrimaryToSelfKeepsExpectedPrimaryLease(t *testing.T) {
 	re := require.New(t)
@@ -47,8 +53,8 @@ func TestTransferPrimaryToSelfKeepsExpectedPrimaryLease(t *testing.T) {
 		secondaryName = "tso-secondary"
 		secondaryAddr = "http://127.0.0.1:10002"
 	)
-	putRegistryEntry(re, ctx, client, primaryName, primaryAddr)
-	putRegistryEntry(re, ctx, client, secondaryName, secondaryAddr)
+	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
+	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
 
 	lease := election.NewLease(client, "tso expected primary 00000")
 	re.NoError(lease.Grant(constant.DefaultLease))
@@ -103,11 +109,14 @@ func TestTransferPrimaryRandomKeepsExistingBehavior(t *testing.T) {
 		secondaryName = "tso-secondary"
 		secondaryAddr = "http://127.0.0.1:10002"
 	)
-	putRegistryEntry(re, ctx, client, primaryName, primaryAddr)
-	putRegistryEntry(re, ctx, client, secondaryName, secondaryAddr)
+	putRegistryEntry(ctx, re, client, primaryName, primaryAddr)
+	putRegistryEntry(ctx, re, client, secondaryName, secondaryAddr)
 
 	lease := election.NewLease(client, "tso expected primary 00000")
 	re.NoError(lease.Grant(constant.DefaultLease))
+	defer func() {
+		_ = lease.Close()
+	}()
 
 	expectedPrimaryPath := keypath.ExpectedPrimaryPath(&keypath.MsParam{
 		ServiceName: constant.TSOServiceName,
@@ -136,8 +145,8 @@ func TestTransferPrimaryRandomKeepsExistingBehavior(t *testing.T) {
 }
 
 func putRegistryEntry(
-	re *require.Assertions,
 	ctx context.Context,
+	re *require.Assertions,
 	client *clientv3.Client,
 	name string,
 	serviceAddr string,
