@@ -86,7 +86,7 @@ type groupCostController struct {
 
 		// initialRequestCompleted is set to true when the first token bucket
 		// request completes successfully.
-		initialRequestCompleted bool
+		initialRequestCompleted atomic.Bool
 
 		requestUnitTokens *tokenCounter
 	}
@@ -331,7 +331,7 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
-	if !gc.run.initialRequestCompleted {
+	if !gc.run.initialRequestCompleted.Load() {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
@@ -355,7 +355,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
 	gc.handleRUTokenResponse(resp)
-	gc.run.initialRequestCompleted = true
+	gc.run.initialRequestCompleted.Store(true)
 }
 
 func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketResponse) {
