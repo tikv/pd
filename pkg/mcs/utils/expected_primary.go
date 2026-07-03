@@ -171,7 +171,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
 			continue
 		}
-		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && isSamePrimary(member, newPrimary)) {
+		if (newPrimary == "" && member.Name != oldPrimary) || isSamePrimary(member, newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
 	}
