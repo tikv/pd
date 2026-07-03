@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -537,14 +538,15 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 	defer pdClient.Close()
 	memberIDs := make([]string, 0, len(cluster.GetServers()))
 	for _, server := range cluster.GetServers() {
-		memberIDs = append(memberIDs, fmt.Sprintf("%d", server.GetServerID()))
+		memberIDs = append(memberIDs, strconv.FormatUint(server.GetServerID(), 10))
 	}
+	memberIDList := strings.Join(memberIDs, ",")
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", strings.Join(memberIDs, ","))))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", memberIDList)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", fmt.Sprintf("return(\"%s\")", memberIDList)))
 	leaderFailpointsDisabled := false
 	disableLeaderFailpoints := func() {
 		if leaderFailpointsDisabled {
@@ -575,7 +577,7 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 	testutil.Eventually(re, func() bool {
 		err := getTSError()
 		return err != nil && strings.Contains(err.Error(), "not leader")
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(20*time.Millisecond))
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(20*time.Millisecond))
 	disableLeaderFailpoints()
 	for range 10 {
 		re.ErrorContains(getTSError(), "not leader")
