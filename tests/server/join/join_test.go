@@ -22,7 +22,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
 )
@@ -159,6 +161,49 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(pd2.Stop())
 	re.NoError(pd2.Destroy())
 	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
+}
+
+// TestJoinWithAbnormalExistingMember verifies that PrepareJoinCluster returns
+// an error when the member list contains a member with an empty Name (MemberAdd
+// succeeded but the node never started) whose peer URLs differ from the peer
+// URLs of the new PD that is trying to join.
+func TestJoinWithAbnormalExistingMember(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// Add a member but never start it.  It will appear in the member list with
+	// an empty Name — an "abnormal" joined member.
+	pd1 := cluster.GetServer("pd1")
+	client := pd1.GetEtcdClient()
+	abnormalPeerURL := tempurl.Alloc()
+	addResp, err := client.MemberAdd(ctx, []string{abnormalPeerURL})
+	re.NoError(err)
+	re.Len(addResp.Members, 2)
+	defer func() {
+		// Remove the stale member so it does not affect other tests.
+		_, _ = client.MemberRemove(ctx, addResp.Member.ID)
+	}()
+
+	// Build a config that tries to join using a *different* peer URL than the
+	// abnormal member.  PrepareJoinCluster must detect the mismatch and fail.
+	pd1Cfg := pd1.GetConfig()
+	joinerCfg := &config.Config{}
+	joinerCfg.Join = pd1Cfg.AdvertiseClientUrls
+	joinerCfg.AdvertisePeerUrls = tempurl.Alloc() // different from abnormalPeerURL
+	joinerCfg.AdvertiseClientUrls = tempurl.Alloc()
+	joinerCfg.DataDir = t.TempDir()
+
+	err = join.PrepareJoinCluster(joinerCfg)
+	re.Error(err)
+	re.Contains(err.Error(), "that has not joined successfully")
 }
 
 // A PD joins itself.
