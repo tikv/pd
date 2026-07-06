@@ -139,6 +139,24 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
+func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) *handlers.AffinityGroupsResponse {
+	var result handlers.AffinityGroupsResponse
+	testutil.Eventually(re, func() bool {
+		result = handlers.AffinityGroupsResponse{}
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &result)
+		if err != nil || len(result.AffinityGroups) != len(groupIDs) {
+			return false
+		}
+		for _, groupID := range groupIDs {
+			if _, ok := result.AffinityGroups[groupID]; !ok {
+				return false
+			}
+		}
+		return true
+	})
+	return &result
+}
+
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
 	tests.MustPutStore(re, cluster, store)
 
@@ -660,9 +678,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		re.Contains(result.AffinityGroups, "existing")
 		re.Contains(result.AffinityGroups, "new")
 
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Contains(listResp.AffinityGroups, "existing")
-		re.Contains(listResp.AffinityGroups, "new")
+		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr), "existing", "new")
 	})
 }
 
@@ -855,12 +871,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
-		var result handlers.AffinityGroupsResponse
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
-		re.NoError(err)
-		re.Len(result.AffinityGroups, 2)
-		re.Contains(result.AffinityGroups, "group-1")
-		re.Contains(result.AffinityGroups, "group-3")
+		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", "group-1", "group-3")
 	})
 }
 
