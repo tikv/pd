@@ -268,13 +268,13 @@ func replacePort(addr, actualListenAddr string) string {
 	return net.JoinHostPort(host, actualPort)
 }
 
-func splitHostPort(addr string) (string, string, bool) {
+func splitHostPort(addr string) (host, port string, ok bool) {
 	parsed, err := url.Parse(addr)
-	host := addr
+	host = addr
 	if err == nil && parsed.Host != "" {
 		host = parsed.Host
 	}
-	_, port, err := net.SplitHostPort(host)
+	_, port, err = net.SplitHostPort(host)
 	if err != nil {
 		return "", "", false
 	}
