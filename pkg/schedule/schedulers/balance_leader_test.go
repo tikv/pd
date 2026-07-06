@@ -15,9 +15,13 @@
 package schedulers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"sort"
 	"testing"
 
@@ -34,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -54,6 +59,31 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
+}
+
+func TestBalanceLeaderBatchLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	body, err := json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize})
+	re.NoError(err)
+	req := httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp := httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
+
+	body, err = json.Marshal(map[string]any{"batch": MaxBalanceLeaderBatchSize + 1})
+	re.NoError(err)
+	req = httptest.NewRequest(http.MethodPost, "/config", bytes.NewReader(body))
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
 }
 
 type balanceLeaderSchedulerTestSuite struct {
@@ -520,6 +550,28 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestBatchBalance() {
 		regions[op.RegionID()] = struct{}{}
 	}
 	re.Len(regions, 4)
+}
+
+func TestBalanceLeaderMaxBatchSchedule(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLeaderStore(1, MaxBalanceLeaderBatchSize*10)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	for i := 1; i <= MaxBalanceLeaderBatchSize*20; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	lb.(*balanceLeaderScheduler).conf.Batch = MaxBalanceLeaderBatchSize
+
+	testutil.Eventually(re, func() bool {
+		ops, _ := lb.Schedule(tc, false)
+		return len(ops) == MaxBalanceLeaderBatchSize
+	})
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
