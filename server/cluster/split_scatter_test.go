@@ -168,6 +168,7 @@ func newSplitScatterTestCluster(t *testing.T) (*RaftCluster, context.CancelFunc)
 	re.NoError(err)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, cluster.BasicCluster, false)
 	cluster.initCoordinator(ctx, cluster, hbStreams)
+	cluster.GetCoordinator().GetPrepareChecker().SetPrepared()
 	t.Cleanup(func() {
 		hbStreams.Close()
 	})
