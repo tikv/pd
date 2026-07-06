@@ -46,9 +46,20 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2, defaultRUVersionProvider)
 	re.NoError(err)
 	return gc
+}
+
+func setTestLimiterState(lim *Limiter, tokens, rate float64, burst int64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.tokens = tokens
+	lim.fillRate = fillRate(rate)
+	lim.burst = burst
+	lim.last = time.Now()
+	lim.notifyThreshold = 0
+	lim.isLowProcess = false
 }
 
 func TestGroupControlBurstable(t *testing.T) {
@@ -209,6 +220,50 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
+func TestRUV2ReportDeductsTokensOnlyWhenEnabled(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	counter := gc.run.requestUnitTokens
+	setTestLimiterState(counter.limiter, 1000, 0, 0)
+
+	gc.addRUV2Consumption(10, 20, 30)
+	re.Equal(float64(1000), counter.limiter.AvailableTokens(time.Now()))
+
+	gc.getRUVersion = func() RUVersion { return RUVersionV2 }
+	gc.addRUV2Consumption(10, 20, 30)
+	re.Equal(float64(940), counter.limiter.AvailableTokens(time.Now()))
+}
+
+func TestRUV2ModeUsesReportInsteadOfV1ResponseForTokens(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.getRUVersion = func() RUVersion { return RUVersionV2 }
+	counter := gc.run.requestUnitTokens
+	setTestLimiterState(counter.limiter, 1000, 0, 0)
+
+	_, err := gc.onResponseImpl(&TestRequestInfo{}, &TestResponseInfo{readBytes: 2000 * 64 * 1024})
+	re.NoError(err)
+	re.Equal(float64(1000), counter.limiter.AvailableTokens(time.Now()))
+
+	gc.addRUV2Consumption(200, 30, 20)
+	re.Equal(float64(750), counter.limiter.AvailableTokens(time.Now()))
+}
+
+func TestRUV2DebtWaitsOnNextRequest(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.getRUVersion = func() RUVersion { return RUVersionV2 }
+	gc.mainCfg.WaitRetryTimes = 1
+	gc.mainCfg.LTBMaxWaitDuration = time.Second
+	counter := gc.run.requestUnitTokens
+	setTestLimiterState(counter.limiter, 0, 1000, 0)
+	gc.addRUV2Consumption(10, 0, 0)
+
+	_, _, waitTime, _, err := gc.onRequestWaitImpl(context.Background(), &TestRequestInfo{})
+	re.NoError(err)
+	re.Positive(waitTime)
+}
+
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -317,7 +372,7 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	cfg := DefaultRUConfig()
 	cfg.WaitRetryInterval = 5 * time.Second
 	cfg.WaitRetryTimes = 3
-	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
+	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), defaultRUVersionProvider)
 	re.NoError(err)
 
 	// Set fillRate=0 so reservation always fails with InfDuration,

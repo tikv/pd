@@ -215,8 +215,15 @@ func (*SQLCalculator) AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInf
 }
 
 func getRUValueFromConsumption(custom *rmpb.Consumption) float64 {
+	return getRUValueFromConsumptionByVersion(custom, RUVersionV1)
+}
+
+func getRUValueFromConsumptionByVersion(custom *rmpb.Consumption, ruVersion RUVersion) float64 {
 	if custom == nil {
 		return 0
+	}
+	if ruVersion == RUVersionV2 {
+		return custom.TikvRUV2 + custom.TidbRUV2 + custom.TiflashRUV2
 	}
 	return custom.RRU + custom.WRU
 }

@@ -43,6 +43,9 @@ type groupCostController struct {
 
 	// following fields are used for token limiter.
 	calculators []ResourceCalculator
+	// getRUVersion returns the current RU calculation version for the
+	// controller's keyspace.
+	getRUVersion func() RUVersion
 
 	// metrics
 	metrics *groupMetricsCollection
@@ -135,6 +138,7 @@ type tokenCounter struct {
 	// lastSecRU is the consumption.RU value when avgRUPerSec was last updated.
 	avgRUPerSecLastRU float64
 	avgLastTime       time.Time
+	avgRUVersion      RUVersion
 
 	notify struct {
 		mu                         sync.Mutex
@@ -158,6 +162,7 @@ func newGroupCostController(
 	mainCfg *RUConfig,
 	lowRUNotifyChan chan notifyMsg,
 	tokenBucketUpdateChan chan *groupCostController,
+	getRUVersion func() RUVersion,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -167,13 +172,17 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
+	if getRUVersion == nil {
+		getRUVersion = defaultRUVersionProvider
+	}
 	ms := initMetrics(group.Name, group.Name)
 	gc := &groupCostController{
-		meta:    group,
-		name:    group.Name,
-		mainCfg: mainCfg,
-		mode:    group.GetMode(),
-		metrics: ms,
+		meta:         group,
+		name:         group.Name,
+		mainCfg:      mainCfg,
+		mode:         group.GetMode(),
+		metrics:      ms,
+		getRUVersion: getRUVersion,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -190,6 +199,25 @@ func newGroupCostController(
 	// TODO: re-init the state if user change mode from RU to RAW mode.
 	gc.initRunState()
 	return gc, nil
+}
+
+func defaultRUVersionProvider() RUVersion {
+	return DefaultRUVersion
+}
+
+func (gc *groupCostController) currentRUVersion() RUVersion {
+	if gc.getRUVersion == nil {
+		return DefaultRUVersion
+	}
+	return gc.getRUVersion()
+}
+
+func (gc *groupCostController) useRUV2() bool {
+	return gc.currentRUVersion() == RUVersionV2
+}
+
+func (gc *groupCostController) getRUValueFromConsumption(consumption *rmpb.Consumption) float64 {
+	return getRUValueFromConsumptionByVersion(consumption, gc.currentRUVersion())
 }
 
 func (gc *groupCostController) initRunState() {
@@ -222,10 +250,11 @@ func (gc *groupCostController) initRunState() {
 	defer gc.metaLock.RUnlock()
 	limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(gc.meta.RUSettings.RU), gc.lowRUNotifyChan)
 	counter := &tokenCounter{
-		limiter:     limiter,
-		avgRUPerSec: 0,
-		avgLastTime: now,
-		fillRate:    gc.meta.RUSettings.RU.Settings.FillRate,
+		limiter:      limiter,
+		avgRUPerSec:  0,
+		avgLastTime:  now,
+		avgRUVersion: gc.currentRUVersion(),
+		fillRate:     gc.meta.RUSettings.RU.Settings.FillRate,
 	}
 	gc.run.requestUnitTokens = counter
 	gc.burstable.Store(isBurstable)
@@ -270,7 +299,17 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
-	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
+	ruVersion := gc.currentRUVersion()
+	newValue := getRUValueFromConsumptionByVersion(gc.run.consumption, ruVersion)
+	if counter.avgRUVersion != ruVersion {
+		counter.avgRUVersion = ruVersion
+		counter.avgRUPerSec = 0
+		counter.avgRUPerSecLastRU = newValue
+		counter.avgLastTime = gc.run.now
+		gc.burstable.Store(isBurstable)
+		return
+	}
+	if !gc.calcAvg(counter, newValue) {
 		return
 	}
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
@@ -345,7 +384,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		if timeSinceLastRequest >= extendedReportingPeriodFactor*defaultTargetPeriod {
 			return true
 		}
-		if getRUValueFromConsumption(gc.run.consumption)-getRUValueFromConsumption(gc.run.lastRequestConsumption) >= consumptionsReportingThreshold {
+		if gc.getRUValueFromConsumption(gc.run.consumption)-gc.getRUValueFromConsumption(gc.run.lastRequestConsumption) >= consumptionsReportingThreshold {
 			return true
 		}
 	}
@@ -512,6 +551,14 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 }
 
 func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Consumption, waitDuration *time.Duration, allowDebt bool) (time.Duration, error) {
+	return gc.acquireTokenValue(ctx, gc.getRUValueFromConsumption(delta), waitDuration, allowDebt, false)
+}
+
+func (gc *groupCostController) waitForRUV2Debt(ctx context.Context, waitDuration *time.Duration) (time.Duration, error) {
+	return gc.acquireTokenValue(ctx, 0, waitDuration, false, true)
+}
+
+func (gc *groupCostController) acquireTokenValue(ctx context.Context, v float64, waitDuration *time.Duration, allowDebt bool, waitForDebt bool) (time.Duration, error) {
 	gc.metrics.runningKVRequestCounter.Inc()
 	defer gc.metrics.runningKVRequestCounter.Dec()
 	var (
@@ -524,7 +571,7 @@ retryLoop:
 		reconfiguredCh := counter.limiter.GetReconfiguredCh()
 		now := time.Now()
 		var res *Reservation
-		if v := getRUValueFromConsumption(delta); v > 0 {
+		if v > 0 {
 			// record the consume token histogram if enable controller debug mode.
 			if enableControllerTraceLog.Load() {
 				gc.metrics.consumeTokenHistogram.Observe(v)
@@ -534,8 +581,10 @@ retryLoop:
 				counter.limiter.RemoveTokens(now, v)
 				break retryLoop
 			}
-			res = counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v)
+		} else if !waitForDebt {
+			break retryLoop
 		}
+		res = counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v)
 		if d, err = WaitReservations(ctx, now, []*Reservation{res}); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 			break retryLoop
 		}
@@ -579,7 +628,12 @@ func (gc *groupCostController) onRequestWaitImpl(
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
-		d, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
+		var d time.Duration
+		if gc.useRUV2() {
+			d, err = gc.waitForRUV2Debt(ctx, &waitDuration)
+		} else {
+			d, err = gc.acquireTokens(ctx, delta, &waitDuration, false)
+		}
 		if err != nil {
 			if errs.ErrClientResourceGroupThrottled.Equal(err) {
 				gc.metrics.failedRequestCounterWithThrottled.Inc()
@@ -625,7 +679,7 @@ func (gc *groupCostController) onResponseImpl(
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
-		if v := getRUValueFromConsumption(delta); v > 0 {
+		if v := gc.getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
 		}
 	}
@@ -695,10 +749,18 @@ func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 }
 
 func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
+	consumption := &rmpb.Consumption{
+		TikvRUV2:    tikvRUV2,
+		TidbRUV2:    tidbRUV2,
+		TiflashRUV2: tiflashRUV2,
+	}
+	if gc.useRUV2() && !gc.burstable.Load() {
+		if v := gc.getRUValueFromConsumption(consumption); v > 0 {
+			gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+		}
+	}
 	gc.mu.Lock()
-	gc.mu.consumption.TikvRUV2 += tikvRUV2
-	gc.mu.consumption.TidbRUV2 += tidbRUV2
-	gc.mu.consumption.TiflashRUV2 += tiflashRUV2
+	add(gc.mu.consumption, consumption)
 	gc.mu.Unlock()
 }
 

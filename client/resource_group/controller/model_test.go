@@ -25,11 +25,12 @@ import (
 func TestGetRUValueFromConsumption(t *testing.T) {
 	// Positive test case
 	re := require.New(t)
-	custom := &rmpb.Consumption{RRU: 2.5, WRU: 3.5}
+	custom := &rmpb.Consumption{RRU: 2.5, WRU: 3.5, TikvRUV2: 4, TidbRUV2: 5, TiflashRUV2: 6}
 	expected := float64(6)
 
 	result := getRUValueFromConsumption(custom)
 	re.Equal(expected, result)
+	re.Equal(float64(15), getRUValueFromConsumptionByVersion(custom, RUVersionV2))
 
 	// When custom is nil
 	custom = nil
@@ -37,6 +38,7 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 
 	result = getRUValueFromConsumption(custom)
 	re.Equal(expected, result)
+	re.Equal(expected, getRUValueFromConsumptionByVersion(custom, RUVersionV2))
 }
 
 func TestAdd(t *testing.T) {
