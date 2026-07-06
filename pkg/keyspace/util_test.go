@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -125,14 +126,12 @@ func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
 	re.NoError(err)
 
-	re.NoError(regionLabeler.SetLabelRule(MakeLabelRule(constant.MaxValidKeyspaceID)))
+	re.NoError(regionLabeler.SetLabelRule(MakeTxnLabelRule(constant.MaxValidKeyspaceID)))
 	encodeKey := func(key []byte) []byte {
 		return []byte(codec.EncodeBytes(key))
 	}
 	re.Equal(
 		[][]byte{
-			encodeKey([]byte{'r', 0xff, 0xff, 0xff}),
-			encodeKey([]byte{'s', 0x00, 0x00, 0x00}),
 			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
 			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
 		},
@@ -261,25 +260,23 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
+		boundType         regionBoundType
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
-			id: 0,
+			id:        0,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(0),
+				ID:    "keyspaces/0",
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   "id",
 						Value: "0",
 					},
 				},
-				RuleType: labeler.KeyRange,
+				RuleType: "key-range",
 				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 1})),
-					},
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
 						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
@@ -288,22 +285,19 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id: 4242,
+			id:        4242,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(4242),
+				ID:    "keyspaces/4242",
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   "id",
 						Value: "4242",
 					},
 				},
-				RuleType: labeler.KeyRange,
+				RuleType: "key-range",
 				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
-					},
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
 						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
@@ -311,10 +305,38 @@ func TestMakeLabelRule(t *testing.T) {
 				},
 			},
 		},
+		{
+			id:        4242,
+			boundType: rawRegionBound,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+		re.Equal(testCase.expectedLabelRule, buildLabelRule(testCase.id, testCase.boundType))
 	}
+}
+
+func TestKeyTypeToRegionBoundType(t *testing.T) {
+	re := require.New(t)
+	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
@@ -326,7 +348,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	}{
 		// Valid keyspace label rule.
 		{
-			labelRule:  MakeLabelRule(1),
+			labelRule:  MakeTxnLabelRule(1),
 			expectedID: 1,
 			expectedOK: true,
 		},

@@ -343,7 +343,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
@@ -375,7 +375,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -803,6 +803,27 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ResourceGroupRuntimeState describes generic local runtime signals derived
+// from token bucket responses.
+type ResourceGroupRuntimeState struct {
+	// HasLimitedBurst is true when the request-unit token bucket has a finite
+	// burst limit instead of unlimited burst.
+	HasLimitedBurst bool
+}
+
+// GetResourceGroupRuntimeState returns the resource group's local runtime
+// state. The second return value is false when the controller has no usable
+// local state for the group.
+func (c *ResourceGroupsController) GetResourceGroupRuntimeState(resourceGroupName string) (ResourceGroupRuntimeState, bool) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok || gc.tombstone.Load() || !gc.initialRequestCompleted.Load() {
+		return ResourceGroupRuntimeState{}, false
+	}
+	return ResourceGroupRuntimeState{
+		HasLimitedBurst: !gc.burstable.Load(),
+	}, true
 }
 
 // ReportConsumption is used to report ru consumption directly.

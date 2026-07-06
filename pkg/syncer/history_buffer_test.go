@@ -162,6 +162,57 @@ func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
+func TestHistoryBufferObservedRequiredWindowKeepsSlowDownstreamRecords(t *testing.T) {
+	re := require.New(t)
+	h := newTestHistoryBuffer(8)
+	h.resetWithIndex(10)
+	h.record(
+		newHistoryBufferTestRegion(1),
+		newHistoryBufferTestRegion(2),
+	)
+
+	h.observeRequiredWindow(5)
+	h.record(
+		newHistoryBufferTestRegion(3),
+		newHistoryBufferTestRegion(4),
+		newHistoryBufferTestRegion(5),
+	)
+
+	records := h.recordsFrom(10)
+	re.Len(records, 5)
+	re.Equal(uint64(1), records[0].GetID())
+	re.Equal(uint64(5), records[4].GetID())
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Equal(uint64(15), h.getNextIndex())
+	re.Equal(8, h.capacity())
+}
+
+func TestHistoryBufferFullSyncRetainTakesPriorityOverRequiredWindow(t *testing.T) {
+	re := require.New(t)
+	h := newTestHistoryBuffer(8)
+	h.resetWithIndex(10)
+	h.record(
+		newHistoryBufferTestRegion(1),
+		newHistoryBufferTestRegion(2),
+	)
+	release := h.retainFrom(10)
+	defer release()
+
+	h.observeRequiredWindow(4)
+	h.record(
+		newHistoryBufferTestRegion(3),
+		newHistoryBufferTestRegion(4),
+		newHistoryBufferTestRegion(5),
+	)
+
+	records := h.recordsFrom(10)
+	re.Len(records, 5)
+	re.Equal(uint64(1), records[0].GetID())
+	re.Equal(uint64(5), records[4].GetID())
+	re.Equal(uint64(10), h.getFirstIndex())
+	re.Equal(8, h.capacity())
+}
+
 func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
@@ -171,7 +222,7 @@ func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
-func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
+func TestHistoryBufferShrinksOneStepAfterReplayWindowStaysLow(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)
 	h.observeRequiredWindow(3)
@@ -179,7 +230,7 @@ func TestHistoryBufferShrinksOneStepAfterRequiredWindowStaysLow(t *testing.T) {
 	h.maybeShrink()
 
 	for range historyBufferShrinkRounds {
-		h.observeRequiredWindow(1)
+		h.observeRequiredWindow(0)
 		h.maybeShrink()
 	}
 

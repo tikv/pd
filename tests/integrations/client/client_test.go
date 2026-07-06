@@ -953,7 +953,7 @@ func TestConfigTTLAfterTransferLeader(t *testing.T) {
 			options.GetMaxSnapshotCount() == 999 &&
 			!options.IsLocationReplacementEnabled()
 	})
-	re.NoError(cluster.GetServer(leaderName).ResignLeader())
+	re.NoError(cluster.GetServer(leaderName).ResignLeaderWithRetry())
 	newLeaderName := cluster.WaitLeader()
 	re.NotEmpty(newLeaderName)
 	re.NotEqual(leaderName, newLeaderName)

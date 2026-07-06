@@ -22,6 +22,9 @@ import (
 
 	"github.com/unrolled/render"
 
+	perrors "github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -103,6 +106,30 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 		PlanExecutionTimeout: planExecutionTimeout,
 		DisableParanoidCheck: disableParanoidCheck,
 	}); err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
+}
+
+// AbortFailedStoresRemoval aborts the current failed stores removal.
+//
+//	@Tags		unsafe
+//	@Summary	Abort the current failed stores removal.
+//	@Produce	json
+//
+// Success 200 {string} string "Request has been accepted."
+// Failure 400 {string} string "There is no ongoing failed stores removal."
+// Failure 500 {string} string "PD server failed to proceed the request."
+//
+//	@Router		/admin/unsafe/remove-failed-stores/abort [post]
+func (h *unsafeOperationHandler) AbortFailedStoresRemoval(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	if err := rc.GetUnsafeRecoveryController().AbortFailedStoresRemoval(); err != nil {
+		if perrors.ErrorEqual(err, errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no ongoing unsafe recovery")) {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

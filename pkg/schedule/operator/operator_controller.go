@@ -88,8 +88,10 @@ type Controller struct {
 	cluster   *core.BasicCluster
 	hbStreams *hbstream.HeartbeatStreams
 
-	// operatorLock serializes bulk cancellation with operator addition and promotion.
+	// operatorLock serializes bulk cancellation with operator addition, promotion,
+	// and dispatch registration.
 	operatorLock syncutil.Mutex
+	dispatchWg   *sync.WaitGroup
 
 	// fast path, TTLUint64 is safe for concurrent.
 	fastOperators *cache.TTLUint64
@@ -116,6 +118,7 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 		cluster:         cluster,
 		config:          config,
 		hbStreams:       hbStreams,
+		dispatchWg:      &sync.WaitGroup{},
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		opNotifierQueue: newConcurrentHeapOpQueue(),
 
@@ -699,6 +702,7 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 		}
 		oc.buryOperator(op)
 	}
+	oc.dispatchWg.Wait()
 }
 
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
@@ -876,12 +880,14 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 }
 
 func (oc *Controller) sendScheduleCommandIfCurrent(region *core.RegionInfo, op *Operator, step OpStep, source string) {
-	// Keep the final current-operator check and send serialized with bulk cancellation.
 	oc.operatorLock.Lock()
-	defer oc.operatorLock.Unlock()
 	if oc.GetOperator(region.GetID()) != op || op.Status() != STARTED {
+		oc.operatorLock.Unlock()
 		return
 	}
+	oc.dispatchWg.Add(1)
+	oc.operatorLock.Unlock()
+	defer oc.dispatchWg.Done()
 	oc.SendScheduleCommand(region, step, source)
 }
 

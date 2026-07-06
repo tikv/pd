@@ -350,7 +350,12 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	// Check if the update is supported.
 	for _, mutation := range mutations {
 		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
-			err = errs.ErrUnsupportedOperationInKeyspace
+			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("keyspace level GC")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if mutation.Key == keyspace.RegionBoundType {
+			err = errs.ErrUnsupportedOperationInKeyspace.FastGen("region bound type")
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -364,6 +369,10 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 		}
 		if goerrors.Is(err, errs.ErrEtcdTxnConflict) {
 			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
+			return
+		}
+		if goerrors.Is(err, keyspace.ErrUnknownMetaServiceGroup) || goerrors.Is(err, keyspace.ErrMetaServiceGroupDisabled) {
+			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())

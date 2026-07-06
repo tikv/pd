@@ -17,9 +17,11 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -70,6 +72,8 @@ const (
 	groupPatrolInterval                 = time.Minute
 	// keyspaceGroupMetricsSyncInterval is the interval for syncing keyspace list length metrics from kgm.kgs.
 	keyspaceGroupMetricsSyncInterval = 15 * time.Second
+	// finishKeyspaceGroupPerEndpointTimeout is the deadline for each backend endpoint attempt.
+	finishKeyspaceGroupPerEndpointTimeout = 3 * time.Second
 )
 
 // getBootstrapKeyspaceID returns the keyspace ID used for bootstrapping.
@@ -667,9 +671,11 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							continue
 						}
 						// only members of specific group are valid primary candidates.
-						group := kgm.GetKeyspaceGroups()[kg.ID]
-						memberMap := make(map[string]bool, len(group.Members))
-						for _, m := range group.Members {
+						// Use kg directly instead of GetKeyspaceGroups()[kg.ID], which
+						// is built from the keyspace lookup table and would miss a served
+						// group that has no keyspaces, causing a nil-pointer panic here.
+						memberMap := make(map[string]bool, len(kg.Members))
+						for _, m := range kg.Members {
 							memberMap[m.Address] = true
 						}
 						log.Info("tso priority checker moves primary",
@@ -932,7 +938,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldGroup != nil {
 		// SplitTarget -> !Splitting
 		if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-			kgm.allocators[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+			if allocator := kgm.allocators[groupID]; allocator != nil {
+				allocator.GetMember().(*member.Participant).SetCampaignChecker(nil)
+			}
 			splitTime := kgm.splittingGroups[groupID]
 			delete(kgm.splittingGroups, groupID)
 			kgm.metrics.splitTargetGauge.Dec()
@@ -1058,7 +1066,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, nil, curKeyspaceGroupID, modRevision, err
+		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
 	}
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
 }
@@ -1089,6 +1097,34 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 		keyspaceGroups[keyspaceGroupID] = kgm.kgs[keyspaceGroupID]
 	}
 	return keyspaceGroups
+}
+
+// GetServingKeyspaceGroups returns all keyspace groups that this TSO node is actively
+// serving (i.e. has an allocator for), regardless of keyspace assignments.
+func (kgm *KeyspaceGroupManager) GetServingKeyspaceGroups() map[uint32]*endpoint.KeyspaceGroup {
+	kgm.RLock()
+	defer kgm.RUnlock()
+	result := make(map[uint32]*endpoint.KeyspaceGroup)
+	for i, allocator := range kgm.allocators {
+		if allocator != nil {
+			result[uint32(i)] = kgm.kgs[i]
+		}
+	}
+	return result
+}
+
+// GetKeyspaceGroupByID returns the keyspace group with the given ID if this TSO node is
+// serving it (i.e. has a non-nil allocator for it). It returns nil when the ID is out of
+// range or the group is not served by this node.
+func (kgm *KeyspaceGroupManager) GetKeyspaceGroupByID(id uint32) *endpoint.KeyspaceGroup {
+	if err := checkKeySpaceGroupID(id); err != nil {
+		return nil
+	}
+	allocator, kg := kgm.getKeyspaceGroupMeta(id)
+	if allocator == nil {
+		return nil
+	}
+	return kg
 }
 
 // HandleTSORequest forwards TSO allocation requests to correct TSO Allocators of the given keyspace group.
@@ -1238,6 +1274,84 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 
 const keyspaceGroupsAPIPrefix = "/pd/api/v2/tso/keyspace-groups"
 
+func (kgm *KeyspaceGroupManager) sendDeleteRequestToKeyspaceGroupsAPI(suffix string) (*http.Response, error) {
+	parentCtx := kgm.ctx
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+
+	var lastErr error
+	var lastResp *http.Response
+	var lastParseErr error
+	for _, endpoint := range strings.Split(kgm.cfg.GetBackendEndpoints(), ",") {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		parsedURL, err := url.Parse(endpoint)
+		if err != nil {
+			log.Warn("skip invalid backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.Error(err))
+			lastParseErr = err
+			continue
+		}
+		if parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+			validationErr := perrors.Errorf("invalid backend endpoint %q: host=%q scheme=%q",
+				endpoint, parsedURL.Host, parsedURL.Scheme)
+			log.Warn("skip unsupported backend endpoint",
+				zap.String("endpoint", endpoint),
+				zap.String("host", parsedURL.Host),
+				zap.String("scheme", parsedURL.Scheme))
+			lastParseErr = validationErr
+			continue
+		}
+		requestURL := strings.TrimRight(endpoint, "/") + keyspaceGroupsAPIPrefix + suffix
+		perEndpointTimeout := finishKeyspaceGroupPerEndpointTimeout
+		failpoint.Inject("finishKeyspaceGroupPerEndpointTimeout", func(val failpoint.Value) {
+			if ms, ok := val.(int); ok {
+				perEndpointTimeout = time.Duration(ms) * time.Millisecond
+			}
+		})
+		reqCtx, reqCancel := context.WithTimeout(parentCtx, perEndpointTimeout)
+		resp, err := apiutil.DoDeleteWithContext(reqCtx, kgm.httpClient, requestURL)
+		reqCancel()
+		if err == nil && resp.StatusCode == http.StatusOK {
+			if lastResp != nil {
+				lastResp.Body.Close()
+			}
+			return resp, nil
+		}
+		if err != nil {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				log.Warn("finish keyspace group request timed out",
+					zap.String("endpoint", endpoint),
+					zap.String("suffix", suffix),
+					zap.Error(err))
+			}
+			lastErr = err
+			continue
+		}
+		if lastResp != nil {
+			lastResp.Body.Close()
+		}
+		lastResp = resp
+	}
+	if lastResp != nil {
+		return lastResp, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	if lastParseErr != nil {
+		return nil, errs.ErrURLParse.Wrap(lastParseErr).GenWithStackByCause()
+	}
+	return nil, errs.ErrURLParse.FastGenByArgs("no valid backend endpoint configured")
+}
+
 // Put the code below into the critical section to prevent from sending too many HTTP requests.
 func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 	start := time.Now()
@@ -1253,9 +1367,7 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
@@ -1292,9 +1404,7 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	resp, err := apiutil.DoDelete(
-		kgm.httpClient,
-		kgm.cfg.GetBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
+	resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI(fmt.Sprintf("/%d/merge", id))
 	if err != nil {
 		return err
 	}

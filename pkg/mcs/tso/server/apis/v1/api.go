@@ -15,8 +15,12 @@
 package apis
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/gin-contrib/cors"
@@ -137,8 +141,11 @@ func (s *Service) RegisterConfigRouter() {
 // RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
 	router := s.root.Group("primary")
-	// Transferring primary needs to be forwarded to the primary.
-	router.POST("transfer", multiservicesapi.ServiceRedirector(), transferPrimary)
+	// We do not use the ServiceRedirector middleware here because it only knows
+	// group 0's primary, which is wrong for non-default keyspace groups. Instead,
+	// transferPrimary forwards the request to the primary of the target keyspace
+	// group itself (see forwardToGroupPrimary).
+	router.POST("transfer", transferPrimary)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -234,6 +241,12 @@ func getHealth(c *gin.Context) {
 	}
 	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
 	if err != nil {
+		// The allocator is absent on this node, e.g. it has watched the keyspace group meta
+		// but does not serve the allocator for the default keyspace group.
+		if errs.ErrGetAllocator.Equal(err) {
+			c.String(http.StatusNotFound, "allocator not found")
+			return
+		}
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -257,7 +270,7 @@ type KeyspaceGroupMember struct {
 func getKeyspaceGroupMembers(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	kgm := svr.GetKeyspaceGroupManager()
-	keyspaceGroups := kgm.GetKeyspaceGroups()
+	keyspaceGroups := kgm.GetServingKeyspaceGroups()
 	members := make(map[uint32]*KeyspaceGroupMember, len(keyspaceGroups))
 	for id, group := range keyspaceGroups {
 		allocator, err := kgm.GetAllocator(id)
@@ -293,40 +306,105 @@ func getConfig(c *gin.Context) {
 // @Tags     primary
 // @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    new_primary body   string  false "new primary name"
+// @Param    new_primary        body  string  false  "new primary name"
+// @Param    keyspace_group_id  body  integer false  "keyspace group ID (default: 0)"
 // @Success  200  string  string
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	var input map[string]string
-	if err := c.BindJSON(&input); err != nil {
+	// Read the raw body first so that it can be replayed when the request needs
+	// to be forwarded to the primary of the target keyspace group.
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	// Reject an empty body explicitly. Since this endpoint has side effects, we
+	// must not silently fall back to a random transfer on the default keyspace
+	// group when no body is provided.
+	if len(body) == 0 {
+		c.String(http.StatusBadRequest, "request body is required")
+		return
+	}
+	var input struct {
+		NewPrimary      string  `json:"new_primary"`
+		KeyspaceGroupID *uint32 `json:"keyspace_group_id"`
+	}
+	if err := json.Unmarshal(body, &input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// We only support default keyspace group now.
-	newPrimary, keyspaceGroupID := "", constant.DefaultKeyspaceGroupID
-	if v, ok := input["new_primary"]; ok {
-		newPrimary = v
+	keyspaceGroupID := constant.DefaultKeyspaceGroupID
+	if input.KeyspaceGroupID != nil {
+		keyspaceGroupID = *input.KeyspaceGroupID
 	}
 
 	allocator, err := svr.GetTSOAllocator(keyspaceGroupID)
 	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		c.AbortWithStatusJSON(http.StatusBadRequest,
+			fmt.Sprintf("keyspace group %d not found on this tso node", keyspaceGroupID))
 		return
 	}
 
+	group := svr.GetKeyspaceGroupManager().GetKeyspaceGroupByID(keyspaceGroupID)
+	if group == nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest,
+			fmt.Sprintf("keyspace group %d not found on this tso node", keyspaceGroupID))
+		return
+	}
+
+	// The transfer must be executed on the current primary of the target keyspace
+	// group. We cannot rely on ServiceRedirector here because it only knows the
+	// default group (0) primary. If this node is not the primary of the group,
+	// forward the request to the group's actual primary. This keeps the original
+	// redirect-on-follower behavior for the default group and extends it to
+	// non-default groups.
+	if !allocator.GetMember().IsServing() {
+		forwardToGroupPrimary(c, svr, keyspaceGroupID, allocator.GetPrimaryAddr(), body)
+		return
+	}
+	lease := allocator.GetExpectedPrimaryLease()
+
 	// only members of specific group are valid primary candidates.
-	group := svr.GetKeyspaceGroupManager().GetKeyspaceGroups()[keyspaceGroupID]
 	memberMap := make(map[string]bool, len(group.Members))
 	for _, member := range group.Members {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetExpectedPrimaryLease(),
-		mcs.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
+	if err := utils.TransferPrimary(svr.GetClient(), lease,
+		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, "success")
+}
+
+// forwardToGroupPrimary forwards the transfer primary request to the primary of
+// the given keyspace group, replaying the original request body. The request is
+// fully handled (forwarded or aborted with an error) when this returns.
+func forwardToGroupPrimary(c *gin.Context, svr *tsoserver.Service, keyspaceGroupID uint32, primaryAddr string, body []byte) {
+	// Prevent more than one redirection.
+	if name := c.Request.Header.Get(multiservicesapi.ServiceRedirectorHeader); len(name) != 0 {
+		log.Error("redirect but server is not the primary of the keyspace group",
+			zap.String("from", name), zap.String("server", svr.Name()),
+			zap.Uint32("keyspace-group-id", keyspaceGroupID), errs.ZapError(errs.ErrRedirectToNotPrimary))
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirectToNotPrimary.FastGenByArgs().Error())
+		return
+	}
+	if primaryAddr == "" {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable,
+			fmt.Sprintf("the primary of keyspace group %d is not elected yet", keyspaceGroupID))
+		return
+	}
+	u, err := url.Parse(primaryAddr)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrURLParse.Wrap(err).GenWithStackByCause().Error())
+		return
+	}
+	c.Request.Header.Set(multiservicesapi.ServiceRedirectorHeader, svr.Name())
+	// Replay the original body for the forwarded request.
+	c.Request.Body = io.NopCloser(bytes.NewReader(body))
+	apiutil.NewCustomReverseProxies(svr.GetHTTPClient(), []url.URL{*u}).ServeHTTP(c.Writer, c.Request)
+	c.Abort()
 }
