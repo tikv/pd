@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -365,7 +364,7 @@ type LoopWatcher struct {
 	// forceLoadCh is used to force loading data from etcd.
 	forceLoadCh chan struct{}
 	// isLoadedCh is used to notify that the data has been loaded from etcd first time.
-	isLoadedCh chan error
+	isLoadedCh chan loopWatcherLoadResult
 
 	// putFn is used to handle the put event.
 	putFn func(*mvccpb.KeyValue) error
@@ -375,9 +374,6 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
-
-	// loadedRevision is the etcd snapshot revision loaded during initialization.
-	loadedRevision atomic.Int64
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
@@ -397,6 +393,11 @@ type LoopWatcher struct {
 	watchChTimeoutDuration time.Duration
 }
 
+type loopWatcherLoadResult struct {
+	revision int64
+	err      error
+}
+
 // NewLoopWatcher creates a new LoopWatcher.
 func NewLoopWatcher(
 	ctx context.Context, wg *sync.WaitGroup,
@@ -414,7 +415,7 @@ func NewLoopWatcher(
 		key:                      key,
 		wg:                       wg,
 		forceLoadCh:              make(chan struct{}, 1),
-		isLoadedCh:               make(chan error, 1),
+		isLoadedCh:               make(chan loopWatcherLoadResult, 1),
 		updateClientCh:           make(chan *clientv3.Client, 1),
 		putFn:                    putFn,
 		deleteFn:                 deleteFn,
@@ -486,7 +487,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		}
 		select {
 		case <-ctx.Done():
-			lw.isLoadedCh <- errors.Errorf("ctx is done before load data from etcd")
+			lw.isLoadedCh <- loopWatcherLoadResult{err: errors.Errorf("ctx is done before load data from etcd")}
 			return watchStartRevision
 		case <-ticker.C:
 		}
@@ -494,12 +495,16 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	if err != nil {
 		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	} else {
-		if watchStartRevision > 0 {
-			lw.loadedRevision.Store(watchStartRevision - 1)
-		}
 		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
-	lw.isLoadedCh <- err
+	snapshotRevision := int64(0)
+	if watchStartRevision > 0 {
+		snapshotRevision = watchStartRevision - 1
+	}
+	lw.isLoadedCh <- loopWatcherLoadResult{
+		revision: snapshotRevision,
+		err:      err,
+	}
 	return watchStartRevision
 }
 
@@ -763,7 +768,8 @@ func (lw *LoopWatcher) ForceLoad() {
 
 // WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
-	return <-lw.isLoadedCh
+	_, err := lw.WaitLoadRevision()
+	return err
 }
 
 // SetLoadRetryTimes sets the retry times when loading data from etcd.
@@ -776,7 +782,8 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
 }
 
-// GetLoadedRevision returns the etcd snapshot revision loaded during initialization.
-func (lw *LoopWatcher) GetLoadedRevision() int64 {
-	return lw.loadedRevision.Load()
+// WaitLoadRevision waits for the initial load and returns the loaded etcd snapshot revision.
+func (lw *LoopWatcher) WaitLoadRevision() (int64, error) {
+	result := <-lw.isLoadedCh
+	return result.revision, result.err
 }

@@ -604,14 +604,15 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.groupWatcher.SetLoadBatchSize(kgm.loadKeyspaceGroupsBatchSize)
 	}
 	kgm.groupWatcher.StartWatchLoop()
-	if err := kgm.groupWatcher.WaitLoad(); err != nil {
+	snapshotRevision, err := kgm.groupWatcher.WaitLoadRevision()
+	if err != nil {
 		log.Error("failed to initialize keyspace group manager", errs.ZapError(err))
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
 		kgm.Close()
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
-	if loadedRevision := kgm.groupWatcher.GetLoadedRevision(); loadedRevision > 0 {
-		kgm.SetModRevision(uint64(loadedRevision))
+	if snapshotRevision > 0 {
+		kgm.SetModRevision(uint64(snapshotRevision))
 	}
 
 	if !defaultKGConfigured {
