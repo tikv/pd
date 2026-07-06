@@ -689,7 +689,7 @@ func restartTestCluster(
 
 // RunServer starts to run TestServer.
 func RunServer(server *TestServer) <-chan error {
-	resC := make(chan error)
+	resC := make(chan error, 1)
 	go func() { resC <- server.Run() }()
 	return resC
 }
