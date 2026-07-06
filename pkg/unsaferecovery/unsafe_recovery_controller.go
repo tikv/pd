@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,6 +47,12 @@ type stage int
 const (
 	defaultPlanExecutionTimeout = time.Second * 60
 )
+
+var globalRecoveryStep = uint64(time.Now().UnixNano())
+
+func nextRecoveryStep() uint64 {
+	return atomic.AddUint64(&globalRecoveryStep, 1)
+}
 
 // Stage transition graph: for more details, please check `Controller.HandleStoreHeartbeat()`
 //
@@ -123,10 +130,11 @@ type Controller struct {
 	cluster cluster
 	stage   stage
 	// the round of recovery, which is an increasing number to identify the reports of each round
-	step         uint64
-	failedStores map[uint64]struct{}
-	timeout      time.Time
-	autoDetect   bool
+	step              uint64
+	recoveryStartStep uint64
+	failedStores      map[uint64]struct{}
+	timeout           time.Time
+	autoDetect        bool
 	// planExecutionTimeout is the duration PD waits for a store to execute the recovery plan
 	// before dispatching the same plan again.
 	planExecutionTimeout time.Duration
@@ -176,6 +184,7 @@ func NewController(cluster cluster) *Controller {
 func (u *Controller) reset() {
 	u.stage = Idle
 	u.step = 0
+	u.recoveryStartStep = 0
 	u.failedStores = make(map[uint64]struct{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
@@ -262,6 +271,8 @@ func (u *Controller) RemoveFailedStoresWithOptions(
 	}
 
 	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
+	u.recoveryStartStep = nextRecoveryStep()
+	u.step = u.recoveryStartStep
 	u.failedStores = failedStores
 	u.autoDetect = autoDetect
 	if options.PlanExecutionTimeout > 0 {
@@ -269,6 +280,24 @@ func (u *Controller) RemoveFailedStoresWithOptions(
 	}
 	u.disableParanoidCheck = options.DisableParanoidCheck
 	u.changeStage(CollectReport)
+	return nil
+}
+
+// AbortFailedStoresRemoval aborts the current unsafe recovery process in a best-effort way.
+// It asks TiKV to exit force leader by dispatching empty recovery plans, but any plan that
+// has already been delivered to TiKV may keep running until TiKV finishes or times it out.
+func (u *Controller) AbortFailedStoresRemoval() error {
+	u.Lock()
+	defer u.Unlock()
+
+	if !isRunning(u.stage) {
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no ongoing unsafe recovery")
+	}
+	if u.stage == ExitForceLeader {
+		return nil
+	}
+
+	u.handleErr(errors.New("aborted by operator"))
 	return nil
 }
 
@@ -585,8 +614,9 @@ func (u *Controller) changeStage(stage stage) {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
 		}
 	case Finished:
-		if u.step > 1 {
-			// == 1 means no operation has done, no need to invalid cache
+		if u.step > u.recoveryStartStep+1 {
+			// Only CollectReport has finished when step == recoveryStartStep+1,
+			// which means no operation has done and no cache invalidation is needed.
 			u.cluster.ResetPrepared()
 			u.cluster.ResetRegionCache()
 		}
@@ -620,7 +650,7 @@ func (u *Controller) changeStage(stage stage) {
 	}
 	u.orphanedPeers = map[uint64][]*metapb.Peer{}
 	u.numStoresReported = 0
-	u.step += 1
+	u.step = nextRecoveryStep()
 }
 
 func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
