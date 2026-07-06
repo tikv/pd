@@ -118,7 +118,7 @@ func TestNegativeRUSettlementPreservesSignedReportAndNonNegativeRequest(t *testi
 	gc.run.lastRequestConsumption.RRU = 110
 	gc.run.settlement.RRU = 90
 	gc.run.lastRequestSettlement.RRU = 100
-	gc.run.initialRequestCompleted = true
+	gc.initialRequestCompleted.Store(true)
 	gc.run.requestInProgress = true
 	counter.avgRUPerSec = 20
 	counter.avgRUPerSecLastRU = 100
@@ -144,7 +144,7 @@ func TestSmallPositiveSettlementDoesNotBypassConsumptionThreshold(t *testing.T) 
 
 	gc.run.consumption.RRU = 1
 	gc.run.settlement.RRU = 1
-	gc.run.initialRequestCompleted = true
+	gc.initialRequestCompleted.Store(true)
 	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.now = now
 
