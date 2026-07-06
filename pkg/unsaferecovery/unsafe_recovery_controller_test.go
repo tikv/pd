@@ -462,7 +462,7 @@ func TestFinished(t *testing.T) {
 		re.Empty(resp.RecoveryPlan.Creates)
 		re.Empty(resp.RecoveryPlan.Demotes)
 		re.Nil(resp.RecoveryPlan.ForceLeader)
-		re.Equal(uint64(1), resp.RecoveryPlan.Step)
+		re.Equal(recoveryController.step, resp.RecoveryPlan.Step)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 
@@ -646,11 +646,11 @@ func TestForceLeaderFail(t *testing.T) {
 
 	req1 := newStoreHeartbeat(1, reports[1])
 	resp1 := &pdpb.StoreHeartbeatResponse{}
-	req1.StoreReport.Step = 1
+	req1.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 	req2 := newStoreHeartbeat(2, reports[2])
 	resp2 := &pdpb.StoreHeartbeatResponse{}
-	req2.StoreReport.Step = 1
+	req2.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req2, resp2)
 	re.Equal(ForceLeader, recoveryController.GetStage())
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
@@ -765,7 +765,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 
 	req := newStoreHeartbeat(1, reports[1])
 	resp := &pdpb.StoreHeartbeatResponse{}
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ForceLeaderForCommitMerge, recoveryController.GetStage())
 
@@ -873,7 +873,7 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 		},
 	}
 	req := newStoreHeartbeat(1, &storeReport)
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	hasStore3AsFailedStore := false
@@ -1387,7 +1387,7 @@ func TestExecutionTimeout(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ExitForceLeader, recoveryController.GetStage())
-	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	req.StoreReport = &pdpb.StoreReport{Step: recoveryController.step}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(Failed, recoveryController.GetStage())
 
@@ -1451,7 +1451,7 @@ func TestExitForceLeader(t *testing.T) {
 					IsForceLeader: true,
 				},
 			},
-			Step: 1,
+			Step: recoveryController.step,
 		},
 	}
 
@@ -1537,7 +1537,7 @@ func TestStep(t *testing.T) {
 	re.Equal(CollectReport, recoveryController.GetStage())
 
 	// valid store report
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ForceLeader, recoveryController.GetStage())
 
@@ -1767,7 +1767,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 4}, {Id: 13, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 		2: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1779,7 +1779,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 8},
 						Peers: []*metapb.Peer{
 							{Id: 21, StoreId: 2}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 		3: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1791,7 +1791,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
 						Peers: []*metapb.Peer{
 							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 	}
 
 	advanceUntilFinished(re, recoveryController, reports)
@@ -1965,6 +1965,75 @@ func TestRemoveFailedStores(t *testing.T) {
 		map[uint64]struct{}{
 			2: {},
 		}, 60, false))
+}
+
+func TestAbortFailedStoresRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(2, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.Error(recoveryController.AbortFailedStoresRemoval())
+
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		1: {},
+	}, 60, false))
+	re.NoError(recoveryController.AbortFailedStoresRemoval())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+	re.Contains(recoveryController.output[1].Details[0], "aborted by operator")
+	re.NoError(recoveryController.AbortFailedStoresRemoval())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(2, nil), resp)
+	re.NotNil(resp.GetRecoveryPlan())
+	re.Empty(resp.GetRecoveryPlan().GetForceLeader().GetEnterForceLeaders())
+	re.Empty(resp.GetRecoveryPlan().GetCreates())
+	re.Empty(resp.GetRecoveryPlan().GetDemotes())
+	re.Empty(resp.GetRecoveryPlan().GetTombstones())
+
+	report := &pdpb.StoreReport{Step: resp.GetRecoveryPlan().GetStep()}
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(2, report), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(Failed, recoveryController.GetStage())
+}
+
+func TestUnsafeRecoveryStepIsUniqueAcrossRuns(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+	oldStep := recoveryController.step
+	recoveryController.changeStage(ExitForceLeader)
+	exitForceLeaderStep := recoveryController.step
+	re.NotEqual(oldStep, exitForceLeaderStep)
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(1, &pdpb.StoreReport{Step: oldStep}), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+	re.Nil(recoveryController.storeReports[1])
+	recoveryController.changeStage(Failed)
+
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+	newStep := recoveryController.step
+	re.NotEqual(oldStep, newStep)
+
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(1, &pdpb.StoreReport{Step: oldStep}), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(CollectReport, recoveryController.GetStage())
+	re.Nil(recoveryController.storeReports[1])
 }
 
 func TestRunning(t *testing.T) {
