@@ -139,7 +139,7 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
-func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) *handlers.AffinityGroupsResponse {
+func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
 	var result handlers.AffinityGroupsResponse
 	testutil.Eventually(re, func() bool {
 		result = handlers.AffinityGroupsResponse{}
@@ -154,7 +154,6 @@ func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...strin
 		}
 		return true
 	})
-	return &result
 }
 
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
