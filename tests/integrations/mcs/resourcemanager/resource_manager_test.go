@@ -1663,8 +1663,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	g.RUSettings.RU.Settings.FillRate = 12345
 	_, err = cli.ModifyResourceGroup(suite.ctx, g)
 	re.NoError(err)
-	g1, err := cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-	re.NoError(err)
+	var g1 *rmpb.ResourceGroup
+	testutil.Eventually(re, func() bool {
+		g1, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+		return err == nil && reflect.DeepEqual(g1, g)
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 	re.Equal(g1, g)
 
 	// test leader change
