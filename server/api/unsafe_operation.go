@@ -56,6 +56,7 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 //
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
+// Failure 501 {string} string "Online unsafe recovery is not supported when scheduling service is enabled."
 // Failure 500 {string} string "PD server failed to proceed the request."
 //
 //	@Router		/admin/unsafe/remove-failed-stores [post]

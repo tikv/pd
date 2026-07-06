@@ -51,6 +51,8 @@ var (
 	AdminStop CancelReasonType = "admin stop"
 	// UnsafeRecovery is the cancel reason when the operator is stopped by unsafe recovery.
 	UnsafeRecovery CancelReasonType = "unsafe recovery"
+	// SchedulingHalted is the cancel reason when scheduling is halted.
+	SchedulingHalted CancelReasonType = "scheduling halted"
 	// NotInRunningState is the cancel reason when the operator is not in running state.
 	NotInRunningState CancelReasonType = "not in running state"
 	// Timeout is the cancel reason when the operator is timeout.

@@ -91,7 +91,6 @@ type Controller struct {
 	// operatorLock serializes bulk cancellation with operator addition, promotion,
 	// and dispatch registration.
 	operatorLock syncutil.Mutex
-	dispatchWg   *sync.WaitGroup
 
 	// fast path, TTLUint64 is safe for concurrent.
 	fastOperators *cache.TTLUint64
@@ -118,7 +117,6 @@ func NewController(ctx context.Context, cluster *core.BasicCluster, config confi
 		cluster:         cluster,
 		config:          config,
 		hbStreams:       hbStreams,
-		dispatchWg:      &sync.WaitGroup{},
 		fastOperators:   cache.NewIDTTL(ctx, time.Minute, FastOperatorFinishTime),
 		opNotifierQueue: newConcurrentHeapOpQueue(),
 
@@ -327,6 +325,18 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	return oc.addWaitingOperatorLocked(ops...)
 }
 
+// AddWaitingOperatorWithGuard adds waiting operators if the guard still passes
+// while the operator lock is held.
+func (oc *Controller) AddWaitingOperatorWithGuard(guard func() bool, reason CancelReasonType, ops ...*Operator) int {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if guard != nil && !guard() {
+		oc.cancelAndBuryCreatedOperators(reason, ops...)
+		return 0
+	}
+	return oc.addWaitingOperatorLocked(ops...)
+}
+
 func (oc *Controller) addWaitingOperatorLocked(ops ...*Operator) int {
 	added := 0
 	needPromoted := 0
@@ -387,6 +397,18 @@ func (oc *Controller) addWaitingOperatorLocked(ops ...*Operator) int {
 func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	oc.operatorLock.Lock()
 	defer oc.operatorLock.Unlock()
+	return oc.addOperatorLocked(ops...)
+}
+
+// AddOperatorWithGuard adds operators if the guard still passes while the
+// operator lock is held.
+func (oc *Controller) AddOperatorWithGuard(guard func() bool, reason CancelReasonType, ops ...*Operator) bool {
+	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
+	if guard != nil && !guard() {
+		oc.cancelAndBuryCreatedOperators(reason, ops...)
+		return false
+	}
 	return oc.addOperatorLocked(ops...)
 }
 
@@ -680,6 +702,13 @@ func (oc *Controller) cancelAndBuryOperators(ops []*Operator, reasons ...CancelR
 	}
 }
 
+func (oc *Controller) cancelAndBuryCreatedOperators(reason CancelReasonType, ops ...*Operator) {
+	for _, op := range ops {
+		_ = op.Cancel(reason)
+		oc.buryOperator(op)
+	}
+}
+
 // CancelAllOperators cancels all running and waiting operators.
 func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 	oc.operatorLock.Lock()
@@ -691,7 +720,14 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
 	}
-	waitingOps := oc.wop.Drain()
+	var waitingOps []*Operator
+	for {
+		ops := oc.wop.GetOperator()
+		if ops == nil {
+			break
+		}
+		waitingOps = append(waitingOps, ops...)
+	}
 	oc.wopStatus.reset()
 	for _, op := range waitingOps {
 		if op == nil || op.IsEnd() {
@@ -706,7 +742,9 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 		oc.buryOperator(op)
 	}
 	oc.opNotifierQueue.clear()
-	oc.dispatchWg.Wait()
+	if oc.hbStreams != nil {
+		oc.hbStreams.ClearPendingScheduleCommands()
+	}
 }
 
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
@@ -885,13 +923,10 @@ func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 
 func (oc *Controller) sendScheduleCommandIfCurrent(region *core.RegionInfo, op *Operator, step OpStep, source string) {
 	oc.operatorLock.Lock()
+	defer oc.operatorLock.Unlock()
 	if oc.GetOperator(region.GetID()) != op || op.Status() != STARTED {
-		oc.operatorLock.Unlock()
 		return
 	}
-	oc.dispatchWg.Add(1)
-	oc.operatorLock.Unlock()
-	defer oc.dispatchWg.Done()
 	oc.SendScheduleCommand(region, step, source)
 }
 
@@ -907,7 +942,12 @@ func (oc *Controller) SendScheduleCommand(region *core.RegionInfo, step OpStep, 
 	if cmd == nil {
 		return
 	}
-	oc.hbStreams.SendMsg(region, cmd)
+	if !oc.hbStreams.SendScheduleCommand(region, cmd) {
+		log.Debug("drop schedule command because heartbeat stream channel is full or closed",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Stringer("step", step),
+			zap.String("source", source))
+	}
 }
 
 func (oc *Controller) pushFastOperator(op *Operator) {

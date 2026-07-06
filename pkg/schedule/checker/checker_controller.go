@@ -287,7 +287,9 @@ func (c *Controller) checkPriorityRegions() {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
+			c.opController.AddWaitingOperatorWithGuard(func() bool {
+				return !c.cluster.GetSharedConfig().IsSchedulingHalted()
+			}, operator.SchedulingHalted, ops...)
 		}
 	}
 	for _, v := range removes {
@@ -409,7 +411,9 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 	}
 
 	if !c.opController.ExceedStoreLimit(ops...) {
-		c.opController.AddWaitingOperator(ops...)
+		c.opController.AddWaitingOperatorWithGuard(func() bool {
+			return !c.cluster.GetSharedConfig().IsSchedulingHalted()
+		}, operator.SchedulingHalted, ops...)
 		c.RemovePendingProcessedRegion(id)
 	} else {
 		c.AddPendingProcessedRegions(true, id)

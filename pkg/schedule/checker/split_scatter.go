@@ -463,7 +463,9 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 					zap.String("operator-desc", op.Desc()))
 				continue
 			}
-			if !c.opController.AddOperator(op) {
+			if !c.opController.AddOperatorWithGuard(func() bool {
+				return !c.cluster.GetSharedConfig().IsSchedulingHalted()
+			}, operator.SchedulingHalted, op) {
 				splitScatterDispatchAddOperatorFailedCounter.Inc()
 				c.delayPendingSplitScatter(pending)
 				log.Info("dispatch internal split scatter add operator failed",
