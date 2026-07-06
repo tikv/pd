@@ -467,6 +467,38 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestPostLoadRevisionHook() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	key := "TestPostLoadRevisionHook"
+	resp, err := suite.client.Put(ctx, key, "")
+	re.NoError(err)
+	targetRevision := resp.Header.Revision
+
+	var loadedRevision atomic.Int64
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetPostLoadRevisionHook(func(revision int64) {
+		loadedRevision.Store(revision)
+	})
+	watcher.StartWatchLoop()
+	err = watcher.WaitLoad()
+	re.NoError(err)
+	re.GreaterOrEqual(loadedRevision.Load(), targetRevision)
+}
+
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))

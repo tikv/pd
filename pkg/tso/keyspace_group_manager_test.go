@@ -210,6 +210,42 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse+1, 0, 10)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevision() {
+	re := suite.Require()
+
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(101)
+	)
+	err := addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		groupID,
+		[]string{mgr.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{keyspaceID},
+	)
+	re.NoError(err)
+
+	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	targetRevision := uint64(resp.Kvs[0].ModRevision)
+
+	err = mgr.Initialize()
+	re.NoError(err)
+
+	_, kg, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.NotNil(kg)
+	re.Equal(groupID, loadedGroupID)
+	re.GreaterOrEqual(loadedRevision, targetRevision)
+}
+
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
 func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	re := suite.Require()

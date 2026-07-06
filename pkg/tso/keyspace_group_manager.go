@@ -597,6 +597,11 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	kgm.groupWatcher.SetPostLoadRevisionHook(func(revision int64) {
+		if revision > 0 {
+			kgm.SetModRevision(uint64(revision))
+		}
+	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}

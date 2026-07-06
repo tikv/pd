@@ -372,6 +372,9 @@ type LoopWatcher struct {
 	deleteFn func(*mvccpb.KeyValue) error
 	// postEventsFn is used to call after handling all events.
 	postEventsFn func([]*clientv3.Event) error
+	// postLoadRevisionFn is called after the initial load has completed. The
+	// revision is the etcd snapshot revision that the load reflects.
+	postLoadRevisionFn func(int64)
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
 
@@ -490,6 +493,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	if err != nil {
 		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	} else {
+		if lw.postLoadRevisionFn != nil && watchStartRevision > 0 {
+			lw.postLoadRevisionFn(watchStartRevision - 1)
+		}
 		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
 	lw.isLoadedCh <- err
@@ -767,4 +773,9 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// SetPostLoadRevisionHook sets the callback invoked after initial load finishes.
+func (lw *LoopWatcher) SetPostLoadRevisionHook(hook func(int64)) {
+	lw.postLoadRevisionFn = hook
 }
