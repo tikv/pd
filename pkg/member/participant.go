@@ -218,7 +218,7 @@ func (p *Participant) CheckPrimary() (*Primary, bool) {
 		// in previous Campaign. We should delete the leadership and campaign again.
 		log.Warn("the primary has not changed, delete and campaign again", zap.Stringer("old-primary", primary))
 		// Delete the primary itself and let others start a new election again.
-		if err = p.leadership.DeleteLeaderKey(); err != nil {
+		if err = p.leadership.DeleteLeaderKeyByRevision(revision); err != nil {
 			log.Error("deleting the primary key meets error", errs.ZapError(err))
 			time.Sleep(200 * time.Millisecond)
 			return nil, true

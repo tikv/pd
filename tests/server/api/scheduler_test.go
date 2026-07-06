@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	schedulerpkg "github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -211,12 +212,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				re.NoError(err)
 				// update invalidate batch
 				dataMap = map[string]any{}
-				dataMap["batch"] = 100
+				dataMap["batch"] = schedulerpkg.MaxBalanceLeaderBatchSize + 1
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
 				err = testutil.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					testutil.Status(re, http.StatusBadRequest),
-					testutil.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
+					testutil.StringEqual(re, fmt.Sprintf("\"invalid batch size which should be an integer between 1 and %d\"\n", schedulerpkg.MaxBalanceLeaderBatchSize)))
 				re.NoError(err)
 				resp = make(map[string]any)
 				testutil.Eventually(re, func() bool {
@@ -249,11 +250,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"min-hot-byte-rate":          100.0,
 					"min-hot-key-rate":           10.0,
 					"min-hot-query-rate":         10.0,
+					"min-hot-cpu-rate":           10.0,
 					"max-zombie-rounds":          3.0,
+					"pending-weight":             1.0,
 					"max-peer-number":            1000.0,
 					"byte-rate-rank-step-ratio":  0.05,
 					"key-rate-rank-step-ratio":   0.05,
 					"query-rate-rank-step-ratio": 0.05,
+					"cpu-rate-rank-step-ratio":   0.05,
 					"count-rank-step-ratio":      0.01,
 					"great-dec-ratio":            0.95,
 					"minor-dec-ratio":            0.99,
@@ -653,7 +657,9 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	assertNoScheduler(re, urlPrefix, name)
-	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	if suite.env == tests.NonMicroserviceEnv {
+		suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
+	}
 
 	// reset schedule config
 	scheduleConfig.Schedulers = originSchedulers

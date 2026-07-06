@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -97,10 +98,22 @@ func (suite *serverTestSuite) TestAllocID() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	id, _, err := tc.GetPrimaryServer().GetCluster().AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, tc.GetPrimaryServer().GetCluster())
 	re.NotEqual(uint64(0), id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+}
+
+func retryAllocID(re *require.Assertions, cluster *scheduling.Cluster) uint64 {
+	var allocID uint64
+	testutil.Eventually(re, func() bool {
+		id, _, err := cluster.AllocID(1)
+		if err != nil {
+			return false
+		}
+		allocID = id
+		return true
+	})
+	return allocID
 }
 
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
@@ -116,8 +129,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	cluster := tc.GetPrimaryServer().GetCluster()
-	id, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id := retryAllocID(re, cluster)
 	re.NotEqual(uint64(0), id)
 	err = suite.cluster.ResignLeader()
 	re.NoError(err)
@@ -126,8 +138,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
-	id1, _, err := cluster.AllocID(1)
-	re.NoError(err)
+	id1 := retryAllocID(re, cluster)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 	// Update the pdLeader in test suite.
@@ -145,10 +156,17 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
+	expectedSchedulerCount := len(types.DefaultSchedulers)
+	// Wait for the cluster to be ready and set it as prepared
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 	// change primary
 	primary.Close()
@@ -156,10 +174,17 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		cluster := primary.GetCluster()
+		return cluster != nil && cluster.GetCoordinator() != nil
+	})
+	// Set the cluster as prepared so that the coordinator can start running schedulers
+	primary.GetCluster().SetPrepared()
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == expectedSchedulerCount
 	})
 }
 
@@ -237,7 +262,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	tc.GetPrimaryServer().Close()
 	// Stop scheduling server. PD will execute scheduling jobs again.
@@ -254,7 +287,15 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs again.
 	testutil.Eventually(re, func() bool {
-		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc1.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 }
 
@@ -263,8 +304,9 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
-		re.NotNil(suite.pdLeader.GetServer())
-		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
+		if suite.pdLeader.GetServer() == nil || suite.pdLeader.GetServer().GetRaftCluster() == nil {
+			return false
+		}
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
@@ -294,7 +336,15 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	// Scheduling server is responsible for executing scheduling jobs.
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.IsBackgroundJobsRunning()
 	})
 	// Disable scheduling service fallback and stop scheduling server. PD won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
@@ -313,6 +363,8 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the PD.
@@ -377,15 +429,16 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// The default scheduler could not be deleted, it could only be disabled.
 	defaultSchedulerNames := []string{
 		types.BalanceLeaderScheduler.String(),
 		types.BalanceRegionScheduler.String(),
 		types.BalanceHotRegionScheduler.String(),
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
+			if schedulersController.GetScheduler(name) == nil {
+				return false
+			}
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
 			re.NoError(err, name)
 			return disabled == shouldDisabled
@@ -394,10 +447,15 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
 		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
 	}
+
 	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
+		testutil.Eventually(re, func() bool {
+			return schedulersController.GetScheduler(name) == nil
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
 		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
@@ -427,6 +485,51 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 	re.ElementsMatch(evictStoreIDs, expected)
 }
 
+func (suite *serverTestSuite) TestRemoveScheduler() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Skip the prepare checker to avoid waiting for region collection.
+	tc.GetPrimaryServer().GetCluster().SetPrepared()
+
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+
+	// Check the default schedulers exist.
+	defaultSchedulerNames := []string{
+		types.BalanceLeaderScheduler.String(),
+		types.BalanceRegionScheduler.String(),
+		types.BalanceHotRegionScheduler.String(),
+		types.EvictSlowStoreScheduler.String(),
+	}
+	checkSchedulerExist := func(name string, shouldExist bool) {
+		testutil.Eventually(re, func() bool {
+			exist := schedulersController.GetScheduler(name) != nil
+			return exist == shouldExist
+		})
+	}
+
+	for _, name := range defaultSchedulerNames {
+		checkSchedulerExist(name, true)
+	}
+
+	// Disable evict-slow-store-scheduler by calling DELETE API.
+	// For the scheduling cluster, when a default scheduler is marked as disabled in config,
+	// the updateScheduler goroutine will detect this and remove the scheduler from the controller.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String())
+
+	// Wait and verify the scheduler is removed from the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), false)
+
+	// Re-enable the scheduler by calling ADD API.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictSlowStoreScheduler.String(), nil)
+
+	// Verify the scheduler exists again in the controller.
+	checkSchedulerExist(types.EvictSlowStoreScheduler.String(), true)
+}
+
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
@@ -451,14 +554,22 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 	queryStats := &pdpb.QueryStats{
 		Get:                    5,
 		Coprocessor:            6,
@@ -477,7 +588,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		DownPeers:       downPeers,
 		PendingPeers:    pendingPeers,
 		BytesWritten:    10,
@@ -498,7 +609,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
 			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers)
 	})
@@ -528,16 +639,24 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 		re.Empty(resp.GetHeader().GetError())
 	}
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 
 	// First create a region via region heartbeat
 	heartbeatStream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = heartbeatStream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
@@ -547,7 +666,7 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 			StartKey: []byte("a"),
 			EndKey:   []byte("z"),
 		},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 	}
@@ -563,6 +682,9 @@ func (suite *serverTestSuite) TestForwardReportBuckets() {
 	// Now test ReportBuckets forwarding with multiple requests
 	bucketStream, err := grpcPDClient.ReportBuckets(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = bucketStream.CloseSend()
+	}()
 
 	// Send multiple bucket reports to test streaming
 	for version := uint64(1); version <= 3; version++ {
@@ -634,13 +756,17 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	// Additional wait to ensure config watcher is ready
+	waitForConfigWatcherReady(re, tc)
+
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetReplicationConfig().Clone()
 	conf.MaxReplicas = 1
 	err = leaderServer.SetReplicationConfig(*conf)
 	re.NoError(err)
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
 			context.Background(), &pdpb.PutStoreRequest{
@@ -659,8 +785,15 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	for i := uint64(2); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
+		if len(peers) == 0 {
+			re.FailNow("peer list should not be empty")
+		}
+		leaderPeer := peers[0]
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 			Region: &metapb.Region{
@@ -669,7 +802,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				StartKey: []byte(fmt.Sprintf("t%d", i)),
 				EndKey:   []byte(fmt.Sprintf("t%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 		}
 		err = stream.Send(regionReq)
@@ -750,9 +883,39 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 	re.False(oc.RemoveOperator(op))
 }
 
+// waitForConfigWatcherReady ensures the config watcher is properly initialized and working
+func waitForConfigWatcherReady(re *require.Assertions, tc *tests.TestSchedulingCluster) {
+	testutil.Eventually(re, func() bool {
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		// Try to get cluster version - if config watcher is working, this should be available
+		sharedConfig := cluster.GetSharedConfig()
+		if sharedConfig == nil {
+			return false
+		}
+		version := sharedConfig.GetClusterVersion()
+		// If we can get a valid cluster version, config watcher is likely working
+		return version != nil && version.String() != ""
+	})
+}
+
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
+		primaryServer := tc.GetPrimaryServer()
+		if primaryServer == nil {
+			return false
+		}
+		cluster := primaryServer.GetCluster()
+		if cluster == nil {
+			return false
+		}
+		return cluster.GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }
 
@@ -859,15 +1022,23 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 	}
 
 	// Send enough regions to satisfy the prepare checker in the initial cluster
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	// Send many regions to ensure the initial scheduling cluster's prepare checker is satisfied
 	for i := uint64(1); i <= 100; i++ {
@@ -879,7 +1050,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -932,7 +1103,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -961,7 +1132,7 @@ func (suite *serverTestSuite) TestPrepareChecker() {
 				StartKey: []byte(fmt.Sprintf("k%d", i)),
 				EndKey:   []byte(fmt.Sprintf("k%d", i+1)),
 			},
-			Leader:          peers[0],
+			Leader:          leaderPeer,
 			ApproximateSize: 10 * units.MiB,
 			ApproximateKeys: 100,
 		}
@@ -1072,20 +1243,28 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
 		{Id: 33, StoreId: 3},
 	}
+	if len(peers) == 0 {
+		re.FailNow("peer list should not be empty")
+	}
+	leaderPeer := peers[0]
 
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	regionReq := &pdpb.RegionHeartbeatRequest{
 		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
 		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
+		Leader:          leaderPeer,
 		ApproximateSize: 30 * units.MiB,
 		ApproximateKeys: 300,
 		Interval:        interval,
@@ -1098,7 +1277,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
 		return region != nil && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
-			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetLeader(), leaderPeer) &&
 			reflect.DeepEqual(region.GetInterval(), interval)
 	})
 
@@ -1145,9 +1324,13 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1288,9 +1471,13 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		re.NoError(err)
 		re.Empty(resp.GetHeader().GetError())
 	}
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
 		{Id: 22, StoreId: 2},
@@ -1414,9 +1601,13 @@ func (suite *serverTestSuite) TestForwardSplitRegion() {
 	}
 
 	// Create a region via region heartbeat
-	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	defer conn.Close()
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
+	defer func() {
+		_ = stream.CloseSend()
+	}()
 
 	peers := []*metapb.Peer{
 		{Id: 11, StoreId: 1},
@@ -1512,7 +1703,7 @@ func (suite *serverTestSuite) TestRegionBucketsStoreNotFound() {
 	tc.WaitForPrimaryServing(re)
 
 	addr := strings.TrimPrefix(tc.GetPrimaryServer().GetAddr(), "http://")
-	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials())) //nolint:staticcheck
 	re.NoError(err)
 	defer conn.Close()
 

@@ -139,6 +139,86 @@ func TestReconfig(t *testing.T) {
 	re.Equal(int64(-1), lim.GetBurst())
 }
 
+// TestLastStaysMonotonicOnStaleNow guards the assumption used by
+// groupCostController.acquireTokens: a mutator's now is captured before it
+// takes lim.mu, so under concurrency a sibling request on the same per-group
+// limiter can advance lim.last past that now. The stale (backward) now must
+// not rewind the limiter's logical clock.
+//
+// In every sub-case the shared Reserve below plays that concurrent sibling: it
+// advances lim.last to advancedAt, after which each mutator runs with the
+// earlier staleNow.
+func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
+	tests := []struct {
+		name         string
+		mutate       func(lim *Limiter, r *Reservation, staleNow time.Time)
+		expectedPool float64
+		checkPool    bool
+	}{
+		{
+			name: "remove tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RemoveTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		// CancelAt is covered by TestAcquireTokensCancelKeepsLastMonotonic.
+		{
+			name: "reconfigure",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+				})
+			},
+			expectedPool: 1100,
+			checkPool:    true,
+		},
+		{
+			name: "reconfigure unlimited",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+					newBurst:    -1,
+				})
+			},
+			checkPool: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			resetTime()
+			nc := make(chan notifyMsg, 1)
+			lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
+
+			advancedAt := t0.Add(10 * time.Second)
+			staleNow := t0.Add(9 * time.Second)
+			checkAt := t0.Add(11 * time.Second)
+
+			// Advance last through the public API to t0+10s and leave pool =
+			// 100*10 - 10 = 990.
+			r := lim.Reserve(context.Background(), InfDuration, advancedAt, 10)
+			re.True(r.reserved)
+			_, pool := lim.getTokens(advancedAt)
+			re.InDelta(990, pool, 1e-6)
+
+			tt.mutate(lim, r, staleNow)
+			re.Equal(advancedAt, lim.last)
+
+			if tt.checkPool {
+				// Accrual over t0+10s..t0+11s is 1s*100 = 100. A rewound
+				// last (to t0+9s) would over-accrue by another 100 tokens.
+				_, pool = lim.getTokens(checkAt)
+				re.InDelta(tt.expectedPool, pool, 1e-6)
+			}
+		})
+	}
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)
@@ -233,6 +313,72 @@ func TestQPS(t *testing.T) {
 			re.LessOrEqual(math.Abs(float64(tc.ruPerSec)/float64(tc.reserveN)-qps), float64(100))
 		})
 	}
+}
+
+func TestReconfiguredCh(t *testing.T) {
+	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
+
+	// The channel should block initially.
+	ch := lim.GetReconfiguredCh()
+	select {
+	case <-ch:
+		t.Fatal("reconfiguredCh should not be closed before Reconfigure")
+	default:
+	}
+
+	// After Reconfigure the old channel must be closed.
+	args := tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1}
+	lim.Reconfigure(t1, args)
+	select {
+	case <-ch:
+	default:
+		t.Fatal("reconfiguredCh should be closed after Reconfigure")
+	}
+
+	// A new channel is created; it should block again.
+	ch2 := lim.GetReconfiguredCh()
+	re.NotEqual(fmt.Sprintf("%p", ch), fmt.Sprintf("%p", ch2))
+	select {
+	case <-ch2:
+		t.Fatal("new reconfiguredCh should not be closed yet")
+	default:
+	}
+
+	// Successive Reconfigure calls each close the current channel.
+	lim.Reconfigure(t2, args)
+	select {
+	case <-ch2:
+	default:
+		t.Fatal("second reconfiguredCh should be closed after second Reconfigure")
+	}
+}
+
+func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 1, 0, 0, nc)
+
+	const numWaiters = 5
+	ch := lim.GetReconfiguredCh()
+	wokenUp := make(chan struct{}, numWaiters)
+
+	var wg sync.WaitGroup
+	for range numWaiters {
+		wg.Go(func() {
+			select {
+			case <-ch:
+				wokenUp <- struct{}{}
+			case <-time.After(2 * time.Second):
+			}
+		})
+	}
+
+	// Close by reconfiguring.
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{newTokens: 10, newFillRate: 1})
+	wg.Wait()
+
+	require.Len(t, wokenUp, numWaiters)
 }
 
 const testCaseRunTime = 4 * time.Second

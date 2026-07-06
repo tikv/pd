@@ -47,7 +47,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -80,7 +82,9 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
-	cluster, err := tests.NewTestCluster(suite.ctx, 2)
+	cluster, err := tests.NewTestCluster(suite.ctx, 2, func(conf *config.Config, _ string) {
+		conf.Schedule.AffinityScheduleLimit = 4
+	})
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
@@ -467,7 +471,13 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	labelRules, err := client.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
-	re.Equal("keyspaces/0", labelRules[0].ID)
+
+	// In NextGen, the bootstrap keyspace is SYSTEM with ID 16777214, not DEFAULT with ID 0
+	expectedKeyspaceID := "keyspaces/0"
+	if kerneltype.IsNextGen() {
+		expectedKeyspaceID = "keyspaces/16777214"
+	}
+	re.Equal(expectedKeyspaceID, labelRules[0].ID)
 	// Set a new region label rule.
 	labelRule := &pd.LabelRule{
 		ID:       "rule1",
@@ -512,7 +522,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal(labelRule, labelRules[0])
-	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{expectedKeyspaceID, "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
@@ -792,6 +802,29 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 	re.Empty(store.Store.Labels)
 }
 
+func (suite *httpClientTestSuite) TestSetStoreLabelsRejectEngineKey() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	resp, err := client.GetStores(ctx)
+	re.NoError(err)
+	re.NotEmpty(resp.Stores)
+	firstStore := resp.Stores[0]
+
+	// Setting EngineKey should be rejected
+	err = client.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+		core.EngineKey: "tiflash",
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "reserved")
+
+	err = client.DeleteStoreLabel(ctx, firstStore.Store.ID, core.EngineKey)
+	re.Error(err)
+	re.Contains(err.Error(), "can't modify label key")
+}
+
 func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
 	client := suite.client
 	members, err := client.GetMembers(ctx)
@@ -965,7 +998,13 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	keyspaceName := constant.DefaultKeyspaceName
+	// Use the correct bootstrap keyspace name based on build type
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
 	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
@@ -994,14 +1033,89 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	re.Error(err)
 }
 
+func (suite *httpClientTestSuite) TestUpdateKeyspaceConfig() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	var keyspaceName string
+	if kerneltype.IsNextGen() {
+		keyspaceName = constant.SystemKeyspaceName
+	} else {
+		keyspaceName = constant.DefaultKeyspaceName
+	}
+
+	configKey := "http_client_test_update_keyspace_config"
+	initialValue := "v1"
+	updatedMeta, err := client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &initialValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: nil,
+		},
+	})
+	re.NoError(err)
+	re.NotNil(updatedMeta)
+	re.Equal(keyspaceName, updatedMeta.GetName())
+	re.Equal(initialValue, updatedMeta.GetConfig()[configKey])
+
+	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	val, ok := keyspaceMetaRes.Config[configKey]
+	re.True(ok)
+	re.Equal(initialValue, val)
+
+	wrongExpected := "wrong"
+	nextValue := "v2"
+	_, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: &nextValue,
+		},
+		Preconditions: map[string]*string{
+			configKey: &wrongExpected,
+		},
+	})
+	re.Error(err)
+	re.Contains(err.Error(), "409 Conflict")
+	re.Contains(err.Error(), "precondition failed")
+
+	updatedMeta, err = client.UpdateKeyspaceConfig(ctx, keyspaceName, &pd.UpdateKeyspaceConfigParams{
+		Config: map[string]*string{
+			configKey: nil,
+		},
+		Preconditions: map[string]*string{
+			configKey: &initialValue,
+		},
+	})
+	re.NoError(err)
+	re.NotNil(updatedMeta)
+	_, ok = updatedMeta.Config[configKey]
+	re.False(ok)
+
+	keyspaceMetaRes, err = client.GetKeyspaceMetaByName(ctx, keyspaceName)
+	re.NoError(err)
+	_, ok = keyspaceMetaRes.Config[configKey]
+	re.False(ok)
+}
+
 func (suite *httpClientTestSuite) TestGetKeyspaceMetaByID() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	// Fetch DEFAULT keyspace by name first to get its ID.
-	metaByName, err := client.GetKeyspaceMetaByName(ctx, constant.DefaultKeyspaceName)
+	// Fetch the bootstrap keyspace by name first to get its ID.
+	// In NextGen, it's SYSTEM keyspace; in Classic, it's DEFAULT keyspace.
+	var bootstrapKeyspaceName string
+	if kerneltype.IsNextGen() {
+		bootstrapKeyspaceName = constant.SystemKeyspaceName
+	} else {
+		bootstrapKeyspaceName = constant.DefaultKeyspaceName
+	}
+
+	metaByName, err := client.GetKeyspaceMetaByName(ctx, bootstrapKeyspaceName)
 	re.NoError(err)
 	re.NotNil(metaByName)
 
@@ -1145,7 +1259,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	// check that the safepoitns are indeed deleted.
+	// check that the safepoints are indeed deleted.
 	// "gc_worker" will still exist in the result set as it's pseudo.
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
@@ -1219,6 +1333,149 @@ func (suite *httpClientTestSuite) TestGetSiblingsRegions() {
 	re.NoError(err)
 	ops := oc.GetOperators()
 	re.Len(ops, 2)
-	re.NotZero(ops[0].Kind() & operator.OpMerge)
-	re.NotZero(ops[1].Kind() & operator.OpMerge)
+	re.NotZero(ops[0].Kind() & operator.OpAdmin)
+	re.NotZero(ops[1].Kind() & operator.OpAdmin)
+}
+
+func (suite *httpClientTestSuite) TestAffinityGroups() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Test key encoding: use raw keys that will be properly encoded
+	testKey1 := []byte("test_key_1")
+	testKey2 := []byte("test_key_2")
+	testKey3 := []byte("test_key_3")
+	testKey4 := []byte("test_key_4")
+
+	// Test 1: Create affinity groups
+	affinityGroups := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+		"test-group-2": {
+			{
+				StartKey: testKey3,
+				EndKey:   testKey4,
+			},
+		},
+	}
+
+	createResp, err := client.CreateAffinityGroups(ctx, affinityGroups)
+	re.NoError(err)
+	re.NotNil(createResp)
+	re.Len(createResp, 2)
+	re.Contains(createResp, "test-group-1")
+	re.Contains(createResp, "test-group-2")
+
+	// Verify the created groups
+	group1 := createResp["test-group-1"]
+	re.NotNil(group1)
+	re.Equal("test-group-1", group1.ID)
+	re.Equal(1, group1.RangeCount)
+
+	group2 := createResp["test-group-2"]
+	re.NotNil(group2)
+	re.Equal("test-group-2", group2.ID)
+	re.Equal(1, group2.RangeCount)
+
+	// Test 2: Get single affinity group
+	getGroup, err := client.GetAffinityGroup(ctx, "test-group-1")
+	re.NoError(err)
+	re.NotNil(getGroup)
+	re.Equal("test-group-1", getGroup.ID)
+	re.Equal(1, getGroup.RangeCount)
+
+	// Test 3: Get all affinity groups
+	allGroups, err := client.GetAllAffinityGroups(ctx)
+	re.NoError(err)
+	re.NotNil(allGroups)
+	re.GreaterOrEqual(len(allGroups), 2)
+	re.Contains(allGroups, "test-group-1")
+	re.Contains(allGroups, "test-group-2")
+
+	// Test 4: Add key ranges to affinity groups
+	testKey5 := []byte("test_key_5")
+	testKey6 := []byte("test_key_6")
+
+	addRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	modifyResp, err := client.AddAffinityGroupKeyRanges(ctx, addRanges)
+	re.NoError(err)
+	re.NotNil(modifyResp)
+	re.Contains(modifyResp, "test-group-1")
+	modifiedGroup := modifyResp["test-group-1"]
+	re.Equal(2, modifiedGroup.RangeCount)
+
+	// Test 5: Update affinity group peers
+	updatedGroup, err := client.UpdateAffinityGroupPeers(ctx, "test-group-1", 1, []uint64{1, 2, 3})
+	re.NoError(err)
+	re.NotNil(updatedGroup)
+	re.Equal(uint64(1), updatedGroup.LeaderStoreID)
+	re.Equal([]uint64{1, 2, 3}, updatedGroup.VoterStoreIDs)
+
+	// Test 6: Remove key ranges from affinity groups
+	removeRanges := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-1": {
+			{
+				StartKey: testKey5,
+				EndKey:   testKey6,
+			},
+		},
+	}
+
+	removeResp, err := client.RemoveAffinityGroupKeyRanges(ctx, removeRanges)
+	re.NoError(err)
+	re.NotNil(removeResp)
+	re.Contains(removeResp, "test-group-1")
+	removedGroup := removeResp["test-group-1"]
+	re.Equal(1, removedGroup.RangeCount)
+
+	// Test 7: Delete single affinity group (with force since it still has ranges)
+	err = client.DeleteAffinityGroup(ctx, "test-group-1", true)
+	re.NoError(err)
+
+	// Verify deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-1")
+	re.Error(err)
+
+	// Test 8: Batch delete affinity groups (with force since they have ranges)
+	err = client.BatchDeleteAffinityGroups(ctx, []string{"test-group-2"}, true)
+	re.NoError(err)
+
+	// Verify batch deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-2")
+	re.Error(err)
+
+	// Test 9: Test force delete with non-empty group
+	affinityGroups2 := map[string][]pd.AffinityGroupKeyRange{
+		"test-group-3": {
+			{
+				StartKey: testKey1,
+				EndKey:   testKey2,
+			},
+		},
+	}
+
+	_, err = client.CreateAffinityGroups(ctx, affinityGroups2)
+	re.NoError(err)
+
+	// Force delete the group
+	err = client.DeleteAffinityGroup(ctx, "test-group-3", true)
+	re.NoError(err)
+
+	// Verify force deletion
+	_, err = client.GetAffinityGroup(ctx, "test-group-3")
+	re.Error(err)
 }

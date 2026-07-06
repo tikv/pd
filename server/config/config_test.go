@@ -309,6 +309,7 @@ enable-remove-extra-replica = false
 `)
 	re.NoError(err)
 	re.Equal(math.MaxInt8, cfg.PDServerCfg.FlowRoundByDigit)
+	re.True(cfg.PDServerCfg.EnableGOGCTuner)
 	re.True(cfg.Schedule.EnableReplaceOfflineReplica)
 	re.False(cfg.Schedule.EnableRemoveDownReplica)
 	re.False(cfg.Schedule.EnableMakeUpReplica)
@@ -324,6 +325,23 @@ enable-make-up-replica = false
 disable-make-up-replica = false
 `)
 	re.Error(err)
+}
+
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
 }
 
 func TestPDServerConfig(t *testing.T) {
@@ -488,6 +506,38 @@ hot-regions-write-interval= "30m"
 	re.Equal(uint64(7), cfg.Schedule.HotRegionsReservedDays)
 }
 
+func TestMaxStorePreparingTime(t *testing.T) {
+	re := require.New(t)
+	cfgData := ``
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(48*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "40h"
+`
+	cfg = NewConfig()
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(40*time.Hour, cfg.Schedule.MaxStorePreparingTime.Duration)
+
+	cfgData = `
+[schedule]
+max-store-preparing-time = "0s"
+`
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal(0*time.Second, cfg.Schedule.MaxStorePreparingTime.Duration)
+}
+
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 	cfg := &Config{}
@@ -549,4 +599,67 @@ func TestRateLimitClone(t *testing.T) {
 	}
 	gdc := gCfg.LimiterConfig["test"]
 	re.Zero(gdc.ConcurrencyLimit)
+}
+
+func TestAdjustMetaServiceGroups(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groups    map[string]string
+		expected  map[string]string
+		expectErr bool
+		errorMsg  string
+	}{
+		{
+			name:     "trim group ID and endpoint",
+			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+		},
+		{
+			name:     "multiple groups",
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+		},
+		{
+			name:      "empty group ID after trim",
+			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
+		},
+		{
+			name:      "empty endpoint after trim",
+			groups:    map[string]string{"group-1": " "},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
+		},
+		{
+			name:      "duplicate group ID after trim",
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
+		},
+		{
+			name:      "group ID with slash is rejected",
+			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot contain '/': group/1",
+		},
+		{
+			name:     "group ID with other special characters is allowed",
+			groups:   map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+			expected: map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			err := AdjustMetaServiceGroups(testCase.groups)
+			if testCase.expectErr {
+				re.EqualError(err, testCase.errorMsg)
+				return
+			}
+			re.NoError(err)
+			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
 }

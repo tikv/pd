@@ -384,7 +384,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
 	err := leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
+	if suite.env.Env == pdTests.NonMicroserviceEnv {
+		checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
+	}
 	// reset Schedulers in ScheduleConfig
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
@@ -519,6 +521,9 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
+
+	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b", "timeout", "0s"}, nil)
+	re.NotContains(echo, "Success!")
 
 	echo = tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
@@ -698,6 +703,8 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 		"min-hot-byte-rate":       float64(100),
 		"min-hot-key-rate":        float64(10),
 		"min-hot-query-rate":      float64(10),
+		"min-hot-cpu-rate":        float64(10),
+		"pending-weight":          float64(1),
 		"src-tolerance-ratio":     1.05,
 		"dst-tolerance-ratio":     1.05,
 		"read-priorities":         []any{"byte", "key"},
@@ -987,7 +994,7 @@ func TestHotSchedulerUpgrade(t *testing.T) {
 		pdTests.MustPutStore(re, cluster, store)
 	}
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
-	// wait scheduelrs run
+	// wait schedulers run
 	testutil.Eventually(re, func() bool {
 		schedulers := []string{}
 		tests.MustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)

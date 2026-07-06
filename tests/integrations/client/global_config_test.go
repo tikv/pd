@@ -31,9 +31,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
@@ -60,9 +58,11 @@ func (s testReceiver) Context() context.Context {
 
 type globalConfigTestSuite struct {
 	suite.Suite
+	ctx     context.Context
+	cancel  context.CancelFunc
+	cluster *tests.TestCluster
 	server  *server.GrpcServer
 	client  pd.Client
-	cleanup testutil.CleanupFunc
 	mu      syncutil.Mutex
 }
 
@@ -72,15 +72,18 @@ func TestGlobalConfigTestSuite(t *testing.T) {
 
 func (suite *globalConfigTestSuite) SetupSuite() {
 	re := suite.Require()
-	var (
-		err error
-		gsi *server.Server
-	)
-	checker := assertutil.NewChecker()
-	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = tests.NewServer(re, checker)
-	suite.server = &server.GrpcServer{Server: gsi}
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	gsi := suite.cluster.GetLeaderServer().GetServer()
+	suite.server = &server.GrpcServer{Server: gsi}
 	addr := suite.server.GetAddr()
 	suite.client, err = pd.NewClientWithContext(suite.server.Context(),
 		caller.TestComponent,
@@ -91,8 +94,8 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 
 func (suite *globalConfigTestSuite) TearDownSuite() {
 	suite.client.Close()
-	suite.cleanup()
-	suite.client.Close()
+	suite.cancel()
+	suite.cluster.Destroy()
 }
 
 func getEtcdPath(configPath string) string {

@@ -47,11 +47,13 @@ const (
 	// If you want to increase balance speed more, please increase above-mentioned param.
 	BalanceLeaderBatchSize = 4
 	// MaxBalanceLeaderBatchSize is maximum of balance leader batch size
-	MaxBalanceLeaderBatchSize = 10
+	MaxBalanceLeaderBatchSize = 100
 
 	transferIn  = "transfer-in"
 	transferOut = "transfer-out"
 )
+
+var invalidBalanceLeaderBatchSizeMsg = "invalid batch size which should be an integer between 1 and " + strconv.Itoa(MaxBalanceLeaderBatchSize)
 
 type balanceLeaderSchedulerParam struct {
 	Ranges []keyutil.KeyRange `json:"ranges"`
@@ -80,7 +82,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			if err := json.Unmarshal(oldConfig, param); err != nil {
 				return http.StatusInternalServerError, err.Error()
 			}
-			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
+			return http.StatusBadRequest, invalidBalanceLeaderBatchSizeMsg
 		}
 		conf.balanceLeaderSchedulerParam = *param
 		if err := conf.save(); err != nil {
@@ -101,7 +103,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 }
 
 func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
-	return conf.Batch >= 1 && conf.Batch <= 10
+	return conf.Batch >= 1 && conf.Batch <= MaxBalanceLeaderBatchSize
 }
 
 func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
@@ -438,7 +440,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.sourceStoreID(), rs),
-		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.sourceStoreID()))
 		balanceLeaderNoLeaderRegionCounter.Inc()
@@ -489,7 +491,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		}
 	}
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.targetStoreID(), rs),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), filter.NewAffinityFilter(solver.SchedulerCluster))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.targetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -513,7 +515,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	}
 	// Check if the source store is available as a source.
 	conf := solver.GetSchedulerConfig()
-	if filter.NewCandidates(s.R, []*core.StoreInfo{solver.Source}).
+	if filter.NewCandidates([]*core.StoreInfo{solver.Source}).
 		FilterSource(conf, nil, s.filterCounter, s.filters...).Len() == 0 {
 		log.Debug("store cannot be used as source", zap.String("scheduler", s.GetName()), zap.Uint64("store-id", solver.Source.GetID()))
 		balanceLeaderNoSourceStoreCounter.Inc()
@@ -525,7 +527,7 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(s.filters, leaderFilter)
 	}
-	target := filter.NewCandidates(s.R, []*core.StoreInfo{solver.Target}).
+	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, s.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {

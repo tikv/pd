@@ -17,8 +17,7 @@ package utils
 import (
 	"context"
 	"fmt"
-	"math/rand"
-	"time"
+	"math/rand/v2"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -63,9 +62,13 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
-	if err != nil || !resp.Succeeded {
+	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
 		return 0, err
+	}
+	if !resp.Succeeded {
+		log.Error("mark expected primary error", zap.String("primary-path", path))
+		return 0, errors.New("mark expected primary txn did not succeed")
 	}
 	return resp.Header.Revision, nil
 }
@@ -84,8 +87,19 @@ func KeepExpectedPrimaryAlive(
 	msParam *keypath.MsParam,
 	m *member.Participant) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary",
-		zap.String("service", msParam.ServiceName), zap.String("primary-value", m.ParticipantString()))
+		zap.String("service", msParam.ServiceName),
+		zap.Uint32("group-id", msParam.GroupID),
+		zap.String("primary-value", m.ParticipantString()))
+	// For TSO, include msParam.GroupID in the purpose so per-keyspace-group
+	// expected primary leases get distinct Prometheus labels and distinct slots
+	// in localTTLRemainingCollector. A single TSO process can be primary for
+	// multiple keyspace groups; without the GroupID suffix their leases all
+	// collapse onto one series. Non-TSO services only ever have one expected
+	// primary lease, so the GroupID suffix would just be noise (0).
 	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
+	if msParam.ServiceName == constant.TSOServiceName {
+		service = fmt.Sprintf("%s %05d", service, msParam.GroupID)
+	}
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
@@ -94,9 +108,12 @@ func KeepExpectedPrimaryAlive(
 		raw:    m.MemberValue(),
 		output: m.ParticipantString(),
 	}
-	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.GetID())
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
+		if closeErr := lease.Close(); closeErr != nil {
+			log.Warn("failed to revoke expected primary lease", zap.Error(closeErr))
+		}
 		return nil, err
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
@@ -159,8 +176,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	nextPrimaryID := r.Intn(len(primaryIDs))
+	nextPrimaryID := rand.IntN(len(primaryIDs))
 
 	// update expected primary flag
 	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)

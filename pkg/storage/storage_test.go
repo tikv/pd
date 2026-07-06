@@ -17,7 +17,7 @@ package storage
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
 	"testing"
 
@@ -301,7 +301,7 @@ func generateKeys(size int) []string {
 	for len(m) < size {
 		k := make([]byte, keyLen)
 		for i := range k {
-			k[i] = keyChars[rand.Intn(len(keyChars))]
+			k[i] = keyChars[rand.IntN(len(keyChars))]
 		}
 		m[string(k)] = struct{}{}
 	}
@@ -315,15 +315,14 @@ func generateKeys(size int) []string {
 }
 
 func randomMerge(regions []*metapb.Region, n int, ratio int) {
-	rand.New(rand.NewSource(6))
 	note := make(map[int]bool)
 	for range n * ratio / 100 {
-		pos := rand.Intn(n - 1)
+		pos := rand.IntN(n - 1)
 		for {
 			if _, ok := note[pos]; !ok {
 				break
 			}
-			pos = rand.Intn(n - 1)
+			pos = rand.IntN(n - 1)
 		}
 		note[pos] = true
 

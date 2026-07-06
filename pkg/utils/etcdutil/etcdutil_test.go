@@ -19,7 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -187,8 +187,18 @@ func TestEtcdClientSync(t *testing.T) {
 		}
 	}
 
-	_, err = RemoveEtcdMember(client1, memIDToRemove)
-	re.NoError(err)
+	// Use testutil.Eventually to handle potential transient errors during member removal.
+	// The removed member will be shut down immediately, which may cause the removal RPC
+	// to fail with "server stopped", but we verify success by checking the member list.
+	testutil.Eventually(re, func() bool {
+		_, err := RemoveEtcdMember(client1, memIDToRemove)
+		if err == nil {
+			return true
+		}
+		// Verify if the member was actually removed by checking the member list
+		listResp, listErr := ListEtcdMembers(client1.Ctx(), client1)
+		return listErr == nil && len(listResp.Members) == 1
+	})
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
@@ -216,10 +226,10 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Create two etcd clients with etcd1 as endpoint.
-	client1, err := CreateEtcdClient(nil, cfg1.ListenClientUrls) // execute member change operation with this client
+	client1, err := CreateEtcdClient(nil, cfg1.ListenClientUrls, TestEtcdClientPurpose, true) // execute member change operation with this client
 	re.NoError(err)
 	defer client1.Close()
-	client2, err := CreateEtcdClient(nil, cfg1.ListenClientUrls) // check member change with this client
+	client2, err := CreateEtcdClient(nil, cfg1.ListenClientUrls, TestEtcdClientPurpose, true) // check member change with this client
 	re.NoError(err)
 	defer client2.Close()
 
@@ -228,10 +238,16 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	defer etcd2.Close()
 	checkMembers(re, client2, []*embed.Etcd{etcd1, etcd2})
 
-	// scale in etcd1
-	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	// Create a client connected to etcd2 to perform the removal
+	cfg2 := etcd2.Config()
+	client3, err := CreateEtcdClient(nil, cfg2.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
-	checkMembers(re, client2, []*embed.Etcd{etcd2})
+	defer client3.Close()
+
+	// scale in etcd1 using client3 (connected to etcd2)
+	_, err = RemoveEtcdMember(client3, uint64(etcd1.Server.ID()))
+	re.NoError(err)
+	checkMembers(re, client3, []*embed.Etcd{etcd2})
 }
 
 func TestRandomKillEtcd(t *testing.T) {
@@ -245,7 +261,7 @@ func TestRandomKillEtcd(t *testing.T) {
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
 	for range len(cfgs) * 2 {
-		killIndex := rand.Intn(len(etcds))
+		killIndex := rand.IntN(len(etcds))
 		etcds[killIndex].Close()
 		checkEtcdEndpointNum(re, client1, 2)
 		checkEtcdClientHealth(re, client1)
@@ -269,18 +285,16 @@ func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
 	var err error
 	// Test with enable check.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
-	err = checkEtcdWithHangLeader(t)
+	err = checkEtcdWithHangLeader(t, true)
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 
 	// Test with disable check.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick", "return(true)"))
-	err = checkEtcdWithHangLeader(t)
+	err = checkEtcdWithHangLeader(t, false)
 	re.Error(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/closeTick"))
 }
 
-func checkEtcdWithHangLeader(t *testing.T) error {
+func checkEtcdWithHangLeader(t *testing.T, enableChecker bool) error {
 	re := require.New(t)
 	// Start a etcd server.
 	servers, _, clean := NewTestEtcdCluster(t, 1, nil)
@@ -297,7 +311,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Create an etcd client with etcd1 as endpoint.
 	urls, err := etcdtypes.NewURLs([]string{proxyAddr})
 	re.NoError(err)
-	client1, err := CreateEtcdClient(nil, urls)
+	client1, err := CreateEtcdClient(nil, urls, TestEtcdClientPurpose, enableChecker)
 	re.NoError(err)
 	defer client1.Close()
 
@@ -411,10 +425,10 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cleans = make([]func(), 0)
 	// Start a etcd server and create a client with etcd1 as endpoint.
-	suite.config = NewTestSingleConfig()
+	suite.config = NewTestEtcdConfig()
 	suite.config.Dir = suite.T().TempDir()
 	suite.startEtcd(re)
-	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	suite.cleans = append(suite.cleans, func() {
 		suite.client.Close()
@@ -673,7 +687,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case2: close the etcd client and put a new value after watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	watcher.updateClientCh <- suite.client
 	suite.put(re, "TestWatcherBreak", "2")
@@ -681,7 +695,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case3: close the etcd client and put a new value before watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	suite.put(re, "TestWatcherBreak", "3")
 	watcher.updateClientCh <- suite.client
@@ -689,7 +703,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case4: close the etcd client and put a new value with compact
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
 	suite.put(re, "TestWatcherBreak", "4")
 	resp, err := EtcdKVGet(suite.client, "TestWatcherBreak")

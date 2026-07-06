@@ -30,7 +30,7 @@ package btree
 
 import (
 	"flag"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sort"
 	"sync"

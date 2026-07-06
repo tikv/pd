@@ -32,6 +32,8 @@ const (
 	RetryTimeoutErr = "retry timeout"
 	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
 	NotPrimaryErr = "not primary"
+	// MismatchCalleeIDErr indicates the callee ID is mismatched, usually caused by the stale DNS cache.
+	MismatchCalleeIDErr = "mismatch callee id"
 )
 
 // internal errors
@@ -68,6 +70,7 @@ var (
 	ErrClientFindGroupByKeyspaceID    = errors.Normalize("can't find keyspace group by keyspace id", errors.RFCCodeText("PD:client:ErrClientFindGroupByKeyspaceID"))
 	ErrClientWatchGCSafePointV2Stream = errors.Normalize("watch gc safe point v2 stream failed", errors.RFCCodeText("PD:client:ErrClientWatchGCSafePointV2Stream"))
 	ErrCircuitBreakerOpen             = errors.Normalize("circuit breaker is open", errors.RFCCodeText("PD:client:ErrCircuitBreakerOpen"))
+	ErrClientRouterConnectionTimeout  = errors.Normalize("router connection is not ready until timeout", errors.RFCCodeText("PD:client:ErrClientRouterConnectionTimeout"))
 )
 
 // grpcutil errors

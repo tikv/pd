@@ -39,7 +39,11 @@ func TestIsHot(t *testing.T) {
 		cache := NewHotCache(ctx, cluster)
 		region, err := buildRegion(cluster, i, 3, 60)
 		re.NoError(err)
-		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
+		loads := make([]float64, utils.RegionStatCount)
+		loads[utils.RegionReadBytes] = 100000000
+		loads[utils.RegionReadKeys] = 1000
+		loads[utils.RegionReadQueryNum] = 1000
+		stats := cache.CheckReadPeerSync(region, region.GetPeers(), loads, 60)
 		cache.Update(stats[0], i)
 		for range 100 {
 			re.True(cache.IsRegionHot(region, 1))

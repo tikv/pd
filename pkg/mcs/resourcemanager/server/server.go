@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,6 +39,7 @@ import (
 	"github.com/pingcap/sysutil"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -56,7 +58,12 @@ import (
 
 var _ bs.Server = (*Server)(nil)
 
-const serviceName = "Resource Manager"
+const (
+	serviceName = "Resource Manager"
+	// Back off after service-ready callback failures so an unhealthy node does not
+	// churn the primary key with immediate re-campaign attempts.
+	primaryCallbackFailureRetryInterval = time.Second
+)
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
@@ -85,6 +92,9 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // GetMeteringWriter returns the metering writer.
@@ -128,6 +138,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -160,11 +171,38 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the resource manager primary has changed, try to re-campaign a primary")
 		}
 
-		s.campaignLeader()
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
+		// Skip campaign if the expected primary is not empty and not equal to the current memberValue.
+		// Expected primary ONLY SET BY `{service}/primary/transfer` API.
+		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+			log.Info("skip campaigning of resource manager primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("participant-id", s.participant.ID()),
+				zap.String("cur-participant-value", s.participant.ParticipantString()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		if s.campaignLeader() {
+			log.Warn("backing off before retrying resource manager primary campaign after callback failure",
+				zap.Duration("retry-after", primaryCallbackFailureRetryInterval))
+			timer := time.NewTimer(primaryCallbackFailureRetryInterval)
+			select {
+			case <-s.serverLoopCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
 	}
 }
 
-func (s *Server) campaignLeader() {
+// campaignLeader campaigns the primary/leader.
+// It returns true only when the server won the campaign but service-ready
+// callbacks failed, so the caller should back off before retrying.
+func (s *Server) campaignLeader() bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
 	if err := s.participant.Campaign(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
@@ -175,7 +213,7 @@ func (s *Server) campaignLeader() {
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()),
 				errs.ZapError(err))
 		}
-		return
+		return false
 	}
 
 	// Start keepalive the leadership and enable Resource Manager service.
@@ -195,8 +233,21 @@ func (s *Server) campaignLeader() {
 	for _, cb := range s.primaryCallbacks {
 		if err := cb(ctx); err != nil {
 			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+			// Do not promote a half-initialized primary: callback failures mean the
+			// service-ready state was not established, so this campaign must step down.
+			// The caller will back off before the next campaign attempt.
+			return true
 		}
 	}
+	// Check expected primary and watch the primary.
+	exitPrimary := make(chan struct{})
+	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
+		s.cfg.LeaderLease, &keypath.MsParam{ServiceName: constant.ResourceManagerServiceName}, s.participant)
+	if err != nil {
+		log.Error("prepare resource manager primary watch error", errs.ZapError(err))
+		return false
+	}
+	s.participant.SetExpectedPrimaryLease(lease)
 
 	s.participant.PromoteSelf()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
@@ -210,12 +261,15 @@ func (s *Server) campaignLeader() {
 		case <-leaderTicker.C:
 			if !s.participant.IsServing() {
 				log.Info("no longer a primary/leader because lease has expired, the resource manager primary/leader will step down")
-				return
+				return false
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
-			return
+			return false
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the resource manager primary/leader will step down")
+			return false
 		}
 	}
 }
@@ -228,6 +282,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}
@@ -254,9 +309,36 @@ func (s *Server) Close() {
 	log.Info("resource manager server is closed")
 }
 
+// GetConfig returns the config.
+func (s *Server) GetConfig() *Config {
+	return s.cfg
+}
+
+// GetParticipant returns the participant.
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // GetControllerConfig returns the controller config.
 func (s *Server) GetControllerConfig() *ControllerConfig {
 	return &s.cfg.Controller
+}
+
+// GetResourceGroupWriteRole returns the manager write role for the resource manager service.
+func (*Server) GetResourceGroupWriteRole() ResourceGroupWriteRole {
+	return ResourceGroupWriteRoleLegacyAll
+}
+
+// ShouldRejectMetadataWritesViaGRPC returns whether metadata writes via RM gRPC APIs should be rejected.
+func (*Server) ShouldRejectMetadataWritesViaGRPC() bool {
+	return true
+}
+
+// EnableResourceGroupMetadataWatcher reports whether the independent RM service
+// should bootstrap manager state from the metadata watcher.
+// The PD server path does not implement this hook and keeps the legacy bootstrap path.
+func (*Server) EnableResourceGroupMetadataWatcher() bool {
+	return true
 }
 
 // IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
@@ -326,11 +408,12 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, "primary election")
+	s.participant.InitInfo(p, constant.ResourceManagerServiceName+" primary election")
 
 	s.service = &Service{
-		ctx:     s.Context(),
-		manager: NewManager[*Server](s),
+		ctx:                         s.Context(),
+		manager:                     NewManager[*Server](s),
+		rejectMetadataWritesViaGRPC: s.ShouldRejectMetadataWritesViaGRPC(),
 	}
 
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {

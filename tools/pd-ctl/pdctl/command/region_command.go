@@ -17,6 +17,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/constants"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-ctl/helper/mok"
@@ -144,6 +146,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(scanRegion)
 
 	r.Flags().String("jq", "", "jq query")
+	r.PersistentFlags().Bool("no-forward", false, "direct request to the endpoint instead of forwarding by PD leader if the flag exists")
 
 	return r
 }
@@ -203,12 +206,12 @@ func scanRegionCommandFunc(cmd *cobra.Command, _ []string) {
 			return
 		}
 
-		lastEndKey := regions.Regions[len(regions.Regions)-1].EndKey
-		if lastEndKey == "" {
+		lastEndKeyHex := regions.Regions[len(regions.Regions)-1].EndKey
+		if lastEndKeyHex == "" {
 			return
 		}
 
-		key, err = hex.DecodeString(lastEndKey)
+		key, err = hex.DecodeString(lastEndKeyHex)
 		if err != nil {
 			cmd.Println("Bad format region key: ", key)
 			return
@@ -535,34 +538,78 @@ func NewRegionWithKeyspaceCommand() *cobra.Command {
 		Short: "show region information of the given keyspace",
 	}
 	r.AddCommand(&cobra.Command{
-		Use:   "id <keyspace_id> <limit>",
-		Short: "show region information for the given keyspace id",
+		Use:   "id <keyspace_id> [table-id <table_id>] [<limit>]",
+		Short: "show region information for the given keyspace id, optionally filtered by table id",
 		Run:   showRegionWithKeyspaceCommandFunc,
 	})
 	return r
 }
 
 func showRegionWithKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) < 1 || len(args) > 2 {
+	if len(args) < 1 || len(args) > 4 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
 
-	keyspaceID := args[0]
-	prefix := regionsKeyspacePrefix + "/id/" + keyspaceID
+	keyspaceIDUint64, err := strconv.ParseUint(args[0], 10, 32)
+	if err != nil {
+		cmd.Println("keyspace_id should be a number")
+		return
+	}
+	keyspaceID := uint32(keyspaceIDUint64)
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
+		cmd.Printf("invalid keyspace id %d. It must be in the range of [%d, %d]\n",
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
+		return
+	}
+
+	prefix := regionsKeyspacePrefix + "/id/" + args[0]
 	if len(args) == 2 {
 		if _, err := strconv.Atoi(args[1]); err != nil {
 			cmd.Println("limit should be a number")
 			return
 		}
 		prefix += "?limit=" + args[1]
+	} else if len(args) >= 3 {
+		if args[1] != "table-id" {
+			cmd.Println("the second argument should be table-id")
+			return
+		}
+		tableID, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil {
+			cmd.Println("table-id should be a number")
+			return
+		}
+		query := make(url.Values)
+		startKey, endKey := makeTableRangeInKeyspace(keyspaceID, tableID)
+		query.Set("key", string(startKey))
+		query.Set("end_key", string(endKey))
+		if len(args) == 4 {
+			if _, err := strconv.Atoi(args[3]); err != nil {
+				cmd.Println("limit should be a number")
+				return
+			}
+			query.Set("limit", args[3])
+		}
+		prefix = regionsKeyPrefix + "?" + query.Encode()
 	}
+
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given keyspace: %s\n", err)
 		return
 	}
 	cmd.Println(r)
+}
+
+func makeTableRangeInKeyspace(keyspaceID uint32, tableID int64) (startKey, endKey []byte) {
+	keyspaceIDBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(keyspaceIDBytes, keyspaceID)
+
+	keyPrefix := append([]byte{'x'}, keyspaceIDBytes[1:]...)
+	startKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID)...)...))
+	endKey = codec.EncodeBytes(nil, append(keyPrefix, append([]byte{'t'}, codec.EncodeInt(nil, tableID+1)...)...))
+	return startKey, endKey
 }
 
 const (

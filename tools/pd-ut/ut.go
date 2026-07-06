@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -549,7 +549,7 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 
 func listPackages() ([]string, error) {
 	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
-	cmd := exec.Command("go", "list", listPath)
+	cmd := goCommand("list", listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -711,7 +711,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, []string{"-test.timeout", "2m"}...)
 	} else {
 		// it takes a longer when race is enabled. so it is set more timeout value.
-		args = append(args, []string{"-test.timeout", "5m"}...)
+		args = append(args, []string{"-test.timeout", "10m"}...)
 	}
 
 	// core.test -test.run TestClusteredPrefixColum
@@ -740,7 +740,7 @@ func generateBuildCache() error {
 	}
 	fmt.Println("generate build cache")
 	// cd cmd/pd-server && go test -tags=$(tags) -exec-=true -vet=off -toolexec=go-compile-without-link
-	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags="+tags)
+	cmd := goCommand("test", "-exec=true", "-vet", "off", "--tags="+tags)
 	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
 	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -778,7 +778,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// We use 2 * parallel for `go build` to make it faster.
 	p := strconv.Itoa(parallel * 2)
-	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
+	cmd := goCommand("test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags="+tags)
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
@@ -813,7 +813,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 func buildTestBinary(pkg string) error {
 	//nolint:gosec
-	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags="+tags, "-o", testFileName(pkg), "-v")
+	cmd := goCommand("test", "-c", "-vet", "off", "--tags="+tags, "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
@@ -880,6 +880,27 @@ func cmdToLines(cmd *exec.Cmd) ([]string, error) {
 	return ret, nil
 }
 
+// Keep child go commands on the same toolchain as pd-ut itself to avoid
+// mixing PATH's go binary with an auto-downloaded newer toolchain in CI.
+func goCommand(args ...string) *exec.Cmd {
+	cmd := exec.Command("go", args...)
+	if toolchain := pdUTToolchain(); toolchain != "" {
+		cmd.Env = append(os.Environ(), "GOTOOLCHAIN="+toolchain)
+	}
+	return cmd
+}
+
+func pdUTToolchain() string {
+	if toolchain, ok := os.LookupEnv("GOTOOLCHAIN"); ok && toolchain != "" && toolchain != "auto" {
+		return toolchain
+	}
+	version := runtime.Version()
+	if strings.HasPrefix(version, "go1.") {
+		return version
+	}
+	return ""
+}
+
 func filter(input []string, f func(string) bool) []string {
 	ret := input[:0]
 	for _, s := range input {
@@ -892,7 +913,7 @@ func filter(input []string, f func(string) bool) []string {
 
 func shuffle(tasks []task) {
 	for i := 0; i < len(tasks); i++ {
-		pos := rand.Intn(len(tasks))
+		pos := rand.IntN(len(tasks))
 		tasks[i], tasks[pos] = tasks[pos], tasks[i]
 	}
 }
@@ -939,7 +960,7 @@ func goVersion() string {
 	if version, ok := os.LookupEnv("GOVERSION"); ok {
 		return version
 	}
-	cmd := exec.Command("go", "version")
+	cmd := goCommand("version")
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"

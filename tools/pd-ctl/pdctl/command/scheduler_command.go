@@ -387,7 +387,7 @@ func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	return c
 }
 
-// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-shceudler.
+// NewTransferWitnessLeaderSchedulerCommand returns a command to add a transfer-witness-leader-scheduler.
 func NewTransferWitnessLeaderSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "transfer-witness-leader-scheduler",
@@ -718,6 +718,7 @@ var hiddenHotConfig = []string{
 	"byte-rate-rank-step-ratio",
 	"key-rate-rank-step-ratio",
 	"query-rate-rank-step-ratio",
+	"cpu-rate-rank-step-ratio",
 	"count-rank-step-ratio",
 	"great-dec-ratio",
 	"minor-dec-ratio",

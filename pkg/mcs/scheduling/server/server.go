@@ -42,9 +42,11 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
@@ -90,7 +92,6 @@ type Server struct {
 
 	cfg           *config.Config
 	persistConfig *config.PersistConfig
-	basicCluster  *core.BasicCluster
 
 	// for the primary election of scheduling
 	participant *member.Participant
@@ -106,14 +107,10 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster   *Cluster
-	hbStreams *hbstream.HeartbeatStreams
-	storage   *endpoint.StorageEndpoint
+	cluster atomic.Value // *Cluster
 
-	// for watching the PD meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -162,6 +159,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -220,12 +218,15 @@ func (s *Server) updatePDMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
-					if status.Leader != curLeader {
-						log.Info("switch PD leader", zap.String("current-leader", strconv.FormatUint(curLeader, 16)), zap.String("new-leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+				cluster := s.GetCluster()
+				if cluster != nil {
+					if cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+						if status.Leader != curLeader {
+							log.Info("switch PD leader", zap.String("current-leader", strconv.FormatUint(curLeader, 16)), zap.String("new-leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
+						}
+						curLeader = ep.ID
+						break
 					}
-					curLeader = ep.ID
-					break
 				}
 			}
 		}
@@ -357,6 +358,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing scheduling server ...")
+	s.cgMonitor.StopMonitor()
 	if err := s.serviceRegister.Deregister(); err != nil {
 		log.Error("failed to deregister the service", errs.ZapError(err))
 	}
@@ -406,12 +408,19 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
-	return s.cluster
+	cluster := s.cluster.Load()
+	if cluster == nil {
+		return nil
+	}
+	return cluster.(*Cluster)
 }
 
 // GetBasicCluster returns the basic cluster.
 func (s *Server) GetBasicCluster() *core.BasicCluster {
-	return s.basicCluster
+	if cluster := s.GetCluster(); cluster != nil {
+		return cluster.GetBasicCluster()
+	}
+	return nil
 }
 
 // GetCoordinator returns the coordinator.
@@ -464,7 +473,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, "primary election")
+	s.participant.InitInfo(p, constant.SchedulingServiceName+" primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
@@ -491,56 +500,113 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startCluster(context.Context) error {
-	s.basicCluster = core.NewBasicCluster()
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	err := s.startMetaConfWatcher()
+func (s *Server) startCluster(ctx context.Context) error {
+	basicCluster := core.NewBasicCluster()
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+
+	var (
+		hbStreams       *hbstream.HeartbeatStreams
+		configWatcher   *config.Watcher
+		metaWatcher     *meta.Watcher
+		ruleWatcher     *rule.Watcher
+		affinityWatcher *affinity.Watcher
+		cluster         *Cluster
+		err             error
+	)
+
+	var initSucceeded bool
+	defer func() {
+		if initSucceeded {
+			return
+		}
+		// make sure cancel context done when some initialization step failed, to avoid goroutine leak in cluster.
+		if cluster != nil {
+			cluster.stopCluster()
+		}
+		// clean new sources
+		if hbStreams != nil {
+			hbStreams.Close()
+			hbStreams = nil
+		}
+		if configWatcher != nil {
+			configWatcher.Close()
+			configWatcher = nil
+		}
+		if metaWatcher != nil {
+			metaWatcher.Close()
+			metaWatcher = nil
+		}
+		if ruleWatcher != nil {
+			ruleWatcher.Close()
+			ruleWatcher = nil
+		}
+		if affinityWatcher != nil {
+			affinityWatcher.Close()
+			affinityWatcher = nil
+		}
+		if storage != nil {
+			storage.Close()
+		}
+	}()
+	metaWatcher, configWatcher, err = s.startMetaConfWatcher(ctx, basicCluster, storage)
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	hbStreams = hbstream.NewHeartbeatStreams(ctx, constant.SchedulingServiceName, basicCluster)
+	cluster, err = NewCluster(ctx, s.persistConfig, storage, basicCluster, hbStreams, s.checkMembershipCh, s.GetHTTPClient(), s.GetBackendEndpoints())
+	storage = nil
+	hbStreams = nil
 	if err != nil {
 		return err
 	}
-	// Inject the cluster components into the config watcher after the scheduler controller is created.
-	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
-	// Start the rule watcher after the cluster is created.
-	err = s.startRuleWatcher()
+
+	am := cluster.GetAffinityManager()
+	configWatcher.SetSchedulersController(cluster.GetCoordinator().GetSchedulersController())
+	ruleWatcher, err = rule.NewWatcher(ctx, s.GetClient(), cluster.GetStorage(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetRuleManager(), cluster.GetRegionLabeler())
 	if err != nil {
 		return err
 	}
-	s.cluster.StartBackgroundJobs()
+	affinityWatcher, err = affinity.NewWatcher(ctx, s.GetClient(), am)
+	if err != nil {
+		return err
+	}
+
+	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
+	// Set watchers to nil to avoid being closed in defer when cluster initialization is successful,
+	// since cluster will take over the ownership of these watchers and close them when stopping cluster.
+	metaWatcher = nil
+	configWatcher = nil
+	ruleWatcher = nil
+	affinityWatcher = nil
+	cluster.StartBackgroundJobs()
+	s.cluster.Store(cluster)
+	initSucceeded = true
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.cluster.StopBackgroundJobs()
-	s.stopWatcher()
-}
-
-func (s *Server) startMetaConfWatcher() (err error) {
-	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
-	if err != nil {
-		return err
+	if cluster := s.GetCluster(); cluster != nil {
+		s.cluster.Store((*Cluster)(nil))
+		cluster.stopCluster()
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
+}
+
+func (s *Server) startMetaConfWatcher(
+	ctx context.Context,
+	basicCluster *core.BasicCluster,
+	storage *endpoint.StorageEndpoint,
+) (metaWatcher *meta.Watcher, configWatcher *config.Watcher, err error) {
+	metaWatcher, err = meta.NewWatcher(ctx, s.GetClient(), basicCluster)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	return err
-}
-
-func (s *Server) startRuleWatcher() (err error) {
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
-		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
-	return err
-}
-
-func (s *Server) stopWatcher() {
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	configWatcher, err = config.NewWatcher(ctx, s.GetClient(), s.persistConfig, storage)
+	if err != nil {
+		metaWatcher.Close()
+		return nil, nil, err
+	}
+	return metaWatcher, configWatcher, nil
 }
 
 // GetPersistConfig returns the persist config.
@@ -555,6 +621,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.Schedule = *s.persistConfig.GetScheduleConfig().Clone()
 	cfg.Replication = *s.persistConfig.GetReplicationConfig().Clone()
 	cfg.ClusterVersion = *s.persistConfig.GetClusterVersion()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	return cfg
 }
 

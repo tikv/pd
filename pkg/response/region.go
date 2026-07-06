@@ -11,8 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//lint:file-ignore ST1016 reason: code intentionally mixes pointer/value receivers
-//nolint:revive
 
 package response
 
@@ -113,9 +111,10 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 // easyjson:json
 type RegionInfo struct {
-	ID          uint64              `json:"id"`
-	StartKey    string              `json:"start_key"`
-	EndKey      string              `json:"end_key"`
+	ID       uint64 `json:"id"`
+	StartKey string `json:"start_key"` // hex-encoded
+	EndKey   string `json:"end_key"`   // hex-encoded
+
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []MetaPeer          `json:"peers,omitempty"`
 

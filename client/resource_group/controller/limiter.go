@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -87,6 +88,10 @@ type Limiter struct {
 	remainingNotifyTimes int
 	name                 string
 
+	// reconfiguredCh is closed on every Reconfigure() call to wake up
+	// goroutines waiting in acquireTokens() retry loops.
+	reconfiguredCh chan struct{}
+
 	// metrics
 	metrics *limiterMetricsCollection
 }
@@ -110,6 +115,7 @@ func NewLimiter(now time.Time, r fillRate, b int64, tokens float64, lowTokensNot
 		tokens:              tokens,
 		burst:               b,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+		reconfiguredCh:      make(chan struct{}),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
@@ -126,6 +132,7 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 		burst:               cfg.newBurst,
 		notifyThreshold:     cfg.newNotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+		reconfiguredCh:      make(chan struct{}),
 	}
 	lim.metrics = &limiterMetricsCollection{
 		lowTokenNotifyCounter: metrics.LowTokenRequestNotifyCounter.WithLabelValues(lim.name),
@@ -196,7 +203,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	tokens += r.tokens
 
 	// update state
-	r.lim.last = now
+	r.lim.updateLast(now)
 	r.lim.tokens = tokens
 }
 
@@ -246,6 +253,18 @@ func (lim *Limiter) SetName(name string) *Limiter {
 	defer lim.mu.Unlock()
 	lim.name = name
 	return lim
+}
+
+// GetReconfiguredCh returns a channel that is closed when the limiter is
+// reconfigured. Callers can select on this to be woken up immediately
+// when new tokens arrive, instead of blind-sleeping.
+func (lim *Limiter) GetReconfiguredCh() <-chan struct{} {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	if lim.reconfiguredCh == nil {
+		lim.reconfiguredCh = make(chan struct{})
+	}
+	return lim.reconfiguredCh
 }
 
 // notify tries to send a non-blocking notification on notifyCh and disables
@@ -302,7 +321,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 		return
 	}
 	_, tokens := lim.getTokens(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
 }
@@ -336,11 +355,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Float64("old-notify-threshold", lim.notifyThreshold),
 		zap.Int64("old-burst", lim.burst))
 	if args.newBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.newTokens
 	} else {
 		_, tokens := lim.getTokens(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.newTokens
 	}
 	lim.fillRate = fillRate(args.newFillRate)
@@ -350,6 +369,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
+	// Wake up all goroutines waiting in acquireTokens retry loops.
+	if lim.reconfiguredCh != nil {
+		close(lim.reconfiguredCh)
+	}
+	lim.reconfiguredCh = make(chan struct{})
 	logControllerTrace("[resource group controller] after reconfigure",
 		zap.String("name", lim.name), zap.Float64("tokens", lim.tokens),
 		zap.Float64("rate", float64(lim.fillRate)),
@@ -512,6 +536,9 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	}
 	longestDelayDuration := time.Duration(0)
 	for _, res := range reservations {
+		if res == nil {
+			continue
+		}
 		if !res.reserved {
 			cancel()
 			if res.err != nil {
@@ -527,6 +554,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return 0, nil
 	}
+	failpoint.InjectCall("waitReservationsBeforeSelect")
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 

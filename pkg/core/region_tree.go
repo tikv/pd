@@ -16,7 +16,7 @@ package core
 
 import (
 	"bytes"
-	"math/rand"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -157,6 +157,17 @@ func (t *regionTree) overlaps(item *regionItem) []*RegionInfo {
 	return overlaps
 }
 
+// updateRef transfers the reference from origin to region when an item is
+// replaced in place, i.e. the tree keeps the same item and only its embedded
+// RegionInfo changes. It is a no-op for trees that do not count references.
+func (t *regionTree) updateRef(origin, region *RegionInfo) {
+	if !t.countRef {
+		return
+	}
+	origin.DecRef()
+	region.IncRef()
+}
+
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
@@ -224,10 +235,7 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	if !origin.LoadedFromStorage() && region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
 	}
-	if t.countRef {
-		origin.DecRef()
-		region.IncRef()
-	}
+	t.updateRef(origin, region)
 }
 
 // remove removes a region if the region is in the tree.
@@ -397,7 +405,7 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		pivotItem            = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
 		region               *RegionInfo
 		regions              = make([]*RegionInfo, 0, n)
-		rangeLen, curLen     = len(ranges), len(regions)
+		curLen               = len(regions)
 		// setStartEndIndices is a helper function to set `startIndex` and `endIndex`
 		// according to the `startKey` and `endKey` and check if the range is invalid
 		// to skip the iteration.
@@ -438,15 +446,15 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 		}
 	)
 	// This is a fast path to reduce the unnecessary iterations when we only have one range.
-	if rangeLen <= 1 {
-		if rangeLen == 1 {
+	if len(ranges) <= 1 {
+		if len(ranges) == 1 {
 			startKey, endKey = ranges[0].StartKey, ranges[0].EndKey
 			if setAndCheckStartEndIndices() {
 				return regions
 			}
 		}
 		for curLen < n {
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)
@@ -463,13 +471,13 @@ func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionIn
 	// keep retrying until we get enough regions.
 	for curLen < n {
 		// Shuffle the ranges to increase the randomness.
-		for _, i := range rand.Perm(rangeLen) {
+		for _, i := range rand.Perm(len(ranges)) {
 			startKey, endKey = ranges[i].StartKey, ranges[i].EndKey
 			if setAndCheckStartEndIndices() {
 				continue
 			}
 
-			randIndex = rand.Intn(endIndex-startIndex) + startIndex
+			randIndex = rand.IntN(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
 			if region.isInvolved(startKey, endKey) {
 				regions = append(regions, region)

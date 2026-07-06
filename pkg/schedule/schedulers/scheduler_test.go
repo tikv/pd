@@ -62,6 +62,19 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	return clean, opt, tc, oc
 }
 
+func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers["test-scheduler"] = nil
+
+	re.NotPanics(func() {
+		re.Error(c.ReloadSchedulerConfig("test-scheduler"))
+	})
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -525,15 +538,15 @@ func TestIsDefault(t *testing.T) {
 	defer cancel()
 
 	for schedulerType := range types.SchedulerTypeCompatibleMap {
-		bs, err := CreateScheduler(schedulerType, oc,
+		s, err := CreateScheduler(schedulerType, oc,
 			storage.NewStorageWithMemoryBackend(),
 			testDecoder,
 			func(string) error { return nil })
 		re.NoError(err)
 		if slices.Contains(types.DefaultSchedulers, schedulerType) {
-			re.True(bs.IsDefault())
+			re.True(s.IsDefault())
 		} else {
-			re.False(bs.IsDefault())
+			re.False(s.IsDefault())
 		}
 	}
 }

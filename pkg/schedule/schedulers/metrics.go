@@ -301,6 +301,7 @@ var (
 	hotSchedulerNoRegionCounter             = hotRegionCounterWithEvent("no_region")
 	hotSchedulerUnhealthyReplicaCounter     = hotRegionCounterWithEvent("unhealthy_replica")
 	hotSchedulerAbnormalReplicaCounter      = hotRegionCounterWithEvent("abnormal_replica")
+	hotSchedulerIgnoredAffinity             = hotRegionCounterWithEvent("ignored_affinity")
 	hotSchedulerCreateOperatorFailedCounter = hotRegionCounterWithEvent("create_operator_failed")
 	hotSchedulerNewOperatorCounter          = hotRegionCounterWithEvent("new_operator")
 	hotSchedulerSnapshotSenderLimitCounter  = hotRegionCounterWithEvent("snapshot_sender_limit")
@@ -326,6 +327,7 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = hotRegionCounterWithEvent("write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = hotRegionCounterWithEvent("read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = hotRegionCounterWithEvent("write-skip-query-uniform-store")
+	readSkipCPUDimUniformStoreCounter    = hotRegionCounterWithEvent("read-skip-cpu-uniform-store")
 	pendingOpFailsStoreCounter           = hotRegionCounterWithEvent("pending-op-fails")
 
 	labelCounter            = labelCounterWithEvent("schedule")

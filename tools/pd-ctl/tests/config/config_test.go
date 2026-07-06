@@ -175,6 +175,12 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Equal(20*10000, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
 	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
+	// set max-affinity-merge-region-size to 1000MB
+	args = []string{"-u", pdAddr, "config", "set", "max-affinity-merge-region-size", "1000"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(1000, int(svr.GetScheduleConfig().GetMaxAffinityMergeRegionSize()))
+
 	// set store limit v2
 	args = []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
 	_, err = tests.ExecuteCommand(cmd, args...)
@@ -616,7 +622,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}}, "--region=1", "--detail")
 
 	// test delete
-	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
+	// need clear up args, so create new a cobra.Command. Otherwise group still exists.
 	rules[0].Count = 0
 	b, err = json.Marshal(rules)
 	re.NoError(err)
@@ -1045,9 +1051,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			replicationCfg := sc.ReplicationConfig{}
-			re.NoError(json.Unmarshal(output, &replicationCfg))
+			if err := json.Unmarshal(output, &replicationCfg); err != nil {
+				return false
+			}
 			return replicationCfg.MaxReplicas == expect
 		})
 	}
@@ -1056,9 +1066,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			replicationCfg := sc.ReplicationConfig{}
-			re.NoError(json.Unmarshal(output, &replicationCfg))
+			if err := json.Unmarshal(output, &replicationCfg); err != nil {
+				return false
+			}
 			return len(replicationCfg.LocationLabels) == expect
 		})
 	}
@@ -1067,9 +1081,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			replicationCfg := sc.ReplicationConfig{}
-			re.NoError(json.Unmarshal(output, &replicationCfg))
+			if err := json.Unmarshal(output, &replicationCfg); err != nil {
+				return false
+			}
 			return replicationCfg.IsolationLevel == expect
 		})
 	}
@@ -1078,9 +1096,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			rule := placement.Rule{}
-			re.NoError(json.Unmarshal(output, &rule))
+			if err := json.Unmarshal(output, &rule); err != nil {
+				return false
+			}
 			return rule.Count == expect
 		})
 	}
@@ -1089,9 +1111,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			rule := placement.Rule{}
-			re.NoError(json.Unmarshal(output, &rule))
+			if err := json.Unmarshal(output, &rule); err != nil {
+				return false
+			}
 			return len(rule.LocationLabels) == expect
 		})
 	}
@@ -1100,9 +1126,13 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 			output, err := tests.ExecuteCommand(cmd, args...)
-			re.NoError(err)
+			if err != nil {
+				return false
+			}
 			rule := placement.Rule{}
-			re.NoError(json.Unmarshal(output, &rule))
+			if err := json.Unmarshal(output, &rule); err != nil {
+				return false
+			}
 			return rule.IsolationLevel == expect
 		})
 	}

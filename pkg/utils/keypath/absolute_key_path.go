@@ -58,7 +58,7 @@ const (
 	// ruleConfigPrefixFormat is used to watch rulePathFormat and ruleGroupPathFormat, so it should be the parent directory of them.
 	ruleCommonPrefixFormat  = "/pd/%d/rule"            // "/pd/{cluster_id}/rule"
 	ruleGroupPathFormat     = "/pd/%d/rule_group/%s"   // "/pd/{cluster_id}/rule_group/{group_id}"
-	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
+	regionLabelPathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
 	// Maintenance task path format
@@ -110,9 +110,9 @@ const (
 	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-	msExpectedPrimaryPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
-	msTsoDefaultExpectedPrimaryPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msExpectedPrimaryPathFormat            = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedPrimaryPathFormat  = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKeyspaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
 	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"
@@ -130,6 +130,11 @@ const (
 
 	timestampPathFormat   = "/pd/%d/timestamp"              // "/pd/{cluster_id}/timestamp"
 	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
+
+	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
+
+	// meta-service group related paths
+	metaServiceGroupStatusFormat = "/pd/%d/meta_service_groups/%s/status" // "/pd/{cluster_id}/meta_service_groups/{group_id}/status"
 )
 
 // MsParam is the parameter of microservice.
@@ -300,4 +305,9 @@ func RegionPath(regionID uint64) string {
 	buf.Write(b)
 
 	return buf.String()
+}
+
+// MetaServiceGroupStatusPath returns the path for the meta-service group status.
+func MetaServiceGroupStatusPath(groupID string) string {
+	return fmt.Sprintf(metaServiceGroupStatusFormat, ClusterID(), groupID)
 }

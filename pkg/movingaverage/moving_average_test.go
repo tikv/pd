@@ -16,17 +16,15 @@ package movingaverage
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 )
 
 func addRandData(ma MovingAvg, n int, mx float64) {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for range n {
-		ma.Add(r.Float64() * mx)
+		ma.Add(rand.Float64() * mx)
 	}
 }
 

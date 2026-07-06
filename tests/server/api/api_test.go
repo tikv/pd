@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,7 +71,7 @@ func TestReconnect(t *testing.T) {
 	re.NotEmpty(leader)
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+			res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 			re.NoError(err)
 			res.Body.Close()
 			re.Equal(http.StatusOK, res.StatusCode)
@@ -87,7 +88,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader {
 			testutil.Eventually(re, func() bool {
-				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusOK
@@ -102,7 +103,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
 			testutil.Eventually(re, func() bool {
-				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/members")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
@@ -444,8 +445,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
-	timeUnix := time.Now().Unix() - 20
-	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
+	req, err = http.NewRequest(http.MethodGet, leader.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	re.NoError(err)
 	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
@@ -461,7 +461,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetVersion\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -474,8 +474,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
-	timeUnix = time.Now().Unix() - 20
-	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
+	req, err = http.NewRequest(http.MethodGet, leader.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	re.NoError(err)
 	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
@@ -491,7 +490,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	content, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	output = string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetTrend\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_count{method=\"HTTP\",service=\"GetVersion\"} 2")
 
 	input = map[string]any{
 		"enable-audit": "false",
@@ -640,8 +639,7 @@ func doTestRequestWithLogAudit(srv *tests.TestServer) error {
 }
 
 func doTestRequestWithPrometheus(srv *tests.TestServer) error {
-	timeUnix := time.Now().Unix() - 20
-	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
+	req, err := http.NewRequest(http.MethodGet, srv.GetAddr()+"/pd/api/v1/version", http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -702,7 +700,7 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	err := leader.ResignLeaderWithRetry()
 	re.NoError(err)
 	for _, svr := range suite.cluster.GetServers() {
-		url := fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr())
+		url := fmt.Sprintf("%s/pd/api/v1/members", svr.GetServer().GetAddr())
 		testutil.Eventually(re, func() bool {
 			resp, err := tests.TestDialClient.Get(url)
 			re.NoError(err)
@@ -718,16 +716,8 @@ func (suite *redirectorTestSuite) TestRedirect() {
 
 func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
-
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	re.NotNil(follower)
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
@@ -743,15 +733,8 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 
 func (suite *redirectorTestSuite) TestPing() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower()).GetServer()
+	re.NotNil(follower)
 
 	for _, svr := range suite.cluster.GetServers() {
 		if svr.GetServer() != follower {
@@ -780,17 +763,9 @@ func (suite *redirectorTestSuite) TestPing() {
 
 func (suite *redirectorTestSuite) TestNotLeader() {
 	re := suite.Require()
-	// Find a follower.
-	var follower *server.Server
-	leader := suite.cluster.GetLeaderServer()
-	for _, svr := range suite.cluster.GetServers() {
-		if svr != leader {
-			follower = svr.GetServer()
-			break
-		}
-	}
-
-	addr := follower.GetAddr() + "/pd/api/v1/version"
+	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
+	re.NotNil(follower)
+	addr := follower.GetAddr() + "/pd/api/v1/members"
 	// Request to follower without redirectorHeader is OK.
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
@@ -835,6 +810,283 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	re.NotContains(l, suite.cluster.GetConfig().GetClientURLs())
 }
 
+func TestFollowerRegionAPIWithNoForward(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	testutil.Eventually(re, func() bool {
+		return follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+	})
+
+	regions := tests.InitRegions(3)
+	for _, region := range regions {
+		re.NoError(leader.GetRaftCluster().HandleRegionHeartbeat(region))
+	}
+	testutil.Eventually(re, func() bool {
+		return len(follower.GetServer().GetBasicCluster().GetRegions()) == len(regions)
+	})
+
+	req, err := http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(body))
+	var regionsInfo response.RegionsInfo
+	re.NoError(json.Unmarshal(body, &regionsInfo))
+	re.Equal(len(regions), regionsInfo.Count)
+
+	req, err = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/region/id/%d", follower.GetAddr(), regions[0].GetID()), http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(body))
+	re.Contains(string(body), fmt.Sprintf(`"id":%d`, regions[0].GetID()))
+
+	req, err = http.NewRequest(http.MethodGet, follower.GetAddr()+"/pd/api/v1/regions/check/miss-peer", http.NoBody)
+	re.NoError(err)
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusInternalServerError, resp.StatusCode, string(body))
+	re.Contains(string(body), "TiKV cluster not bootstrapped")
+}
+
+func TestFollowerRegionResetCacheWithNoForward(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NotNil(follower)
+	regions := tests.InitRegions(3)
+	for _, region := range regions {
+		re.NoError(leader.GetRaftCluster().HandleRegionHeartbeat(region))
+	}
+	waitFollowerRegions(re, follower, regions)
+
+	t.Run("requires opt-in header for follower local reset", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(999)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		syncer := follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer()
+		syncer.StopSyncWithLeader()
+		re.False(syncer.IsRunning())
+
+		path := fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", staleRegion.GetID())
+		statusCode, body, err := requestDeleteFollowerRegionCacheWithHeaders(follower, path, http.Header{})
+		re.NoError(err)
+		re.Equal(http.StatusOK, statusCode, body)
+		re.Contains(body, "server cache")
+		re.False(syncer.IsRunning())
+		assertFollowerRegionStored(re, follower, staleRegion.GetID())
+
+		deleteFollowerRegionCache(re, follower, path)
+		testutil.Eventually(re, syncer.IsRunning)
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+
+	t.Run("deletes one stale follower region", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(1001)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		deleteFollowerRegionCache(re, follower, fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", staleRegion.GetID()))
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+
+	t.Run("deletes one storage-only stale follower region", func(t *testing.T) {
+		re := require.New(t)
+		storageOnlyRegion := newFollowerStaleRegion(1009)
+		injectFollowerStaleRegionStorageOnly(re, follower, storageOnlyRegion)
+		deleteFollowerRegionCache(re, follower, fmt.Sprintf("/pd/api/v1/admin/cache/region/%d", storageOnlyRegion.GetID()))
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, storageOnlyRegion.GetID())
+	})
+
+	t.Run("deletes all stale follower regions", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(1019)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		storageOnlyRegion := newFollowerStaleRegion(1029)
+		injectFollowerStaleRegionStorageOnly(re, follower, storageOnlyRegion)
+		deleteFollowerRegionCache(re, follower, "/pd/api/v1/admin/cache/regions")
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+		assertFollowerRegionNotStored(re, follower, storageOnlyRegion.GetID())
+		assertFollowerRegionStored(re, follower, regions[len(regions)-1].GetID())
+	})
+
+	t.Run("serializes concurrent all-region reset requests", func(t *testing.T) {
+		re := require.New(t)
+		staleRegion := newFollowerStaleRegion(2009)
+		injectFollowerStaleRegion(re, follower, staleRegion)
+		deleteFollowerRegionCacheConcurrently(re, follower, "/pd/api/v1/admin/cache/regions")
+		waitFollowerRegions(re, follower, regions)
+		assertFollowerRegionNotStored(re, follower, staleRegion.GetID())
+	})
+}
+
+func newFollowerStaleRegion(regionID uint64) *core.RegionInfo {
+	region := &metapb.Region{
+		Id:          regionID,
+		StartKey:    []byte{2},
+		EndKey:      []byte{},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Peers: []*metapb.Peer{
+			{Id: regionID*10 + 1, StoreId: 1},
+			{Id: regionID*10 + 2, StoreId: 2},
+			{Id: regionID*10 + 3, StoreId: 3},
+		},
+	}
+	return core.NewRegionInfo(region, region.GetPeers()[0], core.SetSource(core.Storage))
+}
+
+func injectFollowerStaleRegion(re *require.Assertions, follower *tests.TestServer, region *core.RegionInfo) {
+	overlaps := follower.GetServer().GetBasicCluster().PutRegion(region)
+	re.NotEmpty(overlaps)
+	injectFollowerStaleRegionStorageOnly(re, follower, region)
+	re.NotNil(follower.GetServer().GetBasicCluster().GetRegion(region.GetID()))
+}
+
+func injectFollowerStaleRegionStorageOnly(re *require.Assertions, follower *tests.TestServer, region *core.RegionInfo) {
+	re.NoError(follower.GetServer().GetStorage().SaveRegion(region.GetMeta()))
+	re.NoError(follower.GetServer().GetStorage().Flush())
+}
+
+func deleteFollowerRegionCache(re *require.Assertions, follower *tests.TestServer, path string) {
+	statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
+	re.NoError(err)
+	re.Equal(http.StatusOK, statusCode, body)
+}
+
+func deleteFollowerRegionCacheConcurrently(re *require.Assertions, follower *tests.TestServer, path string) {
+	const requestCount = 2
+	var wg sync.WaitGroup
+	startCh := make(chan struct{})
+	errCh := make(chan error, requestCount)
+	for range requestCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startCh
+			statusCode, body, err := requestDeleteFollowerRegionCache(follower, path)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if statusCode != http.StatusOK {
+				errCh <- fmt.Errorf("unexpected status %d: %s", statusCode, body)
+			}
+		}()
+	}
+	close(startCh)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		re.NoError(err)
+	}
+}
+
+func requestDeleteFollowerRegionCache(follower *tests.TestServer, path string) (int, string, error) {
+	return requestDeleteFollowerRegionCacheWithHeaders(follower, path, http.Header{
+		apiutil.PDAllowFollowerHandleHeader: {"true"},
+	})
+}
+
+func requestDeleteFollowerRegionCacheWithHeaders(follower *tests.TestServer, path string, headers http.Header) (int, string, error) {
+	req, err := http.NewRequest(http.MethodDelete, follower.GetAddr()+path, http.NoBody)
+	if err != nil {
+		return 0, "", err
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	resp, err := tests.TestDialClient.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", err
+	}
+	return resp.StatusCode, string(body), nil
+}
+
+func waitFollowerRegions(re *require.Assertions, follower *tests.TestServer, regions []*core.RegionInfo) {
+	testutil.Eventually(re, func() bool {
+		bc := follower.GetServer().GetBasicCluster()
+		if len(bc.GetRegions()) != len(regions) {
+			return false
+		}
+		for _, region := range regions {
+			if bc.GetRegion(region.GetID()) == nil {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+}
+
+func assertFollowerRegionNotStored(re *require.Assertions, follower *tests.TestServer, regionID uint64) {
+	re.NoError(follower.GetServer().GetStorage().Flush())
+	region := &metapb.Region{}
+	ok, err := follower.GetServer().GetStorage().LoadRegion(regionID, region)
+	re.NoError(err)
+	re.False(ok)
+}
+
+func assertFollowerRegionStored(re *require.Assertions, follower *tests.TestServer, regionID uint64) {
+	re.NoError(follower.GetServer().GetStorage().Flush())
+	region := &metapb.Region{}
+	ok, err := follower.GetServer().GetStorage().LoadRegion(regionID, region)
+	re.NoError(err)
+	re.True(ok)
+}
+
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {
 	resp, err := tests.TestDialClient.Get(s.GetAddr() + "/pd/api/v1/version")
 	re.NoError(err)
@@ -861,7 +1113,8 @@ func TestRemovingProgress(t *testing.T) {
 
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -1032,6 +1285,135 @@ func TestRemovingProgress(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
+type forwardTestSuite struct {
+	suite.Suite
+	env      *tests.SchedulingTestEnvironment
+	leader   *server.Server
+	follower *server.Server
+}
+
+func TestForwardTestSuite(t *testing.T) {
+	suite.Run(t, new(forwardTestSuite))
+}
+
+func (suite *forwardTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/enableAddServerNameHeader", `return`))
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+	suite.env.RunFunc(func(cluster *tests.TestCluster) {
+		suite.leader = cluster.GetLeaderServer().GetServer()
+		for _, svr := range cluster.GetServers() {
+			if svr.GetAddr() != suite.leader.GetAddr() {
+				suite.follower = svr.GetServer()
+				break
+			}
+		}
+		re.NotNil(suite.follower)
+	})
+}
+
+func (suite *forwardTestSuite) TearDownSuite() {
+	re := suite.Require()
+	suite.env.Cleanup()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/enableAddServerNameHeader"))
+}
+
+func (suite *forwardTestSuite) TestFollowerLocalAPIs() {
+	suite.env.RunTest(suite.checkAdminLog)
+	suite.env.RunTest(suite.checkGetRequest)
+	suite.env.RunTest(suite.checkConfig)
+}
+
+func (suite *forwardTestSuite) checkAdminLog(_ *tests.TestCluster) {
+	re := suite.Require()
+
+	addr := suite.follower.GetAddr() + "/pd/api/v1/admin/log"
+	level := "debug"
+	data, err := json.Marshal(level)
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPost, addr, bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+
+	re.Equal(http.StatusOK, resp.StatusCode)
+	re.Equal(suite.follower.GetConfig().Name, resp.Header.Get(apiutil.XPDHandleHeader), "request should be handled locally")
+}
+
+func (suite *forwardTestSuite) checkGetRequest(_ *tests.TestCluster) {
+	re := suite.Require()
+	followerName := suite.follower.GetConfig().Name
+
+	testPaths := map[string]bool{
+		"/pd/api/v1/ping":                  true,
+		"/pd/api/v1/config":                true, // GET config is handled by local server
+		"/pd/api/v1/version":               true,
+		"/pd/api/v1/status":                true,
+		"/pd/api/v1/health":                true,
+		"/pd/api/v1/debug/pprof/goroutine": true,
+		"/pd/api/v1/debug/pprof/zip":       true,
+		"/pd/api/v1/schedulers":            false,
+		"/pd/api/v1/operators":             false,
+	}
+
+	for path, isLocal := range testPaths {
+		addr := suite.follower.GetAddr() + path
+		req, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		if isLocal {
+			re.Equal(followerName, resp.Header.Get(apiutil.XPDHandleHeader), path+" request should not be redirected")
+		} else {
+			re.NotEqual(followerName, resp.Header.Get(apiutil.XPDHandleHeader), path+" request should not be redirected")
+		}
+		resp.Body.Close()
+	}
+}
+
+func (suite *forwardTestSuite) checkConfig(_ *tests.TestCluster) {
+	re := suite.Require()
+	followerURL := suite.follower.GetAddr() + "/pd/api/v1/config"
+	followerName := suite.follower.GetConfig().Name
+	// Test local config
+	var followerCfg config.Config
+	err := testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg,
+		testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(suite.follower.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.NotEqual(suite.leader.GetConfig().ClientUrls, followerCfg.ClientUrls)
+	re.Equal(suite.follower.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.NotEqual(suite.leader.GetConfig().AdvertiseClientUrls, followerCfg.AdvertiseClientUrls)
+	re.Equal(suite.follower.GetConfig().Name, followerCfg.Name)
+	re.NotEqual(suite.leader.GetConfig().Name, followerCfg.Name)
+	re.Equal(suite.follower.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	re.NotEqual(suite.leader.GetConfig().PeerUrls, followerCfg.PeerUrls)
+	// Test sync config
+	leaderURL := suite.leader.GetAddr() + "/pd/api/v1/config"
+	reqData, err := json.Marshal(map[string]any{
+		"max-replicas": 4,
+	})
+	re.NoError(err)
+	req, err := http.NewRequest(http.MethodPost, leaderURL, bytes.NewBuffer(reqData))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.NoError(err)
+	re.NotEqual(followerName, resp.Header.Get(apiutil.XPDHandleHeader), "POST /config request should not be redirected")
+	testutil.Eventually(re, func() bool {
+		var followerCfg config.Config
+		err = testutil.ReadGetJSON(re, tests.TestDialClient, followerURL, &followerCfg)
+		re.NoError(err)
+		return followerCfg.Replication.MaxReplicas == 4.
+	})
+}
+
 func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1047,7 +1429,8 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -1082,6 +1465,8 @@ func TestPreparingProgress(t *testing.T) {
 		conf.Replication.MaxReplicas = 1
 		// prevent scheduling
 		conf.Schedule.RegionScheduleLimit = 0
+		// prevent leader lease from being timeout due to environmental issues
+		conf.LeaderLease = 60
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1091,7 +1476,8 @@ func TestPreparingProgress(t *testing.T) {
 
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	defer conn.Close()
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
@@ -1141,6 +1527,11 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {
+		if leader == nil {
+			re.NotEmpty(cluster.WaitLeader())
+			leader = cluster.GetLeaderServer()
+			return false
+		}
 		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
 	})
 
@@ -1159,8 +1550,19 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
+	testutil.Eventually(re, func() bool {
+		return len(cluster.GetLeader()) > 0
+	})
+	leader = cluster.GetLeaderServer()
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
+			if len(cluster.GetLeader()) == 0 {
+				return false
+			}
+			leader = cluster.GetLeaderServer()
+			if leader == nil {
+				return false
+			}
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
@@ -1177,6 +1579,13 @@ func TestPreparingProgress(t *testing.T) {
 	var p api.Progress
 	testutil.Eventually(re, func() bool {
 		defer triggerCheckStores()
+		if len(cluster.GetLeader()) == 0 {
+			return false
+		}
+		leader = cluster.GetLeaderServer()
+		if leader == nil {
+			return false
+		}
 		// wait for cluster prepare
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()

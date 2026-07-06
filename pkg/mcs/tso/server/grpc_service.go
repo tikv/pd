@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -77,6 +79,7 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
+	stream = newTsoMetricsStream(stream)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
@@ -97,6 +100,15 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		clusterID := header.GetClusterId()
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
+		}
+		host := s.advertiseListenHost
+		if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+			if calleeID != host {
+				return status.Errorf(
+					codes.FailedPrecondition, "mismatch callee id, need %s but got %s",
+					s.GetAdvertiseListenAddr(), calleeID,
+				)
+			}
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
@@ -133,8 +145,15 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	allocator, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
-	if err != nil {
+	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	if request.GetModRevision() > modRevision {
+		return &tsopb.FindGroupByKeyspaceIDResponse{
+			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
+		}, nil
+	}
+	// If the error is the ErrGetAllocator, it indicates the server have watched the keyspace group meta.
+	// But this node's server is not one of the members.
+	if err != nil && !errs.ErrGetAllocator.Equal(err) {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
 		}, nil
@@ -171,6 +190,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			SplitState: splitState,
 			Members:    members,
 		},
+		ModRevision: modRevision,
 	}, nil
 }
 
@@ -211,6 +231,15 @@ func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, er
 	}
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {
 		return tsopb.ErrorType_CLUSTER_MISMATCHED, errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
+	}
+	host := s.advertiseListenHost
+	if calleeID := header.GetCalleeId(); calleeID != "" && host != "" {
+		if calleeID != host {
+			return tsopb.ErrorType_INVALID_VALUE, errors.Errorf(
+				"mismatch callee id, need %s but got %s",
+				s.GetAdvertiseListenAddr(), calleeID,
+			)
+		}
 	}
 	return tsopb.ErrorType_OK, nil
 }

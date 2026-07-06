@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -41,8 +40,7 @@ func TestMain(m *testing.M) {
 }
 
 const (
-	clusterID = uint64(20240117)
-	rulesNum  = 16384
+	rulesNum = 16384
 )
 
 func TestLoadLargeRules(t *testing.T) {
@@ -88,28 +86,32 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	cfg := etcdutil.NewTestSingleConfig()
+	cfg := etcdutil.NewTestEtcdConfig()
 	var err error
 	cfg.Dir, err = os.MkdirTemp("", "pd_tests")
 	re.NoError(err)
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls)
+	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
+	ops := make([]clientv3.Op, 0, etcdutil.MaxEtcdTxnOps)
 	for i := 1; i < rulesNum+1; i++ {
-		rule := &labeler.LabelRule{
-			ID:       "test_" + strconv.Itoa(i),
-			Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
-			RuleType: labeler.KeyRange,
-			Data:     keyspace.MakeKeyRanges(uint32(i)),
-		}
+		rule := keyspace.MakeTxnLabelRule(uint32(i))
 		value, err := json.Marshal(rule)
 		re.NoError(err)
 		key := keypath.RegionLabelKeyPath(rule.ID)
-		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
+		ops = append(ops, clientv3.OpPut(key, string(value)))
+		if len(ops) == etcdutil.MaxEtcdTxnOps {
+			_, err = client.Txn(ctx).Then(ops...).Commit()
+			re.NoError(err)
+			ops = ops[:0]
+		}
+	}
+	if len(ops) > 0 {
+		_, err = client.Txn(ctx).Then(ops...).Commit()
 		re.NoError(err)
 	}
 

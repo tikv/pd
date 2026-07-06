@@ -86,6 +86,9 @@ var (
 	ErrNotStarted                 = status.Error(codes.Unavailable, "server not started")
 	ErrEtcdNotStarted             = status.Error(codes.Unavailable, "server is started, but etcd not started")
 	ErrFollowerHandlingNotAllowed = status.Error(codes.Unavailable, "not leader and follower handling not allowed")
+
+	// Unimplemented indicates operation is not implemented or not supported.
+	ErrRecvNotSupported = status.Error(codes.Unimplemented, "recv is not supported by this stream")
 )
 
 // common error in multiple packages
@@ -247,6 +250,8 @@ var (
 	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
 	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
 	ErrUnsupportedOperationInKeyspace = errors.Normalize("it's a unsupported operation", errors.RFCCodeText("PD:keyspace:ErrUnsupportedOperationInKeyspace"))
+	// ErrKeyspaceConfigPreconditionFailed is used to indicate the precondition for updating keyspace config is not met.
+	ErrKeyspaceConfigPreconditionFailed = errors.Normalize("keyspace config precondition failed, %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceConfigPreconditionFailed"))
 	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
 	ErrKeyspaceGroupPrimaryNotFound = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"))
 	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
@@ -260,6 +265,8 @@ var (
 	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
 	ErrKeyspaceGroupNotInMerging = errors.Normalize("keyspace group %v is not in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInMerging"))
 	// errKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
+	ErrKeyspaceGroupModRevisionStale = errors.Normalize("keyspace group mod revision is stale", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupModRevisionStale"))
+	// ErrKeyspaceGroupModRevisionStale is used to indicate target keyspace group mod revision is stale.
 )
 
 // diagnostic errors
@@ -304,6 +311,7 @@ var (
 var (
 	ErrRedirect             = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
 	ErrOptionNotExist       = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
+	ErrOptionTypeInvalid    = errors.Normalize("the type of option %s is invalid", errors.RFCCodeText("PD:apiutil:ErrOptionTypeInvalid"))
 	ErrRedirectNoLeader     = errors.Normalize("redirect finds no leader", errors.RFCCodeText("PD:apiutil:ErrRedirectNoLeader"))
 	ErrRedirectToNotLeader  = errors.Normalize("redirect to not leader", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotLeader"))
 	ErrRedirectToNotPrimary = errors.Normalize("redirect to not primary", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotPrimary"))
@@ -379,7 +387,7 @@ var (
 	ErrEtcdGrantLease    = errors.Normalize("etcd lease failed", errors.RFCCodeText("PD:etcd:ErrEtcdGrantLease"))
 	ErrEtcdTxnInternal   = errors.Normalize("internal etcd transaction error occurred", errors.RFCCodeText("PD:etcd:ErrEtcdTxnInternal"))
 	ErrEtcdTxnConflict   = errors.Normalize("etcd transaction failed, conflicted and rolled back", errors.RFCCodeText("PD:etcd:ErrEtcdTxnConflict"))
-	ErrEtcdTxnResponse   = errors.Normalize("etcd transaction returned invalid response: %v", errors.RFCCodeText("PD:etcd:ErrEtcdTxnResponse"))
+	ErrEtcdTxnResponse   = errors.Normalize("etcd transaction returned unexpected response: %v", errors.RFCCodeText("PD:etcd:ErrEtcdTxnResponse"))
 	ErrEtcdKVPut         = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
 	ErrEtcdKVDelete      = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
 	ErrEtcdKVGet         = errors.Normalize("etcd KV get failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVGet"))
@@ -526,10 +534,13 @@ var (
 
 // Resource Manager errors
 var (
-	ErrKeyspaceNotExists      = errors.Normalize("the keyspace does not exist with id %d", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExists"))
-	ErrResourceGroupNotExists = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
-	ErrDeleteReservedGroup    = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
-	ErrInvalidGroup           = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+	// ErrKeyspaceNotExists is used to indicate target keyspace does not exist when looked up by ID.
+	ErrKeyspaceNotExists = errors.Normalize("the keyspace does not exist with id %d", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExists"))
+	// ErrKeyspaceNotExistsByName is used to indicate target keyspace does not exist when looked up by name.
+	ErrKeyspaceNotExistsByName = errors.Normalize("keyspace not found with name: %s", errors.RFCCodeText("PD:resourcemanager:ErrKeyspaceNotExistsByName"))
+	ErrResourceGroupNotExists  = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
+	ErrDeleteReservedGroup     = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
+	ErrInvalidGroup            = errors.Normalize("invalid group settings, please check %s", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
 )
 
 // Microservice errors
@@ -540,7 +551,7 @@ var (
 
 // GC errors
 var (
-	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
+	ErrGCOnInvalidKeyspace                 = errors.Normalize("trying to manage GC in keyspace %v (id: %v) where keyspace level GC is not enabled", errors.RFCCodeText("PD:gc:ErrGCOnInvalidKeyspace"))
 	ErrDecreasingGCSafePoint               = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
 	ErrGCSafePointExceedsTxnSafePoint      = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
 	ErrDecreasingTxnSafePoint              = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
@@ -552,4 +563,17 @@ var (
 // id alloc errors
 var (
 	ErrIDExhausted = errors.Normalize("id exhausted", errors.RFCCodeText("PD:idalloc:ErrIDExhausted"))
+)
+
+// affinity errors
+var (
+	ErrAffinityGroupNotFound  = errors.Normalize("affinity group %s not found", errors.RFCCodeText("PD:affinity:ErrAffinityGroupNotFound"))
+	ErrAffinityGroupExist     = errors.Normalize("affinity group %s already exists", errors.RFCCodeText("PD:affinity:ErrAffinityGroupExist"))
+	ErrAffinityGroupConflict  = errors.Normalize("affinity group %s cannot appear in both add and remove operations in the same request", errors.RFCCodeText("PD:affinity:ErrAffinityGroupConflict"))
+	ErrAffinityInternal       = errors.Normalize("affinity internal error", errors.RFCCodeText("PD:affinity:ErrAffinityInternal"))
+	ErrAffinityGroupContent   = errors.Normalize("invalid affinity group content, %s", errors.RFCCodeText("PD:affinity:ErrAffinityGroupContent"))
+	ErrInvalidLabelRuleFormat = errors.Normalize("invalid label rule data format %s", errors.RFCCodeText("PD:affinity:ErrInvalidLabelRuleFormat"))
+	ErrEmptyRequest           = errors.Normalize("%s", errors.RFCCodeText("PD:affinity:ErrEmptyRequest"))
+	ErrInvalidGroupID         = errors.Normalize("invalid group id %s: should contain only letters (a-z, A-Z), numbers (0-9), hyphens (-) and underscores (_), and be 1-64 characters long", errors.RFCCodeText("PD:affinity:ErrInvalidGroupID"))
+	ErrInvalidKeyFormat       = errors.Normalize("invalid hex %s key '%s' for group '%s'", errors.RFCCodeText("PD:affinity:ErrInvalidKeyFormat"))
 )

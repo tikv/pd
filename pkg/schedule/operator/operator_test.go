@@ -176,7 +176,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		storeOpInfluence[2] = &StoreInfluence{}
 	}
 
-	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
+	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -194,7 +194,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[1])
 	resetInfluence()
 
-	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
+	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
@@ -213,7 +213,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 	resetInfluence()
 
-	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
+	AddPeer{ToStore: 2, PeerID: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
@@ -222,7 +222,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
+	TransferLeader{FromStore: 1, ToStore: 2}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -238,7 +238,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
+	RemovePeer{FromStore: 1}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -254,7 +254,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: false}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
@@ -270,7 +270,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
+	MergeRegion{IsPassive: true}.Influence(&opInfluence, region)
 	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -2,
@@ -477,9 +477,53 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
+		{
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpSplitScatter|OpRegion),
+			expect: OpSplitScatter,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpSplitScatter|OpRegion),
+			expect: OpAdmin,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpLeader),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAffinity|OpMerge|OpRegion),
+			expect: OpAffinity,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpAffinity|OpRegion),
+			expect: OpAdmin,
+		},
 	}
 	for _, v := range testData {
 		re.Equal(v.expect, v.op.SchedulerKind())
+	}
+}
+
+func (suite *operatorTestSuite) TestOpKindValues() {
+	re := suite.Require()
+	testCases := []struct {
+		name string
+		kind OpKind
+		want OpKind
+	}{
+		{"admin", OpAdmin, 1 << 0},
+		{"affinity", OpAffinity, 1 << 1},
+		{"merge", OpMerge, 1 << 2},
+		{"range", OpRange, 1 << 3},
+		{"replica", OpReplica, 1 << 4},
+		{"split", OpSplit, 1 << 5},
+		{"hot-region", OpHotRegion, 1 << 6},
+		{"region", OpRegion, 1 << 7},
+		{"leader", OpLeader, 1 << 8},
+		{"witness-leader", OpWitnessLeader, 1 << 9},
+		{"witness", OpWitness, 1 << 10},
+		{"split-scatter", OpSplitScatter, 1 << 11},
+	}
+	for _, testCase := range testCases {
+		re.Equal(testCase.want, testCase.kind, "unexpected %s kind value", testCase.name)
 	}
 }
 

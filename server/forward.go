@@ -385,7 +385,7 @@ func forwardRegionBucketsToScheduling(forwardStream schedulingpb.Scheduling_Regi
 			// TODO: handle more error types if needed.
 			if schedulingpbErr.Type == schedulingpb.ErrorType_NOT_BOOTSTRAPPED {
 				response := &pdpb.ReportBucketsResponse{
-					Header: notBootstrappedHeader(),
+					Header: grpcutil.NotBootstrappedHeader(),
 				}
 				if err := server.send(response); err != nil {
 					errCh <- errors.WithStack(err)

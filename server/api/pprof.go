@@ -50,10 +50,11 @@ func newPprofHandler(svr *server.Server, rd *render.Render) *pprofHandler {
 }
 
 // PProfZip dumps the pprof zip file
-// @Tags     debug
-// @Summary  debug zip of PD servers.
-// @Produce  application/octet-stream
-// @Router   /debug/pprof/zip [get]
+//
+//	@Tags		debug
+//	@Summary	debug zip of PD servers.
+//	@Produce	application/octet-stream
+//	@Router		/debug/pprof/zip [get]
 func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip")
 
@@ -149,73 +150,82 @@ func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 }
 
 // PProfProfile dumps the pprof profile
-// @Tags     debug
-// @Summary  debug profile of PD servers.
-// @Router   /debug/pprof/profile [get]
+//
+//	@Tags		debug
+//	@Summary	debug profile of PD servers.
+//	@Router		/debug/pprof/profile [get]
 func (*pprofHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
 	pp.Profile(w, r)
 }
 
 // PProfTrace dumps the pprof trace
-// @Tags     debug
-// @Summary  debug trace of PD servers.
-// @Router   /debug/pprof/trace [get]
+//
+//	@Tags		debug
+//	@Summary	debug trace of PD servers.
+//	@Router		/debug/pprof/trace [get]
 func (*pprofHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
 	pp.Trace(w, r)
 }
 
 // PProfSymbol dumps the pprof symbol
-// @Tags     debug
-// @Summary  debug symbol of PD servers.
-// @Router   /debug/pprof/symbol [get]
+//
+//	@Tags		debug
+//	@Summary	debug symbol of PD servers.
+//	@Router		/debug/pprof/symbol [get]
 func (*pprofHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
 	pp.Symbol(w, r)
 }
 
 // PProfHeap dumps the pprof heap
-// @Tags     debug
-// @Summary  debug heap of PD servers.
-// @Router   /debug/pprof/heap [get]
+//
+//	@Tags		debug
+//	@Summary	debug heap of PD servers.
+//	@Router		/debug/pprof/heap [get]
 func (*pprofHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("heap").ServeHTTP(w, r)
 }
 
 // PProfMutex dumps the pprof mutex
-// @Tags     debug
-// @Summary  debug mutex of PD servers.
-// @Router   /debug/pprof/mutex [get]
+//
+//	@Tags		debug
+//	@Summary	debug mutex of PD servers.
+//	@Router		/debug/pprof/mutex [get]
 func (*pprofHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("mutex").ServeHTTP(w, r)
 }
 
 // PProfAllocs dumps the pprof allocs
-// @Tags     debug
-// @Summary  debug allocs of PD servers.
-// @Router   /debug/pprof/allocs [get]
+//
+//	@Tags		debug
+//	@Summary	debug allocs of PD servers.
+//	@Router		/debug/pprof/allocs [get]
 func (*pprofHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("allocs").ServeHTTP(w, r)
 }
 
 // PProfBlock dumps the pprof block
-// @Tags     debug
-// @Summary  debug block of PD servers.
-// @Router   /debug/pprof/block [get]
+//
+//	@Tags		debug
+//	@Summary	debug block of PD servers.
+//	@Router		/debug/pprof/block [get]
 func (*pprofHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("block").ServeHTTP(w, r)
 }
 
 // PProfGoroutine dumps the pprof goroutine
-// @Tags     debug
-// @Summary  debug goroutine of PD servers.
-// @Router   /debug/pprof/goroutine [get]
+//
+//	@Tags		debug
+//	@Summary	debug goroutine of PD servers.
+//	@Router		/debug/pprof/goroutine [get]
 func (*pprofHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("goroutine").ServeHTTP(w, r)
 }
 
 // PProfThreadcreate dumps the pprof threadcreate
-// @Tags     debug
-// @Summary  debug threadcreate of PD servers.
-// @Router   /debug/pprof/threadcreate [get]
+//
+//	@Tags		debug
+//	@Summary	debug threadcreate of PD servers.
+//	@Router		/debug/pprof/threadcreate [get]
 func (*pprofHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("threadcreate").ServeHTTP(w, r)
 }

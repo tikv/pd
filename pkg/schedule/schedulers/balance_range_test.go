@@ -15,12 +15,17 @@
 package schedulers
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/unrolled/render"
 
 	"github.com/pingcap/failpoint"
 
@@ -31,6 +36,15 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
+
+func checkOperator(re *require.Assertions, op *operator.Operator, sourceScore string, targetScore string) {
+	val, exist := op.GetAdditionalInfo("sourceScore")
+	re.True(exist)
+	re.Equal(sourceScore, val)
+	val, exist = op.GetAdditionalInfo("targetScore")
+	re.True(exist)
+	re.Equal(targetScore, val)
+}
 
 func TestPlacementRule(t *testing.T) {
 	re := require.New(t)
@@ -95,18 +109,18 @@ func TestPlacementRule(t *testing.T) {
 	}
 
 	// only store-1 can match the leader rule
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 
 	// all store can match the rules
 	job.Rule = core.PeerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 
 	// only store-1 can match the learner rule
 	job.Rule = core.LearnerScatter
-	err = sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err = sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.Error(err)
 }
 
@@ -171,7 +185,7 @@ func TestPrepareBalanceRange(t *testing.T) {
 		Rule:   core.LeaderScatter,
 		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
-	err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	err := sc.prepare(tc, operator.NewOpInfluence(), job)
 	re.NoError(err)
 	re.Len(sc.stores, 3)
 	re.Len(sc.scoreMap, 3)
@@ -221,8 +235,7 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
+	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 
 	// case2: move leader from store 1 to store 4
@@ -232,8 +245,7 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
+	checkOperator(re, op, "3.00", "0.00")
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 	re.Equal("transfer leader from store 1 to store 4", op.Step(2).String())
 }
@@ -287,7 +299,7 @@ func TestLocationLabel(t *testing.T) {
 		tc.AddLeaderRegionWithRange(uint64(i), strconv.Itoa(100+i), strconv.Itoa(100+i+1),
 			1, uint64(follower1), uint64(follower2))
 	}
-	// case1: store 1 has 100 peers, the others has 50 peer, it suiter for the location label setting.
+	// case1: store 1 has 100 peers, the others has 50 peer, it is suited for the location label setting.
 	re.False(scheduler.IsScheduleAllowed(tc))
 	op, _ := scheduler.Schedule(tc, true)
 	re.Empty(op)
@@ -372,10 +384,13 @@ func TestTIFLASHEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal("3.00", op.GetAdditionalInfo("sourceScore"))
-	re.Equal("0.00", op.GetAdditionalInfo("targetScore"))
-	re.Equal("1.00", op.GetAdditionalInfo("sourceExpectScore"))
-	re.Equal("1.00", op.GetAdditionalInfo("targetExpectScore"))
+	checkOperator(re, op, "3.00", "0.00")
+	sourceExpectScore, exist := op.GetAdditionalInfo("sourceExpectScore")
+	re.True(exist)
+	re.Equal("1.00", sourceExpectScore)
+	targetExpectScore, exist := op.GetAdditionalInfo("targetExpectScore")
+	re.True(exist)
+	re.Equal("1.00", targetExpectScore)
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }
 
@@ -456,12 +471,12 @@ func TestJobGC(t *testing.T) {
 	}
 	re.NoError(conf.addJob(job))
 	re.NoError(conf.deleteJob(1))
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Len(conf.jobs, 1)
 
 	expiredTime := now.Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &expiredTime
-	re.NoError(conf.gc())
+	re.NoError(conf.gcLocked())
 	re.Empty(conf.jobs)
 }
 
@@ -493,16 +508,92 @@ func TestPersistFail(t *testing.T) {
 	re.ErrorContains(conf.deleteJob(1), errMsg)
 	re.NotEqual(cancelled, conf.jobs[0].Status)
 
-	re.ErrorContains(conf.begin(0), errMsg)
+	re.ErrorContains(conf.beginLocked(0), errMsg)
 	re.NotEqual(running, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = running
-	re.ErrorContains(conf.finish(0), errMsg)
+	re.ErrorContains(conf.finishLocked(0), errMsg)
 	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
 	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &finishedTime
-	re.ErrorContains(conf.gc(), errMsg)
+	re.ErrorContains(conf.gcLocked(), errMsg)
 	re.Len(conf.jobs, 1)
+}
+
+func TestAddBalanceRangeJobWithInvalidFieldType(t *testing.T) {
+	re := require.New(t)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 0),
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	handler := &balanceRangeSchedulerHandler{
+		config: conf,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	count := 0
+	checkFn := func(data []byte, pass bool) {
+		req := httptest.NewRequest(http.MethodPut, "/job", bytes.NewReader(data))
+		resp := httptest.NewRecorder()
+		re.NotPanics(func() {
+			handler.addJob(resp, req)
+		})
+		if pass {
+			re.Equal(http.StatusOK, resp.Code)
+			count++
+			re.Len(conf.jobs, count)
+		} else {
+			re.Equal(http.StatusBadRequest, resp.Code)
+		}
+		re.Len(conf.jobs, count)
+	}
+
+	// invalid engine type
+	body, err := json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    1,
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+	})
+	re.NoError(err)
+	checkFn(body, false)
+
+	// invalid timeout type
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "123",
+	})
+	re.NoError(err)
+	checkFn(body, false)
+
+	// normal case
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "123s",
+	})
+	re.NoError(err)
+	checkFn(body, true)
+
+	// invalidate case
+	body, err = json.Marshal(map[string]any{
+		"alias":     "a",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"timeout":   "0s",
+	})
+	re.NoError(err)
+	checkFn(body, false)
 }

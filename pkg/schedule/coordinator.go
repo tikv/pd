@@ -85,7 +85,17 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	prepareChecker := preparecheck.NewChecker(cluster.GetPrepareRegionCount)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController, prepareChecker)
-	checkers := checker.NewController(ctx, cluster, opController, prepareChecker)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController, prepareChecker)
+
+	// Set the callbacks for operator success
+	opController.SetSuccessCallbacks(
+		func(op *operator.Operator) {
+			if checker := checkers.GetAffinityChecker(); checker != nil {
+				checker.RecordOpSuccess(op)
+			}
+		},
+	)
+
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
@@ -296,6 +306,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with independent configuration"),
+				zap.Int("index", i), zap.Int("total", len(scheduleNames)))
+			return
+		default:
+		}
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
@@ -337,6 +355,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	// The old way to create the scheduler.
 	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
+		select {
+		case <-c.ctx.Done():
+			log.Info("InitSchedulers context cancelled",
+				zap.String("stage", "creating schedulers with old configuration"),
+				zap.Int("index", k), zap.Int("total", len(scheduleCfg.Schedulers)))
+			return
+		default:
+		}
 		if schedulerCfg.Disable {
 			scheduleCfg.Schedulers[k] = schedulerCfg
 			k++
@@ -523,7 +549,7 @@ func (c *Coordinator) CollectHotSpotMetrics() {
 func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	kind := typ.String()
 	hotPeerStats := cluster.GetHotPeerStats(typ)
-	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
+	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,TotalCPURate,Count
 
 	for _, s := range stores {
 		// TODO: pre-allocate gauge metrics
@@ -535,11 +561,13 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader").Set(stat.TotalQueryRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_leader").Set(stat.TotalCPURate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_leader")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_leader")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_leader")
 		}
 
@@ -548,11 +576,13 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer").Set(stat.TotalBytesRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer").Set(stat.TotalKeysRate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer").Set(stat.TotalQueryRate)
+			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_peer").Set(stat.TotalCPURate)
 			hotSpotStatusGauge.WithLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer").Set(float64(stat.Count))
 		} else {
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_bytes_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_keys_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_query_as_peer")
+			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "total_"+kind+"_cpu_as_peer")
 			hotSpotStatusGauge.DeleteLabelValues(storeAddress, storeLabel, "hot_"+kind+"_region_as_peer")
 		}
 

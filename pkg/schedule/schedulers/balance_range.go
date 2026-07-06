@@ -90,27 +90,52 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		Status:  pending,
 		Timeout: defaultJobTimeout,
 	}
-	job.Engine = input["engine"].(string)
-	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
+	engine, ok := input["engine"].(string)
+	if !ok || len(engine) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "engine is required and must be a string")
 		return
 	}
-	job.Rule = core.NewRule(input["rule"].(string))
+	job.Engine = engine
+	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", job.Engine))
+		return
+	}
+	ruleStr, ok := input["rule"].(string)
+	if !ok || len(ruleStr) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "rule is required and must be a string")
+		return
+	}
+	job.Rule = core.NewRule(ruleStr)
 	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
-			input["engine"].(string)))
+			ruleStr))
 		return
 	}
 
-	job.Alias = input["alias"].(string)
-	timeoutStr, ok := input["timeout"].(string)
-	if ok && len(timeoutStr) > 0 {
-		timeout, err := time.ParseDuration(timeoutStr)
-		if err != nil {
-			handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", input["timeout"].(string)))
+	alias, ok := input["alias"].(string)
+	if !ok || len(alias) == 0 {
+		handler.rd.JSON(w, http.StatusBadRequest, "alias is required and must be a string")
+		return
+	}
+	job.Alias = alias
+	if timeoutVal, exists := input["timeout"]; exists {
+		timeoutStr, ok := timeoutVal.(string)
+		if !ok {
+			handler.rd.JSON(w, http.StatusBadRequest, "timeout must be a string")
 			return
 		}
-		job.Timeout = timeout
+		if len(timeoutStr) > 0 {
+			timeout, err := time.ParseDuration(timeoutStr)
+			if err != nil {
+				handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("timeout:%s is invalid", timeoutStr))
+				return
+			}
+			if timeout <= 0 {
+				handler.rd.JSON(w, http.StatusBadRequest, "timeout must be positive")
+				return
+			}
+			job.Timeout = timeout
+		}
 	}
 
 	keys, err := keyutil.DecodeHTTPKeyRanges(input)
@@ -151,8 +176,8 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 }
 
 type balanceRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
+	syncutil.Mutex
 	jobs []*balanceRangeSchedulerJob
 }
 
@@ -200,11 +225,9 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
 }
 
-func (conf *balanceRangeSchedulerConfig) gc() error {
+func (conf *balanceRangeSchedulerConfig) gcLocked() error {
 	needGC := false
 	gcIdx := 0
-	conf.Lock()
-	defer conf.Unlock()
 	for idx, job := range conf.jobs {
 		if job.isComplete() && job.expired(reserveDuration) {
 			needGC = true
@@ -248,9 +271,7 @@ func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (conf *balanceRangeSchedulerConfig) begin(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
+func (conf *balanceRangeSchedulerConfig) beginLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != pending {
 		return errors.New("the job is not pending")
@@ -262,10 +283,7 @@ func (conf *balanceRangeSchedulerConfig) begin(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) finish(index int) error {
-	conf.Lock()
-	defer conf.Unlock()
-
+func (conf *balanceRangeSchedulerConfig) finishLocked(index int) error {
 	job := conf.jobs[index]
 	if job.Status != running {
 		return errors.New("the job is not running")
@@ -277,9 +295,7 @@ func (conf *balanceRangeSchedulerConfig) finish(index int) error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
-	conf.RLock()
-	defer conf.RUnlock()
+func (conf *balanceRangeSchedulerConfig) peekLocked() (int, *balanceRangeSchedulerJob) {
 	for index, job := range conf.jobs {
 		if job.isComplete() {
 			continue
@@ -335,14 +351,18 @@ func (job *balanceRangeSchedulerJob) expired(dur time.Duration) bool {
 	return now.Sub(*job.Finish) > dur
 }
 
+func (job *balanceRangeSchedulerJob) shouldFinished() bool {
+	return time.Since(*job.Start) > job.Timeout
+}
+
 func (job *balanceRangeSchedulerJob) isComplete() bool {
 	return job.Status == finished || job.Status == cancelled
 }
 
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
-	s.conf.RLock()
-	defer s.conf.RUnlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	return EncodeConfig(s.conf.jobs)
 }
 
@@ -350,7 +370,6 @@ func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
 	if err := s.conf.load(&jobs); err != nil {
 		return err
@@ -424,7 +443,9 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 }
 
 func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
-	if err := s.conf.gc(); err != nil {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	if err := s.conf.gcLocked(); err != nil {
 		log.Error("balance range jobs gc failed", errs.ZapError(err))
 		return false
 	}
@@ -433,21 +454,22 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		s.cleanJobStatus(cluster, s.job)
 	}
 
-	index, job := s.conf.peek()
+	index, job := s.conf.peekLocked()
 	// all jobs are completed
 	if job == nil {
+		balanceRangeNoJobCounter.Inc()
 		return false
 	}
 
 	if job.Status == pending {
-		if err := s.conf.begin(index); err != nil {
+		if err := s.conf.beginLocked(index); err != nil {
 			return false
 		}
 		km := cluster.GetKeyRangeManager()
 		km.Append(job.Ranges)
 	}
-	if time.Since(*job.Start) > job.Timeout {
-		if err := s.conf.finish(index); err != nil {
+	if job.shouldFinished() {
+		if err := s.conf.finishLocked(index); err != nil {
 			balancePersistFailedCounter.Inc()
 			return false
 		}
@@ -463,7 +485,7 @@ func (s *balanceRangeScheduler) checkJob(cluster sche.SchedulerCluster) bool {
 		return false
 	}
 	if s.isBalanced() {
-		if err = s.conf.finish(index); err != nil {
+		if err = s.conf.finishLocked(index); err != nil {
 			balancePersistFailedCounter.Inc()
 			return false
 		}
@@ -513,11 +535,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	_, job := s.conf.peek()
-	if job == nil {
-		balanceRangeNoJobCounter.Inc()
-		return nil, nil
-	}
+	job := s.job
 	defer s.filterCounter.Flush()
 
 	faultStores := filter.SelectUnavailableTargetStores(s.stores, s.filters, cluster.GetSchedulerConfig(), nil, s.filterCounter)
@@ -595,7 +613,7 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit),
 	)
 
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
 		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
 		solver.targetScore = s.score(solver.targetStoreID())
@@ -652,7 +670,7 @@ func (s *balanceRangeScheduler) transferPeer(dstStores []*core.StoreInfo, faultS
 	return nil
 }
 
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) error {
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence *operator.OpInfluence, job *balanceRangeSchedulerJob) error {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	// todo: if supports to balance region size, it needs to change here.
 	var kind constant.ScheduleKind

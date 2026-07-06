@@ -74,8 +74,10 @@ type Controller struct {
 	ruleChecker             *RuleChecker
 	splitChecker            *SplitChecker
 	mergeChecker            *MergeChecker
+	affinityChecker         *AffinityChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
+	splitScatter            *splitScatterController
 	pendingProcessedRegions *cache.TTLUint64
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
 	patrolRegionContext     *PatrolRegionContext
@@ -98,11 +100,15 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, opController *operator.Controller, prepareChecker *preparecheck.Checker) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, opController *operator.Controller, prepareCheckers ...*preparecheck.Checker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
-	conf := cluster.GetCheckerConfig()
 	ruleManager := cluster.GetRuleManager()
-	labeler := cluster.GetRegionLabeler()
+	prepareChecker := preparecheck.NewChecker(cluster.GetPrepareRegionCount)
+	if len(prepareCheckers) > 0 && prepareCheckers[0] != nil {
+		prepareChecker = prepareCheckers[0]
+	} else {
+		prepareChecker.SetPrepared()
+	}
 	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -111,8 +117,9 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, opControlle
 		learnerChecker:          NewLearnerChecker(cluster),
 		replicaChecker:          NewReplicaChecker(cluster, conf, pendingProcessedRegions),
 		ruleChecker:             NewRuleChecker(ctx, cluster, ruleManager, pendingProcessedRegions),
-		splitChecker:            NewSplitChecker(cluster, ruleManager, labeler),
+		splitChecker:            NewSplitChecker(cluster, ruleManager, cluster.GetRegionLabeler()),
 		mergeChecker:            NewMergeChecker(ctx, cluster, conf),
+		affinityChecker:         NewAffinityChecker(ctx, cluster, conf),
 		jointStateChecker:       NewJointStateChecker(cluster),
 		priorityInspector:       NewPriorityInspector(cluster, conf),
 		pendingProcessedRegions: pendingProcessedRegions,
@@ -123,6 +130,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, opControlle
 		prepareChecker:          prepareChecker,
 		metrics:                 newCheckerControllerMetrics(),
 	}
+	c.splitScatter = newSplitScatterController(ctx, cluster, opController, c.AddPendingProcessedRegions)
 	c.duration.Store(time.Duration(0))
 	return c
 }
@@ -132,6 +140,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, opControlle
 func (c *Controller) PatrolRegions() {
 	c.patrolRegionContext.init(c.ctx)
 	c.patrolRegionContext.startPatrolRegionWorkers(c)
+	defer c.splitScatter.clearPendingSplitScatter()
 	defer c.patrolRegionContext.stop()
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
@@ -143,6 +152,9 @@ func (c *Controller) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
+			failpoint.Inject("skipPatrolRegions", func() {
+				failpoint.Continue()
+			})
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
 			if !c.prepareChecker.IsPrepared() {
@@ -171,6 +183,10 @@ func (c *Controller) PatrolRegions() {
 
 			measure(c.metrics.patrolPhaseHistograms[phaseCheckPending], func() {
 				c.checkPendingProcessedRegions()
+			})
+
+			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
+				c.splitScatter.dispatchSplitScatterRegions()
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
@@ -279,7 +295,7 @@ func (c *Controller) checkPriorityRegions() {
 		}
 		ops := c.CheckRegion(region)
 		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
 			continue
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
@@ -357,24 +373,34 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
 	// those checkers are help to make region health, it's necessary to skip them when region is set to deny.
-	if cl, ok := c.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
-		l := cl.GetRegionLabeler()
-		if l.ScheduleDisabled(region) {
-			denyCheckersByLabelerCounter.Inc()
-			return nil
-		}
+	l := c.cluster.GetRegionLabeler()
+	if l.ScheduleDisabled(region) {
+		denyCheckersByLabelerCounter.Inc()
+		return nil
 	}
-	if c.mergeChecker != nil {
-		if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {
-			if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
-				// It makes sure that two operators can be added successfully altogether.
-				return c.mergeChecker.Check(region)
-			}
-			operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
-			return nil
-		}); len(ops) > 0 {
-			return ops
+
+	if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
+		if opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit() {
+			// It makes sure that two affinity merge operators can be added successfully altogether.
+			return c.affinityChecker.Check(region)
 		}
+		if c.affinityChecker.hasAffinityGroups() {
+			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		}
+		return nil
+	}); len(ops) > 0 {
+		return ops
+	}
+
+	if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {
+		if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
+			// It makes sure that two operators can be added successfully altogether.
+			return c.mergeChecker.Check(region)
+		}
+		operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
+		return nil
+	}); len(ops) > 0 {
+		return ops
 	}
 	return nil
 }
@@ -410,6 +436,11 @@ func (c *Controller) GetMergeChecker() *MergeChecker {
 // GetRuleChecker returns the rule checker.
 func (c *Controller) GetRuleChecker() *RuleChecker {
 	return c.ruleChecker
+}
+
+// GetAffinityChecker returns the affinity checker.
+func (c *Controller) GetAffinityChecker() *AffinityChecker {
+	return c.affinityChecker
 }
 
 // GetPendingProcessedRegions returns the pending processed regions in the cache.
@@ -466,7 +497,9 @@ func (c *Controller) CheckSuspectRanges() {
 			if !success {
 				continue
 			}
-			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], suspectRegionLimit)
+			startKey := keyRange[0]
+			endKey := keyRange[1]
+			regions := c.cluster.ScanRegions(startKey, endKey, suspectRegionLimit)
 			if len(regions) == 0 {
 				continue
 			}
@@ -477,8 +510,8 @@ func (c *Controller) CheckSuspectRanges() {
 			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
 			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 			lastRegion := regions[len(regions)-1]
-			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), endKey) < 0 {
+				c.AddSuspectKeyRange(lastRegion.GetEndKey(), endKey)
 			}
 			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
@@ -533,6 +566,8 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 		return &c.mergeChecker.PauseController, nil
 	case "joint-state":
 		return &c.jointStateChecker.PauseController, nil
+	case "affinity":
+		return &c.affinityChecker.PauseController, nil
 	default:
 		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}

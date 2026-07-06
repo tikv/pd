@@ -309,11 +309,9 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'batch'").Error())
 		return
 	}
-	if inputBatch {
-		if batchFloat < 1 || batchFloat > 10 {
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
-			return
-		}
+	if inputBatch && !isValidEvictLeaderBatchSize(batchFloat) {
+		handler.rd.JSON(w, http.StatusBadRequest, invalidEvictLeaderBatchSizeMsg)
+		return
 	}
 
 	enableNetworkSlowStore, inputEnableNetworkSlowStore := input["enable-network-slow-store"].(bool)
@@ -477,7 +475,7 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

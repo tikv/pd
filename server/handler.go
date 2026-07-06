@@ -258,15 +258,6 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 
-// SetAllStoresLimitTTL is used to set limit of all stores with ttl
-func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.Type, ttl time.Duration) error {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return err
-	}
-	return c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
-}
-
 // SetLabelStoresLimit is used to set limit of label stores.
 func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.Type, labels []*metapb.StoreLabel) error {
 	c, err := h.GetRaftCluster()
@@ -275,6 +266,16 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 	}
 	for _, store := range c.GetStores() {
 		for _, label := range labels {
+			// set limit for tikv stores
+			if label.Key == core.EngineKey && label.Value == core.EngineTiKV {
+				if store.IsTiKV() {
+					err = c.SetStoreLimit(store.GetID(), limitType, ratePerMin)
+					if err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			for _, sl := range store.GetLabels() {
 				if label.Key == sl.Key && label.Value == sl.Value {
 					// TODO: need to handle some of stores are persisted, and some of stores are not.
@@ -334,12 +335,20 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 
 // GetProgressByID returns the progress details for a given store ID.
 func (h *Handler) GetProgressByID(storeID uint64) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByID(storeID)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByID(storeID)
 }
 
 // GetProgressByAction returns the progress details for a given action.
 func (h *Handler) GetProgressByAction(action string) (*progress.Progress, error) {
-	return h.s.GetRaftCluster().GetProgressByAction(action)
+	c, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	return c.GetProgressByAction(action)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
@@ -378,13 +387,6 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 // GetAddr returns the server urls for clients.
 func (h *Handler) GetAddr() string {
 	return h.s.GetAddr()
-}
-
-// SetStoreLimitTTL set storeLimit with ttl
-func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]any{
-		data: value,
-	}, ttl)
 }
 
 // IsLeader return true if this server is leader
@@ -431,6 +433,7 @@ func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotR
 				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
 				HotDegree:      int64(hotPeerStat.HotDegree),
 				FlowBytes:      hotPeerStat.ByteRate,
+				FlowCPU:        hotPeerStat.CPURate,
 				KeyRate:        hotPeerStat.KeyRate,
 				QueryRate:      hotPeerStat.QueryRate,
 				StartKey:       string(region.GetStartKey()),

@@ -14,6 +14,8 @@
 
 package constant
 
+import "strings"
+
 // PriorityLevel lower level means higher priority
 type PriorityLevel int
 
@@ -143,14 +145,17 @@ func (k KeyType) String() string {
 }
 
 // StringToKeyType creates a key type with string.
+// It return Table if the input string is empty, since Table is the default key type in most cases.
 func StringToKeyType(input string) KeyType {
-	switch input {
+	switch strings.TrimSpace(input) {
 	case Table.String():
 		return Table
 	case Raw.String():
 		return Raw
 	case Txn.String():
 		return Txn
+	case "":
+		return Table
 	default:
 		panic("invalid key type: " + input)
 	}

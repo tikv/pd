@@ -53,9 +53,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.23'
+          go-version: '1.25'
+          check-latest: true
       - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
@@ -70,6 +71,7 @@ jobs:
         with:
           name: cover-reports-${{ matrix.worker_id }}
           path: covprofile_${{ matrix.worker_id }}
+          overwrite: true
   report-coverage:
     needs: chunks
     if: always()

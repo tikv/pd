@@ -52,13 +52,15 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 // DeleteRegionCache removes a specific region from cache.
-// @Tags     admin
-// @Summary  Drop a specific region from cache.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {string}  string  "The region is removed from server cache."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Router   /admin/cache/region/{id} [delete]
+//
+//	@Tags		admin
+//	@Summary	Drop a specific region from cache.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"The region is removed from server/follower cache."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Failure	500	{string}	string	"The follower failed to reset region cache."
+//	@Router		/admin/cache/region/{id} [delete]
 func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -66,6 +68,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if isFollowerSyncedClusterRequest(r) {
+		if err = h.svr.ResetFollowerRegionCache(regionID); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "The region is removed from follower cache and the follower starts to resync regions from leader.")
 		return
 	}
 	rc.RemoveRegionIfExist(regionID)
@@ -80,13 +90,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 }
 
 // DeleteRegionStorage removes a specific region from storage.
-// @Tags     admin
-// @Summary  Remove target region from region cache and storage.
-// @Param    id  path  integer  true  "Region Id"
-// @Produce  json
-// @Success  200  {string}  string  "The region is removed from server storage."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Router   /admin/storage/region/{id} [delete]
+//
+//	@Tags		admin
+//	@Summary	Remove target region from region cache and storage.
+//	@Param		id	path	integer	true	"Region Id"
+//	@Produce	json
+//	@Success	200	{string}	string	"The region is removed from server storage."
+//	@Failure	400	{string}	string	"The input is invalid."
+//	@Router		/admin/storage/region/{id} [delete]
 func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
@@ -125,14 +136,24 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 }
 
 // DeleteAllRegionCache removes all regions from cache.
-// @Tags     admin
-// @Summary  Drop all regions from cache.
-// @Produce  json
-// @Success  200  {string}  string  "All regions are removed from server cache."
-// @Router   /admin/cache/regions [delete]
+//
+//	@Tags		admin
+//	@Summary	Drop all regions from cache.
+//	@Produce	json
+//	@Success	200	{string}	string	"All regions are removed from server/follower cache."
+//	@Failure	500	{string}	string	"The follower failed to reset region cache."
+//	@Router		/admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
 	var err error
 	rc := getCluster(r)
+	if isFollowerSyncedClusterRequest(r) {
+		if err = h.svr.ResetFollowerRegionCache(); err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, "All regions are removed from follower cache and the follower starts to resync regions from leader.")
+		return
+	}
 	rc.ResetRegionCache()
 	rc.ResetPrepared()
 	msg := "All regions are removed from server cache."
@@ -270,11 +291,7 @@ func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 		idStr = strconv.FormatUint(id[0], 10)
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
-	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
-	if err != nil {
-		return err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
+	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
 	if err != nil {
 		return err
 	}

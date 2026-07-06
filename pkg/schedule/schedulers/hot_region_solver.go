@@ -110,7 +110,9 @@ func (bs *balanceSolver) init() {
 	rankStepRatios := []float64{
 		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
 		utils.KeyDim:   bs.sche.conf.getKeyRankStepRatio(),
-		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio()}
+		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio(),
+		utils.CPUDim:   bs.sche.conf.getCPURateRankStepRatio(),
+	}
 	var stepLoads statistics.Loads
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
@@ -127,15 +129,16 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 
 func (bs *balanceSolver) getPriorities() []string {
 	querySupport := bs.sche.conf.checkQuerySupport(bs.SchedulerCluster)
+	cpuSupport := bs.sche.conf.checkCPUSupport(bs.SchedulerCluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.resourceTy {
 	case readLeader, readPeer:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
 	case writeLeader:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
 	case writePeer:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
+		return adjustPrioritiesConfig(querySupport, cpuSupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
 	}
 	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
@@ -195,6 +198,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
+	affinityFilter := filter.NewAffinityFilter(bs.SchedulerCluster)
 	splitThresholds := bs.sche.conf.getSplitThresholds()
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
@@ -202,11 +206,14 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
-			} else if bs.opTy == movePeer {
-				if !snapshotFilter.Select(bs.cur.region).IsOK() {
-					hotSchedulerSnapshotSenderLimitCounter.Inc()
-					continue
-				}
+			}
+			if bs.opTy == movePeer && !snapshotFilter.Select(bs.cur.region).IsOK() {
+				hotSchedulerSnapshotSenderLimitCounter.Inc()
+				continue
+			}
+			if !affinityFilter.Select(bs.cur.region).IsOK() {
+				hotSchedulerIgnoredAffinity.Inc()
+				continue
 			}
 			bs.cur.mainPeerStat = mainPeerStat
 			if bs.GetStoreConfig().IsEnableRegionBucket() && bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) {
@@ -258,6 +265,8 @@ func (bs *balanceSolver) skipCounter(label string) prometheus.Counter {
 			return readSkipKeyDimUniformStoreCounter
 		case "query":
 			return readSkipQueryDimUniformStoreCounter
+		case "cpu":
+			return readSkipCPUDimUniformStoreCounter
 		default:
 			return readSkipAllDimUniformStoreCounter
 		}
@@ -279,9 +288,19 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 		return false
 	}
 	isSplit := bs.ops[0].Kind() == operator.OpSplit
-	if !isSplit && bs.best.srcStore.IsTiFlash() != bs.best.dstStore.IsTiFlash() {
-		hotSchedulerNotSameEngineCounter.Inc()
-		return false
+	// Ensure source and destination stores have the exact same engine type.
+	// We need to distinguish between TiKV, TiFlash Write, and TiFlash Compute nodes.
+	if !isSplit {
+		srcIsTiFlashWrite := bs.best.srcStore.IsTiFlashWrite()
+		dstIsTiFlashWrite := bs.best.dstStore.IsTiFlashWrite()
+		srcIsTiFlashCompute := bs.best.srcStore.IsTiFlashCompute()
+		dstIsTiFlashCompute := bs.best.dstStore.IsTiFlashCompute()
+
+		// Check if engine types match exactly
+		if srcIsTiFlashWrite != dstIsTiFlashWrite || srcIsTiFlashCompute != dstIsTiFlashCompute {
+			hotSchedulerNotSameEngineCounter.Inc()
+			return false
+		}
 	}
 	maxZombieDur := bs.calcMaxZombieDur()
 
@@ -344,7 +363,9 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 		}
 		return bs.sche.conf.getRegionsStatZombieDuration()
 	case writePeer:
-		if bs.best.srcStore.IsTiFlash() {
+		// TiFlash Write nodes (TiFlash Compute nodes are filtered out in filterSrcStores)
+		// use RegionsStatZombieDuration, while TiKV uses StoreStatZombieDuration.
+		if bs.best.srcStore.IsTiFlashWrite() {
 			return bs.sche.conf.getRegionsStatZombieDuration()
 		}
 		return bs.sche.conf.getStoreStatZombieDuration()
@@ -361,8 +382,8 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
-		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
@@ -542,6 +563,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
+			filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
@@ -560,7 +582,10 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 		}
 		if bs.rwTy == utils.Read {
 			peers := bs.cur.region.GetPeers()
-			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High}}
+			moveLeaderFilters := []filter.Filter{
+				&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
+				filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
+			}
 			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
@@ -604,8 +629,8 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
-		if detail.IsTiFlash() {
-			if !confEnableForTiFlash {
+		if !detail.IsTiKV() {
+			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
 			}
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
@@ -730,6 +755,8 @@ func (bs *balanceSolver) getMinRate(dim int) float64 {
 		return bs.sche.conf.getMinHotByteRate()
 	case utils.QueryDim:
 		return bs.sche.conf.getMinHotQueryRate()
+	case utils.CPUDim:
+		return bs.sche.conf.getMinHotCPURate()
 	}
 	return -1
 }
@@ -738,6 +765,7 @@ var dimToStep = [utils.DimLen]float64{
 	utils.ByteDim:  100,
 	utils.KeyDim:   10,
 	utils.QueryDim: 10,
+	utils.CPUDim:   10,
 }
 
 // compareSrcStore compares the source store of detail1, detail2, the result is:
@@ -892,18 +920,21 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 }
 
 // bucketFirstStat returns the first priority statistics of the bucket.
-// if the first priority is query rate, it will return the second priority .
+// If the first priority is a dimension that buckets do not report, it falls
+// back to another bucket-supported priority.
 func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
-	base := utils.RegionReadBytes
-	if bs.rwTy == utils.Write {
-		base = utils.RegionWriteBytes
+	dim := bs.firstPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = bs.secondPriority
 	}
-	offset := bs.firstPriority
-	// todo: remove it if bucket's qps has been supported.
-	if bs.firstPriority == utils.QueryDim {
-		offset = bs.secondPriority
+	if !isBucketLoadDimSupported(dim) {
+		dim = utils.ByteDim
 	}
-	return base + utils.RegionStatKind(offset)
+	return bs.rwTy.RegionStats()[dim]
+}
+
+func isBucketLoadDimSupported(dim int) bool {
+	return dim == utils.ByteDim || dim == utils.KeyDim || dim == utils.QueryDim
 }
 
 func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {

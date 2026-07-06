@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -32,9 +33,10 @@ import (
 )
 
 const (
-	v2Prefix             = "/pd/api/v2"
-	keyspacesPrefix      = "/pd/api/v2/keyspaces"
-	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
+	v2Prefix                = "/pd/api/v2"
+	keyspacesPrefix         = "/pd/api/v2/keyspaces"
+	keyspaceGroupsPrefix    = "/pd/api/v2/tso/keyspace-groups"
+	metaServiceGroupsPrefix = "/pd/api/v2/meta-service-groups"
 )
 
 func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
@@ -116,14 +118,24 @@ func MustCreateKeyspaceByID(re *require.Assertions, server *tests.TestServer, re
 func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspaceParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	checkConfig(re, request.Config, keyspace.IgnoreMetaServiceGroup(meta.Config))
 }
 
 // checkCreateByIDRequest verifies a keyspace meta matches a create request.
 func checkCreateByIDRequest(re *require.Assertions, request *handlers.CreateKeyspaceByIDParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(*request.ID, meta.Id)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
-	re.Equal(request.Config, meta.Config)
+	checkConfig(re, request.Config, keyspace.IgnoreMetaServiceGroup(meta.Config))
+}
+
+// checkConfig verifies that expected config is a subset of actual config
+// This allows for system-generated fields that may be added automatically
+func checkConfig(re *require.Assertions, expected, actual map[string]string) {
+	for key, expectedValue := range expected {
+		actualValue, exists := actual[key]
+		re.True(exists, "Expected config key %s not found in actual config", key)
+		re.Equal(expectedValue, actualValue, "Config value mismatch for key %s", key)
+	}
 }
 
 func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) *keyspacepb.KeyspaceMeta {
@@ -140,6 +152,24 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 	meta := &handlers.KeyspaceMeta{}
 	re.NoError(json.Unmarshal(data, meta))
 	return meta.KeyspaceMeta
+}
+
+func tryUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, name string, request *handlers.UpdateConfigParams) (int, string, *keyspacepb.KeyspaceMeta) {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, string(data), nil
+	}
+	meta := &handlers.KeyspaceMeta{}
+	re.NoError(json.Unmarshal(data, meta))
+	return resp.StatusCode, string(data), meta.KeyspaceMeta
 }
 
 func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
@@ -297,4 +327,114 @@ func MustMergeKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 	data, err = io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+func mustLoadMetaServiceGroups(re *require.Assertions, server *tests.TestServer) []*handlers.MetaServiceGroupStatus {
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+metaServiceGroupsPrefix, http.NoBody)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return groups
+}
+
+func mustPatchMetaServiceGroups(re *require.Assertions, server *tests.TestServer, patch map[string]*string) []*handlers.MetaServiceGroupStatus {
+	data, err := json.Marshal(patch)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return groups
+}
+
+func mustPatchMetaServiceGroupsFail(re *require.Assertions, server *tests.TestServer, patch map[string]*string) {
+	data, err := json.Marshal(patch)
+	re.NoError(err)
+	mustPatchMetaServiceGroupsRawFail(re, server, data)
+}
+
+func mustPatchMetaServiceGroupsRawFail(re *require.Assertions, server *tests.TestServer, body []byte) {
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix, bytes.NewBuffer(body))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusBadRequest, resp.StatusCode)
+}
+
+func mustEnableMetaServiceGroup(re *require.Assertions, server *tests.TestServer, groupID string) {
+	enabled := true
+	mustPatchMetaServiceGroupStatus(re, server, groupID, &keyspace.MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	})
+}
+
+func mustPatchMetaServiceGroupStatus(
+	re *require.Assertions,
+	server *tests.TestServer,
+	groupID string,
+	request *keyspace.MetaServiceGroupStatusPatch,
+) []*handlers.MetaServiceGroupStatus {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix+"/"+groupID+"/status", bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return groups
+}
+
+// MustRemoveKeyspacesFromGroup removes keyspaces from a keyspace group with HTTP API.
+func MustRemoveKeyspacesFromGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32) *endpoint.KeyspaceGroup {
+	params := &handlers.RemoveKeyspacesFromGroupParams{
+		Keyspaces: keyspaceIDs,
+	}
+	data, err := json.Marshal(params)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/keyspaces", groupID), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	respData, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(respData))
+	var kg endpoint.KeyspaceGroup
+	re.NoError(json.Unmarshal(respData, &kg))
+	return &kg
+}
+
+// FailRemoveKeyspacesFromGroupWithCode fails to remove keyspaces from a keyspace group with HTTP API.
+func FailRemoveKeyspacesFromGroupWithCode(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32, expectCode int) {
+	params := &handlers.RemoveKeyspacesFromGroupParams{
+		Keyspaces: keyspaceIDs,
+	}
+	data, err := json.Marshal(params)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/keyspaces", groupID), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	respData, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(expectCode, resp.StatusCode, string(respData))
 }

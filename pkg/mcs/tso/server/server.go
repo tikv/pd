@@ -17,7 +17,9 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"runtime"
@@ -38,6 +40,7 @@ import (
 	"github.com/pingcap/sysutil"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -86,6 +89,12 @@ type Server struct {
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
+
+	// advertiseListenHost is the host part of the advertise listen address
+	advertiseListenHost string
 }
 
 // Implement the following methods defined in bs.Server
@@ -161,6 +170,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
+	s.cgMonitor.StartMonitor(s.Context())
 	return s.startServer()
 }
 
@@ -172,6 +182,7 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing tso server ...")
+	s.cgMonitor.StopMonitor()
 	// close tso service loops in the keyspace group manager
 	s.keyspaceGroupManager.Close()
 	if err := s.serviceRegister.Deregister(); err != nil {
@@ -210,7 +221,7 @@ func (s *Server) IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID uint32) bo
 	}
 	// We need to check if the keyspace group ID is expected for the given keyspace ID.
 	// It is necessary because checkKeyspaceGroupLeadership will correct the keyspace group ID automatically if keyspace serves.
-	_, _, expected, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	_, _, expected, _, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if keyspaceGroupID != expected || err != nil {
 		return false
 	}
@@ -379,10 +390,27 @@ func (s *Server) startServer() (err error) {
 
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
+	addr := cfg.GetAdvertiseListenAddr()
+	parsed, err := url.Parse(addr)
+	advertiseListenHost := ""
+	if err != nil {
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
+			panic(fmt.Sprintf("invalid advertise listen address: %s", addr))
+		}
+		advertiseListenHost = addr
+	} else {
+		advertiseListenHost = parsed.Host
+		if advertiseListenHost == "" {
+			if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+				advertiseListenHost = addr
+			}
+		}
+	}
 	svr := &Server{
-		BaseServer:        server.NewBaseServer(ctx),
-		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		cfg:               cfg,
+		BaseServer:          server.NewBaseServer(ctx),
+		DiagnosticsServer:   sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
+		cfg:                 cfg,
+		advertiseListenHost: advertiseListenHost,
 	}
 	return svr
 }

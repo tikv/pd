@@ -40,7 +40,7 @@ func ExpectedPrimaryPath(p *MsParam) string {
 		if p.GroupID == 0 {
 			return fmt.Sprintf(msTsoDefaultExpectedPrimaryPathFormat, ClusterID())
 		}
-		return fmt.Sprintf(msTsoKespaceExpectedPrimaryPathFormat, ClusterID(), p.GroupID)
+		return fmt.Sprintf(msTsoKeyspaceExpectedPrimaryPathFormat, ClusterID(), p.GroupID)
 	}
 	return fmt.Sprintf(msExpectedPrimaryPathFormat, ClusterID(), p.ServiceName)
 }

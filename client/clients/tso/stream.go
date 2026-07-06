@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
 // TSO Stream Builder Factory
@@ -71,7 +72,7 @@ type pdStreamBuilder struct {
 
 func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
 	done := make(chan struct{})
-	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
+	// TODO: we need to handle a corner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
@@ -90,12 +91,15 @@ func (b *msStreamBuilder) build(
 	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
 ) (*tsoStream, error) {
 	done := make(chan struct{})
-	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
+	// TODO: we need to handle a corner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{
+			stream:   stream,
+			calleeID: grpcutil.GetCalleeID(b.serverURL),
+		}), nil
 	}
 	return nil, err
 }
@@ -154,7 +158,8 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 }
 
 type tsoTSOStreamAdapter struct {
-	stream tsopb.TSO_TsoClient
+	stream   tsopb.TSO_TsoClient
+	calleeID string
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
@@ -164,6 +169,7 @@ func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID 
 			ClusterId:       clusterID,
 			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
+			CalleeId:        s.calleeID,
 		},
 		Count: uint32(count),
 	}
@@ -305,6 +311,7 @@ func (s *tsoStream) processRequests(
 	}
 	s.state.Store(prevState)
 
+	failpoint.InjectCall("pauseAfterTSORequestAttachedToStream")
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid

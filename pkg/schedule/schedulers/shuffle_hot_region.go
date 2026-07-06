@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math/rand/v2"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -139,7 +140,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 		if len(detail.HotPeers) < 1 {
 			continue
 		}
-		i := s.r.Intn(len(detail.HotPeers))
+		i := rand.IntN(len(detail.HotPeers))
 		r := detail.HotPeers[i]
 		// select src region
 		srcRegion := cluster.GetRegion(r.RegionID)
@@ -154,6 +155,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 
 		filters := []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
+			filter.NewHotRegionEvictedTargetFilter(s.GetName()),
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
 			filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 		}
@@ -169,7 +171,7 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 			return nil
 		}
 		// random pick a dest store
-		destStoreID := destStoreIDs[s.r.Intn(len(destStoreIDs))]
+		destStoreID := destStoreIDs[rand.IntN(len(destStoreIDs))]
 		if destStoreID == 0 {
 			return nil
 		}

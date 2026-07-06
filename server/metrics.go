@@ -15,13 +15,11 @@
 package server
 
 import (
-	"math/rand"
-
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 var (
@@ -97,6 +95,13 @@ var (
 			Name:      "tso_proxy_forward_timeout_total",
 			Help:      "Counter of timeouts when tso proxy forwarding tso requests to tso service.",
 		})
+	tsoForwardStreamCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_forward_stream_total",
+			Help:      "Counter of TSO streams forwarded to the independent TSO service.",
+		})
 
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
@@ -105,6 +110,15 @@ var (
 			Name:      "handle_tso_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	tsoBatchSize = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "handle_tso_batch_size",
+			Help:      "Bucketed histogram of the batch size of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
 		})
 
 	queryRegionDuration = prometheus.NewHistogram(
@@ -194,6 +208,8 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration("pd", "server")
+
 	regionRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -212,7 +228,9 @@ func init() {
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
+	prometheus.MustRegister(tsoForwardStreamCounter)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
@@ -224,40 +242,33 @@ func init() {
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(regionRequestCounter)
 }
 
-type requestEvent string
+func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+}
 
-const (
-	requestSuccess requestEvent = "success"
-	requestFailed  requestEvent = "failed"
-)
+func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+}
 
-func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
-	if err == nil && rand.Intn(100) != 0 {
-		// sample 1% region requests to avoid high cardinality
-		return
-	}
+func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
+	return grpcutil.NewMetricsStream(stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration, "report-buckets")
+}
 
-	var (
-		event           = requestSuccess
-		callerID        = header.CallerId
-		callerComponent = header.CallerComponent
-	)
-	if err != nil {
-		log.Warn("region request encounter error",
-			zap.String("method", method),
-			zap.String("caller_id", callerID),
-			zap.String("caller_component", callerComponent),
-			zap.Stringer("error", err))
-		event = requestFailed
+func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+}
+
+func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
+}
+
+func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
+	if stream == nil {
+		return stream
 	}
-	if callerID == "" {
-		callerID = "unknown"
-	}
-	if callerComponent == "" {
-		callerComponent = "unknown"
-	}
-	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
+	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
 }

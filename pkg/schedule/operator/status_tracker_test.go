@@ -192,7 +192,8 @@ func TestAdditionalInfoConcurrent(t *testing.T) {
 			key := fmt.Sprintf("key%d", i)
 			value := fmt.Sprintf("value%d", i)
 			op.SetAdditionalInfo(key, value)
-			if op.GetAdditionalInfo(key) != value {
+			val, ok := op.GetAdditionalInfo(key)
+			if ok && val != value {
 				t.Errorf("unexpected value for key %s", key)
 			}
 		}(i)

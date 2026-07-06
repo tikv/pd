@@ -18,6 +18,8 @@ import (
 	"context"
 	"math"
 	"time"
+
+	"github.com/pingcap/errors"
 )
 
 // Client is the interface for GC client.
@@ -30,6 +32,45 @@ type Client interface {
 	GetGCInternalController(keyspaceID uint32) InternalController
 	// GetGCStatesClient returns the interface for users to access GC states.
 	GetGCStatesClient(keyspaceID uint32) GCStatesClient
+}
+
+// GCStatesAPIOptions represents all options for GC states API.
+//
+//nolint:revive
+type GCStatesAPIOptions struct {
+	ExcludeGCBarriers       bool
+	ExcludeGlobalGCBarriers bool
+}
+
+// DefaultGCStatesAPIOptions returns the default options for GC states API.
+func DefaultGCStatesAPIOptions() GCStatesAPIOptions {
+	return GCStatesAPIOptions{
+		ExcludeGCBarriers:       true,
+		ExcludeGlobalGCBarriers: true,
+	}
+}
+
+// GCStatesAPIOption is the type of option for GC states API.
+//
+//nolint:revive
+type GCStatesAPIOption func(*GCStatesAPIOptions)
+
+// ExcludeGCBarriers controls whether GetGCState and GetAllKeyspacesGCStates should exclude GC barriers.
+// Enabling this can reduce the cost of reading GC states, and is recommended for most use cases.
+// When GC barriers are needed, explicitly set false to this option.
+func ExcludeGCBarriers(whetherToExclude bool) GCStatesAPIOption {
+	return func(opts *GCStatesAPIOptions) {
+		opts.ExcludeGCBarriers = whetherToExclude
+	}
+}
+
+// ExcludeGlobalGCBarriers controls whether GetAllKeyspacesGCStates should exclude global GC barriers.
+// Enabling this can reduce the cost of reading GC states, and is recommended for most use cases.
+// When global GC barriers are needed, explicitly set false to this option.
+func ExcludeGlobalGCBarriers(whetherToExclude bool) GCStatesAPIOption {
+	return func(opts *GCStatesAPIOptions) {
+		opts.ExcludeGlobalGCBarriers = whetherToExclude
+	}
 }
 
 // GCStatesClient is the interface for users to access GC states.
@@ -72,7 +113,7 @@ type GCStatesClient interface {
 	//
 	// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
 	// the NullKeyspace.
-	GetGCState(ctx context.Context) (GCState, error)
+	GetGCState(ctx context.Context, opts ...GCStatesAPIOption) (GCState, error)
 	// SetGlobalGCBarrier sets a global GC barrier, which blocks GC like how GC barriers do, but is effective for all
 	// keyspaces. This API is designed for some special needs to block GC of all keyspaces.
 	//
@@ -105,11 +146,11 @@ type GCStatesClient interface {
 	SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GlobalGCBarrierInfo, error)
 	// DeleteGlobalGCBarrier deletes a global GC barrier.
 	DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*GlobalGCBarrierInfo, error)
-	// Get the GC states from all keyspaces.
+	// GetAllKeyspacesGCStates gets GC states from all keyspaces.
 	// The return value includes both GC states and global GC barriers information.
 	// If a keyspace's state is not ENABLED(like DISABLE/ARCHIVED/TOMBSTONE), that keyspace is skipped.
 	// If a keyspace is not configured with keyspace level GC, its GCState data is missing.
-	GetAllKeyspacesGCStates(ctx context.Context) (ClusterGCStates, error)
+	GetAllKeyspacesGCStates(ctx context.Context, opts ...GCStatesAPIOption) (ClusterGCStates, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -245,16 +286,102 @@ func (b *GlobalGCBarrierInfo) isExpiredImpl(now time.Time) bool {
 //nolint:revive
 type GCState struct {
 	// The ID of the keyspace this GC state belongs to.
-	KeyspaceID   uint32
-	TxnSafePoint uint64
-	GCSafePoint  uint64
-	GCBarriers   []*GCBarrierInfo
+	KeyspaceID    uint32
+	TxnSafePoint  uint64
+	GCSafePoint   uint64
+	hasGCBarriers bool
+	gcBarriers    []*GCBarrierInfo
+}
+
+// NewGCStateWithoutGCBarriers creates a GCState instance without GC barriers info.
+func NewGCStateWithoutGCBarriers(keyspaceID uint32, txnSafePoint uint64, gcSafePoint uint64) GCState {
+	return GCState{
+		KeyspaceID:    keyspaceID,
+		TxnSafePoint:  txnSafePoint,
+		GCSafePoint:   gcSafePoint,
+		hasGCBarriers: false,
+		gcBarriers:    nil,
+	}
+}
+
+// NewGCStateWithGCBarriers creates a GCState instance with GC barriers info.
+func NewGCStateWithGCBarriers(keyspaceID uint32, txnSafePoint uint64, gcSafePoint uint64, gcBarriers []*GCBarrierInfo) GCState {
+	return GCState{
+		KeyspaceID:    keyspaceID,
+		TxnSafePoint:  txnSafePoint,
+		GCSafePoint:   gcSafePoint,
+		hasGCBarriers: true,
+		gcBarriers:    gcBarriers,
+	}
+}
+
+// HasGCBarriers returns whether the GCState instance carries GC barriers info. Note that valid GC barriers info
+// can be empty.
+func (s GCState) HasGCBarriers() bool {
+	return s.hasGCBarriers
+}
+
+// GetGCBarriers retrieves GC barriers from the GCState instance, or returns an error if it doesn't carry any GC barrier
+// info.
+func (s GCState) GetGCBarriers() ([]*GCBarrierInfo, error) {
+	if !s.HasGCBarriers() {
+		return nil, errors.New("trying to get GC barriers from GCState that doesn't provide GC barriers info. " +
+			"to retrieve GC barriers, pass false to excludeGCBarriers parameter to GC APIs")
+	}
+	return s.gcBarriers, nil
 }
 
 // ClusterGCStates represents the information of the GC state for all keyspaces.
 type ClusterGCStates struct {
 	// Maps from keyspace id to GC state of that keyspace.
-	GCStates map[uint32]GCState
-	// All existing global GC barriers.
-	GlobalGCBarriers []*GlobalGCBarrierInfo
+	GCStates            map[uint32]GCState
+	hasGlobalGCBarriers bool
+	globalGCBarriers    []*GlobalGCBarrierInfo
+}
+
+// NewClusterGCStatesWithoutGlobalGCBarriers creates a ClusterGCStates instance without global GC barriers info.
+func NewClusterGCStatesWithoutGlobalGCBarriers(gcStates map[uint32]GCState) ClusterGCStates {
+	return ClusterGCStates{
+		GCStates:            gcStates,
+		hasGlobalGCBarriers: false,
+		globalGCBarriers:    nil,
+	}
+}
+
+// NewClusterGCStatesWithGlobalGCBarriers creates a ClusterGCStates instance with global GC barriers info.
+func NewClusterGCStatesWithGlobalGCBarriers(gcStates map[uint32]GCState, globalGCBarriers []*GlobalGCBarrierInfo) ClusterGCStates {
+	return ClusterGCStates{
+		GCStates:            gcStates,
+		hasGlobalGCBarriers: true,
+		globalGCBarriers:    globalGCBarriers,
+	}
+}
+
+// HasGlobalGCBarriers returns whether the ClusterGCStates instance carries global GC barriers info. Note that valid
+// global GC barriers info can be empty.
+func (s ClusterGCStates) HasGlobalGCBarriers() bool {
+	return s.hasGlobalGCBarriers
+}
+
+// GetGlobalGCBarriers retrieves global GC barriers from the ClusterGCStates instance, or returns an error if it doesn't
+// carry any global GC barrier info.
+func (s ClusterGCStates) GetGlobalGCBarriers() ([]*GlobalGCBarrierInfo, error) {
+	if !s.HasGlobalGCBarriers() {
+		return nil, errors.New("trying to get global GC barriers from ClusterGCStates that doesn't provide global GC barriers info. " +
+			"to retrieve global GC barriers, pass false to excludeGlobalGCBarriers parameter to GC APIs")
+	}
+	return s.globalGCBarriers, nil
+}
+
+// LegacyClientV2 is the GC client interface for legacy PD servers using (old) GC API V2.
+// Used to migrate legacy PD servers which do not support the "new GC API" for multi-tenant usage (e.g. TiCDC nextgen).
+// This interface is intentionally not added to RPCClient to avoid misuse or breaking existing stub and mock implementations.
+// Will be removed after the migration is done.
+type LegacyClientV2 interface {
+	// GetMinServiceSafePointV2 returns the current minimum service GC safe point for the given keyspace.
+	GetMinServiceSafePointV2(ctx context.Context, keyspaceID uint32) (uint64, error)
+	// SetServiceSafePointV2 updates a service GC safe point for the given keyspace and returns the new minimum safe point.
+	SetServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// DeleteServiceSafePointV2 deletes a service GC safe point for the given keyspace and returns the new minimum safe point.
+	DeleteServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string) (uint64, error)
 }

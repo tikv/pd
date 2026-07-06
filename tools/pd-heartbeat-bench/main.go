@@ -18,7 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -274,7 +274,7 @@ func (s *Stores) update(rs *utils.Regions) {
 }
 
 func main() {
-	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
+	rand.New(rand.NewPCG(0, 0)) // Ensure consistent behavior multiple times
 	statistics.DisableDenoising()
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
