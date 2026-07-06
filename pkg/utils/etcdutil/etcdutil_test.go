@@ -467,17 +467,16 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
-func (suite *loopWatcherTestSuite) TestPostLoadRevisionHook() {
+func (suite *loopWatcherTestSuite) TestGetLoadedRevision() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	key := "TestPostLoadRevisionHook"
+	key := "TestGetLoadedRevision"
 	resp, err := suite.client.Put(ctx, key, "")
 	re.NoError(err)
 	targetRevision := resp.Header.Revision
 
-	var loadedRevision atomic.Int64
 	watcher := NewLoopWatcher(
 		ctx,
 		&suite.wg,
@@ -490,13 +489,10 @@ func (suite *loopWatcherTestSuite) TestPostLoadRevisionHook() {
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
-	watcher.SetPostLoadRevisionHook(func(revision int64) {
-		loadedRevision.Store(revision)
-	})
 	watcher.StartWatchLoop()
 	err = watcher.WaitLoad()
 	re.NoError(err)
-	re.GreaterOrEqual(loadedRevision.Load(), targetRevision)
+	re.GreaterOrEqual(watcher.GetLoadedRevision(), targetRevision)
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
