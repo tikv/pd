@@ -953,6 +953,28 @@ func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Oper
 	re.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)
 }
 
+func (suite *operatorControllerTestSuite) TestRemoveAllOperatorsClearsWaitingOperators() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+
+	op1 := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, TransferLeader{ToStore: 2})
+	op2 := NewTestOperator(2, &metapb.RegionEpoch{}, OpLeader, TransferLeader{ToStore: 2})
+	controller.wop.PutOperator(op1)
+	controller.wop.PutOperator(op2)
+	controller.wopStatus.incCount(op1.Desc())
+	controller.wopStatus.incCount(op2.Desc())
+	re.Len(controller.GetWaitingOperators(), 2)
+
+	controller.RemoveAllOperators(AdminStop)
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.GetWaitingOperators())
+	re.True(op1.IsEnd())
+	re.True(op2.IsEnd())
+}
+
 func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
