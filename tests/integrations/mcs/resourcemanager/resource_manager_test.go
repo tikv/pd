@@ -1932,19 +1932,21 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	// test fallback for nil.
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 
-	// modify `Default` to check fallback.
-	resp, err = cli.ModifyResourceGroup(suite.ctx, &rmpb.ResourceGroup{
+	// Modify `Default` to check fallback. Start the controller watch loop
+	// asynchronously, so retry the update until the local cache observes it.
+	defaultGroup := &rmpb.ResourceGroup{
 		Name: server.DefaultResourceGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &rmpb.GroupRequestUnitSettings{
 			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{}},
 		},
 		BackgroundSettings: &rmpb.BackgroundSettings{JobTypes: []string{"lightning", "ddl"}},
-	})
-	re.NoError(err)
-	re.Contains(resp, "Success!")
-	// wait for watch event modify.
+	}
 	testutil.Eventually(re, func() bool {
+		resp, err = cli.ModifyResourceGroup(suite.ctx, defaultGroup)
+		if err != nil || !strings.Contains(resp, "Success!") {
+			return false
+		}
 		meta := c.GetActiveResourceGroup(server.DefaultResourceGroupName)
 		if meta != nil && meta.BackgroundSettings != nil {
 			return len(meta.BackgroundSettings.JobTypes) == 2
