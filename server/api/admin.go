@@ -154,8 +154,8 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 		h.rd.JSON(w, http.StatusOK, "All regions are removed from follower cache and the follower starts to resync regions from leader.")
 		return
 	}
-	rc.ResetRegionCache()
 	rc.ResetPrepared()
+	rc.ResetRegionCache()
 	msg := "All regions are removed from server cache."
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer()

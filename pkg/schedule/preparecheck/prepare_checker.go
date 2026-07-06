@@ -99,7 +99,8 @@ func (checker *Checker) SetPrepared() {
 	checker.prepared = true
 }
 
-// ResetPrepared is for test purpose
+// ResetPrepared resets the checker so scheduling pauses until cluster
+// information is collected again after the region cache is reset.
 func (checker *Checker) ResetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()

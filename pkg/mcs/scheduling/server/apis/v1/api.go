@@ -383,8 +383,8 @@ func deleteAllRegionCache(c *gin.Context) {
 		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
 		return
 	}
-	cluster.ResetRegionCache()
 	cluster.ResetPrepared()
+	cluster.ResetRegionCache()
 	c.String(http.StatusOK, "All regions are removed from server cache.")
 }
 

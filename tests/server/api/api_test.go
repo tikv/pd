@@ -1759,6 +1759,7 @@ func TestDeleteAllRegionCacheScheduling(t *testing.T) {
 	addr := leaderServer.GetAddr() + "/pd/api/v1/admin/cache/regions"
 	output := sendRequest(re, addr, http.MethodDelete, http.StatusOK)
 	re.Contains(string(output), "All regions are removed from server cache")
+	re.False(rc.GetCoordinator().GetPrepareChecker().IsPrepared())
 	rc.GetOperatorController().RemoveOperators()
 	re.Equal(0, int(rc.GetOperatorController().OperatorCount(operator.OpSplit)))
 
