@@ -452,6 +452,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				switched            atomic.Bool
 				okBefore, okAfter   int64
 				errBefore, errAfter int64
+				degradedAfter       int64
 			)
 
 			go func() {
@@ -465,7 +466,9 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 					}
 					req := controller.NewTestRequestInfo(false, 0, 0, controller.AccessUnknown)
 					res := controller.NewTestResponseInfo(0, 0, true)
-					_, _, _, _, err := rgController.OnRequestWait(workCtx, group.Name, req)
+					reqCtx, reqCancel := context.WithTimeout(workCtx, 2*time.Second)
+					_, _, _, _, err := rgController.OnRequestWait(reqCtx, group.Name, req)
+					reqCancel()
 					if err != nil {
 						if switched.Load() {
 							atomic.AddInt64(&errAfter, 1)
@@ -475,8 +478,9 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 						continue
 					}
 					if switched.Load() {
-						if !rgController.IsDegraded() {
-							atomic.AddInt64(&okAfter, 1)
+						atomic.AddInt64(&okAfter, 1)
+						if rgController.IsDegraded() {
+							atomic.AddInt64(&degradedAfter, 1)
 						}
 					} else {
 						atomic.AddInt64(&okBefore, 1)
@@ -533,6 +537,7 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 				zap.Int64("errBefore", atomic.LoadInt64(&errBefore)),
 				zap.Int64("okAfter", atomic.LoadInt64(&okAfter)),
 				zap.Int64("errAfter", atomic.LoadInt64(&errAfter)),
+				zap.Int64("degradedAfter", atomic.LoadInt64(&degradedAfter)),
 			)
 		})
 	}
