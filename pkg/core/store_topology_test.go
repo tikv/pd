@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 )
 
@@ -144,6 +145,19 @@ func TestTopologyWeightWithEmptyStoreLabelValue(t *testing.T) {
 	_ = GetStoreTopoWeight(store, []*StoreInfo{store}, []string{"zone"}, 3)
 
 	re.Equal("zone", store.GetLabels()[0].Key)
+	re.Equal("", store.GetLabels()[0].Value)
+}
+
+func TestTopologyWeightWithNoEligibleStores(t *testing.T) {
+	re := require.New(t)
+
+	store := NewStoreInfoWithLabel(1, map[string]string{"zone": "z1"}).Clone(SetStoreState(metapb.StoreState_Tombstone))
+
+	var weight float64
+	re.NotPanics(func() {
+		weight = GetStoreTopoWeight(store, []*StoreInfo{store}, []string{"zone"}, 3)
+	})
+	re.Equal(1.0, weight)
 }
 
 func TestTopologyWeightWithManyLocationLabels(t *testing.T) {
@@ -195,9 +209,7 @@ func BenchmarkBuildTopology(b *testing.B) {
 			b.ReportAllocs()
 
 			for range b.N {
-				topology := getTopology()
-				buildTopology(
-					topology,
+				topology, _, _, _ := buildTopology(
 					stores[0],
 					stores,
 					locationLabels,

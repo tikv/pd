@@ -24,9 +24,8 @@ import (
 
 // GetStoreTopoWeight calculates the topology weight of a store based on its labels and the labels of other stores.
 func GetStoreTopoWeight(store *StoreInfo, stores []*StoreInfo, locationLabels []string, count int) float64 {
-	topology := getTopology()
+	topology, validLabels, sameLocationStoreNum, isMatch := buildTopology(store, stores, locationLabels, count)
 	defer putTopology(topology)
-	validLabels, sameLocationStoreNum, isMatch := buildTopology(topology, store, stores, locationLabels, count)
 	weight := 1.0
 	topo := topology
 	if isMatch {
@@ -49,13 +48,11 @@ func GetStoreTopoWeight(store *StoreInfo, stores []*StoreInfo, locationLabels []
 	return weight / sameLocationStoreNum
 }
 
-var (
-	storeLabelPool = sync.Pool{
-		New: func() any {
-			return &metapb.StoreLabel{}
-		},
-	}
-)
+var storeLabelPool = sync.Pool{
+	New: func() any {
+		return &metapb.StoreLabel{}
+	},
+}
 
 // LabelPairs is pre-allocated buffer for sorting labels.
 type LabelPairs struct {
@@ -135,10 +132,12 @@ var (
 )
 
 // buildTopology builds the store topology graph and returns:
+// - topology: pooled store topology map
 // - validLabels: filtered valid location labels
 // - sameLocationStoreNum: number of stores in the same location
 // - isMatch: whether the location matches exactly
-func buildTopology(topology map[string]any, s *StoreInfo, stores []*StoreInfo, locationLabels []string, count int) ([]string, float64, bool) {
+func buildTopology(s *StoreInfo, stores []*StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
+	topology := getTopology()
 	labelCount := labelCountPool.Get().(*[]int)
 	defer labelCountPool.Put(labelCount)
 
@@ -164,6 +163,10 @@ func buildTopology(topology map[string]any, s *StoreInfo, stores []*StoreInfo, l
 	validLabels := locationLabels
 	var isMatch bool
 	for i, c := range *labelCount {
+		if c == 0 {
+			validLabels = validLabels[:i]
+			break
+		}
 		if count/c == 0 {
 			validLabels = validLabels[:i]
 			break
@@ -184,7 +187,7 @@ func buildTopology(topology map[string]any, s *StoreInfo, stores []*StoreInfo, l
 		}
 	}
 
-	return validLabels, sameLocationStoreNum, isMatch
+	return topology, validLabels, sameLocationStoreNum, isMatch
 }
 
 // updateTopology records stores' topology in the `topology` variable.
