@@ -942,7 +942,6 @@ func (c *Cluster) SetPrepared() {
 // ResetPrepared reset the prepare checker.
 func (c *Cluster) ResetPrepared() {
 	c.coordinator.GetPrepareChecker().ResetPrepared()
-	c.coordinator.GetOperatorController().RemoveAllOperators(operator.AdminStop)
 }
 
 // IsSchedulingHalted returns whether the scheduling is halted.

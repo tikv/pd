@@ -29,7 +29,6 @@ type WaitingOperator interface {
 	PutMergeOperators(op []*Operator)
 	GetOperator() []*Operator
 	ListOperator() []*Operator
-	Clear() []*Operator
 }
 
 // bucket is used to maintain the operators created by a specific scheduler.
@@ -92,20 +91,6 @@ func (b *randBuckets) ListOperator() []*Operator {
 		bucket := b.buckets[i]
 		ops = append(ops, bucket.ops...)
 	}
-	return ops
-}
-
-// Clear removes all operators from the random buckets and returns them.
-func (b *randBuckets) Clear() []*Operator {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	var ops []*Operator
-	for i := range b.buckets {
-		bucket := b.buckets[i]
-		ops = append(ops, bucket.ops...)
-		bucket.ops = nil
-	}
-	b.totalWeight = 0
 	return ops
 }
 
@@ -179,10 +164,4 @@ func (s *waitingOperatorStatus) getCount(kind string) uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.ops[kind]
-}
-
-func (s *waitingOperatorStatus) clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ops = make(map[string]uint64)
 }

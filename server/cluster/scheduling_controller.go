@@ -488,11 +488,7 @@ func (sc *schedulingController) SetPrepared() {
 func (sc *schedulingController) ResetPrepared() {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	if sc.coordinator == nil {
-		return
-	}
 	sc.coordinator.GetPrepareChecker().ResetPrepared()
-	sc.coordinator.GetOperatorController().RemoveAllOperators(operator.AdminStop)
 }
 
 // IsSchedulingControllerRunning returns whether the scheduling controller is running. Only for test purpose.
