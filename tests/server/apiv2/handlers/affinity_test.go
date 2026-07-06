@@ -141,10 +141,24 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 
 func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
 	var result handlers.AffinityGroupsResponse
+	var lastBody []byte
+	var lastErr error
+	var lastStatusCode int
 	testutil.Eventually(re, func() bool {
 		result = handlers.AffinityGroupsResponse{}
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &result)
-		if err != nil || len(result.AffinityGroups) != len(groupIDs) {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		if err != nil {
+			lastErr = err
+			return false
+		}
+		defer resp.Body.Close()
+		lastStatusCode = resp.StatusCode
+		lastBody, lastErr = io.ReadAll(resp.Body)
+		if lastErr != nil || resp.StatusCode != http.StatusOK {
+			return false
+		}
+		lastErr = json.Unmarshal(lastBody, &result)
+		if lastErr != nil || len(result.AffinityGroups) != len(groupIDs) {
 			return false
 		}
 		for _, groupID := range groupIDs {
@@ -154,6 +168,11 @@ func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...strin
 		}
 		return true
 	})
+	re.NoError(lastErr)
+	re.Equal(http.StatusOK, lastStatusCode, "resp: "+string(lastBody))
+	for _, groupID := range groupIDs {
+		re.Contains(result.AffinityGroups, groupID)
+	}
 }
 
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
