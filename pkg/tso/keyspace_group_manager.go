@@ -548,6 +548,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			}
 		})
 		kgm.updateKeyspaceGroup(group)
+		kgm.SetModRevision(uint64(kv.ModRevision))
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
 		}
@@ -573,12 +574,14 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
-		if len(event) > 0 {
-			last := event[len(event)-1]
-			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
+		for _, e := range event {
+			if e.Type != clientv3.EventTypeDelete {
+				continue
+			}
+			if !kgm.SetModRevision(uint64(e.Kv.ModRevision)) {
 				log.Warn("watch keyspace group met mod revision not increased",
 					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
-					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
+					zap.Uint64("new-mod-revision", uint64(e.Kv.ModRevision)),
 				)
 			}
 		}
