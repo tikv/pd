@@ -272,6 +272,9 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 		return nil, true
 	}
 	op := opi.(*Operator)
+	if op != item.op {
+		return nil, true
+	}
 	// Check the operator lightly. It cant't dispatch the op for some scenario.
 	var reason CancelReasonType
 	r, reason = oc.checkOperatorLightly(op)
@@ -702,6 +705,7 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 		}
 		oc.buryOperator(op)
 	}
+	oc.opNotifierQueue.clear()
 	oc.dispatchWg.Wait()
 }
 

@@ -1002,14 +1002,16 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
 		re.True(ok)
 		re.Equal(string(AdminStop), reason)
 	}
+	re.Equal(0, controller.opNotifierQueue.len())
 	region, next := controller.pollNeedDispatchRegion()
 	re.Nil(region)
-	re.True(next)
+	re.False(next)
 
 	newWaitingOp := newTransferLeaderOp(2)
 	added := controller.AddWaitingOperator(newWaitingOp)
 	re.Equal(1, added)
 	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
+	re.Equal(1, controller.opNotifierQueue.len())
 }
 
 func (suite *operatorControllerTestSuite) TestCancelAllOperatorsPreventsStaleDispatch() {
@@ -1055,6 +1057,28 @@ func (suite *operatorControllerTestSuite) TestCancelAllOperatorsPreventsStaleDis
 	}
 	re.Equal(CANCELED, op.Status())
 	re.Zero(reflect.ValueOf(stream).Elem().FieldByName("msgCh").Len())
+}
+
+func (suite *operatorControllerTestSuite) TestPollNeedDispatchRegionDropsStaleNotifierEntry() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 0)
+	region := cluster.AddLeaderRegion(1, 1, 2)
+
+	oldOp := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	newOp := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(newOp.Start())
+	controller.SetOperator(newOp)
+	controller.opNotifierQueue.push(&operatorWithTime{op: oldOp, time: time.Now()})
+
+	region, next := controller.pollNeedDispatchRegion()
+	re.Nil(region)
+	re.True(next)
+	re.Equal(0, controller.opNotifierQueue.len())
 }
 
 func (suite *operatorControllerTestSuite) TestCancelAllOperatorsWaitsPromotingOperator() {
