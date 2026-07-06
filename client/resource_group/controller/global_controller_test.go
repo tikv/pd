@@ -448,6 +448,96 @@ func TestGetResourceGroup(t *testing.T) {
 	re.Nil(gc02)
 }
 
+func TestGetResourceGroupRuntimeState(t *testing.T) {
+	testCases := []struct {
+		name                            string
+		responseBurstLimit              int64
+		sendResponse                    bool
+		resourceGroupName               string
+		expectOK                        bool
+		expectResourceGroupRuntimeState ResourceGroupRuntimeState
+	}{
+		{
+			name:              "unknown before first token response",
+			resourceGroupName: "test-group",
+		},
+		{
+			name:               "unlimited response remains burstable",
+			responseBurstLimit: -1,
+			sendResponse:       true,
+			resourceGroupName:  "test-group",
+			expectOK:           true,
+		},
+		{
+			name:               "override limited burst from token response",
+			responseBurstLimit: 100,
+			sendResponse:       true,
+			resourceGroupName:  "test-group",
+			expectOK:           true,
+			expectResourceGroupRuntimeState: ResourceGroupRuntimeState{
+				HasLimitedBurst: true,
+			},
+		},
+		{
+			name:               "unknown resource group",
+			responseBurstLimit: 100,
+			sendResponse:       true,
+			resourceGroupName:  "unknown",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+
+			group := &rmpb.ResourceGroup{
+				Name: "test-group",
+				Mode: rmpb.GroupMode_RUMode,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   1000,
+							BurstLimit: -1,
+						},
+					},
+				},
+			}
+			gc, err := newGroupCostController(group, 1001, DefaultRUConfig(), make(chan notifyMsg), make(chan *groupCostController))
+			re.NoError(err)
+
+			controller := &ResourceGroupsController{}
+			controller.groupsController.Store(group.Name, gc)
+
+			if tc.sendResponse {
+				controller.handleTokenBucketResponse([]*rmpb.TokenBucketResponse{
+					{
+						ResourceGroupName: group.Name,
+						GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+							{
+								GrantedTokens: &rmpb.TokenBucket{
+									Settings: &rmpb.TokenLimitSettings{
+										FillRate:   1000,
+										BurstLimit: tc.responseBurstLimit,
+									},
+									Tokens: 1000,
+								},
+							},
+						},
+					},
+				})
+				// Mirror the main loop, which refreshes the derived state
+				// (e.g. burstable) after handling token bucket responses.
+				gc.updateRunState()
+				gc.updateAvgRequestResourcePerSec()
+			}
+
+			state, ok := controller.GetResourceGroupRuntimeState(tc.resourceGroupName)
+			re.Equal(tc.expectOK, ok)
+			re.Equal(tc.expectResourceGroupRuntimeState, state)
+		})
+	}
+}
+
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

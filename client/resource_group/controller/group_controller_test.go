@@ -120,7 +120,7 @@ func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
 	now := time.Now()
 
 	gc.run.consumption.RRU = 1
-	gc.run.initialRequestCompleted = true
+	gc.initialRequestCompleted.Store(true)
 	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.now = now
 
