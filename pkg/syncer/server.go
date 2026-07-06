@@ -73,53 +73,33 @@ type regionSyncStream struct {
 		syncutil.Mutex
 		ServerStream
 	}
-	// sendMu serializes the logical send flow and protects sendIndex.
+	// sendMu serializes the logical send flow.
 	sendMu struct {
-		syncutil.Mutex
-		sendIndex uint64
+		sync.Mutex
 	}
-	notifyCh chan bool
-	done     chan struct{}
-	once     sync.Once
+	sendIndex atomic.Uint64
+	notifyCh  chan bool
+	done      chan struct{}
+	once      sync.Once
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
-	return &regionSyncStream{
+	syncStream := &regionSyncStream{
 		stream: struct {
 			syncutil.Mutex
 			ServerStream
 		}{
 			ServerStream: stream,
 		},
-		sendMu: struct {
-			syncutil.Mutex
-			sendIndex uint64
-		}{
-			sendIndex: startIndex,
-		},
 		notifyCh: make(chan bool, 1),
 		done:     make(chan struct{}),
 	}
+	syncStream.sendIndex.Store(startIndex)
+	return syncStream
 }
 
 func (s *regionSyncStream) getSendIndex() uint64 {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.getSendIndexLocked()
-}
-
-func (s *regionSyncStream) getSendIndexLocked() uint64 {
-	return s.sendMu.sendIndex
-}
-
-func (s *regionSyncStream) advanceSendIndex(count int) {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	s.advanceSendIndexLocked(count)
-}
-
-func (s *regionSyncStream) advanceSendIndexLocked(count int) {
-	s.sendMu.sendIndex += uint64(count)
+	return s.sendIndex.Load()
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -142,12 +122,6 @@ func (s *regionSyncStream) checkOpen() error {
 	default:
 		return nil
 	}
-}
-
-func (s *regionSyncStream) send(regions *pdpb.SyncRegionResponse) error {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	return s.sendStream(regions)
 }
 
 func (s *regionSyncStream) sendStreamIfOpen(regions *pdpb.SyncRegionResponse) error {
@@ -236,11 +210,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	keepAliveTicker := time.NewTicker(syncerKeepAliveInterval)
 	shrinkTicker := time.NewTicker(historyBufferShrinkInterval)
 
-	processRegion := func(region *core.RegionInfo) {
-		records = append(records, region)
-		s.history.record(region)
-	}
-
 	defer func() {
 		keepAliveTicker.Stop()
 		shrinkTicker.Stop()
@@ -261,24 +230,75 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		case first := <-regionNotifier:
 			failpoint.InjectCall("syncRegionChannelFull")
 
-			processRegion(first)
+			records = append(records, first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
-					processRegion(region)
+					records = append(records, region)
 				default:
 					break loop
 				}
 			}
+			s.appendHistoryRecords(records)
 			s.broadcast(ctx, records, false)
 		case <-shrinkTicker.C:
+			s.observeDownstreamReplayWindow(0)
 			s.history.maybeShrink()
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
 		}
 		records = records[:0]
 	}
+}
+
+func (s *RegionSyncer) appendHistoryRecords(records []*core.RegionInfo) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.observeDownstreamReplayWindowLocked(uint64(len(records)))
+	s.history.record(records...)
+}
+
+func (s *RegionSyncer) observeDownstreamReplayWindow(appendCount uint64) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.observeDownstreamReplayWindowLocked(appendCount)
+}
+
+func (s *RegionSyncer) observeDownstreamReplayWindowLocked(appendCount uint64) {
+	minSendIndex, ok := s.minDownstreamSendIndexLocked()
+	if !ok {
+		return
+	}
+	endIndex := s.history.getNextIndex() + appendCount
+	if minSendIndex >= endIndex {
+		return
+	}
+	s.history.observeRequiredWindow(endIndex - minSendIndex)
+}
+
+func (s *RegionSyncer) minDownstreamSendIndex() (uint64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.minDownstreamSendIndexLocked()
+}
+
+func (s *RegionSyncer) minDownstreamSendIndexLocked() (uint64, bool) {
+	var minIndex uint64
+	var ok bool
+	for _, stream := range s.mu.streams {
+		select {
+		case <-stream.done:
+			continue
+		default:
+		}
+		sendIndex := stream.getSendIndex()
+		if !ok || sendIndex < minIndex {
+			minIndex = sendIndex
+			ok = true
+		}
+	}
+	return minIndex, ok
 }
 
 // GetAllDownstreamNames tries to get the all bind stream's name.
@@ -545,7 +565,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
 			return err
 		}
-		syncStream.advanceSendIndexLocked(len(records))
+		syncStream.sendIndex.Add(uint64(len(records)))
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
@@ -614,7 +634,7 @@ func (s *RegionSyncer) sendDownstream(ctx context.Context, name string, stream *
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-		StartIndex: stream.getSendIndexLocked(),
+		StartIndex: stream.getSendIndex(),
 	}
 	if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 		return errors.Errorf("send region sync keepalive failed")
@@ -636,7 +656,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		}
 		s.mu.RUnlock()
 
-		sendIndex := stream.getSendIndexLocked()
+		sendIndex := stream.getSendIndex()
 		firstIndex := s.history.getFirstIndex()
 		if sendIndex < firstIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
@@ -660,7 +680,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 		if !s.sendRegionSyncResponse(ctx, name, stream, resp) {
 			return sentRecords, errors.Errorf("send region sync response failed")
 		}
-		stream.advanceSendIndexLocked(len(records))
+		stream.sendIndex.Add(uint64(len(records)))
 		sentRecords = true
 	}
 }

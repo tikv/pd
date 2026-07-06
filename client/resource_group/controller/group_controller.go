@@ -87,13 +87,12 @@ type groupCostController struct {
 		lastRequestConsumption *rmpb.Consumption
 		lastRequestSettlement  *rmpb.Consumption
 
-		// initialRequestCompleted is set to true when the first token bucket
-		// request completes successfully.
-		initialRequestCompleted bool
-
 		requestUnitTokens *tokenCounter
 	}
 
+	// initialRequestCompleted is set to true when the first token bucket
+	// request completes successfully.
+	initialRequestCompleted atomic.Bool
 	// tombstone is set to true when the resource group is deleted.
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
@@ -393,7 +392,7 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
-	if !gc.run.initialRequestCompleted {
+	if !gc.initialRequestCompleted.Load() {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
@@ -420,7 +419,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
 	gc.handleRUTokenResponse(resp)
-	gc.run.initialRequestCompleted = true
+	gc.initialRequestCompleted.Store(true)
 }
 
 func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketResponse) {

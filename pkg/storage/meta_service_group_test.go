@@ -20,48 +20,49 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 type metaServiceGroupTestCase struct {
-	id            string
-	delta         int
-	expectedCount int
+	id       string
+	status   *endpoint.MetaServiceGroupStatus
+	expected *endpoint.MetaServiceGroupStatus
 }
 
 func mustRunTestCase(re *require.Assertions, store Storage, testCase metaServiceGroupTestCase) {
 	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		return store.IncrementAssignmentCount(txn, testCase.id, testCase.delta)
+		return store.SaveMetaServiceGroupStatus(txn, testCase.id, testCase.status)
 	}))
-	var currentCount int
+	var currentStatus *endpoint.MetaServiceGroupStatus
 	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		assignmentCount, err := store.GetAssignmentCount(txn, map[string]string{testCase.id: ""})
+		status, err := store.LoadMetaServiceGroupStatus(txn, map[string]string{testCase.id: ""})
 		if err != nil {
 			return err
 		}
-		currentCount = assignmentCount[testCase.id]
+		currentStatus = status[testCase.id]
 		return nil
 	}))
-	re.Equal(testCase.expectedCount, currentCount)
+	re.Equal(testCase.expected, currentStatus)
 }
 
-func checkAssignmentCount(re *require.Assertions, store Storage, expectedAssignment map[string]int) {
+func checkStatus(re *require.Assertions, store Storage, expectedStatus map[string]*endpoint.MetaServiceGroupStatus) {
 	var (
-		currentAssignment map[string]int
-		err               error
+		currentStatus map[string]*endpoint.MetaServiceGroupStatus
+		err           error
 	)
 	groups := make(map[string]string)
-	for id := range expectedAssignment {
+	for id := range expectedStatus {
 		groups[id] = ""
 	}
 	re.NoError(store.RunInTxn(context.TODO(), func(txn kv.Txn) error {
-		currentAssignment, err = store.GetAssignmentCount(txn, groups)
+		currentStatus, err = store.LoadMetaServiceGroupStatus(txn, groups)
 		if err != nil {
 			return err
 		}
 		return nil
 	}))
-	re.Equal(expectedAssignment, currentAssignment)
+	re.Equal(expectedStatus, currentStatus)
 }
 
 func TestMetaServiceGroupStorage(t *testing.T) {
@@ -70,55 +71,55 @@ func TestMetaServiceGroupStorage(t *testing.T) {
 
 	testCases := []metaServiceGroupTestCase{
 		{
-			id:            "group1",
-			delta:         1,
-			expectedCount: 1,
+			id:       "group1",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: true},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: true},
 		},
 		{
-			id:            "group1",
-			delta:         1,
-			expectedCount: 2,
+			id:       "group1",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 2, Enabled: true},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 2, Enabled: true},
 		},
 		{
-			id:            "group2",
-			delta:         1,
-			expectedCount: 1,
+			id:       "group2",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: false},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: false},
 		},
 		{
-			id:            "group1",
-			delta:         -1,
-			expectedCount: 1,
+			id:       "group1",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: false},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: false},
 		},
 		{
-			id:            "group3",
-			delta:         100,
-			expectedCount: 100,
+			id:       "group3",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 100, Enabled: true},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 100, Enabled: true},
 		},
 		{
-			id:            "group3",
-			delta:         -1,
-			expectedCount: 99,
+			id:       "group3",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 99, Enabled: true},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 99, Enabled: true},
 		},
 		{
-			id:            "group1",
-			delta:         -1,
-			expectedCount: 0,
+			id:       "group1",
+			status:   &endpoint.MetaServiceGroupStatus{AssignmentCount: 0, Enabled: false},
+			expected: &endpoint.MetaServiceGroupStatus{AssignmentCount: 0, Enabled: false},
 		},
 	}
-	result := map[string]int{
-		"group1": 0,
-		"group2": 1,
-		"group3": 99,
+	result := map[string]*endpoint.MetaServiceGroupStatus{
+		"group1": {AssignmentCount: 0, Enabled: false},
+		"group2": {AssignmentCount: 1, Enabled: false},
+		"group3": {AssignmentCount: 99, Enabled: true},
 	}
-	checkAssignmentCount(re, store, map[string]int{})
+	checkStatus(re, store, map[string]*endpoint.MetaServiceGroupStatus{})
 	for testCase := range testCases {
 		mustRunTestCase(re, store, testCases[testCase])
 	}
-	checkAssignmentCount(re, store, result)
-	// should treat extra groups as having 0 assignment.
-	extraGroups := map[string]int{
-		"group4": 0,
-		"group5": 0,
+	checkStatus(re, store, result)
+	// should treat extra groups as having empty disabled status.
+	extraGroups := map[string]*endpoint.MetaServiceGroupStatus{
+		"group4": {},
+		"group5": {},
 	}
-	checkAssignmentCount(re, store, extraGroups)
+	checkStatus(re, store, extraGroups)
 }

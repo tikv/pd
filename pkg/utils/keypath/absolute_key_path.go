@@ -134,7 +134,7 @@ const (
 	affinityGroupPathFormat = "/pd/%d/affinity_groups/%s" // "/pd/{cluster_id}/affinity_groups/{group_id}"
 
 	// meta-service group related paths
-	metaServiceGroupCountFormat = "/pd/%d/meta_service_groups/%s/assignment_count" // "/pd/{cluster_id}/meta_service_groups/{group_id}/assignment_count"
+	metaServiceGroupStatusFormat = "/pd/%d/meta_service_groups/%s/status" // "/pd/{cluster_id}/meta_service_groups/{group_id}/status"
 )
 
 // MsParam is the parameter of microservice.
@@ -307,8 +307,7 @@ func RegionPath(regionID uint64) string {
 	return buf.String()
 }
 
-// MetaServiceGroupAssignmentCountPath returns the path for the meta-service
-// group assignment count.
-func MetaServiceGroupAssignmentCountPath(groupID string) string {
-	return fmt.Sprintf(metaServiceGroupCountFormat, ClusterID(), groupID)
+// MetaServiceGroupStatusPath returns the path for the meta-service group status.
+func MetaServiceGroupStatusPath(groupID string) string {
+	return fmt.Sprintf(metaServiceGroupStatusFormat, ClusterID(), groupID)
 }

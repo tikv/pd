@@ -53,6 +53,7 @@ func NewRemoveFailedStoresCommand() *cobra.Command {
 	Note: DO NOT RECOMMEND to use this flag for general use, it's used only for case that PD doesn't have the store information of failed stores after pd-recover;
 	Note: Do it with caution to make sure all live stores's heartbeats has been reported PD already, otherwise it may regarded some stores as failed mistakenly.`)
 	cmd.AddCommand(NewRemoveFailedStoresShowCommand())
+	cmd.AddCommand(NewRemoveFailedStoresAbortCommand())
 	return cmd
 }
 
@@ -62,6 +63,15 @@ func NewRemoveFailedStoresShowCommand() *cobra.Command {
 		Use:   "show",
 		Short: "Show the status of ongoing failed stores removal",
 		Run:   removeFailedStoresShowCommandFunc,
+	}
+}
+
+// NewRemoveFailedStoresAbortCommand returns the unsafe remove failed stores abort command.
+func NewRemoveFailedStoresAbortCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "abort",
+		Short: "Abort the current failed stores removal",
+		Run:   removeFailedStoresAbortCommandFunc,
 	}
 }
 
@@ -149,4 +159,9 @@ func removeFailedStoresShowCommandFunc(cmd *cobra.Command, _ []string) {
 		return
 	}
 	cmd.Println(resp)
+}
+
+func removeFailedStoresAbortCommandFunc(cmd *cobra.Command, _ []string) {
+	prefix := fmt.Sprintf("%s/remove-failed-stores/abort", unsafePrefix)
+	postJSON(cmd, prefix, nil)
 }

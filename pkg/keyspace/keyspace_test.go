@@ -1082,3 +1082,46 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	suite.TearDownTest()
 	suite.TearDownSuite()
 }
+
+// TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a
+// stale pre-lock group check: if all meta-service groups are gone by the time
+// the lock is held, the keyspace is created without an assignment instead of
+// failing, while a present group is still assigned normally.
+func TestAssignGroupAndSaveKeyspace(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+
+	// No groups available: assign=true (stale pre-check) must not fail creation.
+	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
+	cfg := map[string]string{}
+	ks := &keyspacepb.KeyspaceMeta{Id: 100, Name: "ks-stale-precheck", Config: cfg}
+	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
+	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
+	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
+	re.NoError(err)
+	re.Empty(loaded.GetConfig()[MetaServiceGroupIDKey])
+
+	// A present, enabled group is still assigned. Groups are disabled by
+	// default, so it must be enabled before it is eligible for assignment.
+	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	enabled := true
+	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
+	cfg2 := map[string]string{}
+	ks2 := &keyspacepb.KeyspaceMeta{Id: 101, Name: "ks-with-group", Config: cfg2}
+	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
+	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
+
+	// A group that exists but is disabled must not fail creation: the keyspace is
+	// created without a meta-service group assignment instead.
+	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
+	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
+	cfg3 := map[string]string{}
+	ks3 := &keyspacepb.KeyspaceMeta{Id: 102, Name: "ks-disabled-group", Config: cfg3}
+	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
+	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
+}

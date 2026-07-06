@@ -242,6 +242,7 @@ type Server struct {
 	resourceManagerPrimaryWatcher    *etcdutil.LoopWatcher
 	resourceGroupMetadataManager     *rm_server.Manager
 	resourceGroupMetadataManagerOnce sync.Once
+	membersCache                     *membersCache
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
@@ -274,6 +275,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
+		membersCache:                    newMembersCache(membersCacheTTL),
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
@@ -1162,8 +1164,22 @@ func (s *Server) StartTimestamp() int64 {
 
 // GetMembers returns PD server list.
 func (s *Server) GetMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(false)
+}
+
+// ReloadMembers reloads PD server list and updates the cache.
+func (s *Server) ReloadMembers() ([]*pdpb.Member, error) {
+	return s.loadMembers(true)
+}
+
+func (s *Server) loadMembers(forceRefresh bool) ([]*pdpb.Member, error) {
 	if s.IsClosed() {
 		return nil, errs.ErrServerNotStarted.FastGenByArgs()
+	}
+	if s.membersCache != nil {
+		return s.membersCache.get(forceRefresh, func() ([]*pdpb.Member, error) {
+			return cluster.GetMembers(s.GetClient())
+		})
 	}
 	return cluster.GetMembers(s.GetClient())
 }
@@ -1198,6 +1214,20 @@ func (s *Server) GetKeyspaceConfig() *config.KeyspaceConfig {
 
 // SetKeyspaceConfig sets the keyspace config information.
 func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, true)
+}
+
+// SetKeyspaceConfigWithoutKeyspaceManagerUpdate sets keyspace config without updating the keyspace manager.
+func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *config.KeyspaceConfig) error {
+	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
+}
+
+// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
+	s.keyspaceManager.UpdateConfig(newCfg)
+}
+
+func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
 	if err := newCfg.Validate(); err != nil {
 		return err
 	}
@@ -1213,7 +1243,9 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(newCfg)
+	if updateKeyspaceManager {
+		s.keyspaceManager.UpdateConfig(newCfg)
+	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
