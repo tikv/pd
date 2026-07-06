@@ -1127,8 +1127,14 @@ func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *k
 
 // transformKeyspaceState transforms the keyspace state to the target state and record the update time.
 func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
-	// If already in the target state, do nothing and return.
+	// If already in the target state, do nothing and return. A TOMBSTONE keyspace
+	// still carrying a meta-service group binding (e.g. one tombstoned before this
+	// cleanup existed) is repaired here by re-applying the TOMBSTONE update; the
+	// unassignment is idempotent, so it is a no-op once the binding is cleared.
 	if meta.GetState() == newState {
+		if newState == keyspacepb.KeyspaceState_TOMBSTONE {
+			return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+		}
 		return nil
 	}
 	// Consult state transition table to check if the operation is legal.
