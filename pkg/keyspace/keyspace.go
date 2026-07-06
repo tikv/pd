@@ -1109,8 +1109,15 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 // meta-service group manager is configured, decrements the persisted assignment
 // count. Once the config key is removed and persisted, a subsequent call is a
 // no-op, so the removal and tombstone paths can both invoke it without
-// double-counting. Callers must hold the keyspace metaLock so meta is not
-// mutated concurrently.
+// double-counting.
+//
+// Callers already hold the keyspace metaLock (so meta is not mutated
+// concurrently). This deliberately does NOT take mgm.RLock: the config-update
+// path acquires mgm.RLock before metaLock (via runTxnWithMetaGroupLock), so
+// grabbing mgm.RLock here while holding metaLock would invert the lock order and
+// deadlock once UpdateGroupsSafely is waiting on mgm.Lock. The lock is
+// unnecessary anyway — updateAssignmentTxn only touches the store, and the
+// group delete guard relies on the authoritative keyspace scan, not this count.
 func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
 	groupID := meta.GetConfig()[MetaServiceGroupIDKey]
 	if groupID == "" {
@@ -1120,8 +1127,6 @@ func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *k
 	if manager.mgm == nil {
 		return nil
 	}
-	manager.mgm.RLock()
-	defer manager.mgm.RUnlock()
 	return manager.mgm.updateAssignmentTxn(txn, groupID, "")
 }
 
