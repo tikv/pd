@@ -51,6 +51,9 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
 		conf.Schedule.AffinityScheduleLimit = 4
 	})
+	// Exercise the full affinity handler matrix through the local scheduling
+	// path. TestAffinityForwardedHeader covers the microservice forwarding path.
+	suite.env.Env = tests.NonMicroserviceEnv
 }
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
@@ -59,7 +62,7 @@ func (suite *affinityHandlerTestSuite) TearDownSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownTest() {
 	// Clean up any remaining affinity groups after each test to avoid interference between tests.
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunFuncInStartedEnvs(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		manager, err := leader.GetServer().GetAffinityManager()
@@ -139,7 +142,7 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
-func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) *handlers.AffinityGroupsResponse {
+func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
 	var result handlers.AffinityGroupsResponse
 	testutil.Eventually(re, func() bool {
 		result = handlers.AffinityGroupsResponse{}
@@ -154,7 +157,6 @@ func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...strin
 		}
 		return true
 	})
-	return &result
 }
 
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
