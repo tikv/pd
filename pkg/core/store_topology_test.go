@@ -18,8 +18,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 func TestTopologyWeight(t *testing.T) {
@@ -145,7 +146,7 @@ func TestTopologyWeightWithEmptyStoreLabelValue(t *testing.T) {
 	_ = GetStoreTopoWeight(store, []*StoreInfo{store}, []string{"zone"}, 3)
 
 	re.Equal("zone", store.GetLabels()[0].Key)
-	re.Equal("", store.GetLabels()[0].Value)
+	re.Empty(store.GetLabels()[0].Value)
 }
 
 func TestTopologyWeightWithNoEligibleStores(t *testing.T) {
