@@ -243,14 +243,31 @@ func (c *Controller) updatePatrolWorkersIfNeeded() {
 	}
 }
 
-type operatorControllerLimit struct {
+// operatorLimit is rechecked while admitting a candidate into the operator queue.
+type operatorLimit struct {
 	kind        operator.OpKind
 	checkerType types.CheckerSchedulerType
+	getLimit    func() uint64
 }
 
-type checkRegionResult struct {
+func (l operatorLimit) reached(opController *operator.Controller) bool {
+	return l.getLimit != nil && opController.OperatorCount(l.kind) >= l.getLimit()
+}
+
+func (l operatorLimit) recordLimit() {
+	if l.getLimit != nil {
+		operator.IncOperatorLimitCounter(l.checkerType, l.kind)
+	}
+}
+
+// operatorCandidate is a checker result that still needs operator-controller admission.
+type operatorCandidate struct {
 	ops   []*operator.Operator
-	limit *operatorControllerLimit
+	limit operatorLimit
+}
+
+func newOperatorCandidate(limit operatorLimit, ops ...*operator.Operator) operatorCandidate {
+	return operatorCandidate{ops: ops, limit: limit}
 }
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.
@@ -297,13 +314,13 @@ func (c *Controller) checkPriorityRegions() {
 			removes = append(removes, id)
 			continue
 		}
-		result := c.buildRegionCheckResult(region)
-		ops := result.ops
+		candidate := c.buildOperatorCandidate(region)
+		ops := candidate.ops
 		// it should skip if region needs to merge
 		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
 			continue
 		}
-		c.addWaitingOperators(result)
+		c.admitWaitingOperators(candidate)
 	}
 	for _, v := range removes {
 		c.RemovePriorityRegions(v)
@@ -313,28 +330,55 @@ func (c *Controller) checkPriorityRegions() {
 // CheckRegion will check the region and add a new operator if needed.
 // The function is exposed for test purpose.
 func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
-	return c.buildRegionCheckResult(region).ops
+	return c.buildOperatorCandidate(region).ops
 }
 
-func (c *Controller) buildRegionCheckResult(region *core.RegionInfo) checkRegionResult {
+func (c *Controller) replicaLimit(checkerType types.CheckerSchedulerType) operatorLimit {
+	return operatorLimit{
+		kind:        operator.OpReplica,
+		checkerType: checkerType,
+		getLimit:    c.conf.GetReplicaScheduleLimit,
+	}
+}
+
+func (c *Controller) affinityLimit() operatorLimit {
+	return operatorLimit{
+		kind:        operator.OpAffinity,
+		checkerType: c.affinityChecker.GetType(),
+		getLimit:    c.conf.GetAffinityScheduleLimit,
+	}
+}
+
+func (c *Controller) mergeLimit() operatorLimit {
+	return operatorLimit{
+		kind:        operator.OpMerge,
+		checkerType: c.mergeChecker.GetType(),
+		getLimit:    c.conf.GetMergeScheduleLimit,
+	}
+}
+
+func (c *Controller) deferByLimit(regionID uint64, limit operatorLimit) {
+	limit.recordLimit()
+	c.pendingProcessedRegions.Put(regionID, nil)
+}
+
+func (c *Controller) buildOperatorCandidate(region *core.RegionInfo) operatorCandidate {
 	// If PD has restarted, it needs to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
-	opController := c.opController
-
 	if ops := measureChecker(c.metrics.checkRegionHistograms[jointStateChecker], func() []*operator.Operator {
 		return []*operator.Operator{c.jointStateChecker.Check(region)}
 	}); len(ops) > 0 {
-		return checkRegionResult{ops: ops}
+		return newOperatorCandidate(operatorLimit{}, ops...)
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[splitChecker], func() []*operator.Operator {
 		return []*operator.Operator{c.splitChecker.Check(region)}
 	}); len(ops) > 0 {
-		return checkRegionResult{ops: ops}
+		return newOperatorCandidate(operatorLimit{}, ops...)
 	}
 
 	if c.conf.IsPlacementRulesEnabled() {
-		var result checkRegionResult
+		var candidate operatorCandidate
 		measure(c.metrics.checkRegionHistograms[ruleChecker], func() {
 			skipRuleCheck := c.cluster.GetCheckerConfig().IsPlacementRulesCacheEnabled() &&
 				c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
@@ -349,51 +393,39 @@ func (c *Controller) buildRegionCheckResult(region *core.RegionInfo) checkRegion
 					panic("cached should be used")
 				})
 				fit := c.priorityInspector.Inspect(region)
-				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-					if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
-						result = checkRegionResult{
-							ops: []*operator.Operator{op},
-							limit: &operatorControllerLimit{
-								kind:        operator.OpReplica,
-								checkerType: c.ruleChecker.GetType(),
-							},
-						}
-					}
+				limit := c.replicaLimit(c.ruleChecker.GetType())
+				if limit.reached(c.opController) {
+					c.deferByLimit(region.GetID(), limit)
 					return
 				}
-				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
-				c.pendingProcessedRegions.Put(region.GetID(), nil)
+				if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
+					candidate = newOperatorCandidate(limit, op)
+				}
 			}
 		})
-		if len(result.ops) > 0 {
-			return result
+		if len(candidate.ops) > 0 {
+			return candidate
 		}
 	} else {
 		if ops := measureChecker(c.metrics.checkRegionHistograms[learnerChecker], func() []*operator.Operator {
 			return []*operator.Operator{c.learnerChecker.Check(region)}
 		}); len(ops) > 0 {
-			return checkRegionResult{ops: ops}
+			return newOperatorCandidate(operatorLimit{}, ops...)
 		}
 
-		var result checkRegionResult
+		var candidate operatorCandidate
 		measure(c.metrics.checkRegionHistograms[replicaChecker], func() {
 			if op := c.replicaChecker.Check(region); op != nil {
-				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
-					result = checkRegionResult{
-						ops: []*operator.Operator{op},
-						limit: &operatorControllerLimit{
-							kind:        operator.OpReplica,
-							checkerType: c.replicaChecker.GetType(),
-						},
-					}
+				limit := c.replicaLimit(c.replicaChecker.GetType())
+				if limit.reached(c.opController) {
+					c.deferByLimit(region.GetID(), limit)
 					return
 				}
-				operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
-				c.pendingProcessedRegions.Put(region.GetID(), nil)
+				candidate = newOperatorCandidate(limit, op)
 			}
 		})
-		if len(result.ops) > 0 {
-			return result
+		if len(candidate.ops) > 0 {
+			return candidate
 		}
 	}
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
@@ -401,52 +433,42 @@ func (c *Controller) buildRegionCheckResult(region *core.RegionInfo) checkRegion
 	l := c.cluster.GetRegionLabeler()
 	if l.ScheduleDisabled(region) {
 		denyCheckersByLabelerCounter.Inc()
-		return checkRegionResult{}
+		return operatorCandidate{}
 	}
 
-	var affinityResult checkRegionResult
+	affinityLimit := c.affinityLimit()
+	var affinityCandidate operatorCandidate
 	measure(c.metrics.checkRegionHistograms[affinityChecker], func() {
-		if opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit() {
-			if ops := c.affinityChecker.Check(region); len(ops) > 0 {
-				affinityResult = checkRegionResult{
-					ops: ops,
-					limit: &operatorControllerLimit{
-						kind:        operator.OpAffinity,
-						checkerType: c.affinityChecker.GetType(),
-					},
-				}
+		if affinityLimit.reached(c.opController) {
+			if c.affinityChecker.hasAffinityGroups() {
+				affinityLimit.recordLimit()
 			}
 			return
 		}
-		if c.affinityChecker.hasAffinityGroups() {
-			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
+		if ops := c.affinityChecker.Check(region); len(ops) > 0 {
+			affinityCandidate = newOperatorCandidate(affinityLimit, ops...)
 		}
 	})
-	if len(affinityResult.ops) > 0 {
-		return affinityResult
+	if len(affinityCandidate.ops) > 0 {
+		return affinityCandidate
 	}
 
-	var mergeResult checkRegionResult
+	mergeLimit := c.mergeLimit()
+	var mergeCandidate operatorCandidate
 	measure(c.metrics.checkRegionHistograms[mergeChecker], func() {
-		if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
-			if ops := c.mergeChecker.Check(region); len(ops) > 0 {
-				// It makes sure that two operators can be added successfully altogether.
-				mergeResult = checkRegionResult{
-					ops: ops,
-					limit: &operatorControllerLimit{
-						kind:        operator.OpMerge,
-						checkerType: c.mergeChecker.GetType(),
-					},
-				}
-			}
+		if mergeLimit.reached(c.opController) {
+			mergeLimit.recordLimit()
 			return
 		}
-		operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
+		if ops := c.mergeChecker.Check(region); len(ops) > 0 {
+			// It makes sure that two operators can be added successfully altogether.
+			mergeCandidate = newOperatorCandidate(mergeLimit, ops...)
+		}
 	})
-	if len(mergeResult.ops) > 0 {
-		return mergeResult
+	if len(mergeCandidate.ops) > 0 {
+		return mergeCandidate
 	}
-	return checkRegionResult{}
+	return operatorCandidate{}
 }
 
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
@@ -462,12 +484,12 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		c.RemovePendingProcessedRegion(id)
 		return
 	}
-	result := c.buildRegionCheckResult(region)
-	if len(result.ops) == 0 {
+	candidate := c.buildOperatorCandidate(region)
+	if len(candidate.ops) == 0 {
 		return
 	}
 
-	if c.addWaitingOperators(result) {
+	if c.admitWaitingOperators(candidate) {
 		c.RemovePendingProcessedRegion(id)
 	} else {
 		if c.cluster.IsSchedulingHalted() {
@@ -477,8 +499,8 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 	}
 }
 
-func (c *Controller) addWaitingOperators(result checkRegionResult) bool {
-	if len(result.ops) == 0 {
+func (c *Controller) admitWaitingOperators(candidate operatorCandidate) bool {
+	if len(candidate.ops) == 0 {
 		return false
 	}
 	c.operatorMu.Lock()
@@ -486,27 +508,14 @@ func (c *Controller) addWaitingOperators(result checkRegionResult) bool {
 	if c.cluster.IsSchedulingHalted() {
 		return false
 	}
-	if result.limit != nil && c.opController.OperatorCount(result.limit.kind) >= c.getOperatorLimit(result.limit.kind) {
-		operator.IncOperatorLimitCounter(result.limit.checkerType, result.limit.kind)
+	if candidate.limit.reached(c.opController) {
+		candidate.limit.recordLimit()
 		return false
 	}
-	if c.opController.ExceedStoreLimit(result.ops...) {
+	if c.opController.ExceedStoreLimit(candidate.ops...) {
 		return false
 	}
-	return c.opController.AddWaitingOperator(result.ops...) > 0
-}
-
-func (c *Controller) getOperatorLimit(kind operator.OpKind) uint64 {
-	switch kind {
-	case operator.OpReplica:
-		return c.conf.GetReplicaScheduleLimit()
-	case operator.OpMerge:
-		return c.conf.GetMergeScheduleLimit()
-	case operator.OpAffinity:
-		return c.conf.GetAffinityScheduleLimit()
-	default:
-		return 0
-	}
+	return c.opController.AddWaitingOperator(candidate.ops...) > 0
 }
 
 // GetMergeChecker returns the merge checker.

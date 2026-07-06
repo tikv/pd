@@ -43,22 +43,17 @@ func TestAddWaitingOperatorsSkipsSchedulingHalted(t *testing.T) {
 	defer stream.Close()
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	controller := NewController(ctx, tc, tc.GetCheckerConfig(), oc)
-	result := checkRegionResult{
-		ops: []*operator.Operator{
-			operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpReplica),
-		},
-		limit: &operatorControllerLimit{
-			kind:        operator.OpReplica,
-			checkerType: types.ReplicaChecker,
-		},
-	}
+	candidate := newOperatorCandidate(
+		controller.replicaLimit(types.ReplicaChecker),
+		operator.NewTestOperator(region.GetID(), region.GetRegionEpoch(), operator.OpReplica),
+	)
 
 	tc.SetHaltScheduling(true, "test")
-	re.False(controller.addWaitingOperators(result))
+	re.False(controller.admitWaitingOperators(candidate))
 	re.Empty(oc.GetOperators())
 	re.Empty(oc.GetWaitingOperators())
 
 	tc.SetHaltScheduling(false, "test")
-	re.True(controller.addWaitingOperators(result))
+	re.True(controller.admitWaitingOperators(candidate))
 	re.Len(oc.GetOperators(), 1)
 }
