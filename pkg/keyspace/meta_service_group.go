@@ -36,6 +36,16 @@ const (
 )
 
 // MetaServiceGroupManager manages external meta-service groups.
+//
+// Locking: the embedded RWMutex guards metaServiceGroups and isLeader, while
+// statusMu is a dedicated leaf lock guarding cachedStatus and dirtyCount only.
+// statusMu must always be the innermost lock: never acquire the RWMutex or the
+// keyspace metaLock, and never perform storage I/O, while holding it. This lets
+// the assignment-count update paths that already hold the keyspace metaLock
+// (RemoveKeyspace, tombstone unassignment) mutate the cache without taking the
+// RWMutex, which would otherwise invert the RWMutex->metaLock order used by the
+// create/config paths and deadlock. Allowed orders are RWMutex->statusMu and
+// metaLock->statusMu; both are safe because statusMu wraps nothing.
 type MetaServiceGroupManager struct {
 	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
@@ -48,10 +58,13 @@ type MetaServiceGroupManager struct {
 	// the authoritative source for the delete guard so a stale persisted counter
 	// cannot permanently block removing an actually-empty group.
 	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
-	cachedStatus              map[string]*endpoint.MetaServiceGroupStatus
-	dirtyCount                int
-	flushCh                   chan struct{}
 	isLeader                  func() bool
+	// statusMu guards cachedStatus and dirtyCount. See the type comment for the
+	// leaf-lock discipline it must follow.
+	statusMu     syncutil.Mutex
+	cachedStatus map[string]*endpoint.MetaServiceGroupStatus
+	dirtyCount   int
+	flushCh      chan struct{}
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
@@ -102,8 +115,10 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 		log.Error("[keyspace] failed to load meta-service group status from storage", zap.Error(err))
 		return err
 	}
+	m.statusMu.Lock()
 	m.cachedStatus = statusMap
 	m.dirtyCount = 0
+	m.statusMu.Unlock()
 	log.Info("[keyspace] meta-service group status loaded from storage", zap.Any("meta-service-group-status", statusMap))
 	return nil
 }
@@ -128,24 +143,30 @@ func (m *MetaServiceGroupManager) flushLoop() {
 }
 
 func (m *MetaServiceGroupManager) flushToStorage() error {
-	// Snapshot the dirty state under the lock and reset the dirty counter
+	// Only the serving leader persists; a stale read here is benign because the
+	// next leader reloads the authoritative status via RefreshCache.
+	m.RLock()
+	skip := m.isLeader != nil && !m.isLeader()
+	m.RUnlock()
+	if skip {
+		return nil
+	}
+	// Snapshot the dirty state under statusMu and reset the dirty counter
 	// optimistically, then release the lock before the storage transaction so a
 	// slow etcd write does not block concurrent assignment operations. The
 	// snapshot is a deep copy, so later cache mutations are not observed by this
 	// flush. On failure the dirty count is restored so the next tick retries.
-	m.Lock()
-	if m.isLeader != nil && !m.isLeader() {
-		m.Unlock()
-		return nil
-	}
+	// Only flushLoop calls this, so there is no concurrent flush to race the
+	// reset/restore.
+	m.statusMu.Lock()
 	if m.dirtyCount == 0 {
-		m.Unlock()
+		m.statusMu.Unlock()
 		return nil
 	}
 	snapshot := copyStatusMap(m.cachedStatus)
 	flushed := m.dirtyCount
 	m.dirtyCount = 0
-	m.Unlock()
+	m.statusMu.Unlock()
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
 		for id, status := range snapshot {
@@ -155,9 +176,9 @@ func (m *MetaServiceGroupManager) flushToStorage() error {
 		}
 		return nil
 	}); err != nil {
-		m.Lock()
+		m.statusMu.Lock()
 		m.dirtyCount += flushed
-		m.Unlock()
+		m.statusMu.Unlock()
 		return err
 	}
 	return nil
@@ -165,8 +186,8 @@ func (m *MetaServiceGroupManager) flushToStorage() error {
 
 // GetStatus returns the status of each meta-service group.
 func (m *MetaServiceGroupManager) GetStatus(_ context.Context) (map[string]*endpoint.MetaServiceGroupStatus, error) {
-	m.RLock()
-	defer m.RUnlock()
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
 	return copyStatusMap(m.cachedStatus), nil
 }
 
@@ -214,27 +235,35 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
 		return ErrUnknownMetaServiceGroup
 	}
-	currentStatus := m.cachedStatus[groupID]
-	if currentStatus == nil {
-		currentStatus = &endpoint.MetaServiceGroupStatus{}
+	m.statusMu.Lock()
+	newStatus := endpoint.MetaServiceGroupStatus{}
+	if currentStatus := m.cachedStatus[groupID]; currentStatus != nil {
+		newStatus = *currentStatus
 	}
-	newStatus := *currentStatus
+	m.statusMu.Unlock()
 	if patch.AssignmentCount != nil {
 		newStatus.AssignmentCount = *patch.AssignmentCount
 	}
 	if patch.Enabled != nil {
 		newStatus.Enabled = *patch.Enabled
 	}
+	// Persist synchronously so API updates are immediately durable, then reflect
+	// them in the cache. The store I/O runs without statusMu (it is never held
+	// across I/O); the enclosing mgm write lock serializes concurrent patches.
 	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return m.store.SaveMetaServiceGroupStatus(txn, groupID, &newStatus)
 	}); err != nil {
 		return err
 	}
+	m.statusMu.Lock()
 	m.cachedStatus[groupID] = &newStatus
+	m.statusMu.Unlock()
 	return nil
 }
 
-func (m *MetaServiceGroupManager) findMinMetaGroupLocked() (string, error) {
+// findMinMetaGroupStatusLocked returns the enabled group with the least assigned
+// keyspaces. The caller must hold statusMu.
+func (m *MetaServiceGroupManager) findMinMetaGroupStatusLocked() (string, error) {
 	minCount := math.MaxInt
 	var assignedGroup string
 	for currentGroup, status := range m.cachedStatus {
@@ -263,16 +292,20 @@ func (m *MetaServiceGroupManager) hasGroupsLocked() bool {
 	return len(m.metaServiceGroups) > 0
 }
 
-// pickGroupLocked is PickGroup with the lock already held by the caller.
+// pickGroupLocked is PickGroup with the mgm lock already held by the caller.
 // Callers that need group selection and the subsequent keyspace metadata save to
 // be atomic with respect to group deletion (which takes the write lock) must
-// hold the lock across both, e.g. via Manager.assignGroupAndSaveKeyspace.
+// hold the mgm lock across both, e.g. via Manager.assignGroupAndSaveKeyspace. The
+// selection and the reservation are done together under statusMu so a concurrent
+// assignment cannot pick the same minimum twice.
 func (m *MetaServiceGroupManager) pickGroupLocked() (string, error) {
-	assignedGroup, err := m.findMinMetaGroupLocked()
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	assignedGroup, err := m.findMinMetaGroupStatusLocked()
 	if err != nil {
 		return "", err
 	}
-	if err := m.updateAssignmentLockedTxn(nil, "", assignedGroup); err != nil {
+	if err := m.applyAssignmentDeltaStatusLocked("", assignedGroup); err != nil {
 		return "", err
 	}
 	return assignedGroup, nil
@@ -287,21 +320,26 @@ func (m *MetaServiceGroupManager) AssignToGroup(_ context.Context, count int) (s
 	}
 	m.Lock()
 	defer m.Unlock()
-	assignedGroup, err := m.findMinMetaGroupLocked()
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	assignedGroup, err := m.findMinMetaGroupStatusLocked()
 	if err != nil {
 		return "", err
 	}
 	m.cachedStatus[assignedGroup].AssignmentCount += count
-	m.markDirtyLocked(count)
+	m.markDirtyStatusLocked(count)
 	return assignedGroup, nil
 }
 
 // reassignKeyspaceLocked validates that newGroupID (if any) still exists and
-// moves a single keyspace assignment from oldGroupID to newGroupID within txn.
-// The caller must hold the lock for the whole enclosing transaction so a
-// concurrent UpdateGroupsSafely cannot delete a group between this validation
-// and the cached assignment count update.
-func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID, newGroupID string) error {
+// moves a single keyspace assignment from oldGroupID to newGroupID. The caller
+// must hold the mgm lock for the whole enclosing transaction so a concurrent
+// UpdateGroupsSafely cannot delete a group between this validation and the cached
+// assignment count update; metaServiceGroups is therefore read without taking
+// the mgm lock again. statusMu guards the cache reads and the count update.
+func (m *MetaServiceGroupManager) reassignKeyspaceLocked(_ kv.Txn, oldGroupID, newGroupID string) error {
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
 	if newGroupID != "" {
 		if _, ok := m.metaServiceGroups[newGroupID]; !ok {
 			return ErrUnknownMetaServiceGroup
@@ -312,28 +350,29 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 			return ErrMetaServiceGroupDisabled
 		}
 	}
-	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
+	return m.applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID)
 }
 
-// updateAssignmentTxn is updateAssignmentLockedTxn with the mgm lock acquired
-// for the caller. The txn is accepted for call-site symmetry with the storage
-// transaction the caller runs, but see updateAssignmentLockedTxn: the count
-// change is applied to the in-memory cache and is NOT part of txn, so it is not
-// rolled back if txn fails to commit.
-func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
-	m.Lock()
-	defer m.Unlock()
-	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
-}
-
-// updateAssignmentLockedTxn moves one assignment from oldGroupID to newGroupID in
-// the cached status and marks it dirty for the flush loop to persist later. The
-// txn parameter is intentionally unused: unlike the pre-cache implementation the
+// updateAssignmentTxn applies an assignment count delta to the cache. It takes
+// only statusMu (the leaf lock), deliberately NOT the mgm lock: callers such as
+// RemoveKeyspace and the tombstone unassignment already hold the keyspace
+// metaLock, and the create/config paths take the mgm lock before metaLock, so
+// acquiring the mgm lock here would invert that order and deadlock. The txn
+// parameter is intentionally unused: unlike the pre-cache implementation the
 // count is no longer written inside the caller's storage transaction, so callers
 // must not assume the count update is atomic with their txn. Counts are
 // best-effort load-balancing hints; the delete guard uses the authoritative
 // keyspace scan, and RefreshCache reconciles any drift on the next leader term.
-func (m *MetaServiceGroupManager) updateAssignmentLockedTxn(_ kv.Txn, oldGroupID, newGroupID string) error {
+func (m *MetaServiceGroupManager) updateAssignmentTxn(_ kv.Txn, oldGroupID, newGroupID string) error {
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	return m.applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID)
+}
+
+// applyAssignmentDeltaStatusLocked moves one assignment from oldGroupID to
+// newGroupID in the cached status and marks it dirty for the flush loop to
+// persist later. The caller must hold statusMu.
+func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID string) error {
 	dirtyCount := 0
 	if oldGroupID != "" {
 		if status := m.cachedStatus[oldGroupID]; status != nil && status.AssignmentCount > 0 {
@@ -350,12 +389,14 @@ func (m *MetaServiceGroupManager) updateAssignmentLockedTxn(_ kv.Txn, oldGroupID
 		dirtyCount++
 	}
 	if dirtyCount > 0 {
-		m.markDirtyLocked(dirtyCount)
+		m.markDirtyStatusLocked(dirtyCount)
 	}
 	return nil
 }
 
-func (m *MetaServiceGroupManager) markDirtyLocked(count int) {
+// markDirtyStatusLocked accumulates dirty count and signals the flush loop once
+// the threshold is reached. The caller must hold statusMu.
+func (m *MetaServiceGroupManager) markDirtyStatusLocked(count int) {
 	m.dirtyCount += count
 	if m.dirtyCount < flushThreshold {
 		return
@@ -437,20 +478,23 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		return err
 	}
 	m.metaServiceGroups = metaServiceGroups
+	// Sync the cache to the new group set. Clearing deleted groups here (and the
+	// persisted status below) keeps re-adding a group with the same ID from
+	// inheriting a stale assignment count or enabled state, which would skew list
+	// output and PickGroup balancing.
+	m.statusMu.Lock()
 	for groupID := range metaServiceGroups {
 		if m.cachedStatus[groupID] == nil {
 			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
 		}
 	}
-	// Clear the persisted status for deleted groups so re-adding a group with
-	// the same ID does not inherit a stale assignment count or enabled state,
-	// which would skew list output and PickGroup balancing. Best-effort: the
-	// config deletion is already persisted and the delete guard relies on
-	// actual keyspace scans, not this counter.
+	for _, id := range deletedGroups {
+		delete(m.cachedStatus, id)
+	}
+	m.statusMu.Unlock()
+	// Best-effort: the config deletion is already persisted and the delete guard
+	// relies on actual keyspace scans, not this counter.
 	if len(deletedGroups) > 0 {
-		for _, id := range deletedGroups {
-			delete(m.cachedStatus, id)
-		}
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range deletedGroups {
 				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
@@ -478,15 +522,15 @@ func (m *MetaServiceGroupManager) assignedKeyspaceCounts(_ context.Context, grou
 		}
 		return m.keyspaceAssignmentCounter(set)
 	}
-	// Fallback path: derive counts from the cached status. The caller holds
-	// the write lock, so m.metaServiceGroups is accessed without an extra read
-	// lock (which would deadlock against the held write lock).
+	// Fallback path: derive counts from the cached status under statusMu.
 	counts := make(map[string]int, len(groupIDs))
+	m.statusMu.Lock()
 	for _, id := range groupIDs {
 		if status := m.cachedStatus[id]; status != nil {
 			counts[id] = status.AssignmentCount
 		}
 	}
+	m.statusMu.Unlock()
 	return counts, nil
 }
 
@@ -495,6 +539,8 @@ func (m *MetaServiceGroupManager) updateGroups(metaServiceGroups map[string]stri
 	m.Lock()
 	defer m.Unlock()
 	m.metaServiceGroups = metaServiceGroups
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
 	for groupID := range metaServiceGroups {
 		if m.cachedStatus[groupID] == nil {
 			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
