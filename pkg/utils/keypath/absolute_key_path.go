@@ -106,10 +106,12 @@ const (
 	msTsoDefaultPrimaryPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
 	msTsoKespacePrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
-	// `expected_primary` is the flag to indicate the expected primary.
-	// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
-	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
-	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
+	// `expected_primary` is a transient flag to indicate the expected primary.
+	// It is ONLY written by the `{service}/primary/transfer` API (with a TTL), which
+	// then resigns the current primary; the target member wins the campaign only if
+	// the flag still names it, and deletes the flag (and revokes its lease) once it
+	// wins. In steady state the flag is absent. It lets the transfer target campaign
+	// successfully while other secondaries skip the campaign.
 	msExpectedPrimaryPathFormat            = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
 	msTsoDefaultExpectedPrimaryPathFormat  = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
 	msTsoKeyspaceExpectedPrimaryPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
