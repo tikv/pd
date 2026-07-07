@@ -62,14 +62,12 @@ func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
-func TestResourceGroupPushCollectorsIncludesRefundCounters(t *testing.T) {
+func TestResourceGroupPushCollectors(t *testing.T) {
 	re := require.New(t)
 
 	re.Equal([]prometheus.Collector{
 		readRequestUnitCost,
 		writeRequestUnitCost,
-		readRequestUnitRefund,
-		writeRequestUnitRefund,
 		sqlLayerRequestUnitCost,
 	}, resourceGroupPushCollectors())
 }
@@ -489,7 +487,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	})
 }
 
-func TestDispatchConsumptionIncludesSignedSettlement(t *testing.T) {
+func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 	re := require.New(t)
 	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
 	req := &rmpb.TokenBucketRequest{
@@ -498,10 +496,6 @@ func TestDispatchConsumptionIncludesSignedSettlement(t *testing.T) {
 			RRU:        12,
 			WRU:        8,
 			WriteBytes: 1024,
-		},
-		SettlementSinceLastRequest: &rmpb.Consumption{
-			RRU: -4,
-			WRU: -2,
 		},
 		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 42},
 	}
@@ -513,7 +507,6 @@ func TestDispatchConsumptionIncludesSignedSettlement(t *testing.T) {
 	re.Equal(uint32(42), item.keyspaceID)
 	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
 	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
-	re.Equal(req.GetSettlementSinceLastRequest(), item.Settlement)
 }
 
 // Put a keyspace meta into the storage.

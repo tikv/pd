@@ -325,16 +325,6 @@ func reportedResponseConsumption(calculators []ResourceCalculator, req RequestIn
 	return reported
 }
 
-func requestUnitSettlement(consumption *rmpb.Consumption) *rmpb.Consumption {
-	if consumption == nil {
-		return &rmpb.Consumption{}
-	}
-	return &rmpb.Consumption{
-		RRU: consumption.RRU,
-		WRU: consumption.WRU,
-	}
-}
-
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
 	*RUConfig
@@ -450,31 +440,8 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 	return delta
 }
 
-func updateDeltaSettlement(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
-	delta := &rmpb.Consumption{}
-	if now.RRU != last.RRU {
-		delta.RRU = now.RRU - last.RRU
-		last.RRU = now.RRU
-	}
-	if now.WRU != last.WRU {
-		delta.WRU = now.WRU - last.WRU
-		last.WRU = now.WRU
-	}
-	if isZeroConsumption(delta) {
-		return nil
-	}
-	return delta
-}
-
 func isZeroConsumption(consumption *rmpb.Consumption) bool {
 	return consumption == nil || *consumption == rmpb.Consumption{}
-}
-
-func hasRUSettlementRefund(last *rmpb.Consumption, now *rmpb.Consumption) bool {
-	if last == nil || now == nil {
-		return false
-	}
-	return now.RRU < last.RRU || now.WRU < last.WRU
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {

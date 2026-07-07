@@ -92,8 +92,6 @@ func resourceGroupPushCollectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		readRequestUnitCost,
 		writeRequestUnitCost,
-		readRequestUnitRefund,
-		writeRequestUnitRefund,
 		sqlLayerRequestUnitCost,
 	}
 }
@@ -681,7 +679,6 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
-		Settlement:        req.GetSettlementSinceLastRequest(),
 		isBackground:      isBackground,
 		isTiFlash:         isTiFlash,
 	}
@@ -799,7 +796,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			log.Info("resource group manager background metrics flush loop exits")
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			if consumptionInfo == nil || (consumptionInfo.Consumption == nil && consumptionInfo.Settlement == nil) {
+			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
 			}
 			keyspaceID := consumptionInfo.keyspaceID
@@ -808,12 +805,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				continue
 			}
 			consumptionInfo.keyspaceName = keyspaceName
-			if consumptionInfo.Consumption != nil {
-				m.ruCollector.Collect(consumptionInfo)
-			}
+			m.ruCollector.Collect(consumptionInfo)
 			m.metrics.recordConsumption(consumptionInfo, m.GetControllerConfig(), time.Now())
 			// TODO: maybe we need to distinguish background ru.
-			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil && consumptionInfo.Consumption != nil {
+			if rg, _ := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:

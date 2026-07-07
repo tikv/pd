@@ -108,16 +108,14 @@ func TestCalcAvgClampsNegativeDeltaForRateEstimation(t *testing.T) {
 	re.InDelta(2.5, counter.avgRUPerSec, 1e-9)
 }
 
-func TestNegativeRUSettlementPreservesSignedReportAndNonNegativeRequest(t *testing.T) {
+func TestConsumptionReportIgnoresDecreasedRequestUnits(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 	counter := gc.run.requestUnitTokens
 	start := time.Now()
 
-	gc.run.consumption.RRU = 110
-	gc.run.lastRequestConsumption.RRU = 110
-	gc.run.settlement.RRU = 90
-	gc.run.lastRequestSettlement.RRU = 100
+	gc.run.consumption.RRU = 90
+	gc.run.lastRequestConsumption.RRU = 100
 	gc.initialRequestCompleted.Store(true)
 	gc.run.requestInProgress = true
 	counter.avgRUPerSec = 20
@@ -126,24 +124,22 @@ func TestNegativeRUSettlementPreservesSignedReportAndNonNegativeRequest(t *testi
 	gc.run.now = start.Add(time.Second)
 
 	gc.updateAvgRequestResourcePerSec()
-	re.InDelta(15, counter.avgRUPerSec, 1e-9)
-	re.Equal(float64(110), counter.avgRUPerSecLastRU)
+	re.InDelta(10, counter.avgRUPerSec, 1e-9)
+	re.Equal(float64(90), counter.avgRUPerSecLastRU)
 
 	report := gc.collectRequestAndConsumption(periodicReport)
 	re.NotNil(report)
 	re.Nil(report.GetConsumptionSinceLastRequest())
-	re.Equal(float64(-10), report.GetSettlementSinceLastRequest().GetRRU())
 	re.NotEmpty(report.GetRuItems().GetRequestRU())
 	re.GreaterOrEqual(report.GetRuItems().GetRequestRU()[0].GetValue(), 0.0)
 }
 
-func TestSmallPositiveSettlementDoesNotBypassConsumptionThreshold(t *testing.T) {
+func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 	now := time.Now()
 
 	gc.run.consumption.RRU = 1
-	gc.run.settlement.RRU = 1
 	gc.initialRequestCompleted.Store(true)
 	gc.run.lastRequestTime = now.Add(-defaultTargetPeriod)
 	gc.run.now = now
@@ -152,7 +148,7 @@ func TestSmallPositiveSettlementDoesNotBypassConsumptionThreshold(t *testing.T) 
 	re.Nil(report)
 }
 
-func TestDirectReportConsumptionDoesNotSendEmptySettlement(t *testing.T) {
+func TestDirectReportConsumptionReportsOnlyConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
@@ -168,7 +164,6 @@ func TestDirectReportConsumptionDoesNotSendEmptySettlement(t *testing.T) {
 	re.Equal(float64(7), report.GetConsumptionSinceLastRequest().GetRRU())
 	re.Equal(float64(3), report.GetConsumptionSinceLastRequest().GetWRU())
 	re.Equal(float64(1024), report.GetConsumptionSinceLastRequest().GetWriteBytes())
-	re.Nil(report.GetSettlementSinceLastRequest())
 }
 
 func TestRequestAndResponseConsumption(t *testing.T) {
@@ -397,8 +392,6 @@ func TestPagingPrechargeDoesNotEnterReportedRequestConsumption(t *testing.T) {
 	re.NotNil(report)
 	re.InDelta(baseCost, report.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported request consumption must keep metering aligned with master and exclude predicted-read reservation")
-	re.InDelta(baseCost+prechargeCost, report.GetSettlementSinceLastRequest().GetRRU(), 1e-6,
-		"signed settlement should still report the tokens reserved by the request")
 }
 
 func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing.T) {
@@ -440,11 +433,9 @@ func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing
 	re.InDelta(expectedReportedResponseRU, responseReport.GetConsumptionSinceLastRequest().GetRRU(), 1e-6,
 		"reported response consumption must expose actual read usage, not the paging refund")
 	re.GreaterOrEqual(responseReport.GetConsumptionSinceLastRequest().GetRRU(), 0.0)
-	re.InDelta(expectedTokenSettlement, responseReport.GetSettlementSinceLastRequest().GetRRU(), 1e-6,
-		"signed settlement should carry the paging refund")
 }
 
-func TestFailedWriteRefundOnlyEntersSettlement(t *testing.T) {
+func TestFailedWriteReservationDoesNotEnterReportedConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
@@ -466,8 +457,6 @@ func TestFailedWriteRefundOnlyEntersSettlement(t *testing.T) {
 	re.NotNil(requestReport)
 	re.Zero(requestReport.GetConsumptionSinceLastRequest().GetWRU(),
 		"write reservation should not be reported as actual usage before the response succeeds")
-	re.InDelta(tokenDelta.WRU, requestReport.GetSettlementSinceLastRequest().GetWRU(), 1e-6,
-		"signed settlement should report the write reservation")
 	gc.handleTokenBucketResponse(&rmpb.TokenBucketResponse{})
 
 	refundDelta, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
@@ -479,8 +468,6 @@ func TestFailedWriteRefundOnlyEntersSettlement(t *testing.T) {
 	re.NotNil(refundReport)
 	re.Zero(refundReport.GetConsumptionSinceLastRequest().GetWRU(),
 		"failed write refund must not make actual usage negative")
-	re.InDelta(refundDelta.WRU, refundReport.GetSettlementSinceLastRequest().GetWRU(), 1e-6,
-		"signed settlement should carry the write refund")
 }
 
 func TestPredictedReadBytesRequiresCopRead(t *testing.T) {
@@ -683,7 +670,7 @@ func TestOnResponseImplPagingRefund(t *testing.T) {
 		"onResponseImpl should refund excess pre-charged tokens")
 }
 
-func TestOnResponseNegativePagingSettlementTriggersSettlementReport(t *testing.T) {
+func TestNegativePagingSettlementDoesNotForceConsumptionReport(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
@@ -716,14 +703,12 @@ func TestOnResponseNegativePagingSettlementTriggersSettlementReport(t *testing.T
 	re.NoError(err)
 	gc.run.lastRequestTime = time.Now().Add(-defaultTargetPeriod)
 	gc.updateRunState()
-	settlementReport := gc.collectRequestAndConsumption(periodicReport)
+	report := gc.collectRequestAndConsumption(periodicReport)
 
 	cfg := DefaultRUConfig()
 	expectedRRU := float64(cfg.ReadBytesCost) * (float64(actualReadBytes) - float64(predictedReadBytes))
 	re.InDelta(expectedRRU, settlementDelta.RRU, 1e-6)
-	re.NotNil(settlementReport, "negative settlement should be reported even when actual usage is below the threshold")
-	re.InDelta(expectedRRU, settlementReport.GetSettlementSinceLastRequest().GetRRU(), 1e-6)
-	re.GreaterOrEqual(settlementReport.GetConsumptionSinceLastRequest().GetRRU(), 0.0)
+	re.Nil(report, "negative token settlement alone should not force a consumption report")
 }
 
 func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {

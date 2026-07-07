@@ -74,20 +74,6 @@ var (
 			Name:      "active_request_unit_sum",
 			Help:      "Counter of the active request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
-	readRequestUnitRefund = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: ruSubsystem,
-			Name:      "read_request_unit_refund_sum",
-			Help:      "Counter of the read request unit refunded for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
-	writeRequestUnitRefund = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: namespace,
-			Subsystem: ruSubsystem,
-			Name:      "write_request_unit_refund_sum",
-			Help:      "Counter of the write request unit refunded for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	// RUv2 metrics (experimental v2 RU calculation, recording only).
 	requestUnitV2Cost = prometheus.NewCounterVec(
@@ -270,8 +256,6 @@ func init() {
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(activeRequestUnitCost)
-	prometheus.MustRegister(readRequestUnitRefund)
-	prometheus.MustRegister(writeRequestUnitRefund)
 	prometheus.MustRegister(requestUnitV2Cost)
 	prometheus.MustRegister(tikvRequestUnitV2Cost)
 	prometheus.MustRegister(tidbRequestUnitV2Cost)
@@ -366,19 +350,11 @@ func (m *metrics) recordConsumption(
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
-	settlement := consumptionInfo.Settlement
-	if !hasMetricsActivity(consumption, settlement) {
+	if isZeroConsumption(consumption) {
 		return
 	}
-	if !isZeroConsumption(consumption) {
-		m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
-	}
-	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).addWithSettlement(
-		consumption,
-		settlement,
-		controllerConfig,
-		keyspaceID,
-	)
+	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.touchMetricsActivityRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
@@ -392,8 +368,6 @@ type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
 	ActiveRUMetrics            prometheus.Counter
-	RRURefundMetrics           prometheus.Counter
-	WRURefundMetrics           prometheus.Counter
 	TotalRUV2Metrics           prometheus.Counter
 	TiKVRUV2Metrics            prometheus.Counter
 	TiDBRUV2Metrics            prometheus.Counter
@@ -414,8 +388,6 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		RRURefundMetrics:           readRequestUnitRefund.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
-		WRURefundMetrics:           writeRequestUnitRefund.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TotalRUV2Metrics:           requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiKVRUV2Metrics:            tikvRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		TiDBRUV2Metrics:            tidbRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -449,34 +421,17 @@ func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *Controll
 	return consumption.RRU + consumption.WRU + calculateSQLRU(consumption, controllerConfig)
 }
 
-func addSignedCounter(value float64, debit, refund prometheus.Counter) {
-	if value > 0 {
-		debit.Add(value)
-	} else if value < 0 {
-		refund.Add(-value)
-	}
-}
-
 func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
-	m.addWithSettlement(consumption, consumption, controllerConfig, keyspaceID)
-}
-
-func (m *counterMetrics) addWithSettlement(consumption, settlement *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
-	if !hasMetricsActivity(consumption, settlement) {
+	if isZeroConsumption(consumption) {
 		return
 	}
-	if settlement == nil {
-		settlement = consumption
+	// RU info.
+	if consumption.RRU > 0 {
+		m.RRUMetrics.Add(consumption.RRU)
 	}
-	// RU info. Counters are monotonic, so refunds are recorded in paired
-	// refund counters and subtracted in PromQL when displaying net RU.
-	addSignedCounter(settlement.RRU, m.RRUMetrics, m.RRURefundMetrics)
-	addSignedCounter(settlement.WRU, m.WRUMetrics, m.WRURefundMetrics)
-	if consumption == nil {
-		return
+	if consumption.WRU > 0 {
+		m.WRUMetrics.Add(consumption.WRU)
 	}
-	// Active RU reflects actual usage. The settlement only carries signed
-	// RRU/WRU token changes and does not include SQL RU or RUv2 details.
 	if activeRU := calculateActiveRU(consumption, controllerConfig, keyspaceID); activeRU > 0 {
 		m.ActiveRUMetrics.Add(activeRU)
 	}
@@ -591,8 +546,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	readRequestUnitRefund.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
-	writeRequestUnitRefund.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
@@ -611,10 +564,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
-}
-
-func hasMetricsActivity(consumption, settlement *rmpb.Consumption) bool {
-	return !isZeroConsumption(consumption) || !isZeroConsumption(settlement)
 }
 
 func isZeroConsumption(consumption *rmpb.Consumption) bool {

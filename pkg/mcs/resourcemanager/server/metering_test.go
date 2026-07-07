@@ -81,7 +81,7 @@ func TestRUCollectorCollectSingleKeyspace(t *testing.T) {
 	re.Equal(metering.NewRUValue(40.0), record[meteringDataTiFlashRUV2Field])
 }
 
-func TestRUCollectorIgnoresSignedSettlement(t *testing.T) {
+func TestRUCollectorUsesConsumption(t *testing.T) {
 	re := require.New(t)
 	collector := newRUCollector()
 
@@ -91,10 +91,6 @@ func TestRUCollectorIgnoresSignedSettlement(t *testing.T) {
 			RRU:        12,
 			WRU:        8,
 			WriteBytes: 1024,
-		},
-		Settlement: &rmpb.Consumption{
-			RRU: -100,
-			WRU: -50,
 		},
 	})
 

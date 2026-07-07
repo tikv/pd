@@ -220,21 +220,6 @@ func TestUpdateDeltaConsumptionIgnoresDecreasedRequestUnits(t *testing.T) {
 	re.Equal(float64(1100), last.TiflashRUV2)
 }
 
-func TestUpdateDeltaSettlementReportsSignedRequestUnits(t *testing.T) {
-	re := require.New(t)
-	last := &rmpb.Consumption{RRU: 10, WRU: 20, ReadBytes: 100}
-	now := &rmpb.Consumption{RRU: 7, WRU: 15, ReadBytes: 90}
-
-	delta := updateDeltaSettlement(last, now)
-
-	re.Equal(float64(-3), delta.RRU)
-	re.Equal(float64(-5), delta.WRU)
-	re.Zero(delta.ReadBytes)
-	re.Equal(now.RRU, last.RRU)
-	re.Equal(now.WRU, last.WRU)
-	re.Equal(float64(100), last.ReadBytes)
-}
-
 func TestRequestInfoPagingProvidersAreOptional(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()
@@ -289,7 +274,7 @@ func TestReportedConsumptionStripsPagingPrecharge(t *testing.T) {
 	re.InDelta(tokenDelta.RRU, reported.RRU+float64(cfg.ReadBytesCost)*1024, 1e-6)
 }
 
-func TestReportedConsumptionRestoresPagingSettlement(t *testing.T) {
+func TestReportedConsumptionRestoresPagingActualUsage(t *testing.T) {
 	re := require.New(t)
 	cfg := DefaultRUConfig()
 	kvCalc := newKVCalculator(cfg)

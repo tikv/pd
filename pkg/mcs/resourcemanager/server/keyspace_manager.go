@@ -63,7 +63,6 @@ type consumptionItem struct {
 	keyspaceName      string
 	resourceGroupName string
 	*rmpb.Consumption
-	Settlement   *rmpb.Consumption
 	isBackground bool
 	isTiFlash    bool
 }
