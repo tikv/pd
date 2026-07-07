@@ -2629,6 +2629,9 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	if etcdClient == nil {
+		return nil, errs.ErrEtcdNotStarted
+	}
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 	if err != nil {
 		return nil, err
