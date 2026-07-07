@@ -1290,7 +1290,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 	})
 }
 
-// TestAffinityForwardedHeader verifies microservice forwarding sets the header.
+// TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
@@ -1305,11 +1305,17 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
-		resp, err := tests.TestDialClient.Get(getAffinityGroupURL(serverAddr))
-		re.NoError(err)
-		defer resp.Body.Close()
-
-		re.Equal(http.StatusOK, resp.StatusCode)
-		re.Equal("true", resp.Header.Get(apiutil.XForwardedToMicroserviceHeader))
+		var result handlers.AffinityGroupsResponse
+		testutil.Eventually(re, func() bool {
+			result = handlers.AffinityGroupsResponse{}
+			err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr), &result,
+				testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
+			if err != nil {
+				return false
+			}
+			_, ok := result.AffinityGroups["header-check"]
+			return ok
+		})
+		re.Contains(result.AffinityGroups, "header-check")
 	})
 }
