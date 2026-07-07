@@ -142,12 +142,32 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
+func tryGetAffinityGroups(url string) (handlers.AffinityGroupsResponse, http.Header, bool) {
+	var result handlers.AffinityGroupsResponse
+	resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	if err != nil {
+		return result, nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return result, resp.Header, false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return result, resp.Header, false
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return result, resp.Header, false
+	}
+	return result, resp.Header, true
+}
+
 func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
 	var result handlers.AffinityGroupsResponse
 	testutil.Eventually(re, func() bool {
-		result = handlers.AffinityGroupsResponse{}
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &result)
-		if err != nil || len(result.AffinityGroups) != len(groupIDs) {
+		var ok bool
+		result, _, ok = tryGetAffinityGroups(url)
+		if !ok || len(result.AffinityGroups) != len(groupIDs) {
 			return false
 		}
 		for _, groupID := range groupIDs {
@@ -1307,13 +1327,13 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 
 		var result handlers.AffinityGroupsResponse
 		testutil.Eventually(re, func() bool {
-			result = handlers.AffinityGroupsResponse{}
-			err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr), &result,
-				testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
-			if err != nil {
+			var header http.Header
+			var ok bool
+			result, header, ok = tryGetAffinityGroups(getAffinityGroupURL(serverAddr))
+			if !ok || header.Get(apiutil.XForwardedToMicroserviceHeader) != "true" {
 				return false
 			}
-			_, ok := result.AffinityGroups["header-check"]
+			_, ok = result.AffinityGroups["header-check"]
 			return ok
 		})
 		re.Contains(result.AffinityGroups, "header-check")
