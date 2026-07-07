@@ -390,16 +390,22 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	for {
 		select {
 		case <-ticker.C:
-			if !c.prepareChecker.IsPrepared() {
+			shouldResetTicker := false
+			if !c.prepareChecker.RunIfPrepared(func() {
+				diagnosable := s.IsDiagnosticAllowed()
+				if !s.AllowSchedule(diagnosable) {
+					return
+				}
+				shouldResetTicker = true
+				if op := s.Schedule(diagnosable); len(op) > 0 {
+					added := c.opController.AddWaitingOperator(op...)
+					log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
+				}
+			}) {
 				continue
 			}
-			diagnosable := s.IsDiagnosticAllowed()
-			if !s.AllowSchedule(diagnosable) {
+			if !shouldResetTicker {
 				continue
-			}
-			if op := s.Schedule(diagnosable); len(op) > 0 {
-				added := c.opController.AddWaitingOperator(op...)
-				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(s.GetInterval())

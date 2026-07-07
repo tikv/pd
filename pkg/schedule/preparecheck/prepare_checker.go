@@ -92,6 +92,20 @@ func (checker *Checker) IsPrepared() bool {
 	return checker.prepared
 }
 
+// RunIfPrepared runs fn while the checker remains prepared.
+func (checker *Checker) RunIfPrepared(fn func()) bool {
+	if checker == nil {
+		return false
+	}
+	checker.RLock()
+	defer checker.RUnlock()
+	if !checker.prepared {
+		return false
+	}
+	fn()
+	return true
+}
+
 // SetPrepared is for test purpose
 func (checker *Checker) SetPrepared() {
 	checker.Lock()

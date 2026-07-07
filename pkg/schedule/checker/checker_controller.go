@@ -284,27 +284,29 @@ func (c *Controller) checkPendingProcessedRegions() {
 
 // checkPriorityRegions checks priority regions
 func (c *Controller) checkPriorityRegions() {
-	items := c.GetPriorityRegions()
-	removes := make([]uint64, 0)
-	priorityListGauge.Set(float64(len(items)))
-	for _, id := range items {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			removes = append(removes, id)
-			continue
+	c.prepareChecker.RunIfPrepared(func() {
+		items := c.GetPriorityRegions()
+		removes := make([]uint64, 0)
+		priorityListGauge.Set(float64(len(items)))
+		for _, id := range items {
+			region := c.cluster.GetRegion(id)
+			if region == nil {
+				removes = append(removes, id)
+				continue
+			}
+			ops := c.CheckRegion(region)
+			// it should skip if region needs to merge
+			if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
+				continue
+			}
+			if !c.opController.ExceedStoreLimit(ops...) {
+				c.opController.AddWaitingOperator(ops...)
+			}
 		}
-		ops := c.CheckRegion(region)
-		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
-			continue
+		for _, v := range removes {
+			c.RemovePriorityRegions(v)
 		}
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-		}
-	}
-	for _, v := range removes {
-		c.RemovePriorityRegions(v)
-	}
+	})
 }
 
 // CheckRegion will check the region and add a new operator if needed.
@@ -406,6 +408,12 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
+	c.prepareChecker.RunIfPrepared(func() {
+		c.tryAddOperatorsLocked(region)
+	})
+}
+
+func (c *Controller) tryAddOperatorsLocked(region *core.RegionInfo) {
 	if region == nil {
 		// the region could be recent split, continue to wait.
 		return
