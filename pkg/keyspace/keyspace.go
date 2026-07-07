@@ -589,7 +589,7 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	if !manager.mgm.hasGroupsLocked() {
 		return manager.saveNewKeyspace(keyspace)
 	}
-	groupID, err := manager.mgm.pickGroupLocked(manager.ctx)
+	groupID, err := manager.mgm.pickGroupLocked()
 	if err != nil {
 		if goerrors.Is(err, errNoAvailableMetaServiceGroups) {
 			// Groups exist but none are enabled: create the keyspace without a
@@ -605,7 +605,9 @@ func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[stri
 	(*config)[MetaServiceGroupIDKey] = groupID
 	keyspace.Config = *config
 	if err := manager.saveNewKeyspace(keyspace); err != nil {
-		// Roll back the reservation made by pickGroupLocked. This only performs
+		// Roll back the reservation made by pickGroupLocked. This only mutates the
+		// cached count and does not re-take the mgm lock, so it is safe to call
+		// while still holding the lock acquired above.
 		if rollbackErr := manager.mgm.updateAssignmentLockedTxn(nil, groupID, ""); rollbackErr != nil {
 			log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
 		}

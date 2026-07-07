@@ -128,31 +128,43 @@ func (m *MetaServiceGroupManager) flushLoop() {
 }
 
 func (m *MetaServiceGroupManager) flushToStorage() error {
+	// Snapshot the dirty state under the lock and reset the dirty counter
+	// optimistically, then release the lock before the storage transaction so a
+	// slow etcd write does not block concurrent assignment operations. The
+	// snapshot is a deep copy, so later cache mutations are not observed by this
+	// flush. On failure the dirty count is restored so the next tick retries.
 	m.Lock()
-	defer m.Unlock()
 	if m.isLeader != nil && !m.isLeader() {
+		m.Unlock()
 		return nil
 	}
 	if m.dirtyCount == 0 {
+		m.Unlock()
 		return nil
 	}
+	snapshot := copyStatusMap(m.cachedStatus)
+	flushed := m.dirtyCount
+	m.dirtyCount = 0
+	m.Unlock()
+
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-		for id, status := range m.cachedStatus {
+		for id, status := range snapshot {
 			if err := m.store.SaveMetaServiceGroupStatus(txn, id, status); err != nil {
 				return err
 			}
 		}
 		return nil
 	}); err != nil {
+		m.Lock()
+		m.dirtyCount += flushed
+		m.Unlock()
 		return err
 	}
-	m.dirtyCount = 0
 	return nil
 }
 
 // GetStatus returns the status of each meta-service group.
-func (m *MetaServiceGroupManager) GetStatus(ctx context.Context) (map[string]*endpoint.MetaServiceGroupStatus, error) {
-	_ = ctx
+func (m *MetaServiceGroupManager) GetStatus(_ context.Context) (map[string]*endpoint.MetaServiceGroupStatus, error) {
 	m.RLock()
 	defer m.RUnlock()
 	return copyStatusMap(m.cachedStatus), nil
@@ -239,11 +251,10 @@ func (m *MetaServiceGroupManager) findMinMetaGroupLocked() (string, error) {
 
 // PickGroup returns the meta-service group with the least assigned keyspaces
 // and updates the cached assignment count.
-func (m *MetaServiceGroupManager) PickGroup(ctx context.Context) (string, error) {
-	_ = ctx
+func (m *MetaServiceGroupManager) PickGroup(_ context.Context) (string, error) {
 	m.Lock()
 	defer m.Unlock()
-	return m.pickGroupLocked(ctx)
+	return m.pickGroupLocked()
 }
 
 // hasGroupsLocked reports whether any meta-service group is currently available.
@@ -256,8 +267,7 @@ func (m *MetaServiceGroupManager) hasGroupsLocked() bool {
 // Callers that need group selection and the subsequent keyspace metadata save to
 // be atomic with respect to group deletion (which takes the write lock) must
 // hold the lock across both, e.g. via Manager.assignGroupAndSaveKeyspace.
-func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, error) {
-	_ = ctx
+func (m *MetaServiceGroupManager) pickGroupLocked() (string, error) {
 	assignedGroup, err := m.findMinMetaGroupLocked()
 	if err != nil {
 		return "", err
@@ -271,8 +281,7 @@ func (m *MetaServiceGroupManager) pickGroupLocked(ctx context.Context) (string, 
 // AssignToGroup increments count of the meta-service group with least assigned keyspaces.
 // It returns the assigned meta-service group and an error if any.
 // only used for testing now, as it doesn't guarantee the atomicity of select and update. UpdateAssignment should be used in production code instead.
-func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) (string, error) {
-	_ = ctx
+func (m *MetaServiceGroupManager) AssignToGroup(_ context.Context, count int) (string, error) {
 	if count < 0 {
 		return "", ErrInvalidAssignmentCount
 	}
@@ -306,14 +315,25 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
 }
 
+// updateAssignmentTxn is updateAssignmentLockedTxn with the mgm lock acquired
+// for the caller. The txn is accepted for call-site symmetry with the storage
+// transaction the caller runs, but see updateAssignmentLockedTxn: the count
+// change is applied to the in-memory cache and is NOT part of txn, so it is not
+// rolled back if txn fails to commit.
 func (m *MetaServiceGroupManager) updateAssignmentTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
 	m.Lock()
 	defer m.Unlock()
 	return m.updateAssignmentLockedTxn(txn, oldGroupID, newGroupID)
 }
 
-func (m *MetaServiceGroupManager) updateAssignmentLockedTxn(txn kv.Txn, oldGroupID, newGroupID string) error {
-	_ = txn
+// updateAssignmentLockedTxn moves one assignment from oldGroupID to newGroupID in
+// the cached status and marks it dirty for the flush loop to persist later. The
+// txn parameter is intentionally unused: unlike the pre-cache implementation the
+// count is no longer written inside the caller's storage transaction, so callers
+// must not assume the count update is atomic with their txn. Counts are
+// best-effort load-balancing hints; the delete guard uses the authoritative
+// keyspace scan, and RefreshCache reconciles any drift on the next leader term.
+func (m *MetaServiceGroupManager) updateAssignmentLockedTxn(_ kv.Txn, oldGroupID, newGroupID string) error {
 	dirtyCount := 0
 	if oldGroupID != "" {
 		if status := m.cachedStatus[oldGroupID]; status != nil && status.AssignmentCount > 0 {
