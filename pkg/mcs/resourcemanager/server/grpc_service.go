@@ -236,6 +236,9 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			// so it must happen before accessKeyspaceResourceGroupManager below.
 			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
+				if err != nil && !errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(resourceGroupName)) {
+					return err
+				}
 				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
