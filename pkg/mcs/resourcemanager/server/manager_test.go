@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -61,16 +60,6 @@ func (*mockConfigProvider) GetResourceGroupWriteRole() ResourceGroupWriteRole {
 func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
-
-func TestResourceGroupPushCollectors(t *testing.T) {
-	re := require.New(t)
-
-	re.Equal([]prometheus.Collector{
-		readRequestUnitCost,
-		writeRequestUnitCost,
-		sqlLayerRequestUnitCost,
-	}, resourceGroupPushCollectors())
-}
 
 type mockRoleConfigProvider struct {
 	bs.Server

@@ -47,9 +47,6 @@ type ruMetering struct {
 }
 
 func (rm *ruMetering) add(consumption *consumptionItem) {
-	if consumption == nil || consumption.Consumption == nil {
-		return
-	}
 	// Keep the legacy oltp/olap buckets unchanged for compatibility, and
 	// expose the finer-grained experimental RUv2 breakdown separately.
 	ru := consumption.RRU + consumption.WRU

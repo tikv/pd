@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 	"go.uber.org/zap"
 
@@ -86,14 +85,6 @@ func (cfg *pushMetricsConfig) syncPushMetricsTicker(
 	}
 	ticker = time.NewTicker(newCfg.interval)
 	return ticker
-}
-
-func resourceGroupPushCollectors() []prometheus.Collector {
-	return []prometheus.Collector{
-		readRequestUnitCost,
-		writeRequestUnitCost,
-		sqlLayerRequestUnitCost,
-	}
 }
 
 // Manager is the manager of resource group.
@@ -888,12 +879,12 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
 			start := time.Now()
-			pusher := push.New(pushMetricsConfig.address, "resource_group_svc").
-				Grouping("pod", podName)
-			for _, collector := range resourceGroupPushCollectors() {
-				pusher.Collector(collector)
-			}
-			err := pusher.PushContext(pushCtx)
+			err := push.New(pushMetricsConfig.address, "resource_group_svc").
+				Grouping("pod", podName).
+				Collector(readRequestUnitCost).
+				Collector(writeRequestUnitCost).
+				Collector(sqlLayerRequestUnitCost).
+				PushContext(pushCtx)
 			cancel()
 			if err != nil {
 				log.Warn("push metrics to Prometheus failed", zap.Error(err))
