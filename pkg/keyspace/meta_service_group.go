@@ -477,21 +477,10 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
-	m.metaServiceGroups = metaServiceGroups
-	// Sync the cache to the new group set. Clearing deleted groups here (and the
-	// persisted status below) keeps re-adding a group with the same ID from
-	// inheriting a stale assignment count or enabled state, which would skew list
-	// output and PickGroup balancing.
-	m.statusMu.Lock()
-	for groupID := range metaServiceGroups {
-		if m.cachedStatus[groupID] == nil {
-			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
-		}
-	}
-	for _, id := range deletedGroups {
-		delete(m.cachedStatus, id)
-	}
-	m.statusMu.Unlock()
+	// Clear the persisted status for deleted groups before touching memory, so all
+	// storage writes complete before the in-memory view changes. This keeps
+	// re-adding a group with the same ID from inheriting a stale assignment count
+	// or enabled state, which would skew list output and PickGroup balancing.
 	// Best-effort: the config deletion is already persisted and the delete guard
 	// relies on actual keyspace scans, not this counter.
 	if len(deletedGroups) > 0 {
@@ -507,6 +496,18 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 				zap.Strings("deleted-groups", deletedGroups), zap.Error(err))
 		}
 	}
+	// Apply the change to the in-memory view only after the storage writes above.
+	m.metaServiceGroups = metaServiceGroups
+	m.statusMu.Lock()
+	for groupID := range metaServiceGroups {
+		if m.cachedStatus[groupID] == nil {
+			m.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{}
+		}
+	}
+	for _, id := range deletedGroups {
+		delete(m.cachedStatus, id)
+	}
+	m.statusMu.Unlock()
 	return nil
 }
 
