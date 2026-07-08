@@ -244,6 +244,74 @@ func TestFailedWriteReservationDoesNotEnterReportedConsumption(t *testing.T) {
 		"failed write refund must not make actual usage negative")
 }
 
+func TestFailedWriteReservationRefundsLimiterOnResponseWait(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   100000,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  4 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		succeed:   false,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterReservation := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	refundDelta, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	expectedRefund := -getRUValueFromConsumption(refundDelta)
+	re.Positive(expectedRefund)
+	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.InDelta(tokensAfterReservation+expectedRefund, tokensAfterResponse, 1.0,
+		"failed write payback should refund the local write reservation")
+}
+
+func TestFailedWriteReservationRefundsLimiterOnResponse(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   100000,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  4 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		succeed:   false,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterReservation := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	refundDelta, err := gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	expectedRefund := -getRUValueFromConsumption(refundDelta)
+	re.Positive(expectedRefund)
+	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.InDelta(tokensAfterReservation+expectedRefund, tokensAfterResponse, 1.0,
+		"failed write payback should refund the local write reservation")
+}
+
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)

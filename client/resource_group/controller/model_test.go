@@ -39,6 +39,21 @@ func TestGetRUValueFromConsumption(t *testing.T) {
 	re.Equal(expected, result)
 }
 
+func TestWriteConsumptionHelpersSkipReadRequests(t *testing.T) {
+	re := require.New(t)
+	calculators := []ResourceCalculator{newKVCalculator(DefaultRUConfig())}
+	req := &TestRequestInfo{isWrite: false}
+
+	re.Nil(writeReservationConsumption(calculators, req))
+	re.Nil(writeRefundConsumption(calculators, req))
+	re.Zero(testing.AllocsPerRun(1000, func() {
+		_ = writeReservationConsumption(calculators, req)
+	}))
+	re.Zero(testing.AllocsPerRun(1000, func() {
+		_ = writeRefundConsumption(calculators, req)
+	}))
+}
+
 func TestAdd(t *testing.T) {
 	// Positive test case
 	re := require.New(t)

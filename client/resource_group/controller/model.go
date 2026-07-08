@@ -194,10 +194,10 @@ func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
 }
 
 func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	reservation := &rmpb.Consumption{}
 	if !req.IsWrite() {
-		return reservation
+		return nil
 	}
+	reservation := &rmpb.Consumption{}
 	for _, calc := range calculators {
 		kvCalc, ok := calc.(*KVCalculator)
 		if !ok {
@@ -209,10 +209,10 @@ func writeReservationConsumption(calculators []ResourceCalculator, req RequestIn
 }
 
 func writeRefundConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	refund := &rmpb.Consumption{}
 	if !req.IsWrite() {
-		return refund
+		return nil
 	}
+	refund := &rmpb.Consumption{}
 	for _, calc := range calculators {
 		kvCalc, ok := calc.(*KVCalculator)
 		if !ok {

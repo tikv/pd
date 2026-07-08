@@ -219,6 +219,40 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 	}
 }
 
+func TestRefundTokens(t *testing.T) {
+	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 0, 0, 100, nc)
+
+	// Consume some tokens.
+	lim.RemoveTokens(t0, 30)
+	checkTokens(re, lim, t0, 70)
+
+	// Refund part of them.
+	lim.RefundTokens(t0, 20)
+	checkTokens(re, lim, t0, 90)
+
+	// Refund beyond the initial amount - allowed (no burst cap when burst==0).
+	lim.RefundTokens(t0, 50)
+	checkTokens(re, lim, t0, 140)
+
+	// With burst > 0, refund up to burst stays.
+	limBurst := NewLimiter(t0, 0, 100, 50, nc)
+	limBurst.RemoveTokens(t0, 30)
+	checkTokens(re, limBurst, t0, 20)
+	limBurst.RefundTokens(t0, 80) // tokens = 20 + 80 = 100, burst = 100
+	checkTokens(re, limBurst, t0, 100)
+
+	// Refund beyond burst - capped by getTokens.
+	limBurst.RefundTokens(t0, 50) // tokens = 100 + 50 = 150, capped to 100
+	checkTokens(re, limBurst, t0, 100)
+
+	// Burstable (burst < 0): RefundTokens is a no-op.
+	limUnlimited := NewLimiter(t0, 0, -1, 100, nc)
+	limUnlimited.RefundTokens(t0, 50)
+	checkTokens(re, limUnlimited, t0, 100)
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)
