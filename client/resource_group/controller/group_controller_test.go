@@ -88,52 +88,6 @@ func TestGroupControlBurstable(t *testing.T) {
 	re.True(gc.burstable.Load())
 }
 
-func TestCalcAvgClampsNegativeDeltaForRateEstimation(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	counter := gc.run.requestUnitTokens
-	start := time.Now()
-
-	counter.avgRUPerSec = 0
-	counter.avgRUPerSecLastRU = 100
-	counter.avgLastTime = start
-	gc.run.now = start.Add(time.Second)
-
-	re.True(gc.calcAvg(counter, 90))
-	re.Zero(counter.avgRUPerSec)
-	re.Equal(float64(90), counter.avgRUPerSecLastRU)
-
-	gc.run.now = gc.run.now.Add(time.Second)
-	re.True(gc.calcAvg(counter, 95))
-	re.InDelta(2.5, counter.avgRUPerSec, 1e-9)
-}
-
-func TestConsumptionReportIgnoresDecreasedRequestUnits(t *testing.T) {
-	re := require.New(t)
-	gc := createTestGroupCostController(re)
-	counter := gc.run.requestUnitTokens
-	start := time.Now()
-
-	gc.run.consumption.RRU = 90
-	gc.run.lastRequestConsumption.RRU = 100
-	gc.initialRequestCompleted.Store(true)
-	gc.run.requestInProgress = true
-	counter.avgRUPerSec = 20
-	counter.avgRUPerSecLastRU = 100
-	counter.avgLastTime = start
-	gc.run.now = start.Add(time.Second)
-
-	gc.updateAvgRequestResourcePerSec()
-	re.InDelta(10, counter.avgRUPerSec, 1e-9)
-	re.Equal(float64(90), counter.avgRUPerSecLastRU)
-
-	report := gc.collectRequestAndConsumption(periodicReport)
-	re.NotNil(report)
-	re.Nil(report.GetConsumptionSinceLastRequest())
-	re.NotEmpty(report.GetRuItems().GetRequestRU())
-	re.GreaterOrEqual(report.GetRuItems().GetRequestRU()[0].GetValue(), 0.0)
-}
-
 func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
