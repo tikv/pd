@@ -329,7 +329,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	}
 	// Assign a meta-service group (if any exist) and save the keyspace atomically
 	// with respect to group deletion. The assignment is reflected in request.Config.
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	assignToMetaServiceGroup := manager.mgm != nil && manager.mgm.HasGroups()
 	if err = manager.assignGroupAndSaveKeyspace(assignToMetaServiceGroup, &request.Config, keyspace); err != nil {
 		log.Warn("[create-keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),
@@ -476,7 +476,7 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 	}
 	// Assign a meta-service group (if any exist) and save the keyspace atomically
 	// with respect to group deletion. The assignment is reflected in request.Config.
-	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0
+	assignToMetaServiceGroup := manager.mgm != nil && manager.mgm.HasGroups()
 	if err = manager.assignGroupAndSaveKeyspace(assignToMetaServiceGroup, &request.Config, keyspace); err != nil {
 		log.Warn("[keyspace] failed to save keyspace before split",
 			zap.Uint32("keyspace-id", keyspace.GetId()),

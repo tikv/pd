@@ -431,6 +431,15 @@ func (m *MetaServiceGroupManager) GetGroups() map[string]string {
 	return groups
 }
 
+// HasGroups reports whether any meta-service group is currently available. It
+// avoids the map copy of GetGroups for callers that only need the existence
+// check, e.g. the keyspace creation path.
+func (m *MetaServiceGroupManager) HasGroups() bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.hasGroupsLocked()
+}
+
 // UpdateGroupsSafely persists and applies meta-service group changes while
 // blocking concurrent keyspace assignments.
 func (m *MetaServiceGroupManager) UpdateGroupsSafely(
