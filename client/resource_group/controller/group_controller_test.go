@@ -209,6 +209,41 @@ func TestOnResponseWaitConsumption(t *testing.T) {
 	verify()
 }
 
+func TestFailedWriteReservationDoesNotEnterReportedConsumption(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		succeed:   false,
+	}
+
+	tokenDelta, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	re.Positive(tokenDelta.WRU)
+	gc.updateRunState()
+	requestReport := gc.collectRequestAndConsumption(periodicReport)
+	re.NotNil(requestReport)
+	re.Zero(requestReport.GetConsumptionSinceLastRequest().GetWRU(),
+		"write reservation should not be reported as actual usage before the response succeeds")
+	gc.handleTokenBucketResponse(&rmpb.TokenBucketResponse{})
+
+	refundDelta, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	re.Negative(refundDelta.WRU)
+	gc.run.lastRequestTime = time.Now().Add(-extendedReportingPeriodFactor * defaultTargetPeriod)
+	gc.updateRunState()
+	refundReport := gc.collectRequestAndConsumption(periodicReport)
+	re.NotNil(refundReport)
+	re.Zero(refundReport.GetConsumptionSinceLastRequest().GetWRU(),
+		"failed write refund must not make actual usage negative")
+}
+
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)

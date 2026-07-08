@@ -572,9 +572,10 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -587,7 +588,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
-			sub(gc.mu.consumption, delta)
+			sub(gc.mu.consumption, reportedDelta)
 			gc.mu.Unlock()
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
@@ -622,6 +623,7 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, resp, delta)
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
@@ -631,7 +633,7 @@ func (gc *groupCostController) onResponseImpl(
 
 	gc.mu.Lock()
 	// Record the consumption of the request
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -653,6 +655,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, resp, delta)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
 		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
@@ -672,7 +675,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 
 	gc.mu.Lock()
 	// Record the consumption of the request
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
 	// Record the consumption of the request by store
 	count := &rmpb.Consumption{}
 	*count = *delta

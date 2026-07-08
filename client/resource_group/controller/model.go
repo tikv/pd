@@ -185,6 +185,62 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 }
 
+func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
+	if consumption == nil {
+		return &rmpb.Consumption{}
+	}
+	cloned := *consumption
+	return &cloned
+}
+
+func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
+	reservation := &rmpb.Consumption{}
+	if !req.IsWrite() {
+		return reservation
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		kvCalc.calculateWriteCost(reservation, req)
+	}
+	return reservation
+}
+
+func writeRefundConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
+	refund := &rmpb.Consumption{}
+	if !req.IsWrite() {
+		return refund
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		kvCalc.payBackWriteCost(refund, req)
+	}
+	return refund
+}
+
+func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	reported := cloneConsumption(tokenDelta)
+	sub(reported, writeReservationConsumption(calculators, req))
+	return reported
+}
+
+func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, resp ResponseInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	reported := cloneConsumption(tokenDelta)
+	if req.IsWrite() {
+		if resp.Succeed() {
+			add(reported, writeReservationConsumption(calculators, req))
+		} else {
+			sub(reported, writeRefundConsumption(calculators, req))
+		}
+	}
+	return reported
+}
+
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
 	*RUConfig
