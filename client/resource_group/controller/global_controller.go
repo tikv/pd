@@ -638,6 +638,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
