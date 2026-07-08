@@ -673,6 +673,72 @@ func TestPagingPreChargeRefundOnFailedRead(t *testing.T) {
 		"failed read with paging hint should refund ReadBytesCost*predicted")
 }
 
+func TestFailedWriteDoesNotUsePagingRefundPath(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   100000,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  4 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		succeed:   false,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterReservation := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	refundDelta, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	re.Negative(refundDelta.WRU)
+	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.InDelta(tokensAfterReservation, tokensAfterResponse, 1.0,
+		"feature PR should only refund paging over-estimates, not failed-write reservations")
+}
+
+func TestFailedWriteOnResponseDoesNotUsePagingRefundPath(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), tokenBucketReconfigureArgs{
+		newTokens:   100000,
+		newFillRate: 0,
+		newBurst:    0,
+	})
+
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  4 * 1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 0,
+		succeed:   false,
+	}
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	tokensAfterReservation := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	refundDelta, err := gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.Negative(refundDelta.WRU)
+	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+
+	re.InDelta(tokensAfterReservation, tokensAfterResponse, 1.0,
+		"feature PR should only refund paging over-estimates, not failed-write reservations")
+}
+
 func TestNonCopPredictedReadBytesResponseIgnoresPagingAccounting(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)

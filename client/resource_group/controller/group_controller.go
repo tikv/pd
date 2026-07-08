@@ -684,14 +684,15 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
-	if bytesForEst, ok := pagingReadEstimate(req); ok {
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	if isPagingRead {
 		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
 	}
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
-		} else if v < 0 {
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			counter.limiter.RefundTokens(time.Now(), -v)
 		}
@@ -745,7 +746,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 			}
 			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 			waitDuration += d
-		} else if v < 0 {
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
 		} else {
