@@ -244,7 +244,7 @@ func TestFailedWriteReservationDoesNotEnterReportedConsumption(t *testing.T) {
 		"failed write refund must not make actual usage negative")
 }
 
-func TestFailedWriteReservationRefundsLimiterOnResponseWait(t *testing.T) {
+func TestFailedWritePaybackRefundsLimiterOnResponseWait(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
@@ -275,10 +275,10 @@ func TestFailedWriteReservationRefundsLimiterOnResponseWait(t *testing.T) {
 	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
 
 	re.InDelta(tokensAfterReservation+expectedRefund, tokensAfterResponse, 1.0,
-		"failed write payback should refund the local write reservation")
+		"failed write payback should refund the local limiter")
 }
 
-func TestFailedWriteReservationRefundsLimiterOnResponse(t *testing.T) {
+func TestFailedWritePaybackRefundsLimiterOnResponse(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 
@@ -309,7 +309,7 @@ func TestFailedWriteReservationRefundsLimiterOnResponse(t *testing.T) {
 	tokensAfterResponse := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
 
 	re.InDelta(tokensAfterReservation+expectedRefund, tokensAfterResponse, 1.0,
-		"failed write payback should refund the local write reservation")
+		"failed write payback should refund the local limiter")
 }
 
 func TestHandleTokenBucketUpdateEventCanceledByInitCounterNotify(t *testing.T) {

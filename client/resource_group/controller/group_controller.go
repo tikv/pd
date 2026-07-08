@@ -629,7 +629,7 @@ func (gc *groupCostController) onResponseImpl(
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
 		} else if v < 0 {
-			// Failed writes pay back the local write reservation.
+			// Failed writes refund the response-side write payback delta.
 			counter.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
@@ -677,7 +677,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 			waitDuration += d
 		} else if v < 0 {
-			// Failed writes pay back the local write reservation.
+			// Failed writes refund the response-side write payback delta.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
 			gc.metrics.successfulRequestDuration.Observe(0)
 		} else {
