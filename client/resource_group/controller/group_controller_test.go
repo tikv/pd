@@ -450,9 +450,11 @@ func TestPagingPreChargeTokenRefund(t *testing.T) {
 	re.NoError(err)
 	tokensAfterPreCharge := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
 
+	samplesBefore := histogramSampleCount(re, gc.metrics.successfulRequestDuration)
 	_, _, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
 	re.NoError(err)
 	tokensAfterSettlement := gc.run.requestUnitTokens.limiter.AvailableTokens(time.Now())
+	re.Equal(samplesBefore+1, histogramSampleCount(re, gc.metrics.successfulRequestDuration))
 
 	// Refund (pre-charge - actual) should exceed the actual read cost,
 	// so the limiter ends settlement with more tokens than after pre-charge.

@@ -749,6 +749,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 		} else if v < 0 && isPagingRead && bytesForEst > 0 {
 			// Paging over-estimate: refund the excess pre-charge.
 			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
+			gc.metrics.successfulRequestDuration.Observe(0)
 		} else {
 			gc.metrics.successfulRequestDuration.Observe(0)
 		}
