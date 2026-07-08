@@ -231,16 +231,18 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
 			)
+			// Get the resource group from manager to acquire token buckets. This also
+			// triggers lazy loading of the group if async loading hasn't completed yet,
+			// so it must happen before accessKeyspaceResourceGroupManager below.
+			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
+			if rg == nil {
+				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
+				continue
+			}
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
 				log.Warn("keyspace resource group manager not found", append(requestFields, zap.Error(err))...)
-				continue
-			}
-			// Get the resource group from manager to acquire token buckets.
-			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
-			if rg == nil {
-				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.

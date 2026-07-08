@@ -578,12 +578,14 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return nil
 		}
 	}
-	if name == DefaultResourceGroupName {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
-		return nil
-	}
 	group, err := m.loadResourceGroup(keyspaceID, name)
 	if err != nil {
+		if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
+			// No persisted default group settings exist yet (e.g. a brand-new
+			// keyspace), so it's safe to synthesize the reserved default group.
+			m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+			return nil
+		}
 		return err
 	}
 	krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
@@ -782,8 +784,10 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil {
-		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil &&
+		!errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(grouppb.Name)) {
+		log.Warn("failed to load resource group before add", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+		return err
 	}
 	if err := krgm.addResourceGroup(grouppb); err != nil {
 		return err

@@ -32,9 +32,10 @@ import (
 type blockingResourceGroupStorage struct {
 	storage.Storage
 
-	once    sync.Once
-	entered chan struct{}
-	release chan struct{}
+	once        sync.Once
+	releaseOnce sync.Once
+	entered     chan struct{}
+	release     chan struct{}
 }
 
 func newBlockingResourceGroupStorage() *blockingResourceGroupStorage {
@@ -63,7 +64,9 @@ func (s *blockingResourceGroupStorage) waitEntered(t *testing.T) {
 }
 
 func (s *blockingResourceGroupStorage) unblock() {
-	close(s.release)
+	s.releaseOnce.Do(func() {
+		close(s.release)
+	})
 }
 
 func newAsyncTestGroup(name string, fillRate uint64) *resource_manager.ResourceGroup {
@@ -98,6 +101,10 @@ func TestAsyncLoadResourceGroupsLazyGet(t *testing.T) {
 	m.storage = store
 	re.NoError(m.Init(context.Background()))
 	defer stopAsyncTestManager(m)
+	// Unblock the async loader first (LIFO) so stopAsyncTestManager's wg.Wait()
+	// cannot hang if a later assertion aborts the test before the explicit
+	// store.unblock() call below is reached.
+	defer store.unblock()
 
 	store.waitEntered(t)
 
@@ -126,6 +133,10 @@ func TestAsyncLoadResourceGroupsDoesNotRestoreDeletedLazyGroup(t *testing.T) {
 	m.storage = store
 	re.NoError(m.Init(context.Background()))
 	defer stopAsyncTestManager(m)
+	// Unblock the async loader first (LIFO) so stopAsyncTestManager's wg.Wait()
+	// cannot hang if a later assertion aborts the test before the explicit
+	// store.unblock() call below is reached.
+	defer store.unblock()
 
 	store.waitEntered(t)
 
