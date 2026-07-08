@@ -122,12 +122,19 @@ func (h *historyBuffer) capacity() int {
 	return h.size - 1
 }
 
-func (h *historyBuffer) record(r *core.RegionInfo) {
+func (h *historyBuffer) record(records ...*core.RegionInfo) {
+	if len(records) == 0 {
+		return
+	}
 	h.Lock()
 	defer h.Unlock()
-	if retainIndex, ok := h.minRetainIndexLocked(); ok && retainIndex <= h.index {
-		h.growForWindowLocked(h.index - retainIndex + 1)
+	h.prepareRequiredWindowLocked(uint64(len(records)))
+	for _, r := range records {
+		h.recordLocked(r)
 	}
+}
+
+func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	syncIndexGauge.Set(float64(h.index))
 	h.records[h.tail] = r
 	h.tail = (h.tail + 1) % h.size
@@ -139,6 +146,15 @@ func (h *historyBuffer) record(r *core.RegionInfo) {
 	if h.flushCount <= 0 {
 		h.persist()
 		h.flushCount = defaultFlushCount
+	}
+}
+
+func (h *historyBuffer) prepareRequiredWindowLocked(appendCount uint64) {
+	if retainIndex, ok := h.minRetainIndexLocked(); ok {
+		endIndex := h.index + appendCount
+		if retainIndex < endIndex {
+			h.growForWindowLocked(endIndex - retainIndex)
+		}
 	}
 }
 
@@ -231,6 +247,9 @@ func (h *historyBuffer) observeRequiredWindow(window uint64) {
 }
 
 func (h *historyBuffer) observeRequiredWindowLocked(window uint64) {
+	if window == 0 {
+		return
+	}
 	if window > h.observedRequiredWindow {
 		h.observedRequiredWindow = window
 	}

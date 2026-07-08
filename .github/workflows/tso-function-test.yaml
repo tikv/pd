@@ -7,7 +7,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
-      - release-nextgen-20250815
+      - release-nextgen-*
   pull_request:
     branches:
       - master
@@ -15,7 +15,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
-      - release-nextgen-20250815
+      - release-nextgen-*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true

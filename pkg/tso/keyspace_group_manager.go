@@ -639,8 +639,8 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			return
 		case <-ticker.C:
 			// Every primaryPriorityCheckInterval, we only reset the primary of one keyspace group
-			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
-			if member != nil {
+			electedMember, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
+			if electedMember != nil {
 				aliveTSONodes := make(map[string]struct{})
 				kgm.tsoNodes.Range(func(key, _ any) bool {
 					aliveTSONodes[typeutil.TrimScheme(key.(string))] = struct{}{}
@@ -682,7 +682,13 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
-						if err := utils.TransferPrimary(kgm.etcdClient, allocator.GetExpectedPrimaryLease(),
+						participant, ok := allocator.GetMember().(*member.Participant)
+						if !ok {
+							log.Warn("the tso member is not a participant, skip transferring primary",
+								zap.Uint32("keyspace-group-id", kg.ID))
+							continue
+						}
+						if err := utils.TransferPrimary(kgm.etcdClient, participant,
 							mcs.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
@@ -938,7 +944,9 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldGroup != nil {
 		// SplitTarget -> !Splitting
 		if oldGroup.IsSplitTarget() && !newGroup.IsSplitting() {
-			kgm.allocators[groupID].GetMember().(*member.Participant).SetCampaignChecker(nil)
+			if allocator := kgm.allocators[groupID]; allocator != nil {
+				allocator.GetMember().(*member.Participant).SetCampaignChecker(nil)
+			}
 			splitTime := kgm.splittingGroups[groupID]
 			delete(kgm.splittingGroups, groupID)
 			kgm.metrics.splitTargetGauge.Dec()
@@ -1064,7 +1072,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
 		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
 	if err != nil {
-		return nil, nil, curKeyspaceGroupID, modRevision, err
+		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
 	}
 	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
 }

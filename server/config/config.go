@@ -912,6 +912,14 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) error {
 	return AdjustMetaServiceGroups(c.MetaServiceGroups)
 }
 
+// IsValidMetaServiceGroupID reports whether id is safe to use as a single path
+// segment in /meta-service-groups/{id}/status. A '/' would split the path and
+// make the group impossible to patch, so it is the only rejected character;
+// everything else is left as-is to avoid breaking existing group IDs.
+func IsValidMetaServiceGroupID(id string) bool {
+	return !strings.Contains(id, "/")
+}
+
 // AdjustMetaServiceGroups validates and adjusts the meta-service groups configuration.
 func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 	dict := make(map[string]string, len(metaGroups))
@@ -919,6 +927,9 @@ func AdjustMetaServiceGroups(metaGroups map[string]string) error {
 		id := strings.TrimSpace(groupID)
 		if id == "" {
 			return errors.New("[keyspace] meta-service group ID cannot be empty")
+		}
+		if !IsValidMetaServiceGroupID(id) {
+			return errors.New(fmt.Sprintf("[keyspace] meta-service group ID cannot contain '/': %s", id))
 		}
 		address := strings.TrimSpace(endpoint)
 		if address == "" {
