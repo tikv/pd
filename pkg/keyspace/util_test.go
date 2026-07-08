@@ -23,8 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/failpoint"
-
 	"github.com/tikv/pd/pkg/codec"
 	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -207,37 +205,23 @@ func TestValidateName(t *testing.T) {
 
 func TestProtectedKeyspaceValidation(t *testing.T) {
 	re := require.New(t)
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag"))
-	}()
-	const classic = `return(false)`
-	const nextGen = `return(true)`
 
 	cases := []struct {
 		name          string
-		nextGenFlag   string
 		idToTest      uint32
 		nameToTest    string
 		expectErrID   bool
 		expectErrName bool
 	}{
-		// classic
-		{"classic_default_id", classic, constant.DefaultKeyspaceID, "", true, false},
-		{"classic_default_name", classic, 1, constant.DefaultKeyspaceName, false, true},
-		{"classic_system_id_allowed", classic, constant.SystemKeyspaceID, "", false, false},
-		{"classic_system_name_allowed", classic, 1, constant.SystemKeyspaceName, false, false},
-		{"classic_normal_case", classic, 100, "normal_keyspace", false, false},
-		// next-gen
-		{"nextgen_system_id", nextGen, constant.SystemKeyspaceID, "", true, false},
-		{"nextgen_system_name", nextGen, 1, constant.SystemKeyspaceName, false, true},
-		{"nextgen_default_id_allowed", nextGen, constant.DefaultKeyspaceID, "", false, false},
-		{"nextgen_default_name_allowed", nextGen, 1, constant.DefaultKeyspaceName, false, false},
-		{"nextgen_normal_case", nextGen, 100, "normal_keyspace", false, false},
+		{"default_id", constant.DefaultKeyspaceID, "", !kerneltype.IsNextGen(), false},
+		{"default_name", 1, constant.DefaultKeyspaceName, false, !kerneltype.IsNextGen()},
+		{"system_id", constant.SystemKeyspaceID, "", kerneltype.IsNextGen(), false},
+		{"system_name", 1, constant.SystemKeyspaceName, false, kerneltype.IsNextGen()},
+		{"normal_case", 100, "normal_keyspace", false, false},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(_ *testing.T) {
-			re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", c.nextGenFlag))
 			errID := validateID(c.idToTest)
 			if c.expectErrID {
 				re.Error(errID)
