@@ -223,9 +223,8 @@ var (
 )
 
 type metrics struct {
-	// Records the latest activity time for metric series cleanup. This is
-	// independent from metering/actual consumption.
-	metricsActivityRecordMap map[metricsActivityRecordKey]time.Time
+	// record update time of each resource group
+	consumptionRecordMap map[consumptionRecordKey]time.Time
 	// max per sec trackers for each keyspace and resource group.
 	maxPerSecTrackerMap map[trackerKey]*maxPerSecCostTracker
 	// cached counter metrics for each keyspace, resource group and RU type.
@@ -234,7 +233,7 @@ type metrics struct {
 	gaugeMetricsMap map[metricsKey]*gaugeMetrics
 }
 
-type metricsActivityRecordKey struct {
+type consumptionRecordKey struct {
 	keyspaceID uint32
 	groupName  string
 	ruType     string
@@ -279,24 +278,25 @@ func init() {
 
 func newMetrics() *metrics {
 	return &metrics{
-		metricsActivityRecordMap: make(map[metricsActivityRecordKey]time.Time),
-		maxPerSecTrackerMap:      make(map[trackerKey]*maxPerSecCostTracker),
-		counterMetricsMap:        make(map[metricsKey]*counterMetrics),
-		gaugeMetricsMap:          make(map[metricsKey]*gaugeMetrics),
+		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
+		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
+		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
+		gaugeMetricsMap:      make(map[metricsKey]*gaugeMetrics),
 	}
 }
 
-func (m *metrics) touchMetricsActivityRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) {
-	key := metricsActivityRecordKey{
+// insertConsumptionRecord inserts the consumption record.
+func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) {
+	key := consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  groupName,
 		ruType:     ruType,
 	}
-	m.metricsActivityRecordMap[key] = now
+	m.consumptionRecordMap[key] = now
 }
 
-func (m *metrics) deleteMetricsActivityRecord(record metricsActivityRecordKey) {
-	delete(m.metricsActivityRecordMap, record)
+func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
+	delete(m.consumptionRecordMap, record)
 }
 
 func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
@@ -355,11 +355,11 @@ func (m *metrics) recordConsumption(
 	}
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
-	m.touchMetricsActivityRecord(keyspaceID, groupName, ruLabelType, now)
+	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
-func (m *metrics) cleanupAllMetrics(r metricsActivityRecordKey, keyspaceName string) {
-	m.deleteMetricsActivityRecord(r)
+func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
+	m.deleteConsumptionRecord(r)
 	m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
 	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
 }

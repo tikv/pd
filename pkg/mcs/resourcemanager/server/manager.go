@@ -804,7 +804,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.metrics.metricsActivityRecordMap {
+			for r, lastTime := range m.metrics.consumptionRecordMap {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}

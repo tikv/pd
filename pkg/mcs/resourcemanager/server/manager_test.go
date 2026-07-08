@@ -574,13 +574,13 @@ func TestCleanUpTicker(t *testing.T) {
 	// Put a keyspace meta.
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
-	// Insert two metrics activity records manually.
-	m.metrics.metricsActivityRecordMap[metricsActivityRecordKey{
+	// Insert two consumption records manually.
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_1",
 		ruType:     defaultTypeLabel,
 	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	m.metrics.metricsActivityRecordMap[metricsActivityRecordKey{
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
@@ -597,8 +597,8 @@ func TestCleanUpTicker(t *testing.T) {
 	// Close the manager to avoid the data race.
 	m.close()
 
-	re.Len(m.metrics.metricsActivityRecordMap, 1)
-	re.Contains(m.metrics.metricsActivityRecordMap, metricsActivityRecordKey{
+	re.Len(m.metrics.consumptionRecordMap, 1)
+	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,

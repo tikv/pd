@@ -145,7 +145,7 @@ func TestRecordConsumptionUsesActualRequestUnitCounters(t *testing.T) {
 	re.Equal(float64(12), testutil.ToFloat64(counter.RRUMetrics))
 	re.Equal(float64(8), testutil.ToFloat64(counter.WRUMetrics))
 	re.Equal(float64(1024), testutil.ToFloat64(counter.WriteByteMetrics))
-	re.Contains(m.metricsActivityRecordMap, metricsActivityRecordKey{
+	re.Contains(m.consumptionRecordMap, consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  groupName,
 		ruType:     defaultTypeLabel,
@@ -174,7 +174,7 @@ func TestRecordConsumptionIgnoresEmptyConsumption(t *testing.T) {
 	}, &ControllerConfig{}, time.Now())
 
 	re.Empty(m.counterMetricsMap)
-	re.Empty(m.metricsActivityRecordMap)
+	re.Empty(m.consumptionRecordMap)
 }
 
 func TestRecordConsumptionDoesNotRefundNegativeConsumption(t *testing.T) {
