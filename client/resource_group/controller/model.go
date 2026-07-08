@@ -276,12 +276,18 @@ func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmp
 }
 
 func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if estimatedReadBytes(req) == 0 {
+		return tokenDelta
+	}
 	reported := cloneConsumption(tokenDelta)
 	adjustPagingPrechargeRRU(calculators, reported, req, -1)
 	return reported
 }
 
 func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if estimatedReadBytes(req) == 0 {
+		return tokenDelta
+	}
 	reported := cloneConsumption(tokenDelta)
 	adjustPagingPrechargeRRU(calculators, reported, req, 1)
 	return reported

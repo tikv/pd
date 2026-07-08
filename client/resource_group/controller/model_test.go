@@ -309,6 +309,23 @@ func TestReportedConsumptionRestoresPagingActualUsage(t *testing.T) {
 	re.GreaterOrEqual(reported.RRU, 0.0)
 }
 
+func TestReportedConsumptionReusesDeltaWithoutPagingPrecharge(t *testing.T) {
+	re := require.New(t)
+	calculators := []ResourceCalculator{newKVCalculator(DefaultRUConfig())}
+	req := &TestRequestInfo{
+		isWrite:            false,
+		isCop:              false,
+		predictedReadBytes: 1024,
+	}
+	tokenDelta := &rmpb.Consumption{RRU: 1, ReadBytes: 64}
+
+	reportedRequest := reportedRequestConsumption(calculators, req, tokenDelta)
+	reportedResponse := reportedResponseConsumption(calculators, req, tokenDelta)
+
+	re.Same(tokenDelta, reportedRequest)
+	re.Same(tokenDelta, reportedResponse)
+}
+
 func TestEqualRU(t *testing.T) {
 	re := require.New(t)
 
