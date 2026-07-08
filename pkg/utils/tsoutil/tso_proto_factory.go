@@ -70,8 +70,10 @@ func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
-			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspaceID,
+			},
 		},
 		Count: count,
 	}
