@@ -169,6 +169,17 @@ func TestUpdateDeltaConsumption(t *testing.T) {
 	re.Equal(now.TiflashRUV2, last.TiflashRUV2)
 }
 
+func TestUpdateDeltaConsumptionReportsEmptyConsumption(t *testing.T) {
+	re := require.New(t)
+	last := &rmpb.Consumption{RRU: 10, WRU: 20, ReadBytes: 30}
+	now := &rmpb.Consumption{RRU: 10, WRU: 20, ReadBytes: 30}
+
+	delta := updateDeltaConsumption(last, now)
+
+	re.Equal(&rmpb.Consumption{}, delta)
+	re.Equal(now, last)
+}
+
 func TestUpdateDeltaConsumptionIgnoresDecreasedRequestUnits(t *testing.T) {
 	re := require.New(t)
 	last := &rmpb.Consumption{
@@ -204,7 +215,7 @@ func TestUpdateDeltaConsumptionIgnoresDecreasedRequestUnits(t *testing.T) {
 
 	delta := updateDeltaConsumption(last, now)
 
-	re.Nil(delta)
+	re.Equal(&rmpb.Consumption{}, delta)
 	re.Equal(float64(10), last.RRU)
 	re.Equal(float64(20), last.WRU)
 	re.Equal(float64(100), last.ReadBytes)

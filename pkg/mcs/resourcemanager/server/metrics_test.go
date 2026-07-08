@@ -152,7 +152,7 @@ func TestRecordConsumptionUsesActualRequestUnitCounters(t *testing.T) {
 	})
 }
 
-func TestRecordConsumptionIgnoresEmptyConsumption(t *testing.T) {
+func TestRecordConsumptionKeepsRecordForEmptyConsumption(t *testing.T) {
 	re := require.New(t)
 
 	const (
@@ -166,13 +166,39 @@ func TestRecordConsumptionIgnoresEmptyConsumption(t *testing.T) {
 	})
 
 	m := newMetrics()
+	now := time.Now()
 	m.recordConsumption(&consumptionItem{
 		keyspaceID:        keyspaceID,
 		keyspaceName:      keyspaceName,
 		resourceGroupName: groupName,
 		Consumption:       &rmpb.Consumption{},
-	}, &ControllerConfig{}, time.Now())
+	}, &ControllerConfig{}, now)
 
+	key := consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     defaultTypeLabel,
+	}
+	re.Equal(now, m.consumptionRecordMap[key])
+
+	counter := m.counterMetricsMap[metricsKey{keyspaceID: keyspaceID, groupName: groupName, ruType: defaultTypeLabel}]
+	re.NotNil(counter)
+	re.Zero(testutil.ToFloat64(counter.RRUMetrics))
+	re.Zero(testutil.ToFloat64(counter.WRUMetrics))
+	re.Zero(testutil.ToFloat64(counter.ActiveRUMetrics))
+}
+
+func TestRecordConsumptionIgnoresNilConsumption(t *testing.T) {
+	re := require.New(t)
+
+	m := newMetrics()
+	re.NotPanics(func() {
+		m.recordConsumption(&consumptionItem{
+			keyspaceID:        408,
+			keyspaceName:      "nil-consumption-keyspace",
+			resourceGroupName: "nil-consumption-group",
+		}, &ControllerConfig{}, time.Now())
+	})
 	re.Empty(m.counterMetricsMap)
 	re.Empty(m.consumptionRecordMap)
 }

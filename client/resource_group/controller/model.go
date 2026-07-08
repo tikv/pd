@@ -434,14 +434,7 @@ func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb
 		delta.TiflashRUV2 = now.TiflashRUV2 - last.TiflashRUV2
 		last.TiflashRUV2 = now.TiflashRUV2
 	}
-	if isZeroConsumption(delta) {
-		return nil
-	}
 	return delta
-}
-
-func isZeroConsumption(consumption *rmpb.Consumption) bool {
-	return consumption == nil || *consumption == rmpb.Consumption{}
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {

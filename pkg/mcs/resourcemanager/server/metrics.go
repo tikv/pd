@@ -350,7 +350,7 @@ func (m *metrics) recordConsumption(
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
-	if isZeroConsumption(consumption) {
+	if consumption == nil {
 		return
 	}
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
@@ -422,7 +422,7 @@ func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *Controll
 }
 
 func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
-	if isZeroConsumption(consumption) {
+	if consumption == nil {
 		return
 	}
 	// RU info.
@@ -564,10 +564,6 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, fillRateLabel)
 	overrideSettings.DeleteLabelValues(groupName, keyspaceName, burstLimitLabel)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
-}
-
-func isZeroConsumption(consumption *rmpb.Consumption) bool {
-	return consumption == nil || *consumption == rmpb.Consumption{}
 }
 
 type maxPerSecCostTracker struct {
