@@ -114,9 +114,9 @@ func TestLoadKeyspaceByID(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	expected := &keyspacepb.KeyspaceMeta{
-		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 42},
-		Name:     "test-keyspace",
-		State:    keyspacepb.KeyspaceState_ENABLED,
+		Id:    42,
+		Name:  "test-keyspace",
+		State: keyspacepb.KeyspaceState_ENABLED,
 	}
 	keyspaceServer := &testKeyspaceServer{meta: expected}
 	addr, cleanup := startTestKeyspaceServer(t, keyspaceServer)

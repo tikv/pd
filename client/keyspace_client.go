@@ -68,7 +68,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 			// Create a hardcoded keyspace meta for keyspace_1
 			now := time.Now().Unix()
 			mockKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-				Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 1},
+				Id:             1,
 				Name:           name,
 				CreatedAt:      now,
 				StateChangedAt: now,
