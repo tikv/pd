@@ -856,8 +856,14 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
 		var result handlers.AffinityGroupsResponse
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
-		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			result = handlers.AffinityGroupsResponse{}
+			err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
+			re.NoError(err)
+			_, ok1 := result.AffinityGroups["group-1"]
+			_, ok3 := result.AffinityGroups["group-3"]
+			return len(result.AffinityGroups) == 2 && ok1 && ok3
+		})
 		re.Len(result.AffinityGroups, 2)
 		re.Contains(result.AffinityGroups, "group-1")
 		re.Contains(result.AffinityGroups, "group-3")
