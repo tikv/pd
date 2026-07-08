@@ -646,6 +646,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 				metrics.WriteByteCost.DeleteLabelValues(resourceGroupName, refundDirection)
 				metrics.KVCPUCost.DeleteLabelValues(resourceGroupName)
 				metrics.SQLCPUCost.DeleteLabelValues(resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true

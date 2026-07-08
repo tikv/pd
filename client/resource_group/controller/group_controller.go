@@ -123,6 +123,14 @@ type groupMetricsCollection struct {
 	refundWriteByteCostCounter        prometheus.Counter
 	kvCPUCostCounter                  prometheus.Counter
 	sqlCPUCostCounter                 prometheus.Counter
+
+	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
+	// on the hot path.
+	prechargeCounter        prometheus.Counter
+	prechargeBytesCounter   prometheus.Counter
+	actualBytesCounter      prometheus.Counter
+	predictionResidualBytes prometheus.Observer
+	noPrechargeCounter      prometheus.Counter
 }
 
 const (
@@ -160,7 +168,50 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		refundWriteByteCostCounter:        metrics.WriteByteCost.WithLabelValues(name, refundDirection),
 		kvCPUCostCounter:                  metrics.KVCPUCost.WithLabelValues(name),
 		sqlCPUCostCounter:                 metrics.SQLCPUCost.WithLabelValues(name),
+
+		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
+		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
+		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
+		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
+
+		noPrechargeCounter: metrics.CopReadNoPrechargeCounter.WithLabelValues(name),
 	}
+}
+
+// deletePagingLabels removes the per-resource-group paging_* metric series
+// when the group is being deleted or tombstoned, so stale label series do
+// not linger in Prometheus until the process restarts. Keep this list in
+// sync with initMetrics — adding a paging metric there must be paired
+// with a deletion here.
+func (*groupMetricsCollection) deletePagingLabels(name string) {
+	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
+	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
+	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
+	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
+	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
+}
+
+// observePagingRequest records request-boundary cop read pre-charge counters.
+// Callers must gate the call on pagingReadEstimate(...).ok so the metric stays
+// scoped to coprocessor reads and excludes point gets, batch gets, scans, and
+// other bounded-size reads.
+func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
+	if bytesForEst == 0 {
+		gmc.noPrechargeCounter.Inc()
+		return
+	}
+	gmc.prechargeCounter.Inc()
+	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+}
+
+// observePagingResponse records response-boundary paging metrics for
+// precharged coprocessor RPCs.
+func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
+	if bytesForEst == 0 {
+		return
+	}
+	gmc.actualBytesCounter.Add(float64(actual))
+	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
 }
 
 type tokenCounter struct {
@@ -767,10 +818,11 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 	gc.observeDemand(delta)
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -783,7 +835,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
-			sub(gc.mu.consumption, delta)
+			sub(gc.mu.consumption, reportedDelta)
 			gc.mu.Unlock()
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
@@ -798,6 +850,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
+	if bytesForEst, ok := pagingReadEstimate(info); ok {
+		gc.metrics.observePagingRequest(bytesForEst)
+	}
 
 	gc.mu.Lock()
 	// Calculate the penalty of the store
@@ -823,26 +878,32 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
+	count := &rmpb.Consumption{}
+	*count = *delta
+	for _, calc := range gc.calculators {
+		calc.BeforeKVRequest(count, req)
+	}
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	if isPagingRead {
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
+	}
 	gc.observeDemand(delta)
 	if !gc.burstable.Load() {
 		counter := gc.run.requestUnitTokens
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			counter.limiter.RemoveTokens(time.Now(), v)
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			counter.limiter.RefundTokens(time.Now(), -v)
 		}
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
 
 	gc.mu.Lock()
-	// Record the consumption of the request
-	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
-	count := &rmpb.Consumption{}
-	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
@@ -857,39 +918,58 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	gc.observeDemand(delta)
-	var waitDuration time.Duration
-	if !gc.burstable.Load() {
-		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-		d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-		if err != nil {
-			if errs.ErrClientResourceGroupThrottled.Equal(err) {
-				gc.metrics.failedRequestCounterWithThrottled.Inc()
-				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-			} else {
-				gc.metrics.failedRequestCounterWithOthers.Inc()
-			}
-			if waitDuration > slowNotifyFilterDuration {
-				log.Warn("[resource group controller] response wait for tokens failed", gc.logFields(waitDuration, err)...)
-			}
-			return nil, waitDuration, err
-		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
-	}
-	gc.observeConsumption(delta)
-	gc.observeComponentConsumption(delta)
-
-	gc.mu.Lock()
-	// Record the consumption of the request
-	add(gc.mu.consumption, delta)
-	// Record the consumption of the request by store
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	// As the penalty is only counted when the request is completed, so here needs to calculate the write cost which is added in `BeforeKVRequest`
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	gc.observeDemand(delta)
+	var waitDuration time.Duration
+	if !gc.burstable.Load() {
+		v := getRUValueFromConsumption(delta)
+		if v > 0 && isPagingRead && bytesForEst > 0 {
+			// The precharged request has already consumed TiKV resources.
+			// Debit any positive settlement delta immediately so future
+			// requests observe the debt instead of queueing this completed
+			// request for response-side admission.
+			gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+			gc.metrics.successfulRequestDuration.Observe(0)
+		} else if v > 0 {
+			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+			if err != nil {
+				if errs.ErrClientResourceGroupThrottled.Equal(err) {
+					gc.metrics.failedRequestCounterWithThrottled.Inc()
+					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+				} else {
+					gc.metrics.failedRequestCounterWithOthers.Inc()
+				}
+				if waitDuration > slowNotifyFilterDuration {
+					log.Warn("[resource group controller] response wait for tokens failed", gc.logFields(waitDuration, err)...)
+				}
+				return nil, waitDuration, err
+			}
+			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+			waitDuration += d
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
+			gc.metrics.successfulRequestDuration.Observe(0)
+		} else {
+			gc.metrics.successfulRequestDuration.Observe(0)
+		}
+	}
+	gc.observeConsumption(delta)
+	gc.observeComponentConsumption(delta)
+	if isPagingRead {
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
+	}
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
