@@ -301,7 +301,7 @@ func TestReportedConsumptionRestoresPagingActualUsage(t *testing.T) {
 		RRU:       float64(cfg.ReadBytesCost) * (float64(actualReadBytes) - float64(req.predictedReadBytes)),
 		ReadBytes: float64(actualReadBytes),
 	}
-	reported := reportedResponseConsumption(calculators, req, &TestResponseInfo{succeed: true}, tokenDelta)
+	reported := reportedResponseConsumption(calculators, req, tokenDelta)
 
 	re.InDelta(float64(cfg.ReadBytesCost)*float64(actualReadBytes), reported.RRU, 1e-6)
 	re.Equal(float64(actualReadBytes), reported.ReadBytes)

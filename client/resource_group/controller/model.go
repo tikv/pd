@@ -275,53 +275,15 @@ func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmp
 	}
 }
 
-func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	reservation := &rmpb.Consumption{}
-	if !req.IsWrite() {
-		return reservation
-	}
-	for _, calc := range calculators {
-		kvCalc, ok := calc.(*KVCalculator)
-		if !ok {
-			continue
-		}
-		kvCalc.calculateWriteCost(reservation, req)
-	}
-	return reservation
-}
-
-func writeRefundConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	refund := &rmpb.Consumption{}
-	if !req.IsWrite() {
-		return refund
-	}
-	for _, calc := range calculators {
-		kvCalc, ok := calc.(*KVCalculator)
-		if !ok {
-			continue
-		}
-		kvCalc.payBackWriteCost(refund, req)
-	}
-	return refund
-}
-
 func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
 	reported := cloneConsumption(tokenDelta)
 	adjustPagingPrechargeRRU(calculators, reported, req, -1)
-	sub(reported, writeReservationConsumption(calculators, req))
 	return reported
 }
 
-func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, resp ResponseInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
 	reported := cloneConsumption(tokenDelta)
 	adjustPagingPrechargeRRU(calculators, reported, req, 1)
-	if req.IsWrite() {
-		if resp.Succeed() {
-			add(reported, writeReservationConsumption(calculators, req))
-		} else {
-			sub(reported, writeRefundConsumption(calculators, req))
-		}
-	}
 	return reported
 }
 
