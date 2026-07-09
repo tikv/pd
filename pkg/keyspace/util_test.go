@@ -100,13 +100,13 @@ func TestMakeKeyspacePrefix(t *testing.T) {
 	}{
 		{
 			name:       "raw",
-			mode:       RawKeyspaceModePrefix,
+			mode:       codec.RawKeyspaceModePrefix,
 			id:         0x010203,
 			wantPrefix: []byte{'r', 0x01, 0x02, 0x03},
 		},
 		{
 			name:       "txn",
-			mode:       TxnKeyspaceModePrefix,
+			mode:       codec.TxnKeyspaceModePrefix,
 			id:         constant.MaxValidKeyspaceID,
 			wantPrefix: []byte{'x', 0xff, 0xff, 0xff},
 		},
@@ -151,13 +151,13 @@ func TestParseKeyspacePrefix(t *testing.T) {
 		{
 			name: "raw",
 			key:  []byte{'r', 0x01, 0x02, 0x03},
-			mode: RawKeyspaceModePrefix,
+			mode: codec.RawKeyspaceModePrefix,
 			id:   0x010203,
 		},
 		{
 			name: "txn with suffix",
 			key:  []byte{'x', 0xff, 0xff, 0xff, 't'},
-			mode: TxnKeyspaceModePrefix,
+			mode: codec.TxnKeyspaceModePrefix,
 			id:   constant.MaxValidKeyspaceID,
 		},
 	}
