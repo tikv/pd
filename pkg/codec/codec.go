@@ -70,12 +70,14 @@ func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
 	return mode, id, true
 }
 
-// unwrapKeyspace strips the API v2 keyspace prefix (mode byte + 24-bit id)
-// when the remainder is a TiDB meta/table key. Classic keys and raw keys that
-// only happen to start with 'x'/'r' are left unchanged with hasKeyspace false.
+// unwrapKeyspace strips the API v2 txn keyspace prefix (mode byte + 24-bit id)
+// when the remainder is a TiDB meta/table key. TiDB data only lives under the
+// txn ('x') mode; raw-mode payloads are arbitrary user bytes, so raw keys and
+// keys that only happen to start with 'x' are left unchanged with hasKeyspace
+// false.
 func unwrapKeyspace(key []byte) (payload []byte, keyspaceID uint32, hasKeyspace bool) {
-	_, keyspaceID, ok := ParseKeyspacePrefix(key)
-	if !ok {
+	mode, keyspaceID, ok := ParseKeyspacePrefix(key)
+	if !ok || mode != TxnKeyspaceModePrefix {
 		return key, 0, false
 	}
 	rest := key[KeyspacePrefixLen:]
