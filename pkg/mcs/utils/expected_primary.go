@@ -86,7 +86,7 @@ func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPri
 		return nil, err
 	}
 
-	revision, err := markExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.GetID())
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		return nil, err

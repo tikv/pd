@@ -309,7 +309,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, keypath.ResourceManagerSvcRootPath(), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, keypath.ResourceManagerSvcRootPath(), constant.PrimaryKey, constant.ResourceManagerServiceName+" primary election")
 
 	s.service = &Service{
 		ctx:     s.Context(),
