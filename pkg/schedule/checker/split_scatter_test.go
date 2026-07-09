@@ -1010,14 +1010,14 @@ func splitScatterIndexKeyPrefix() []byte {
 }
 
 func splitScatterKeyspacePrefixRange(keyspaceID uint32, rawPrefix []byte) splitScatterRangeHint {
-	startKey := newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, rawPrefix)
+	startKey := newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, rawPrefix)
 	endRawPrefix := splitScatterNextPrefix(rawPrefix)
 	if len(endRawPrefix) == 0 {
 		return splitScatterRangeHint{startKey: startKey}
 	}
 	return splitScatterRangeHint{
 		startKey: startKey,
-		endKey:   newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, endRawPrefix),
+		endKey:   newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, endRawPrefix),
 	}
 }
 
@@ -1030,7 +1030,7 @@ func newSplitScatterIndexKey(suffix string) []byte {
 func newSplitScatterKeyspaceIndexKey(keyspaceID uint32, suffix string) []byte {
 	key := append([]byte(nil), splitScatterIndexKeyPrefix()...)
 	key = append(key, suffix...)
-	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, key)
+	return newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, key)
 }
 
 func newSplitScatterRecordKey(tableID int64, suffix string) []byte {
@@ -1042,13 +1042,13 @@ func newSplitScatterRecordKey(tableID int64, suffix string) []byte {
 func newSplitScatterKeyspaceRecordKey(keyspaceID uint32, suffix string) []byte {
 	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(splitScatterTestTableID)...)
 	key = append(key, suffix...)
-	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.TxnKeyspaceModePrefix, key)
+	return newSplitScatterKeyspaceKey(keyspaceID, codec.TxnKeyspaceModePrefix, key)
 }
 
 func newSplitScatterRawKeyspaceRecordKey(keyspaceID uint32, tableID int64, suffix string) []byte {
 	key := append([]byte(nil), codec.GenerateRecordKeyPrefix(tableID)...)
 	key = append(key, suffix...)
-	return newSplitScatterKeyspaceKey(keyspaceID, keyspace.RawKeyspaceModePrefix, key)
+	return newSplitScatterKeyspaceKey(keyspaceID, codec.RawKeyspaceModePrefix, key)
 }
 
 func newSplitScatterTableBoundaryKey(tableID int64) []byte {

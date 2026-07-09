@@ -105,7 +105,7 @@ func decodeSplitScatterRegionKey(
 	}
 	decodedKey := splitScatterDecodedKey{rawKey: rawKey}
 	mode, keyspaceID, ok := keyspace.ParseKeyspacePrefix(rawKey)
-	if !ok || mode != keyspace.TxnKeyspaceModePrefix {
+	if !ok || mode != codec.TxnKeyspaceModePrefix {
 		return decodedKey, nil
 	}
 
@@ -116,7 +116,7 @@ func decodeSplitScatterRegionKey(
 	if validateKeyspace == nil || !validateKeyspace(keyspaceID) {
 		return decodedKey, nil
 	}
-	decodedKey.rawKey = rawKey[keyspace.KeyspacePrefixLen:]
+	decodedKey.rawKey = rawKey[codec.KeyspacePrefixLen:]
 	decodedKey.keyspacePrefix = keyspace.MakeKeyspacePrefix(mode, keyspaceID)
 	decodedKey.keyspaceID = keyspaceID
 	return decodedKey, nil

@@ -35,11 +35,12 @@ const (
 	encMarker    = byte(0xFF)
 	encPad       = byte(0x0)
 
-	// Keyspace mode prefixes match pkg/keyspace. They are duplicated here to
-	// avoid an import cycle (keyspace already depends on codec).
-	rawKeyspaceModePrefix = byte('r')
-	txnKeyspaceModePrefix = byte('x')
-	keyspacePrefixLen     = 4
+	// RawKeyspaceModePrefix is the raw keyspace prefix mode byte.
+	RawKeyspaceModePrefix = byte('r')
+	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
+	TxnKeyspaceModePrefix = byte('x')
+	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
+	KeyspacePrefixLen = 4
 )
 
 // Key represents high-level Key type.
@@ -49,14 +50,14 @@ type Key []byte
 // remainder is a TiDB meta/table key. Classic keys and raw keys that only
 // happen to start with 'x'/'r' are left unchanged.
 func stripKeyspacePrefixIfPresent(key []byte) []byte {
-	if len(key) <= keyspacePrefixLen {
+	if len(key) <= KeyspacePrefixLen {
 		return key
 	}
 	mode := key[0]
-	if mode != rawKeyspaceModePrefix && mode != txnKeyspaceModePrefix {
+	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
 		return key
 	}
-	rest := key[keyspacePrefixLen:]
+	rest := key[KeyspacePrefixLen:]
 	if bytes.HasPrefix(rest, tablePrefix) || bytes.HasPrefix(rest, metaPrefix) {
 		return rest
 	}

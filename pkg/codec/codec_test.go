@@ -63,7 +63,7 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 	classic := EncodeBytes(GenerateTableKey(tableID))
 	re.Equal(tableID, classic.TableID())
 
-	for _, mode := range []byte{txnKeyspaceModePrefix, rawKeyspaceModePrefix} {
+	for _, mode := range []byte{TxnKeyspaceModePrefix, RawKeyspaceModePrefix} {
 		prefix := makeKeyspacePrefix(mode, keyspaceID)
 		encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
 		re.Equal(tableID, encoded.TableID(), "mode=%q", mode)
@@ -89,7 +89,7 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 	re := require.New(t)
 	tableID := int64(55)
 	keyspaceID := uint32(7)
-	prefix := makeKeyspacePrefix(txnKeyspaceModePrefix, keyspaceID)
+	prefix := makeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 
 	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
 	re.True(isMeta)
@@ -105,7 +105,7 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 }
 
 func makeKeyspacePrefix(mode byte, id uint32) []byte {
-	prefix := make([]byte, keyspacePrefixLen)
+	prefix := make([]byte, KeyspacePrefixLen)
 	binary.BigEndian.PutUint32(prefix, id)
 	prefix[0] = mode
 	return prefix

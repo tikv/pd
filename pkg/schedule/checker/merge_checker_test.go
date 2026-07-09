@@ -681,7 +681,7 @@ func TestAllowMergeCrossTable(t *testing.T) {
 }
 
 func encodeKeyspaceRawKey(keyspaceID uint32, rawKey []byte) []byte {
-	prefix := keyspace.MakeKeyspacePrefix(keyspace.TxnKeyspaceModePrefix, keyspaceID)
+	prefix := keyspace.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
 	return codec.EncodeBytes(append(prefix, rawKey...))
 }
 
