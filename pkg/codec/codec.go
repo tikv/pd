@@ -106,6 +106,8 @@ func (k Key) TableIdentity() TableIdentity {
 	key, keyspaceID, hasKeyspace := unwrapKeyspace(key)
 	identity := TableIdentity{KeyspaceID: keyspaceID, HasKeyspace: hasKeyspace}
 	if bytes.HasPrefix(key, tablePrefix) {
+		// A truncated table key fails to decode and keeps TableID 0, i.e. it
+		// is treated as a non-table key, matching the historical semantics.
 		_, identity.TableID, _ = DecodeInt(key[len(tablePrefix):])
 	}
 	return identity

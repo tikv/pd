@@ -58,8 +58,8 @@ func TestCrossTableMergeWithKeyspace(t *testing.T) {
 	replication.MaxReplicas = 1
 	re.NoError(svr.SetReplicationConfig(replication))
 
-	// Keyspace 42, txn mode: 'x' + big-endian lower 24 bits of the keyspace id.
-	keyspacePrefix := []byte{'x', 0x00, 0x00, 0x2a}
+	// Keyspace 42, txn mode.
+	keyspacePrefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, 42)
 	tableKey := func(tableID int64) []byte {
 		return codec.EncodeBytes(append(append([]byte{}, keyspacePrefix...), codec.GenerateTableKey(tableID)...))
 	}
