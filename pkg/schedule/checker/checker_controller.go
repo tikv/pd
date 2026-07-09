@@ -151,11 +151,12 @@ func (c *Controller) PatrolRegions() {
 				failpoint.Continue()
 			})
 			c.updateTickerIfNeeded(ticker)
+			pendingRegionCount := c.patrolRegionContext.pendingRegionCount()
+			c.metrics.patrolRegionChannelSize.Set(float64(pendingRegionCount))
 			// wait for the previous batch to be fully processed.
-			if !c.patrolRegionContext.isIdle() {
+			if pendingRegionCount > 0 {
 				continue
 			}
-			c.metrics.patrolRegionChannelSize.Set(float64(len(c.patrolRegionContext.regionChan)))
 			c.updatePatrolWorkersIfNeeded()
 			if c.cluster.IsSchedulingHalted() {
 				log.Debug("skip patrol regions due to scheduling is halted")
@@ -187,7 +188,11 @@ func (c *Controller) PatrolRegions() {
 			})
 			// When the key is nil, it means that the scan is finished.
 			if len(key) == 0 {
-				if !c.patrolRegionContext.waitIdle(c.ctx) {
+				var idle bool
+				measure(c.metrics.patrolPhaseHistograms[phaseWaitForChannel], func() {
+					idle = c.patrolRegionContext.waitIdle(c.ctx)
+				})
+				if !idle {
 					patrolCheckRegionsGauge.Set(0)
 					c.setPatrolRegionsDuration(0)
 					return
@@ -725,8 +730,12 @@ func (p *PatrolRegionContext) submit(region *core.RegionInfo) {
 	p.regionChan <- region
 }
 
+func (p *PatrolRegionContext) pendingRegionCount() int64 {
+	return p.pendingCount.Load()
+}
+
 func (p *PatrolRegionContext) isIdle() bool {
-	return p.pendingCount.Load() == 0
+	return p.pendingRegionCount() == 0
 }
 
 func (p *PatrolRegionContext) waitIdle(ctx context.Context) bool {

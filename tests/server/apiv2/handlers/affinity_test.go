@@ -139,42 +139,6 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	return &result
 }
 
-func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
-	var result handlers.AffinityGroupsResponse
-	var lastBody []byte
-	var lastErr error
-	var lastStatusCode int
-	testutil.Eventually(re, func() bool {
-		result = handlers.AffinityGroupsResponse{}
-		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
-		if err != nil {
-			lastErr = err
-			return false
-		}
-		defer resp.Body.Close()
-		lastStatusCode = resp.StatusCode
-		lastBody, lastErr = io.ReadAll(resp.Body)
-		if lastErr != nil || resp.StatusCode != http.StatusOK {
-			return false
-		}
-		lastErr = json.Unmarshal(lastBody, &result)
-		if lastErr != nil || len(result.AffinityGroups) != len(groupIDs) {
-			return false
-		}
-		for _, groupID := range groupIDs {
-			if _, ok := result.AffinityGroups[groupID]; !ok {
-				return false
-			}
-		}
-		return true
-	})
-	re.NoError(lastErr)
-	re.Equal(http.StatusOK, lastStatusCode, "resp: "+string(lastBody))
-	for _, groupID := range groupIDs {
-		re.Contains(result.AffinityGroups, groupID)
-	}
-}
-
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
 	tests.MustPutStore(re, cluster, store)
 
@@ -696,7 +660,9 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		re.Contains(result.AffinityGroups, "existing")
 		re.Contains(result.AffinityGroups, "new")
 
-		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr), "existing", "new")
+		listResp := mustGetAllAffinityGroups(re, serverAddr)
+		re.Contains(listResp.AffinityGroups, "existing")
+		re.Contains(listResp.AffinityGroups, "new")
 	})
 }
 
@@ -889,7 +855,12 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
-		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", "group-1", "group-3")
+		var result handlers.AffinityGroupsResponse
+		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
+		re.NoError(err)
+		re.Len(result.AffinityGroups, 2)
+		re.Contains(result.AffinityGroups, "group-1")
+		re.Contains(result.AffinityGroups, "group-3")
 	})
 }
 
