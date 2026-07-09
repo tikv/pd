@@ -58,12 +58,12 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"checker"})
 
-	patrolRegionChannelSize = prometheus.NewGauge(
+	patrolRegionPendingWork = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "checker",
 			Name:      "patrol_region_channel_size",
-			Help:      "Size of patrol region channel.",
+			Help:      "Number of queued and in-flight patrol regions.",
 		})
 	splitScatterPendingExpiredCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -100,7 +100,7 @@ func init() {
 	prometheus.MustRegister(patrolCheckRegionsGauge)
 	prometheus.MustRegister(patrolPhaseDuration)
 	prometheus.MustRegister(checkRegionDuration)
-	prometheus.MustRegister(patrolRegionChannelSize)
+	prometheus.MustRegister(patrolRegionPendingWork)
 	prometheus.MustRegister(splitScatterPendingExpiredCounter)
 	prometheus.MustRegister(splitScatterPendingDroppedCounter)
 	prometheus.MustRegister(splitScatterPendingGauge)
@@ -136,8 +136,8 @@ type checkerControllerMetrics struct {
 	patrolPhaseHistograms map[string]prometheus.Observer
 	// Pre-created histograms for checkers. Key is the checker name.
 	checkRegionHistograms map[string]prometheus.Observer
-	// Gauge for patrol region channel size.
-	patrolRegionChannelSize prometheus.Gauge
+	// Gauge for queued and in-flight patrol regions.
+	patrolRegionPendingWork prometheus.Gauge
 }
 
 // newCheckerControllerMetrics creates and initializes a new checkerControllerMetrics instance.
@@ -165,7 +165,7 @@ func newCheckerControllerMetrics() *checkerControllerMetrics {
 	m := &checkerControllerMetrics{
 		patrolPhaseHistograms:   make(map[string]prometheus.Observer, len(patrolPhases)),
 		checkRegionHistograms:   make(map[string]prometheus.Observer, len(checkerTypes)),
-		patrolRegionChannelSize: patrolRegionChannelSize, // Use the gauge defined at package-level
+		patrolRegionPendingWork: patrolRegionPendingWork,
 	}
 
 	for _, phase := range patrolPhases {
