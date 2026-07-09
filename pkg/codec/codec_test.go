@@ -15,6 +15,7 @@
 package codec
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,63 @@ func TestTableID(t *testing.T) {
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
 	re.Equal(int64(0), key.TableID())
+}
+
+func TestTableIDWithKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	tableID := int64(100)
+	otherTableID := int64(200)
+	keyspaceID := uint32(42)
+
+	classic := EncodeBytes(GenerateTableKey(tableID))
+	re.Equal(tableID, classic.TableID())
+
+	for _, mode := range []byte{txnKeyspaceModePrefix, rawKeyspaceModePrefix} {
+		prefix := makeKeyspacePrefix(mode, keyspaceID)
+		encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
+		re.Equal(tableID, encoded.TableID(), "mode=%q", mode)
+
+		other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
+		re.Equal(otherTableID, other.TableID(), "mode=%q", mode)
+		re.NotEqual(encoded.TableID(), other.TableID(), "mode=%q", mode)
+
+		// Same table: record and index keys must still resolve to the same table ID.
+		record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
+		index := EncodeBytes(append(append([]byte{}, prefix...), GenerateIndexKey(tableID, 7)...))
+		re.Equal(tableID, record.TableID(), "mode=%q", mode)
+		re.Equal(tableID, index.TableID(), "mode=%q", mode)
+	}
+
+	// A raw key that only happens to start with the keyspace mode byte but is
+	// not followed by a TiDB table/meta payload must not be treated as a table key.
+	ambiguous := EncodeBytes([]byte{'x', 0x00, 0x00, 0x2a, 'u', 's', 'e', 'r'})
+	re.Equal(int64(0), ambiguous.TableID())
+}
+
+func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	tableID := int64(55)
+	keyspaceID := uint32(7)
+	prefix := makeKeyspacePrefix(txnKeyspaceModePrefix, keyspaceID)
+
+	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
+	re.True(isMeta)
+	re.Equal(int64(0), id)
+
+	isMeta, id = EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...)).MetaOrTable()
+	re.False(isMeta)
+	re.Equal(tableID, id)
+
+	isMeta, id = EncodeBytes([]byte("hello")).MetaOrTable()
+	re.False(isMeta)
+	re.Equal(int64(0), id)
+}
+
+func makeKeyspacePrefix(mode byte, id uint32) []byte {
+	prefix := make([]byte, keyspacePrefixLen)
+	binary.BigEndian.PutUint32(prefix, id)
+	prefix[0] = mode
+	return prefix
 }
 
 func TestGenerateRecordAndIndexKeys(t *testing.T) {

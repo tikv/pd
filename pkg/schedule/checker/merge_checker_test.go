@@ -20,13 +20,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -588,5 +591,109 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
+	)
+}
+
+func TestAllowMergeCrossTable(t *testing.T) {
+	ctx := t.Context()
+	cfg := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, cfg)
+	// Disable placement rules so AllowMerge is decided only by key type / table ID.
+	cluster.SetEnablePlacementRules(false)
+
+	const (
+		keyspaceID = uint32(42)
+		tableA     = int64(100)
+		tableB     = int64(101)
+		indexID    = int64(1)
+	)
+
+	classicTableA := codec.EncodeBytes(codec.GenerateTableKey(tableA))
+	classicTableB := codec.EncodeBytes(codec.GenerateTableKey(tableB))
+	classicIndexA := codec.EncodeBytes(codec.GenerateIndexKey(tableA, indexID))
+	classicRecordA := codec.EncodeBytes(codec.GenerateRowKey(tableA, 1))
+
+	ksTableA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableA))
+	ksTableB := encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB))
+	ksIndexA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateIndexKey(tableA, indexID))
+	ksRecordA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateRowKey(tableA, 1))
+
+	cases := []struct {
+		name            string
+		startA, endA    []byte
+		startB, endB    []byte
+		crossTableMerge bool
+		expectAllow     bool
+	}{
+		{
+			name:   "classic different tables cross-table enabled",
+			startA: classicTableA, endA: classicTableB,
+			startB: classicTableB, endB: codec.EncodeBytes(codec.GenerateTableKey(tableB + 1)),
+			crossTableMerge: true,
+			expectAllow:     true,
+		},
+		{
+			name:   "classic different tables cross-table disabled",
+			startA: classicTableA, endA: classicTableB,
+			startB: classicTableB, endB: codec.EncodeBytes(codec.GenerateTableKey(tableB + 1)),
+			crossTableMerge: false,
+			expectAllow:     false,
+		},
+		{
+			name:   "classic same table index and record cross-table disabled",
+			startA: classicIndexA, endA: classicRecordA,
+			startB: classicRecordA, endB: classicTableB,
+			crossTableMerge: false,
+			expectAllow:     true,
+		},
+		{
+			name:   "keyspace different tables cross-table enabled",
+			startA: ksTableA, endA: ksTableB,
+			startB: ksTableB, endB: encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB+1)),
+			crossTableMerge: true,
+			expectAllow:     true,
+		},
+		{
+			name:   "keyspace different tables cross-table disabled",
+			startA: ksTableA, endA: ksTableB,
+			startB: ksTableB, endB: encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB+1)),
+			crossTableMerge: false,
+			expectAllow:     false,
+		},
+		{
+			name:   "keyspace same table index and record cross-table disabled",
+			startA: ksIndexA, endA: ksRecordA,
+			startB: ksRecordA, endB: ksTableB,
+			crossTableMerge: false,
+			expectAllow:     true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			cluster.SetEnableCrossTableMerge(tc.crossTableMerge)
+			regionA := newRegionInfoWithBytes(1, tc.startA, tc.endA)
+			regionB := newRegionInfoWithBytes(2, tc.startB, tc.endB)
+			re.Equal(tc.expectAllow, AllowMerge(cluster, regionA, regionB))
+		})
+	}
+}
+
+func encodeKeyspaceRawKey(keyspaceID uint32, rawKey []byte) []byte {
+	prefix := keyspace.MakeKeyspacePrefix(keyspace.TxnKeyspaceModePrefix, keyspaceID)
+	return codec.EncodeBytes(append(prefix, rawKey...))
+}
+
+func newRegionInfoWithBytes(id uint64, startKey, endKey []byte) *core.RegionInfo {
+	peer := &metapb.Peer{Id: id * 10, StoreId: 1}
+	return core.NewRegionInfo(
+		&metapb.Region{
+			Id:       id,
+			StartKey: startKey,
+			EndKey:   endKey,
+			Peers:    []*metapb.Peer{peer},
+		},
+		peer,
 	)
 }

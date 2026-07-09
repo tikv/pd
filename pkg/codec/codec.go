@@ -34,18 +34,44 @@ const (
 	encGroupSize = 8
 	encMarker    = byte(0xFF)
 	encPad       = byte(0x0)
+
+	// Keyspace mode prefixes match pkg/keyspace. They are duplicated here to
+	// avoid an import cycle (keyspace already depends on codec).
+	rawKeyspaceModePrefix = byte('r')
+	txnKeyspaceModePrefix = byte('x')
+	keyspacePrefixLen     = 4
 )
 
 // Key represents high-level Key type.
 type Key []byte
 
+// stripKeyspacePrefixIfPresent removes the API v2 keyspace prefix when the
+// remainder is a TiDB meta/table key. Classic keys and raw keys that only
+// happen to start with 'x'/'r' are left unchanged.
+func stripKeyspacePrefixIfPresent(key []byte) []byte {
+	if len(key) <= keyspacePrefixLen {
+		return key
+	}
+	mode := key[0]
+	if mode != rawKeyspaceModePrefix && mode != txnKeyspaceModePrefix {
+		return key
+	}
+	rest := key[keyspacePrefixLen:]
+	if bytes.HasPrefix(rest, tablePrefix) || bytes.HasPrefix(rest, metaPrefix) {
+		return rest
+	}
+	return key
+}
+
 // TableID returns the table ID of the key, if the key is not table key, returns 0.
+// It supports both classic TiDB keys and API v2 keyspace-prefixed keys.
 func (k Key) TableID() int64 {
 	_, key, err := DecodeBytes(k)
 	if err != nil {
 		// should never happen
 		return 0
 	}
+	key = stripKeyspacePrefixIfPresent(key)
 	if !bytes.HasPrefix(key, tablePrefix) {
 		return 0
 	}
@@ -59,11 +85,13 @@ func (k Key) TableID() int64 {
 // If the key is a meta key, it returns true and 0.
 // If the key is a table key, it returns false and table ID.
 // Otherwise, it returns false and 0.
+// It supports both classic TiDB keys and API v2 keyspace-prefixed keys.
 func (k Key) MetaOrTable() (bool, int64) {
 	_, key, err := DecodeBytes(k)
 	if err != nil {
 		return false, 0
 	}
+	key = stripKeyspacePrefixIfPresent(key)
 	if bytes.HasPrefix(key, metaPrefix) {
 		return true, 0
 	}
