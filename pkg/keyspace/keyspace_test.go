@@ -201,12 +201,14 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureStillCreatesKeyspace() {
 		Name:       "waitsplitfail",
 		CreateTime: time.Now().Unix(),
 	})
-	// Wait-split failed, but the keyspace must still be created.
+	// Wait-split failed, but the keyspace must still be created and left disabled
+	// for a later split/recovery path to enable explicitly.
 	re.NoError(err)
 	re.NotNil(ks)
 	loaded, err := manager.LoadKeyspace("waitsplitfail")
 	re.NoError(err)
 	re.Equal(ks.Id, loaded.Id)
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.State)
 }
 
 func (suite *keyspaceTestSuite) TestCreateKeyspace() {
@@ -1252,7 +1254,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	manager.mgm.updateGroups(map[string]string{groupID: groupEndpoint})
 	assignKeyspaceToGroup(created.GetId())
 
-	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err := metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(1, counts[groupID])
 
@@ -1267,7 +1269,7 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	loaded, err := manager.LoadKeyspace(created.GetName())
 	re.NoError(err)
 	re.NotContains(loaded.GetConfig(), MetaServiceGroupIDKey)
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
 
@@ -1275,13 +1277,13 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	// binding and an inflated counter. Re-applying the TOMBSTONE state (a
 	// same-state update) must repair it rather than being skipped.
 	assignKeyspaceToGroup(updated.GetId())
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(1, counts[groupID])
 	repaired, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
 	re.NoError(err)
 	re.NotContains(repaired.GetConfig(), MetaServiceGroupIDKey)
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
 
@@ -1291,7 +1293,19 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
 		return manager.RemoveKeyspace(txn, updated.GetId())
 	}))
-	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	counts, err = metaServiceGroupAssignmentCounts(suite.ctx, manager.mgm)
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
+}
+
+func metaServiceGroupAssignmentCounts(ctx context.Context, manager *MetaServiceGroupManager) (map[string]int, error) {
+	statusMap, err := manager.GetStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(statusMap))
+	for id, status := range statusMap {
+		counts[id] = status.AssignmentCount
+	}
+	return counts, nil
 }
