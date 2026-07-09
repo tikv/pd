@@ -46,30 +46,50 @@ const (
 // Key represents high-level Key type.
 type Key []byte
 
+// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
+// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
+func MakeKeyspacePrefix(mode byte, id uint32) []byte {
+	prefix := make([]byte, KeyspacePrefixLen)
+	binary.BigEndian.PutUint32(prefix, id)
+	prefix[0] = mode
+	return prefix
+}
+
+// ParseKeyspacePrefix parses a raw keyspace prefix from key.
+// It returns false for keys that do not start with a known keyspace mode byte.
+func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
+	if len(key) < KeyspacePrefixLen {
+		return 0, 0, false
+	}
+	mode = key[0]
+	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
+		return 0, 0, false
+	}
+	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
+	id = binary.BigEndian.Uint32(idBytes[:])
+	return mode, id, true
+}
+
 // unwrapKeyspace strips the API v2 keyspace prefix (mode byte + 24-bit id)
 // when the remainder is a TiDB meta/table key. Classic keys and raw keys that
 // only happen to start with 'x'/'r' are left unchanged with hasKeyspace false.
 func unwrapKeyspace(key []byte) (payload []byte, keyspaceID uint32, hasKeyspace bool) {
-	if len(key) <= KeyspacePrefixLen {
-		return key, 0, false
-	}
-	mode := key[0]
-	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
+	_, keyspaceID, ok := ParseKeyspacePrefix(key)
+	if !ok {
 		return key, 0, false
 	}
 	rest := key[KeyspacePrefixLen:]
 	if !bytes.HasPrefix(rest, tablePrefix) && !bytes.HasPrefix(rest, metaPrefix) {
 		return key, 0, false
 	}
-	// Lower 24 bits of the keyspace id are encoded after the mode byte.
-	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
-	return rest, binary.BigEndian.Uint32(idBytes[:]), true
+	return rest, keyspaceID, true
 }
 
 // TableIdentity identifies the logical table a key belongs to. HasKeyspace is
 // false for classic TiDB keys, distinguishing them from keyspace 0. TableID is
-// 0 when the key is not a table key (including meta keys). Two keys belong to
-// the same logical table iff their TableIdentity values are equal.
+// 0 when the key is not a table key (including meta keys), so all non-table
+// keys of one keyspace share a single identity. Two table keys belong to the
+// same logical table iff their TableIdentity values are equal.
 type TableIdentity struct {
 	KeyspaceID  uint32
 	TableID     int64

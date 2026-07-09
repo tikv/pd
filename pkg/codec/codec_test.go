@@ -15,7 +15,6 @@
 package codec
 
 import (
-	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -64,7 +63,7 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 	re.Equal(TableIdentity{TableID: tableID}, classic.TableIdentity())
 
 	for _, mode := range []byte{TxnKeyspaceModePrefix, RawKeyspaceModePrefix} {
-		prefix := makeKeyspacePrefix(mode, keyspaceID)
+		prefix := MakeKeyspacePrefix(mode, keyspaceID)
 		identity := TableIdentity{KeyspaceID: keyspaceID, TableID: tableID, HasKeyspace: true}
 		encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
 		re.Equal(identity, encoded.TableIdentity(), "mode=%q", mode)
@@ -81,8 +80,8 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 	}
 
 	// Same numeric table id under different keyspaces is a different identity.
-	ks1 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 1), GenerateTableKey(tableID)...))
-	ks2 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 2), GenerateTableKey(tableID)...))
+	ks1 := EncodeBytes(append(MakeKeyspacePrefix(TxnKeyspaceModePrefix, 1), GenerateTableKey(tableID)...))
+	ks2 := EncodeBytes(append(MakeKeyspacePrefix(TxnKeyspaceModePrefix, 2), GenerateTableKey(tableID)...))
 	re.Equal(ks1.TableIdentity().TableID, ks2.TableIdentity().TableID)
 	re.NotEqual(ks1.TableIdentity(), ks2.TableIdentity())
 
@@ -96,7 +95,7 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 	re := require.New(t)
 	tableID := int64(55)
 	keyspaceID := uint32(7)
-	prefix := makeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
+	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
 
 	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
 	re.True(isMeta)
@@ -111,11 +110,32 @@ func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
 	re.Equal(int64(0), id)
 }
 
-func makeKeyspacePrefix(mode byte, id uint32) []byte {
-	prefix := make([]byte, KeyspacePrefixLen)
-	binary.BigEndian.PutUint32(prefix, id)
-	prefix[0] = mode
-	return prefix
+func TestMakeKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	re.Equal([]byte{'r', 0x01, 0x02, 0x03}, MakeKeyspacePrefix(RawKeyspaceModePrefix, 0x010203))
+	// Only the lower 24 bits of the keyspace ID are encoded.
+	re.Equal([]byte{'x', 0xff, 0xff, 0xff}, MakeKeyspacePrefix(TxnKeyspaceModePrefix, 0xffffff))
+}
+
+func TestParseKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+
+	mode, id, ok := ParseKeyspacePrefix([]byte{'r', 0x01, 0x02, 0x03})
+	re.True(ok)
+	re.Equal(RawKeyspaceModePrefix, mode)
+	re.Equal(uint32(0x010203), id)
+
+	mode, id, ok = ParseKeyspacePrefix([]byte{'x', 0xff, 0xff, 0xff, 't'})
+	re.True(ok)
+	re.Equal(TxnKeyspaceModePrefix, mode)
+	re.Equal(uint32(0xffffff), id)
+
+	// Too short.
+	_, _, ok = ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
+	re.False(ok)
+	// Unknown mode byte.
+	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
+	re.False(ok)
 }
 
 func TestGenerateRecordAndIndexKeys(t *testing.T) {

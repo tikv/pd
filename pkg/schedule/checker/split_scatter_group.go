@@ -20,7 +20,6 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/keyspace"
 )
 
 var (
@@ -104,7 +103,7 @@ func decodeSplitScatterRegionKey(
 		return splitScatterDecodedKey{}, err
 	}
 	decodedKey := splitScatterDecodedKey{rawKey: rawKey}
-	mode, keyspaceID, ok := keyspace.ParseKeyspacePrefix(rawKey)
+	mode, keyspaceID, ok := codec.ParseKeyspacePrefix(rawKey)
 	if !ok || mode != codec.TxnKeyspaceModePrefix {
 		return decodedKey, nil
 	}
@@ -117,7 +116,7 @@ func decodeSplitScatterRegionKey(
 		return decodedKey, nil
 	}
 	decodedKey.rawKey = rawKey[codec.KeyspacePrefixLen:]
-	decodedKey.keyspacePrefix = keyspace.MakeKeyspacePrefix(mode, keyspaceID)
+	decodedKey.keyspacePrefix = codec.MakeKeyspacePrefix(mode, keyspaceID)
 	decodedKey.keyspaceID = keyspaceID
 	return decodedKey, nil
 }

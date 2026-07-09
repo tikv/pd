@@ -1056,6 +1056,6 @@ func newSplitScatterTableBoundaryKey(tableID int64) []byte {
 }
 
 func newSplitScatterKeyspaceKey(keyspaceID uint32, mode byte, rawKey []byte) []byte {
-	key := keyspace.MakeKeyspacePrefix(mode, keyspaceID)
+	key := codec.MakeKeyspacePrefix(mode, keyspaceID)
 	return codec.EncodeBytes(append(key, rawKey...))
 }

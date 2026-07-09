@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -686,7 +685,7 @@ func TestAllowMergeCrossTable(t *testing.T) {
 }
 
 func encodeKeyspaceRawKey(keyspaceID uint32, rawKey []byte) []byte {
-	prefix := keyspace.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
+	prefix := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, keyspaceID)
 	return codec.EncodeBytes(append(prefix, rawKey...))
 }
 
