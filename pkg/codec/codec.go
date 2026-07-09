@@ -33,42 +33,103 @@ const (
 	encGroupSize = 8
 	encMarker    = byte(0xFF)
 	encPad       = byte(0x0)
+
+	// RawKeyspaceModePrefix is the raw keyspace prefix mode byte.
+	RawKeyspaceModePrefix = byte('r')
+	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
+	TxnKeyspaceModePrefix = byte('x')
+	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
+	KeyspacePrefixLen = 4
 )
 
 // Key represents high-level Key type.
 type Key []byte
 
-// TableID returns the table ID of the key, if the key is not table key, returns 0.
-func (k Key) TableID() int64 {
+// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
+// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
+func MakeKeyspacePrefix(mode byte, id uint32) []byte {
+	prefix := make([]byte, KeyspacePrefixLen)
+	binary.BigEndian.PutUint32(prefix, id)
+	prefix[0] = mode
+	return prefix
+}
+
+// ParseKeyspacePrefix parses a raw keyspace prefix from key.
+// It returns false for keys that do not start with a known keyspace mode byte.
+func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
+	if len(key) < KeyspacePrefixLen {
+		return 0, 0, false
+	}
+	mode = key[0]
+	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
+		return 0, 0, false
+	}
+	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
+	id = binary.BigEndian.Uint32(idBytes[:])
+	return mode, id, true
+}
+
+// unwrapKeyspace strips the API v2 txn keyspace prefix (mode byte + 24-bit id)
+// when the remainder is a TiDB meta/table key. TiDB data only lives under the
+// txn ('x') mode; raw-mode payloads are arbitrary user bytes, so raw keys and
+// keys that only happen to start with 'x' are left unchanged with hasKeyspace
+// false.
+func unwrapKeyspace(key []byte) (payload []byte, keyspaceID uint32, hasKeyspace bool) {
+	mode, keyspaceID, ok := ParseKeyspacePrefix(key)
+	if !ok || mode != TxnKeyspaceModePrefix {
+		return key, 0, false
+	}
+	rest := key[KeyspacePrefixLen:]
+	if !bytes.HasPrefix(rest, tablePrefix) && !bytes.HasPrefix(rest, metaPrefix) {
+		return key, 0, false
+	}
+	return rest, keyspaceID, true
+}
+
+// TableIdentity identifies the logical table a key belongs to. HasKeyspace is
+// false for classic TiDB keys, distinguishing them from keyspace 0. TableID is
+// 0 when the key is not a table key (including meta keys), so all non-table
+// keys of one keyspace share a single identity. Two table keys belong to the
+// same logical table iff their TableIdentity values are equal.
+type TableIdentity struct {
+	KeyspaceID  uint32
+	TableID     int64
+	HasKeyspace bool
+}
+
+// TableIdentity returns the keyspace-qualified table identity of an encoded key.
+func (k Key) TableIdentity() TableIdentity {
 	_, key, err := DecodeBytes(k)
 	if err != nil {
-		// should never happen
-		return 0
+		// should never happen for region boundary keys produced by TiKV
+		return TableIdentity{}
 	}
-	if !bytes.HasPrefix(key, tablePrefix) {
-		return 0
+	key, keyspaceID, hasKeyspace := unwrapKeyspace(key)
+	identity := TableIdentity{KeyspaceID: keyspaceID, HasKeyspace: hasKeyspace}
+	if bytes.HasPrefix(key, tablePrefix) {
+		// A truncated table key fails to decode and keeps TableID 0, i.e. it
+		// is treated as a non-table key, matching the historical semantics.
+		_, identity.TableID, _ = DecodeInt(key[len(tablePrefix):])
 	}
-	key = key[len(tablePrefix):]
-
-	_, tableID, _ := DecodeInt(key)
-	return tableID
+	return identity
 }
 
 // MetaOrTable checks if the key is a meta key or table key.
 // If the key is a meta key, it returns true and 0.
 // If the key is a table key, it returns false and table ID.
 // Otherwise, it returns false and 0.
+// It supports both classic TiDB keys and API v2 keyspace-prefixed keys.
 func (k Key) MetaOrTable() (bool, int64) {
 	_, key, err := DecodeBytes(k)
 	if err != nil {
 		return false, 0
 	}
+	key, _, _ = unwrapKeyspace(key)
 	if bytes.HasPrefix(key, metaPrefix) {
 		return true, 0
 	}
 	if bytes.HasPrefix(key, tablePrefix) {
-		key = key[len(tablePrefix):]
-		_, tableID, _ := DecodeInt(key)
+		_, tableID, _ := DecodeInt(key[len(tablePrefix):])
 		return false, tableID
 	}
 	return false, 0

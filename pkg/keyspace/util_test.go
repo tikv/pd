@@ -61,6 +61,52 @@ func TestValidateID(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
+=======
+func TestMakeRegionBound(t *testing.T) {
+	re := require.New(t)
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+
+	regionBound := MakeRegionBound(0x010203)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x03}), regionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x04}), regionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x03}), regionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x04}), regionBound.TxnRightBound)
+
+	carryRegionBound := MakeRegionBound(0x0102ff)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x03, 0x00}), carryRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x03, 0x00}), carryRegionBound.TxnRightBound)
+
+	maxRegionBound := MakeRegionBound(constant.MaxValidKeyspaceID)
+	re.Equal(encodeKey([]byte{'r', 0xff, 0xff, 0xff}), maxRegionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'s', 0x00, 0x00, 0x00}), maxRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0xff, 0xff, 0xff}), maxRegionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
+}
+
+func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeTxnLabelRule(constant.MaxValidKeyspaceID)))
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+	re.Equal(
+		[][]byte{
+			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
+			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
+		},
+		regionLabeler.GetSplitKeys(nil, nil),
+	)
+}
+
+>>>>>>> 2b3abf1483 (codec, checker: fix enable-cross-table-merge for keyspace keys (#10992))
 func TestValidateName(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
