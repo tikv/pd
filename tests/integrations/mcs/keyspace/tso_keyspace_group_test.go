@@ -396,6 +396,10 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
 	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		if code != http.StatusOK || kg == nil {
+			return false
+		}
 		return len(kg.Members) == mcs.DefaultKeyspaceGroupReplicaCount
 	})
 	for _, member := range kg.Members {
