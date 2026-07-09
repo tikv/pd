@@ -18,6 +18,8 @@ import (
 	"net/http"
 
 	"github.com/unrolled/render"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -50,11 +52,16 @@ func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
 //	@Produce	json
 //	@Success	200	{array}		Health
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
+//	@Failure	503	{string}	string	"PD server is not ready."
 //	@Router		/health [get]
 func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, _ *http.Request) {
 	client := h.svr.GetClient()
 	members, err := cluster.GetMembers(client)
 	if err != nil {
+		if status.Code(err) == codes.Unavailable {
+			h.rd.JSON(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

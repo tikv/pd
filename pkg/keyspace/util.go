@@ -53,7 +53,14 @@ const (
 
 var (
 	errNoAvailableMetaServiceGroups = errors.New("no available meta-service groups")
-	errUnknownMetaServiceGroup      = errors.New("unknown meta-service group")
+
+	// ErrUnknownMetaServiceGroup is returned when the specified meta-service group does not exist.
+	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
+	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
+	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
+	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a
+	// disabled meta-service group, which is not eligible for assignment.
+	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")
 	// ErrGroupHasAssignedKeyspaces is returned when deleting a meta-service group
 	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
 	// map it to a 400 Bad Request via errors.Is.

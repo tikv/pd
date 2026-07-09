@@ -364,7 +364,11 @@ func transferPrimary(c *gin.Context) {
 		forwardToGroupPrimary(c, svr, keyspaceGroupID, allocator.GetPrimaryAddr(), body)
 		return
 	}
-	lease := allocator.GetExpectedPrimaryLease()
+	participant, ok := allocator.GetMember().(*member.Participant)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "the tso member is not a participant")
+		return
+	}
 
 	// only members of specific group are valid primary candidates.
 	memberMap := make(map[string]bool, len(group.Members))
@@ -372,7 +376,7 @@ func transferPrimary(c *gin.Context) {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), lease,
+	if err := utils.TransferPrimary(svr.GetClient(), participant,
 		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
