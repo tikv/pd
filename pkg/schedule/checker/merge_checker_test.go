@@ -602,79 +602,86 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	cluster.SetEnablePlacementRules(false)
 
 	const (
-		keyspaceID = uint32(42)
-		tableA     = int64(100)
-		tableB     = int64(101)
-		indexID    = int64(1)
+		keyspace1 = uint32(42)
+		keyspace2 = uint32(43)
+		tableA    = int64(100)
+		tableB    = int64(101)
+		indexID   = int64(1)
 	)
 
+	// Classic keys.
 	classicTableA := codec.EncodeBytes(codec.GenerateTableKey(tableA))
 	classicTableB := codec.EncodeBytes(codec.GenerateTableKey(tableB))
+	classicTableC := codec.EncodeBytes(codec.GenerateTableKey(tableB + 1))
 	classicIndexA := codec.EncodeBytes(codec.GenerateIndexKey(tableA, indexID))
 	classicRecordA := codec.EncodeBytes(codec.GenerateRowKey(tableA, 1))
 
-	ksTableA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableA))
-	ksTableB := encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB))
-	ksIndexA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateIndexKey(tableA, indexID))
-	ksRecordA := encodeKeyspaceRawKey(keyspaceID, codec.GenerateRowKey(tableA, 1))
+	// Same-keyspace keys.
+	ks1TableA := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableA))
+	ks1TableB := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableB))
+	ks1TableC := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableB+1))
+	ks1IndexA := encodeKeyspaceRawKey(keyspace1, codec.GenerateIndexKey(tableA, indexID))
+	ks1RecordA := encodeKeyspaceRawKey(keyspace1, codec.GenerateRowKey(tableA, 1))
+
+	// Different-keyspace keys. Adjacent ranges are constructed artificially so
+	// AllowMerge can reach the table-ID check; production keyspaces are usually
+	// separated by fence regions and would not be merge candidates.
+	ks2TableA := encodeKeyspaceRawKey(keyspace2, codec.GenerateTableKey(tableA))
+	ks2TableB := encodeKeyspaceRawKey(keyspace2, codec.GenerateTableKey(tableB))
+	ks2TableC := encodeKeyspaceRawKey(keyspace2, codec.GenerateTableKey(tableB+1))
+
+	// Matrix:
+	//   layout × same/diff table ID × enable-cross-table-merge on/off
+	// Expectations follow current isTableIDSame semantics: only table IDs are
+	// compared, keyspace IDs are ignored.
+	type adjacentPair struct {
+		startA, endA []byte
+		startB, endB []byte
+	}
+	classicDiffTable := adjacentPair{classicTableA, classicTableB, classicTableB, classicTableC}
+	classicSameTable := adjacentPair{classicIndexA, classicRecordA, classicRecordA, classicTableB}
+	sameKSDiffTable := adjacentPair{ks1TableA, ks1TableB, ks1TableB, ks1TableC}
+	sameKSSameTable := adjacentPair{ks1IndexA, ks1RecordA, ks1RecordA, ks1TableB}
+	// Different keyspace, same table ID on both start keys.
+	diffKSSameTable := adjacentPair{ks1TableA, ks2TableA, ks2TableA, ks2TableB}
+	// Different keyspace, different table IDs on start keys.
+	diffKSDiffTable := adjacentPair{ks1TableA, ks2TableB, ks2TableB, ks2TableC}
 
 	cases := []struct {
 		name            string
-		startA, endA    []byte
-		startB, endB    []byte
+		pair            adjacentPair
 		crossTableMerge bool
 		expectAllow     bool
 	}{
-		{
-			name:   "classic different tables cross-table enabled",
-			startA: classicTableA, endA: classicTableB,
-			startB: classicTableB, endB: codec.EncodeBytes(codec.GenerateTableKey(tableB + 1)),
-			crossTableMerge: true,
-			expectAllow:     true,
-		},
-		{
-			name:   "classic different tables cross-table disabled",
-			startA: classicTableA, endA: classicTableB,
-			startB: classicTableB, endB: codec.EncodeBytes(codec.GenerateTableKey(tableB + 1)),
-			crossTableMerge: false,
-			expectAllow:     false,
-		},
-		{
-			name:   "classic same table index and record cross-table disabled",
-			startA: classicIndexA, endA: classicRecordA,
-			startB: classicRecordA, endB: classicTableB,
-			crossTableMerge: false,
-			expectAllow:     true,
-		},
-		{
-			name:   "keyspace different tables cross-table enabled",
-			startA: ksTableA, endA: ksTableB,
-			startB: ksTableB, endB: encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB+1)),
-			crossTableMerge: true,
-			expectAllow:     true,
-		},
-		{
-			name:   "keyspace different tables cross-table disabled",
-			startA: ksTableA, endA: ksTableB,
-			startB: ksTableB, endB: encodeKeyspaceRawKey(keyspaceID, codec.GenerateTableKey(tableB+1)),
-			crossTableMerge: false,
-			expectAllow:     false,
-		},
-		{
-			name:   "keyspace same table index and record cross-table disabled",
-			startA: ksIndexA, endA: ksRecordA,
-			startB: ksRecordA, endB: ksTableB,
-			crossTableMerge: false,
-			expectAllow:     true,
-		},
+		// Classic: different table IDs.
+		{"classic/diff-table/cross-enabled", classicDiffTable, true, true},
+		{"classic/diff-table/cross-disabled", classicDiffTable, false, false},
+		// Classic: same table ID (index + record).
+		{"classic/same-table/cross-enabled", classicSameTable, true, true},
+		{"classic/same-table/cross-disabled", classicSameTable, false, true},
+
+		// Same keyspace: different table IDs.
+		{"same-keyspace/diff-table/cross-enabled", sameKSDiffTable, true, true},
+		{"same-keyspace/diff-table/cross-disabled", sameKSDiffTable, false, false},
+		// Same keyspace: same table ID (index + record).
+		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, true, true},
+		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, true},
+
+		// Different keyspaces: same table ID → allow even when cross-table is
+		// disabled, because isTableIDSame only compares table IDs.
+		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, true, true},
+		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, true},
+		// Different keyspaces: different table IDs.
+		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, true, true},
+		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			re := require.New(t)
 			cluster.SetEnableCrossTableMerge(tc.crossTableMerge)
-			regionA := newRegionInfoWithBytes(1, tc.startA, tc.endA)
-			regionB := newRegionInfoWithBytes(2, tc.startB, tc.endB)
+			regionA := newRegionInfoWithBytes(1, tc.pair.startA, tc.pair.endA)
+			regionB := newRegionInfoWithBytes(2, tc.pair.startB, tc.pair.endB)
 			re.Equal(tc.expectAllow, AllowMerge(cluster, regionA, regionB))
 		})
 	}
