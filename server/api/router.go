@@ -371,6 +371,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores",
 		unsafeOperationHandler.RemoveFailedStores, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/abort",
+		unsafeOperationHandler.AbortFailedStoresRemoval, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 

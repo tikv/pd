@@ -374,6 +374,34 @@ func mustPatchMetaServiceGroupsRawFail(re *require.Assertions, server *tests.Tes
 	re.Equal(http.StatusBadRequest, resp.StatusCode)
 }
 
+func mustEnableMetaServiceGroup(re *require.Assertions, server *tests.TestServer, groupID string) {
+	enabled := true
+	mustPatchMetaServiceGroupStatus(re, server, groupID, &keyspace.MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	})
+}
+
+func mustPatchMetaServiceGroupStatus(
+	re *require.Assertions,
+	server *tests.TestServer,
+	groupID string,
+	request *keyspace.MetaServiceGroupStatusPatch,
+) []*handlers.MetaServiceGroupStatus {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+metaServiceGroupsPrefix+"/"+groupID+"/status", bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+	var groups []*handlers.MetaServiceGroupStatus
+	re.NoError(json.Unmarshal(data, &groups))
+	return groups
+}
+
 // MustRemoveKeyspacesFromGroup removes keyspaces from a keyspace group with HTTP API.
 func MustRemoveKeyspacesFromGroup(re *require.Assertions, server *tests.TestServer, groupID uint32, keyspaceIDs []uint32) *endpoint.KeyspaceGroup {
 	params := &handlers.RemoveKeyspacesFromGroupParams{

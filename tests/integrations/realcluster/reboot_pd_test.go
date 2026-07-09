@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -46,24 +47,41 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
+	const zoneLabelKey = "zone"
 	storeLabels := map[string]string{
-		"zone": "zone1",
+		zoneLabelKey: "zone1",
 	}
 	expectedLabels := make(map[string]string, len(firstStore.Store.Labels)+len(storeLabels))
+	originalZoneKey, originalZone, hasOriginalZone := "", "", false
 	for _, label := range firstStore.Store.Labels {
 		re.NotNil(label)
 		expectedLabels[label.Key] = label.Value
+		if !hasOriginalZone && strings.EqualFold(label.Key, zoneLabelKey) {
+			originalZoneKey, originalZone, hasOriginalZone = label.Key, label.Value, true
+		}
 	}
 	for key, value := range storeLabels {
-		expectedLabels[key] = value
+		expectedKey := key
+		if hasOriginalZone && strings.EqualFold(key, zoneLabelKey) {
+			expectedKey = originalZoneKey
+		}
+		expectedLabels[expectedKey] = value
 	}
 	// SetStoreLabels merges labels server-side. Do not echo existing labels
 	// back in the request because "engine" is reserved for TiKV/TiFlash.
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 	defer func() {
+		// The restarted client is closed before this cleanup runs because defers
+		// run in LIFO order, so use a fresh client to restore the store labels.
 		cleanupCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 		defer cleanupCli.Close()
-		re.NoError(cleanupCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
+		if hasOriginalZone {
+			re.NoError(cleanupCli.SetStoreLabels(ctx, firstStore.Store.ID, map[string]string{
+				originalZoneKey: originalZone,
+			}))
+			return
+		}
+		re.NoError(cleanupCli.DeleteStoreLabel(ctx, firstStore.Store.ID, zoneLabelKey))
 	}()
 
 	checkLabelsAreEqual := func() {

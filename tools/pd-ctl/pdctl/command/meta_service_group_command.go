@@ -18,9 +18,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/tikv/pd/pkg/keyspace"
 )
 
 const (
@@ -37,6 +41,8 @@ func NewMetaServiceGroupCommand() *cobra.Command {
 	cmd.AddCommand(newListMetaServiceGroupCommand())
 	cmd.AddCommand(newUpsertMetaServiceGroupCommand())
 	cmd.AddCommand(newDeleteMetaServiceGroupCommand())
+	cmd.AddCommand(newSetMetaServiceGroupEnabledCommand())
+	cmd.AddCommand(newSetMetaServiceGroupAssignmentCountCommand())
 	return cmd
 }
 
@@ -156,6 +162,74 @@ func newDeleteMetaServiceGroupFunc(cmd *cobra.Command, args []string) {
 		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
 	if err != nil {
 		cmd.PrintErrln("Failed to delete meta-service group:", err)
+		return
+	}
+	cmd.Println(resp)
+}
+
+func newSetMetaServiceGroupEnabledCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "set-enabled <id> <true|false>",
+		Short: "enable or disable a meta-service group",
+		Args:  cobra.ExactArgs(2),
+		Run:   newSetMetaServiceGroupEnabledFunc,
+	}
+	return r
+}
+
+func newSetMetaServiceGroupEnabledFunc(cmd *cobra.Command, args []string) {
+	groupID := strings.TrimSpace(args[0])
+	enabled, err := strconv.ParseBool(strings.ToLower(args[1]))
+	if err != nil {
+		cmd.PrintErrln("Invalid value for enabled flag, must be true or false:", err)
+		return
+	}
+	patch := &keyspace.MetaServiceGroupStatusPatch{
+		Enabled: &enabled,
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		cmd.PrintErrln("Failed to marshal request:", err)
+		return
+	}
+	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+url.PathEscape(groupID)+"/status", http.MethodPatch,
+		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
+	if err != nil {
+		cmd.PrintErrln("Failed to set meta-service group enabled status:", err)
+		return
+	}
+	cmd.Println(resp)
+}
+
+func newSetMetaServiceGroupAssignmentCountCommand() *cobra.Command {
+	r := &cobra.Command{
+		Use:   "set-assignment-count <id> <count>",
+		Short: "set the assignment count for a meta-service group",
+		Args:  cobra.ExactArgs(2),
+		Run:   newSetMetaServiceGroupAssignmentCountFunc,
+	}
+	return r
+}
+
+func newSetMetaServiceGroupAssignmentCountFunc(cmd *cobra.Command, args []string) {
+	groupID := strings.TrimSpace(args[0])
+	assignmentCount, err := strconv.Atoi(args[1])
+	if err != nil {
+		cmd.PrintErrln("Invalid value for assignment count, must be an integer:", err)
+		return
+	}
+	patch := &keyspace.MetaServiceGroupStatusPatch{
+		AssignmentCount: &assignmentCount,
+	}
+	body, err := json.Marshal(patch)
+	if err != nil {
+		cmd.PrintErrln("Failed to marshal request:", err)
+		return
+	}
+	resp, err := doRequest(cmd, metaServiceGroupPrefix+"/"+url.PathEscape(groupID)+"/status", http.MethodPatch,
+		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(body)))
+	if err != nil {
+		cmd.PrintErrln("Failed to set meta-service group assignment count:", err)
 		return
 	}
 	cmd.Println(resp)

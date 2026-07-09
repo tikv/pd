@@ -439,8 +439,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
+		// Transfer to `newPrimary` explicitly (not a random target), so the expected
+		// primary flag deterministically points at the node we close below. This is
+		// what makes this test actually exercise the marker-TTL-expiry recovery path.
 		newPrimaryData := make(map[string]any)
-		newPrimaryData["new_primary"] = ""
+		newPrimaryData["new_primary"] = newPrimary
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
@@ -456,15 +459,28 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
-		// for now, close the current primary to mock the server down
+		// for now, close the transfer target to mock the server down
 		nodes[newPrimary].Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 
-		tests.WaitForPrimaryServing(re, nodes)
-		// Primary should be different with before
-		onlyPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
-		re.NoError(err)
-		re.NotEqual(newPrimary, onlyPrimary)
+		// The transfer target (which we just closed) is the one named in the expected
+		// primary flag, so the other replicas back off until the flag's TTL (a few
+		// leader leases) expires, after which a free re-election elects a live primary.
+		// Wait long enough to cover that worst case.
+		recoverWait := time.Duration(mcs.TransferPrimaryLeaseMultiplier*mcs.DefaultLease)*time.Second + 10*time.Second
+		serving := make([]string, 0, len(nodes))
+		testutil.Eventually(re, func() bool {
+			serving = serving[:0]
+			for name, s := range nodes {
+				if s.IsServing() {
+					serving = append(serving, name)
+				}
+			}
+			return len(serving) == 1 && serving[0] != newPrimary
+		}, testutil.WithWaitFor(recoverWait), testutil.WithTickInterval(50*time.Millisecond))
+		// Exactly one node serves and it is not the one we closed.
+		re.Len(serving, 1)
+		re.NotEqual(newPrimary, serving[0])
 	}
 }
 
@@ -665,6 +681,83 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	re.NoError(err)
 	re.Equal(http.StatusBadRequest, resp.StatusCode)
 	resp.Body.Close()
+}
+
+// TestTransferPrimaryWhileLeaseExpiredAndServerDownWithKeyspaceGroup covers the
+// marker-TTL-expiry recovery path for a NON-default keyspace group (the default
+// group is covered by TestTransferPrimaryWhileLeaseExpiredAndServerDown): transfer
+// the group's primary to a specific member, take that member down before it can
+// win, and verify the group recovers a live primary once the flag TTL expires.
+func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDownWithKeyspaceGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// Pick a non-primary member of the group as the explicit transfer target.
+	var target, targetAddr string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && !m.IsPrimary {
+			target, targetAddr = tsoSvr.Name(), tsoSvr.GetAddr()
+			break
+		}
+	}
+	re.NotEmpty(target)
+
+	// Prevent anyone from granting leadership so the transfer target cannot win.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
+	data, err := json.Marshal(map[string]any{"new_primary": target, "keyspace_group_id": testGroupID})
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Wait until the old group primary steps down (group temporarily has no primary).
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Take the transfer target (the node named in the expected primary flag) down,
+	// then allow campaigns again. The remaining group member backs off until the
+	// flag TTL expires, after which a free re-election elects a live primary.
+	suite.tsoNodes[targetAddr].Close()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
+
+	recoverWait := time.Duration(mcs.TransferPrimaryLeaseMultiplier*mcs.DefaultLease)*time.Second + 10*time.Second
+	var recovered string
+	testutil.Eventually(re, func() bool {
+		recovered = ""
+		for addr, s := range suite.tsoNodes {
+			if addr == targetAddr {
+				continue
+			}
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				recovered = tsoSvr.Name()
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(recoverWait), testutil.WithTickInterval(100*time.Millisecond))
+	re.NotEmpty(recovered)
+	re.NotEqual(target, recovered)
 }
 
 // TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary
