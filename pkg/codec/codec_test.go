@@ -39,19 +39,19 @@ func TestDecodeBytes(t *testing.T) {
 func TestTableID(t *testing.T) {
 	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	re.Equal(int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableIdentity().TableID)
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
 }
 
 func TestTableIDWithKeyspacePrefix(t *testing.T) {
@@ -61,18 +61,16 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 	keyspaceID := uint32(42)
 
 	classic := EncodeBytes(GenerateTableKey(tableID))
-	re.Equal(tableID, classic.TableID())
 	re.Equal(TableIdentity{TableID: tableID}, classic.TableIdentity())
 
 	for _, mode := range []byte{TxnKeyspaceModePrefix, RawKeyspaceModePrefix} {
 		prefix := makeKeyspacePrefix(mode, keyspaceID)
 		identity := TableIdentity{KeyspaceID: keyspaceID, TableID: tableID, HasKeyspace: true}
 		encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
-		re.Equal(tableID, encoded.TableID(), "mode=%q", mode)
 		re.Equal(identity, encoded.TableIdentity(), "mode=%q", mode)
 
 		other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
-		re.Equal(otherTableID, other.TableID(), "mode=%q", mode)
+		re.Equal(otherTableID, other.TableIdentity().TableID, "mode=%q", mode)
 		re.NotEqual(encoded.TableIdentity(), other.TableIdentity(), "mode=%q", mode)
 
 		// Same table: record and index keys must still resolve to the same identity.
@@ -85,7 +83,7 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 	// Same numeric table id under different keyspaces is a different identity.
 	ks1 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 1), GenerateTableKey(tableID)...))
 	ks2 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 2), GenerateTableKey(tableID)...))
-	re.Equal(ks1.TableID(), ks2.TableID())
+	re.Equal(ks1.TableIdentity().TableID, ks2.TableIdentity().TableID)
 	re.NotEqual(ks1.TableIdentity(), ks2.TableIdentity())
 
 	// A raw key that only happens to start with the keyspace mode byte but is
@@ -128,11 +126,11 @@ func TestGenerateRecordAndIndexKeys(t *testing.T) {
 	rowKeyPrefix := GenerateRecordKeyPrefix(tableID)
 	rowKey := GenerateRowKey(tableID, 1)
 	re.Equal(rowKeyPrefix, rowKey[:len(rowKeyPrefix)])
-	re.Equal(tableID, EncodeBytes(rowKey).TableID())
+	re.Equal(tableID, EncodeBytes(rowKey).TableIdentity().TableID)
 
 	indexKey := GenerateIndexKey(tableID, indexID)
 	_, decodedIndexKey, err := DecodeBytes(EncodeBytes(indexKey))
 	re.NoError(err)
 	re.Equal(indexKey, decodedIndexKey)
-	re.Equal(tableID, EncodeBytes(indexKey).TableID())
+	re.Equal(tableID, EncodeBytes(indexKey).TableIdentity().TableID)
 }

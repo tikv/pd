@@ -91,12 +91,6 @@ func (k Key) TableIdentity() TableIdentity {
 	return identity
 }
 
-// TableID returns the table ID of the key, if the key is not table key, returns 0.
-// It supports both classic TiDB keys and API v2 keyspace-prefixed keys.
-func (k Key) TableID() int64 {
-	return k.TableIdentity().TableID
-}
-
 // MetaOrTable checks if the key is a meta key or table key.
 // If the key is a meta key, it returns true and 0.
 // If the key is a table key, it returns false and table ID.
