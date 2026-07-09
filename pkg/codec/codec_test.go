@@ -62,27 +62,49 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 
 	classic := EncodeBytes(GenerateTableKey(tableID))
 	re.Equal(tableID, classic.TableID())
+	ks, tid, hasKS := classic.TableIdentity()
+	re.False(hasKS)
+	re.Equal(uint32(0), ks)
+	re.Equal(tableID, tid)
 
 	for _, mode := range []byte{TxnKeyspaceModePrefix, RawKeyspaceModePrefix} {
 		prefix := makeKeyspacePrefix(mode, keyspaceID)
 		encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
 		re.Equal(tableID, encoded.TableID(), "mode=%q", mode)
+		ks, tid, hasKS = encoded.TableIdentity()
+		re.True(hasKS, "mode=%q", mode)
+		re.Equal(keyspaceID, ks, "mode=%q", mode)
+		re.Equal(tableID, tid, "mode=%q", mode)
 
 		other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
 		re.Equal(otherTableID, other.TableID(), "mode=%q", mode)
 		re.NotEqual(encoded.TableID(), other.TableID(), "mode=%q", mode)
 
-		// Same table: record and index keys must still resolve to the same table ID.
+		// Same table: record and index keys must still resolve to the same identity.
 		record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
 		index := EncodeBytes(append(append([]byte{}, prefix...), GenerateIndexKey(tableID, 7)...))
 		re.Equal(tableID, record.TableID(), "mode=%q", mode)
 		re.Equal(tableID, index.TableID(), "mode=%q", mode)
+		_, _, hasKS = record.TableIdentity()
+		re.True(hasKS, "mode=%q", mode)
 	}
+
+	// Same numeric table id under different keyspaces is a different identity.
+	ks1 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 1), GenerateTableKey(tableID)...))
+	ks2 := EncodeBytes(append(makeKeyspacePrefix(TxnKeyspaceModePrefix, 2), GenerateTableKey(tableID)...))
+	re.Equal(ks1.TableID(), ks2.TableID())
+	ksA, tA, hasA := ks1.TableIdentity()
+	ksB, tB, hasB := ks2.TableIdentity()
+	re.True(hasA && hasB)
+	re.Equal(tA, tB)
+	re.NotEqual(ksA, ksB)
 
 	// A raw key that only happens to start with the keyspace mode byte but is
 	// not followed by a TiDB table/meta payload must not be treated as a table key.
 	ambiguous := EncodeBytes([]byte{'x', 0x00, 0x00, 0x2a, 'u', 's', 'e', 'r'})
 	re.Equal(int64(0), ambiguous.TableID())
+	_, _, hasKS = ambiguous.TableIdentity()
+	re.False(hasKS)
 }
 
 func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {

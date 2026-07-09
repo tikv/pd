@@ -46,39 +46,56 @@ const (
 // Key represents high-level Key type.
 type Key []byte
 
-// stripKeyspacePrefixIfPresent removes the API v2 keyspace prefix when the
-// remainder is a TiDB meta/table key. Classic keys and raw keys that only
-// happen to start with 'x'/'r' are left unchanged.
-func stripKeyspacePrefixIfPresent(key []byte) []byte {
+// unwrapKeyspace removes the API v2 keyspace prefix when the remainder is a
+// TiDB meta/table key. Classic keys and raw keys that only happen to start
+// with 'x'/'r' are left unchanged.
+//
+// hasKeyspace is true only when the prefix is treated as a real keyspace
+// header (mode byte + 24-bit id) and the payload is a TiDB meta/table key.
+// This matches how NextGen encodes tenant data while avoiding false positives
+// on arbitrary raw user keys.
+func unwrapKeyspace(key []byte) (payload []byte, keyspaceID uint32, hasKeyspace bool) {
 	if len(key) <= KeyspacePrefixLen {
-		return key
+		return key, 0, false
 	}
 	mode := key[0]
 	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
-		return key
+		return key, 0, false
 	}
 	rest := key[KeyspacePrefixLen:]
-	if bytes.HasPrefix(rest, tablePrefix) || bytes.HasPrefix(rest, metaPrefix) {
-		return rest
+	if !bytes.HasPrefix(rest, tablePrefix) && !bytes.HasPrefix(rest, metaPrefix) {
+		return key, 0, false
 	}
-	return key
+	// Lower 24 bits of the keyspace id are encoded after the mode byte.
+	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
+	return rest, binary.BigEndian.Uint32(idBytes[:]), true
+}
+
+// TableIdentity returns the keyspace (if any) and table ID of an encoded key.
+// hasKeyspace is false for classic TiDB keys. tableID is 0 when the key is not
+// a table key (including meta keys).
+//
+// Callers that need tenant-safe equality should compare both hasKeyspace/keyspaceID
+// and tableID; TableID() alone is not sufficient across keyspaces.
+func (k Key) TableIdentity() (keyspaceID uint32, tableID int64, hasKeyspace bool) {
+	_, key, err := DecodeBytes(k)
+	if err != nil {
+		// should never happen for region boundary keys produced by TiKV
+		return 0, 0, false
+	}
+	key, keyspaceID, hasKeyspace = unwrapKeyspace(key)
+	if !bytes.HasPrefix(key, tablePrefix) {
+		return keyspaceID, 0, hasKeyspace
+	}
+	_, tableID, _ = DecodeInt(key[len(tablePrefix):])
+	return keyspaceID, tableID, hasKeyspace
 }
 
 // TableID returns the table ID of the key, if the key is not table key, returns 0.
 // It supports both classic TiDB keys and API v2 keyspace-prefixed keys.
+// For equality across tenants, use TableIdentity instead.
 func (k Key) TableID() int64 {
-	_, key, err := DecodeBytes(k)
-	if err != nil {
-		// should never happen
-		return 0
-	}
-	key = stripKeyspacePrefixIfPresent(key)
-	if !bytes.HasPrefix(key, tablePrefix) {
-		return 0
-	}
-	key = key[len(tablePrefix):]
-
-	_, tableID, _ := DecodeInt(key)
+	_, tableID, _ := k.TableIdentity()
 	return tableID
 }
 
@@ -92,13 +109,12 @@ func (k Key) MetaOrTable() (bool, int64) {
 	if err != nil {
 		return false, 0
 	}
-	key = stripKeyspacePrefixIfPresent(key)
+	key, _, _ = unwrapKeyspace(key)
 	if bytes.HasPrefix(key, metaPrefix) {
 		return true, 0
 	}
 	if bytes.HasPrefix(key, tablePrefix) {
-		key = key[len(tablePrefix):]
-		_, tableID, _ := DecodeInt(key)
+		_, tableID, _ := DecodeInt(key[len(tablePrefix):])
 		return false, tableID
 	}
 	return false, 0

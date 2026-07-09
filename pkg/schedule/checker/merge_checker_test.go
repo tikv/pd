@@ -630,10 +630,8 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	ks2TableB := encodeKeyspaceRawKey(keyspace2, codec.GenerateTableKey(tableB))
 	ks2TableC := encodeKeyspaceRawKey(keyspace2, codec.GenerateTableKey(tableB+1))
 
-	// Matrix:
-	//   layout × same/diff table ID × enable-cross-table-merge on/off
-	// Expectations follow current isTableIDSame semantics: only table IDs are
-	// compared, keyspace IDs are ignored.
+	// Matrix: layout × same/diff table identity × enable-cross-table-merge.
+	// Logical table identity is (keyspaceID, tableID); classic has no keyspace.
 	type adjacentPair struct {
 		startA, endA []byte
 		startB, endB []byte
@@ -642,9 +640,8 @@ func TestAllowMergeCrossTable(t *testing.T) {
 	classicSameTable := adjacentPair{classicIndexA, classicRecordA, classicRecordA, classicTableB}
 	sameKSDiffTable := adjacentPair{ks1TableA, ks1TableB, ks1TableB, ks1TableC}
 	sameKSSameTable := adjacentPair{ks1IndexA, ks1RecordA, ks1RecordA, ks1TableB}
-	// Different keyspace, same table ID on both start keys.
+	// Different keyspaces with the same numeric table id are still different tables.
 	diffKSSameTable := adjacentPair{ks1TableA, ks2TableA, ks2TableA, ks2TableB}
-	// Different keyspace, different table IDs on start keys.
 	diffKSDiffTable := adjacentPair{ks1TableA, ks2TableB, ks2TableB, ks2TableC}
 
 	cases := []struct {
@@ -667,10 +664,11 @@ func TestAllowMergeCrossTable(t *testing.T) {
 		{"same-keyspace/same-table/cross-enabled", sameKSSameTable, true, true},
 		{"same-keyspace/same-table/cross-disabled", sameKSSameTable, false, true},
 
-		// Different keyspaces: same table ID → allow even when cross-table is
-		// disabled, because isTableIDSame only compares table IDs.
+		// Different keyspaces: same numeric table ID is not the same logical table.
+		// With cross-table enabled, merge is still allowed by policy (split keys
+		// from keyspace labels normally block this path in production).
 		{"diff-keyspace/same-table/cross-enabled", diffKSSameTable, true, true},
-		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, true},
+		{"diff-keyspace/same-table/cross-disabled", diffKSSameTable, false, false},
 		// Different keyspaces: different table IDs.
 		{"diff-keyspace/diff-table/cross-enabled", diffKSDiffTable, true, true},
 		{"diff-keyspace/diff-table/cross-disabled", diffKSDiffTable, false, false},

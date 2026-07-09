@@ -279,8 +279,15 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 	}
 }
 
+// isTableIDSame reports whether two regions belong to the same logical table.
+// On classic clusters this is table-id equality. On NextGen / keyspace clusters
+// the identity is (keyspaceID, tableID): the same numeric table id in two
+// keyspaces must not be treated as the same table when cross-table merge is
+// disabled.
 func isTableIDSame(region, adjacent *core.RegionInfo) bool {
-	return codec.Key(region.GetStartKey()).TableID() == codec.Key(adjacent.GetStartKey()).TableID()
+	ks1, table1, hasKS1 := codec.Key(region.GetStartKey()).TableIdentity()
+	ks2, table2, hasKS2 := codec.Key(adjacent.GetStartKey()).TableIdentity()
+	return hasKS1 == hasKS2 && ks1 == ks2 && table1 == table2
 }
 
 // Check whether there is a peer of the adjacent region on an offline store,
