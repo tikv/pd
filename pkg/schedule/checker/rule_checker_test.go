@@ -1571,6 +1571,229 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	re.Nil(suite.rc.Check(region))
 }
 
+func (suite *ruleCheckerTestSuite) TestPreferAddTiFlashLearnerOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreOffline(2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
+	addLearner := op.Step(0).(operator.AddLearner)
+	re.Equal(uint64(4), addLearner.ToStore)
+
+	region := suite.cluster.GetRegion(1).Clone(core.WithAddPeer(&metapb.Peer{
+		Id:      addLearner.PeerID,
+		StoreId: addLearner.ToStore,
+		Role:    metapb.PeerRole_Learner,
+	}))
+	suite.cluster.PutRegion(region)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+}
+
+func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashSwapFitOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", "engine": "tiflash"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{4})
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "generic-learner",
+		Index:   1,
+		Role:    placement.Learner,
+		Count:   1,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    "engine",
+				Op:     placement.In,
+				Values: []string{"tiflash"},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreOffline(2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	_, exist := suite.rc.pendingList.Get(1)
+	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestDoNotPreferWideEngineLearnerRuleOverOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "wide-engine",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    core.EngineKey,
+				Op:     placement.In,
+				Values: []string{core.EngineTiFlash, core.EngineTiKV},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreOffline(2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	_, exist := suite.rc.pendingList.Get(1)
+	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashComputeLearnerRuleOverOfflinePeer() {
+	const engineTiFlashCompute = "tiflash_compute"
+
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: engineTiFlashCompute})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash-compute",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    core.EngineKey,
+				Op:     placement.In,
+				Values: []string{engineTiFlashCompute},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreOffline(2)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("replace-rule-offline-peer", op.Desc())
+	_, exist := suite.rc.pendingList.Get(1)
+	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestDoNotPreferTiFlashLearnerOverDownPeer() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", core.EngineKey: core.EngineTiFlash})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	err := suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, "witness")
+	re.NoError(err)
+	err = suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: "tiflash",
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{
+				Key:    core.EngineKey,
+				Op:     placement.In,
+				Values: []string{core.EngineTiFlash},
+			},
+		},
+	})
+	re.NoError(err)
+
+	suite.cluster.SetStoreDown(2)
+	region := suite.cluster.GetRegion(1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(2), DownSeconds: 60000},
+	}))
+	suite.cluster.PutRegion(region)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("fast-replace-rule-down-peer", op.Desc())
+}
+
 func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
