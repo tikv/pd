@@ -32,6 +32,8 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -221,7 +223,8 @@ func TestLeaderPrioritySkipsUnreadyTarget(t *testing.T) {
 	}()
 
 	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/members/name/"+targetName, `{"leader-priority": 1}`)
-	time.Sleep(time.Second)
+	targetPDServer := targetServer.GetServer()
+	targetPDServer.GetMember().CheckPriority(ctx, member.WithTargetChecker(targetPDServer.CheckMemberReadyForLeaderTransfer))
 	etcdLeader, err = leaderServer.GetEtcdLeader()
 	re.NoError(err)
 	re.Equal(leaderName, etcdLeader)
@@ -332,6 +335,26 @@ func TestLeaderTransferChecksTargetReady(t *testing.T) {
 	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/leader/transfer/"+followerName, "")
 	leader2 := waitLeaderChange(re, cluster, leaderName)
 	re.Equal(followerName, leader2)
+}
+
+func TestResignEtcdLeaderReturnsTargetCheckError(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetLeaderServer()
+	err = leaderServer.GetServer().GetMember().ResignEtcdLeader(ctx, leaderName, "",
+		member.WithTargetChecker(func(context.Context, uint64) error {
+			return errors.New("not ready")
+		}))
+	re.Error(err)
+	re.True(errors.ErrorEqual(err, errs.ErrEtcdLeaderTransferTargetCheck))
 }
 
 func TestLeaderResignSkipsUnreadyCandidate(t *testing.T) {

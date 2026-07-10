@@ -426,15 +426,16 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 			readyEtcdLeaderIDs = append(readyEtcdLeaderIDs, id)
 		}
 		if len(readyEtcdLeaderIDs) == 0 {
+			errMsg := "no ready pd to transfer etcd leader"
 			if lastErr != nil {
-				return errors.Errorf("no ready pd to transfer etcd leader: %v", lastErr)
+				errMsg += ": " + lastErr.Error()
 			}
-			return errors.New("no ready pd to transfer etcd leader")
+			return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(errMsg)
 		}
 		etcdLeaderIDs = readyEtcdLeaderIDs
 	}
 	nextEtcdLeaderID := etcdLeaderIDs[rand.IntN(len(etcdLeaderIDs))]
-	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID, opts...)
+	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
