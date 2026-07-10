@@ -572,9 +572,16 @@ func (c *ScheduleConfig) Validate() error {
 	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
 		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
 	}
-	for storeID := range c.StoreLimit {
-		if _, err := strconv.ParseUint(storeID, 10, 64); err != nil {
+	for storeID, limit := range c.StoreLimit {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
 			return errors.Annotatef(err, "invalid schedule.store-limit key %q", storeID)
+		}
+		if storeID != strconv.FormatUint(id, 10) {
+			return errors.Errorf("invalid schedule.store-limit key %q", storeID)
+		}
+		if limit.AddPeer <= 0 || limit.RemovePeer <= 0 {
+			return errors.Errorf("schedule.store-limit.%s add-peer and remove-peer should be positive", storeID)
 		}
 	}
 	return nil

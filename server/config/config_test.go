@@ -151,7 +151,7 @@ func TestValidation(t *testing.T) {
 	cfg.Schedule.StoreLimit["foo"] = sc.StoreLimitConfig{}
 	re.Error(cfg.Schedule.Validate())
 	delete(cfg.Schedule.StoreLimit, "foo")
-	cfg.Schedule.StoreLimit["100"] = sc.StoreLimitConfig{}
+	cfg.Schedule.StoreLimit["100"] = sc.StoreLimitConfig{AddPeer: 1, RemovePeer: 1}
 	re.NoError(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
@@ -705,4 +705,46 @@ func TestStoreLimitRejectsNonNumericKey(t *testing.T) {
 	err = cfg.Adjust(&meta, false)
 	re.Error(err)
 	re.Contains(err.Error(), `invalid schedule.store-limit key "foo"`)
+}
+
+func TestStoreLimitRejectsInvalidConfig(t *testing.T) {
+	testCases := []struct {
+		name    string
+		cfgData string
+	}{
+		{
+			name: "non-canonical store ID",
+			cfgData: `
+	[schedule.store-limit.00100]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`,
+		},
+		{
+			name: "missing rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	`,
+		},
+		{
+			name: "non-positive rates",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = -1.0
+	remove-peer = 0.0
+	`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			meta, err := toml.Decode(testCase.cfgData, &cfg)
+			re.NoError(err)
+			re.Error(cfg.Adjust(&meta, false))
+		})
+	}
 }
