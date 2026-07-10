@@ -93,10 +93,9 @@ func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clien
 		return errors.Annotatef(err, "failed to get target pd member %d version from %s", memberID, clientURL)
 	}
 	pdVersion, err := versioninfo.ParseVersion(version)
-	if err != nil {
-		return errors.Annotatef(err, "failed to parse target pd member %d version %q from %s", memberID, version, clientURL)
-	}
-	if !versioninfo.IsReadyAPISupported(pdVersion) {
+	// If the version endpoint succeeds but returns an unparsable version, treat
+	// the target as supporting the ready API and let the /ready result decide.
+	if err == nil && !versioninfo.IsReadyAPISupported(pdVersion) {
 		return nil
 	}
 	if err := s.checkTargetPDReady(checkCtx, clientURL); err != nil {
