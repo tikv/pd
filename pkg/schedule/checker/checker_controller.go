@@ -378,9 +378,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
-		if opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit() {
-			// It makes sure that two affinity merge operators can be added successfully altogether.
-			return c.affinityChecker.Check(region)
+		current := opController.OperatorCount(operator.OpAffinity)
+		limit := c.conf.GetAffinityScheduleLimit()
+		if current < limit {
+			ops := c.affinityChecker.Check(region)
+			if hasOperatorCapacity(current, limit, uint64(len(ops))) {
+				return ops
+			}
 		}
 		if c.affinityChecker.hasAffinityGroups() {
 			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
@@ -391,9 +395,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {
-		if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
-			// It makes sure that two operators can be added successfully altogether.
-			return c.mergeChecker.Check(region)
+		current := opController.OperatorCount(operator.OpMerge)
+		limit := c.conf.GetMergeScheduleLimit()
+		if current < limit {
+			ops := c.mergeChecker.Check(region)
+			if hasOperatorCapacity(current, limit, uint64(len(ops))) {
+				return ops
+			}
 		}
 		operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
 		return nil
@@ -401,6 +409,10 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 		return ops
 	}
 	return nil
+}
+
+func hasOperatorCapacity(current, limit, candidateCount uint64) bool {
+	return current < limit && candidateCount <= limit-current
 }
 
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
