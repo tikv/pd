@@ -46,3 +46,23 @@ func TestIsHotScheduleWithCPUSupported(t *testing.T) {
 		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
 	}
 }
+
+func TestIsReadyAPISupported(t *testing.T) {
+	re := require.New(t)
+	re.False(IsReadyAPISupported(nil))
+
+	tests := []struct {
+		version string
+		expect  bool
+	}{
+		{"8.5.1", false},
+		{"v8.5.1", false},
+		{"8.5.2", true},
+		{"v8.5.2", true},
+		{"8.5.3", true},
+		{"9.0.0", true},
+	}
+	for _, test := range tests {
+		re.Equal(test.expect, IsReadyAPISupported(MustParseVersion(test.version)), test.version)
+	}
+}

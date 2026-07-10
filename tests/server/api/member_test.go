@@ -30,6 +30,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
@@ -161,6 +162,12 @@ func (suite *memberTestSuite) TestResignMyself() {
 
 func (suite *memberTestSuite) checkResignMyself(cluster *tests.TestCluster) {
 	re := suite.Require()
+	oldVersion := versioninfo.PDReleaseVersion
+	versioninfo.PDReleaseVersion = "v8.5.2"
+	defer func() {
+		versioninfo.PDReleaseVersion = oldVersion
+	}()
+
 	leader := cluster.GetLeaderServer()
 	addr := leader.GetAddr() + api.APIPrefix + "/api/v1/leader/resign"
 	resp, err := tests.TestDialClient.Post(addr, "", nil)
