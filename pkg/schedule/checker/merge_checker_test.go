@@ -607,19 +607,23 @@ func TestAllowMergeCrossTable(t *testing.T) {
 		tableB    = int64(101)
 		indexID   = int64(1)
 	)
+	generateIndexKey := func(tableID, indexID int64) []byte {
+		key := append(codec.GenerateTableKey(tableID), '_', 'i')
+		return codec.EncodeInt(key, indexID)
+	}
 
 	// Classic keys.
 	classicTableA := codec.EncodeBytes(codec.GenerateTableKey(tableA))
 	classicTableB := codec.EncodeBytes(codec.GenerateTableKey(tableB))
 	classicTableC := codec.EncodeBytes(codec.GenerateTableKey(tableB + 1))
-	classicIndexA := codec.EncodeBytes(codec.GenerateIndexKey(tableA, indexID))
+	classicIndexA := codec.EncodeBytes(generateIndexKey(tableA, indexID))
 	classicRecordA := codec.EncodeBytes(codec.GenerateRowKey(tableA, 1))
 
 	// Same-keyspace keys.
 	ks1TableA := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableA))
 	ks1TableB := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableB))
 	ks1TableC := encodeKeyspaceRawKey(keyspace1, codec.GenerateTableKey(tableB+1))
-	ks1IndexA := encodeKeyspaceRawKey(keyspace1, codec.GenerateIndexKey(tableA, indexID))
+	ks1IndexA := encodeKeyspaceRawKey(keyspace1, generateIndexKey(tableA, indexID))
 	ks1RecordA := encodeKeyspaceRawKey(keyspace1, codec.GenerateRowKey(tableA, 1))
 
 	// Different-keyspace keys. Adjacent ranges are constructed artificially so

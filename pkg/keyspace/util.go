@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"container/heap"
+	"encoding/binary"
 	"encoding/hex"
 	"regexp"
 	"strconv"
@@ -113,22 +114,10 @@ type RegionBound struct {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-<<<<<<< HEAD
 	keyspaceIDBytes := make([]byte, 4)
 	nextKeyspaceIDBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(keyspaceIDBytes, id)
 	binary.BigEndian.PutUint32(nextKeyspaceIDBytes, id+1)
-=======
-	rawLeftBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id)
-	rawRightBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id+1)
-	txnLeftBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id)
-	txnRightBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id+1)
-	if id == constant.MaxValidKeyspaceID {
-		// The right bound is an exclusive fencepost, not a real keyspace prefix.
-		rawRightBound = []byte{'s', 0, 0, 0}
-		txnRightBound = []byte{'y', 0, 0, 0}
-	}
->>>>>>> 2b3abf1483 (codec, checker: fix enable-cross-table-merge for keyspace keys (#10992))
 	return &RegionBound{
 		RawLeftBound:  codec.EncodeBytes(append([]byte{'r'}, keyspaceIDBytes[1:]...)),
 		RawRightBound: codec.EncodeBytes(append([]byte{'r'}, nextKeyspaceIDBytes[1:]...)),

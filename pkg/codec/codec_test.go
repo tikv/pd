@@ -73,7 +73,9 @@ func TestTableIDWithKeyspacePrefix(t *testing.T) {
 
 	// Same table: record and index keys must still resolve to the same identity.
 	record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
-	index := EncodeBytes(append(append([]byte{}, prefix...), GenerateIndexKey(tableID, 7)...))
+	indexKey := append(GenerateTableKey(tableID), '_', 'i')
+	indexKey = EncodeInt(indexKey, 7)
+	index := EncodeBytes(append(append([]byte{}, prefix...), indexKey...))
 	re.Equal(identity, record.TableIdentity())
 	re.Equal(identity, index.TableIdentity())
 
@@ -140,23 +142,3 @@ func TestParseKeyspacePrefix(t *testing.T) {
 	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
 	re.False(ok)
 }
-<<<<<<< HEAD
-=======
-
-func TestGenerateRecordAndIndexKeys(t *testing.T) {
-	re := require.New(t)
-	tableID := int64(42)
-	indexID := int64(7)
-
-	rowKeyPrefix := GenerateRecordKeyPrefix(tableID)
-	rowKey := GenerateRowKey(tableID, 1)
-	re.Equal(rowKeyPrefix, rowKey[:len(rowKeyPrefix)])
-	re.Equal(tableID, EncodeBytes(rowKey).TableIdentity().TableID)
-
-	indexKey := GenerateIndexKey(tableID, indexID)
-	_, decodedIndexKey, err := DecodeBytes(EncodeBytes(indexKey))
-	re.NoError(err)
-	re.Equal(indexKey, decodedIndexKey)
-	re.Equal(tableID, EncodeBytes(indexKey).TableIdentity().TableID)
-}
->>>>>>> 2b3abf1483 (codec, checker: fix enable-cross-table-merge for keyspace keys (#10992))
