@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -374,6 +375,8 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
+	// loadedRevision is the etcd snapshot revision loaded during initialization.
+	loadedRevision atomic.Int64
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
@@ -490,6 +493,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	if err != nil {
 		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	} else {
+		if watchStartRevision > 0 {
+			lw.loadedRevision.Store(watchStartRevision - 1)
+		}
 		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
 	lw.isLoadedCh <- err
@@ -639,6 +645,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	startKey := lw.key
 	limit := lw.loadBatchSize
+	snapshotRevision := int64(0)
 	opts := lw.buildLoadingOpts(limit)
 
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
@@ -677,9 +684,18 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 					return 0, err
 				}
 				opts = lw.buildLoadingOpts(limit)
+				if snapshotRevision > 0 {
+					opts = append(opts, clientv3.WithRev(snapshotRevision))
+				}
 				continue
 			}
 			return 0, err
+		}
+		if snapshotRevision == 0 {
+			snapshotRevision = resp.Header.Revision
+			// Keep all remaining pages on the same snapshot. Otherwise a write
+			// between pages could be skipped when the watch starts.
+			opts = append(opts, clientv3.WithRev(snapshotRevision))
 		}
 		for i, item := range resp.Kvs {
 			if i == len(resp.Kvs)-1 && resp.More {
@@ -701,7 +717,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			return resp.Header.Revision + 1, err
+			return snapshotRevision + 1, err
 		}
 	}
 }
@@ -757,6 +773,11 @@ func (lw *LoopWatcher) ForceLoad() {
 // WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
 	return <-lw.isLoadedCh
+}
+
+// GetLoadedRevision returns the etcd snapshot revision loaded during initialization.
+func (lw *LoopWatcher) GetLoadedRevision() int64 {
+	return lw.loadedRevision.Load()
 }
 
 // SetLoadRetryTimes sets the retry times when loading data from etcd.

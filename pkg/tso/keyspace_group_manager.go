@@ -536,11 +536,6 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
-	maxLoadedModRevision := uint64(0)
-	preEventsFn := func([]*clientv3.Event) error {
-		maxLoadedModRevision = 0
-		return nil
-	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
@@ -552,9 +547,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
-		if modRevision := uint64(kv.ModRevision); modRevision > maxLoadedModRevision {
-			maxLoadedModRevision = modRevision
-		}
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -589,8 +581,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
 				)
 			}
-		} else if maxLoadedModRevision > 0 {
-			kgm.SetModRevision(maxLoadedModRevision)
 		}
 		return nil
 	}
@@ -601,7 +591,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		"keyspace-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		preEventsFn,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
 		postEventsFn,
@@ -619,6 +609,15 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		// We might have partially loaded/initialized the keyspace groups. Close the manager to clean up.
 		kgm.Close()
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
+	}
+	if loadedRevision := kgm.groupWatcher.GetLoadedRevision(); loadedRevision > 0 {
+		// The watch loop can advance the manager after the initial load finishes
+		// but before WaitLoad returns. In that case, keeping the newer revision is
+		// correct and SetModRevision returns false.
+		if !kgm.SetModRevision(uint64(loadedRevision)) {
+			log.Debug("keyspace group revision is already at or ahead of the loaded snapshot",
+				zap.Int64("loaded-revision", loadedRevision))
+		}
 	}
 
 	if !defaultKGConfigured {
