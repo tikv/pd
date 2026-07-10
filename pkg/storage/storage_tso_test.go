@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
+	storageendpoint "github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
@@ -156,7 +157,7 @@ func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
 	re.NoError(err)
 
 	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, true)
-	re.ErrorContains(err, "tso microservice primary exists")
+	re.ErrorIs(err, storageendpoint.ErrTSOServicePrimaryExists)
 
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -164,4 +165,45 @@ func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
 
 	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
 	re.NoError(err)
+}
+
+func TestSaveTimestampFencedByConcurrentTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	globalTS := time.Now().Round(0)
+	re.NoError(storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, true))
+
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/storage/endpoint/beforeSaveTimestampTxnCommit", func() {
+		close(entered)
+		<-resume
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/beforeSaveTimestampTxnCommit"))
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, true)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("timestamp transaction did not reach the commit fence")
+	}
+
+	tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	})
+	re.NoError(storage.Save(tsoPrimaryPath, "tso-primary"))
+	close(resume)
+	re.ErrorIs(<-errCh, storageendpoint.ErrTSOServicePrimaryExists)
+
+	ts, err := storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
 }

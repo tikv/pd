@@ -2492,6 +2492,29 @@ func TestDefaultTSOPrimaryReadyRequiresExpectedPrimaryMatch(t *testing.T) {
 	re.Equal(2, called)
 }
 
+func TestSwitchTSOProviderToPDKeepsDiscoveredTSOService(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.GetMicroserviceConfig().EnableTSODynamicSwitching = true
+	c := &RaftCluster{
+		etcdClient:             client,
+		isKeyspaceGroupEnabled: true,
+		opt:                    opt,
+	}
+	c.SetServiceIndependent(mcsconstant.TSOServiceName)
+	_, err = client.Put(context.Background(),
+		keypath.RegistryPath(mcsconstant.TSOServiceName, "127.0.0.1:3379"), "127.0.0.1:3379")
+	re.NoError(err)
+
+	re.NoError(c.SwitchTSOProviderToPD())
+	re.True(c.IsServiceIndependent(mcsconstant.TSOServiceName))
+	c.checkTSOService()
+	re.True(c.IsServiceIndependent(mcsconstant.TSOServiceName))
+}
+
 // Create n stores (0..n).
 func newTestStores(n uint64, version string) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, n)

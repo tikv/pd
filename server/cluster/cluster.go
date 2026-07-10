@@ -529,16 +529,19 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO dynamic switching is enabled, resuming TSO service checks")
 			}
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-			if err != nil || len(servers) == 0 || !c.isDefaultTSOPrimaryEtcdReady() {
+			if err != nil {
+				log.Warn("failed to discover TSO service, keep current TSO provider", errs.ZapError(err))
+				return
+			}
+			if len(servers) == 0 {
 				if err := c.switchTSOProviderToPD(); err != nil {
 					log.Error("failed to start TSO jobs", errs.ZapError(err))
 					return
 				}
+			} else if !c.isDefaultTSOPrimaryEtcdReady() {
+				log.Debug("TSO service is discovered but not ready, keep current TSO provider")
 			} else if c.IsServiceIndependent(constant.TSOServiceName) || c.isDefaultTSOServiceReady() {
 				c.switchTSOProviderToTSO()
-			} else if err := c.switchTSOProviderToPD(); err != nil {
-				log.Error("failed to start TSO jobs", errs.ZapError(err))
-				return
 			}
 		} else {
 			prev := c.tsoDynamicSwitchingState.Swap(tsoDynamicSwitchingStateDisabled)
@@ -638,7 +641,7 @@ func (c *RaftCluster) SwitchTSOProviderToPD() error {
 	if c.isKeyspaceGroupEnabled && c.opt != nil && !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 		return nil
 	}
-	return c.switchTSOProviderToPDLocked()
+	return c.switchTSOProviderToPD()
 }
 
 func (c *RaftCluster) isTSOServiceIndependent() bool {
@@ -652,12 +655,33 @@ func (c *RaftCluster) switchTSOProviderToPD() error {
 	if c.isTSOAllocatorInitialized() && !c.IsServiceIndependent(constant.TSOServiceName) {
 		return nil
 	}
+	if c.isKeyspaceGroupEnabled {
+		return c.switchTSOProviderToPDIfNoTSOService()
+	}
 	return c.switchTSOProviderToPDLocked()
 }
 
 func (c *RaftCluster) switchTSOProviderToPDLocked() error {
 	c.tsoSwitchMu.Lock()
 	defer c.tsoSwitchMu.Unlock()
+	return c.enableEmbeddedTSO()
+}
+
+func (c *RaftCluster) switchTSOProviderToPDIfNoTSOService() error {
+	c.tsoSwitchMu.Lock()
+	defer c.tsoSwitchMu.Unlock()
+	servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+	if err != nil {
+		return err
+	}
+	if len(servers) != 0 {
+		return nil
+	}
+	return c.enableEmbeddedTSO()
+}
+
+// enableEmbeddedTSO must be called with tsoSwitchMu locked.
+func (c *RaftCluster) enableEmbeddedTSO() error {
 	if err := c.startTSOJobsIfNeeded(); err != nil {
 		return err
 	}
