@@ -738,7 +738,6 @@ func TestStoreLimitRejectsInvalidConfig(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
 			cfg := NewConfig()
