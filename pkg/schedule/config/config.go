@@ -15,6 +15,7 @@
 package config
 
 import (
+	"math"
 	"strconv"
 	"time"
 
@@ -577,11 +578,12 @@ func (c *ScheduleConfig) Validate() error {
 		if err != nil {
 			return errors.Annotatef(err, "invalid schedule.store-limit key %q", storeID)
 		}
-		if storeID != strconv.FormatUint(id, 10) {
+		if id == 0 || storeID != strconv.FormatUint(id, 10) {
 			return errors.Errorf("invalid schedule.store-limit key %q", storeID)
 		}
-		if limit.AddPeer <= 0 || limit.RemovePeer <= 0 {
-			return errors.Errorf("schedule.store-limit.%s add-peer and remove-peer should be positive", storeID)
+		if limit.AddPeer <= 0 || math.IsNaN(limit.AddPeer) || math.IsInf(limit.AddPeer, 0) ||
+			limit.RemovePeer <= 0 || math.IsNaN(limit.RemovePeer) || math.IsInf(limit.RemovePeer, 0) {
+			return errors.Errorf("schedule.store-limit.%s rates must be finite and positive", storeID)
 		}
 	}
 	return nil

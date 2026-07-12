@@ -721,6 +721,14 @@ func TestStoreLimitRejectsInvalidConfig(t *testing.T) {
 	`,
 		},
 		{
+			name: "zero store ID",
+			cfgData: `
+	[schedule.store-limit.0]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`,
+		},
+		{
 			name: "missing rate",
 			cfgData: `
 	[schedule.store-limit.100]
@@ -733,6 +741,22 @@ func TestStoreLimitRejectsInvalidConfig(t *testing.T) {
 	[schedule.store-limit.100]
 	add-peer = -1.0
 	remove-peer = 0.0
+	`,
+		},
+		{
+			name: "NaN rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = nan
+	remove-peer = 40.0
+	`,
+		},
+		{
+			name: "infinite rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	remove-peer = inf
 	`,
 		},
 	}
