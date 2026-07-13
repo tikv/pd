@@ -327,7 +327,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
-		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
+
+		failpoint.Inject("staleRevision", func(val failpoint.Value) {
+			if rev, ok := val.(int); ok {
+				cfgRevision = int64(rev)
+			}
+		})
+		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
@@ -337,7 +343,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
@@ -369,7 +375,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -412,7 +418,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				for _, item := range resp.Events {
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -462,7 +468,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				if resp.CompactRevision > cfgRevision {
+					cfgRevision = resp.CompactRevision
+				}
+				for _, item := range resp.Events {
 					cfgRevision = item.Kv.ModRevision
 					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
@@ -629,6 +638,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -794,6 +804,27 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ResourceGroupRuntimeState describes generic local runtime signals derived
+// from token bucket responses.
+type ResourceGroupRuntimeState struct {
+	// HasLimitedBurst is true when the request-unit token bucket has a finite
+	// burst limit instead of unlimited burst.
+	HasLimitedBurst bool
+}
+
+// GetResourceGroupRuntimeState returns the resource group's local runtime
+// state. The second return value is false when the controller has no usable
+// local state for the group.
+func (c *ResourceGroupsController) GetResourceGroupRuntimeState(resourceGroupName string) (ResourceGroupRuntimeState, bool) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok || gc.tombstone.Load() || !gc.initialRequestCompleted.Load() {
+		return ResourceGroupRuntimeState{}, false
+	}
+	return ResourceGroupRuntimeState{
+		HasLimitedBurst: !gc.burstable.Load(),
+	}, true
 }
 
 // ReportConsumption is used to report ru consumption directly.

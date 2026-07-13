@@ -72,8 +72,8 @@ var NewKeyRange = pd.NewKeyRange
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
 	ID                int64            `json:"id"`
-	StartKey          string           `json:"start_key"`
-	EndKey            string           `json:"end_key"`
+	StartKey          string           `json:"start_key"` // hex-encoded
+	EndKey            string           `json:"end_key"`   // hex-encoded
 	Epoch             RegionEpoch      `json:"epoch"`
 	Peers             []RegionPeer     `json:"peers"`
 	Leader            RegionPeer       `json:"leader"`

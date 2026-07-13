@@ -132,6 +132,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	clusterRouter.Use(newClusterMiddleware(svr).middleware)
 	regionReadRouter := apiRouter.NewRoute().Subrouter()
 	regionReadRouter.Use(newClusterMiddleware(svr, withFollowerSyncedRegion()).middleware)
+	regionResetRouter := apiRouter.NewRoute().Subrouter()
+	regionResetRouter.Use(newClusterMiddleware(svr, withFollowerRegionReset()).middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 	regionReadEscapeRouter := regionReadRouter.NewRoute().Subrouter().UseEncodedPath()
@@ -307,9 +309,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	adminHandler := newAdminHandler(svr, rd)
-	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(regionResetRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/storage/region/{id}", adminHandler.DeleteRegionStorage, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/admin/cache/regions", adminHandler.DeleteAllRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(regionResetRouter, "/admin/cache/regions", adminHandler.DeleteAllRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.isSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.markSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
@@ -369,6 +371,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores",
 		unsafeOperationHandler.RemoveFailedStores, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/abort",
+		unsafeOperationHandler.AbortFailedStoresRemoval, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/unsafe/remove-failed-stores/show",
 		unsafeOperationHandler.GetFailedStoresRemovalStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 

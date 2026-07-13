@@ -16,6 +16,8 @@ package pd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
@@ -66,6 +69,14 @@ func TestClientWithRetry(t *testing.T) {
 	re.Error(err)
 	defer cli.Close()
 	re.Less(time.Since(start), time.Second*10)
+}
+
+func TestIsRetryableGetTSError(t *testing.T) {
+	re := require.New(t)
+
+	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.NotLeaderErr)))
+	re.True(isRetryableGetTSError(fmt.Errorf("%s", errs.MismatchCalleeIDErr)))
+	re.False(isRetryableGetTSError(errors.New("other error")))
 }
 
 func TestRoundUpDurationToSeconds(t *testing.T) {

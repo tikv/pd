@@ -43,6 +43,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -139,8 +140,10 @@ type Server interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceManager() *keyspace.Manager
 	GetKeyspaceGroupManager() *keyspace.GroupManager
+	GetMetaServiceGroupManager() *keyspace.MetaServiceGroupManager
 	IsKeyspaceGroupEnabled() bool
 	GetMeteringWriter() *metering.Writer
+	GetGCStateManager() *gc.GCStateManager
 }
 
 // RaftCluster is used for cluster config management.
@@ -202,6 +205,8 @@ type RaftCluster struct {
 	logRunner ratelimit.Runner
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
+
+	stopGCStateManager func()
 }
 
 // Status saves some state information.
@@ -470,6 +475,10 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.startGCTuner()
 	go c.startProgressGC()
 	go c.runStorageSizeCollector(s.GetMeteringWriter(), c.regionLabeler, s.GetKeyspaceManager())
+
+	s.GetGCStateManager().OnNodeBecomesLeader()
+	c.stopGCStateManager = s.GetGCStateManager().OnNodeBecomesFollower
+
 	log.Info("start background jobs completed", zap.Duration("cost", time.Since(backgroundJobsStart)))
 	runnersStart := time.Now()
 	c.running = true
@@ -988,6 +997,9 @@ func (c *RaftCluster) Stop() {
 	miscRunner = c.miscRunner
 	logRunner = c.logRunner
 	syncRegionRunner = c.syncRegionRunner
+	if c.stopGCStateManager != nil {
+		c.stopGCStateManager()
+	}
 	c.Unlock()
 
 	if cancel != nil {
@@ -2617,6 +2629,9 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
+	if etcdClient == nil {
+		return nil, errs.ErrEtcdNotStarted
+	}
 	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 	if err != nil {
 		return nil, err

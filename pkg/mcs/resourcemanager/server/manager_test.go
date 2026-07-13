@@ -478,6 +478,28 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	})
 }
 
+func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	req := &rmpb.TokenBucketRequest{
+		ResourceGroupName: "test_group",
+		ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 42},
+	}
+
+	err := m.dispatchConsumption(req)
+	re.NoError(err)
+
+	item := <-m.consumptionDispatcher
+	re.Equal(uint32(42), item.keyspaceID)
+	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
+	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
+}
+
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
