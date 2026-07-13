@@ -163,6 +163,14 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 	}
 }
 
+func (gmc *groupMetricsCollection) recordSuccessfulRequestWaitMetrics(
+	accumulatedWaitDuration, reservationWaitDuration time.Duration,
+) time.Duration {
+	totalWaitDuration := accumulatedWaitDuration + reservationWaitDuration
+	gmc.successfulRequestDuration.Observe(totalWaitDuration.Seconds())
+	return totalWaitDuration
+}
+
 type tokenCounter struct {
 	fillRate uint64
 
@@ -793,11 +801,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 			}
 			return nil, nil, waitDuration, 0, err
 		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
-		if waitDuration > slowNotifyFilterDuration {
-			log.Warn("[resource group controller] waited for tokens", gc.logFields(waitDuration, nil)...)
-		}
+		waitDuration = gc.metrics.recordSuccessfulRequestWaitMetrics(waitDuration, d)
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
@@ -877,11 +881,7 @@ func (gc *groupCostController) onResponseWaitImpl(
 			}
 			return nil, waitDuration, err
 		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
-		if waitDuration > slowNotifyFilterDuration {
-			log.Warn("[resource group controller] response waited for tokens", gc.logFields(waitDuration, nil)...)
-		}
+		waitDuration = gc.metrics.recordSuccessfulRequestWaitMetrics(waitDuration, d)
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
