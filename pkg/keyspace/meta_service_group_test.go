@@ -16,9 +16,11 @@ package keyspace
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -331,4 +333,71 @@ func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 			Enabled: &enabled,
 		}))
 	}
+}
+
+// blockingMetaServiceGroupStorage pauses the first SaveMetaServiceGroupStatus so
+// a flush can be held mid-write to exercise its concurrency with PatchStatus.
+type blockingMetaServiceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	blockNextSave atomic.Bool
+	saveStarted   chan struct{}
+	unblockSave   chan struct{}
+}
+
+func (s *blockingMetaServiceGroupStorage) SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *endpoint.MetaServiceGroupStatus) error {
+	if s.blockNextSave.CompareAndSwap(true, false) {
+		close(s.saveStarted)
+		<-s.unblockSave
+	}
+	return s.StorageEndpoint.SaveMetaServiceGroupStatus(txn, id, status)
+}
+
+// TestFlushDoesNotOverwriteConcurrentPatchStatus verifies that an in-flight flush
+// cannot clobber a status persisted by a concurrent PatchStatus. flushToStorage
+// holds the mgm lock across its storage write, so PatchStatus serializes after it
+// and its value is the persisted winner.
+func TestFlushDoesNotOverwriteConcurrentPatchStatus(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := &blockingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		saveStarted:     make(chan struct{}),
+		unblockSave:     make(chan struct{}),
+	}
+	manager, err := NewMetaServiceGroupManager(ctx, store, mockMetaServiceGroups())
+	re.NoError(err)
+
+	const groupID = "etcd-group-0"
+	manager.statusMu.Lock()
+	manager.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: true}
+	manager.dirtyCount = 1
+	manager.statusMu.Unlock()
+
+	// Start a flush and pause it inside the storage write, holding the mgm lock.
+	store.blockNextSave.Store(true)
+	flushErr := make(chan error, 1)
+	go func() { flushErr <- manager.flushToStorage() }()
+	<-store.saveStarted
+
+	// PatchStatus blocks on the mgm lock the paused flush holds, so run it in a
+	// goroutine; it can only complete once the flush releases the lock.
+	const newCount = 99
+	patchErr := make(chan error, 1)
+	go func() {
+		c := newCount
+		patchErr <- manager.PatchStatus(ctx, groupID, &MetaServiceGroupStatusPatch{AssignmentCount: &c})
+	}()
+
+	// Let the flush finish; PatchStatus then serializes strictly after it.
+	close(store.unblockSave)
+	re.NoError(<-flushErr)
+	re.NoError(<-patchErr)
+
+	// The patch applied after the flush must be the persisted winner.
+	re.NoError(manager.RefreshCache())
+	statusMap, err := manager.GetStatus(ctx)
+	re.NoError(err)
+	re.Equal(newCount, statusMap[groupID].AssignmentCount)
 }

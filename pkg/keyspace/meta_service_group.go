@@ -143,21 +143,28 @@ func (m *MetaServiceGroupManager) flushLoop() {
 }
 
 func (m *MetaServiceGroupManager) flushToStorage() error {
-	// Only the serving leader persists; a stale read here is benign because the
-	// next leader reloads the authoritative status via RefreshCache.
-	m.RLock()
-	skip := m.isLeader != nil && !m.isLeader()
-	m.RUnlock()
-	if skip {
+	// Hold the mgm write lock for the whole flush, including the storage write, so
+	// it serializes with PatchStatus and persistGroupsLocked (both take the mgm
+	// lock). Without that, the snapshot below could overwrite a status those paths
+	// persisted synchronously in the meantime, or recreate a status key that
+	// persistGroupsLocked just deleted. This cannot deadlock: the metaLock-holding
+	// paths (RemoveKeyspace, tombstone unassignment) only take statusMu, never the
+	// mgm lock, so nothing waits on the mgm lock while holding metaLock, and flush
+	// never takes metaLock.
+	m.Lock()
+	defer m.Unlock()
+	// Only the serving leader persists; a follower's next leader term reloads the
+	// authoritative status via RefreshCache.
+	if m.isLeader != nil && !m.isLeader() {
 		return nil
 	}
-	// Snapshot the dirty state under statusMu and reset the dirty counter
-	// optimistically, then release the lock before the storage transaction so a
-	// slow etcd write does not block concurrent assignment operations. The
-	// snapshot is a deep copy, so later cache mutations are not observed by this
-	// flush. On failure the dirty count is restored so the next tick retries.
-	// Only flushLoop calls this, so there is no concurrent flush to race the
-	// reset/restore.
+	// Snapshot the dirty state under statusMu (a deep copy) and reset the dirty
+	// counter, without holding statusMu across the storage write. The snapshot
+	// keeps the write from reading cachedStatus while a concurrent statusMu holder
+	// (an assignment-count update under metaLock) mutates it; such updates re-mark
+	// the counter dirty and are flushed on the next tick. On failure the dirty
+	// count is restored. Only flushLoop calls this, so no concurrent flush races
+	// the reset/restore.
 	m.statusMu.Lock()
 	if m.dirtyCount == 0 {
 		m.statusMu.Unlock()
