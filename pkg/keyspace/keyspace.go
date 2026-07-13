@@ -880,6 +880,12 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 	oldConfig := make(map[string]string)
 	var oldMetaServiceGroup, newMetaServiceGroup string
 	metaServiceGroupReassigned := false
+	// Captured for the outer rollback below: UpdateKeyspaceGroup persists the TSO
+	// keyspace group move immediately, so a commit failure after txnFunc returns
+	// nil leaves it applied while the keyspace meta was not saved.
+	var oldTSOGroupID, newTSOGroupID string
+	var oldTSOUserKind, newTSOUserKind endpoint.UserKind
+	keyspaceGroupMoved := false
 	txnFunc := func(txn kv.Txn) error {
 		// First get KeyspaceID from Name.
 		loaded, id, err := manager.store.LoadKeyspaceID(txn, name)
@@ -940,12 +946,17 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 			if err := manager.kgm.UpdateKeyspaceGroup(oldID, newID, oldUserKind, newUserKind, meta.GetId()); err != nil {
 				return err
 			}
+			oldTSOGroupID, newTSOGroupID = oldID, newID
+			oldTSOUserKind, newTSOUserKind = oldUserKind, newUserKind
+			keyspaceGroupMoved = true
 		}
 		// Save the updated keyspace meta.
 		if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
-			if needUpdate {
+			if keyspaceGroupMoved {
 				if err := manager.kgm.UpdateKeyspaceGroup(newID, oldID, newUserKind, oldUserKind, meta.GetId()); err != nil {
 					log.Error("failed to revert keyspace group", zap.Error(err))
+				} else {
+					keyspaceGroupMoved = false
 				}
 			}
 			return err
@@ -954,6 +965,15 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 	}
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
+		// The txn can fail at commit after txnFunc returned nil, leaving the
+		// immediately-persisted TSO keyspace group move applied while the keyspace
+		// meta was rolled back. keyspaceGroupMoved stays true only when the inner
+		// error branch did not already revert it, so revert it here.
+		if keyspaceGroupMoved {
+			if rollbackErr := manager.kgm.UpdateKeyspaceGroup(newTSOGroupID, oldTSOGroupID, newTSOUserKind, oldTSOUserKind, meta.GetId()); rollbackErr != nil {
+				log.Error("failed to revert keyspace group", zap.Error(rollbackErr))
+			}
+		}
 		if metaServiceGroupReassigned {
 			if rollbackErr := manager.mgm.updateAssignmentTxn(nil, newMetaServiceGroup, oldMetaServiceGroup); rollbackErr != nil {
 				log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
