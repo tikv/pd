@@ -1012,7 +1012,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -1059,18 +1059,10 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
-	// Decrement the meta-service group assignment count in the same txn so the
-	// persisted counter stays in sync with the keyspaces actually referencing the
-	// group. Without this, removed keyspaces leak count and could permanently
-	// block deleting an otherwise-empty group.
-	if manager.mgm != nil {
-		if groupID := meta.GetConfig()[MetaServiceGroupIDKey]; groupID != "" {
-			if err := manager.mgm.updateAssignmentTxn(txn, groupID, ""); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	// Keep the meta-service group assignment accounting in sync within the same
+	// txn. Without this, removed keyspaces leak count and could permanently block
+	// deleting an otherwise-empty group.
+	return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
 }
 
 // UpdateKeyspaceStateByID updates target keyspace to the given state if it's not already in that state.
@@ -1095,7 +1087,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
-		if err = manager.transformKeyspaceState(meta, newState, now); err != nil {
+		if err = manager.transformKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
@@ -1119,15 +1111,52 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
+// unassignKeyspaceFromMetaServiceGroup removes the keyspace's meta-service group
+// binding within txn: it drops MetaServiceGroupIDKey from the config and, when a
+// meta-service group manager is configured, decrements the persisted assignment
+// count. Once the config key is removed and persisted, a subsequent call is a
+// no-op, so the removal and tombstone paths can both invoke it without
+// double-counting.
+//
+// Callers already hold the keyspace metaLock (so meta is not mutated
+// concurrently). This deliberately does NOT take mgm.RLock: the config-update
+// path acquires mgm.RLock before metaLock (via runTxnWithMetaGroupLock), so
+// grabbing mgm.RLock here while holding metaLock would invert the lock order and
+// deadlock once UpdateGroupsSafely is waiting on mgm.Lock. The lock is
+// unnecessary anyway — updateAssignmentTxn only touches the store, and the
+// group delete guard relies on the authoritative keyspace scan, not this count.
+func (manager *Manager) unassignKeyspaceFromMetaServiceGroup(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	groupID := meta.GetConfig()[MetaServiceGroupIDKey]
+	if groupID == "" {
+		return nil
+	}
+	delete(meta.Config, MetaServiceGroupIDKey)
+	if manager.mgm == nil {
+		return nil
+	}
+	return manager.mgm.updateAssignmentTxn(txn, groupID, "")
+}
+
 // transformKeyspaceState transforms the keyspace state to the target state and record the update time.
-func (manager *Manager) transformKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
-	// If already in the target state, do nothing and return.
+func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.KeyspaceMeta, newState keyspacepb.KeyspaceState, now int64) error {
+	// If already in the target state, do nothing and return. A TOMBSTONE keyspace
+	// still carrying a meta-service group binding (e.g. one tombstoned before this
+	// cleanup existed) is repaired here by re-applying the TOMBSTONE update; the
+	// unassignment is idempotent, so it is a no-op once the binding is cleared.
 	if meta.GetState() == newState {
+		if newState == keyspacepb.KeyspaceState_TOMBSTONE {
+			return manager.unassignKeyspaceFromMetaServiceGroup(txn, meta)
+		}
 		return nil
 	}
 	// Consult state transition table to check if the operation is legal.
 	if !slice.Contains(stateTransitionTable[meta.GetState()], newState) {
 		return errors.Errorf("cannot change keyspace state from %s to %s", meta.GetState().String(), newState.String())
+	}
+	if newState == keyspacepb.KeyspaceState_TOMBSTONE {
+		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, meta); err != nil {
+			return err
+		}
 	}
 	// If the operation is legal, update keyspace state and change time.
 	meta.State = newState

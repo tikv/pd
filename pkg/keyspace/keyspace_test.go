@@ -1125,3 +1125,88 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
 }
+
+func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
+	re := suite.Require()
+	manager := suite.manager
+	groupID := "etcd-group-0"
+	groupEndpoint := "etcd-group-0.tidb-serverless.cluster.svc.local"
+	metaServiceGroupStore, ok := manager.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	// Start without any group so creation never auto-assigns: meta-service groups
+	// are disabled by default, and this keeps the test independent of that.
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
+
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "test_ks_msg",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NotContains(created.GetConfig(), MetaServiceGroupIDKey)
+
+	// Make the group available and assign the keyspace to it explicitly, mirroring
+	// what a meta-service-group-enabled cluster persists.
+	assignKeyspaceToGroup := func(id uint32) {
+		re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			meta, err := manager.store.LoadKeyspaceMeta(txn, id)
+			if err != nil {
+				return err
+			}
+			if meta.Config == nil {
+				meta.Config = map[string]string{}
+			}
+			meta.Config[MetaServiceGroupIDKey] = groupID
+			if err := manager.store.SaveKeyspaceMeta(txn, meta); err != nil {
+				return err
+			}
+			return manager.mgm.updateAssignmentTxn(txn, "", groupID)
+		}))
+	}
+	manager.mgm.updateGroups(map[string]string{groupID: groupEndpoint})
+	assignKeyspaceToGroup(created.GetId())
+
+	counts, err := manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts[groupID])
+
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	_, err = manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_ARCHIVED, time.Now().Unix())
+	re.NoError(err)
+	updated, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NotContains(updated.GetConfig(), MetaServiceGroupIDKey)
+
+	loaded, err := manager.LoadKeyspace(created.GetName())
+	re.NoError(err)
+	re.NotContains(loaded.GetConfig(), MetaServiceGroupIDKey)
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+
+	// A keyspace tombstoned before this cleanup existed still carries the group
+	// binding and an inflated counter. Re-applying the TOMBSTONE state (a
+	// same-state update) must repair it rather than being skipped.
+	assignKeyspaceToGroup(updated.GetId())
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, counts[groupID])
+	repaired, err := manager.UpdateKeyspaceState(created.GetName(), keyspacepb.KeyspaceState_TOMBSTONE, time.Now().Unix())
+	re.NoError(err)
+	re.NotContains(repaired.GetConfig(), MetaServiceGroupIDKey)
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+
+	// Removing the already-tombstoned keyspace must not decrement the counter
+	// again: the group binding was cleared and persisted during the tombstone
+	// transition, so unassignment is a no-op and the count stays at zero.
+	re.NoError(manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return manager.RemoveKeyspace(txn, updated.GetId())
+	}))
+	counts, err = manager.mgm.GetAssignmentCounts(suite.ctx)
+	re.NoError(err)
+	re.Equal(0, counts[groupID])
+}
