@@ -268,6 +268,33 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() 
 	re.ErrorIs(err, ErrInvalidAssignmentCount)
 }
 
+// TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that adding a group
+// whose status still lingers in storage (e.g. from an earlier best-effort delete
+// that failed) resets that persisted status to zero, so RefreshCache does not
+// resurrect the stale count/enabled state.
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForReaddedGroup() {
+	re := suite.Require()
+	const groupID = "etcd-group-readded"
+	// Simulate a stale persisted status for a group the manager does not know yet.
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, groupID,
+			&endpoint.MetaServiceGroupStatus{AssignmentCount: 5, Enabled: true})
+	}))
+
+	groups := mockMetaServiceGroups()
+	groups[groupID] = "etcd-group-readded.tidb-serverless.cluster.svc.local"
+	re.NoError(suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil,
+		func() error { return nil }, nil))
+
+	// Reloading from storage must see a zero status, not the stale one.
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.NotNil(statusMap[groupID])
+	re.Equal(0, statusMap[groupID].AssignmentCount)
+	re.False(statusMap[groupID].Enabled)
+}
+
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re := suite.Require()
 	// Groups are disabled by default, so reassigning a keyspace into one must be

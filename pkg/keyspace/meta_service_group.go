@@ -493,23 +493,40 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if err := persist(); err != nil {
 		return err
 	}
-	// Clear the persisted status for deleted groups before touching memory, so all
-	// storage writes complete before the in-memory view changes. This keeps
-	// re-adding a group with the same ID from inheriting a stale assignment count
-	// or enabled state, which would skew list output and PickGroup balancing.
-	// Best-effort: the config deletion is already persisted and the delete guard
-	// relies on actual keyspace scans, not this counter.
-	if len(deletedGroups) > 0 {
+	// Collect the groups that have no cached status yet (newly added or re-added)
+	// before mutating the cache, so their persisted status can be reset below.
+	m.statusMu.Lock()
+	var addedGroups []string
+	for groupID := range metaServiceGroups {
+		if m.cachedStatus[groupID] == nil {
+			addedGroups = append(addedGroups, groupID)
+		}
+	}
+	m.statusMu.Unlock()
+	// Reconcile persisted status before touching memory, so all storage writes
+	// complete before the in-memory view changes. Clearing deleted groups and
+	// resetting added ones to a zero status keeps re-adding a group with the same
+	// ID from inheriting a stale assignment count or enabled state (e.g. left by
+	// an earlier best-effort deletion that failed), which would skew list output
+	// and PickGroup balancing. Best-effort: the config change is already persisted
+	// and the delete guard relies on actual keyspace scans, not this counter.
+	if len(deletedGroups) > 0 || len(addedGroups) > 0 {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range deletedGroups {
 				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
 					return err
 				}
 			}
+			for _, id := range addedGroups {
+				if err := m.store.SaveMetaServiceGroupStatus(txn, id, &endpoint.MetaServiceGroupStatus{}); err != nil {
+					return err
+				}
+			}
 			return nil
 		}); err != nil {
-			log.Warn("[keyspace] failed to clear status for deleted meta-service groups",
-				zap.Strings("deleted-groups", deletedGroups), zap.Error(err))
+			log.Warn("[keyspace] failed to reconcile status for meta-service group changes",
+				zap.Strings("deleted-groups", deletedGroups),
+				zap.Strings("added-groups", addedGroups), zap.Error(err))
 		}
 	}
 	// Apply the change to the in-memory view only after the storage writes above.
