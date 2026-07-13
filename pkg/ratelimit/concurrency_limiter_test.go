@@ -102,6 +102,114 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	require.Equal(t, uint64(1), limiter.GetRunningTasksNum(), "Expected running tasks to be 1")
 }
 
+func TestConcurrencyLimiterAcquireWithCanceledContext(t *testing.T) {
+	re := require.New(t)
+	limiter := NewConcurrencyLimiter(1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	token, err := limiter.AcquireToken(ctx)
+	re.ErrorIs(err, context.Canceled)
+	re.Nil(token)
+	re.Zero(limiter.GetRunningTasksNum())
+	re.Zero(limiter.GetWaitingTasksNum())
+}
+
+func TestConcurrencyLimiterDoesNotReuseStaleQueuedToken(t *testing.T) {
+	re := require.New(t)
+	limiter := NewConcurrencyLimiter(1)
+
+	token1, err := limiter.AcquireToken(context.Background())
+	re.NoError(err)
+	limiter.ReleaseToken(token1)
+
+	token2, err := limiter.AcquireToken(context.Background())
+	re.NoError(err)
+	re.Equal(uint64(1), limiter.GetRunningTasksNum())
+
+	type acquireResult struct {
+		token *TaskToken
+		err   error
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan acquireResult, 1)
+	go func() {
+		token, err := limiter.AcquireToken(ctx)
+		resultCh <- acquireResult{token: token, err: err}
+	}()
+
+	select {
+	case result := <-resultCh:
+		re.Failf("unexpected token acquisition", "token: %v, err: %v", result.token, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	cancel()
+	result := <-resultCh
+	re.ErrorIs(result.err, context.Canceled)
+	re.Nil(result.token)
+	re.Equal(uint64(1), limiter.GetRunningTasksNum())
+	re.Zero(limiter.GetWaitingTasksNum())
+	limiter.ReleaseToken(token2)
+}
+
+func TestConcurrencyLimiterForwardsWakeUpFromCanceledWaiter(t *testing.T) {
+	re := require.New(t)
+	limiter := NewConcurrencyLimiter(1)
+
+	token, err := limiter.AcquireToken(context.Background())
+	re.NoError(err)
+
+	type acquireResult struct {
+		token *TaskToken
+		err   error
+	}
+	acquire := func(ctx context.Context, resultCh chan<- acquireResult) {
+		token, err := limiter.AcquireToken(ctx)
+		resultCh <- acquireResult{token: token, err: err}
+	}
+
+	canceledCtx, cancelCanceledWaiter := context.WithCancel(context.Background())
+	defer cancelCanceledWaiter()
+	canceledResultCh := make(chan acquireResult, 1)
+	go acquire(canceledCtx, canceledResultCh)
+	re.Eventually(func() bool {
+		return limiter.GetWaitingTasksNum() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	survivingCtx, cancelSurvivingWaiter := context.WithCancel(context.Background())
+	defer cancelSurvivingWaiter()
+	survivingResultCh := make(chan acquireResult, 1)
+	go acquire(survivingCtx, survivingResultCh)
+	re.Eventually(func() bool {
+		return limiter.GetWaitingTasksNum() == 2
+	}, time.Second, 10*time.Millisecond)
+
+	// Force the first waiter to consume the wake-up before it observes cancellation.
+	limiter.mu.Lock()
+	token.released = true
+	limiter.current--
+	limiter.queue <- struct{}{}
+	cancelCanceledWaiter()
+	limiter.mu.Unlock()
+
+	canceledResult := <-canceledResultCh
+	re.ErrorIs(canceledResult.err, context.Canceled)
+	re.Nil(canceledResult.token)
+
+	select {
+	case survivingResult := <-survivingResultCh:
+		re.NoError(survivingResult.err)
+		re.NotNil(survivingResult.token)
+		limiter.ReleaseToken(survivingResult.token)
+	case <-time.After(time.Second):
+		re.Fail("surviving waiter did not acquire the released token")
+	}
+	re.Zero(limiter.GetRunningTasksNum())
+	re.Zero(limiter.GetWaitingTasksNum())
+}
+
 func TestConcurrencyLimiterAcquire(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

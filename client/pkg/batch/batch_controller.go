@@ -82,6 +82,9 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 	// TODO: `bc.collectedRequestCount` should never be non-empty here. Consider do assertion here.
 	bc.collectedRequestCount = 0
 	for {
+		if errRet = ctx.Err(); errRet != nil {
+			return errRet
+		}
 		// If the batch size reaches the maxBatchSize limit but the token haven't arrived yet, don't receive more
 		// requests, and return when token is ready.
 		if bc.collectedRequestCount >= bc.maxBatchSize && !tokenAcquired {
@@ -92,6 +95,10 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-tokenCh:
+				tokenAcquired = true
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 				return nil
 			}
 		}
@@ -103,22 +110,34 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 			case req := <-requestCh:
 				// Start to batch when the first request arrives.
 				bc.pushRequest(req)
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 				// A request arrives but the token is not ready yet. Continue waiting, and also allowing collecting the next
 				// request if it arrives.
 				continue
 			case <-tokenCh:
 				tokenAcquired = true
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 			}
 		}
 
 		// After the token is ready or it's working without token,
 		// wait for the first request to arrive.
 		if bc.collectedRequestCount == 0 {
+			if errRet = ctx.Err(); errRet != nil {
+				return errRet
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case firstRequest := <-requestCh:
 				bc.pushRequest(firstRequest)
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 			}
 		}
 
@@ -131,9 +150,15 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 	// This loop is for trying best to collect more requests, so we use `bc.maxBatchSize` here.
 fetchPendingRequestsLoop:
 	for bc.collectedRequestCount < bc.maxBatchSize {
+		if errRet = ctx.Err(); errRet != nil {
+			return errRet
+		}
 		select {
 		case req := <-requestCh:
 			bc.pushRequest(req)
+			if errRet = ctx.Err(); errRet != nil {
+				return errRet
+			}
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -153,12 +178,21 @@ fetchPendingRequestsLoop:
 		after := time.NewTimer(maxBatchWaitInterval)
 		defer after.Stop()
 		for bc.collectedRequestCount < bc.bestBatchSize {
+			if errRet = ctx.Err(); errRet != nil {
+				return errRet
+			}
 			select {
 			case req := <-requestCh:
 				bc.pushRequest(req)
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-after.C:
+				if errRet = ctx.Err(); errRet != nil {
+					return errRet
+				}
 				return nil
 			}
 		}
@@ -168,9 +202,15 @@ fetchPendingRequestsLoop:
 	// of `bc.bestBatchSize` because trying best to fetch more requests is necessary so that
 	// we can adjust the `bc.bestBatchSize` dynamically later.
 	for bc.collectedRequestCount < bc.maxBatchSize {
+		if errRet = ctx.Err(); errRet != nil {
+			return errRet
+		}
 		select {
 		case req := <-requestCh:
 			bc.pushRequest(req)
+			if errRet = ctx.Err(); errRet != nil {
+				return errRet
+			}
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
@@ -185,12 +225,21 @@ fetchPendingRequestsLoop:
 func (bc *Controller[T]) FetchRequestsWithTimer(ctx context.Context, requestCh <-chan T, timer *time.Timer) error {
 batchingLoop:
 	for bc.collectedRequestCount < bc.maxBatchSize {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case req := <-requestCh:
 			bc.pushRequest(req)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 		case <-timer.C:
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			break batchingLoop
 		}
 	}
@@ -198,11 +247,17 @@ batchingLoop:
 	// Try to collect more requests in non-blocking way.
 nonWaitingBatchLoop:
 	for bc.collectedRequestCount < bc.maxBatchSize {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case req := <-requestCh:
 			bc.pushRequest(req)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 		default:
 			break nonWaitingBatchLoop
 		}

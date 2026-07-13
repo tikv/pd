@@ -112,6 +112,11 @@ func NewOrderedSingleFlight[TResult any]() *OrderedSingleFlight[TResult] {
 // Do tries to execute the function `f`, or if possible, wait and reuse the result of an execution triggered by another
 // goroutine. See comments of OrderedSingleFlight for details.
 func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Context) (TResult, error)) (TResult, error) {
+	var zero TResult
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+
 	var currentTask *task[TResult]
 
 	s.mu.Lock()
@@ -122,11 +127,15 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Co
 	currentTask.refState.Add(1)
 	s.mu.Unlock()
 
+	if err := ctx.Err(); err != nil {
+		currentTask.cancelOne()
+		return zero, err
+	}
+
 	select {
 	case <-ctx.Done():
 		currentTask.cancelOne()
-		var res TResult
-		return res, ctx.Err()
+		return zero, ctx.Err()
 	case <-currentTask.finishCh:
 		// Executed by other goroutines. Reuse the result.
 		return currentTask.result, currentTask.err
@@ -145,6 +154,11 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Co
 		s.tokenCh <- struct{}{}
 		return currentTask.result, currentTask.err
 	default:
+	}
+	if err := ctx.Err(); err != nil {
+		currentTask.cancelOne()
+		s.tokenCh <- struct{}{}
+		return zero, err
 	}
 
 	// The following code executes exactly once for each instance of the `task`.
@@ -174,8 +188,7 @@ func (s *OrderedSingleFlight[TResult]) Do(ctx context.Context, f func(context.Co
 	select {
 	case <-ctx.Done():
 		currentTask.cancelOne()
-		var res TResult
-		return res, ctx.Err()
+		return zero, ctx.Err()
 	case <-currentTask.finishCh:
 		return currentTask.result, currentTask.err
 	}

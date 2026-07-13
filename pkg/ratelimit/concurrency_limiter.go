@@ -29,12 +29,12 @@ type ConcurrencyLimiter struct {
 
 	// statistic
 	maxLimit uint64
-	queue    chan *TaskToken
+	queue    chan struct{} // wake-up signals for waiting tasks
 }
 
 // NewConcurrencyLimiter creates a new ConcurrencyLimiter.
 func NewConcurrencyLimiter(limit uint64) *ConcurrencyLimiter {
-	return &ConcurrencyLimiter{limit: limit, queue: make(chan *TaskToken, limit)}
+	return &ConcurrencyLimiter{limit: limit, queue: make(chan struct{}, limit)}
 }
 
 const unlimit = uint64(0)
@@ -108,43 +108,72 @@ func (l *ConcurrencyLimiter) GetWaitingTasksNum() uint64 {
 
 // AcquireToken acquires a token from the limiter. which will block until a token is available or ctx is done, like Timeout.
 func (l *ConcurrencyLimiter) AcquireToken(ctx context.Context) (*TaskToken, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	l.mu.Lock()
-	if l.current >= l.limit {
-		l.waiting++
+	if err := ctx.Err(); err != nil {
 		l.mu.Unlock()
-		// block the waiting task on the caller goroutine
+		return nil, err
+	}
+	if l.limit == unlimit || l.current < l.limit {
+		l.current++
+		l.mu.Unlock()
+		return &TaskToken{}, nil
+	}
+	l.waiting++
+	l.mu.Unlock()
+
+	// Block the waiting task on the caller goroutine.
+	for {
 		select {
 		case <-ctx.Done():
 			l.mu.Lock()
 			l.waiting--
 			l.mu.Unlock()
 			return nil, ctx.Err()
-		case token := <-l.queue:
+		case <-l.queue:
 			l.mu.Lock()
-			token.released = false
-			l.current++
-			l.waiting--
+			if err := ctx.Err(); err != nil {
+				l.waiting--
+				shouldWakeUp := l.waiting > 0 && (l.limit == unlimit || l.current < l.limit)
+				l.mu.Unlock()
+				if shouldWakeUp {
+					select {
+					case l.queue <- struct{}{}:
+					default:
+					}
+				}
+				return nil, err
+			}
+			if l.limit == unlimit || l.current < l.limit {
+				l.waiting--
+				l.current++
+				l.mu.Unlock()
+				return &TaskToken{}, nil
+			}
 			l.mu.Unlock()
-			return token, nil
 		}
 	}
-	l.current++
-	token := &TaskToken{}
-	l.mu.Unlock()
-	return token, nil
 }
 
 // ReleaseToken releases the token.
 func (l *ConcurrencyLimiter) ReleaseToken(token *TaskToken) {
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if token.released {
+		l.mu.Unlock()
 		return
 	}
 	token.released = true
 	l.current--
-	if len(l.queue) < int(l.limit) {
-		l.queue <- token
+	shouldWakeUp := l.waiting > 0 && (l.limit == unlimit || l.current < l.limit)
+	l.mu.Unlock()
+	if shouldWakeUp {
+		select {
+		case l.queue <- struct{}{}:
+		default:
+		}
 	}
 }
 

@@ -123,6 +123,24 @@ func TestOrderedSingleFlight(t *testing.T) {
 	re.Equal(200, res)
 }
 
+func TestOrderedSingleFlightCanceledContextDoesNotExecute(t *testing.T) {
+	re := require.New(t)
+
+	s := NewOrderedSingleFlight[int]()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	called := atomic.Bool{}
+	res, err := s.Do(ctx, func(context.Context) (int, error) {
+		called.Store(true)
+		return 1, nil
+	})
+	re.ErrorIs(err, context.Canceled)
+	re.Zero(res)
+	re.False(called.Load())
+	re.Equal(int64(0), s.ExecCount())
+}
+
 func TestOrderedSingleFlightCancellation(t *testing.T) {
 	re := require.New(t)
 
