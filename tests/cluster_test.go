@@ -18,6 +18,7 @@ import (
 	"os"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -63,6 +64,7 @@ type stubTestServer struct {
 	state    atomic.Int32
 	stopCh   chan struct{}
 	runErr   error
+	stopErr  error
 	stopped  atomic.Bool
 	finished atomic.Bool
 }
@@ -85,7 +87,7 @@ func (s *stubTestServer) runWithStartSignal(started chan<- struct{}) error {
 	}
 	<-s.stopCh
 	s.finished.Store(true)
-	return nil
+	return s.stopErr
 }
 
 func (s *stubTestServer) Stop() error {
@@ -102,16 +104,18 @@ func (s *stubTestServer) State() int32 {
 }
 
 func TestRunServersWaitsForInFlightRuns(t *testing.T) {
-	t.Parallel()
-
 	re := require.New(t)
+	oldCleanupGracePeriod := runServersCleanupGracePeriod
+	runServersCleanupGracePeriod = time.Millisecond
+	t.Cleanup(func() { runServersCleanupGracePeriod = oldCleanupGracePeriod })
+	blockedServer := newStubTestServer()
+	blockedServer.stopErr = errors.New("start canceled")
 	failedServer := newStubTestServer()
 	failedServer.runErr = errors.New("start failed")
-	blockedServer := newStubTestServer()
 
-	// Start the failed server first to verify that RunServers waits until the
-	// following server is stoppable before handling the failure.
-	err := runTestServers([]testServerRunner{failedServer, blockedServer})
+	// The cleanup error from the lower-index server must not replace the startup
+	// error that triggered cleanup.
+	err := runTestServers([]testServerRunner{blockedServer, failedServer})
 	re.EqualError(err, "start failed")
 	re.True(blockedServer.stopped.Load())
 	re.True(blockedServer.finished.Load())

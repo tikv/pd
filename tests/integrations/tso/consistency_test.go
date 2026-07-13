@@ -16,10 +16,13 @@ package tso
 
 import (
 	"context"
+	"net"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
 
@@ -66,6 +69,55 @@ func TestMicroserviceTSOConsistencySuite(t *testing.T) {
 	suite.Run(t, &tsoConsistencyTestSuite{
 		legacy: false,
 	})
+}
+
+func TestRunInitialServersClosesStartingServersBeforeRetry(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestCluster(ctx, serverCount)
+	re.NoError(err)
+	t.Cleanup(func() {
+		cancel()
+		cluster.Destroy()
+	})
+
+	oldServer := cluster.GetServer("pd1")
+	conflictURL, err := url.Parse(cluster.GetServer("pd3").GetConfig().ClientUrls)
+	re.NoError(err)
+	listener, err := net.Listen("tcp", conflictURL.Host)
+	re.NoError(err)
+	t.Cleanup(func() { re.NoError(listener.Close()) })
+
+	re.NoError(cluster.RunInitialServers())
+	re.True(oldServer.GetServer().IsClosed())
+}
+
+func TestRunFailureAfterEtcdStartClosesServer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	t.Cleanup(func() {
+		cancel()
+		cluster.Destroy()
+	})
+
+	const failpointName = "github.com/tikv/pd/server/failAfterStartEtcd"
+	re.NoError(failpoint.Enable(failpointName, "return(true)"))
+	t.Cleanup(func() { re.NoError(failpoint.Disable(failpointName)) })
+
+	testServer := cluster.GetServer("pd1")
+	clientURL, err := url.Parse(testServer.GetConfig().ClientUrls)
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.ErrorContains(err, "injected error after etcd startup")
+	re.NoError(testServer.Destroy())
+
+	conn, err := net.DialTimeout("tcp", clientURL.Host, time.Second)
+	re.Error(err)
+	if conn != nil {
+		re.NoError(conn.Close())
+	}
 }
 
 func (suite *tsoConsistencyTestSuite) SetupSuite() {
