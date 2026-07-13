@@ -377,6 +377,8 @@ type LoopWatcher struct {
 	preEventsFn func([]*clientv3.Event) error
 	// loadedRevision is the etcd snapshot revision loaded during initialization.
 	loadedRevision atomic.Int64
+	// revisionUpdatedFn is called when the watcher has caught up to a newer etcd revision.
+	revisionUpdatedFn func(int64)
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
@@ -419,6 +421,7 @@ func NewLoopWatcher(
 		deleteFn:                 deleteFn,
 		postEventsFn:             postEventsFn,
 		preEventsFn:              preEventsFn,
+		revisionUpdatedFn:        func(int64) {},
 		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
@@ -603,6 +606,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			} else if wresp.IsProgressNotify() {
 				log.Debug("watcher receives progress notify in watch loop",
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				lw.revisionUpdatedFn(wresp.Header.Revision)
 				goto watchChanLoop
 			}
 			if err := lw.preEventsFn(wresp.Events); err != nil {
@@ -636,6 +640,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
+			lw.revisionUpdatedFn(wresp.Header.Revision)
 			revision = wresp.Header.Revision + 1
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
@@ -717,6 +722,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
+			lw.revisionUpdatedFn(snapshotRevision)
 			return snapshotRevision + 1, err
 		}
 	}
@@ -778,6 +784,15 @@ func (lw *LoopWatcher) WaitLoad() error {
 // GetLoadedRevision returns the etcd snapshot revision loaded during initialization.
 func (lw *LoopWatcher) GetLoadedRevision() int64 {
 	return lw.loadedRevision.Load()
+}
+
+// SetRevisionUpdatedCallback sets a callback that is invoked after the watcher catches up to an etcd revision.
+func (lw *LoopWatcher) SetRevisionUpdatedCallback(fn func(int64)) {
+	if fn == nil {
+		lw.revisionUpdatedFn = func(int64) {}
+		return
+	}
+	lw.revisionUpdatedFn = fn
 }
 
 // SetLoadRetryTimes sets the retry times when loading data from etcd.
