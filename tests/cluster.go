@@ -172,16 +172,26 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
+	return s.runWithStartSignal(nil)
+}
+
+func (s *TestServer) runWithStartSignal(started chan<- struct{}) error {
 	s.Lock()
 	if s.state != Initial && s.state != Stop {
 		state := s.state
 		s.Unlock()
+		if started != nil {
+			close(started)
+		}
 		return errors.Errorf("server(state%d) cannot run", state)
 	}
 	prevState := s.state
 	// Treat startup as running so retry cleanup can close a blocked server.Run.
 	s.state = Running
 	s.Unlock()
+	if started != nil {
+		close(started)
+	}
 
 	if err := s.server.Run(); err != nil {
 		s.Lock()
@@ -696,12 +706,65 @@ func RunServer(server *TestServer) <-chan error {
 
 // RunServers starts to run multiple TestServer.
 func RunServers(servers []*TestServer) error {
-	res := make([]<-chan error, len(servers))
-	for i, s := range servers {
-		res[i] = RunServer(s)
+	runners := make([]testServerRunner, 0, len(servers))
+	for _, server := range servers {
+		runners = append(runners, server)
 	}
-	for _, c := range res {
-		if err := <-c; err != nil {
+	return runTestServers(runners)
+}
+
+type testServerRunner interface {
+	runWithStartSignal(chan<- struct{}) error
+	Stop() error
+	State() int32
+}
+
+func runTestServers(servers []testServerRunner) error {
+	type runResult struct {
+		index int
+		err   error
+	}
+	resC := make(chan runResult, len(servers))
+	for i, s := range servers {
+		index := i
+		server := s
+		started := make(chan struct{})
+		go func() {
+			resC <- runResult{index: index, err: server.runWithStartSignal(started)}
+		}()
+		// runWithStartSignal changes the state to Running before notifying started.
+		// Wait for that transition so an early failure cannot race with a server
+		// that has not entered run yet and therefore cannot be stopped.
+		<-started
+	}
+
+	errs := make([]error, len(servers))
+	stopping := false
+	for range servers {
+		result := <-resC
+		errs[result.index] = result.err
+		if result.err != nil && !stopping {
+			stopping = true
+			// Another server may still be blocked in Run. Stop all in-flight servers
+			// to unblock them, then keep draining resC before retry cleanup can destroy
+			// their data directories.
+			var wg sync.WaitGroup
+			for _, s := range servers {
+				if s.State() != Running {
+					continue
+				}
+				server := s
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					_ = server.Stop()
+				}()
+			}
+			wg.Wait()
+		}
+	}
+	for _, err := range errs {
+		if err != nil {
 			return errors.WithStack(err)
 		}
 	}

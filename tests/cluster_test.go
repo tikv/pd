@@ -15,6 +15,7 @@
 package tests
 
 import (
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -53,4 +54,62 @@ func TestClassifyInitialServersError(t *testing.T) {
 	re.Equal(startServersRetryRecreate, classifyInitialServersError(errors.New("Etcd cluster ID mismatch")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(errors.New("some other error")))
 	re.Equal(startServersNoRetry, classifyInitialServersError(nil))
+}
+
+type stubTestServer struct {
+	state    atomic.Int32
+	stopCh   chan struct{}
+	runErr   error
+	stopped  atomic.Bool
+	finished atomic.Bool
+}
+
+func newStubTestServer() *stubTestServer {
+	return &stubTestServer{
+		stopCh: make(chan struct{}),
+	}
+}
+
+func (s *stubTestServer) runWithStartSignal(started chan<- struct{}) error {
+	s.state.Store(Running)
+	if started != nil {
+		close(started)
+	}
+	if s.runErr != nil {
+		s.state.Store(Initial)
+		s.finished.Store(true)
+		return s.runErr
+	}
+	<-s.stopCh
+	s.finished.Store(true)
+	return nil
+}
+
+func (s *stubTestServer) Stop() error {
+	if !s.state.CompareAndSwap(Running, Stop) {
+		return errors.New("server is not running")
+	}
+	s.stopped.Store(true)
+	close(s.stopCh)
+	return nil
+}
+
+func (s *stubTestServer) State() int32 {
+	return s.state.Load()
+}
+
+func TestRunServersWaitsForInFlightRuns(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	failedServer := newStubTestServer()
+	failedServer.runErr = errors.New("start failed")
+	blockedServer := newStubTestServer()
+
+	// Start the failed server first to verify that RunServers waits until the
+	// following server is stoppable before handling the failure.
+	err := runTestServers([]testServerRunner{failedServer, blockedServer})
+	re.EqualError(err, "start failed")
+	re.True(blockedServer.stopped.Load())
+	re.True(blockedServer.finished.Load())
 }
