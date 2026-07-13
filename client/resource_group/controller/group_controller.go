@@ -793,8 +793,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 			}
 			return nil, nil, waitDuration, 0, err
 		}
+		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
-		gc.metrics.successfulRequestDuration.Observe(waitDuration.Seconds())
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
@@ -874,8 +874,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 			}
 			return nil, waitDuration, err
 		}
+		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
-		gc.metrics.successfulRequestDuration.Observe(waitDuration.Seconds())
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
