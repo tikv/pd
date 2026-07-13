@@ -140,6 +140,27 @@ func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 	svr.serverLoopWg.Wait()
 }
 
+func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	keypath.SetClusterID(12350)
+	defer keypath.ResetClusterID()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	needsCleanup, err := svr.validateMicroserviceMetadataCleanup(ctx)
+	re.NoError(err)
+	re.False(needsCleanup)
+
+	_, err = client.Put(ctx, keypath.RegistryPath(mcs.TSOServiceName, "127.0.0.1:3379"), "tso")
+	re.NoError(err)
+	needsCleanup, err = svr.validateMicroserviceMetadataCleanup(ctx)
+	re.NoError(err)
+	re.True(needsCleanup)
+}
+
 func TestCleanupMicroserviceMetadataInPDModeRejectsNonDefaultGroup(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()

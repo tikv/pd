@@ -80,8 +80,12 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error 
 	}
 	start := time.Now()
 
-	if err := s.validateMicroserviceMetadataCleanup(ctx); err != nil {
+	needsCleanup, err := s.validateMicroserviceMetadataCleanup(ctx)
+	if err != nil {
 		return err
+	}
+	if !needsCleanup {
+		return nil
 	}
 	cleanedKeyspaces, err := s.cleanupDefaultTSOKeyspaceGroupConfig(ctx)
 	if err != nil {
@@ -106,26 +110,40 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error 
 	return nil
 }
 
-func (s *Server) validateMicroserviceMetadataCleanup(ctx context.Context) error {
+func (s *Server) validateMicroserviceMetadataCleanup(ctx context.Context) (bool, error) {
 	groups, err := s.storage.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
-		return err
+		return false, err
 	}
+	needsCleanup := false
 	for _, group := range groups {
 		if group == nil {
 			continue
 		}
+		needsCleanup = true
 		if group.ID != constant.DefaultKeyspaceGroupID {
-			return errors.Errorf("found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", group.ID)
+			return false, errors.Errorf("found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", group.ID)
 		}
 		if group.IsSplitting() {
-			return errors.Errorf("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
+			return false, errors.Errorf("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
 		}
 		if group.IsMerging() {
-			return errors.Errorf("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
+			return false, errors.Errorf("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
 		}
 	}
-	return s.scanKeyspaceMetadata(ctx, etcdutil.MaxEtcdTxnOps, func(_ kv.Txn, metas []*keyspacepb.KeyspaceMeta) error {
+	if !needsCleanup && s.client != nil {
+		getCtx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
+		resp, err := s.client.Get(getCtx, microserviceEtcdPrefix(), clientv3.WithPrefix(), clientv3.WithLimit(1))
+		cancel()
+		if err != nil {
+			return false, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		}
+		needsCleanup = len(resp.Kvs) > 0
+	}
+	if !needsCleanup {
+		return false, nil
+	}
+	err = s.scanKeyspaceMetadata(ctx, etcdutil.MaxEtcdTxnOps, func(_ kv.Txn, metas []*keyspacepb.KeyspaceMeta) error {
 		for _, meta := range metas {
 			if meta == nil {
 				continue
@@ -136,6 +154,7 @@ func (s *Server) validateMicroserviceMetadataCleanup(ctx context.Context) error 
 		}
 		return nil
 	})
+	return true, err
 }
 
 func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int, error) {
