@@ -723,12 +723,12 @@ func (s *Server) cleanupFailedStart() {
 	}
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
-			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+			log.Warn("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 	if s.electionClient != nil {
 		if err := s.electionClient.Close(); err != nil {
-			log.Error("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+			log.Warn("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
 	if s.httpClient != nil {
@@ -742,12 +742,12 @@ func (s *Server) cleanupFailedStart() {
 	}
 	if s.storage != nil {
 		if err := s.storage.Close(); err != nil {
-			log.Error("close storage meet error", errs.ZapError(err))
+			log.Warn("close storage meet error", errs.ZapError(err))
 		}
 	}
 	if s.hotRegionStorage != nil {
 		if err := s.hotRegionStorage.Close(); err != nil {
-			log.Error("close hot region storage meet error", errs.ZapError(err))
+			log.Warn("close hot region storage meet error", errs.ZapError(err))
 		}
 	}
 }
