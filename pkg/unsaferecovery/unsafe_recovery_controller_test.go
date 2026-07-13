@@ -17,6 +17,7 @@ package unsaferecovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -40,6 +41,23 @@ import (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+type resetTrackingCluster struct {
+	*mockcluster.Cluster
+	resetCalls   int
+	resetErr     error
+	resetContext context.Context
+	onReset      func()
+}
+
+func (c *resetTrackingCluster) ResetPreparedAndResetRegionCache(ctx context.Context) error {
+	c.resetCalls++
+	c.resetContext = ctx
+	if c.onReset != nil {
+		c.onReset()
+	}
+	return c.resetErr
 }
 
 func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHeartbeatRequest {
@@ -2034,6 +2052,102 @@ func TestUnsafeRecoveryStepIsUniqueAcrossRuns(t *testing.T) {
 	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(1, &pdpb.StoreReport{Step: oldStep}), &pdpb.StoreHeartbeatResponse{})
 	re.Equal(CollectReport, recoveryController.GetStage())
 	re.Nil(recoveryController.storeReports[1])
+}
+
+func TestFinishRetriesCacheResetBeforeLeavingRunningStage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster := &resetTrackingCluster{
+		Cluster:  mockcluster.NewCluster(ctx, mockconfig.NewTestOptions()),
+		resetErr: errors.New("scheduling cache reset failed"),
+	}
+	recoveryController := NewController(cluster)
+	recoveryController.stage = ExitForceLeader
+	recoveryController.recoveryStartStep = 1
+	recoveryController.step = 3
+	recoveryController.timeout = time.Now().Add(time.Minute)
+	recoveryController.storeReports[1] = nil
+
+	recoveryController.HandleStoreHeartbeat(
+		newStoreHeartbeat(1, &pdpb.StoreReport{Step: recoveryController.step}),
+		&pdpb.StoreHeartbeatResponse{},
+	)
+
+	re.Equal(1, cluster.resetCalls)
+	_, hasDeadline := cluster.resetContext.Deadline()
+	re.True(hasDeadline)
+	re.True(recoveryController.IsRunning())
+	re.Equal(Resetting, recoveryController.GetStage())
+
+	recoveryController.timeout = time.Now().Add(-time.Second)
+	status := recoveryController.Show()
+	re.Equal(Resetting, recoveryController.GetStage())
+	re.Contains(status[len(status)-1].Info, "Resetting region cache")
+	re.Contains(status[len(status)-1].Details[0], "scheduling cache reset failed")
+	re.ErrorContains(recoveryController.AbortFailedStoresRemoval(), "resetting region cache")
+
+	cluster.resetErr = nil
+	recoveryController.HandleStoreHeartbeat(
+		newStoreHeartbeat(1, &pdpb.StoreReport{}),
+		&pdpb.StoreHeartbeatResponse{},
+	)
+	re.Equal(2, cluster.resetCalls)
+	re.Equal(Finished, recoveryController.GetStage())
+}
+
+func TestFinishDoesNotHoldControllerLockDuringCacheReset(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resetStarted := make(chan struct{})
+	finishReset := make(chan struct{})
+	cluster := &resetTrackingCluster{
+		Cluster: mockcluster.NewCluster(ctx, mockconfig.NewTestOptions()),
+		onReset: func() {
+			close(resetStarted)
+			<-finishReset
+		},
+	}
+	recoveryController := NewController(cluster)
+	recoveryController.stage = ExitForceLeader
+	recoveryController.recoveryStartStep = 1
+	recoveryController.step = 3
+	recoveryController.timeout = time.Now().Add(time.Minute)
+	recoveryController.storeReports[1] = nil
+
+	handleDone := make(chan struct{})
+	go func() {
+		recoveryController.HandleStoreHeartbeat(
+			newStoreHeartbeat(1, &pdpb.StoreReport{Step: recoveryController.step}),
+			&pdpb.StoreHeartbeatResponse{},
+		)
+		close(handleDone)
+	}()
+	<-resetStarted
+
+	isRunningDone := make(chan bool, 1)
+	go func() {
+		isRunningDone <- recoveryController.IsRunning()
+	}()
+	lockWasAvailable := false
+	select {
+	case running := <-isRunningDone:
+		lockWasAvailable = running
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(finishReset)
+	<-handleDone
+	if !lockWasAvailable {
+		select {
+		case <-isRunningDone:
+		default:
+		}
+	}
+	re.True(lockWasAvailable)
 }
 
 func TestRunning(t *testing.T) {

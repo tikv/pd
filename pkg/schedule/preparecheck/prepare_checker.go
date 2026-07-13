@@ -116,8 +116,18 @@ func (checker *Checker) SetPrepared() {
 // ResetPrepared resets the checker so scheduling pauses until cluster
 // information is collected again after the region cache is reset.
 func (checker *Checker) ResetPrepared() {
+	checker.ResetPreparedAndRun(nil)
+}
+
+// ResetPreparedAndRun resets the checker and runs fn while scheduling is
+// fenced. It is used to keep the prepared state and the region cache reset
+// atomic with respect to prepare checks and scheduling.
+func (checker *Checker) ResetPreparedAndRun(fn func()) {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = false
 	checker.start = time.Now()
+	if fn != nil {
+		fn()
+	}
 }

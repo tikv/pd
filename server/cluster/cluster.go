@@ -206,7 +206,8 @@ type RaftCluster struct {
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
 
-	stopGCStateManager func()
+	stopGCStateManager       func()
+	resetSchedulingCacheFunc func(context.Context) error
 }
 
 // Status saves some state information.
@@ -2668,6 +2669,26 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
 	_, exist := c.independentServices.Load(name)
 	return exist
+}
+
+// SetResetSchedulingCacheFunc sets the callback used to reset the cache in an
+// independent scheduling service.
+func (c *RaftCluster) SetResetSchedulingCacheFunc(fn func(context.Context) error) {
+	c.resetSchedulingCacheFunc = fn
+}
+
+// ResetPreparedAndResetRegionCache atomically pauses local scheduling and
+// clears the local region cache. It also resets the active scheduling service
+// when scheduling runs independently.
+func (c *RaftCluster) ResetPreparedAndResetRegionCache(ctx context.Context) error {
+	c.resetPreparedAndRegionCache()
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		return nil
+	}
+	if c.resetSchedulingCacheFunc == nil {
+		return errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
+	}
+	return c.resetSchedulingCacheFunc(ctx)
 }
 
 // SetServiceIndependent sets the service to be independent.

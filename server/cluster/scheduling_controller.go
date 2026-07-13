@@ -491,6 +491,12 @@ func (sc *schedulingController) ResetPrepared() {
 	sc.coordinator.GetPrepareChecker().ResetPrepared()
 }
 
+func (sc *schedulingController) resetPreparedAndRegionCache() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	sc.coordinator.GetPrepareChecker().ResetPreparedAndRun(sc.ResetRegionCache)
+}
+
 // IsSchedulingControllerRunning returns whether the scheduling controller is running. Only for test purpose.
 func (sc *schedulingController) IsSchedulingControllerRunning() bool {
 	sc.mu.RLock()

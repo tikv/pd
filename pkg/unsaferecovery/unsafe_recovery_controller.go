@@ -16,6 +16,7 @@ package unsaferecovery
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -46,6 +47,7 @@ type stage int
 
 const (
 	defaultPlanExecutionTimeout = time.Second * 60
+	resetRegionCacheTimeout     = 3 * time.Second
 )
 
 var globalRecoveryStep = uint64(time.Now().UnixNano())
@@ -94,12 +96,12 @@ func nextRecoveryStep() uint64 {
 //	                                                  |           |
 //	                                                  |           |
 //	                                                  v           |
-//	                    +-----------+           +-----------+     |
-//	+-----------+       |           |           |           |     |
-//	|           |       | ExitForce |           |  Create   |     |
-//	| Finished  |<------|  Leader   |<----------|  Region   |-----+
-//	|           |       |           |           |           |
-//	+-----------+       +-----------+           +-----------+
+//	                    +-----------+       +-----------+       +-----------+     |
+//	+-----------+       |           |       |           |       |           |     |
+//	|           |       | Resetting |       | ExitForce |       |  Create   |     |
+//	| Finished  |<------|   Cache   |<------|  Leader   |<------|  Region   |-----+
+//	|           |       |           |       |           |       |           |
+//	+-----------+       +-----------+       +-----------+       +-----------+
 const (
 	Idle stage = iota
 	CollectReport
@@ -109,6 +111,7 @@ const (
 	DemoteFailedVoter
 	CreateEmptyRegion
 	ExitForceLeader
+	Resetting
 	Finished
 	Failed
 )
@@ -116,8 +119,8 @@ const (
 type cluster interface {
 	core.StoreSetInformer
 
-	ResetPrepared()
-	ResetRegionCache()
+	Context() context.Context
+	ResetPreparedAndResetRegionCache(context.Context) error
 	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
@@ -158,10 +161,12 @@ type Controller struct {
 	// accumulated output for the whole recovery process
 	output []StageOutput
 	// exposed to the outside for testing
-	AffectedTableIDs    map[int64]struct{}
-	affectedMetaRegions map[uint64]struct{}
-	newlyCreatedRegions map[uint64]struct{}
-	err                 error
+	AffectedTableIDs     map[int64]struct{}
+	affectedMetaRegions  map[uint64]struct{}
+	newlyCreatedRegions  map[uint64]struct{}
+	resettingRegionCache bool
+	resetRegionCacheErr  error
+	err                  error
 }
 
 // StageOutput is the information for one stage of the recovery process.
@@ -195,6 +200,8 @@ func (u *Controller) reset() {
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
 	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
 	u.orphanedPeers = make(map[uint64][]*metapb.Peer)
+	u.resettingRegionCache = false
+	u.resetRegionCacheErr = nil
 	u.err = nil
 	u.planExecutionTimeout = defaultPlanExecutionTimeout
 	u.disableParanoidCheck = false
@@ -293,6 +300,9 @@ func (u *Controller) AbortFailedStoresRemoval() error {
 	if !isRunning(u.stage) {
 		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no ongoing unsafe recovery")
 	}
+	if u.stage == Resetting {
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("unsafe recovery is resetting region cache")
+	}
 	if u.stage == ExitForceLeader {
 		return nil
 	}
@@ -322,6 +332,13 @@ func (u *Controller) Show() []StageOutput {
 func (u *Controller) getReportStatus() StageOutput {
 	var status StageOutput
 	status.Time = time.Now().Format("2006-01-02 15:04:05.000")
+	if u.stage == Resetting {
+		status.Info = "Resetting region cache before finishing unsafe recovery"
+		if u.resetRegionCacheErr != nil {
+			status.Details = append(status.Details, fmt.Sprintf("failed to reset region cache: %v", u.resetRegionCacheErr))
+		}
+		return status
+	}
 	if u.numStoresReported != len(u.storeReports) {
 		status.Info = fmt.Sprintf("Collecting reports from alive stores(%d/%d)", u.numStoresReported, len(u.storeReports))
 		var (
@@ -351,7 +368,7 @@ func (u *Controller) getReportStatus() StageOutput {
 }
 
 func (u *Controller) checkTimeout() error {
-	if u.stage == Finished || u.stage == Failed {
+	if u.stage == Resetting || u.stage == Finished || u.stage == Failed {
 		return nil
 	}
 
@@ -389,10 +406,18 @@ func (u *Controller) handleErr(err error) bool {
 // send detailed report back.
 func (u *Controller) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) {
 	u.Lock()
-	defer u.Unlock()
 
 	if !isRunning(u.stage) {
 		// no recovery in progress, do nothing
+		u.Unlock()
+		return
+	}
+	if u.stage == Resetting {
+		shouldReset := u.startRegionCacheReset()
+		u.Unlock()
+		if shouldReset {
+			u.resetRegionCacheAndFinish()
+		}
 		return
 	}
 
@@ -418,9 +443,48 @@ func (u *Controller) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest,
 	}()
 
 	if done || (err != nil && u.handleErr(err)) {
+		shouldReset := u.startRegionCacheReset()
+		u.Unlock()
+		if shouldReset {
+			u.resetRegionCacheAndFinish()
+		}
 		return
 	}
 	u.dispatchPlan(heartbeat, resp)
+	u.Unlock()
+}
+
+// startRegionCacheReset marks the cache reset as in progress. The caller must
+// hold the controller lock.
+func (u *Controller) startRegionCacheReset() bool {
+	if u.stage != Resetting || u.resettingRegionCache {
+		return false
+	}
+	u.resettingRegionCache = true
+	return true
+}
+
+func (u *Controller) resetRegionCacheAndFinish() {
+	parentCtx := u.cluster.Context()
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, resetRegionCacheTimeout)
+	err := u.cluster.ResetPreparedAndResetRegionCache(ctx)
+	cancel()
+
+	u.Lock()
+	defer u.Unlock()
+	u.resettingRegionCache = false
+	if u.stage != Resetting {
+		return
+	}
+	u.resetRegionCacheErr = err
+	if err != nil {
+		log.Warn("failed to reset region cache before finishing unsafe recovery", zap.Error(err))
+		return
+	}
+	u.changeStage(Finished)
 }
 
 func (u *Controller) generatePlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) (bool, error) {
@@ -495,6 +559,10 @@ func (u *Controller) generatePlan(newestRegionTree *regionTree, peersMap map[uin
 	if err == nil && !hasPlan {
 		if u.err != nil {
 			u.changeStage(Failed)
+		} else if u.step > u.recoveryStartStep+1 {
+			// Only CollectReport has finished when step == recoveryStartStep+1,
+			// which means no operation has done and no cache invalidation is needed.
+			u.changeStage(Resetting)
 		} else {
 			u.changeStage(Finished)
 		}
@@ -613,13 +681,9 @@ func (u *Controller) changeStage(stage stage) {
 		if u.err != nil {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
 		}
+	case Resetting:
+		output.Info = "Unsafe recovery is resetting region cache"
 	case Finished:
-		if u.step > u.recoveryStartStep+1 {
-			// Only CollectReport has finished when step == recoveryStartStep+1,
-			// which means no operation has done and no cache invalidation is needed.
-			u.cluster.ResetPrepared()
-			u.cluster.ResetRegionCache()
-		}
 		output.Info = "Unsafe recovery Finished"
 		output.Details = u.getAffectedTableDigest()
 		u.storePlanExpires = make(map[uint64]time.Time)

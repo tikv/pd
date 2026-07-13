@@ -186,7 +186,7 @@ func (c *Controller) PatrolRegions() {
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
-				c.splitScatter.dispatchSplitScatterRegions()
+				c.dispatchSplitScatterRegions()
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
@@ -221,6 +221,10 @@ func (c *Controller) PatrolRegions() {
 			return
 		}
 	}
+}
+
+func (c *Controller) dispatchSplitScatterRegions() {
+	c.prepareChecker.RunIfPrepared(c.splitScatter.dispatchSplitScatterRegions)
 }
 
 func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {

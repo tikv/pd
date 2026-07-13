@@ -81,7 +81,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	rc.RemoveRegionIfExist(regionID)
 	msg := "The region is removed from server cache."
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		err = h.svr.DeleteRegionCacheInSchedulingServer(r.Context(), regionID)
 		if err != nil {
 			msg = buildMsg(err)
 		}
@@ -126,7 +126,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	rc.RemoveRegionIfExist(regionID)
 	msg := "The region is removed from server cache and region meta storage."
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		err = h.svr.DeleteRegionCacheInSchedulingServer(r.Context(), regionID)
 		if err != nil {
 			msg = buildMsg(err)
 		}
@@ -154,14 +154,10 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 		h.rd.JSON(w, http.StatusOK, "All regions are removed from follower cache and the follower starts to resync regions from leader.")
 		return
 	}
-	rc.ResetPrepared()
-	rc.ResetRegionCache()
+	err = rc.ResetPreparedAndResetRegionCache(r.Context())
 	msg := "All regions are removed from server cache."
-	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer()
-		if err != nil {
-			msg = buildMsg(err)
-		}
+	if err != nil {
+		msg = buildMsg(err)
 	}
 
 	h.rd.JSON(w, http.StatusOK, msg)
@@ -279,27 +275,6 @@ func (h *adminHandler) recoverAllocID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.rd.Text(w, http.StatusOK, "")
-}
-
-func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
-	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
-	if !ok {
-		return errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
-	}
-	var idStr string
-	if len(id) > 0 {
-		idStr = strconv.FormatUint(id[0], 10)
-	}
-	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
-	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
-	}
-	return nil
 }
 
 func buildMsg(err error) string {

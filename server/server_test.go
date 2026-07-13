@@ -17,6 +17,8 @@ package server
 import (
 	"context"
 	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -32,6 +35,33 @@ import (
 )
 
 var errTestFollowerRegionStorage = stderrors.New("test follower region storage error")
+
+func TestDeleteRegionCacheInSchedulingServer(t *testing.T) {
+	re := require.New(t)
+	requests := make(chan *http.Request, 2)
+	schedulingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer schedulingServer.Close()
+
+	s := &Server{ctx: context.Background(), httpClient: schedulingServer.Client()}
+	s.SetServicePrimaryAddr(constant.SchedulingServiceName, schedulingServer.URL)
+
+	re.NoError(s.DeleteRegionCacheInSchedulingServer(context.Background()))
+	request := <-requests
+	re.Equal(http.MethodDelete, request.Method)
+	re.Equal("/scheduling/api/v1/admin/cache/regions/", request.URL.Path)
+
+	re.NoError(s.DeleteRegionCacheInSchedulingServer(context.Background(), 42))
+	request = <-requests
+	re.Equal(http.MethodDelete, request.Method)
+	re.Equal("/scheduling/api/v1/admin/cache/regions/42", request.URL.Path)
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	re.ErrorIs(s.DeleteRegionCacheInSchedulingServer(canceledCtx), context.Canceled)
+}
 
 func TestResetFollowerRegionCacheRequiresRegionStorage(t *testing.T) {
 	re := require.New(t)

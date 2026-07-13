@@ -944,6 +944,12 @@ func (c *Cluster) ResetPrepared() {
 	c.coordinator.GetPrepareChecker().ResetPrepared()
 }
 
+// ResetPreparedAndResetRegionCache atomically pauses scheduling and clears the
+// region cache.
+func (c *Cluster) ResetPreparedAndResetRegionCache() {
+	c.coordinator.GetPrepareChecker().ResetPreparedAndRun(c.ResetRegionCache)
+}
+
 // IsSchedulingHalted returns whether the scheduling is halted.
 // Currently, the microservice scheduling is halted when:
 //   - The `HaltScheduling` persist option is set to true.

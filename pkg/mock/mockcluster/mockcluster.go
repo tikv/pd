@@ -91,6 +91,11 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	return c
 }
 
+// Context returns the cluster context.
+func (mc *Cluster) Context() context.Context {
+	return mc.ctx
+}
+
 // GetStoreConfig returns the store config.
 func (mc *Cluster) GetStoreConfig() sc.StoreConfigProvider {
 	return mc.PersistOptions.GetStoreConfig()
@@ -940,3 +945,9 @@ func (mc *Cluster) ObserveRegionsStats() {
 
 // ResetPrepared mocks method.
 func (*Cluster) ResetPrepared() {}
+
+// ResetPreparedAndResetRegionCache mocks method.
+func (mc *Cluster) ResetPreparedAndResetRegionCache(context.Context) error {
+	mc.ResetRegionCache()
+	return nil
+}

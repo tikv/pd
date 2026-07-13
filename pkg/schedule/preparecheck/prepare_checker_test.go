@@ -15,11 +15,14 @@
 package preparecheck
 
 import (
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -51,4 +54,54 @@ func TestRunIfPrepared(t *testing.T) {
 		ran = true
 	}))
 	re.False(ran)
+}
+
+func TestResetPreparedAndRunFencesPrepareCheck(t *testing.T) {
+	re := require.New(t)
+	var resetFinished atomic.Bool
+	var checkedBeforeResetFinished atomic.Bool
+	checker := NewChecker(func() (int, error) {
+		if !resetFinished.Load() {
+			checkedBeforeResetFinished.Store(true)
+		}
+		return 0, nil
+	})
+	checker.SetPrepared()
+
+	resetStarted := make(chan struct{})
+	finishReset := make(chan struct{})
+	resetDone := make(chan struct{})
+	go func() {
+		checker.ResetPreparedAndRun(func() {
+			close(resetStarted)
+			<-finishReset
+			resetFinished.Store(true)
+		})
+		close(resetDone)
+	}()
+	<-resetStarted
+
+	checkStarted := make(chan struct{})
+	checkDone := make(chan bool, 1)
+	go func() {
+		close(checkStarted)
+		checkDone <- checker.Check(core.NewBasicCluster())
+	}()
+	<-checkStarted
+	time.Sleep(50 * time.Millisecond)
+	completedEarly := false
+	select {
+	case <-checkDone:
+		completedEarly = true
+	default:
+	}
+
+	close(finishReset)
+	<-resetDone
+	if completedEarly {
+		re.Fail("prepare check completed before reset callback")
+		return
+	}
+	re.True(<-checkDone)
+	re.False(checkedBeforeResetFinished.Load())
 }
