@@ -294,6 +294,250 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 	}
 }
 
+// TestEvictPrimary verifies that the tso-only /primary/evict endpoint transfers
+// away every keyspace group primary held by the target node. It creates many
+// keyspace groups replicated on all tso nodes and exercises every node as the
+// eviction target in turn.
+func (suite *memberTestSuite) TestEvictPrimary() {
+	re := suite.Require()
+
+	// Every created group is replicated on all three tso nodes, so each node can
+	// be exercised as the eviction target and always has a destination to move
+	// its primaries to.
+	nodeList := make([]bs.Server, 0, len(suite.tsoNodes))
+	members := make([]endpoint.KeyspaceGroupMember, 0, len(suite.tsoNodes))
+	for _, node := range suite.tsoNodes {
+		nodeList = append(nodeList, node)
+		members = append(members, endpoint.KeyspaceGroupMember{
+			Address:  node.GetAddr(),
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		})
+	}
+	re.Len(nodeList, 3)
+
+	// Create 12 non-default keyspace groups with equal member priority, so that
+	// an eviction is not undone by the priority checker moving the primary back
+	// to a higher-priority member.
+	const groupCount = 12
+	groupIDs := make([]uint32, 0, groupCount)
+	for i := range groupCount {
+		id := uint32(i + 1)
+		groupIDs = append(groupIDs, id)
+		handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+			KeyspaceGroups: []*endpoint.KeyspaceGroup{
+				{
+					ID:        id,
+					UserKind:  endpoint.Standard.String(),
+					Members:   members,
+					Keyspaces: []uint32{uint32(90001 + i)},
+				},
+			},
+		})
+	}
+
+	for _, target := range nodeList {
+		tsoTarget := target.(*tso.Server)
+
+		// Concentrate every group's primary on the target node so it holds
+		// multiple keyspace group primaries at once. Retry the transfer, since a
+		// group may not have elected a primary yet right after creation or after
+		// a previous eviction.
+		for _, id := range groupIDs {
+			transferData, err := json.Marshal(map[string]any{
+				"new_primary":       target.Name(),
+				"keyspace_group_id": id,
+			})
+			re.NoError(err)
+			testutil.Eventually(re, func() bool {
+				resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/transfer",
+					"application/json", bytes.NewBuffer(transferData))
+				if err != nil {
+					return false
+				}
+				defer resp.Body.Close()
+				return resp.StatusCode == http.StatusOK
+			}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+		}
+
+		// Wait until the target node is the primary of all created groups.
+		testutil.Eventually(re, func() bool {
+			serving := mustGetKeyspaceGroupMembers(re, tsoTarget)
+			for _, id := range groupIDs {
+				if serving[id] == nil || !serving[id].IsPrimary {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// Evict all keyspace group primaries held by the target node.
+		resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/evict",
+			"application/json", nil)
+		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		resp.Body.Close()
+
+		// The response body carries the per-group eviction result. Every group the
+		// target held must be reported, and each must have transferred
+		// successfully. Since the target was concentrated as the primary of all
+		// created groups, they must all appear here.
+		results := make(map[uint32]string)
+		re.NoError(json.Unmarshal(body, &results), string(body))
+		for _, id := range groupIDs {
+			re.Equalf("success", results[id], "group %d result: %q", id, results[id])
+		}
+		for id, status := range results {
+			re.Equalf("success", status, "group %d result: %q", id, status)
+		}
+
+		// The target node should no longer be primary of any keyspace group it
+		// serves.
+		testutil.Eventually(re, func() bool {
+			serving := mustGetKeyspaceGroupMembers(re, tsoTarget)
+			for _, member := range serving {
+				if member.IsPrimary {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// Every created group should have a serving primary on one of the other
+		// nodes.
+		testutil.Eventually(re, func() bool {
+			served := make(map[uint32]bool, len(groupIDs))
+			for _, node := range nodeList {
+				if node.GetAddr() == target.GetAddr() {
+					continue
+				}
+				serving := mustGetKeyspaceGroupMembers(re, node.(*tso.Server))
+				for _, id := range groupIDs {
+					if serving[id] != nil && serving[id].IsPrimary {
+						served[id] = true
+					}
+				}
+			}
+			return len(served) == len(groupIDs)
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}
+}
+
+// TestEvictPrimaryRejectedWhileSplitting verifies that /primary/evict refuses to
+// drain a node while it is the primary of a splitting keyspace group, because a
+// split target must campaign on the same node as its split source and eviction
+// would break that invariant. It also asserts the rejection happens before any
+// transfer: a normal group co-located on the node must not be moved. It runs in
+// the member suite so each case gets a fresh cluster, keeping this disruptive
+// eviction isolated.
+func (suite *memberTestSuite) TestEvictPrimaryRejectedWhileSplitting() {
+	re := suite.Require()
+
+	// Hold the split in progress so /evict observes a splitting group.
+	const pauseFinishSplit = "github.com/tikv/pd/pkg/keyspace/pauseFinishSplitBeforeTxn"
+	re.NoError(failpoint.Enable(pauseFinishSplit, `pause`))
+	defer func() {
+		re.NoError(failpoint.Disable(pauseFinishSplit))
+	}()
+
+	members := make([]endpoint.KeyspaceGroupMember, 0, len(suite.tsoNodes))
+	for _, node := range suite.tsoNodes {
+		members = append(members, endpoint.KeyspaceGroupMember{
+			Address:  node.GetAddr(),
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		})
+	}
+	const (
+		srcID    = uint32(1)
+		dstID    = uint32(2)
+		normalID = uint32(3)
+	)
+	// A normal (non-splitting) group, used to prove the eviction is rejected
+	// before any transfer side effect.
+	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        normalID,
+				UserKind:  endpoint.Standard.String(),
+				Members:   members,
+				Keyspaces: []uint32{2000},
+			},
+		},
+	})
+	// Create a keyspace group on all tso nodes, then split it. Both source and
+	// target stay in the splitting state while the failpoint is active.
+	handlersutil.MustCreateKeyspaceGroup(re, suite.server, &handlers.CreateKeyspaceGroupParams{
+		KeyspaceGroups: []*endpoint.KeyspaceGroup{
+			{
+				ID:        srcID,
+				UserKind:  endpoint.Standard.String(),
+				Members:   members,
+				Keyspaces: []uint32{1000, 1001, 1002},
+			},
+		},
+	})
+	handlersutil.MustSplitKeyspaceGroup(re, suite.server, srcID, &handlers.SplitKeyspaceGroupByIDParams{
+		NewID:     dstID,
+		Keyspaces: []uint32{1001, 1002},
+	})
+	kg := handlersutil.MustLoadKeyspaceGroupByID(re, suite.server, dstID)
+	re.True(kg.IsSplitTarget())
+
+	// Wait until a tso node both is the primary of the split source and observes
+	// it as splitting; that node is the eviction target.
+	var target bs.Server
+	testutil.Eventually(re, func() bool {
+		for _, node := range suite.tsoNodes {
+			m := mustGetKeyspaceGroupMembers(re, node.(*tso.Server))
+			if g, ok := m[srcID]; ok && g.IsPrimary && g.Group.IsSplitting() {
+				target = node
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(200*time.Millisecond))
+	re.NotNil(target)
+	tsoTarget := target.(*tso.Server)
+
+	// Concentrate the normal group's primary on the same node, so it is the
+	// primary of both a normal and a splitting group.
+	transferData, err := json.Marshal(map[string]any{
+		"new_primary":       target.Name(),
+		"keyspace_group_id": normalID,
+	})
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/transfer",
+			"application/json", bytes.NewBuffer(transferData))
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	testutil.Eventually(re, func() bool {
+		g, ok := mustGetKeyspaceGroupMembers(re, tsoTarget)[normalID]
+		return ok && g.IsPrimary
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Evicting the node is rejected because it is the primary of a splitting group.
+	resp, err := tests.TestDialClient.Post(target.GetAddr()+"/tso/api/v1/primary/evict",
+		"application/json", nil)
+	re.NoError(err)
+	re.Equal(http.StatusInternalServerError, resp.StatusCode)
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	resp.Body.Close()
+	re.Contains(string(body), "is in split state")
+
+	// The rejection must happen before any transfer, so the normal group is still
+	// the primary on this node (not moved by a partial eviction).
+	g, ok := mustGetKeyspaceGroupMembers(re, tsoTarget)[normalID]
+	re.True(ok)
+	re.True(g.IsPrimary)
+}
+
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
 	supportedServices := []string{"tso", "scheduling", "resource_manager"}
@@ -439,8 +683,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
+		// Transfer to `newPrimary` explicitly (not a random target), so the expected
+		// primary flag deterministically points at the node we close below. This is
+		// what makes this test actually exercise the marker-TTL-expiry recovery path.
 		newPrimaryData := make(map[string]any)
-		newPrimaryData["new_primary"] = ""
+		newPrimaryData["new_primary"] = newPrimary
 		data, err := json.Marshal(newPrimaryData)
 		re.NoError(err)
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
@@ -456,15 +703,28 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
-		// for now, close the current primary to mock the server down
+		// for now, close the transfer target to mock the server down
 		nodes[newPrimary].Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 
-		tests.WaitForPrimaryServing(re, nodes)
-		// Primary should be different with before
-		onlyPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
-		re.NoError(err)
-		re.NotEqual(newPrimary, onlyPrimary)
+		// The transfer target (which we just closed) is the one named in the expected
+		// primary flag, so the other replicas back off until the flag's TTL (a few
+		// leader leases) expires, after which a free re-election elects a live primary.
+		// Wait long enough to cover that worst case.
+		recoverWait := time.Duration(mcs.TransferPrimaryLeaseMultiplier*mcs.DefaultLease)*time.Second + 10*time.Second
+		serving := make([]string, 0, len(nodes))
+		testutil.Eventually(re, func() bool {
+			serving = serving[:0]
+			for name, s := range nodes {
+				if s.IsServing() {
+					serving = append(serving, name)
+				}
+			}
+			return len(serving) == 1 && serving[0] != newPrimary
+		}, testutil.WithWaitFor(recoverWait), testutil.WithTickInterval(50*time.Millisecond))
+		// Exactly one node serves and it is not the one we closed.
+		re.Len(serving, 1)
+		re.NotEqual(newPrimary, serving[0])
 	}
 }
 
@@ -665,6 +925,83 @@ func (suite *memberTestSuite) TestTransferPrimaryWithKeyspaceGroup() {
 	re.NoError(err)
 	re.Equal(http.StatusBadRequest, resp.StatusCode)
 	resp.Body.Close()
+}
+
+// TestTransferPrimaryWhileLeaseExpiredAndServerDownWithKeyspaceGroup covers the
+// marker-TTL-expiry recovery path for a NON-default keyspace group (the default
+// group is covered by TestTransferPrimaryWhileLeaseExpiredAndServerDown): transfer
+// the group's primary to a specific member, take that member down before it can
+// win, and verify the group recovers a live primary once the flag TTL expires.
+func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDownWithKeyspaceGroup() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	const testGroupID = uint32(1)
+	groupPrimary := suite.mustSetupKeyspaceGroupWithoutKeyspaces(re, testGroupID)
+
+	// Pick a non-primary member of the group as the explicit transfer target.
+	var target, targetAddr string
+	for _, s := range suite.tsoNodes {
+		tsoSvr := s.(*tso.Server)
+		members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+		if m, ok := members[testGroupID]; ok && !m.IsPrimary {
+			target, targetAddr = tsoSvr.Name(), tsoSvr.GetAddr()
+			break
+		}
+	}
+	re.NotEmpty(target)
+
+	// Prevent anyone from granting leadership so the transfer target cannot win.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
+	data, err := json.Marshal(map[string]any{"new_primary": target, "keyspace_group_id": testGroupID})
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Post(
+		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
+		"application/json", bytes.NewBuffer(data))
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Wait until the old group primary steps down (group temporarily has no primary).
+	testutil.Eventually(re, func() bool {
+		for _, s := range suite.tsoNodes {
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Take the transfer target (the node named in the expected primary flag) down,
+	// then allow campaigns again. The remaining group member backs off until the
+	// flag TTL expires, after which a free re-election elects a live primary.
+	suite.tsoNodes[targetAddr].Close()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
+
+	recoverWait := time.Duration(mcs.TransferPrimaryLeaseMultiplier*mcs.DefaultLease)*time.Second + 10*time.Second
+	var recovered string
+	testutil.Eventually(re, func() bool {
+		recovered = ""
+		for addr, s := range suite.tsoNodes {
+			if addr == targetAddr {
+				continue
+			}
+			tsoSvr := s.(*tso.Server)
+			members := mustGetKeyspaceGroupMembers(re, tsoSvr)
+			if m, ok := members[testGroupID]; ok && m.IsPrimary {
+				recovered = tsoSvr.Name()
+				return true
+			}
+		}
+		return false
+	}, testutil.WithWaitFor(recoverWait), testutil.WithTickInterval(100*time.Millisecond))
+	re.NotEmpty(recovered)
+	re.NotEqual(target, recovered)
 }
 
 // TestTransferPrimaryToDefaultGroupFollower verifies that the transfer primary

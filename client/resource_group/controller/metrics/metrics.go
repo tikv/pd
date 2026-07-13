@@ -53,6 +53,22 @@ var (
 	FailedTokenRequestDuration prometheus.Observer
 	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
+
+	// CopReadPrechargeCounter counts read coprocessor RPCs that carried a positive
+	// PredictedReadBytes hint and triggered RC read-byte pre-charge.
+	CopReadPrechargeCounter *prometheus.CounterVec
+	// CopReadNoPrechargeCounter counts read coprocessor RPCs without a positive
+	// PredictedReadBytes hint, so request-side read-byte pre-charge was skipped.
+	CopReadNoPrechargeCounter *prometheus.CounterVec
+
+	// PagingPrechargeBytesCounter accumulates bytes used as the RC paging pre-charge basis
+	// (sum of predicted hints from coprocessor RPCs).
+	PagingPrechargeBytesCounter *prometheus.CounterVec
+	// PagingActualBytesCounter accumulates actual bytes read by pre-charged coprocessor RPCs.
+	PagingActualBytesCounter *prometheus.CounterVec
+	// PagingPredictionResidualBytes records the distribution of (actual - predicted) read
+	// bytes for pre-charged coprocessor RPCs.
+	PagingPredictionResidualBytes *prometheus.HistogramVec
 )
 
 func init() {
@@ -156,6 +172,56 @@ func initMetrics(constLabels prometheus.Labels) {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
 	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
+
+	CopReadPrechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "cop_read_precharge_total",
+			Help:        "Counter of read coprocessor RPCs that carried a positive PredictedReadBytes hint and triggered request-side read-byte pre-charge.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	CopReadNoPrechargeCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "cop_read_no_precharge_total",
+			Help:        "Counter of read coprocessor RPCs that reached the RC interceptor without a positive PredictedReadBytes hint, so request-side read-byte pre-charge was skipped.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingPrechargeBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_precharge_bytes_total",
+			Help:        "Sum of bytes used as the RC paging pre-charge basis (predicted hint from coprocessor RPCs).",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingActualBytesCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   namespace,
+			Subsystem:   requestSubsystem,
+			Name:        "paging_actual_bytes_total",
+			Help:        "Sum of actual bytes read by pre-charged coprocessor RPCs.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
+
+	PagingPredictionResidualBytes = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "paging_prediction_residual_bytes",
+			// Signed residual = actual - predicted for a single coprocessor
+			// RPC response. Buckets span ±64MB to cover per-RPC prediction
+			// residuals in both directions while factor-4 spacing keeps
+			// resolution near zero.
+			Buckets:     []float64{-67108864, -16777216, -4194304, -1048576, -262144, -65536, -16384, -4096, 0, 4096, 16384, 65536, 262144, 1048576, 4194304, 16777216, 67108864},
+			Help:        "Histogram of signed (actual_read_bytes - predicted_read_bytes) for pre-charged coprocessor RPCs. Use bucket series for distribution/quantiles; _sum is non-monotonic because observations can be negative.",
+			ConstLabels: constLabels,
+		}, []string{newResourceGroupNameLabel})
 }
 
 // InitAndRegisterMetrics initializes and register metrics.
@@ -171,4 +237,9 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
 	prometheus.MustRegister(LowTokenRequestNotifyCounter)
 	prometheus.MustRegister(TokenConsumedHistogram)
+	prometheus.MustRegister(CopReadPrechargeCounter)
+	prometheus.MustRegister(CopReadNoPrechargeCounter)
+	prometheus.MustRegister(PagingPrechargeBytesCounter)
+	prometheus.MustRegister(PagingActualBytesCounter)
+	prometheus.MustRegister(PagingPredictionResidualBytes)
 }

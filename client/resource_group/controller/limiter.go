@@ -326,6 +326,24 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	lim.maybeNotify()
 }
 
+// RefundTokens adds tokens back to the limiter.
+//
+// Token overshoot above burst is intentional here: getTokens clamps the
+// value on the next call, so RefundTokens never permanently leaks past
+// the burst cap. maybeNotify is intentionally not called either —
+// refunding can only raise the token count, never push the limiter into
+// the low-token state.
+func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	if lim.burst < 0 || lim.fillRate == Inf {
+		return
+	}
+	_, tokens := lim.getTokens(now)
+	lim.updateLast(now)
+	lim.tokens = tokens + amount
+}
+
 type tokenBucketReconfigureArgs struct {
 	newTokens          float64
 	newFillRate        float64

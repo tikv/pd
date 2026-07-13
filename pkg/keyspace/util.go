@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"container/heap"
-	"encoding/binary"
 	"encoding/hex"
 	"regexp"
 	"strconv"
@@ -40,15 +39,6 @@ const (
 	// numbers (0-9), hyphens (-), and underscores (_).
 	// currently, we enforce this rule to keyspace_name.
 	namePattern = "^[-A-Za-z0-9_]{1,20}$"
-)
-
-const (
-	// RawKeyspaceModePrefix is the raw keyspace prefix mode byte.
-	RawKeyspaceModePrefix = byte('r')
-	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
-	TxnKeyspaceModePrefix = byte('x')
-	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
-	KeyspacePrefixLen = 4
 )
 
 var (
@@ -117,30 +107,6 @@ func MaskKeyspaceID(id uint32) uint32 {
 	return id & 0xFF
 }
 
-// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
-// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
-func MakeKeyspacePrefix(mode byte, id uint32) []byte {
-	prefix := make([]byte, KeyspacePrefixLen)
-	binary.BigEndian.PutUint32(prefix, id)
-	prefix[0] = mode
-	return prefix
-}
-
-// ParseKeyspacePrefix parses a raw keyspace prefix from key.
-// It returns false for keys that do not start with a known keyspace mode byte.
-func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
-	if len(key) < KeyspacePrefixLen {
-		return 0, 0, false
-	}
-	mode = key[0]
-	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
-		return 0, 0, false
-	}
-	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
-	id = binary.BigEndian.Uint32(idBytes[:])
-	return mode, id, true
-}
-
 // RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
@@ -194,10 +160,10 @@ func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)
-	rawRightBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id+1)
-	txnLeftBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id)
-	txnRightBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id+1)
+	rawLeftBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id)
+	rawRightBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id+1)
+	txnLeftBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id)
+	txnRightBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id+1)
 	if id == constant.MaxValidKeyspaceID {
 		// The right bound is an exclusive fencepost, not a real keyspace prefix.
 		rawRightBound = []byte{'s', 0, 0, 0}

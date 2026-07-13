@@ -133,19 +133,27 @@ func (c *Controller) CollectSchedulerMetrics() {
 	}
 	c.RUnlock()
 	ruleMgr := c.cluster.GetRuleManager()
-	if ruleMgr == nil {
+	if ruleMgr != nil {
+		ruleCnt := ruleMgr.GetRulesCount()
+		groupCnt := ruleMgr.GetGroupsCount()
+		ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+		ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
+	}
+
+	labelerMgr := c.cluster.GetRegionLabeler()
+	if labelerMgr == nil {
 		return
 	}
-	ruleCnt := ruleMgr.GetRulesCount()
-	groupCnt := ruleMgr.GetGroupsCount()
-	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
-	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
+	ruleCnt, keyRangeCnt := labelerMgr.GetRuleAndKeyRangeCounts()
+	regionLabelStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+	regionLabelStatusGauge.WithLabelValues("range_count").Set(float64(keyRangeCnt))
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
 func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
+	regionLabelStatusGauge.Reset()
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
