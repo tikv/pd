@@ -24,7 +24,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -37,11 +36,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// microserviceMetadataCleanupDelay lets clients observe the service mode change
-// before stale microservice metadata disappears from etcd.
 const (
-	microserviceMetadataCleanupDelay         = 10 * time.Second
 	microserviceMetadataCleanupRetryInterval = 5 * time.Second
+	// Each loaded key adds one comparison and each updated key adds one write to
+	// the etcd transaction. Use half of the operation limit so a full batch stays
+	// within the transaction limit.
+	microserviceMetadataCleanupBatchSize = etcdutil.MaxEtcdTxnOps / 2
 )
 
 func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
@@ -52,19 +52,16 @@ func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
 	go func() {
 		defer logutil.LogPanic()
 		defer s.serverLoopWg.Done()
-		if !waitMicroserviceMetadataCleanupDelay(ctx) {
-			return
-		}
 		for {
 			if s.member != nil && !s.member.IsServing() {
 				return
 			}
-			if err := s.cleanupMicroserviceMetadataInPDMode(ctx); err == nil {
+			err := s.cleanupMicroserviceMetadataInPDMode(ctx)
+			if err == nil {
 				return
-			} else {
-				log.Warn("failed to clean up microservice metadata in PD mode, retry later",
-					errs.ZapError(err))
 			}
+			log.Warn("failed to clean up microservice metadata in PD mode, retry later",
+				errs.ZapError(err))
 			timer := time.NewTimer(microserviceMetadataCleanupRetryInterval)
 			select {
 			case <-ctx.Done():
@@ -76,24 +73,6 @@ func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
 	}()
 }
 
-func waitMicroserviceMetadataCleanupDelay(ctx context.Context) bool {
-	delay := microserviceMetadataCleanupDelay
-	failpoint.Inject("skipMicroserviceMetadataCleanupDelay", func() {
-		delay = 0
-	})
-	if delay == 0 {
-		return true
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-timer.C:
-		return true
-	}
-}
-
 func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		return nil
@@ -102,6 +81,9 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error 
 
 	defaultGroupExists, err := s.checkDefaultOnlyTSOKeyspaceGroup()
 	if err != nil {
+		return err
+	}
+	if err := s.validateDefaultTSOKeyspaceGroupConfig(ctx); err != nil {
 		return err
 	}
 	cleanedKeyspaces, err := s.cleanupDefaultTSOKeyspaceGroupConfig(ctx)
@@ -124,6 +106,60 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error 
 			zap.Int("cleaned-keyspace-configs", cleanedKeyspaces),
 			zap.Int64("deleted-microservice-keys", deletedMicroserviceKeys),
 			zap.Duration("cost", time.Since(start)))
+	}
+	return nil
+}
+
+func (s *Server) validateDefaultTSOKeyspaceGroupConfig(ctx context.Context) error {
+	startID := constant.StartKeyspaceID
+	for {
+		var (
+			keyspaceIDs []uint32
+			loaded      int
+		)
+		err := s.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+			metas, err := s.storage.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
+			if err != nil {
+				return err
+			}
+			loaded = len(metas)
+			keyspaceIDs = make([]uint32, 0, len(metas))
+			for _, meta := range metas {
+				if meta == nil {
+					continue
+				}
+				keyspaceIDs = append(keyspaceIDs, meta.GetId())
+				if err := validateDefaultTSOKeyspaceGroupAssignment(meta.GetId(), meta.GetConfig()); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if loaded < etcdutil.MaxEtcdTxnOps || len(keyspaceIDs) == 0 {
+			return nil
+		}
+		lastID := keyspaceIDs[len(keyspaceIDs)-1]
+		if lastID == ^uint32(0) {
+			return nil
+		}
+		startID = lastID + 1
+	}
+}
+
+func validateDefaultTSOKeyspaceGroupAssignment(keyspaceID uint32, config map[string]string) error {
+	groupIDText, ok := config[keyspace.TSOKeyspaceGroupIDKey]
+	if !ok {
+		return nil
+	}
+	groupID, err := strconv.ParseUint(groupIDText, 10, 32)
+	if err != nil {
+		return errors.Errorf("keyspace %d has invalid TSO keyspace group ID %q", keyspaceID, groupIDText)
+	}
+	if groupID != uint64(constant.DefaultKeyspaceGroupID) {
+		return errors.Errorf("keyspace %d is assigned to non-default TSO keyspace group %d", keyspaceID, groupID)
 	}
 	return nil
 }
@@ -155,7 +191,7 @@ func (s *Server) checkDefaultOnlyTSOKeyspaceGroup() (bool, error) {
 func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int, error) {
 	var (
 		cleaned int
-		startID uint32 = constant.StartKeyspaceID
+		startID = constant.StartKeyspaceID
 	)
 	for {
 		var (
@@ -164,7 +200,7 @@ func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int,
 			loaded       int
 		)
 		err := s.storage.RunInTxn(ctx, func(txn kv.Txn) error {
-			metas, err := s.storage.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
+			metas, err := s.storage.LoadRangeKeyspace(txn, startID, microserviceMetadataCleanupBatchSize)
 			if err != nil {
 				return err
 			}
@@ -178,16 +214,12 @@ func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int,
 				if meta.Config == nil {
 					continue
 				}
-				groupIDText, ok := meta.Config[keyspace.TSOKeyspaceGroupIDKey]
+				_, ok := meta.Config[keyspace.TSOKeyspaceGroupIDKey]
 				if !ok {
 					continue
 				}
-				groupID, err := strconv.ParseUint(groupIDText, 10, 32)
-				if err != nil {
-					return errors.Errorf("keyspace %d has invalid TSO keyspace group ID %q", meta.GetId(), groupIDText)
-				}
-				if uint32(groupID) != constant.DefaultKeyspaceGroupID {
-					return errors.Errorf("keyspace %d is assigned to non-default TSO keyspace group %d", meta.GetId(), groupID)
+				if err := validateDefaultTSOKeyspaceGroupAssignment(meta.GetId(), meta.GetConfig()); err != nil {
+					return err
 				}
 				delete(meta.Config, keyspace.TSOKeyspaceGroupIDKey)
 				if err := s.storage.SaveKeyspaceMeta(txn, meta); err != nil {
@@ -201,7 +233,7 @@ func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int,
 			return cleaned, err
 		}
 		cleaned += batchCleaned
-		if loaded < etcdutil.MaxEtcdTxnOps {
+		if loaded < microserviceMetadataCleanupBatchSize {
 			break
 		}
 		if len(keyspaceIDs) == 0 {

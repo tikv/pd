@@ -776,10 +776,6 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipMicroserviceMetadataCleanupDelay", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipMicroserviceMetadataCleanupDelay"))
-	}()
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Microservice.EnableTSODynamicSwitching = false

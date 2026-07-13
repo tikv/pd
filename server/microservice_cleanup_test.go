@@ -128,10 +128,8 @@ func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 			UserKind: endpoint.Basic.String(),
 		})
 	}))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipMicroserviceMetadataCleanupDelay", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet", "return(1)"))
 	t.Cleanup(func() {
-		_ = failpoint.Disable("github.com/tikv/pd/server/skipMicroserviceMetadataCleanupDelay")
 		_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet")
 	})
 
@@ -188,33 +186,102 @@ func TestCleanupMicroserviceMetadataInPDModeRejectsNonDefaultKeyspaceAssignment(
 	store := storage.NewStorageWithEtcdBackend(client)
 	svr := &Server{storage: store, client: client}
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
-		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
 			UserKind: endpoint.Basic.String(),
-		}); err != nil {
-			return err
-		}
-		return store.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
-			Id:   1,
-			Name: "keyspace-1",
-			Config: map[string]string{
-				keyspace.TSOKeyspaceGroupIDKey: "1",
-			},
 		})
 	}))
+	metas := make([]*keyspacepb.KeyspaceMeta, 0, etcdutil.MaxEtcdTxnOps+1)
+	for id := uint32(1); id <= etcdutil.MaxEtcdTxnOps; id++ {
+		metas = append(metas, newKeyspaceMetaWithTSOGroup(id, "0"))
+	}
+	invalidID := uint32(etcdutil.MaxEtcdTxnOps + 1)
+	metas = append(metas, newKeyspaceMetaWithTSOGroup(invalidID, "1"))
+	saveKeyspaceMetas(ctx, re, store, metas)
 	_, err := client.Put(ctx, keypath.RegistryPath(mcs.TSOServiceName, "127.0.0.1:3379"), "tso")
 	re.NoError(err)
 
 	err = svr.cleanupMicroserviceMetadataInPDMode(ctx)
-	re.ErrorContains(err, "keyspace 1 is assigned to non-default TSO keyspace group 1")
+	re.ErrorContains(err, "keyspace "+strconv.FormatUint(uint64(invalidID), 10)+" is assigned to non-default TSO keyspace group 1")
 	var group *endpoint.KeyspaceGroup
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		group, err = store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
-		return err
+		if err != nil {
+			return err
+		}
+		meta, err := store.LoadKeyspaceMeta(txn, 1)
+		re.NoError(err)
+		re.Equal("0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
+		return nil
 	}))
 	re.NotNil(group)
 	resp, err := etcdutil.EtcdKVGet(client, microserviceEtcdPrefix(), clientv3.WithPrefix())
 	re.NoError(err)
 	re.Len(resp.Kvs, 1)
+}
+
+func TestCleanupMicroserviceMetadataInPDModeWithLargeKeyspaceBatch(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	keypath.SetClusterID(12349)
+	defer keypath.ResetClusterID()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+		})
+	}))
+	metas := make([]*keyspacepb.KeyspaceMeta, 0, etcdutil.MaxEtcdTxnOps)
+	for id := uint32(1); id <= etcdutil.MaxEtcdTxnOps; id++ {
+		metas = append(metas, newKeyspaceMetaWithTSOGroup(id, "0"))
+	}
+	saveKeyspaceMetas(ctx, re, store, metas)
+
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		loaded, err := store.LoadRangeKeyspace(txn, constant.StartKeyspaceID, 0)
+		if err != nil {
+			return err
+		}
+		re.Len(loaded, etcdutil.MaxEtcdTxnOps)
+		for _, meta := range loaded {
+			re.NotContains(meta.GetConfig(), keyspace.TSOKeyspaceGroupIDKey)
+		}
+		return nil
+	}))
+}
+
+func newKeyspaceMetaWithTSOGroup(id uint32, groupID string) *keyspacepb.KeyspaceMeta {
+	return &keyspacepb.KeyspaceMeta{
+		Id:   id,
+		Name: "keyspace-" + strconv.FormatUint(uint64(id), 10),
+		Config: map[string]string{
+			keyspace.TSOKeyspaceGroupIDKey: groupID,
+		},
+	}
+}
+
+func saveKeyspaceMetas(
+	ctx context.Context,
+	re *require.Assertions,
+	store storage.Storage,
+	metas []*keyspacepb.KeyspaceMeta,
+) {
+	for start := 0; start < len(metas); start += microserviceMetadataCleanupBatchSize {
+		end := min(start+microserviceMetadataCleanupBatchSize, len(metas))
+		re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+			for _, meta := range metas[start:end] {
+				if err := store.SaveKeyspaceMeta(txn, meta); err != nil {
+					return err
+				}
+			}
+			return nil
+		}))
+	}
 }
