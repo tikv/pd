@@ -542,17 +542,21 @@ func (m *Manager) loadKeyspaceResourceGroupsFromStorage() (map[uint32]*keyspaceR
 	return tempKrgms, nil
 }
 
-func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+// loadResourceGroup loads a single resource group from storage. The returned
+// stateLoaded reports whether the group's persisted state was successfully
+// read; the caller must not mark such a group as sync-loaded, so that a
+// concurrent or later async bulk load can still fill in its real state.
+func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (group *ResourceGroup, stateLoaded bool, err error) {
 	rawValue, err := m.storage.LoadResourceGroupSetting(keyspaceID, name)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if rawValue == "" {
-		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
+		return nil, false, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
 	}
 	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
 	if err := krgm.addResourceGroupFromRaw(name, rawValue); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	state, err := m.storage.LoadResourceGroupState(keyspaceID, name)
 	if err != nil {
@@ -560,12 +564,14 @@ func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGr
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("group-name", name),
 			zap.Error(err))
-	} else if state != "" {
+		return krgm.getMutableResourceGroup(name), false, nil
+	}
+	if state != "" {
 		if err := krgm.setRawStatesIntoResourceGroup(name, state); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-	return krgm.getMutableResourceGroup(name), nil
+	return krgm.getMutableResourceGroup(name), true, nil
 }
 
 func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
@@ -578,7 +584,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return nil
 		}
 	}
-	group, err := m.loadResourceGroup(keyspaceID, name)
+	group, stateLoaded, err := m.loadResourceGroup(keyspaceID, name)
 	if err != nil {
 		if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
 			// No persisted default group settings exist yet (e.g. a brand-new
@@ -599,12 +605,17 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	if inserted {
 		krgm.syncBurstabilityWithServiceLimit(group)
 	}
-	markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
-	m.Lock()
-	if m.syncLoadedGroups != nil {
-		m.syncLoadedGroups[markKey] = true
+	// Only mark the group as sync-loaded when its persisted state was actually
+	// read; otherwise a later async bulk load must remain free to fill in the
+	// real state instead of being skipped forever.
+	if stateLoaded {
+		markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
+		m.Lock()
+		if m.syncLoadedGroups != nil {
+			m.syncLoadedGroups[markKey] = true
+		}
+		m.Unlock()
 	}
-	m.Unlock()
 	syncLoadGroupCounter.Inc()
 	return nil
 }
