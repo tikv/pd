@@ -163,14 +163,6 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 	}
 }
 
-func (gmc *groupMetricsCollection) recordSuccessfulRequestWaitMetrics(
-	accumulatedWaitDuration, reservationWaitDuration time.Duration,
-) time.Duration {
-	totalWaitDuration := accumulatedWaitDuration + reservationWaitDuration
-	gmc.successfulRequestDuration.Observe(totalWaitDuration.Seconds())
-	return totalWaitDuration
-}
-
 type tokenCounter struct {
 	fillRate uint64
 
@@ -801,7 +793,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 			}
 			return nil, nil, waitDuration, 0, err
 		}
-		waitDuration = gc.metrics.recordSuccessfulRequestWaitMetrics(waitDuration, d)
+		waitDuration += d
+		gc.metrics.successfulRequestDuration.Observe(waitDuration.Seconds())
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
@@ -881,7 +874,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 			}
 			return nil, waitDuration, err
 		}
-		waitDuration = gc.metrics.recordSuccessfulRequestWaitMetrics(waitDuration, d)
+		waitDuration += d
+		gc.metrics.successfulRequestDuration.Observe(waitDuration.Seconds())
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)

@@ -34,47 +34,6 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-func TestRecordSuccessfulRequestWaitMetrics(t *testing.T) {
-	testCases := []struct {
-		name                    string
-		accumulatedWaitDuration time.Duration
-		reservationWaitDuration time.Duration
-		expectedWaitDuration    time.Duration
-	}{
-		{
-			name:                    "reservation wait only",
-			reservationWaitDuration: 25 * time.Millisecond,
-			expectedWaitDuration:    25 * time.Millisecond,
-		},
-		{
-			name:                    "retry and reservation wait",
-			accumulatedWaitDuration: 20 * time.Millisecond,
-			reservationWaitDuration: 30 * time.Millisecond,
-			expectedWaitDuration:    50 * time.Millisecond,
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			re := require.New(t)
-			var observedSeconds float64
-			metrics := &groupMetricsCollection{
-				successfulRequestDuration: prometheus.ObserverFunc(func(value float64) {
-					observedSeconds = value
-				}),
-			}
-
-			waitDuration := metrics.recordSuccessfulRequestWaitMetrics(
-				testCase.accumulatedWaitDuration,
-				testCase.reservationWaitDuration,
-			)
-
-			re.Equal(testCase.expectedWaitDuration, waitDuration)
-			re.InDelta(testCase.expectedWaitDuration.Seconds(), observedSeconds, 1e-9)
-		})
-	}
-}
-
 func createTestGroupCostController(re *require.Assertions, names ...string) *groupCostController {
 	name := "test"
 	if len(names) > 0 {
