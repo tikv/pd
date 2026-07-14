@@ -23,6 +23,7 @@ import (
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"github.com/tikv/pd/tests"
 )
@@ -159,6 +160,58 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(pd2.Stop())
 	re.NoError(pd2.Destroy())
 	re.Error(join.PrepareJoinCluster(pd2.GetConfig()))
+}
+
+// Reproduces https://github.com/tikv/pd/issues/10999: a new member can join
+// and start up with a unique peer URL while advertising a client URL already
+// owned by an existing member. Because --join points to a different string
+// than the duplicated client URL, the self-join check is bypassed and etcd
+// accepts the unique peer URL, so the member list ends up with two logical
+// members sharing one client URL.
+func TestJoinWithDuplicateClientURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	pd1 := cluster.GetServer("pd1")
+	client := pd1.GetEtcdClient()
+	dupClientURL := pd1.GetConfig().AdvertiseClientUrls
+
+	// Join a new member whose advertise-client-urls duplicates pd1's, while its
+	// peer URL stays unique. --join points to pd1's peer URL, a different string
+	// than the duplicated client URL, so the `cfg.Join == cfg.AdvertiseClientUrls`
+	// self-join check does not trigger.
+	orphan, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
+		conf.AdvertiseClientUrls = dupClientURL
+	})
+	re.NoError(err)
+
+	// The joining member starts successfully today — this is the bug. After a
+	// fix it should be rejected before it can corrupt membership.
+	re.NoError(orphan.Run())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// Membership is now corrupted: two members advertise the same client URL.
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
+	re.NoError(err)
+	re.Len(members.Members, 2)
+	dupOwners := make([]uint64, 0, 2)
+	for _, m := range members.Members {
+		for _, u := range m.ClientURLs {
+			if u == dupClientURL {
+				dupOwners = append(dupOwners, m.ID)
+			}
+		}
+	}
+	// Exactly one member should ever own a given client URL; here two do.
+	re.Len(dupOwners, 2, "client URL %s is owned by members %v", dupClientURL, dupOwners)
 }
 
 // A PD joins itself.
