@@ -1523,19 +1523,26 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		return err
 	}
 
-	// Store address and peer address can not be the same as other stores.
+	// Store address and peer address can not collide across stores.
+	// TiFlash uses peer address for Raft replication, so a non-empty peer
+	// address must also not collide with any other store's address (and vice versa).
+	// Empty peer address is common for TiKV and should not participate in conflict checks.
 	for _, s := range c.GetStores() {
 		// It's OK to start a new store on the same address if the old store has been removed or physically destroyed.
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() {
 			continue
 		}
-		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
+		if s.GetID() == store.GetId() {
+			continue
+		}
+		existingAddr := s.GetAddress()
+		existingPeerAddr := s.GetMeta().GetPeerAddress()
+		if store.GetAddress() == existingAddr ||
+			(existingPeerAddr != "" && store.GetAddress() == existingPeerAddr) {
 			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
 		}
-		// Add unique peer address check. TiFlash uses peer address for Raft replication.
-		// Empty peer address is common for TiKV and should not participate in conflict checks.
-		if store.GetPeerAddress() != "" && s.GetID() != store.GetId() &&
-			s.GetMeta().GetPeerAddress() == store.GetPeerAddress() {
+		if store.GetPeerAddress() != "" &&
+			(store.GetPeerAddress() == existingAddr || store.GetPeerAddress() == existingPeerAddr) {
 			return errors.Errorf("duplicated store peer address: %v, already registered by %v", store, s.GetMeta())
 		}
 	}

@@ -639,6 +639,36 @@ func TestReusePeerAddress(t *testing.T) {
 		Version:     "2.0.0",
 		DeployPath:  getTestDeployPath(3002),
 	}))
+
+	// Cross collision: new peer address equals an existing store address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          4001,
+		Address:     "mock://tiflash-c:3930",
+		PeerAddress: cluster.GetStore(100).GetAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4001),
+	}))
+
+	// Cross collision: new address equals an existing non-empty peer address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:         4002,
+		Address:    cluster.GetStore(1).GetMeta().GetPeerAddress(),
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(4002),
+	}))
+
+	// Cross reuse is allowed after the conflicting store is physically destroyed.
+	re.NoError(cluster.RemoveStore(100, true))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          4003,
+		Address:     "mock://tiflash-d:3930",
+		PeerAddress: "mock://tikv-1:20160",
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4003),
+	}))
 }
 
 func TestUpStore(t *testing.T) {
