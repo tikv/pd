@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -183,7 +184,13 @@ func TestHotLeaderCandidatesPrunesStores(t *testing.T) {
 
 type testHotLeaderCluster struct {
 	*mockcluster.Cluster
-	provider *testHotPeerStatsProvider
+	provider       hotPeerStatsProvider
+	fullStatsCalls int
+}
+
+func (c *testHotLeaderCluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	c.fullStatsCalls++
+	return c.Cluster.GetHotPeerStats(rw)
 }
 
 func (c *testHotLeaderCluster) GetHotPeerStatsForStores(
@@ -191,6 +198,55 @@ func (c *testHotLeaderCluster) GetHotPeerStatsForStores(
 	storeIDs []uint64,
 ) map[uint64][]*statistics.HotPeerStat {
 	return c.provider.GetHotPeerStatsForStores(rw, storeIDs)
+}
+
+// regionScalingHotLeaderCluster advertises the total cluster Region count without
+// materializing cold Regions. Its counters make any broad Region access visible,
+// so the tests and benchmark measure only the fixed targeted-hot working set.
+type regionScalingHotLeaderCluster struct {
+	*testHotLeaderCluster
+	totalRegionCount   int
+	fullRegionScans    int
+	ordinarySelections int
+}
+
+func (c *regionScalingHotLeaderCluster) GetTotalRegionCount() int {
+	return c.totalRegionCount
+}
+
+func (c *regionScalingHotLeaderCluster) ScanRegions(_, _ []byte, _ int) []*core.RegionInfo {
+	c.fullRegionScans++
+	return nil
+}
+
+func (c *regionScalingHotLeaderCluster) BatchScanRegions(
+	_ *keyutil.KeyRanges,
+	_ ...core.BatchScanRegionsOptionFunc,
+) ([]*core.RegionInfo, error) {
+	c.fullRegionScans++
+	return nil, nil
+}
+
+func (c *regionScalingHotLeaderCluster) GetRegionCount(_, _ []byte) int {
+	c.fullRegionScans++
+	return c.totalRegionCount
+}
+
+func (c *regionScalingHotLeaderCluster) RandLeaderRegions(
+	_ uint64,
+	_ []keyutil.KeyRange,
+) []*core.RegionInfo {
+	c.ordinarySelections++
+	return nil
+}
+
+type fixedHotPeerStatsProvider map[utils.RWType]map[uint64][]*statistics.HotPeerStat
+
+func (p fixedHotPeerStatsProvider) GetHotPeerStatsForStores(
+	rw utils.RWType,
+	_ []uint64,
+) map[uint64][]*statistics.HotPeerStat {
+	return p[rw]
 }
 
 func TestEvictLeaderSchedulerUsesHotLeaderCandidates(t *testing.T) {
@@ -250,6 +306,33 @@ func TestEvictSlowStoreSchedulerHotCandidatesFollowCurrentStore(t *testing.T) {
 	re.Equal(2, provider.calls[utils.Read])
 	re.Equal(2, provider.calls[utils.Write])
 	re.Equal([]uint64{2}, provider.requests[utils.Read][1])
+}
+
+func TestScheduleEvictHotLeaderDoesNotScanTotalRegions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 2)
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{1: {read11}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+	scalingCluster := &regionScalingHotLeaderCluster{
+		testHotLeaderCluster: hotCluster,
+		totalRegionCount:     10_000_000,
+	}
+
+	ops := scheduleEvictHotLeaderBatch(
+		"test-no-total-region-scan", scalingCluster, newTestEvictLeaderConfig(1, 1),
+		opController, newHotLeaderCandidates(),
+	)
+	re.Len(ops, 1)
+	re.Equal(uint64(11), ops[0].RegionID())
+	re.Equal(1, provider.calls[utils.Read])
+	re.Equal(1, provider.calls[utils.Write])
+	re.Zero(hotCluster.fullStatsCalls)
+	re.Zero(scalingCluster.fullRegionScans)
+	re.Zero(scalingCluster.ordinarySelections)
 }
 
 func TestScheduleEvictHotLeaderPriority(t *testing.T) {
@@ -504,7 +587,7 @@ func newTestEvictLeaderConfig(batch int, storeIDs ...uint64) *evictLeaderSchedul
 }
 
 func newTestHotPeerStat(
-	t *testing.T,
+	t testing.TB,
 	cluster *mockcluster.Cluster,
 	kind utils.RWType,
 	regionID, leaderStoreID, wantedStoreID uint64,
@@ -554,5 +637,65 @@ func popAllHotLeaderCandidates(
 			return popped
 		}
 		popped[regionID] = storeID
+	}
+}
+
+func BenchmarkScheduleEvictHotLeaderByTotalRegionCount(b *testing.B) {
+	const hotLeaderCount = 5_000
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	b.Cleanup(cancel)
+
+	readStats := make([]*statistics.HotPeerStat, 0, hotLeaderCount)
+	for regionID := uint64(1); regionID <= hotLeaderCount; regionID++ {
+		readStats = append(readStats, newTestHotPeerStat(
+			b, cluster, utils.Read, regionID, 1, 1, 2,
+		))
+	}
+	provider := fixedHotPeerStatsProvider{
+		utils.Read:  {1: readStats},
+		utils.Write: {},
+	}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+	conf := newTestEvictLeaderConfig(1, 1)
+
+	for _, totalRegionCount := range []int{10_000, 100_000, 1_000_000, 10_000_000} {
+		b.Run(fmt.Sprintf("total_regions=%d", totalRegionCount), func(b *testing.B) {
+			scalingCluster := &regionScalingHotLeaderCluster{
+				testHotLeaderCluster: hotCluster,
+				totalRegionCount:     totalRegionCount,
+			}
+			candidates := newHotLeaderCandidates()
+			now := time.Unix(1_000, 0)
+			candidates.now = func() time.Time { return now }
+			b.ReportAllocs()
+			b.ResetTimer()
+			b.ReportMetric(hotLeaderCount, "hot_leaders")
+			b.ReportMetric(float64(totalRegionCount), "total_regions")
+
+			for range b.N {
+				// Force the once-per-second refresh path on every iteration. Cache-hit
+				// scheduling calls do less work than the path measured here.
+				now = now.Add(hotLeaderCandidateRefreshInterval)
+				ops := scheduleEvictHotLeaderBatch(
+					"benchmark-evict-hot-leader", scalingCluster, conf,
+					opController, candidates,
+				)
+				if len(ops) != 1 {
+					b.Fatalf("expected one operator, got %d", len(ops))
+				}
+			}
+
+			b.StopTimer()
+			if hotCluster.fullStatsCalls != 0 ||
+				scalingCluster.fullRegionScans != 0 ||
+				scalingCluster.ordinarySelections != 0 {
+				b.Fatalf(
+					"unexpected broad access: full-stats=%d full-scans=%d ordinary=%d",
+					hotCluster.fullStatsCalls,
+					scalingCluster.fullRegionScans,
+					scalingCluster.ordinarySelections,
+				)
+			}
+		})
 	}
 }
