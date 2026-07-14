@@ -795,9 +795,6 @@ func (gc *groupCostController) onRequestWaitImpl(
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
-		if waitDuration > slowNotifyFilterDuration {
-			log.Warn("[resource group controller] waited for tokens", gc.logFields(waitDuration, nil)...)
-		}
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
@@ -879,9 +876,6 @@ func (gc *groupCostController) onResponseWaitImpl(
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
-		if waitDuration > slowNotifyFilterDuration {
-			log.Warn("[resource group controller] response waited for tokens", gc.logFields(waitDuration, nil)...)
-		}
 	}
 	gc.observeConsumption(delta)
 	gc.observeComponentConsumption(delta)
