@@ -580,7 +580,10 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	}
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm != nil {
-		if group := krgm.getMutableResourceGroup(name); group != nil {
+		// A cached entry only satisfies this call if it's confirmed data, not
+		// just a synthetic placeholder (e.g. from ensureReservedDefaultGroupInCache)
+		// installed before async loading had a chance to run.
+		if group := krgm.getMutableResourceGroup(name); group != nil && !krgm.isReserved(name) {
 			return nil
 		}
 	}
@@ -588,7 +591,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	if err != nil {
 		if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
 			// No persisted default group settings exist yet (e.g. a brand-new
-			// keyspace), so it's safe to synthesize the reserved default group.
+			// keyspace), so it's safe to keep serving the reserved placeholder.
 			m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
 			return nil
 		}
@@ -600,7 +603,13 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	if _, exists := krgm.groups[name]; !exists {
 		krgm.groups[name] = group
 		inserted = true
+	} else if _, reserved := krgm.reservedGroups[name]; reserved {
+		// The existing entry is just an unconfirmed placeholder; the freshly
+		// loaded group is the real, confirmed data, so replacing it is safe.
+		krgm.groups[name] = group
+		inserted = true
 	}
+	delete(krgm.reservedGroups, name)
 	krgm.Unlock()
 	if inserted {
 		krgm.syncBurstabilityWithServiceLimit(group)
