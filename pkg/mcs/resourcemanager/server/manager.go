@@ -609,7 +609,15 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		krgm.groups[name] = group
 		inserted = true
 	}
-	delete(krgm.reservedGroups, name)
+	// Only clear the placeholder mark once the state was actually read; a
+	// metadata-only group (state load failed) must stay reserved so a later
+	// call or the async bulk merge remains free to fill in the real state,
+	// instead of this partial result being treated as final forever.
+	if stateLoaded {
+		delete(krgm.reservedGroups, name)
+	} else {
+		krgm.reservedGroups[name] = struct{}{}
+	}
 	krgm.Unlock()
 	if inserted {
 		krgm.syncBurstabilityWithServiceLimit(group)

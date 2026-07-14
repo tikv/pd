@@ -416,6 +416,14 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 	for idx := range keys {
 		krgm.RLock()
 		group, ok := krgm.groups[keys[idx]]
+		_, reserved := krgm.reservedGroups[keys[idx]]
+		if ok && reserved {
+			// The entry is still just an unconfirmed placeholder (e.g. the
+			// synthetic default installed before async loading completes);
+			// persisting its fresh state would permanently overwrite any
+			// real persisted state still waiting to be loaded.
+			ok = false
+		}
 		if ok {
 			if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
 				log.Error("persist keyspace resource group state failed",
