@@ -1523,7 +1523,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		return err
 	}
 
-	// Store address can not be the same as other stores.
+	// Store address and peer address can not be the same as other stores.
 	for _, s := range c.GetStores() {
 		// It's OK to start a new store on the same address if the old store has been removed or physically destroyed.
 		if s.IsRemoved() || s.IsPhysicallyDestroyed() {
@@ -1531,6 +1531,12 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 		if s.GetID() != store.GetId() && s.GetAddress() == store.GetAddress() {
 			return errors.Errorf("duplicated store address: %v, already registered by %v", store, s.GetMeta())
+		}
+		// Add unique peer address check. TiFlash uses peer address for Raft replication.
+		// Empty peer address is common for TiKV and should not participate in conflict checks.
+		if store.GetPeerAddress() != "" && s.GetID() != store.GetId() &&
+			s.GetMeta().GetPeerAddress() == store.GetPeerAddress() {
+			return errors.Errorf("duplicated store peer address: %v, already registered by %v", store, s.GetMeta())
 		}
 	}
 
