@@ -91,7 +91,11 @@ func (c *hotLeaderCandidates) refresh(provider hotPeerStatsProvider, targetStore
 		storeCandidates.refreshAfter = now.Add(hotLeaderCandidateRefreshInterval)
 	}
 
-	readRegionIDs := make(map[uint64]struct{})
+	readCandidateCount := 0
+	for _, storeCandidates := range c.stores {
+		readCandidateCount += len(storeCandidates.read)
+	}
+	readRegionIDs := make(map[uint64]struct{}, readCandidateCount)
 	for _, storeCandidates := range c.stores {
 		for _, regionID := range storeCandidates.read {
 			readRegionIDs[regionID] = struct{}{}
