@@ -262,8 +262,22 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	}); err != nil {
 		return err
 	}
+	// Apply only the patched fields to the live cached status instead of replacing
+	// it wholesale: an assignment-count update (updateAssignmentTxn, statusMu only)
+	// may have mutated the count during the I/O above, and overwriting with the
+	// pre-I/O snapshot would drop it.
 	m.statusMu.Lock()
-	m.cachedStatus[groupID] = &newStatus
+	status := m.cachedStatus[groupID]
+	if status == nil {
+		status = &endpoint.MetaServiceGroupStatus{}
+		m.cachedStatus[groupID] = status
+	}
+	if patch.AssignmentCount != nil {
+		status.AssignmentCount = *patch.AssignmentCount
+	}
+	if patch.Enabled != nil {
+		status.Enabled = *patch.Enabled
+	}
 	m.statusMu.Unlock()
 	return nil
 }
