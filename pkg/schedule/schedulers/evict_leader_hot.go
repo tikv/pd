@@ -128,7 +128,10 @@ func hotLeaderRegionIDs(stats []*statistics.HotPeerStat, storeID uint64) []uint6
 	return regionIDs
 }
 
-func (c *hotLeaderCandidates) pop(rw utils.RWType, targetStoreIDs []uint64) (uint64, uint64, bool) {
+func (c *hotLeaderCandidates) pop(
+	rw utils.RWType,
+	targetStoreIDs []uint64,
+) (storeID, regionID uint64, ok bool) {
 	eligibleStoreIDs := make([]uint64, 0, len(targetStoreIDs))
 	seen := make(map[uint64]struct{}, len(targetStoreIDs))
 	for _, storeID := range targetStoreIDs {
@@ -157,14 +160,14 @@ func (c *hotLeaderCandidates) pop(rw utils.RWType, targetStoreIDs []uint64) (uin
 		return 0, 0, false
 	}
 
-	storeID := eligibleStoreIDs[rand.IntN(len(eligibleStoreIDs))]
+	storeID = eligibleStoreIDs[rand.IntN(len(eligibleStoreIDs))]
 	storeCandidates := c.stores[storeID]
 	regionIDs := &storeCandidates.read
 	if rw == utils.Write {
 		regionIDs = &storeCandidates.write
 	}
 	index := rand.IntN(len(*regionIDs))
-	regionID := (*regionIDs)[index]
+	regionID = (*regionIDs)[index]
 	last := len(*regionIDs) - 1
 	(*regionIDs)[index] = (*regionIDs)[last]
 	*regionIDs = (*regionIDs)[:last]

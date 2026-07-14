@@ -103,7 +103,7 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
 	for storeID, peers := range f.peersOfStore {
-		res[storeID] = f.getHotPeerStats(peers, minHotDegree)
+		res[storeID] = f.collectHotPeerStats(peers, minHotDegree)
 	}
 	return res
 }
@@ -118,7 +118,7 @@ func (f *HotPeerCache) GetHotPeerStatsForStores(storeIDs []uint64, minHotDegree 
 			continue
 		}
 		visited[storeID] = struct{}{}
-		stats := f.getHotPeerStats(f.peersOfStore[storeID], minHotDegree)
+		stats := f.collectHotPeerStats(f.peersOfStore[storeID], minHotDegree)
 		if len(stats) > 0 {
 			res[storeID] = stats
 		}
@@ -126,7 +126,7 @@ func (f *HotPeerCache) GetHotPeerStatsForStores(storeIDs []uint64, minHotDegree 
 	return res
 }
 
-func (f *HotPeerCache) getHotPeerStats(peers *utils.TopN, minHotDegree int) []*HotPeerStat {
+func (f *HotPeerCache) collectHotPeerStats(peers *utils.TopN, minHotDegree int) []*HotPeerStat {
 	if peers == nil {
 		return nil
 	}

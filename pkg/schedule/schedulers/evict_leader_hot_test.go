@@ -448,7 +448,7 @@ func TestScheduleEvictHotLeaderRevalidatesCandidates(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			re := require.New(t)
-			cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+			cancel, cluster, opController := prepareHotLeaderValidationTest()
 			defer cancel()
 			regionID := test.setup(re, cluster, opController)
 			selected := make(map[uint64]struct{})
@@ -465,7 +465,7 @@ func TestScheduleEvictHotLeaderRevalidatesCandidates(t *testing.T) {
 
 	t.Run("valid", func(t *testing.T) {
 		re := require.New(t)
-		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		cancel, cluster, opController := prepareHotLeaderValidationTest()
 		defer cancel()
 		cluster.AddLeaderRegion(1, 1, 2)
 		op := scheduleEvictHotLeader(
@@ -537,7 +537,7 @@ func TestScheduleEvictHotLeaderDoesNotFallbackToActiveRegion(t *testing.T) {
 func TestScheduleEvictHotLeaderFallsBackToOrdinaryAndUnhealthy(t *testing.T) {
 	t.Run("ordinary", func(t *testing.T) {
 		re := require.New(t)
-		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		cancel, cluster, opController := prepareHotLeaderValidationTest()
 		defer cancel()
 		cluster.AddLeaderRegion(1, 1, 2)
 		provider := newTestHotPeerStatsProvider()
@@ -552,7 +552,7 @@ func TestScheduleEvictHotLeaderFallsBackToOrdinaryAndUnhealthy(t *testing.T) {
 
 	t.Run("unhealthy", func(t *testing.T) {
 		re := require.New(t)
-		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		cancel, cluster, opController := prepareHotLeaderValidationTest()
 		defer cancel()
 		region := cluster.AddLeaderRegion(1, 1, 2, 3)
 		cluster.PutRegion(region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)})))
@@ -567,12 +567,12 @@ func TestScheduleEvictHotLeaderFallsBackToOrdinaryAndUnhealthy(t *testing.T) {
 	})
 }
 
-func prepareHotLeaderValidationTest() (func(), *testHotPeerStatsProvider, *mockcluster.Cluster, *operator.Controller) {
+func prepareHotLeaderValidationTest() (func(), *mockcluster.Cluster, *operator.Controller) {
 	cancel, _, cluster, opController := prepareSchedulersTest(false)
 	for storeID := uint64(1); storeID <= 3; storeID++ {
 		cluster.AddLeaderStore(storeID, 0)
 	}
-	return cancel, newTestHotPeerStatsProvider(), cluster, opController
+	return cancel, cluster, opController
 }
 
 func newTestEvictLeaderConfig(batch int, storeIDs ...uint64) *evictLeaderSchedulerConfig {
