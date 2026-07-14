@@ -15,11 +15,16 @@
 package schedulers
 
 import (
+	"bytes"
 	"math/rand/v2"
 	"time"
 
+	"github.com/tikv/pd/pkg/core"
+	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const hotLeaderCandidateRefreshInterval = time.Second
@@ -160,4 +165,117 @@ func (c *hotLeaderCandidates) pop(rw utils.RWType, targetStoreIDs []uint64) (uin
 	(*regionIDs)[index] = (*regionIDs)[last]
 	*regionIDs = (*regionIDs)[:last]
 	return storeID, regionID, true
+}
+
+func scheduleEvictHotLeaderBatch(
+	name string,
+	cluster sche.SchedulerCluster,
+	conf evictLeaderStoresConf,
+	opController *operator.Controller,
+	candidates *hotLeaderCandidates,
+) []*operator.Operator {
+	storeIDs := conf.getStores()
+	candidates.refresh(cluster, storeIDs)
+	batchSize := conf.getBatch()
+	if batchSize <= 0 {
+		return nil
+	}
+
+	ops := make([]*operator.Operator, 0, batchSize)
+	selected := make(map[uint64]struct{}, batchSize)
+	for _, rw := range []utils.RWType{utils.Read, utils.Write} {
+		for len(ops) < batchSize {
+			storeID, regionID, ok := candidates.pop(rw, storeIDs)
+			if !ok {
+				break
+			}
+			op := scheduleEvictHotLeader(
+				name, cluster, conf, opController, selected, storeID, regionID,
+			)
+			if op == nil {
+				evictLeaderHotCandidateRejectedCounter.Inc()
+				continue
+			}
+			selected[regionID] = struct{}{}
+			if rw == utils.Read {
+				op.Counters = append(op.Counters, evictLeaderPickReadHotCounter)
+			} else {
+				op.Counters = append(op.Counters, evictLeaderPickWriteHotCounter)
+			}
+			ops = append(ops, op)
+		}
+	}
+
+	if len(ops) < batchSize {
+		evictLeaderHotFallbackCounter.Inc()
+		ops = append(ops, scheduleEvictLeaderFallback(
+			name, cluster, conf, opController, selected, batchSize-len(ops),
+		)...)
+	}
+	return ops
+}
+
+func scheduleEvictHotLeader(
+	name string,
+	cluster sche.SchedulerCluster,
+	conf evictLeaderStoresConf,
+	opController *operator.Controller,
+	selected map[uint64]struct{},
+	storeID uint64,
+	regionID uint64,
+) *operator.Operator {
+	if _, ok := selected[regionID]; ok {
+		return nil
+	}
+	region := cluster.GetRegion(regionID)
+	if region == nil ||
+		region.GetLeader() == nil ||
+		region.GetLeader().GetStoreId() != storeID ||
+		!regionIsInKeyRanges(region, conf.getKeyRangesByID(storeID)) ||
+		opController.GetOperator(regionID) != nil ||
+		len(region.GetPendingPeers()) > 0 ||
+		len(region.GetDownPeers()) > 0 {
+		return nil
+	}
+	return createEvictLeaderOperator(name, cluster, region)
+}
+
+func regionIsInKeyRanges(region *core.RegionInfo, ranges []keyutil.KeyRange) bool {
+	for _, keyRange := range ranges {
+		if bytes.Compare(region.GetStartKey(), keyRange.StartKey) >= 0 &&
+			(len(keyRange.EndKey) == 0 ||
+				(len(region.GetEndKey()) > 0 && bytes.Compare(region.GetEndKey(), keyRange.EndKey) <= 0)) {
+			return true
+		}
+	}
+	return false
+}
+
+func scheduleEvictLeaderFallback(
+	name string,
+	cluster sche.SchedulerCluster,
+	conf evictLeaderStoresConf,
+	opController *operator.Controller,
+	selected map[uint64]struct{},
+	limit int,
+) []*operator.Operator {
+	ops := make([]*operator.Operator, 0, limit)
+	for range limit {
+		once := scheduleEvictLeaderOnce(name, cluster, conf, selected, opController)
+		if len(once) == 0 {
+			break
+		}
+		for _, op := range once {
+			if len(ops) >= limit {
+				return ops
+			}
+			regionID := op.RegionID()
+			if _, ok := selected[regionID]; ok {
+				continue
+			}
+			selected[regionID] = struct{}{}
+			ops = append(ops, op)
+		}
+	}
+	return ops
 }

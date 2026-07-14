@@ -20,9 +20,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
 
 type testHotPeerStatsProvider struct {
@@ -172,6 +179,269 @@ func TestHotLeaderCandidatesPrunesStores(t *testing.T) {
 	re.Empty(candidates.stores)
 	re.Equal(2, provider.calls[utils.Read])
 	re.Equal(2, provider.calls[utils.Write])
+}
+
+type testHotLeaderCluster struct {
+	*mockcluster.Cluster
+	provider *testHotPeerStatsProvider
+}
+
+func (c *testHotLeaderCluster) GetHotPeerStatsForStores(
+	rw utils.RWType,
+	storeIDs []uint64,
+) map[uint64][]*statistics.HotPeerStat {
+	return c.provider.GetHotPeerStatsForStores(rw, storeIDs)
+}
+
+func TestScheduleEvictHotLeaderPriority(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 2)
+	write12 := newTestHotPeerStat(t, cluster, utils.Write, 12, 1, 1, 2)
+	cluster.AddLeaderRegion(13, 1, 2)
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{1: {read11}}
+	provider.responses[utils.Write] = map[uint64][]*statistics.HotPeerStat{1: {write12}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+
+	ops := scheduleEvictHotLeaderBatch(
+		"test-evict-hot-leader", hotCluster, newTestEvictLeaderConfig(3, 1),
+		opController, newHotLeaderCandidates(),
+	)
+	re.Len(ops, 3)
+	re.Equal([]uint64{11, 12, 13}, []uint64{ops[0].RegionID(), ops[1].RegionID(), ops[2].RegionID()})
+	re.Contains(ops[0].Counters, evictLeaderPickReadHotCounter)
+	re.Contains(ops[1].Counters, evictLeaderPickWriteHotCounter)
+}
+
+func TestScheduleEvictHotLeaderGlobalReadPriority(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	write11 := newTestHotPeerStat(t, cluster, utils.Write, 11, 1, 1, 3)
+	read21 := newTestHotPeerStat(t, cluster, utils.Read, 21, 2, 2, 3)
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{2: {read21}}
+	provider.responses[utils.Write] = map[uint64][]*statistics.HotPeerStat{1: {write11}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+
+	ops := scheduleEvictHotLeaderBatch(
+		"test-global-read-priority", hotCluster, newTestEvictLeaderConfig(1, 1, 2),
+		opController, newHotLeaderCandidates(),
+	)
+	re.Len(ops, 1)
+	re.Equal(uint64(21), ops[0].RegionID())
+	re.Contains(ops[0].Counters, evictLeaderPickReadHotCounter)
+}
+
+func TestScheduleEvictHotLeaderRevalidatesCandidates(t *testing.T) {
+	tests := []struct {
+		name          string
+		setup         func(*require.Assertions, *mockcluster.Cluster, *operator.Controller) uint64
+		selectAlready bool
+	}{
+		{
+			name: "missing-region",
+			setup: func(_ *require.Assertions, _ *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				return 999
+			},
+		},
+		{
+			name: "leader-moved",
+			setup: func(_ *require.Assertions, cluster *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				cluster.AddLeaderRegion(1, 2, 1)
+				return 1
+			},
+		},
+		{
+			name: "active-operator",
+			setup: func(re *require.Assertions, cluster *mockcluster.Cluster, opController *operator.Controller) uint64 {
+				region := cluster.AddLeaderRegion(1, 1, 2)
+				op, err := operator.CreateTransferLeaderOperator(
+					"existing", cluster, region, 2, []uint64{2}, operator.OpLeader,
+				)
+				re.NoError(err)
+				re.True(opController.AddOperator(op))
+				return 1
+			},
+		},
+		{
+			name: "pending-peer",
+			setup: func(_ *require.Assertions, cluster *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				region := cluster.AddLeaderRegion(1, 1, 2)
+				cluster.PutRegion(region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)})))
+				return 1
+			},
+		},
+		{
+			name: "down-peer",
+			setup: func(_ *require.Assertions, cluster *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				region := cluster.AddLeaderRegion(1, 1, 2)
+				cluster.PutRegion(region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{
+					Peer: region.GetStorePeer(2),
+				}})))
+				return 1
+			},
+		},
+		{
+			name: "no-target-follower",
+			setup: func(_ *require.Assertions, cluster *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				cluster.AddLeaderRegion(1, 1)
+				return 1
+			},
+		},
+		{
+			name: "selected-in-current-batch",
+			setup: func(_ *require.Assertions, cluster *mockcluster.Cluster, _ *operator.Controller) uint64 {
+				cluster.AddLeaderRegion(1, 1, 2)
+				return 1
+			},
+			selectAlready: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+			defer cancel()
+			regionID := test.setup(re, cluster, opController)
+			selected := make(map[uint64]struct{})
+			if test.selectAlready {
+				selected[regionID] = struct{}{}
+			}
+			op := scheduleEvictHotLeader(
+				"test-revalidate", cluster, newTestEvictLeaderConfig(1, 1),
+				opController, selected, 1, regionID,
+			)
+			re.Nil(op)
+		})
+	}
+
+	t.Run("valid", func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		defer cancel()
+		cluster.AddLeaderRegion(1, 1, 2)
+		op := scheduleEvictHotLeader(
+			"test-revalidate", cluster, newTestEvictLeaderConfig(1, 1),
+			opController, map[uint64]struct{}{}, 1, 1,
+		)
+		operatorutil.CheckMultiTargetTransferLeader(re, op, operator.OpLeader, 1, []uint64{2})
+	})
+}
+
+func TestScheduleEvictHotLeaderRespectsRanges(t *testing.T) {
+	re := require.New(t)
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("b"),
+		EndKey:   []byte("d"),
+	}, nil)
+	re.True(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("a", "e")}))
+	re.True(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("b", "")}))
+	re.False(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("b", "c")}))
+	re.False(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("c", "e")}))
+
+	region = region.Clone(core.WithEndKey(nil))
+	re.True(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("b", "")}))
+	re.False(regionIsInKeyRanges(region, []keyutil.KeyRange{keyutil.NewKeyRange("b", "z")}))
+}
+
+func TestScheduleEvictHotLeaderAvoidsDuplicateBatchRegions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 2)
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{1: {read11}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+	ops := scheduleEvictHotLeaderBatch(
+		"test-no-duplicate", hotCluster, newTestEvictLeaderConfig(2, 1),
+		opController, newHotLeaderCandidates(),
+	)
+	re.Len(ops, 1)
+	re.Equal(uint64(11), ops[0].RegionID())
+}
+
+func TestScheduleEvictHotLeaderDoesNotFallbackToActiveRegion(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest(false)
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 2)
+	cluster.AddLeaderRegion(13, 1, 2)
+	existing, err := operator.CreateTransferLeaderOperator(
+		"existing", cluster, cluster.GetRegion(11), 2, []uint64{2}, operator.OpLeader,
+	)
+	re.NoError(err)
+	re.True(opController.AddOperator(existing))
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{1: {read11}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+
+	ops := scheduleEvictHotLeaderBatch(
+		"test-active-fallback", hotCluster, newTestEvictLeaderConfig(2, 1),
+		opController, newHotLeaderCandidates(),
+	)
+	re.Len(ops, 1)
+	re.Equal(uint64(13), ops[0].RegionID())
+}
+
+func TestScheduleEvictHotLeaderFallsBackToOrdinaryAndUnhealthy(t *testing.T) {
+	t.Run("ordinary", func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		defer cancel()
+		cluster.AddLeaderRegion(1, 1, 2)
+		provider := newTestHotPeerStatsProvider()
+		hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+		ops := scheduleEvictHotLeaderBatch(
+			"test-ordinary-fallback", hotCluster, newTestEvictLeaderConfig(1, 1),
+			opController, newHotLeaderCandidates(),
+		)
+		re.Len(ops, 1)
+		operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
+	})
+
+	t.Run("unhealthy", func(t *testing.T) {
+		re := require.New(t)
+		cancel, _, cluster, opController := prepareHotLeaderValidationTest()
+		defer cancel()
+		region := cluster.AddLeaderRegion(1, 1, 2, 3)
+		cluster.PutRegion(region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(2)})))
+		provider := newTestHotPeerStatsProvider()
+		hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+		ops := scheduleEvictHotLeaderBatch(
+			"test-unhealthy-fallback", hotCluster, newTestEvictLeaderConfig(1, 1),
+			opController, newHotLeaderCandidates(),
+		)
+		re.Len(ops, 1)
+		operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
+	})
+}
+
+func prepareHotLeaderValidationTest() (func(), *testHotPeerStatsProvider, *mockcluster.Cluster, *operator.Controller) {
+	cancel, _, cluster, opController := prepareSchedulersTest(false)
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		cluster.AddLeaderStore(storeID, 0)
+	}
+	return cancel, newTestHotPeerStatsProvider(), cluster, opController
+}
+
+func newTestEvictLeaderConfig(batch int, storeIDs ...uint64) *evictLeaderSchedulerConfig {
+	storeIDWithRanges := make(map[uint64][]keyutil.KeyRange, len(storeIDs))
+	for _, storeID := range storeIDs {
+		storeIDWithRanges[storeID] = []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
+	}
+	return &evictLeaderSchedulerConfig{
+		StoreIDWithRanges: storeIDWithRanges,
+		Batch:             batch,
+	}
 }
 
 func newTestHotPeerStat(
