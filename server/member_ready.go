@@ -41,19 +41,50 @@ func (s *Server) CheckMemberReadyForLeaderTransfer(ctx context.Context, memberID
 	if err != nil {
 		return err
 	}
-	if len(clientURLs) == 0 {
-		return errors.Errorf("target pd member %d has no client url", memberID)
+
+	triedURLs, ready, lastErr := s.checkMemberReadyURLs(ctx, memberID, clientURLs)
+	if ready {
+		return nil
 	}
 
+	reloadedClientURLs, err := s.reloadMemberClientURLs(memberID)
+	if err != nil {
+		lastErr = errors.Annotatef(err, "failed to reload target pd member %d client urls", memberID)
+	} else if !sameClientURLs(clientURLs, reloadedClientURLs) {
+		var reloadedTriedURLs []string
+		reloadedTriedURLs, ready, lastErr = s.checkMemberReadyURLs(ctx, memberID, reloadedClientURLs)
+		triedURLs = append(triedURLs, reloadedTriedURLs...)
+		if ready {
+			return nil
+		}
+	}
+	return errors.Errorf("target pd member %d is not ready for leader transfer, tried urls %v, last error: %v", memberID, triedURLs, lastErr)
+}
+
+func (s *Server) checkMemberReadyURLs(ctx context.Context, memberID uint64, clientURLs []string) ([]string, bool, error) {
+	triedURLs := make([]string, 0, len(clientURLs))
 	var lastErr error
 	for _, clientURL := range clientURLs {
+		triedURLs = append(triedURLs, clientURL)
 		if err := s.checkMemberReadyURL(ctx, memberID, clientURL); err != nil {
 			lastErr = err
 			continue
 		}
-		return nil
+		return triedURLs, true, nil
 	}
-	return errors.Errorf("target pd member %d is not ready for leader transfer, tried urls %v, last error: %v", memberID, clientURLs, lastErr)
+	return triedURLs, false, lastErr
+}
+
+func sameClientURLs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) getMemberClientURLs(memberID uint64) ([]string, error) {
@@ -61,27 +92,37 @@ func (s *Server) getMemberClientURLs(memberID uint64) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if clientURLs := findMemberClientURLs(members, memberID); len(clientURLs) > 0 {
-		return clientURLs, nil
+	if clientURLs, found := findMemberClientURLs(members, memberID); found {
+		if len(clientURLs) > 0 {
+			return clientURLs, nil
+		}
+		return s.reloadMemberClientURLs(memberID)
 	}
-	members, err = s.ReloadMembers()
+	return s.reloadMemberClientURLs(memberID)
+}
+
+func (s *Server) reloadMemberClientURLs(memberID uint64) ([]string, error) {
+	members, err := s.ReloadMembers()
 	if err != nil {
 		return nil, err
 	}
-	clientURLs := findMemberClientURLs(members, memberID)
-	if len(clientURLs) == 0 {
+	clientURLs, found := findMemberClientURLs(members, memberID)
+	if !found {
 		return nil, errors.Errorf("target pd member %d not found", memberID)
+	}
+	if len(clientURLs) == 0 {
+		return nil, errors.Errorf("target pd member %d has no client url", memberID)
 	}
 	return clientURLs, nil
 }
 
-func findMemberClientURLs(members []*pdpb.Member, memberID uint64) []string {
+func findMemberClientURLs(members []*pdpb.Member, memberID uint64) ([]string, bool) {
 	for _, member := range members {
 		if member.GetMemberId() == memberID {
-			return member.GetClientUrls()
+			return member.GetClientUrls(), true
 		}
 	}
-	return nil
+	return nil, false
 }
 
 func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clientURL string) error {
@@ -93,8 +134,10 @@ func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clien
 		return errors.Annotatef(err, "failed to get target pd member %d version from %s", memberID, clientURL)
 	}
 	pdVersion, err := versioninfo.ParseVersion(version)
-	// If the version endpoint succeeds but returns an unparsable version, treat
-	// the target as supporting the ready API and let the /ready result decide.
+	// A successful /version response with an unparsable version, such as "None"
+	// from local or dev builds, is treated as a dev/current build, so /ready
+	// decides readiness. Only a parseable release version older than ReadyAPI
+	// skips /ready for compatibility.
 	if err == nil && !versioninfo.IsReadyAPISupported(pdVersion) {
 		return nil
 	}

@@ -418,7 +418,10 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 		readyEtcdLeaderIDs := make([]uint64, 0, len(etcdLeaderIDs))
 		var lastErr error
 		for _, id := range etcdLeaderIDs {
-			if err := options.targetChecker(ctx, id); err != nil {
+			checkCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+			err := options.targetChecker(checkCtx, id)
+			cancel()
+			if err != nil {
 				lastErr = err
 				log.Warn("skip unready pd when resigning etcd leader", zap.Uint64("target-member-id", id), errs.ZapError(err))
 				continue
