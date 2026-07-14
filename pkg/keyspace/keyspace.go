@@ -965,20 +965,29 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 	}
 	err := manager.runTxnWithMetaGroupLock(txnFunc)
 	if err != nil {
-		// The txn can fail at commit after txnFunc returned nil, leaving the
-		// immediately-persisted TSO keyspace group move applied while the keyspace
-		// meta was rolled back. keyspaceGroupMoved stays true only when the inner
-		// error branch did not already revert it, so revert it here.
-		if keyspaceGroupMoved {
-			if rollbackErr := manager.kgm.UpdateKeyspaceGroup(newTSOGroupID, oldTSOGroupID, newTSOUserKind, oldTSOUserKind, meta.GetId()); rollbackErr != nil {
-				log.Error("failed to revert keyspace group", zap.Error(rollbackErr))
+		// Roll back side effects that were persisted immediately (and so are not
+		// undone by the failed txn): the TSO keyspace group move and the cached
+		// meta-service assignment. A commit-time failure after txnFunc returned nil
+		// leaves the move applied while the keyspace meta was rolled back;
+		// keyspaceGroupMoved stays true only when the inner branch did not already
+		// revert it. Hold the mgm lock across both undos so they are atomic with
+		// respect to UpdateGroupsSafely, mirroring runTxnWithMetaGroupLock.
+		func() {
+			if manager.mgm != nil {
+				manager.mgm.Lock()
+				defer manager.mgm.Unlock()
 			}
-		}
-		if metaServiceGroupReassigned {
-			if rollbackErr := manager.mgm.updateAssignmentTxn(nil, newMetaServiceGroup, oldMetaServiceGroup); rollbackErr != nil {
-				log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
+			if keyspaceGroupMoved {
+				if rollbackErr := manager.kgm.UpdateKeyspaceGroup(newTSOGroupID, oldTSOGroupID, newTSOUserKind, oldTSOUserKind, meta.GetId()); rollbackErr != nil {
+					log.Error("failed to revert keyspace group", zap.Error(rollbackErr))
+				}
 			}
-		}
+			if metaServiceGroupReassigned {
+				if rollbackErr := manager.mgm.updateAssignmentTxn(nil, newMetaServiceGroup, oldMetaServiceGroup); rollbackErr != nil {
+					log.Error("failed to revert meta-service group assignment", zap.Error(rollbackErr))
+				}
+			}
+		}()
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),
 			zap.String("name", meta.GetName()),
