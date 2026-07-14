@@ -94,8 +94,6 @@ const (
 	StatusRegionLabelReject
 	// StatusRegionSendSnapshotThrottled represents the plan conflicts with send snapshot.
 	StatusRegionSendSnapshotThrottled
-	// StatusRegionInProgress represents the region is in progress of some operations.
-	StatusRegionInProgress
 	// StatusRegionAffinity indicates that the Region is in an affinity state and therefore should not be scheduled.
 	StatusRegionAffinity
 )
@@ -140,7 +138,6 @@ var statusText = map[StatusCode]string{
 	StatusRegionNotReplicated: "RegionNotReplicated",
 	StatusRegionNotMatchRule:  "RegionNotMatchRule",
 	StatusRegionNoLeader:      "RegionNoLeader",
-	StatusRegionInProgress:    "RegionInProgress",
 	StatusRegionAffinity:      "RegionAffinity",
 
 	// non-filter

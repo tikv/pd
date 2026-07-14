@@ -363,9 +363,8 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 
 type evictSlowStoreScheduler struct {
 	*BaseScheduler
-	conf           *evictSlowStoreSchedulerConfig
-	handler        http.Handler
-	pendingRegions map[uint64]*operator.Operator
+	conf    *evictSlowStoreSchedulerConfig
+	handler http.Handler
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -476,7 +475,7 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf, s.pendingRegions)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -838,10 +837,9 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler:  NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
-		conf:           conf,
-		handler:        handler,
-		pendingRegions: make(map[uint64]*operator.Operator),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
+		conf:          conf,
+		handler:       handler,
 	}
 }
 

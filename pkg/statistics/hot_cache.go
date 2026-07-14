@@ -195,25 +195,11 @@ func (w *HotCache) runWriteTask(task func(cache *HotPeerCache)) {
 // Update updates the cache.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) Update(item *HotPeerStat, kind utils.RWType) {
-	done := make(chan struct{}, 1)
-	updateTask := func(cache *HotPeerCache) {
-		cache.UpdateStat(item)
-		done <- struct{}{}
-	}
-
-	var succ bool
 	switch kind {
 	case utils.Write:
-		succ = w.CheckWriteAsync(updateTask)
+		w.writeCache.UpdateStat(item)
 	case utils.Read:
-		succ = w.CheckReadAsync(updateTask)
-	}
-	if !succ {
-		return
-	}
-	select {
-	case <-w.ctx.Done():
-	case <-done:
+		w.readCache.UpdateStat(item)
 	}
 }
 

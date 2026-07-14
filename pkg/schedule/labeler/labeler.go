@@ -75,7 +75,7 @@ func (l *RegionLabeler) doGC(gcInterval time.Duration) {
 			l.checkAndClearExpiredLabels()
 			log.Debug("region labeler GC")
 		case <-l.ctx.Done():
-			log.Debug("region labeler GC stopped")
+			log.Info("region labeler GC stopped")
 			return
 		}
 	}
@@ -216,6 +216,23 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 		}
 	}
 	return rules
+}
+
+// GetRuleAndKeyRangeCounts returns the number of effective label rules and key ranges.
+func (l *RegionLabeler) GetRuleAndKeyRangeCounts() (ruleCount, keyRangeCount int) {
+	l.RLock()
+	defer l.RUnlock()
+
+	now := time.Now()
+	for _, rule := range l.labelRules {
+		filteredRule := filterExpiredLabels(rule, now)
+		if filteredRule == nil {
+			continue
+		}
+		ruleCount++
+		keyRangeCount += len(filteredRule.GetKeyRanges())
+	}
+	return ruleCount, keyRangeCount
 }
 
 // GetLabelRules returns the rules that match the given ids.

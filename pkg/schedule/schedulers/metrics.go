@@ -163,6 +163,14 @@ var (
 			Help:      "Status of the rule.",
 		}, []string{"type"})
 
+	regionLabelStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "region_label",
+			Name:      "status",
+			Help:      "Status of the region labeler.",
+		}, []string{"type"})
+
 	balanceRangeGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -182,6 +190,7 @@ var (
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(ruleStatusGauge)
+	prometheus.MustRegister(regionLabelStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
@@ -281,7 +290,6 @@ var (
 	evictLeaderNoLeaderCounter      = evictLeaderCounterWithEvent("no-leader")
 	evictLeaderPickUnhealthyCounter = evictLeaderCounterWithEvent("pick-unhealthy-region")
 	evictLeaderNoTargetStoreCounter = evictLeaderCounterWithEvent("no-target-store")
-	evictLeaderStaleCounter         = evictLeaderCounterWithEvent("stale")
 	evictLeaderNewOperatorCounter   = evictLeaderCounterWithEvent("new-operator")
 
 	evictSlowStoreCounter     = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")

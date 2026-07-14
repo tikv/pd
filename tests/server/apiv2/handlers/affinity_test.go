@@ -51,6 +51,9 @@ func (suite *affinityHandlerTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
 		conf.Schedule.AffinityScheduleLimit = 4
 	})
+	// Exercise the full affinity handler matrix through the local scheduling
+	// path. TestAffinityForwardedHeader covers the microservice forwarding path.
+	suite.env.Env = tests.NonMicroserviceEnv
 }
 
 func (suite *affinityHandlerTestSuite) TearDownSuite() {
@@ -59,7 +62,7 @@ func (suite *affinityHandlerTestSuite) TearDownSuite() {
 
 func (suite *affinityHandlerTestSuite) TearDownTest() {
 	// Clean up any remaining affinity groups after each test to avoid interference between tests.
-	suite.env.RunTest(func(cluster *tests.TestCluster) {
+	suite.env.RunFuncInStartedEnvs(func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		leader := cluster.GetLeaderServer()
 		manager, err := leader.GetServer().GetAffinityManager()
@@ -137,6 +140,43 @@ func mustGetAllAffinityGroups(re *require.Assertions, serverAddr string) *handle
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr), &result)
 	re.NoError(err)
 	return &result
+}
+
+func tryGetAffinityGroups(url string) (handlers.AffinityGroupsResponse, http.Header, bool) {
+	var result handlers.AffinityGroupsResponse
+	resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+	if err != nil {
+		return result, nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return result, resp.Header, false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return result, resp.Header, false
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return result, resp.Header, false
+	}
+	return result, resp.Header, true
+}
+
+func waitForAffinityGroups(re *require.Assertions, url string, groupIDs ...string) {
+	var result handlers.AffinityGroupsResponse
+	testutil.Eventually(re, func() bool {
+		var ok bool
+		result, _, ok = tryGetAffinityGroups(url)
+		if !ok || len(result.AffinityGroups) != len(groupIDs) {
+			return false
+		}
+		for _, groupID := range groupIDs {
+			if _, ok := result.AffinityGroups[groupID]; !ok {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 func mustPutHealthyStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
@@ -660,9 +700,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityGroupCreateSkipExistCheck() {
 		re.Contains(result.AffinityGroups, "existing")
 		re.Contains(result.AffinityGroups, "new")
 
-		listResp := mustGetAllAffinityGroups(re, serverAddr)
-		re.Contains(listResp.AffinityGroups, "existing")
-		re.Contains(listResp.AffinityGroups, "new")
+		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr), "existing", "new")
 	})
 }
 
@@ -855,12 +893,7 @@ func (suite *affinityHandlerTestSuite) TestAffinityListWithIDs() {
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
-		var result handlers.AffinityGroupsResponse
-		err := testutil.ReadGetJSON(re, tests.TestDialClient, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", &result)
-		re.NoError(err)
-		re.Len(result.AffinityGroups, 2)
-		re.Contains(result.AffinityGroups, "group-1")
-		re.Contains(result.AffinityGroups, "group-3")
+		waitForAffinityGroups(re, getAffinityGroupURL(serverAddr)+"?ids=group-1&ids=group-3&ids=missing", "group-1", "group-3")
 	})
 }
 
@@ -1277,7 +1310,7 @@ func (suite *affinityHandlerTestSuite) TestBatchModifyRemoveNonExistentRange() {
 	})
 }
 
-// TestAffinityForwardedHeader verifies microservice forwarding sets the header.
+// TestAffinityForwardedHeader verifies microservice forwarding sets the header and returns the scheduling response.
 func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 	suite.env.RunTestInMicroserviceEnv(func(cluster *tests.TestCluster) {
 		re := suite.Require()
@@ -1292,11 +1325,17 @@ func (suite *affinityHandlerTestSuite) TestAffinityForwardedHeader() {
 		}
 		mustCreateAffinityGroups(re, serverAddr, &createReq)
 
-		resp, err := tests.TestDialClient.Get(getAffinityGroupURL(serverAddr))
-		re.NoError(err)
-		defer resp.Body.Close()
-
-		re.Equal(http.StatusOK, resp.StatusCode)
-		re.Equal("true", resp.Header.Get(apiutil.XForwardedToMicroserviceHeader))
+		var result handlers.AffinityGroupsResponse
+		testutil.Eventually(re, func() bool {
+			var header http.Header
+			var ok bool
+			result, header, ok = tryGetAffinityGroups(getAffinityGroupURL(serverAddr))
+			if !ok || header.Get(apiutil.XForwardedToMicroserviceHeader) != "true" {
+				return false
+			}
+			_, ok = result.AffinityGroups["header-check"]
+			return ok
+		})
+		re.Contains(result.AffinityGroups, "header-check")
 	})
 }

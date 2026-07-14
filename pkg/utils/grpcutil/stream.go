@@ -35,14 +35,14 @@ func NewGRPCStreamSendDuration(namespace, subsystem string) *prometheus.Histogra
 			Name:      "grpc_stream_send_duration_seconds",
 			Help:      "Bucketed histogram of duration (s) of gRPC stream Send operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request", "client_ip"})
+		}, []string{"request", "target"})
 }
 
-// clientIP extracts the client IP (without port) from a gRPC server stream's peer info.
+// targetIP extracts the target IP (without port) from a gRPC server stream's peer info.
 // The port is stripped to avoid high-cardinality Prometheus labels, since ephemeral
 // ports change across reconnections and would create unbounded time series.
 // Returns "unknown" if the peer information is unavailable.
-func clientIP(stream grpc.ServerStream) string {
+func targetIP(stream grpc.ServerStream) string {
 	if stream == nil {
 		return "unknown"
 	}
@@ -72,7 +72,7 @@ type MetricsStream[SendT any, RecvT any] struct {
 }
 
 // NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
-// It automatically extracts the client IP from the stream's peer info and combines
+// It automatically extracts the target IP from the stream's peer info and combines
 // it with requestLabel to create the prometheus observer from hist.
 // If hist is nil, no metrics are recorded.
 func NewMetricsStream[SendT any, RecvT any](
@@ -84,7 +84,7 @@ func NewMetricsStream[SendT any, RecvT any](
 ) *MetricsStream[SendT, RecvT] {
 	var obs prometheus.Observer
 	if hist != nil {
-		obs = hist.WithLabelValues(requestLabel, clientIP(stream))
+		obs = hist.WithLabelValues(requestLabel, targetIP(stream))
 	}
 	return &MetricsStream[SendT, RecvT]{
 		ServerStream: stream,
