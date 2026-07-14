@@ -193,6 +193,65 @@ func (c *testHotLeaderCluster) GetHotPeerStatsForStores(
 	return c.provider.GetHotPeerStatsForStores(rw, storeIDs)
 }
 
+func TestEvictLeaderSchedulerUsesHotLeaderCandidates(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 2)
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{1: {read11}}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+	scheduler := newEvictLeaderScheduler(opController, newTestEvictLeaderConfig(1, 1))
+
+	ops, _ := scheduler.Schedule(hotCluster, false)
+	re.Equal(1, provider.calls[utils.Read])
+	re.Equal(1, provider.calls[utils.Write])
+	re.Len(ops, 1)
+	re.Equal(uint64(11), ops[0].RegionID())
+	re.Contains(ops[0].Counters, evictLeaderPickReadHotCounter)
+}
+
+func TestEvictSlowStoreSchedulerHotCandidatesFollowCurrentStore(t *testing.T) {
+	re := require.New(t)
+	cancel, _, cluster, opController := prepareSchedulersTest()
+	defer cancel()
+
+	read11 := newTestHotPeerStat(t, cluster, utils.Read, 11, 1, 1, 3)
+	read21 := newTestHotPeerStat(t, cluster, utils.Read, 21, 2, 2, 3)
+	for _, storeID := range []uint64{1, 2} {
+		store := cluster.GetStore(storeID)
+		cluster.PutStore(store.Clone(func(store *core.StoreInfo) {
+			store.GetStoreStats().SlowScore = slowStoreEvictThreshold
+		}))
+	}
+	provider := newTestHotPeerStatsProvider()
+	provider.responses[utils.Read] = map[uint64][]*statistics.HotPeerStat{
+		1: {read11},
+		2: {read21},
+	}
+	hotCluster := &testHotLeaderCluster{Cluster: cluster, provider: provider}
+	conf := initEvictSlowStoreSchedulerConfig()
+	conf.EvictedStores = []uint64{1}
+	conf.Batch = 1
+	scheduler := newEvictSlowStoreScheduler(opController, conf)
+
+	ops, _ := scheduler.Schedule(hotCluster, false)
+	re.Equal(1, provider.calls[utils.Read])
+	re.Equal(1, provider.calls[utils.Write])
+	re.Len(ops, 1)
+	re.Equal(uint64(11), ops[0].RegionID())
+	re.Equal([]uint64{1}, provider.requests[utils.Read][0])
+
+	conf.EvictedStores = []uint64{2}
+	ops, _ = scheduler.Schedule(hotCluster, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(21), ops[0].RegionID())
+	re.Equal(2, provider.calls[utils.Read])
+	re.Equal(2, provider.calls[utils.Write])
+	re.Equal([]uint64{2}, provider.requests[utils.Read][1])
+}
+
 func TestScheduleEvictHotLeaderPriority(t *testing.T) {
 	re := require.New(t)
 	cancel, _, cluster, opController := prepareSchedulersTest()

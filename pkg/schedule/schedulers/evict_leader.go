@@ -246,8 +246,9 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf    *evictLeaderSchedulerConfig
-	handler http.Handler
+	conf          *evictLeaderSchedulerConfig
+	handler       http.Handler
+	hotCandidates *hotLeaderCandidates
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -258,6 +259,7 @@ func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeade
 		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
+		hotCandidates: newHotLeaderCandidates(),
 	}
 }
 
@@ -303,7 +305,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
+	return scheduleEvictHotLeaderBatch(s.GetName(), cluster, s.conf, s.OpController, s.hotCandidates), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
