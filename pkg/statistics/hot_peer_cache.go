@@ -102,18 +102,44 @@ func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
-	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {
-		values := peers.GetAll()
-		stat := make([]*HotPeerStat, 0, len(values))
-		for _, v := range values {
-			if peer := v.(*HotPeerStat); peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == defaultAntiCount {
-				stat = append(stat, peer)
-			}
-		}
-		res[storeID] = stat
+		res[storeID] = f.getHotPeerStats(peers, minHotDegree)
 	}
 	return res
+}
+
+// GetHotPeerStatsForStores returns the read or write statistics for hot regions
+// on the specified stores.
+func (f *HotPeerCache) GetHotPeerStatsForStores(storeIDs []uint64, minHotDegree int) map[uint64][]*HotPeerStat {
+	res := make(map[uint64][]*HotPeerStat, len(storeIDs))
+	visited := make(map[uint64]struct{}, len(storeIDs))
+	for _, storeID := range storeIDs {
+		if _, ok := visited[storeID]; ok {
+			continue
+		}
+		visited[storeID] = struct{}{}
+		stats := f.getHotPeerStats(f.peersOfStore[storeID], minHotDegree)
+		if len(stats) > 0 {
+			res[storeID] = stats
+		}
+	}
+	return res
+}
+
+func (f *HotPeerCache) getHotPeerStats(peers *utils.TopN, minHotDegree int) []*HotPeerStat {
+	if peers == nil {
+		return nil
+	}
+	values := peers.GetAll()
+	stats := make([]*HotPeerStat, 0, len(values))
+	defaultAntiCount := f.kind.DefaultAntiCount()
+	for _, value := range values {
+		peer := value.(*HotPeerStat)
+		if peer.HotDegree >= minHotDegree && !peer.inCold && peer.AntiCount == defaultAntiCount {
+			stats = append(stats, peer)
+		}
+	}
+	return stats
 }
 
 // UpdateStat updates the stat cache.
