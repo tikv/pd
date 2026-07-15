@@ -37,18 +37,27 @@ const (
 
 // MetaServiceGroupManager manages external meta-service groups.
 //
-// Locking: the embedded RWMutex guards metaServiceGroups and isLeader, while
-// statusMu is a dedicated leaf lock guarding cachedStatus and dirtyCount only.
-// statusMu must always be the innermost lock: never acquire the RWMutex or the
-// keyspace metaLock, and never perform storage I/O, while holding it. This lets
-// the assignment-count update paths that already hold the keyspace metaLock
-// (RemoveKeyspace, tombstone unassignment) mutate the cache without taking the
-// RWMutex, which would otherwise invert the RWMutex->metaLock order used by the
-// create/config paths and deadlock. Allowed orders are RWMutex->statusMu and
-// metaLock->statusMu; both are safe because statusMu wraps nothing.
+// Locking hierarchy, outermost to innermost: persistMu -> RWMutex -> statusMu.
+//   - persistMu serializes the storage writers (flushToStorage, PatchStatus,
+//     persistGroupsLocked, RefreshCache) so their status writes cannot clobber
+//     each other, without taking the RWMutex write lock across storage I/O. That
+//     keeps a slow flush from blocking RWMutex read paths (AttachEndpoints,
+//     GetGroups) or assignment operations.
+//   - the embedded RWMutex guards metaServiceGroups, isLeader and leaderCtx.
+//   - statusMu is a leaf lock guarding cachedStatus and dirtyCount only: never
+//     acquire the RWMutex, the keyspace metaLock or persistMu, and never perform
+//     storage I/O, while holding it. This lets the assignment-count update paths
+//     that already hold the keyspace metaLock (RemoveKeyspace, tombstone
+//     unassignment) mutate the cache without taking the RWMutex, which would
+//     otherwise invert the RWMutex->metaLock order used by the create/config
+//     paths and deadlock. Allowed orders are RWMutex->statusMu and
+//     metaLock->statusMu; both are safe because statusMu wraps nothing.
 type MetaServiceGroupManager struct {
 	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
+	// persistMu serializes storage writers; see the type comment. It is the
+	// outermost lock, taken before the RWMutex.
+	persistMu syncutil.Mutex
 	syncutil.RWMutex
 	// metaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
@@ -59,6 +68,10 @@ type MetaServiceGroupManager struct {
 	// cannot permanently block removing an actually-empty group.
 	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
 	isLeader                  func() bool
+	// leaderCtx is the current leadership term's context, canceled when this PD
+	// loses its lease. flushToStorage uses it so a lost-leadership PD does not keep
+	// writing status with the server-lifetime context. Guarded by the RWMutex.
+	leaderCtx context.Context
 	// statusMu guards cachedStatus and dirtyCount. See the type comment for the
 	// leaf-lock discipline it must follow.
 	statusMu     syncutil.Mutex
@@ -79,6 +92,15 @@ func (m *MetaServiceGroupManager) SetLeaderChecker(isLeader func() bool) {
 	m.Lock()
 	defer m.Unlock()
 	m.isLeader = isLeader
+}
+
+// SetLeaderContext sets the current leadership term's context, so flushToStorage
+// stops writing once the term ends. It is called from the service-ready callback
+// on each leadership acquisition with that term's context.
+func (m *MetaServiceGroupManager) SetLeaderContext(ctx context.Context) {
+	m.Lock()
+	defer m.Unlock()
+	m.leaderCtx = ctx
 }
 
 // NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
@@ -102,6 +124,10 @@ func NewMetaServiceGroupManager(
 
 // RefreshCache loads the current status from storage into memory.
 func (m *MetaServiceGroupManager) RefreshCache() error {
+	// Serialize with flush/PatchStatus so the reload does not race an in-flight
+	// status write and load a half-applied view.
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	var (
@@ -143,20 +169,24 @@ func (m *MetaServiceGroupManager) flushLoop() {
 }
 
 func (m *MetaServiceGroupManager) flushToStorage() error {
-	// Hold the mgm write lock for the whole flush, including the storage write, so
-	// it serializes with PatchStatus and persistGroupsLocked (both take the mgm
-	// lock). Without that, the snapshot below could overwrite a status those paths
-	// persisted synchronously in the meantime, or recreate a status key that
-	// persistGroupsLocked just deleted. This cannot deadlock: the metaLock-holding
-	// paths (RemoveKeyspace, tombstone unassignment) only take statusMu, never the
-	// mgm lock, so nothing waits on the mgm lock while holding metaLock, and flush
-	// never takes metaLock.
-	m.Lock()
-	defer m.Unlock()
-	// Only the serving leader persists; a follower's next leader term reloads the
-	// authoritative status via RefreshCache.
-	if m.isLeader != nil && !m.isLeader() {
+	// Serialize the storage write with PatchStatus/persistGroupsLocked/RefreshCache
+	// on persistMu (not the mgm write lock), so a slow flush does not block mgm read
+	// paths (AttachEndpoints/GetGroups) or assignment operations, while still keeping
+	// the snapshot from clobbering a synchronous write or recreating a deleted key.
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
+	// Only the serving leader persists, fenced to the current term: skip when not
+	// leader, and use the leadership context (canceled when the lease is lost) so a
+	// former leader's write is canceled instead of landing after the new leader.
+	m.RLock()
+	notLeader := m.isLeader != nil && !m.isLeader()
+	ctx := m.leaderCtx
+	m.RUnlock()
+	if notLeader {
 		return nil
+	}
+	if ctx == nil {
+		ctx = m.ctx
 	}
 	// Snapshot the dirty state under statusMu (a deep copy) and reset the dirty
 	// counter, without holding statusMu across the storage write. The snapshot
@@ -175,7 +205,7 @@ func (m *MetaServiceGroupManager) flushToStorage() error {
 	m.dirtyCount = 0
 	m.statusMu.Unlock()
 
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		for id, status := range snapshot {
 			if err := m.store.SaveMetaServiceGroupStatus(txn, id, status); err != nil {
 				return err
@@ -237,9 +267,16 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if patch.AssignmentCount != nil && *patch.AssignmentCount < 0 {
 		return ErrInvalidAssignmentCount
 	}
-	m.Lock()
-	defer m.Unlock()
-	if _, ok := m.metaServiceGroups[groupID]; !ok {
+	// Serialize with flush/persistGroupsLocked on persistMu so this synchronous
+	// write is not clobbered by a concurrent flush, without holding the mgm write
+	// lock across the storage I/O. persistMu also blocks persistGroupsLocked, so
+	// the group cannot be deleted between the existence check and the write.
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
+	m.RLock()
+	_, known := m.metaServiceGroups[groupID]
+	m.RUnlock()
+	if !known {
 		return ErrUnknownMetaServiceGroup
 	}
 	m.statusMu.Lock()
@@ -256,7 +293,7 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	}
 	// Persist synchronously so API updates are immediately durable, then reflect
 	// them in the cache. The store I/O runs without statusMu (it is never held
-	// across I/O); the enclosing mgm write lock serializes concurrent patches.
+	// across I/O); persistMu serializes concurrent patches and flushes.
 	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return m.store.SaveMetaServiceGroupStatus(txn, groupID, &newStatus)
 	}); err != nil {
@@ -491,6 +528,10 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	deletedGroups []string,
 	persist func() error,
 ) error {
+	// Take persistMu (outermost) so the status reconcile writes below serialize
+	// with flush/PatchStatus and are not clobbered or resurrected by a flush.
+	m.persistMu.Lock()
+	defer m.persistMu.Unlock()
 	m.Lock()
 	defer m.Unlock()
 	if len(deletedGroups) > 0 {
