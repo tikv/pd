@@ -565,6 +565,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	// an earlier best-effort deletion that failed), which would skew list output
 	// and PickGroup balancing. Best-effort: the config change is already persisted
 	// and the delete guard relies on actual keyspace scans, not this counter.
+	reconcileFailed := false
 	if len(deletedGroups) > 0 || len(addedGroups) > 0 {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range deletedGroups {
@@ -582,6 +583,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 			log.Warn("[keyspace] failed to reconcile status for meta-service group changes",
 				zap.Strings("deleted-groups", deletedGroups),
 				zap.Strings("added-groups", addedGroups), zap.Error(err))
+			reconcileFailed = true
 		}
 	}
 	// Apply the change to the in-memory view only after the storage writes above.
@@ -594,6 +596,12 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	}
 	for _, id := range deletedGroups {
 		delete(m.cachedStatus, id)
+	}
+	// If the synchronous reset above failed, mark the zeroed added groups dirty so a
+	// later flush re-persists their zero status; otherwise the stale value left in
+	// storage would be resurrected by the next RefreshCache, breaking the reset.
+	if reconcileFailed && len(addedGroups) > 0 {
+		m.markDirtyStatusLocked(len(addedGroups))
 	}
 	m.statusMu.Unlock()
 	return nil
