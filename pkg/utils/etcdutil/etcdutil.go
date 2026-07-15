@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -375,8 +374,6 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
-	// loadedRevision is the etcd snapshot revision loaded during initialization.
-	loadedRevision atomic.Int64
 	// revisionUpdatedFn is called when the watcher has caught up to a newer etcd revision.
 	revisionUpdatedFn func(int64)
 
@@ -496,9 +493,6 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	if err != nil {
 		log.Warn("meet error when loading in watch loop", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
 	} else {
-		if watchStartRevision > 0 {
-			lw.loadedRevision.Store(watchStartRevision - 1)
-		}
 		log.Info("load finished in watch loop", zap.String("name", lw.name), zap.String("key", lw.key))
 	}
 	lw.isLoadedCh <- err
@@ -779,11 +773,6 @@ func (lw *LoopWatcher) ForceLoad() {
 // WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
 	return <-lw.isLoadedCh
-}
-
-// GetLoadedRevision returns the etcd snapshot revision loaded during initialization.
-func (lw *LoopWatcher) GetLoadedRevision() int64 {
-	return lw.loadedRevision.Load()
 }
 
 // SetRevisionUpdatedCallback sets a callback that is invoked after the watcher catches up to an etcd revision.

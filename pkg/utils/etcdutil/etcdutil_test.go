@@ -467,12 +467,12 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
-func (suite *loopWatcherTestSuite) TestGetLoadedRevision() {
+func (suite *loopWatcherTestSuite) TestLoadUsesSingleSnapshotRevision() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	prefix := "TestGetLoadedRevision/"
+	prefix := "TestLoadUsesSingleSnapshotRevision/"
 	_, err := suite.client.Txn(ctx).Then(
 		clientv3.OpPut(prefix+"a", ""),
 		clientv3.OpPut(prefix+"b", ""),
@@ -503,10 +503,10 @@ func (suite *loopWatcherTestSuite) TestGetLoadedRevision() {
 		true, /* withPrefix */
 	)
 	watcher.SetLoadBatchSize(1)
-	watcher.StartWatchLoop()
-	err = watcher.WaitLoad()
+	nextRevision, err := watcher.load(ctx)
 	re.NoError(err)
-	re.Equal(expectedRevision, watcher.GetLoadedRevision())
+	re.NoError(putErr)
+	re.Equal(expectedRevision+1, nextRevision)
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {

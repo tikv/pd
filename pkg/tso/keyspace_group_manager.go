@@ -621,15 +621,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.Close()
 		return errs.ErrLoadKeyspaceGroupsTerminated.Wrap(err)
 	}
-	if loadedRevision := kgm.groupWatcher.GetLoadedRevision(); loadedRevision > 0 {
-		// The watch loop can advance the manager after the initial load finishes
-		// but before WaitLoad returns. In that case, keeping the newer revision is
-		// correct and SetModRevision returns false.
-		if !kgm.SetModRevision(uint64(loadedRevision)) {
-			log.Debug("keyspace group revision is already at or ahead of the loaded snapshot",
-				zap.Int64("loaded-revision", loadedRevision))
-		}
-	}
 
 	if !defaultKGConfigured {
 		log.Info("initializing default keyspace group")

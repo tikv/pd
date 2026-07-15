@@ -261,6 +261,42 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevisio
 	re.GreaterOrEqual(loadedRevision, deletedRevision)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestInitialSkipKeyspaceWatchDoesNotAdvanceRevision() {
+	re := suite.Require()
+
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	re.NotNil(mgr)
+	defer mgr.Close()
+
+	point := fmt.Sprintf("return(\"%s\")", mgr.electionNamePrefix)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch", point))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch"))
+	}()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(101)
+	)
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		groupID,
+		[]string{mgr.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{keyspaceID},
+	))
+	re.NoError(mgr.Initialize())
+
+	mgr.RLock()
+	loadedGroup := mgr.kgs[groupID]
+	loadedRevision := mgr.modRevision
+	mgr.RUnlock()
+
+	re.Nil(loadedGroup)
+	re.Zero(loadedRevision, "a skipped initial watch must not advertise an unapplied revision")
+}
+
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
 func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	re := suite.Require()
