@@ -115,7 +115,15 @@ const (
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
+// It is used as a no-progress timeout rather than a fixed overall deadline:
+// startEtcd only gives up when etcd makes no apply progress for this duration,
+// so a slow-but-healthy startup that keeps catching up its raft log is not
+// killed. See waitEtcdReady.
 var EtcdStartTimeout = time.Minute * 5
+
+// etcdStartProgressCheckInterval is how often startEtcd polls the embedded
+// etcd applied index to tell a slow-but-progressing startup apart from a hang.
+const etcdStartProgressCheckInterval = time.Second
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
@@ -345,9 +353,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 }
 
 func (s *Server) startEtcd(ctx context.Context) (retErr error) {
-	newCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
-	defer cancel()
-
 	etcd, err := embed.StartEtcd(s.etcdCfg)
 	if err != nil {
 		return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
@@ -395,11 +400,11 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 		return err
 	}
 
-	select {
-	// Wait etcd until it is ready to use
-	case <-etcd.Server.ReadyNotify():
-	case <-newCtx.Done():
-		return errs.ErrCancelStartEtcd.FastGenByArgs()
+	// Wait until etcd is ready to use. Instead of a fixed overall deadline, only
+	// give up when etcd makes no apply progress for EtcdStartTimeout, so a slow
+	// but healthy startup that is still catching up its raft log is not killed.
+	if err = s.waitEtcdReady(ctx, etcd); err != nil {
+		return err
 	}
 
 	// Start the etcd and HTTP clients, then init the member.
@@ -407,13 +412,57 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	if err != nil {
 		return err
 	}
-	err = s.initMember(newCtx, etcd)
+	initCtx, cancel := context.WithTimeout(ctx, EtcdStartTimeout)
+	defer cancel()
+	err = s.initMember(initCtx, etcd)
 	if err != nil {
 		return err
 	}
 
 	s.initGRPCServiceLabels()
 	return nil
+}
+
+// waitEtcdReady blocks until the embedded etcd is ready to serve requests.
+//
+// Rather than bounding the wait by a fixed deadline, it treats the etcd applied
+// index as a liveness signal: as long as the applied index keeps advancing, the
+// startup is still making progress (e.g. applying its raft log while catching
+// up) and we keep waiting. Only when there is no apply progress for
+// EtcdStartTimeout do we give up. This distinguishes a slow-but-healthy startup
+// from a genuine hang, such as a removed member that can never rejoin the
+// quorum. It also honors ctx cancellation for normal shutdown.
+func (s *Server) waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
+	ticker := time.NewTicker(etcdStartProgressCheckInterval)
+	defer ticker.Stop()
+
+	lastApplied := etcd.Server.AppliedIndex()
+	lastProgress := time.Now()
+	for {
+		select {
+		case <-etcd.Server.ReadyNotify():
+			return nil
+		case <-ctx.Done():
+			return errs.ErrCancelStartEtcd.FastGenByArgs()
+		case now := <-ticker.C:
+			applied := etcd.Server.AppliedIndex()
+			if applied > lastApplied {
+				log.Info("etcd is not ready yet but still making apply progress, keep waiting",
+					zap.Uint64("last-applied-index", lastApplied),
+					zap.Uint64("applied-index", applied))
+				lastApplied = applied
+				lastProgress = now
+				continue
+			}
+			if stalled := now.Sub(lastProgress); stalled >= EtcdStartTimeout {
+				log.Warn("etcd is not ready and made no apply progress, stop waiting",
+					zap.Uint64("applied-index", applied),
+					zap.Duration("no-progress-duration", stalled),
+					zap.Duration("timeout", EtcdStartTimeout))
+				return errs.ErrCancelStartEtcd.FastGenByArgs()
+			}
+		}
+	}
 }
 
 func (s *Server) initGRPCServiceLabels() {
