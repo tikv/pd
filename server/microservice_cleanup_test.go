@@ -112,6 +112,112 @@ func TestCleanupMicroserviceMetadataInPDMode(t *testing.T) {
 	re.Equal("timestamp", string(resp.Kvs[0].Value))
 }
 
+func TestCleanupMicroserviceMetadataWaitsForLeasedKeys(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	keypath.SetClusterID(12351)
+	defer keypath.ResetClusterID()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{1},
+		}); err != nil {
+			return err
+		}
+		return store.SaveKeyspaceMeta(txn, newKeyspaceMetaWithTSOGroup(1, "0"))
+	}))
+	registryPath := keypath.RegistryPath(mcs.TSOServiceName, "127.0.0.1:3379")
+	leaseID, err := etcdutil.EtcdKVPutWithTTL(ctx, client, registryPath, "tso", 60)
+	re.NoError(err)
+	re.NotZero(leaseID)
+
+	err = svr.cleanupMicroserviceMetadataInPDMode(ctx)
+	re.ErrorContains(err, "is still leased")
+
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		meta, err := store.LoadKeyspaceMeta(txn, 1)
+		if err != nil {
+			return err
+		}
+		re.Contains(meta.GetConfig(), keyspace.TSOKeyspaceGroupIDKey)
+		return nil
+	}))
+	resp, err := etcdutil.EtcdKVGet(client, registryPath)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.NotZero(resp.Kvs[0].Lease)
+
+	_, err = client.Revoke(ctx, leaseID)
+	re.NoError(err)
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
+	groups, err = store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Empty(groups)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		meta, err := store.LoadKeyspaceMeta(txn, 1)
+		if err != nil {
+			return err
+		}
+		re.NotContains(meta.GetConfig(), keyspace.TSOKeyspaceGroupIDKey)
+		return nil
+	}))
+}
+
+func TestCleanupMicroserviceMetadataRechecksLeasesBeforeDelete(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	keypath.SetClusterID(12352)
+	defer keypath.ResetClusterID()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Keyspaces: []uint32{1},
+		}); err != nil {
+			return err
+		}
+		return store.SaveKeyspaceMeta(txn, newKeyspaceMetaWithTSOGroup(1, "0"))
+	}))
+	registryPath := keypath.RegistryPath(mcs.TSOServiceName, "127.0.0.1:3379")
+	var leaseID clientv3.LeaseID
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/beforeDeleteMicroserviceEtcdKeys", func() {
+		if leaseID != clientv3.NoLease {
+			return
+		}
+		var err error
+		leaseID, err = etcdutil.EtcdKVPutWithTTL(ctx, client, registryPath, "tso", 60)
+		re.NoError(err)
+	}))
+	t.Cleanup(func() {
+		_ = failpoint.Disable("github.com/tikv/pd/server/beforeDeleteMicroserviceEtcdKeys")
+	})
+
+	err := svr.cleanupMicroserviceMetadataInPDMode(ctx)
+	re.ErrorContains(err, "is still leased")
+	re.NotZero(leaseID)
+	resp, err := etcdutil.EtcdKVGet(client, registryPath)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal(leaseID, clientv3.LeaseID(resp.Kvs[0].Lease))
+
+	_, err = client.Revoke(ctx, leaseID)
+	re.NoError(err)
+}
+
 func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
@@ -138,6 +244,45 @@ func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 	re.Less(time.Since(start), 200*time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet"))
 	svr.serverLoopWg.Wait()
+}
+
+func TestScheduleMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	keypath.SetClusterID(12353)
+	defer keypath.ResetClusterID()
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+		}); err != nil {
+			return err
+		}
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       1,
+			UserKind: endpoint.Standard.String(),
+		})
+	}))
+
+	svr.scheduleMicroserviceMetadataCleanup(ctx)
+	done := make(chan struct{})
+	go func() {
+		svr.serverLoopWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("cleanup task kept retrying a rejected metadata state")
+	}
 }
 
 func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
