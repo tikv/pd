@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -157,5 +158,36 @@ func TestAsyncLoadResourceGroupsDoesNotRestoreDeletedLazyGroup(t *testing.T) {
 			}
 		}
 		return true
+	}, testutil.WithTickInterval(20*time.Millisecond))
+}
+
+// TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace guards against the point
+// loaders (LoadResourceGroupSetting/LoadResourceGroupState) diverging from
+// the bulk loaders on legacy, pre-keyspace resource groups: those are saved
+// under constant.NullKeyspaceID, and a lazy Get during async loading must be
+// able to find one the same way the bulk scan would once it completes.
+func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	re.NoError(store.SaveResourceGroupSetting(constant.NullKeyspaceID, "legacy-group", newAsyncTestGroup("legacy-group", 100)))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+
+	group, err := m.GetResourceGroup(constant.NullKeyspaceID, "legacy-group", false)
+	re.NoError(err)
+	re.NotNil(group)
+	re.Equal("legacy-group", group.Name)
+	re.Equal(float64(100), group.RUSettings.RU.getFillRate())
+
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		group, err := m.GetResourceGroup(constant.NullKeyspaceID, "legacy-group", false)
+		return err == nil && group != nil
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }
