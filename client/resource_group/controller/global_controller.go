@@ -576,7 +576,7 @@ func (c *ResourceGroupsController) shouldUseDegradedResourceGroup(err error) boo
 	if isResourceGroupNotFoundError(err) {
 		return false
 	}
-	if normalizedErr := normalizeGetResourceGroupError(err); normalizedErr == context.Canceled || normalizedErr == context.DeadlineExceeded {
+	if goerrors.Is(err, context.Canceled) || goerrors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	causeErr := unwrapGetResourceGroupError(err)
@@ -584,6 +584,8 @@ func (c *ResourceGroupsController) shouldUseDegradedResourceGroup(err error) boo
 		return true
 	}
 	switch status.Code(causeErr) {
+	case codes.Canceled:
+		return false
 	case codes.Unavailable, codes.DeadlineExceeded:
 		return true
 	default:

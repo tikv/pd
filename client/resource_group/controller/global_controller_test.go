@@ -424,6 +424,20 @@ func TestGetResourceGroup(t *testing.T) {
 		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
 	})
 
+	t.Run("grpc-deadline-exceeded-uses-degraded-group", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", status.Error(codes.DeadlineExceeded, "rpc deadline exceeded"))).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(degradedResourceGroup, gc.getMeta())
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
 	t.Run("generic-non-retryable-error-returns-original-error", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
