@@ -295,6 +295,13 @@ func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
 	return m.controllerConfig.RUVersionPolicy.Clone()
 }
 
+// getOrCreateKeyspaceResourceGroupManager returns the keyspace resource group
+// manager for keyspaceID, creating it if needed. When initDefault is true, it
+// also ensures the default resource group is present. While async loading is
+// still in progress this goes through loadResourceGroupIfNeeded, which tries
+// a storage point load first so a customized default is never clobbered by a
+// blindly synthesized one. Once loading has completed, any default missing
+// from the cache truly doesn't exist anywhere, so it's synthesized directly.
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
 	krgm, ok := m.krgms[keyspaceID]
@@ -303,9 +310,15 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 		m.krgms[keyspaceID] = krgm
 	}
 	m.Unlock()
-	// Init the default resource group if needed.
 	if initDefault {
-		krgm.initDefaultResourceGroup()
+		if atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted {
+			// Async loading (if any) has already finished, so if the default
+			// group isn't cached yet it truly doesn't exist anywhere; it's
+			// safe to synthesize and persist it directly.
+			krgm.initDefaultResourceGroup()
+		} else if err := m.loadResourceGroupIfNeeded(keyspaceID, DefaultResourceGroupName); err != nil {
+			log.Debug("failed to load default resource group", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+		}
 	}
 	return krgm
 }
@@ -591,8 +604,11 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	if err != nil {
 		if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
 			// No persisted default group settings exist yet (e.g. a brand-new
-			// keyspace), so it's safe to keep serving the reserved placeholder.
-			m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+			// keyspace), so it's safe to synthesize the reserved default group.
+			// This calls initDefaultResourceGroup directly instead of going
+			// through getOrCreateKeyspaceResourceGroupManager(id, true), which
+			// now routes back into this same function and would recurse.
+			m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).initDefaultResourceGroup()
 			return nil
 		}
 		return err
