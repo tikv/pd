@@ -339,7 +339,8 @@ func TestGetResourceGroup(t *testing.T) {
 			Err:               err,
 		}
 	}
-	newController := func(provider *MockResourceGroupProvider, opts ...ResourceControlCreateOption) *ResourceGroupsController {
+	newController := func(t *testing.T, provider *MockResourceGroupProvider, opts ...ResourceControlCreateOption) *ResourceGroupsController {
+		re := require.New(t)
 		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID, opts...)
 		re.NoError(err)
 		return controller
@@ -357,7 +358,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("transient-rm-unavailability-uses-degraded-and-recovers", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		realGroup := newResourceGroup("test-group", 1000000, 0)
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
@@ -379,7 +380,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("resource-group-not-found-returns-original-error", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		notFoundErr := wrapGetResourceGroupErr("test-group",
 			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the test-group resource group does not exist"))
@@ -396,7 +397,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("caller-cancellation-returns-context-canceled", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
 			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.Canceled)).
@@ -411,7 +412,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("caller-deadline-returns-context-deadline-exceeded", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
 			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.DeadlineExceeded)).
@@ -426,7 +427,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("grpc-deadline-exceeded-uses-degraded-group", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
 			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", status.Error(codes.DeadlineExceeded, "rpc deadline exceeded"))).
@@ -440,7 +441,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("generic-non-retryable-error-returns-original-error", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		permissionErr := wrapGetResourceGroupErr("test-group", status.Error(codes.PermissionDenied, "permission denied"))
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
@@ -456,7 +457,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("nonexistent-switch-group-target-does-not-switch", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
 		switchTargetErr := wrapGetResourceGroupErr("switch-target",
 			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the switch-target resource group does not exist"))
@@ -473,7 +474,7 @@ func TestGetResourceGroup(t *testing.T) {
 
 	t.Run("without-degraded-settings-propagates-transient-error", func(t *testing.T) {
 		mockProvider := newMockResourceGroupProvider()
-		controller := newController(mockProvider)
+		controller := newController(t, mockProvider)
 
 		unavailableErr := wrapGetResourceGroupErr("test-group", status.Error(codes.Unavailable, "resource manager unavailable"))
 		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
