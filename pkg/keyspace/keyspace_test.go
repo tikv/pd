@@ -984,12 +984,8 @@ func TestIterateKeyspaces(t *testing.T) {
 		}
 
 		loadRangeCounter := 0
-		re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange", func() {
-			loadRangeCounter++
-		}))
-		defer func() {
-			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorOnLoadRange"))
-		}()
+		iteratorOnLoadRange = func() { loadRangeCounter++ }
+		defer func() { iteratorOnLoadRange = nil }()
 
 		it := manager.IterateKeyspaces()
 		i := 0
@@ -1020,7 +1016,9 @@ func TestIterateKeyspaces(t *testing.T) {
 		testWithKeyspaces(keyspaceIDs, keyspaceNames, expectedLoadRangeCount)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize", "return(5)"))
+	prevIteratorLoadingBatchSize := iteratorLoadingBatchSize
+	iteratorLoadingBatchSize = 5
+	defer func() { iteratorLoadingBatchSize = prevIteratorLoadingBatchSize }()
 
 	testWithKeyspaces([]uint32{}, []string{}, 2)
 	testWithKeyspaces([]uint32{1, 2}, []string{"ks1", "ks2"}, 2)
@@ -1030,7 +1028,7 @@ func TestIterateKeyspaces(t *testing.T) {
 	testWithNKeyspaces(1, 19, 2, 5)
 	testWithNKeyspaces(100, 20, 2, 6)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/keyspaceIteratorLoadingBatchSize"))
+	iteratorLoadingBatchSize = IteratorLoadingBatchSize
 
 	testWithNKeyspaces(1, 999, 1, 11)
 	testWithNKeyspaces(1, 1000, 10, 12)
