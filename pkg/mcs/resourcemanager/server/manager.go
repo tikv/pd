@@ -857,7 +857,13 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if err := krgm.modifyResourceGroup(grouppb); err != nil {
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+	// Modifying only patches settings, it never establishes the group's
+	// state. If the state still hasn't been confirmed (isReserved), marking
+	// it sync-loaded here would make the async bulk merge skip it forever,
+	// so the persisted running state would never get applied.
+	if !krgm.isReserved(grouppb.Name) {
+		m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+	}
 	return nil
 }
 

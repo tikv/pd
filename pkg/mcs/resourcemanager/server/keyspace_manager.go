@@ -303,13 +303,10 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 	if err != nil {
 		return err
 	}
-	if err := curGroup.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
-		return err
-	}
-	krgm.Lock()
-	delete(krgm.reservedGroups, group.Name)
-	krgm.Unlock()
-	return nil
+	// Deliberately not clearing reservedGroups here: modifying only patches
+	// settings, it never establishes the group's state, so it must not make
+	// a state-unconfirmed entry look fully confirmed.
+	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
 }
 
 func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
