@@ -153,6 +153,19 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.New("missing data or join a duplicated pd")
 	}
 
+	// Reject (and atomically claim) a joining member whose advertised client URL
+	// is already owned by another member. This runs before MemberAdd so a bad
+	// join never enters the member list. See issue #10999.
+	if err := checkAndClaimClientURLs(
+		client,
+		listResp.Header.GetClusterId(),
+		cfg.Name,
+		strings.Split(cfg.AdvertiseClientUrls, ","),
+		listResp.Members,
+	); err != nil {
+		return err
+	}
+
 	var addResp *clientv3.MemberAddResponse
 
 	failpoint.Inject("addMemberFailed", func() {
