@@ -21,6 +21,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -157,7 +159,18 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
 		c.inner.resourceManagerErrorHandler(err)
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		causeErr := err
+		switch status.Code(err) {
+		case codes.Canceled:
+			causeErr = context.Canceled
+		case codes.DeadlineExceeded:
+			causeErr = context.DeadlineExceeded
+		}
+		return nil, &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: resourceGroupName,
+			Cause:             err.Error(),
+			Err:               causeErr,
+		}
 	}
 	resErr := resp.GetError()
 	if resErr != nil {

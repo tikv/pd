@@ -317,6 +317,32 @@ func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	require.EqualValues(t, 0, rmServer.deleteCount.Load())
 }
 
+func TestGetResourceGroupPreservesContextErrors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdAddr, _, pdCleanup := startTestRMServer(t, "pd")
+	t.Cleanup(pdCleanup)
+	rmAddr, _, rmCleanup := startTestRMServer(t, "rm")
+	t.Cleanup(rmCleanup)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(inner.resourceManagerDiscovery.Close)
+
+	cli := &client{inner: inner}
+
+	canceledCtx, cancelRequest := context.WithCancel(ctx)
+	cancelRequest()
+	_, err := cli.GetResourceGroup(canceledCtx, "test-group")
+	require.ErrorIs(t, err, context.Canceled)
+
+	expiredCtx, cancelDeadline := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancelDeadline()
+	_, err = cli.GetResourceGroup(expiredCtx, "test-group")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
 func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {
 	t.Run("prefer-rm-when-available", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())

@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -65,11 +67,15 @@ func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resour
 		err = errors.New("fake get resource group error")
 	})
 	if err != nil {
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error(), Err: err}
 	}
 
 	args := m.Called(ctx, resourceGroupName, opts)
-	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
+	var group *rmpb.ResourceGroup
+	if ret := args.Get(0); ret != nil {
+		group = ret.(*rmpb.ResourceGroup)
+	}
+	return group, args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
@@ -309,77 +315,163 @@ func TestGetResourceGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Enable the failpoint to simulate an error when getting the resource group.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	}()
-
-	mockProvider := newMockResourceGroupProvider()
-
-	expectResourceGroupName := "test-group"
-	expectRUSettings := &rmpb.GroupRequestUnitSettings{
-		RU: &rmpb.TokenBucket{
-			Settings: &rmpb.TokenLimitSettings{
-				FillRate:   uint64(50),
-				BurstLimit: int64(100),
-			},
-		},
-	}
-	expectResourceGroup := &rmpb.ResourceGroup{
-		Name:       expectResourceGroupName,
-		Mode:       rmpb.GroupMode_RUMode,
-		RUSettings: expectRUSettings,
-	}
-
-	opts := []ResourceControlCreateOption{WithDegradedRUSettings(expectRUSettings)}
-
-	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
-	re.NoError(err)
-	controller.Start(ctx)
-
-	testResourceGroup := &rmpb.ResourceGroup{
-		Name: "test-group",
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate: 1000000,
+	newResourceGroup := func(name string, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
+		return &rmpb.ResourceGroup{
+			Name: name,
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   fillRate,
+						BurstLimit: burstLimit,
+					},
 				},
 			},
+		}
+	}
+	wrapGetResourceGroupErr := func(name string, err error) error {
+		if err == nil {
+			return nil
+		}
+		return &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: name,
+			Cause:             err.Error(),
+			Err:               err,
+		}
+	}
+	newController := func(provider *MockResourceGroupProvider, opts ...ResourceControlCreateOption) *ResourceGroupsController {
+		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID, opts...)
+		re.NoError(err)
+		return controller
+	}
+
+	degradedRUSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   50,
+				BurstLimit: 100,
+			},
 		},
 	}
-	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+	degradedResourceGroup := newResourceGroup("test-group", 50, 100)
 
-	// case1: when GetResourceGroup return error, it should return the expectResourceGroup.
-	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(expectResourceGroup, gc.getMeta())
+	t.Run("transient-rm-unavailability-uses-degraded-and-recovers", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
-	// case2: when GetResourceGroup return error again, It should still return the expectResourceGroup.
-	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(expectResourceGroup, gc.getMeta())
+		realGroup := newResourceGroup("test-group", 1000000, 0)
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", status.Error(codes.Unavailable, "resource manager unavailable"))).
+			Once()
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return(realGroup, nil).
+			Once()
 
-	// case3: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(testResourceGroup, gc.getMeta())
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(degradedResourceGroup, gc.getMeta())
 
-	// case4: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	}()
+		gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(realGroup, gc.getMeta())
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 2)
+	})
 
-	controller02, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
-	re.NoError(err)
-	controller02.Start(ctx)
+	t.Run("resource-group-not-found-returns-original-error", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
-	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
-	re.Error(err)
-	re.Nil(gc02)
+		notFoundErr := wrapGetResourceGroupErr("test-group",
+			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the test-group resource group does not exist"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), notFoundErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(notFoundErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("caller-cancellation-returns-context-canceled", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.Canceled)).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.ErrorIs(err, context.Canceled)
+		re.Equal(context.Canceled, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("caller-deadline-returns-context-deadline-exceeded", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.DeadlineExceeded)).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.ErrorIs(err, context.DeadlineExceeded)
+		re.Equal(context.DeadlineExceeded, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("generic-non-retryable-error-returns-original-error", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		permissionErr := wrapGetResourceGroupErr("test-group", status.Error(codes.PermissionDenied, "permission denied"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), permissionErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(permissionErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("nonexistent-switch-group-target-does-not-switch", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		switchTargetErr := wrapGetResourceGroupErr("switch-target",
+			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the switch-target resource group does not exist"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "switch-target", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), switchTargetErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "switch-target", false)
+		re.Error(err)
+		re.Same(switchTargetErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("without-degraded-settings-propagates-transient-error", func(t *testing.T) {
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(mockProvider)
+
+		unavailableErr := wrapGetResourceGroupErr("test-group", status.Error(codes.Unavailable, "resource manager unavailable"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), unavailableErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(unavailableErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
 }
 
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
