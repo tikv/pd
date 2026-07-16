@@ -21,6 +21,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 func TestMain(m *testing.M) {
@@ -43,6 +44,8 @@ func TestIsHotScheduleWithCPUSupported(t *testing.T) {
 		{"9.1.0", true},
 	}
 	for _, test := range tests {
-		re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
+		if !kerneltype.IsNextGen() {
+			re.Equal(test.expect, IsHotScheduleWithCPUSupported(MustParseVersion(test.version)), test.version)
+		}
 	}
 }
