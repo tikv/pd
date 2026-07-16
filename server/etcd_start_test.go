@@ -50,9 +50,25 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		re := require.New(t)
 		ready := make(chan struct{})
 		close(ready)
-		err := waitEtcdReadyProgress(context.Background(), ready, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, constApplied(0),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
+	})
+
+	t.Run("fails fast on async etcd error", func(t *testing.T) {
+		re := require.New(t)
+		// etcd reports a fatal startup error before ever becoming ready.
+		errCh := make(chan error, 1)
+		errCh <- errors.New("boom")
+		start := time.Now()
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), errCh, constApplied(0),
+			testCheckInterval, testNoProgressTimeout)
+		re.Error(err)
+		// The real cause is wrapped in ErrStartEtcd, not swallowed by a timeout.
+		re.ErrorContains(err, "PD:etcd:ErrStartEtcd")
+		re.ErrorContains(err, "boom")
+		// It must not wait out the whole no-progress window.
+		re.Less(time.Since(start), testNoProgressTimeout)
 	})
 
 	t.Run("keeps waiting while applied index advances", func(t *testing.T) {
@@ -66,7 +82,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 			close(ready)
 		}()
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), ready, advancingApplied(),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, advancingApplied(),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
 		// It must have outlived the no-progress window instead of bailing at it.
@@ -77,7 +93,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		re := require.New(t)
 		// ready never fires and applied index is stuck: a genuine hang.
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), constApplied(7),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, constApplied(7),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))
@@ -94,7 +110,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		}()
 		start := time.Now()
 		// applied index advances, so only ctx cancellation can end the wait.
-		err := waitEtcdReadyProgress(ctx, make(chan struct{}), advancingApplied(),
+		err := waitEtcdReadyProgress(ctx, make(chan struct{}), nil, advancingApplied(),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))

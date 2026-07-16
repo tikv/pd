@@ -114,11 +114,11 @@ const (
 	lostPDLeaderReElectionFactor = 10
 )
 
-// EtcdStartTimeout the timeout of the startup etcd.
-// It is used as a no-progress timeout rather than a fixed overall deadline:
-// startEtcd only gives up when etcd makes no apply progress for this duration,
-// so a slow-but-healthy startup that keeps catching up its raft log is not
-// killed. See waitEtcdReady.
+// EtcdStartTimeout is the timeout for starting the embedded etcd. It is used as
+// a no-progress timeout rather than a fixed overall deadline: startEtcd only
+// gives up when etcd makes no apply progress for this duration, so a
+// slow-but-healthy startup that keeps catching up its raft log is not killed.
+// See waitEtcdReady.
 var EtcdStartTimeout = time.Minute * 5
 
 // etcdStartProgressCheckInterval is how often startEtcd polls the embedded
@@ -433,17 +433,20 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 // from a genuine hang, such as a removed member that can never rejoin the
 // quorum. It also honors ctx cancellation for normal shutdown.
 func (s *Server) waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
-	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Server.AppliedIndex,
+	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Err(), etcd.Server.AppliedIndex,
 		etcdStartProgressCheckInterval, EtcdStartTimeout)
 }
 
 // waitEtcdReadyProgress is the testable core of waitEtcdReady. It blocks until
 // ready is signaled, treating appliedIndex as a liveness signal: it keeps
 // waiting while appliedIndex advances, and only returns an error when there is
-// no apply progress for noProgressTimeout, or when ctx is canceled.
+// no apply progress for noProgressTimeout, or when ctx is canceled. It also
+// fails fast if etcd reports an asynchronous startup error on errCh, which would
+// otherwise leave ready unsignaled and stall the wait for the whole timeout.
 func waitEtcdReadyProgress(
 	ctx context.Context,
 	ready <-chan struct{},
+	errCh <-chan error,
 	appliedIndex func() uint64,
 	checkInterval, noProgressTimeout time.Duration,
 ) error {
@@ -456,6 +459,8 @@ func waitEtcdReadyProgress(
 		select {
 		case <-ready:
 			return nil
+		case err := <-errCh:
+			return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
 		case <-ctx.Done():
 			return errs.ErrCancelStartEtcd.FastGenByArgs()
 		case now := <-ticker.C:
