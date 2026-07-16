@@ -44,7 +44,8 @@ const (
 )
 
 var defaultPrioritiesConfig = prioritiesConfig{
-	read:        []string{utils.CPUPriority, utils.BytePriority},
+	// Keep CPU-based hot-read scheduling opt-in until it has been validated in canary clusters.
+	read:        []string{utils.QueryPriority, utils.BytePriority},
 	writeLeader: []string{utils.QueryPriority, utils.BytePriority},
 	writePeer:   []string{utils.BytePriority, utils.KeyPriority},
 }

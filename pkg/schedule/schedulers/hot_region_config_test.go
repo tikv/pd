@@ -32,11 +32,11 @@ func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
 		expect       []string
 	}{
 		{
-			name:         "cpu-supported-keep-origins",
+			name:         "cpu-supported-keeps-manual-opt-in",
 			querySupport: true,
 			cpuSupport:   true,
 			origins:      []string{utils.CPUPriority, utils.BytePriority},
-			expect:       getReadPriorities(&defaultPrioritiesConfig),
+			expect:       []string{utils.CPUPriority, utils.BytePriority},
 		},
 		{
 			name:         "cpu-unsupported-fallback-to-query",
@@ -50,6 +50,13 @@ func TestAdjustPrioritiesConfigCPUFallback(t *testing.T) {
 			querySupport: true,
 			cpuSupport:   false,
 			origins:      []string{utils.QueryPriority, utils.BytePriority},
+			expect:       []string{utils.QueryPriority, utils.BytePriority},
+		},
+		{
+			name:         "cpu-supported-invalid-config-uses-safe-default",
+			querySupport: true,
+			cpuSupport:   true,
+			origins:      []string{"invalid"},
 			expect:       []string{utils.QueryPriority, utils.BytePriority},
 		},
 		{

@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 var (
@@ -90,7 +91,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
@@ -99,7 +100,7 @@ func TestUpgrade(t *testing.T) {
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.CPUPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
 	re.Equal(defaultPendingWeight, hb.conf.getPendingWeight())
@@ -2348,8 +2349,15 @@ func TestCompatibility(t *testing.T) {
 		{utils.ByteDim, utils.KeyDim},
 	})
 	re.True(hb.(*hotScheduler).conf.lastQuerySupported)
-	re.False(hb.(*hotScheduler).conf.lastCPUSupported)
+	re.Equal(kerneltype.IsNextGen(), hb.(*hotScheduler).conf.lastCPUSupported)
 	tc.SetClusterVersion(versioninfo.MustParseVersion("8.5.7"))
+	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
+		{utils.QueryDim, utils.ByteDim},
+		{utils.QueryDim, utils.ByteDim},
+		{utils.ByteDim, utils.KeyDim},
+	})
+	// CPU support alone does not change the default. Operators must explicitly opt in.
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.CPUPriority, utils.BytePriority}
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.CPUDim, utils.ByteDim},
 		{utils.QueryDim, utils.ByteDim},
