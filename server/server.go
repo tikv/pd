@@ -433,19 +433,33 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 // from a genuine hang, such as a removed member that can never rejoin the
 // quorum. It also honors ctx cancellation for normal shutdown.
 func (s *Server) waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
-	ticker := time.NewTicker(etcdStartProgressCheckInterval)
+	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Server.AppliedIndex,
+		etcdStartProgressCheckInterval, EtcdStartTimeout)
+}
+
+// waitEtcdReadyProgress is the testable core of waitEtcdReady. It blocks until
+// ready is signaled, treating appliedIndex as a liveness signal: it keeps
+// waiting while appliedIndex advances, and only returns an error when there is
+// no apply progress for noProgressTimeout, or when ctx is canceled.
+func waitEtcdReadyProgress(
+	ctx context.Context,
+	ready <-chan struct{},
+	appliedIndex func() uint64,
+	checkInterval, noProgressTimeout time.Duration,
+) error {
+	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
-	lastApplied := etcd.Server.AppliedIndex()
+	lastApplied := appliedIndex()
 	lastProgress := time.Now()
 	for {
 		select {
-		case <-etcd.Server.ReadyNotify():
+		case <-ready:
 			return nil
 		case <-ctx.Done():
 			return errs.ErrCancelStartEtcd.FastGenByArgs()
 		case now := <-ticker.C:
-			applied := etcd.Server.AppliedIndex()
+			applied := appliedIndex()
 			if applied > lastApplied {
 				log.Info("etcd is not ready yet but still making apply progress, keep waiting",
 					zap.Uint64("last-applied-index", lastApplied),
@@ -454,11 +468,11 @@ func (s *Server) waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
 				lastProgress = now
 				continue
 			}
-			if stalled := now.Sub(lastProgress); stalled >= EtcdStartTimeout {
+			if stalled := now.Sub(lastProgress); stalled >= noProgressTimeout {
 				log.Warn("etcd is not ready and made no apply progress, stop waiting",
 					zap.Uint64("applied-index", applied),
 					zap.Duration("no-progress-duration", stalled),
-					zap.Duration("timeout", EtcdStartTimeout))
+					zap.Duration("timeout", noProgressTimeout))
 				return errs.ErrCancelStartEtcd.FastGenByArgs()
 			}
 		}
