@@ -502,11 +502,14 @@ func (suite *loopWatcherTestSuite) TestLoadUsesSingleSnapshotRevision() {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	var loadedRevision atomic.Int64
+	watcher.SetLoadRevisionUpdatedCallback(loadedRevision.Store)
 	watcher.SetLoadBatchSize(1)
 	nextRevision, err := watcher.load(ctx)
 	re.NoError(err)
 	re.NoError(putErr)
 	re.Equal(expectedRevision+1, nextRevision)
+	re.Equal(expectedRevision, loadedRevision.Load())
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
@@ -814,38 +817,6 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 	}
 	checkWatcherRequestProgress(false)
 	checkWatcherRequestProgress(true)
-}
-
-func (suite *loopWatcherTestSuite) TestWatcherReportsProgressRevision() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
-
-	watcher := NewLoopWatcher(
-		ctx,
-		&suite.wg,
-		suite.client,
-		"test",
-		"TestWatcherReportsProgressRevision",
-		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func([]*clientv3.Event) error { return nil },
-		false, /* withPrefix */
-	)
-	var updatedRevision atomic.Int64
-	watcher.SetRevisionUpdatedCallback(updatedRevision.Store)
-
-	suite.wg.Add(1)
-	go func() {
-		defer suite.wg.Done()
-		_, err := watcher.watch(ctx, 0)
-		re.NoError(err)
-	}()
-
-	testutil.Eventually(re, func() bool {
-		return updatedRevision.Load() > 0
-	})
 }
 
 func (suite *loopWatcherTestSuite) startEtcd(re *require.Assertions) {

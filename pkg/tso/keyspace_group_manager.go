@@ -597,7 +597,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	kgm.groupWatcher.SetRevisionUpdatedCallback(func(revision int64) {
+	kgm.groupWatcher.SetLoadRevisionUpdatedCallback(func(revision int64) {
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
 			if ok && addr == kgm.electionNamePrefix {
