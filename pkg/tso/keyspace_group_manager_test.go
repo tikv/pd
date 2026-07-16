@@ -246,7 +246,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevisio
 		[]uint32{keyspaceID + 1},
 	)
 	re.NoError(err)
-	deleteResp, err := suite.etcdClient.Delete(suite.ctx, keypath.KeyspaceGroupIDPath(deletedGroupID))
+	deleteResp, err := suite.etcdClient.Txn(suite.ctx).Then(
+		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(deletedGroupID)),
+		clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
+	).Commit()
 	re.NoError(err)
 	deletedRevision := uint64(deleteResp.Header.Revision)
 	re.Greater(deletedRevision, groupRevision)
@@ -258,7 +261,51 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevisio
 	re.NoError(err)
 	re.NotNil(kg)
 	re.Equal(groupID, loadedGroupID)
-	re.GreaterOrEqual(loadedRevision, deletedRevision)
+	re.Equal(deletedRevision, loadedRevision)
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestSnapshotRevisionRemainsComparableAcrossManagers() {
+	re := suite.Require()
+	keypath.SetClusterID(rand.Uint64())
+
+	cfg1 := suite.createConfig()
+	cfg2 := suite.createConfig()
+	mgr1 := suite.newKeyspaceGroupManager(1, cfg1)
+	mgr2 := suite.newKeyspaceGroupManager(1, cfg2)
+	defer mgr1.Close()
+	defer mgr2.Close()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(101)
+	)
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		groupID,
+		[]string{
+			mgr1.tsoServiceID.ServiceAddr,
+			mgr2.tsoServiceID.ServiceAddr,
+		},
+		[]int{
+			mcs.DefaultKeyspaceGroupReplicaPriority,
+			mcs.DefaultKeyspaceGroupReplicaPriority,
+		},
+		[]uint32{keyspaceID},
+	))
+	re.NoError(mgr1.Initialize())
+
+	_, _, _, oldRevision, err := mgr1.FindGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.NotZero(oldRevision)
+
+	_, err = suite.etcdClient.Put(suite.ctx, "/unrelated/revision-gap", "1")
+	re.NoError(err)
+
+	re.NoError(mgr2.Initialize())
+	_, _, _, newRevision, err := mgr2.FindGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.Equal(oldRevision, newRevision)
 }
 
 func (suite *keyspaceGroupManagerTestSuite) TestInitialSkipKeyspaceWatchDoesNotAdvanceRevision() {

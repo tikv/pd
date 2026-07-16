@@ -374,9 +374,6 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
-	// loadRevisionUpdatedFn is called after a snapshot has been loaded.
-	loadRevisionUpdatedFn func(int64)
-
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -418,7 +415,6 @@ func NewLoopWatcher(
 		deleteFn:                 deleteFn,
 		postEventsFn:             postEventsFn,
 		preEventsFn:              preEventsFn,
-		loadRevisionUpdatedFn:    func(int64) {},
 		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
@@ -714,7 +710,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			lw.loadRevisionUpdatedFn(snapshotRevision)
 			return snapshotRevision + 1, err
 		}
 	}
@@ -771,15 +766,6 @@ func (lw *LoopWatcher) ForceLoad() {
 // WaitLoad waits for the result to obtain whether data is loaded.
 func (lw *LoopWatcher) WaitLoad() error {
 	return <-lw.isLoadedCh
-}
-
-// SetLoadRevisionUpdatedCallback sets a callback that is invoked after a snapshot has been loaded.
-func (lw *LoopWatcher) SetLoadRevisionUpdatedCallback(fn func(int64)) {
-	if fn == nil {
-		lw.loadRevisionUpdatedFn = func(int64) {}
-		return
-	}
-	lw.loadRevisionUpdatedFn = fn
 }
 
 // SetLoadRetryTimes sets the retry times when loading data from etcd.

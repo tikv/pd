@@ -502,14 +502,11 @@ func (suite *loopWatcherTestSuite) TestLoadUsesSingleSnapshotRevision() {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
-	var loadedRevision atomic.Int64
-	watcher.SetLoadRevisionUpdatedCallback(loadedRevision.Store)
 	watcher.SetLoadBatchSize(1)
 	nextRevision, err := watcher.load(ctx)
 	re.NoError(err)
 	re.NoError(putErr)
 	re.Equal(expectedRevision+1, nextRevision)
-	re.Equal(expectedRevision, loadedRevision.Load())
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -129,6 +130,37 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupOperations() {
 	keyspaceGroups = []*endpoint.KeyspaceGroup{{ID: uint32(1), UserKind: endpoint.Standard.String()}}
 	err = suite.kgm.CreateKeyspaceGroups(keyspaceGroups)
 	re.Error(err)
+}
+
+func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupChangesUpdateRevisionMarker() {
+	re := suite.Require()
+
+	removeMarker := func() {
+		re.NoError(suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			return txn.Remove(keypath.KeyspaceGroupRevisionPath())
+		}))
+	}
+	checkMarker := func() {
+		var marker string
+		re.NoError(suite.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+			var err error
+			marker, err = txn.Load(keypath.KeyspaceGroupRevisionPath())
+			return err
+		}))
+		re.NotEmpty(marker)
+	}
+
+	removeMarker()
+	re.NoError(suite.kgm.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+	}}))
+	checkMarker()
+
+	removeMarker()
+	_, err := suite.kgm.DeleteKeyspaceGroupByID(1)
+	re.NoError(err)
+	checkMarker()
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
