@@ -97,14 +97,10 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	initialCluster := ""
-	// Cases with data directory.
-	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
-		cfg.InitialCluster = initialCluster
-		cfg.InitialClusterState = embed.ClusterStateFlagExisting
-		return nil
-	}
+	dataExists := isDataExist(filepath.Join(cfg.DataDir, "member"))
 
-	// Below are cases without data directory.
+	// A client to the target cluster is needed both to verify the advertised
+	// client URL is unique and, for a fresh join, to run MemberAdd.
 	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
@@ -118,15 +114,57 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		LogConfig:   &lgc,
 	})
 	if err != nil {
+		// A restart (data already exists) must not be blocked when the cluster
+		// is unreachable; the member starts from its local data directory, so
+		// the client-URL check is best-effort in that case.
+		if dataExists {
+			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to create etcd client",
+				errs.ZapError(err))
+			cfg.InitialCluster = initialCluster
+			cfg.InitialClusterState = embed.ClusterStateFlagExisting
+			return nil
+		}
 		return errors.WithStack(err)
 	}
 	defer client.Close()
 
 	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
+		if dataExists {
+			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to list members",
+				errs.ZapError(err))
+			cfg.InitialCluster = initialCluster
+			cfg.InitialClusterState = embed.ClusterStateFlagExisting
+			return nil
+		}
 		return err
 	}
 
+	// Reject (and atomically claim) a member — whether joining fresh or
+	// restarting with a modified advertise-client-urls — whose advertised client
+	// URL is already owned by another member. This runs before the local etcd
+	// (re)starts and republishes its attributes, so a duplicate never enters the
+	// member list. See issue #10999.
+	if err := checkAndClaimClientURLs(
+		client,
+		listResp.Header.GetClusterId(),
+		cfg.Name,
+		strings.Split(cfg.AdvertiseClientUrls, ","),
+		strings.Split(cfg.AdvertisePeerUrls, ","),
+		listResp.Members,
+	); err != nil {
+		return err
+	}
+
+	// Cases with data directory: the local etcd reads its configuration from the
+	// data directory, nothing more to prepare here.
+	if dataExists {
+		cfg.InitialCluster = initialCluster
+		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+		return nil
+	}
+
+	// Below are cases without data directory.
 	existed := false
 	joinedFailedToStart := false
 	advertisePeerURLs := strings.Split(cfg.AdvertisePeerUrls, ",")
@@ -151,19 +189,6 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	// - A failed PD re-joins the previous cluster.
 	if existed {
 		return errors.New("missing data or join a duplicated pd")
-	}
-
-	// Reject (and atomically claim) a joining member whose advertised client URL
-	// is already owned by another member. This runs before MemberAdd so a bad
-	// join never enters the member list. See issue #10999.
-	if err := checkAndClaimClientURLs(
-		client,
-		listResp.Header.GetClusterId(),
-		cfg.Name,
-		strings.Split(cfg.AdvertiseClientUrls, ","),
-		listResp.Members,
-	); err != nil {
-		return err
 	}
 
 	var addResp *clientv3.MemberAddResponse

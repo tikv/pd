@@ -198,6 +198,42 @@ func TestJoinWithDuplicateClientURL(t *testing.T) {
 	re.Len(members.Members, 1)
 }
 
+// Regression test for the restart path of https://github.com/tikv/pd/issues/10999:
+// a member that restarts (its data directory already exists) after its
+// advertise-client-urls was changed to a value owned by another member must
+// still be rejected. The uniqueness check runs on every startup, not only on a
+// fresh join, and before the local etcd republishes its attributes.
+func TestRestartWithModifiedDuplicateClientURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// Bring up a legitimate second member with its own unique client URL so it
+	// has a data directory, then stop it to simulate a restart.
+	pd2, err := cluster.Join(ctx)
+	re.NoError(err)
+	re.NoError(pd2.Run())
+	re.NotEmpty(cluster.WaitLeader())
+	re.NoError(pd2.Stop())
+
+	dupClientURL := cluster.GetServer("pd1").GetConfig().AdvertiseClientUrls
+
+	// Restart pd2 with its advertise-client-urls changed to pd1's. Its data
+	// directory still exists, so PrepareJoinCluster takes the "data exists"
+	// path — which must still run the uniqueness check and reject the restart.
+	cfg := pd2.GetConfig()
+	cfg.AdvertiseClientUrls = dupClientURL
+	err = join.PrepareJoinCluster(cfg)
+	re.Error(err)
+	re.Contains(err.Error(), "already used by member")
+}
+
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
