@@ -549,6 +549,9 @@ func (m *metrics) recordConsumption(
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
+	if consumption == nil {
+		return
+	}
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
 	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
@@ -692,6 +695,9 @@ func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *Controll
 }
 
 func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
+	if consumption == nil {
+		return
+	}
 	// RU info.
 	if consumption.RRU > 0 {
 		m.RRUMetrics.Add(consumption.RRU)
