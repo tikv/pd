@@ -43,6 +43,39 @@ const (
 // listMemberRetryTimes is the retry times of list member.
 var listMemberRetryTimes = 20
 
+var (
+	// restartListMemberRetryTimes is how many times a restarting member retries
+	// listing cluster members (with exponential backoff) before skipping the
+	// best-effort advertise-client-urls uniqueness check.
+	restartListMemberRetryTimes = 3
+	// restartListMemberBackoff is the initial backoff between those retries; it
+	// doubles each time (2s, 4s, 8s), which together with the per-request
+	// timeouts spans roughly 20s before giving up.
+	restartListMemberBackoff = 2 * time.Second
+)
+
+// retryListEtcdMembers retries ListEtcdMembers with exponential backoff. It is
+// used on the restart path so a transient failure does not immediately skip the
+// client-URL uniqueness check; it returns the last error if all retries fail.
+func retryListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	var (
+		listResp *clientv3.MemberListResponse
+		err      error
+	)
+	backoff := restartListMemberBackoff
+	for i := range restartListMemberRetryTimes {
+		time.Sleep(backoff)
+		backoff *= 2
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
+		if err == nil {
+			return listResp, nil
+		}
+		log.Warn("retry listing members on restart failed",
+			zap.Int("retry", i+1), errs.ZapError(err))
+	}
+	return nil, err
+}
+
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
@@ -130,25 +163,29 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
-		if dataExists {
-			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to list members",
+		if !dataExists {
+			return err
+		}
+		// Restart: a transient failure should not silently skip the check.
+		// Retry with exponential backoff, and only skip (best-effort) if the
+		// cluster is still unreachable afterwards — the member must still be
+		// able to start from its local data directory.
+		listResp, err = retryListEtcdMembers(client)
+		if err != nil {
+			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to list members after retries",
 				errs.ZapError(err))
 			cfg.InitialCluster = initialCluster
 			cfg.InitialClusterState = embed.ClusterStateFlagExisting
 			return nil
 		}
-		return err
 	}
 
-	// Reject (and atomically claim) a member — whether joining fresh or
-	// restarting with a modified advertise-client-urls — whose advertised client
-	// URL is already owned by another member. This runs before the local etcd
-	// (re)starts and republishes its attributes, so a duplicate never enters the
-	// member list. See issue #10999.
-	if err := checkAndClaimClientURLs(
-		client,
-		listResp.Header.GetClusterId(),
-		cfg.Name,
+	// Reject a member — whether joining fresh or restarting with a modified
+	// advertise-client-urls — whose advertised client URL is already owned by
+	// another member. This is read-only (no quorum needed) and runs before the
+	// local etcd (re)starts and republishes its attributes, so a duplicate never
+	// enters the member list. See issue #10999.
+	if err := checkClientURLConflict(
 		strings.Split(cfg.AdvertiseClientUrls, ","),
 		strings.Split(cfg.AdvertisePeerUrls, ","),
 		listResp.Members,
@@ -157,7 +194,9 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	// Cases with data directory: the local etcd reads its configuration from the
-	// data directory, nothing more to prepare here.
+	// data directory, nothing more to prepare here. The registry claim is
+	// intentionally skipped on this path — it writes to etcd (needs quorum), and
+	// a restart must not depend on quorum.
 	if dataExists {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
@@ -189,6 +228,19 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	// - A failed PD re-joins the previous cluster.
 	if existed {
 		return errors.New("missing data or join a duplicated pd")
+	}
+
+	// Atomically claim the advertised client URLs before MemberAdd so two
+	// concurrent joiners cannot both take the same client URL. Only the
+	// fresh-join path reaches here, where quorum is required anyway.
+	if err := claimClientURLs(
+		client,
+		listResp.Header.GetClusterId(),
+		cfg.Name,
+		strings.Split(cfg.AdvertiseClientUrls, ","),
+		strings.Split(cfg.AdvertisePeerUrls, ","),
+	); err != nil {
+		return err
 	}
 
 	var addResp *clientv3.MemberAddResponse

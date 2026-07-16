@@ -47,43 +47,25 @@ func clientURLRegistryPath(clusterID uint64, clientURL string) string {
 	return fmt.Sprintf("/pd/%d/member/client-urls/%s", clusterID, hex.EncodeToString([]byte(clientURL)))
 }
 
-// checkAndClaimClientURLs makes sure none of advertiseClientURLs is already
-// owned by another member, then atomically claims each URL in an etcd registry.
+// checkClientURLConflict rejects the member if any *other* member in the current
+// member list already advertises one of advertiseClientURLs. "Other" is decided
+// by peer URLs (unique per member), not name, so a different member that happens
+// to share our name is still checked. This catches the common case where an
+// existing, live member owns the URL — e.g. issue #10999.
 //
-// It is intentionally a standalone function (not folded into the join member
-// loop) so the same logic runs on every startup path — fresh join and a restart
-// that changed its advertise-client-urls alike. It has two layers:
-//
-//  1. Reject if any *other* member in the current member list already advertises
-//     one of these client URLs. "Other" is decided by peer URLs (unique per
-//     member), not name, so a different member that happens to share our name is
-//     still checked. This catches the common case where an existing, live member
-//     owns the URL — e.g. issue #10999.
-//  2. Atomically claim each URL via an etcd transaction (create-if-absent). This
-//     makes concurrent joiners race-safe: the transaction is serialized through
-//     raft, so the first claimer wins and a later joiner — even one sharing the
-//     same name — finds a different peer URL in the owner record and is rejected.
-//
-// The registry entry is keyed by URL and valued by the owner's identity (name +
-// peer URLs); a restart keeps the same peer URLs and therefore re-claims its own
-// URL without error.
-//
-// Known limitation: the claim is persistent, so if a member is removed and a
-// *different* member later wants to reuse its client URL, the stale entry must
-// be cleaned up first. Cleanup on member removal is tracked as follow-up work.
-func checkAndClaimClientURLs(
-	client *clientv3.Client,
-	clusterID uint64,
-	name string,
+// It is read-only (no etcd write, no quorum requirement), so it runs on every
+// startup — fresh join and a restart that changed its advertise-client-urls
+// alike — without ever blocking a member that needs to restart to *restore*
+// quorum.
+func checkClientURLConflict(
 	advertiseClientURLs []string,
 	advertisePeerURLs []string,
 	members []*etcdserverpb.Member,
 ) error {
-	// Layer 1: reject against the current member list. Skip only our own entry,
-	// matched by peer URLs so a different member sharing our name is still
-	// checked.
 	for _, url := range advertiseClientURLs {
 		for _, m := range members {
+			// Skip only our own entry, matched by peer URLs so a different
+			// member sharing our name is still checked.
 			if slice.EqualWithoutOrder(m.PeerURLs, advertisePeerURLs) {
 				continue
 			}
@@ -96,8 +78,30 @@ func checkAndClaimClientURLs(
 			}
 		}
 	}
+	return nil
+}
 
-	// Layer 2: atomically claim each URL.
+// claimClientURLs atomically claims each advertised client URL in an etcd
+// registry via a create-if-absent transaction. Because the transaction is
+// serialized through raft, two concurrent joiners cannot both take the same
+// client URL: the first wins and a later joiner — even one sharing the same name
+// — finds a different peer URL in the owner record and is rejected.
+//
+// The registry entry is keyed by URL and valued by the owner's identity (name +
+// peer URLs). This writes to etcd (needs quorum) and is therefore only used on
+// the fresh-join path, where quorum is required anyway for MemberAdd; a restart
+// relies on the read-only checkClientURLConflict instead.
+//
+// Known limitation: the claim is persistent, so if a member is removed and a
+// *different* member later wants to reuse its client URL, the stale entry must
+// be cleaned up first. Cleanup on member removal is tracked as follow-up work.
+func claimClientURLs(
+	client *clientv3.Client,
+	clusterID uint64,
+	name string,
+	advertiseClientURLs []string,
+	advertisePeerURLs []string,
+) error {
 	self := clientURLOwner{Name: name, PeerURLs: advertisePeerURLs}
 	value, err := json.Marshal(self)
 	if err != nil {
