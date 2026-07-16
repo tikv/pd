@@ -16,7 +16,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +39,10 @@ type blockingResourceGroupStorage struct {
 	releaseOnce sync.Once
 	entered     chan struct{}
 	release     chan struct{}
+
+	// failNextState, when true, makes the very next LoadResourceGroupState
+	// call fail once, then resets itself.
+	failNextState atomic.Bool
 }
 
 func newBlockingResourceGroupStorage() *blockingResourceGroupStorage {
@@ -53,6 +59,13 @@ func (s *blockingResourceGroupStorage) LoadResourceGroupSettings(f func(keyspace
 		<-s.release
 	})
 	return s.Storage.LoadResourceGroupSettings(f)
+}
+
+func (s *blockingResourceGroupStorage) LoadResourceGroupState(keyspaceID uint32, name string) (string, error) {
+	if s.failNextState.CompareAndSwap(true, false) {
+		return "", errors.New("injected resource group state load failure")
+	}
+	return s.Storage.LoadResourceGroupState(keyspaceID, name)
 }
 
 func (s *blockingResourceGroupStorage) waitEntered(t *testing.T) {
@@ -189,5 +202,46 @@ func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		group, err := m.GetResourceGroup(constant.NullKeyspaceID, "legacy-group", false)
 		return err == nil && group != nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+}
+
+// TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure guards against a
+// group getting stuck marked reserved forever after a transient
+// LoadResourceGroupState failure during lazy loading: once the async bulk
+// load subsequently installs the fully-loaded (settings and state)
+// confirmed data for the same group, the reserved marker must be cleared,
+// otherwise loadResourceGroupIfNeeded and the state persist loop would keep
+// treating already-recovered, correct data as an unconfirmed placeholder.
+func TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	group := newAsyncTestGroup("flaky-group", 100)
+	re.NoError(store.SaveResourceGroupSetting(1, "flaky-group", group))
+	re.NoError(store.SaveResourceGroupStates(1, "flaky-group", FromProtoResourceGroup(group).GetGroupStates()))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+
+	// Make the lazy load's own state read fail once, so the group is cached
+	// as a metadata-only, still-reserved entry.
+	store.failNextState.Store(true)
+	fetched, err := m.GetResourceGroup(1, "flaky-group", false)
+	re.NoError(err)
+	re.NotNil(fetched)
+
+	krgm := m.getKeyspaceResourceGroupManager(1)
+	re.NotNil(krgm)
+	re.True(krgm.isReserved("flaky-group"), "group should still be reserved after a failed state load")
+
+	// Let the async bulk load proceed; its own state read is unaffected
+	// (failNextState was already consumed) and should install confirmed data.
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		return !krgm.isReserved("flaky-group")
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }

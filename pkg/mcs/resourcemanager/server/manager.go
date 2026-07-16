@@ -496,6 +496,11 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
 				key := trackerKey{keyspaceID: keyspaceID, groupName: name}
 				if !m.syncLoadedGroups[key] {
 					krgm.groups[name] = group
+					// This group is now confirmed, fully-loaded data (settings
+					// and state); it must no longer be treated as an
+					// unconfirmed placeholder by loadResourceGroupIfNeeded or
+					// skipped by the state persist loop.
+					delete(krgm.reservedGroups, name)
 					groupsToSync = append(groupsToSync, group)
 					loaded++
 				}
