@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -71,7 +72,7 @@ func Every(interval time.Duration) fillRate {
 //     can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	fillRate fillRate
 	tokens   float64
 	burst    int64
@@ -202,7 +203,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	tokens += r.tokens
 
 	// update state
-	r.lim.last = now
+	r.lim.updateLast(now)
 	r.lim.tokens = tokens
 }
 
@@ -300,16 +301,23 @@ func (lim *Limiter) isLowTokensLocked() bool {
 
 // IsLowTokens returns whether the limiter is in low tokens
 func (lim *Limiter) IsLowTokens() bool {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	return lim.isLowTokensLocked()
 }
 
 // GetBurst returns the burst size of the limiter
 func (lim *Limiter) GetBurst() int64 {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	return lim.burst
+}
+
+// GetFillRate returns the current fill rate of the limiter.
+func (lim *Limiter) GetFillRate() float64 {
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
+	return float64(lim.fillRate)
 }
 
 // RemoveTokens decreases the amount of tokens currently available.
@@ -320,7 +328,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 		return
 	}
 	_, tokens := lim.getTokens(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
 }
@@ -354,11 +362,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Float64("old-notify-threshold", lim.notifyThreshold),
 		zap.Int64("old-burst", lim.burst))
 	if args.newBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.newTokens
 	} else {
 		_, tokens := lim.getTokens(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.newTokens
 	}
 	lim.fillRate = fillRate(args.newFillRate)
@@ -380,10 +388,10 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Int64("burst", lim.burst))
 }
 
-// AvailableTokens decreases the amount of tokens currently available.
+// AvailableTokens returns the current number of available tokens.
 func (lim *Limiter) AvailableTokens(now time.Time) float64 {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	_, tokens := lim.getTokens(now)
 	return tokens
 }
@@ -553,6 +561,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return 0, nil
 	}
+	failpoint.InjectCall("waitReservationsBeforeSelect")
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 

@@ -34,6 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -153,7 +155,13 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		storeLabel := strconv.FormatUint(storeID, 10)
 
 		if time.Since(lastBind) > time.Minute {
-			s.hbStreams.BindStream(storeID, server)
+			streams := c.GetHeartbeatStreams()
+			if streams == nil {
+				resp := &schedulingpb.RegionHeartbeatResponse{Header: notBootstrappedHeader()}
+				err := server.Send(resp)
+				return errors.WithStack(err)
+			}
+			streams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
 
@@ -243,13 +251,17 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 // StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
-	if c == nil {
+	var metaWatcher *meta.Watcher
+	if c != nil {
+		metaWatcher = c.GetMetaWatcher()
+	}
+	if c == nil || metaWatcher == nil {
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	start := time.Now()
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
-		s.metaWatcher.GetStoreWatcher().ForceLoad()
+		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
 	storeID := request.GetStats().GetStoreId()
@@ -373,6 +385,13 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	err := c.ValidRegion(reqRegion)
 	if err != nil {
 		return nil, err
+	}
+	region := c.GetRegion(reqRegion.GetId())
+	if affinityManager := c.GetAffinityManager(); affinityManager != nil && !affinityManager.AllowSplit(region, request.GetReason()) {
+		c.GetCoordinator().GetHeartbeatStreams().SendMsg(region, &hbstream.Operation{ChangeSplit: &pdpb.ChangeSplit{AutoSplitEnabled: false}})
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, "cannot split affinity region"),
+		}, nil
 	}
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)

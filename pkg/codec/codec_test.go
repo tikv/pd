@@ -38,17 +38,107 @@ func TestDecodeBytes(t *testing.T) {
 func TestTableID(t *testing.T) {
 	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff_i\x01\x02"))
-	re.Equal(int64(0xff), key.TableID())
+	re.Equal(int64(0xff), key.TableIdentity().TableID)
 
 	key = []byte("t\x80\x00\x00\x00\x00\x00\x00\xff")
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("T\x00\x00\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
 
 	key = EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\xff"))
-	re.Equal(int64(0), key.TableID())
+	re.Equal(int64(0), key.TableIdentity().TableID)
+}
+
+func TestTableIDWithKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	tableID := int64(100)
+	otherTableID := int64(200)
+	keyspaceID := uint32(42)
+
+	classic := EncodeBytes(GenerateTableKey(tableID))
+	re.Equal(TableIdentity{TableID: tableID}, classic.TableIdentity())
+
+	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
+	identity := TableIdentity{KeyspaceID: keyspaceID, TableID: tableID, HasKeyspace: true}
+	encoded := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...))
+	re.Equal(identity, encoded.TableIdentity())
+
+	other := EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(otherTableID)...))
+	re.Equal(otherTableID, other.TableIdentity().TableID)
+	re.NotEqual(encoded.TableIdentity(), other.TableIdentity())
+
+	// Same table: record and index keys must still resolve to the same identity.
+	record := EncodeBytes(append(append([]byte{}, prefix...), GenerateRowKey(tableID, 1)...))
+	indexKey := append(GenerateTableKey(tableID), '_', 'i')
+	indexKey = EncodeInt(indexKey, 7)
+	index := EncodeBytes(append(append([]byte{}, prefix...), indexKey...))
+	re.Equal(identity, record.TableIdentity())
+	re.Equal(identity, index.TableIdentity())
+
+	// Same numeric table id under different keyspaces is a different identity.
+	ks1 := EncodeBytes(append(MakeKeyspacePrefix(TxnKeyspaceModePrefix, 1), GenerateTableKey(tableID)...))
+	ks2 := EncodeBytes(append(MakeKeyspacePrefix(TxnKeyspaceModePrefix, 2), GenerateTableKey(tableID)...))
+	re.Equal(ks1.TableIdentity().TableID, ks2.TableIdentity().TableID)
+	re.NotEqual(ks1.TableIdentity(), ks2.TableIdentity())
+
+	// A raw key that only happens to start with the txn mode byte but is not
+	// followed by a TiDB table/meta payload must not be treated as a table key.
+	ambiguous := EncodeBytes([]byte{'x', 0x00, 0x00, 0x2a, 'u', 's', 'e', 'r'})
+	re.Equal(TableIdentity{}, ambiguous.TableIdentity())
+
+	// TiDB data only lives under the txn mode: a raw-mode keyspace key whose
+	// payload happens to look like a table key gets no table identity.
+	rawMode := EncodeBytes(append(MakeKeyspacePrefix(RawKeyspaceModePrefix, keyspaceID), GenerateTableKey(tableID)...))
+	re.Equal(TableIdentity{}, rawMode.TableIdentity())
+}
+
+func TestMetaOrTableWithKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	tableID := int64(55)
+	keyspaceID := uint32(7)
+	prefix := MakeKeyspacePrefix(TxnKeyspaceModePrefix, keyspaceID)
+
+	isMeta, id := EncodeBytes(append(append([]byte{}, prefix...), metaPrefix...)).MetaOrTable()
+	re.True(isMeta)
+	re.Equal(int64(0), id)
+
+	isMeta, id = EncodeBytes(append(append([]byte{}, prefix...), GenerateTableKey(tableID)...)).MetaOrTable()
+	re.False(isMeta)
+	re.Equal(tableID, id)
+
+	isMeta, id = EncodeBytes([]byte("hello")).MetaOrTable()
+	re.False(isMeta)
+	re.Equal(int64(0), id)
+}
+
+func TestMakeKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+	re.Equal([]byte{'r', 0x01, 0x02, 0x03}, MakeKeyspacePrefix(RawKeyspaceModePrefix, 0x010203))
+	// Only the lower 24 bits of the keyspace ID are encoded.
+	re.Equal([]byte{'x', 0xff, 0xff, 0xff}, MakeKeyspacePrefix(TxnKeyspaceModePrefix, 0xffffff))
+}
+
+func TestParseKeyspacePrefix(t *testing.T) {
+	re := require.New(t)
+
+	mode, id, ok := ParseKeyspacePrefix([]byte{'r', 0x01, 0x02, 0x03})
+	re.True(ok)
+	re.Equal(RawKeyspaceModePrefix, mode)
+	re.Equal(uint32(0x010203), id)
+
+	mode, id, ok = ParseKeyspacePrefix([]byte{'x', 0xff, 0xff, 0xff, 't'})
+	re.True(ok)
+	re.Equal(TxnKeyspaceModePrefix, mode)
+	re.Equal(uint32(0xffffff), id)
+
+	// Too short.
+	_, _, ok = ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
+	re.False(ok)
+	// Unknown mode byte.
+	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
+	re.False(ok)
 }

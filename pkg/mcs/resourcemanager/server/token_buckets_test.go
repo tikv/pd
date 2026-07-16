@@ -335,6 +335,104 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	}
 }
 
+func TestGroupTokenBucketSlotEventCounters(t *testing.T) {
+	re := require.New(t)
+	tbSetting := &rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 20000000,
+		},
+	}
+
+	gtb := NewGroupTokenBucket(testResourceGroupName, tbSetting)
+	now := time.Now()
+	clientUniqueID := uint64(100)
+
+	gtb.request(now, 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(1), gtb.slotsCreated)
+
+	gtb.request(now, 0, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(1), gtb.slotsDeleted)
+
+	gtb.request(now, 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+	re.Equal(uint64(2), gtb.slotsCreated)
+	gtb.tokenSlots[clientUniqueID].lastReqTime = now.Add(-(slotExpireTimeout + time.Second))
+	gtb.request(now.Add(2*time.Second), 1000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID+1)
+	re.Equal(uint64(1), gtb.slotsExpired)
+}
+
+func TestGroupTokenBucketTokenLoanMetricIsMaintainedIncrementally(t *testing.T) {
+	re := require.New(t)
+	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Tokens: 0,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   10,
+			BurstLimit: 100,
+		},
+	})
+	now := time.Now()
+	targetPeriodMs := uint64(time.Second / time.Millisecond)
+	gtb.init(now)
+	gtb.Tokens = 0
+
+	assertCachedLoan := func() {
+		re.InDelta(scanTokenLoan(gtb), gtb.getTokenLoan(), 1e-7)
+	}
+	assertCachedLoan()
+
+	_, _ = gtb.request(now, 100, targetPeriodMs, 1)
+	re.Positive(gtb.getTokenLoan())
+	assertCachedLoan()
+
+	_, _ = gtb.request(now, 100, targetPeriodMs, 2)
+	assertCachedLoan()
+
+	_, _ = gtb.request(now, 0, targetPeriodMs, 1)
+	assertCachedLoan()
+
+	gtb.tokenSlots[2].lastReqTime = time.Now().Add(-(slotExpireTimeout + time.Second))
+	_, _ = gtb.request(now, 100, targetPeriodMs, 3)
+	assertCachedLoan()
+
+	gtb.overrideFillRate = 0
+	gtb.overrideBurstLimit = 0
+	_, _ = gtb.request(now, 100, targetPeriodMs, 3)
+	assertCachedLoan()
+}
+
+func TestGroupTokenBucketCloneDoesNotShareTokenSlots(t *testing.T) {
+	re := require.New(t)
+	gtb := NewGroupTokenBucket(testResourceGroupName, &rmpb.TokenBucket{
+		Tokens: 0,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   10,
+			BurstLimit: 100,
+		},
+	})
+	slot := newTokenSlot(1, time.Now())
+	gtb.tokenSlots[1] = slot
+	gtb.setSlotTokenCapacity(slot, -10)
+
+	cloned := gtb.clone()
+	cloned.setSlotTokenCapacity(cloned.tokenSlots[1], -20)
+
+	re.InDelta(-10.0, gtb.tokenSlots[1].curTokenCapacity, 1e-7)
+	re.InDelta(10.0, gtb.getTokenLoan(), 1e-7)
+	re.InDelta(-20.0, cloned.tokenSlots[1].curTokenCapacity, 1e-7)
+	re.InDelta(20.0, cloned.getTokenLoan(), 1e-7)
+}
+
+func scanTokenLoan(gtb *GroupTokenBucket) float64 {
+	var tokenLoan float64
+	for _, slot := range gtb.tokenSlots {
+		if slot.curTokenCapacity < 0 {
+			tokenLoan += -slot.curTokenCapacity
+		}
+	}
+	return tokenLoan
+}
+
 func TestBalanceSlotTokensFillRateAllocation(t *testing.T) {
 	re := require.New(t)
 
