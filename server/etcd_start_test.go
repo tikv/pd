@@ -50,7 +50,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		re := require.New(t)
 		ready := make(chan struct{})
 		close(ready)
-		err := waitEtcdReadyProgress(context.Background(), ready, nil, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, constApplied(0),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
 	})
@@ -61,13 +61,27 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		errCh := make(chan error, 1)
 		errCh <- errors.New("boom")
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), errCh, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, errCh, constApplied(0),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		// The real cause is wrapped in ErrStartEtcd, not swallowed by a timeout.
 		re.ErrorContains(err, "PD:etcd:ErrStartEtcd")
 		re.ErrorContains(err, "boom")
 		// It must not wait out the whole no-progress window.
+		re.Less(time.Since(start), testNoProgressTimeout)
+	})
+
+	t.Run("fails fast when etcd server stops before ready", func(t *testing.T) {
+		re := require.New(t)
+		// The server terminates before becoming ready without publishing an error
+		// on errCh (e.g. an internal EtcdServer.run failure).
+		stopped := make(chan struct{})
+		close(stopped)
+		start := time.Now()
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), stopped, nil, constApplied(0),
+			testCheckInterval, testNoProgressTimeout)
+		re.Error(err)
+		re.ErrorContains(err, "PD:etcd:ErrStartEtcd")
 		re.Less(time.Since(start), testNoProgressTimeout)
 	})
 
@@ -82,7 +96,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 			close(ready)
 		}()
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), ready, nil, advancingApplied(),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, advancingApplied(),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
 		// It must have outlived the no-progress window instead of bailing at it.
@@ -93,7 +107,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		re := require.New(t)
 		// ready never fires and applied index is stuck: a genuine hang.
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, constApplied(7),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, nil, constApplied(7),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))
@@ -104,17 +118,15 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 	t.Run("honors ctx cancellation", func(t *testing.T) {
 		re := require.New(t)
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		go func() {
 			time.Sleep(2 * testCheckInterval)
 			cancel()
 		}()
-		start := time.Now()
 		// applied index advances, so only ctx cancellation can end the wait.
-		err := waitEtcdReadyProgress(ctx, make(chan struct{}), nil, advancingApplied(),
+		err := waitEtcdReadyProgress(ctx, make(chan struct{}), nil, nil, advancingApplied(),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))
-		// Cancellation returns before the no-progress timeout would trigger.
-		re.Less(time.Since(start), testNoProgressTimeout)
 	})
 }

@@ -125,6 +125,10 @@ var EtcdStartTimeout = time.Minute * 5
 // etcd applied index to tell a slow-but-progressing startup apart from a hang.
 const etcdStartProgressCheckInterval = time.Second
 
+// etcdStartProgressLogInterval rate-limits the "still making progress" log, so a
+// recovery that runs for many minutes does not emit one line per poll.
+const etcdStartProgressLogInterval = 30 * time.Second
+
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	etcdTermGauge           = etcdStateGauge.WithLabelValues("term")
@@ -403,7 +407,7 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	// Wait until etcd is ready to use. Instead of a fixed overall deadline, only
 	// give up when etcd makes no apply progress for EtcdStartTimeout, so a slow
 	// but healthy startup that is still catching up its raft log is not killed.
-	if err = s.waitEtcdReady(ctx, etcd); err != nil {
+	if err = waitEtcdReady(ctx, etcd); err != nil {
 		return err
 	}
 
@@ -431,21 +435,26 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 // up) and we keep waiting. Only when there is no apply progress for
 // EtcdStartTimeout do we give up. This distinguishes a slow-but-healthy startup
 // from a genuine hang, such as a removed member that can never rejoin the
-// quorum. It also honors ctx cancellation for normal shutdown.
-func (s *Server) waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
-	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Err(), etcd.Server.AppliedIndex,
-		etcdStartProgressCheckInterval, EtcdStartTimeout)
+// quorum. It also fails fast when etcd reports a startup error or stops before
+// becoming ready, and honors ctx cancellation for normal shutdown.
+func waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
+	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Server.StopNotify(),
+		etcd.Err(), etcd.Server.AppliedIndex, etcdStartProgressCheckInterval, EtcdStartTimeout)
 }
 
-// waitEtcdReadyProgress is the testable core of waitEtcdReady. It blocks until
-// ready is signaled, treating appliedIndex as a liveness signal: it keeps
-// waiting while appliedIndex advances, and only returns an error when there is
-// no apply progress for noProgressTimeout, or when ctx is canceled. It also
-// fails fast if etcd reports an asynchronous startup error on errCh, which would
-// otherwise leave ready unsignaled and stall the wait for the whole timeout.
+// waitEtcdReadyProgress is the testable core of waitEtcdReady, decoupled from
+// *embed.Etcd so it can be driven without a real server. It keeps waiting while
+// appliedIndex advances and reports a no-progress failure only when appliedIndex
+// does not advance for noProgressTimeout. It fails fast when:
+//   - etcd reports an asynchronous startup error on errCh (e.g. listener or
+//     serving failures);
+//   - the etcd server stops before becoming ready (stopped), e.g. an internal
+//     EtcdServer.run failure that may not surface on errCh — the underlying
+//     error is preserved when etcd published one;
+//   - ctx is canceled (normal shutdown).
 func waitEtcdReadyProgress(
 	ctx context.Context,
-	ready <-chan struct{},
+	ready, stopped <-chan struct{},
 	errCh <-chan error,
 	appliedIndex func() uint64,
 	checkInterval, noProgressTimeout time.Duration,
@@ -455,22 +464,41 @@ func waitEtcdReadyProgress(
 
 	lastApplied := appliedIndex()
 	lastProgress := time.Now()
+	lastLog := lastProgress
 	for {
 		select {
 		case <-ready:
 			return nil
 		case err := <-errCh:
 			return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+		case <-stopped:
+			// The server terminated before becoming ready; surface the real
+			// cause if etcd published one, otherwise report the stop itself.
+			select {
+			case err := <-errCh:
+				return errs.ErrStartEtcd.Wrap(err).GenWithStackByCause()
+			default:
+				return errs.ErrStartEtcd.GenWithStackByArgs()
+			}
 		case <-ctx.Done():
 			return errs.ErrCancelStartEtcd.FastGenByArgs()
-		case now := <-ticker.C:
+		case <-ticker.C:
 			applied := appliedIndex()
+			// Sample the wall clock here rather than reusing the ticker's
+			// scheduled time: a tick buffered during a scheduling or GC pause
+			// carries a stale timestamp that could otherwise trip a false
+			// no-progress timeout on the following tick.
+			now := time.Now()
 			if applied > lastApplied {
-				log.Info("etcd is not ready yet but still making apply progress, keep waiting",
-					zap.Uint64("last-applied-index", lastApplied),
-					zap.Uint64("applied-index", applied))
 				lastApplied = applied
 				lastProgress = now
+				// Rate-limit: this path can run for many minutes during a slow
+				// recovery, so avoid logging on every poll.
+				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
+					log.Info("etcd is not ready yet but still making apply progress, keep waiting",
+						zap.Uint64("applied-index", applied))
+					lastLog = now
+				}
 				continue
 			}
 			if stalled := now.Sub(lastProgress); stalled >= noProgressTimeout {
