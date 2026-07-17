@@ -453,7 +453,7 @@ type serviceDiscovery struct {
 	// Client option.
 	option *opt.Option
 
-	cannotUpdateMemberLogger func() *zap.Logger
+	cannotUpdateMemberLogger *zap.Logger
 
 	flight singleflight.Group
 }
@@ -487,7 +487,7 @@ func NewServiceDiscovery(
 		keyspaceID:               keyspaceID,
 		tlsCfg:                   tlsCfg,
 		option:                   option,
-		cannotUpdateMemberLogger: logutil.SampleLoggerFactory(time.Minute, 5),
+		cannotUpdateMemberLogger: logutil.SampleLoggerFactory(time.Minute, 5)(),
 		flight:                   singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
@@ -892,16 +892,6 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	return nil
 }
 
-func (c *serviceDiscovery) logCannotUpdateMember(url string, err error) {
-	logger := log.L()
-	if c.cannotUpdateMemberLogger != nil {
-		logger = c.cannotUpdateMemberLogger()
-	}
-	logger.Info("[pd] cannot update member from this url",
-		zap.String("url", url),
-		errs.ZapError(err))
-}
-
 func (c *serviceDiscovery) updateMember() error {
 	for _, url := range c.GetServiceURLs() {
 		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
@@ -918,7 +908,9 @@ func (c *serviceDiscovery) updateMember() error {
 		}
 		// Failed to get members
 		if err != nil {
-			c.logCannotUpdateMember(url, err)
+			c.cannotUpdateMemberLogger.Info("[pd] cannot update member from this url",
+				zap.String("url", url),
+				errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)
