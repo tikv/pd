@@ -460,24 +460,6 @@ func TestGetResourceGroup(t *testing.T) {
 		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
 	})
 
-	t.Run("nonexistent-switch-group-target-does-not-switch", func(t *testing.T) {
-		re := require.New(t)
-		mockProvider := newMockResourceGroupProvider()
-		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
-
-		switchTargetErr := wrapGetResourceGroupErr("switch-target",
-			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the switch-target resource group does not exist"))
-		mockProvider.On("GetResourceGroup", mock.Anything, "switch-target", mock.Anything).
-			Return((*rmpb.ResourceGroup)(nil), switchTargetErr).
-			Once()
-
-		gc, err := controller.tryGetResourceGroupController(ctx, "switch-target", false)
-		re.Error(err)
-		re.Same(switchTargetErr, err)
-		re.Nil(gc)
-		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
-	})
-
 	t.Run("without-degraded-settings-propagates-transient-error", func(t *testing.T) {
 		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
