@@ -225,6 +225,9 @@ type RequestUnitConfig struct {
 	ReadPerBatchBaseCost float64 `toml:"read-per-batch-base-cost" json:"read-per-batch-base-cost"`
 	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
 	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
+	// ReadCostPerByteRemote is the cost for each byte processed by a remote coprocessor.
+	// Nil means the client controller should use half of ReadCostPerByte.
+	ReadCostPerByteRemote *float64 `toml:"read-cost-per-byte-remote" json:"read-cost-per-byte-remote,omitempty"`
 	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
 	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`

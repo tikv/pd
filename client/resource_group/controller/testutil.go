@@ -84,9 +84,10 @@ func (tri *TestRequestInfo) IsCop() bool {
 
 // TestResponseInfo is used to test the response info interface.
 type TestResponseInfo struct {
-	readBytes uint64
-	kvCPU     time.Duration
-	succeed   bool
+	readBytes       uint64
+	remoteReadBytes uint64
+	kvCPU           time.Duration
+	succeed         bool
 }
 
 // NewTestResponseInfo creates a new TestResponseInfo.
@@ -101,6 +102,11 @@ func NewTestResponseInfo(readBytes uint64, kvCPU time.Duration, succeed bool) *T
 // ReadBytes implements the ResponseInfo interface.
 func (tri *TestResponseInfo) ReadBytes() uint64 {
 	return tri.readBytes
+}
+
+// RemoteReadBytes implements the optional remoteReadBytesProvider interface.
+func (tri *TestResponseInfo) RemoteReadBytes() uint64 {
+	return tri.remoteReadBytes
 }
 
 // KVCPU implements the ResponseInfo interface.

@@ -118,6 +118,20 @@ type ResponseInfo interface {
 	ResponseSize() uint64
 }
 
+type remoteReadBytesProvider interface {
+	// RemoteReadBytes returns the factual subset of ReadBytes that was processed
+	// by a remote coprocessor.
+	RemoteReadBytes() uint64
+}
+
+func getRemoteReadBytes(res ResponseInfo, totalReadBytes uint64) uint64 {
+	provider, ok := res.(remoteReadBytesProvider)
+	if !ok {
+		return 0
+	}
+	return min(provider.RemoteReadBytes(), totalReadBytes)
+}
+
 // ResourceCalculator is used to calculate the resource consumption of a request.
 type ResourceCalculator interface {
 	// Trickle is used to calculate the resource consumption periodically rather than on the request path.
@@ -213,9 +227,12 @@ func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res Res
 	if consumption == nil {
 		return
 	}
-	readBytes := float64(res.ReadBytes())
-	consumption.ReadBytes += readBytes
-	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
+	totalReadBytes := res.ReadBytes()
+	remoteBytes := getRemoteReadBytes(res, totalReadBytes)
+	localReadBytes := totalReadBytes - remoteBytes
+	consumption.ReadBytes += float64(totalReadBytes)
+	consumption.RRU += float64(kc.ReadBytesCost)*float64(localReadBytes) +
+		float64(kc.RemoteReadBytesCost)*float64(remoteBytes)
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {

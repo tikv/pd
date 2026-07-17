@@ -50,5 +50,22 @@ read-cpu-ms-cost =  5.0
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.ReadCostPerByte-2), 1e-7)
+	re.Nil(cfg.Controller.RequestUnit.ReadCostPerByteRemote)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.ReadBaseCost-1), 1e-7)
+}
+
+func TestControllerConfigRemoteReadCostOverride(t *testing.T) {
+	re := require.New(t)
+	cfgData := `
+[controller.request-unit]
+read-cost-per-byte = 2.0
+read-cost-per-byte-remote = 0.25
+`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	re.NoError(cfg.Adjust(&meta))
+
+	re.NotNil(cfg.Controller.RequestUnit.ReadCostPerByteRemote)
+	re.InDelta(0.25, *cfg.Controller.RequestUnit.ReadCostPerByteRemote, 1e-7)
 }
