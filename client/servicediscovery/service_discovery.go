@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/logutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
 
@@ -452,6 +453,8 @@ type serviceDiscovery struct {
 	// Client option.
 	option *opt.Option
 
+	cannotUpdateMemberLogger func() *zap.Logger
+
 	flight singleflight.Group
 }
 
@@ -474,17 +477,18 @@ func NewServiceDiscovery(
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	pdsd := &serviceDiscovery{
-		checkMembershipCh:    make(chan struct{}, 1),
-		ctx:                  ctx,
-		cancel:               cancel,
-		wg:                   wg,
-		apiCandidateNodes:    [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
-		callbacks:            newServiceCallbacks(),
-		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
-		keyspaceID:           keyspaceID,
-		tlsCfg:               tlsCfg,
-		option:               option,
-		flight:               singleflight.Group{},
+		checkMembershipCh:        make(chan struct{}, 1),
+		ctx:                      ctx,
+		cancel:                   cancel,
+		wg:                       wg,
+		apiCandidateNodes:        [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
+		callbacks:                newServiceCallbacks(),
+		updateKeyspaceIDFunc:     updateKeyspaceIDFunc,
+		keyspaceID:               keyspaceID,
+		tlsCfg:                   tlsCfg,
+		option:                   option,
+		cannotUpdateMemberLogger: logutil.SampleLoggerFactory(time.Minute, 5),
+		flight:                   singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
@@ -888,6 +892,16 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	return nil
 }
 
+func (c *serviceDiscovery) logCannotUpdateMember(url string, err error) {
+	logger := log.L()
+	if c.cannotUpdateMemberLogger != nil {
+		logger = c.cannotUpdateMemberLogger()
+	}
+	logger.Info("[pd] cannot update member from this url",
+		zap.String("url", url),
+		errs.ZapError(err))
+}
+
 func (c *serviceDiscovery) updateMember() error {
 	for _, url := range c.GetServiceURLs() {
 		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
@@ -904,9 +918,7 @@ func (c *serviceDiscovery) updateMember() error {
 		}
 		// Failed to get members
 		if err != nil {
-			log.Info("[pd] cannot update member from this url",
-				zap.String("url", url),
-				errs.ZapError(err))
+			c.logCannotUpdateMember(url, err)
 			select {
 			case <-c.ctx.Done():
 				return errors.WithStack(err)

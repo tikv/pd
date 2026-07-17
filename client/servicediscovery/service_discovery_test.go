@@ -21,6 +21,7 @@ import (
 	"log"
 	"net"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,6 +29,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -37,6 +41,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	pingcaplog "github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -431,6 +436,45 @@ func TestUpdateURLs(t *testing.T) {
 	re.Equal(getURLs([]*pdpb.Member{members[3], members[2]}), cli.GetServiceURLs())
 	cli.updateURLs(members[3:])
 	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
+}
+
+func TestCannotUpdateMemberLogIsSampled(t *testing.T) {
+	core, observed := observer.New(zapcore.InfoLevel)
+	restore := pingcaplog.ReplaceGlobals(zap.New(core), nil)
+	t.Cleanup(restore)
+
+	newClient := func(url string) *serviceDiscovery {
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		var wg sync.WaitGroup
+		return NewServiceDiscovery(
+			ctx, cancel, &wg, nil, nil, 0, []string{url}, nil, opt.NewOption(),
+		).(*serviceDiscovery)
+	}
+
+	const (
+		firstURL  = "http://pd-1:2379"
+		secondURL = "http://pd-2:2379"
+	)
+	firstClient := newClient(firstURL)
+	secondClient := newClient(secondURL)
+	err := errors.New("pd unavailable")
+	for range 6 {
+		firstClient.logCannotUpdateMember(firstURL, err)
+		secondClient.logCannotUpdateMember(secondURL, err)
+	}
+
+	const sampledMessage = "[pd] cannot update member from this url"
+	sampledEntries := observed.FilterMessage(sampledMessage)
+	require.Equal(t, 10, sampledEntries.Len())
+	require.Equal(t, 5, sampledEntries.FilterField(zap.String("url", firstURL)).Len())
+	require.Equal(t, 5, sampledEntries.FilterField(zap.String("url", secondURL)).Len())
+
+	const batchWarning = "[pd] failed to update member"
+	for range 6 {
+		pingcaplog.Warn(batchWarning)
+	}
+	require.Equal(t, 6, observed.FilterMessage(batchWarning).Len())
 }
 
 func TestGRPCDialOption(t *testing.T) {
