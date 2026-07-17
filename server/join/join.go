@@ -181,10 +181,11 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	// Reject a member — whether joining fresh or restarting with a modified
-	// advertise-client-urls — whose advertised client URL is already owned by
-	// another member. This is read-only (no quorum needed) and runs before the
-	// local etcd (re)starts and republishes its attributes, so a duplicate never
-	// enters the member list. See issue #10999.
+	// advertise-client-urls — whose advertised client URL is already used by
+	// another published member. This is read-only (no quorum needed) and runs
+	// before the local etcd (re)starts and republishes its attributes. See issue
+	// #10999. Concurrent (pre-publish) races and initial-cluster nodes are not
+	// covered here; see checkClientURLConflict for scope.
 	if err := checkClientURLConflict(
 		strings.Split(cfg.AdvertiseClientUrls, ","),
 		strings.Split(cfg.AdvertisePeerUrls, ","),
@@ -228,19 +229,6 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	// - A failed PD re-joins the previous cluster.
 	if existed {
 		return errors.New("missing data or join a duplicated pd")
-	}
-
-	// Atomically claim the advertised client URLs before MemberAdd so two
-	// concurrent joiners cannot both take the same client URL. Only the
-	// fresh-join path reaches here, where quorum is required anyway.
-	if err := claimClientURLs(
-		client,
-		listResp.Header.GetClusterId(),
-		cfg.Name,
-		strings.Split(cfg.AdvertiseClientUrls, ","),
-		strings.Split(cfg.AdvertisePeerUrls, ","),
-	); err != nil {
-		return err
 	}
 
 	var addResp *clientv3.MemberAddResponse

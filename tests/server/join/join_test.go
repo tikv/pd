@@ -174,8 +174,8 @@ func TestJoinWithDuplicateClientURL(t *testing.T) {
 	defer cancel()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
 	re.NoError(err)
+	defer cluster.Destroy()
 
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
@@ -201,16 +201,17 @@ func TestJoinWithDuplicateClientURL(t *testing.T) {
 // Regression test for the restart path of https://github.com/tikv/pd/issues/10999:
 // a member that restarts (its data directory already exists) after its
 // advertise-client-urls was changed to a value owned by another member must
-// still be rejected. The uniqueness check runs on every startup, not only on a
-// fresh join, and before the local etcd republishes its attributes.
+// still be rejected. The read-only conflict check runs on the restart-with-data
+// path too, before the local etcd republishes its attributes — not only on a
+// fresh join.
 func TestRestartWithModifiedDuplicateClientURL(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	cluster, err := tests.NewTestCluster(ctx, 1)
-	defer cluster.Destroy()
 	re.NoError(err)
+	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
 
