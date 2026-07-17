@@ -32,6 +32,8 @@ import (
 // DefaultLeaseInSeconds is the default lease time in seconds.
 const DefaultLeaseInSeconds = 5
 
+const maxKeepAliveRetryInterval = time.Duration(DefaultLeaseInSeconds) * time.Second
+
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
 	ctx    context.Context
@@ -88,7 +90,7 @@ func (sr *ServiceRegister) Register() error {
 }
 
 func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveResponse {
-	t := time.NewTicker(time.Duration(sr.ttl) * time.Second / 2)
+	t := time.NewTicker(sr.keepAliveRetryInterval())
 	defer t.Stop()
 	for {
 		select {
@@ -111,6 +113,14 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 	}
 }
 
+func (sr *ServiceRegister) keepAliveRetryInterval() time.Duration {
+	interval := time.Duration(sr.ttl) * time.Second / 2
+	if interval > maxKeepAliveRetryInterval {
+		return maxKeepAliveRetryInterval
+	}
+	return interval
+}
+
 func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
@@ -120,8 +130,12 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 // Deregister deregisters the service from etcd.
 func (sr *ServiceRegister) Deregister() error {
 	sr.cancel()
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(sr.ttl)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), deregisterTimeout())
 	defer cancel()
 	_, err := sr.cli.Delete(ctx, sr.key)
 	return err
+}
+
+func deregisterTimeout() time.Duration {
+	return etcdutil.DefaultRequestTimeout
 }

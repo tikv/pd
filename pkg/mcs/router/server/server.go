@@ -97,7 +97,7 @@ func (s *Server) GetAddr() string {
 // GetLeaderLease returns the configured leader lease in seconds. The router
 // service has no lease config, so it returns 0 and the registry falls back to
 // discovery.DefaultLeaseInSeconds.
-func (s *Server) GetLeaderLease() int64 {
+func (*Server) GetLeaderLease() int64 {
 	return 0
 }
 
