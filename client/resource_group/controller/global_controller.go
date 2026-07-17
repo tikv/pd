@@ -551,10 +551,6 @@ func normalizeGetResourceGroupError(err error) error {
 		return context.Canceled
 	case goerrors.Is(err, context.DeadlineExceeded):
 		return context.DeadlineExceeded
-	case status.Code(err) == codes.Canceled:
-		return context.Canceled
-	case status.Code(err) == codes.DeadlineExceeded:
-		return context.DeadlineExceeded
 	default:
 		return err
 	}

@@ -428,6 +428,42 @@ func TestGetResourceGroup(t *testing.T) {
 		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
 	})
 
+	t.Run("server-grpc-status-without-degraded-settings-preserves-original-error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			code codes.Code
+		}{
+			{name: "canceled", code: codes.Canceled},
+			{name: "deadline-exceeded", code: codes.DeadlineExceeded},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				re := require.New(t)
+				activeCtx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+
+				mockProvider := newMockResourceGroupProvider()
+				controller := newController(t, mockProvider)
+
+				serverErr := status.Error(tc.code, "resource manager returned an error")
+				wrappedErr := &errs.ErrClientGetResourceGroup{
+					ResourceGroupName: "test-group",
+					Cause:             serverErr.Error(),
+					Err:               serverErr,
+				}
+				mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+					Return((*rmpb.ResourceGroup)(nil), wrappedErr).
+					Once()
+
+				gc, err := controller.tryGetResourceGroupController(activeCtx, "test-group", false)
+				re.Nil(gc)
+				re.Same(wrappedErr, err)
+				re.Same(serverErr, wrappedErr.Err)
+				re.Equal(tc.code, status.Code(err))
+				mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+			})
+		}
+	})
+
 	t.Run("grpc-deadline-exceeded-uses-degraded-group", func(t *testing.T) {
 		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
