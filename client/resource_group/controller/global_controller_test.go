@@ -311,7 +311,6 @@ func TestTryGetController(t *testing.T) {
 }
 
 func TestGetResourceGroup(t *testing.T) {
-	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -357,6 +356,7 @@ func TestGetResourceGroup(t *testing.T) {
 	degradedResourceGroup := newResourceGroup("test-group", 50, 100)
 
 	t.Run("transient-rm-unavailability-uses-degraded-and-recovers", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -379,6 +379,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("resource-group-not-found-returns-original-error", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -396,6 +397,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("caller-cancellation-returns-context-canceled", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -411,6 +413,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("caller-deadline-returns-context-deadline-exceeded", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -426,6 +429,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("grpc-deadline-exceeded-uses-degraded-group", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -440,6 +444,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("generic-non-retryable-error-returns-original-error", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -456,6 +461,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("nonexistent-switch-group-target-does-not-switch", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
@@ -473,6 +479,7 @@ func TestGetResourceGroup(t *testing.T) {
 	})
 
 	t.Run("without-degraded-settings-propagates-transient-error", func(t *testing.T) {
+		re := require.New(t)
 		mockProvider := newMockResourceGroupProvider()
 		controller := newController(t, mockProvider)
 
