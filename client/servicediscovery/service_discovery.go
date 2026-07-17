@@ -453,8 +453,6 @@ type serviceDiscovery struct {
 	// Client option.
 	option *opt.Option
 
-	sampleLogger *zap.Logger
-
 	flight singleflight.Group
 }
 
@@ -487,7 +485,6 @@ func NewServiceDiscovery(
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
-		sampleLogger:         logutil.SampleLoggerFactory(time.Minute, 5)(),
 		flight:               singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
@@ -908,7 +905,7 @@ func (c *serviceDiscovery) updateMember() error {
 		}
 		// Failed to get members
 		if err != nil {
-			c.sampleLogger.Info("[pd] cannot update member from this url",
+			logutil.SamplerLogger().Info("[pd] cannot update member from this url",
 				zap.String("url", url),
 				errs.ZapError(err))
 			select {

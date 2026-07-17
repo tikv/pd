@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestSampleLoggerFactory(t *testing.T) {
-	factory := SampleLoggerFactory(time.Minute, 5)
+	factory := getSampleLoggerFactory(time.Minute, 5)
 
 	firstCore, firstObserved := observer.New(zapcore.InfoLevel)
 	restoreFirst := log.ReplaceGlobals(zap.New(firstCore), nil)

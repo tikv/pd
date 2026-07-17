@@ -24,7 +24,9 @@ import (
 	"github.com/pingcap/log"
 )
 
-// SampleLoggerFactory returns a factory that lazily creates one sampled logger.
+var sampleLoggerFactory = getSampleLoggerFactory(time.Minute, 5)
+
+// getSampleLoggerFactory returns a factory that lazily creates one sampled logger.
 // The logger writes the first `first` entries with the same level and message
 // in each tick and drops the remaining matching entries until the next tick.
 // Zap hashes messages into 4096 counters per level, so distinct messages may
@@ -33,7 +35,7 @@ import (
 // is captured lazily on the returned factory's first invocation. The created
 // logger stays pinned to that global logger, so later log.ReplaceGlobals calls
 // do not retarget it.
-func SampleLoggerFactory(tick time.Duration, first int, fields ...zap.Field) func() *zap.Logger {
+func getSampleLoggerFactory(tick time.Duration, first int, fields ...zap.Field) func() *zap.Logger {
 	var (
 		once   sync.Once
 		logger *zap.Logger
@@ -47,4 +49,9 @@ func SampleLoggerFactory(tick time.Duration, first int, fields ...zap.Field) fun
 		})
 		return logger
 	}
+}
+
+// SamplerLogger returns the shared sampled logger for the PD client.
+func SamplerLogger() *zap.Logger {
+	return sampleLoggerFactory()
 }
