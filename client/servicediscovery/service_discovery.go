@@ -453,7 +453,7 @@ type serviceDiscovery struct {
 	// Client option.
 	option *opt.Option
 
-	cannotUpdateMemberLogger *zap.Logger
+	sampleLogger *zap.Logger
 
 	flight singleflight.Group
 }
@@ -477,18 +477,18 @@ func NewServiceDiscovery(
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	pdsd := &serviceDiscovery{
-		checkMembershipCh:        make(chan struct{}, 1),
-		ctx:                      ctx,
-		cancel:                   cancel,
-		wg:                       wg,
-		apiCandidateNodes:        [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
-		callbacks:                newServiceCallbacks(),
-		updateKeyspaceIDFunc:     updateKeyspaceIDFunc,
-		keyspaceID:               keyspaceID,
-		tlsCfg:                   tlsCfg,
-		option:                   option,
-		cannotUpdateMemberLogger: logutil.SampleLoggerFactory(time.Minute, 5)(),
-		flight:                   singleflight.Group{},
+		checkMembershipCh:    make(chan struct{}, 1),
+		ctx:                  ctx,
+		cancel:               cancel,
+		wg:                   wg,
+		apiCandidateNodes:    [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
+		callbacks:            newServiceCallbacks(),
+		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
+		keyspaceID:           keyspaceID,
+		tlsCfg:               tlsCfg,
+		option:               option,
+		sampleLogger:         logutil.SampleLoggerFactory(time.Minute, 5)(),
+		flight:               singleflight.Group{},
 	}
 	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
@@ -908,7 +908,7 @@ func (c *serviceDiscovery) updateMember() error {
 		}
 		// Failed to get members
 		if err != nil {
-			c.cannotUpdateMemberLogger.Info("[pd] cannot update member from this url",
+			c.sampleLogger.Info("[pd] cannot update member from this url",
 				zap.String("url", url),
 				errs.ZapError(err))
 			select {

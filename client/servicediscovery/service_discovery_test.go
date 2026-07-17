@@ -461,10 +461,10 @@ func TestCannotUpdateMemberLogIsSampled(t *testing.T) {
 	const sampledMessage = "[pd] cannot update member from this url"
 	err := errors.New("pd unavailable")
 	for range 6 {
-		firstClient.cannotUpdateMemberLogger.Info(sampledMessage,
+		firstClient.sampleLogger.Info(sampledMessage,
 			zap.String("url", firstURL),
 			errs.ZapError(err))
-		secondClient.cannotUpdateMemberLogger.Info(sampledMessage,
+		secondClient.sampleLogger.Info(sampledMessage,
 			zap.String("url", secondURL),
 			errs.ZapError(err))
 	}
@@ -487,13 +487,13 @@ func TestGRPCDialOption(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
 	cli := &serviceDiscovery{
-		callbacks:                newServiceCallbacks(),
-		checkMembershipCh:        make(chan struct{}, 1),
-		ctx:                      ctx,
-		cancel:                   cancel,
-		tlsCfg:                   nil,
-		option:                   opt.NewOption(),
-		cannotUpdateMemberLogger: zap.NewNop(),
+		callbacks:         newServiceCallbacks(),
+		checkMembershipCh: make(chan struct{}, 1),
+		ctx:               ctx,
+		cancel:            cancel,
+		tlsCfg:            nil,
+		option:            opt.NewOption(),
+		sampleLogger:      zap.NewNop(),
 	}
 	cli.urls.Store([]string{"tmp://test.url:5255"})
 	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()} //nolint:staticcheck
