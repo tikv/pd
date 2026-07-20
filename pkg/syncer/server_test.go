@@ -58,6 +58,62 @@ func TestHistoryBufferMaxSizeFromMemory(t *testing.T) {
 	}
 }
 
+// TestPublishCommittedRegionCount pins down the region count the leader
+// persists for the campaign gate, especially the reachable
+// regions > 0 && historyIndex == 0 state (bootstrap-with-existing-regions,
+// restart/upgrade reloading regions before the history advances). In that
+// state the leader must publish the real region count: a freshly joined member
+// can already have pulled all of these regions via a full-sync dump
+// (syncFullRegionsLocked streams the whole basic cluster on first connect), so
+// publishing 0 would let a stale/empty member win the campaign ahead of a
+// caught-up peer. The persisted value is asserted directly, so the test does
+// not depend on RunServer's ticker or any timing.
+func TestPublishCommittedRegionCount(t *testing.T) {
+	re := require.New(t)
+	syncer, bc := newTestRegionSyncer(t,
+		newTestSyncRegion(1, 1),
+		newTestSyncRegion(2, 2),
+		newTestSyncRegion(3, 3),
+	)
+	re.Equal(3, bc.GetTotalRegionCount())
+
+	loadCommitted := func() uint64 {
+		got, err := syncer.server.GetStorage().LoadRegionSyncerCommittedRegionCount()
+		re.NoError(err)
+		return got
+	}
+
+	// Regions are in the basic cluster but the syncer history is still at
+	// index 0 (nothing flowed through the heartbeat -> history path). These
+	// regions are still syncable via the full-sync dump, so the real count
+	// must be persisted, not 0.
+	re.Zero(syncer.history.getNextIndex())
+	published := syncer.publishCommittedRegionCount(-1)
+	re.Equal(3, published)
+	re.Equal(uint64(3), loadCommitted())
+
+	// Advancing the history does not change the published count: it always
+	// reflects the live basic-cluster region count.
+	syncer.history.record(newTestSyncRegion(4, 4))
+	re.NotZero(syncer.history.getNextIndex())
+	re.Equal(3, syncer.publishCommittedRegionCount(published))
+
+	// A new region grows the count and persists the new value.
+	bc.PutRegion(newTestSyncRegion(5, 5))
+	published = syncer.publishCommittedRegionCount(published)
+	re.Equal(4, published)
+	re.Equal(uint64(4), loadCommitted())
+
+	// An empty basic cluster reports 0 regardless of the history index: there
+	// is genuinely nothing for a follower to be behind on.
+	empty, _ := newTestRegionSyncer(t)
+	empty.history.record(newTestSyncRegion(1, 1))
+	re.Zero(empty.publishCommittedRegionCount(-1))
+	got, err := empty.server.GetStorage().LoadRegionSyncerCommittedRegionCount()
+	re.NoError(err)
+	re.Zero(got)
+}
+
 func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 	re := require.New(t)
 	syncer, _ := newTestRegionSyncer(t)

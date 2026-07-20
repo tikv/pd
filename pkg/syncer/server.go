@@ -198,10 +198,10 @@ type RegionSyncer struct {
 	// status when as client
 	streamingRunning atomic.Bool
 	// attempted sync status as client, sticky for the process lifetime.
-	// It is used to distinguish follower from never attempted to sync (e.g., bootstrapp).
+	// It is used to distinguish follower from never attempted to sync (e.g., bootstrap).
 	attemptedSync atomic.Bool
-	// status of the historitcal catch-up as client, sticky for the process lifetime.
-	// set to true once the client has observed that it has completed the historitcal
+	// status of the historical catch-up as client, sticky for the process lifetime.
+	// set to true once the client has observed that it has completed the historical
 	// catch-up/ the local region storage is durably populated.
 	historySynced atomic.Bool
 }
@@ -259,6 +259,25 @@ func (s *RegionSyncer) reloadHistorySyncedFromDurableState() {
 	}
 }
 
+// publishCommittedRegionCount persists the region count this leader is serving
+// via SaveRegionSyncerCommittedRegionCount, so that a member deciding whether
+// to campaign (canCampaignAsRegionSyncerCaughtUp) can tell whether it might be
+// behind on region-syncer data. Only the leader runs RunServer, so only the
+// leader writes this. It skips the write when the count is unchanged from
+// lastPublished and returns the count now published (== lastPublished when the
+// write was skipped or failed).
+func (s *RegionSyncer) publishCommittedRegionCount(lastPublished int) int {
+	count := s.server.GetBasicCluster().GetTotalRegionCount()
+	if count == lastPublished {
+		return lastPublished
+	}
+	if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
+		log.Warn("failed to persist committed region count", errs.ZapError(err))
+		return lastPublished
+	}
+	return count
+}
+
 // RunServer runs the server of the region syncer.
 // regionNotifier is used to get the changed regions.
 func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *core.RegionInfo) {
@@ -268,31 +287,10 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	committedCountTicker := time.NewTicker(committedRegionCountInterval)
 	// -1 forces an initial publish on the first tick.
 	lastPublishedRegionCount := -1
-	publishCommittedRegionCount := func() {
-		count := s.server.GetBasicCluster().GetTotalRegionCount()
-		// Only advertise a non-zero committed count once regions have actually
-		// entered the syncer history and thus become syncable by followers.
-		// Regions present in the basic cluster but that never flowed through the
-		// heartbeat -> changedRegions -> history path (most notably the bootstrap
-		// region) cannot have been synced by any follower. Counting them would
-		// keep the region-syncer campaign gate (canCampaignAsRegionSyncerCaughtUp)
-		// permanently closed and stall the next leader election until the grace
-		// elapses, even though no follower could possibly be caught up.
-		if s.history.getNextIndex() == 0 {
-			count = 0
-		}
-		if count != lastPublishedRegionCount {
-			if err := s.server.GetStorage().SaveRegionSyncerCommittedRegionCount(uint64(count)); err != nil {
-				log.Warn("failed to persist committed region count", errs.ZapError(err))
-			} else {
-				lastPublishedRegionCount = count
-			}
-		}
-	}
-	// Publish the region count immediately to minimize the poissibility of a leader dies
+	// Publish the region count immediately to minimize the possibility of a leader dies
 	// immediately and a new campaign gate misclassifies an unsynced follower as
 	// already caught up.
-	publishCommittedRegionCount()
+	lastPublishedRegionCount = s.publishCommittedRegionCount(lastPublishedRegionCount)
 
 	processRegion := func(region *core.RegionInfo) {
 		records = append(records, region)
@@ -338,7 +336,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			// that has not finished a history sync can still decide, after this
 			// leader is gone, whether it is caught up enough to campaign. Only
 			// the leader runs RunServer, so only the leader writes this.
-			publishCommittedRegionCount()
+			lastPublishedRegionCount = s.publishCommittedRegionCount(lastPublishedRegionCount)
 		case <-keepAliveTicker.C:
 			s.broadcast(ctx, nil, true)
 		}
