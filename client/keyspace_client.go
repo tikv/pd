@@ -68,7 +68,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 			// Create a hardcoded keyspace meta for keyspace_1
 			now := time.Now().Unix()
 			mockKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-				Id:             1,
+				Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 1},
 				Name:           name,
 				CreatedAt:      now,
 				StateChangedAt: now,
@@ -169,9 +169,9 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
-		Header: c.requestHeader(),
-		Id:     id,
-		State:  state,
+		Header:   c.requestHeader(),
+		Keyspace: &keyspacepb.UpdateKeyspaceStateRequest_Id{Id: id},
+		State:    state,
 	}
 	protoClient := c.keyspaceClient()
 	if protoClient == nil {
@@ -213,9 +213,9 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
-		Header:  c.requestHeader(),
-		StartId: startID,
-		Limit:   limit,
+		Header:        c.requestHeader(),
+		StartKeyspace: &keyspacepb.GetAllKeyspacesRequest_StartId{StartId: startID},
+		Limit:         limit,
 	}
 	protoClient := c.keyspaceClient()
 	if protoClient == nil {

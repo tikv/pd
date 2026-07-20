@@ -704,7 +704,7 @@ func (meta *tempKeyspaceMeta) toPB() (*keyspacepb.KeyspaceMeta, error) {
 
 	return &keyspacepb.KeyspaceMeta{
 		Name:           meta.Name,
-		Id:             meta.ID,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: meta.ID},
 		Config:         meta.Config,
 		CreatedAt:      meta.CreatedAt,
 		StateChangedAt: meta.StateChangedAt,

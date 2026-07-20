@@ -167,9 +167,11 @@ func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID 
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
-			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
 			CalleeId:        s.calleeID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspaceID,
+			},
 		},
 		Count: uint32(count),
 	}

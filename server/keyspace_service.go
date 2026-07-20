@@ -34,6 +34,7 @@ import (
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
 type KeyspaceServer struct {
+	keyspacepb.UnimplementedKeyspaceServer
 	*GrpcServer
 }
 
@@ -202,7 +203,7 @@ func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.
 	}
 
 	manager := s.GetKeyspaceManager()
-	keyspaces, err := manager.LoadRangeKeyspace(request.StartId, int(request.Limit))
+	keyspaces, err := manager.LoadRangeKeyspace(request.GetStartId(), int(request.Limit))
 	if err != nil {
 		return &keyspacepb.GetAllKeyspacesResponse{Header: getErrorHeader(err)}, nil
 	}

@@ -145,23 +145,23 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	for i, request := range requests {
 		created, err := manager.CreateKeyspace(request)
 		re.NoError(err)
-		re.Equal(uint32(i+1), created.Id)
+		re.Equal(uint32(i+1), created.GetId())
 		checkCreateRequest(re, request, created)
 
-		name, err := manager.GetKeyspaceNameByID(created.Id)
+		name, err := manager.GetKeyspaceNameByID(created.GetId())
 		re.NoError(err)
 		re.Equal(created.Name, name)
 
-		name, err = manager.GetEnabledKeyspaceNameByID(created.Id)
+		name, err = manager.GetEnabledKeyspaceNameByID(created.GetId())
 		re.NoError(err)
 		re.Equal(created.Name, name)
 
 		loaded, err := manager.LoadKeyspace(request.Name)
 		re.NoError(err)
-		re.Equal(uint32(i+1), loaded.Id)
+		re.Equal(uint32(i+1), loaded.GetId())
 		checkCreateRequest(re, request, loaded)
 
-		loaded, err = manager.LoadKeyspaceByID(created.Id)
+		loaded, err = manager.LoadKeyspaceByID(created.GetId())
 		re.NoError(err)
 		re.Equal(loaded.Name, request.Name)
 		checkCreateRequest(re, request, loaded)
@@ -283,7 +283,7 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		}
 		created, err := manager.CreateKeyspace(req)
 		re.NoError(err)
-		loaded, err := manager.LoadKeyspaceByID(created.Id)
+		loaded, err := manager.LoadKeyspaceByID(created.GetId())
 		re.NoError(err)
 		re.Equal(tc.expect, loaded.Config[GCManagementType])
 	}
@@ -316,7 +316,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 		created, err := manager.CreateKeyspaceByID(request)
 		re.NoError(err)
 		id := i + 1
-		re.Equal(uint32(id), created.Id)
+		re.Equal(uint32(id), created.GetId())
 		re.Equal(strconv.Itoa(id), created.Name)
 		checkCreateByIDRequest(re, request, created)
 
@@ -324,7 +324,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 		re.NoError(err)
 		checkCreateByIDRequest(re, request, loaded)
 
-		loaded, err = manager.LoadKeyspaceByID(created.Id)
+		loaded, err = manager.LoadKeyspaceByID(created.GetId())
 		re.NoError(err)
 		checkCreateByIDRequest(re, request, loaded)
 	}
@@ -363,7 +363,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
 	}
 	first, err := manager.CreateKeyspace(req)
 	re.NoError(err)
-	re.Equal(uint32(1), first.Id)
+	re.Equal(uint32(1), first.GetId())
 
 	// Attempt to create the same keyspace 5 times - should all fail without allocating IDs.
 	for range 5 {
@@ -378,7 +378,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
 		Config:     map[string]string{testConfig1: "100"},
 	})
 	re.NoError(err)
-	re.Equal(uint32(2), second.Id)
+	re.Equal(uint32(2), second.GetId())
 
 	// Test CreateKeyspaceByID: should reject duplicate name or ID early.
 	id10 := uint32(10)
@@ -418,7 +418,7 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceNoIDLeak() {
 		Config:     map[string]string{testConfig1: "100"},
 	})
 	re.NoError(err)
-	re.Equal(uint32(3), third.Id)
+	re.Equal(uint32(3), third.GetId())
 }
 
 func makeMutations() []*Mutation {
@@ -657,17 +657,17 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 		for i := range keyspaces {
 			if i < total {
 				// User-created keyspaces with IDs 1-100
-				re.Equal(uint32(i+1), keyspaces[i].Id)
+				re.Equal(uint32(i+1), keyspaces[i].GetId())
 				checkCreateRequest(re, requests[i], keyspaces[i])
 			} else {
 				// Bootstrap keyspace with SystemKeyspaceID
-				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].GetId())
 			}
 		}
 	} else {
 		// For classic: expect keyspaces [0, 1, 2, ..., 100]
 		for i := range keyspaces {
-			re.Equal(uint32(i), keyspaces[i].Id)
+			re.Equal(uint32(i), keyspaces[i].GetId())
 			if i != 0 {
 				checkCreateRequest(re, requests[i-1], keyspaces[i])
 			}
@@ -682,14 +682,14 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 		// In next-gen mode, result should be keyspaces with id 1 - 50.
 		re.Len(keyspaces, 50)
 		for i := range keyspaces {
-			re.Equal(uint32(i+1), keyspaces[i].Id)
+			re.Equal(uint32(i+1), keyspaces[i].GetId())
 			checkCreateRequest(re, requests[i], keyspaces[i])
 		}
 	} else {
 		// In legacy mode, result should be keyspaces with id 0 - 49.
 		re.Len(keyspaces, 50)
 		for i := range keyspaces {
-			re.Equal(uint32(i), keyspaces[i].Id)
+			re.Equal(uint32(i), keyspaces[i].GetId())
 			if i != 0 {
 				checkCreateRequest(re, requests[i-1], keyspaces[i])
 			}
@@ -703,7 +703,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	re.NoError(err)
 	re.Len(keyspaces, 20)
 	for i := range keyspaces {
-		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+		re.Equal(uint32(loadStart+i), keyspaces[i].GetId())
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
 	}
 
@@ -718,18 +718,18 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 		for i := range keyspaces {
 			if i < 11 {
 				// User-created keyspaces with IDs 90-100
-				re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+				re.Equal(uint32(loadStart+i), keyspaces[i].GetId())
 				checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
 			} else {
 				// System keyspace with SystemKeyspaceID
-				re.Equal(constant.SystemKeyspaceID, keyspaces[i].Id)
+				re.Equal(constant.SystemKeyspaceID, keyspaces[i].GetId())
 			}
 		}
 	} else {
 		// In legacy mode, scan result should be keyspaces with id 90-100.
 		re.Len(keyspaces, 11)
 		for i := range keyspaces {
-			re.Equal(uint32(loadStart+i), keyspaces[i].Id)
+			re.Equal(uint32(loadStart+i), keyspaces[i].GetId())
 			checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
 		}
 	}
@@ -741,7 +741,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	if kerneltype.IsNextGen() {
 		// In next-gen mode, only SystemKeyspaceID is greater than 900.
 		re.Len(keyspaces, 1)
-		re.Equal(constant.SystemKeyspaceID, keyspaces[0].Id)
+		re.Equal(constant.SystemKeyspaceID, keyspaces[0].GetId())
 	} else {
 		re.Empty(keyspaces)
 	}
@@ -843,7 +843,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	// Create a keyspace without any keyspace group.
 	now := time.Now().Unix()
 	err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
-		Id:             111,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 111},
 		Name:           "111",
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
@@ -871,7 +871,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
-			Id:             uint32(i),
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -904,7 +904,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
-			Id:             uint32(i),
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -1002,10 +1002,10 @@ func TestIterateKeyspaces(t *testing.T) {
 			if !ok {
 				break
 			}
-			re.Equal(keyspaceIDs[i], meta.Id)
+			re.Equal(keyspaceIDs[i], meta.GetId())
 			re.Equal(keyspaceNames[i], meta.Name)
-			if meta.Id != constant.DefaultKeyspaceID && meta.Id != constant.SystemKeyspaceID {
-				re.Equal(strconv.FormatUint(uint64(meta.Id), 10), meta.Config["test_cfg"])
+			if meta.GetId() != constant.DefaultKeyspaceID && meta.GetId() != constant.SystemKeyspaceID {
+				re.Equal(strconv.FormatUint(uint64(meta.GetId()), 10), meta.Config["test_cfg"])
 			}
 		}
 		re.Equal(len(keyspaceIDs), i)
@@ -1064,7 +1064,7 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	for i := 1; i <= n; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
-			Id:             uint32(i),
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: uint32(i)},
 			Name:           strconv.Itoa(i),
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -1098,7 +1098,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
 	cfg := map[string]string{}
-	ks := &keyspacepb.KeyspaceMeta{Id: 100, Name: "ks-stale-precheck", Config: cfg}
+	ks := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 100}, Name: "ks-stale-precheck", Config: cfg}
 	re.NoError(managerNoGroup.assignGroupAndSaveKeyspace(true, &cfg, ks))
 	re.NotContains(ks.GetConfig(), MetaServiceGroupIDKey)
 	loaded, err := managerNoGroup.LoadKeyspace("ks-stale-precheck")
@@ -1112,7 +1112,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
 	cfg2 := map[string]string{}
-	ks2 := &keyspacepb.KeyspaceMeta{Id: 101, Name: "ks-with-group", Config: cfg2}
+	ks2 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 101}, Name: "ks-with-group", Config: cfg2}
 	re.NoError(managerWithGroup.assignGroupAndSaveKeyspace(true, &cfg2, ks2))
 	re.Equal("g1", ks2.GetConfig()[MetaServiceGroupIDKey])
 
@@ -1121,7 +1121,7 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
 	cfg3 := map[string]string{}
-	ks3 := &keyspacepb.KeyspaceMeta{Id: 102, Name: "ks-disabled-group", Config: cfg3}
+	ks3 := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 102}, Name: "ks-disabled-group", Config: cfg3}
 	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
 }
