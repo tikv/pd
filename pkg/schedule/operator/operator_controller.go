@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -89,8 +90,9 @@ type Controller struct {
 	hbStreams *hbstream.HeartbeatStreams
 
 	// operatorLock serializes bulk cancellation with operator addition, promotion,
-	// and dispatch registration.
-	operatorLock syncutil.Mutex
+	// and the final dispatch enqueue.
+	operatorLock       syncutil.Mutex
+	operatorGeneration atomic.Uint64
 
 	// fast path, TTLUint64 is safe for concurrent.
 	fastOperators *cache.TTLUint64
@@ -325,12 +327,17 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 	return oc.addWaitingOperatorLocked(ops...)
 }
 
-// AddWaitingOperatorWithGuard adds waiting operators if the guard still passes
-// while the operator lock is held.
-func (oc *Controller) AddWaitingOperatorWithGuard(guard func() bool, reason CancelReasonType, ops ...*Operator) int {
+// GetOperatorGeneration returns the current bulk-cancellation generation.
+func (oc *Controller) GetOperatorGeneration() uint64 {
+	return oc.operatorGeneration.Load()
+}
+
+// AddWaitingOperatorWithGeneration adds waiting operators if no bulk
+// cancellation has happened since generation was captured.
+func (oc *Controller) AddWaitingOperatorWithGeneration(generation uint64, reason CancelReasonType, ops ...*Operator) int {
 	oc.operatorLock.Lock()
 	defer oc.operatorLock.Unlock()
-	if guard != nil && !guard() {
+	if generation != oc.operatorGeneration.Load() {
 		oc.cancelAndBuryCreatedOperators(reason, ops...)
 		return 0
 	}
@@ -400,12 +407,12 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	return oc.addOperatorLocked(ops...)
 }
 
-// AddOperatorWithGuard adds operators if the guard still passes while the
-// operator lock is held.
-func (oc *Controller) AddOperatorWithGuard(guard func() bool, reason CancelReasonType, ops ...*Operator) bool {
+// AddOperatorWithGeneration adds operators if no bulk cancellation has
+// happened since generation was captured.
+func (oc *Controller) AddOperatorWithGeneration(generation uint64, reason CancelReasonType, ops ...*Operator) bool {
 	oc.operatorLock.Lock()
 	defer oc.operatorLock.Unlock()
-	if guard != nil && !guard() {
+	if generation != oc.operatorGeneration.Load() {
 		oc.cancelAndBuryCreatedOperators(reason, ops...)
 		return false
 	}
@@ -713,6 +720,7 @@ func (oc *Controller) cancelAndBuryCreatedOperators(reason CancelReasonType, ops
 func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 	oc.operatorLock.Lock()
 	defer oc.operatorLock.Unlock()
+	oc.operatorGeneration.Add(1)
 	removed := oc.removeOperatorsWithoutBury()
 	oc.cancelAndBuryOperators(removed, reasons...)
 
@@ -742,16 +750,15 @@ func (oc *Controller) CancelAllOperators(reasons ...CancelReasonType) {
 		oc.buryOperator(op)
 	}
 	oc.opNotifierQueue.clear()
-	if oc.hbStreams != nil {
-		oc.hbStreams.ClearPendingScheduleCommands()
-	}
 }
 
 func (oc *Controller) removeOperatorsWithoutBury() []*Operator {
 	var removed []*Operator
 	oc.operators.Range(func(regionID, value any) bool {
 		op := value.(*Operator)
-		oc.operators.Delete(regionID)
+		if !oc.operators.CompareAndDelete(regionID, op) {
+			return true
+		}
 		oc.counts.dec(op.SchedulerKind())
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)

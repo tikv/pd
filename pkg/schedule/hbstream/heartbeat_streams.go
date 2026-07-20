@@ -18,7 +18,6 @@ import (
 	"context"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -65,12 +64,6 @@ type streamUpdate struct {
 	stream  HeartbeatStream
 }
 
-type heartbeatMessage struct {
-	response        core.RegionHeartbeatResponse
-	scheduleCommand bool
-	scheduleEpoch   uint64
-}
-
 // HeartbeatStreams is the bridge of communication with TIKV instance.
 type HeartbeatStreams struct {
 	wg             sync.WaitGroup
@@ -78,13 +71,11 @@ type HeartbeatStreams struct {
 	hbStreamCancel context.CancelFunc
 	clusterID      uint64
 	streams        map[uint64]HeartbeatStream
-	msgCh          chan heartbeatMessage
+	msgCh          chan core.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
 	storeInformer  core.StoreSetInformer
 	typ            string
 	needRun        bool // For test only.
-	scheduleEpoch  atomic.Uint64
-	scheduleSendMu sync.Mutex
 }
 
 // NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.
@@ -105,7 +96,7 @@ func newHbStreams(ctx context.Context, typ string, storeInformer core.StoreSetIn
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      keypath.ClusterID(),
 		streams:        make(map[uint64]HeartbeatStream),
-		msgCh:          make(chan heartbeatMessage, heartbeatChanCapacity),
+		msgCh:          make(chan core.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		storeInformer:  storeInformer,
 		typ:            typ,
@@ -146,11 +137,7 @@ func (s *HeartbeatStreams) run() {
 		select {
 		case update := <-s.streamCh:
 			s.streams[update.storeID] = update.stream
-		case item := <-s.msgCh:
-			if s.isStaleScheduleCommand(item) {
-				continue
-			}
-			msg := item.response
+		case msg := <-s.msgCh:
 			storeID := msg.GetTargetPeer().GetStoreId()
 			storeLabel := strconv.FormatUint(storeID, 10)
 			store := s.storeInformer.GetStore(storeID)
@@ -163,11 +150,7 @@ func (s *HeartbeatStreams) run() {
 			}
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
-				sent, err := s.sendHeartbeatMessage(stream, item)
-				if !sent {
-					continue
-				}
-				if err != nil {
+				if err := stream.Send(msg); err != nil {
 					log.Warn("send heartbeat message fail",
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
 					delete(s.streams, storeID)
@@ -208,47 +191,6 @@ func (s *HeartbeatStreams) run() {
 	}
 }
 
-func (s *HeartbeatStreams) sendHeartbeatMessage(stream HeartbeatStream, msg heartbeatMessage) (bool, error) {
-	if !msg.scheduleCommand {
-		return true, stream.Send(msg.response)
-	}
-	s.scheduleSendMu.Lock()
-	defer s.scheduleSendMu.Unlock()
-	if s.isStaleScheduleCommand(msg) {
-		return false, nil
-	}
-	return true, stream.Send(msg.response)
-}
-
-func (s *HeartbeatStreams) isStaleScheduleCommand(msg heartbeatMessage) bool {
-	return msg.scheduleCommand && msg.scheduleEpoch != s.scheduleEpoch.Load()
-}
-
-// ClearPendingScheduleCommands drops queued operator schedule commands.
-func (s *HeartbeatStreams) ClearPendingScheduleCommands() {
-	s.scheduleEpoch.Add(1)
-	kept := make([]heartbeatMessage, 0, len(s.msgCh))
-	for {
-		select {
-		case msg := <-s.msgCh:
-			if !msg.scheduleCommand {
-				kept = append(kept, msg)
-			}
-		default:
-			for _, msg := range kept {
-				select {
-				case s.msgCh <- msg:
-				case <-s.hbStreamCtx.Done():
-					return
-				}
-			}
-			s.scheduleSendMu.Lock()
-			s.scheduleSendMu.Unlock()
-			return
-		}
-	}
-}
-
 // Close closes background running.
 func (s *HeartbeatStreams) Close() {
 	s.hbStreamCancel()
@@ -269,17 +211,35 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 
 // SendMsg sends a message to related store.
 func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
-	_ = s.enqueueMsg(region, op, false)
+	resp := s.prepareMessage(region, op)
+	if resp == nil {
+		return
+	}
+	select {
+	case s.msgCh <- resp:
+	case <-s.hbStreamCtx.Done():
+	}
 }
 
-// SendScheduleCommand sends an operator schedule command to related store.
+// SendScheduleCommand tries to enqueue an operator schedule command without blocking.
 func (s *HeartbeatStreams) SendScheduleCommand(region *core.RegionInfo, op *Operation) bool {
-	return s.enqueueMsg(region, op, true)
+	resp := s.prepareMessage(region, op)
+	if resp == nil {
+		return false
+	}
+	select {
+	case s.msgCh <- resp:
+		return true
+	case <-s.hbStreamCtx.Done():
+		return false
+	default:
+		return false
+	}
 }
 
-func (s *HeartbeatStreams) enqueueMsg(region *core.RegionInfo, op *Operation, scheduleCommand bool) bool {
+func (s *HeartbeatStreams) prepareMessage(region *core.RegionInfo, op *Operation) core.RegionHeartbeatResponse {
 	if region.GetLeader() == nil {
-		return false
+		return nil
 	}
 
 	// TODO: use generic
@@ -315,25 +275,7 @@ func (s *HeartbeatStreams) enqueueMsg(region *core.RegionInfo, op *Operation, sc
 		}
 	}
 
-	item := heartbeatMessage{response: resp, scheduleCommand: scheduleCommand}
-	if scheduleCommand {
-		item.scheduleEpoch = s.scheduleEpoch.Load()
-		select {
-		case s.msgCh <- item:
-			return true
-		case <-s.hbStreamCtx.Done():
-			return false
-		default:
-			return false
-		}
-	}
-
-	select {
-	case s.msgCh <- item:
-		return true
-	case <-s.hbStreamCtx.Done():
-		return false
-	}
+	return resp
 }
 
 // SendErr sends a error message to related store.
@@ -350,7 +292,7 @@ func (s *HeartbeatStreams) SendErr(errType pdpb.ErrorType, errMsg string, target
 	}
 
 	select {
-	case s.msgCh <- heartbeatMessage{response: msg}:
+	case s.msgCh <- msg:
 	case <-s.hbStreamCtx.Done():
 	}
 }
