@@ -163,10 +163,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestMultiNodes() {
 		req := tsopb.FindGroupByKeyspaceIDRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       clusterID,
-				KeyspaceId:      keyspaceID,
+				Keyspace:        &tsopb.RequestHeader_KeyspaceId{KeyspaceId: keyspaceID},
 				KeyspaceGroupId: groupID,
 			},
-			KeyspaceId:  keyspaceID,
+			Keyspace:    &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{KeyspaceId: keyspaceID},
 			ModRevision: 0,
 		}
 		for i, server := range serverList {
@@ -250,10 +250,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestWatchFailed() {
 		req := tsopb.FindGroupByKeyspaceIDRequest{
 			Header: &tsopb.RequestHeader{
 				ClusterId:       clusterID,
-				KeyspaceId:      keyspaceID,
+				Keyspace:        &tsopb.RequestHeader_KeyspaceId{KeyspaceId: keyspaceID},
 				KeyspaceGroupId: groupID,
 			},
-			KeyspaceId:  keyspaceID,
+			Keyspace:    &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{KeyspaceId: keyspaceID},
 			ModRevision: requestModRevision,
 		}
 		return tsopb.NewTSOClient(conn).FindGroupByKeyspaceID(ctx, &req)
