@@ -50,9 +50,11 @@ func testCanceledTxn(re *require.Assertions, kv Base) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	err := kv.RunInTxn(ctx, func(txn Txn) error {
+		_, loadErr := txn.Load("canceled-key")
+		re.ErrorIs(loadErr, context.Canceled)
 		return txn.Save("canceled-key", "value")
 	})
-	re.Error(err)
+	re.ErrorIs(err, context.Canceled)
 	value, err := kv.Load("canceled-key")
 	re.NoError(err)
 	re.Empty(value)

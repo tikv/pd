@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
@@ -40,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
-	"go.etcd.io/etcd/api/v3/mvccpb"
 )
 
 var errSaveKeyspaceGroup = errors.New("save keyspace group error")
@@ -107,8 +107,10 @@ func TestReconcileKeyspaceGroupsDoesNotLoadHealthyGroups(t *testing.T) {
 		KeyspaceGroupStorage: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	}
 	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
 	manager.nodesBalancer.Put("http://tso-1")
 	manager.nodesBalancer.Put("http://tso-2")
+	termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
 	manager.Lock()
 	manager.putKeyspaceGroupLocked(&endpoint.KeyspaceGroup{
 		ID:       constant.DefaultKeyspaceGroupID,
@@ -125,7 +127,7 @@ func TestReconcileKeyspaceGroupsDoesNotLoadHealthyGroups(t *testing.T) {
 	runtime.GC()
 	runtime.ReadMemStats(&before)
 	for range 10 {
-		re.False(manager.reconcileKeyspaceGroups())
+		re.False(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
 	}
 	runtime.ReadMemStats(&after)
 	re.Zero(store.loadGroupsCount.Load())
@@ -155,8 +157,10 @@ func TestReconcileKeyspaceGroupsRevalidatesGroupBeforeWriting(t *testing.T) {
 	store.saveGroupCount.Store(0)
 
 	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
 	manager.nodesBalancer.Put("http://tso-1")
 	manager.nodesBalancer.Put("http://tso-2")
+	termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
 	manager.Lock()
 	manager.putKeyspaceGroupLocked(&endpoint.KeyspaceGroup{
 		ID:       constant.DefaultKeyspaceGroupID,
@@ -168,7 +172,7 @@ func TestReconcileKeyspaceGroupsRevalidatesGroupBeforeWriting(t *testing.T) {
 	})
 	manager.Unlock()
 
-	re.False(manager.reconcileKeyspaceGroups())
+	re.False(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
 	re.Zero(store.saveGroupCount.Load())
 	var got *endpoint.KeyspaceGroup
 	re.NoError(baseStore.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -236,6 +240,7 @@ func TestKeyspaceGroupReconcileTermFencesPreviousLeader(t *testing.T) {
 	defer manager.Close()
 
 	oldLeaderCtx, cancelOldLeader := context.WithCancel(context.Background())
+	defer cancelOldLeader()
 	oldTermCtx, oldTerm, oldReconcileCh := manager.beginKeyspaceGroupReconcileTerm(oldLeaderCtx)
 	newLeaderCtx, cancelNewLeader := context.WithCancel(context.Background())
 	defer cancelNewLeader()
@@ -258,33 +263,6 @@ func TestKeyspaceGroupReconcileTermFencesPreviousLeader(t *testing.T) {
 		t.Fatal("the previous leader term received a new reconcile notification")
 	default:
 	}
-
-	cancelOldLeader()
-}
-
-func TestAllocNodesToAllKeyspaceGroupsOnNotification(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	manager := NewKeyspaceGroupManager(ctx, store, nil)
-	defer manager.Close()
-	manager.nodesBalancer.Put("http://tso-1")
-	manager.nodesBalancer.Put("http://tso-2")
-	re.NoError(manager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
-		ID:       1,
-		UserKind: endpoint.Standard.String(),
-	}}))
-
-	manager.wg.Add(1)
-	go manager.allocNodesToAllKeyspaceGroups(ctx, 0, manager.reconcileCh)
-	manager.notifyKeyspaceGroupReconcile()
-
-	testutil.Eventually(re, func() bool {
-		group, err := manager.GetKeyspaceGroupByID(1)
-		return err == nil && group != nil && len(group.Members) == mcs.DefaultKeyspaceGroupReplicaCount
-	}, testutil.WithWaitFor(500*time.Millisecond), testutil.WithTickInterval(10*time.Millisecond))
 }
 
 func TestCreateKeyspaceGroupTriggersNodeAllocation(t *testing.T) {
@@ -416,6 +394,7 @@ func TestAllocNodesToAllKeyspaceGroupsRetriesTransientFailure(t *testing.T) {
 	defer manager.Close()
 	manager.nodesBalancer.Put("http://tso-1")
 	manager.nodesBalancer.Put("http://tso-2")
+	termCtx, term, reconcileCh := manager.beginKeyspaceGroupReconcileTerm(ctx)
 	re.NoError(manager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
 		ID:       1,
 		UserKind: endpoint.Standard.String(),
@@ -423,8 +402,7 @@ func TestAllocNodesToAllKeyspaceGroupsRetriesTransientFailure(t *testing.T) {
 	store.loadFailures.Store(1)
 
 	manager.wg.Add(1)
-	go manager.allocNodesToAllKeyspaceGroups(ctx, 0, manager.reconcileCh)
-	manager.notifyKeyspaceGroupReconcile()
+	go manager.allocNodesToAllKeyspaceGroups(termCtx, term, reconcileCh)
 	select {
 	case <-store.loadFailureCh:
 	case <-time.After(time.Second):
@@ -470,11 +448,12 @@ func TestTSONodesWatcherTriggersNodeAllocation(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return manager.GetNodesCount() == 1
 	})
+	termCtx, term, reconcileCh := manager.beginKeyspaceGroupReconcileTerm(ctx)
 	manager.Lock()
 	manager.putKeyspaceGroupLocked(group)
 	manager.Unlock()
 	manager.wg.Add(1)
-	go manager.allocNodesToAllKeyspaceGroups(ctx, 0, manager.reconcileCh)
+	go manager.allocNodesToAllKeyspaceGroups(termCtx, term, reconcileCh)
 
 	registerNode("http://tso-2")
 	testutil.Eventually(re, func() bool {
@@ -525,14 +504,16 @@ func BenchmarkReconcileKeyspaceGroupsMillionKeyspaces(b *testing.B) {
 	b.Run("event-driven-healthy", func(b *testing.B) {
 		countingStore := &countingKeyspaceGroupStorage{KeyspaceGroupStorage: store}
 		manager := NewKeyspaceGroupManager(ctx, countingStore, nil)
+		defer manager.Close()
 		manager.nodesBalancer.Put("http://tso-1")
 		manager.nodesBalancer.Put("http://tso-2")
+		termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
 		manager.Lock()
 		manager.putKeyspaceGroupLocked(group)
 		manager.Unlock()
 		b.ReportAllocs()
 		for b.Loop() {
-			if manager.reconcileKeyspaceGroups() {
+			if manager.reconcileKeyspaceGroupsForTerm(termCtx, term) {
 				b.Fatal("healthy groups should not need a retry")
 			}
 		}

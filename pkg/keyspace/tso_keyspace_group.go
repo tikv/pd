@@ -118,7 +118,6 @@ func NewKeyspaceGroupManager(
 		client:             client,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
-		reconcileCh:        make(chan struct{}, 1),
 		groupMemberships:   make(map[uint32][]endpoint.KeyspaceGroupMember),
 	}
 
@@ -312,12 +311,8 @@ func notifyKeyspaceGroupReconcile(reconcileCh chan<- struct{}) {
 	}
 }
 
-// reconcileKeyspaceGroups checks the cached group memberships and allocates nodes only for
-// groups that may be under-replicated. It returns whether a transient error needs a retry.
-func (m *GroupManager) reconcileKeyspaceGroups() (needRetry bool) {
-	return m.reconcileKeyspaceGroupsForTerm(m.ctx, 0)
-}
-
+// reconcileKeyspaceGroupsForTerm checks the cached group memberships and allocates nodes only
+// for groups that may be under-replicated. It returns whether a transient error needs a retry.
 func (m *GroupManager) reconcileKeyspaceGroupsForTerm(ctx context.Context, term uint64) (needRetry bool) {
 	if !m.isKeyspaceGroupReconcileTermActive(ctx, term) {
 		return false
@@ -371,9 +366,6 @@ func (m *GroupManager) isKeyspaceGroupReconcileTermActive(ctx context.Context, t
 	case <-ctx.Done():
 		return false
 	default:
-	}
-	if term == 0 {
-		return true
 	}
 	m.RLock()
 	defer m.RUnlock()
@@ -1308,16 +1300,16 @@ func (m *GroupManager) GetNodesCount() int {
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
 func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, existMembers map[string]struct{}, desiredReplicaCount int) ([]endpoint.KeyspaceGroupMember, error) {
-	return m.allocNodesForKeyspaceGroup(m.ctx, id, existMembers, desiredReplicaCount, false)
+	return m.allocNodesForKeyspaceGroupWithOptions(m.ctx, id, existMembers, desiredReplicaCount, false)
 }
 
 // reconcileNodesForKeyspaceGroup revalidates the latest group membership in storage before
 // allocating nodes. The cache is only a hint and must never be used as the source of truth for writes.
 func (m *GroupManager) reconcileNodesForKeyspaceGroup(ctx context.Context, id uint32) ([]endpoint.KeyspaceGroupMember, error) {
-	return m.allocNodesForKeyspaceGroup(ctx, id, nil, mcs.DefaultKeyspaceGroupReplicaCount, true)
+	return m.allocNodesForKeyspaceGroupWithOptions(ctx, id, nil, mcs.DefaultKeyspaceGroupReplicaCount, true)
 }
 
-func (m *GroupManager) allocNodesForKeyspaceGroup(
+func (m *GroupManager) allocNodesForKeyspaceGroupWithOptions(
 	operationCtx context.Context,
 	id uint32,
 	existMembers map[string]struct{},
