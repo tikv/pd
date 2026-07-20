@@ -147,7 +147,12 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 
 // EtcdKVGet returns the etcd GetResponse by given key or key prefix
 func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	return EtcdKVGetWithContext(c.Ctx(), c, key, opts...)
+}
+
+// EtcdKVGetWithContext returns the etcd GetResponse using the given context.
+func EtcdKVGetWithContext(ctx context.Context, c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	start := time.Now()

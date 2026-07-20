@@ -43,6 +43,19 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
+	testCanceledTxn(re, kv)
+}
+
+func testCanceledTxn(re *require.Assertions, kv Base) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := kv.RunInTxn(ctx, func(txn Txn) error {
+		return txn.Save("canceled-key", "value")
+	})
+	re.Error(err)
+	value, err := kv.Load("canceled-key")
+	re.NoError(err)
+	re.Empty(value)
 }
 
 func TestLevelDB(t *testing.T) {
