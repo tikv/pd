@@ -69,14 +69,16 @@ func canonicalizeURLs(raws []string) []string {
 // differences (e.g. http://pd.example:2379 vs http://PD.EXAMPLE:2379) are still
 // detected as the same endpoint.
 //
-// Scope / follow-ups: the caller runs this only on the fresh-join path (against
-// a linearizable member list). It detects a conflict only against members that
+// Scope / follow-ups: the caller runs this on the no-data join paths — a
+// genuinely new member (against a linearizable member list) and a recovery
+// re-join after a failed start (against the non-linearizable list, so recovery
+// is not blocked on quorum). It detects a conflict only against members that
 // have already published their client URLs, so it does not by itself close the
 // window between two concurrent joiners before either publishes, nor does it
-// cover a restart or a member bootstrapped with --initial-cluster (which never
-// reach this path). Making membership uniqueness authoritative (an atomic
-// reservation bound to the member lifecycle) and verifying responder identity in
-// health checks are tracked separately.
+// cover a restart-with-data or a member bootstrapped with --initial-cluster
+// (which never reach this path). Making membership uniqueness authoritative (an
+// atomic reservation bound to the member lifecycle) and verifying responder
+// identity in health checks are tracked separately.
 func checkClientURLConflict(
 	advertiseClientURLs []string,
 	advertisePeerURLs []string,

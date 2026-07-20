@@ -17,9 +17,8 @@ package join
 import (
 	"testing"
 
-	"go.etcd.io/etcd/api/v3/etcdserverpb"
-
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 )
 
 func TestCanonicalizeURL(t *testing.T) {

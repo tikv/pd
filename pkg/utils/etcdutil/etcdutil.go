@@ -118,7 +118,7 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 // contacted server's local data (not linearizable), so an isolated or lagging
 // endpoint may return a stale view.
 func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	return listEtcdMembers(ctx, client, false)
+	return queryEtcdMembers(ctx, client, false)
 }
 
 // ListEtcdMembersLinearizable returns a list of internal etcd members with a
@@ -126,10 +126,10 @@ func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.Me
 // server is disconnected from quorum. Use it when the membership view must
 // reflect the latest committed state, e.g. join admission decisions.
 func ListEtcdMembersLinearizable(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	return listEtcdMembers(ctx, client, true)
+	return queryEtcdMembers(ctx, client, true)
 }
 
-func listEtcdMembers(ctx context.Context, client *clientv3.Client, linearizable bool) (*clientv3.MemberListResponse, error) {
+func queryEtcdMembers(ctx context.Context, client *clientv3.Client, linearizable bool) (*clientv3.MemberListResponse, error) {
 	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)

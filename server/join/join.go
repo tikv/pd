@@ -161,6 +161,31 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.New("missing data or join a duplicated pd")
 	}
 
+	// Reject a member whose advertised client URL is already used by another
+	// member, before MemberAdd and before the local etcd publishes its
+	// attributes, so a duplicate never enters the member list. See issue #10999.
+	advertiseClientURLs := strings.Split(cfg.AdvertiseClientUrls, ",")
+	if joinedFailedToStart {
+		// Recovery re-join: this member's peer was already added but never
+		// started, so the cluster may be at 1/2 quorum. Reuse the
+		// non-linearizable list already fetched instead of issuing a
+		// quorum-dependent linearizable read, so recovery is never blocked.
+		if cerr := checkClientURLConflict(advertiseClientURLs, advertisePeerURLs, listResp.Members); cerr != nil {
+			return cerr
+		}
+	} else {
+		// Genuinely new member: use a linearizable list so a stale/lagging local
+		// view cannot miss a conflict that has already been published; a genuine
+		// join needs quorum for MemberAdd anyway.
+		linResp, lerr := etcdutil.ListEtcdMembersLinearizable(client.Ctx(), client)
+		if lerr != nil {
+			return lerr
+		}
+		if cerr := checkClientURLConflict(advertiseClientURLs, advertisePeerURLs, linResp.Members); cerr != nil {
+			return cerr
+		}
+	}
+
 	var addResp *clientv3.MemberAddResponse
 
 	failpoint.Inject("addMemberFailed", func() {
@@ -172,23 +197,6 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	{
 		// No need to add member if the PD is already in the cluster.
 		if !joinedFailedToStart {
-			// Admission for a genuinely new member: reject if its advertised
-			// client URL is already used by another member. Use a linearizable
-			// member list so a stale/lagging local view cannot miss a conflict
-			// that has already been published; a genuine join needs quorum for
-			// MemberAdd anyway. The joinedFailedToStart recovery path skips this,
-			// so it never depends on quorum. See issue #10999.
-			linResp, lerr := etcdutil.ListEtcdMembersLinearizable(client.Ctx(), client)
-			if lerr != nil {
-				return lerr
-			}
-			if cerr := checkClientURLConflict(
-				strings.Split(cfg.AdvertiseClientUrls, ","),
-				strings.Split(cfg.AdvertisePeerUrls, ","),
-				linResp.Members,
-			); cerr != nil {
-				return cerr
-			}
 			// First adds member through the API
 			addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 			if err != nil {
