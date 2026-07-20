@@ -501,15 +501,15 @@ func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:   ExtractKeyspaceID(keyspaceIDValue),
-		Name: keyspaceName,
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: ExtractKeyspaceID(keyspaceIDValue)},
+		Name:     keyspaceName,
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		err := manager.storage.SaveKeyspaceMeta(txn, keyspaceMeta)
 		if err != nil {
 			return err
 		}
-		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.Id, keyspaceMeta.Name)
+		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.GetId(), keyspaceMeta.Name)
 	})
 	re.NoError(err)
 }

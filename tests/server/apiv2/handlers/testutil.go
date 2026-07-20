@@ -123,7 +123,7 @@ func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspace
 
 // checkCreateByIDRequest verifies a keyspace meta matches a create request.
 func checkCreateByIDRequest(re *require.Assertions, request *handlers.CreateKeyspaceByIDParams, meta *keyspacepb.KeyspaceMeta) {
-	re.Equal(*request.ID, meta.Id)
+	re.Equal(*request.ID, meta.GetId())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
 	checkConfig(re, request.Config, keyspace.IgnoreMetaServiceGroup(meta.Config))
 }
