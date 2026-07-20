@@ -341,6 +341,10 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		StateChangedAt: createTime,
 		Config:         config,
 	}
+	// if waitSplit is false, we can enable the keyspace directly, otherwise we need to wait for the split to finish.
+	if !tracer.waitSplit {
+		keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	}
 
 	txnOps := make([]txnOp, 0, 4)
 	txnCbs := make([]txnCb, 0, 4)
@@ -421,10 +425,11 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			tracer.OnCreateKeyspaceComplete()
 			return keyspace, nil
 		}
+		// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
+		keyspace, err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
 	}
 
 	tracer.OnSplitRegionFinished()
-	keyspace, err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
 	if err != nil {
 		log.Warn("[create-keyspace] failed to enable keyspace after split",
 			zap.Uint32("keyspace-id", tracer.keyspaceID),

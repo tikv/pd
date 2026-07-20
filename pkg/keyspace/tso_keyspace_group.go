@@ -700,17 +700,20 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	})
 	m.Lock()
 	kg := m.groups[userKind].Get(uint32(groupID))
-	m.Unlock()
+
 	if kg == nil {
+		m.Unlock()
 		return nil, nil, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(uint32(groupID))
 	}
 	if kg.IsSplitting() {
+		m.Unlock()
 		return nil, nil, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(uint32(groupID))
 	}
 	if kg.IsMerging() {
+		m.Unlock()
 		return nil, nil, errs.ErrKeyspaceGroupInMerging.FastGenByArgs(uint32(groupID))
 	}
-
+	m.Unlock()
 	cb := func(err error) {
 		if err != nil {
 			return
@@ -724,6 +727,7 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 			return loadErr
 		})
 		if loadErr != nil || kg == nil {
+			log.Warn("load keyspace group failed  from storage", zap.Uint64("group-id", groupID), zap.Error(loadErr))
 			return
 		}
 		m.groups[userKind].Put(kg)
