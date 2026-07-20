@@ -74,3 +74,11 @@ func (l List) GetSplitKeys(start, end []byte) [][]byte {
 	}
 	return keys
 }
+
+// HasSplitKey reports whether there is a split point in (start, end).
+func (l List) HasSplitKey(start, end []byte) bool {
+	i := sort.Search(len(l.segments), func(i int) bool {
+		return bytes.Compare(l.segments[i].startKey, start) > 0
+	})
+	return i < len(l.segments) && (len(end) == 0 || bytes.Compare(l.segments[i].startKey, end) < 0)
+}
