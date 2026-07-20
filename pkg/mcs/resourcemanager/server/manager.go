@@ -605,6 +605,12 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return nil
 		}
 	}
+	// Ensure the keyspace manager exists and snapshot its delete generation
+	// before the lock-free storage read below, so a concurrent Delete that
+	// lands after the read is detected under the insert lock and can't be
+	// undone by this now-stale result.
+	krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+	deleteGen := krgm.loadDeleteGen()
 	group, stateLoaded, err := m.loadResourceGroup(keyspaceID, name)
 	if err != nil {
 		if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
@@ -613,14 +619,20 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			// This calls initDefaultResourceGroup directly instead of going
 			// through getOrCreateKeyspaceResourceGroupManager(id, true), which
 			// now routes back into this same function and would recurse.
-			m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).initDefaultResourceGroup()
+			krgm.initDefaultResourceGroup()
 			return nil
 		}
 		return err
 	}
-	krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
 	inserted := false
 	krgm.Lock()
+	if krgm.deleteGen != deleteGen {
+		// A Delete raced with our storage read; the result may be stale, so
+		// don't insert it. A later request or the async bulk merge will reload
+		// the group if it still exists.
+		krgm.Unlock()
+		return nil
+	}
 	if _, exists := krgm.groups[name]; !exists {
 		krgm.groups[name] = group
 		inserted = true

@@ -43,13 +43,22 @@ type blockingResourceGroupStorage struct {
 	// failNextState, when true, makes the very next LoadResourceGroupState
 	// call fail once, then resets itself.
 	failNextState atomic.Bool
+
+	// pausePointState, when true, makes the very next LoadResourceGroupState
+	// call signal pointReached and then block on pointRelease, so a test can
+	// hold a lazy load right after its storage read but before it inserts.
+	pausePointState atomic.Bool
+	pointReached    chan struct{}
+	pointRelease    chan struct{}
 }
 
 func newBlockingResourceGroupStorage() *blockingResourceGroupStorage {
 	return &blockingResourceGroupStorage{
-		Storage: storage.NewStorageWithMemoryBackend(),
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
+		Storage:      storage.NewStorageWithMemoryBackend(),
+		entered:      make(chan struct{}),
+		release:      make(chan struct{}),
+		pointReached: make(chan struct{}),
+		pointRelease: make(chan struct{}),
 	}
 }
 
@@ -64,6 +73,10 @@ func (s *blockingResourceGroupStorage) LoadResourceGroupSettings(f func(keyspace
 func (s *blockingResourceGroupStorage) LoadResourceGroupState(keyspaceID uint32, name string) (string, error) {
 	if s.failNextState.CompareAndSwap(true, false) {
 		return "", errors.New("injected resource group state load failure")
+	}
+	if s.pausePointState.CompareAndSwap(true, false) {
+		close(s.pointReached)
+		<-s.pointRelease
 	}
 	return s.Storage.LoadResourceGroupState(keyspaceID, name)
 }
@@ -248,5 +261,77 @@ func TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure(t *testing.T) {
 	store.unblock()
 	testutil.Eventually(re, func() bool {
 		return !krgm.isReserved("flaky-group")
+	}, testutil.WithTickInterval(20*time.Millisecond))
+}
+
+// TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect reproduces the
+// lazy-load vs concurrent Delete race deterministically: a lazy load reads a
+// group from storage, then a Delete removes it before the lazy load inserts.
+// The stale insert must be rejected (via the delete-generation check) so the
+// deleted group is not resurrected for the rest of the manager's lifetime.
+func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	group := newAsyncTestGroup("race-group")
+	re.NoError(store.SaveResourceGroupSetting(1, "race-group", group))
+	re.NoError(store.SaveResourceGroupStates(1, "race-group", FromProtoResourceGroup(group).GetGroupStates()))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	// Async bulk load is blocked, so loadingState stays in progress and lazy
+	// loading is active.
+	store.waitEntered(t)
+
+	// Start a lazy Get that will pause inside its state read, i.e. after it has
+	// read the group from storage but before it inserts into the cache.
+	store.pausePointState.Store(true)
+	var (
+		gotGroup *ResourceGroup
+		gotErr   error
+	)
+	getDone := make(chan struct{})
+	go func() {
+		defer close(getDone)
+		gotGroup, gotErr = m.GetResourceGroup(1, "race-group", false)
+	}()
+
+	select {
+	case <-store.pointReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the lazy load to reach its state read")
+	}
+
+	// While the lazy load is paused, delete the group. Delete does its own
+	// (unpaused) load-then-delete, removing it from storage and cache and
+	// bumping the delete generation.
+	re.NoError(m.DeleteResourceGroup(1, "race-group"))
+
+	// Release the paused lazy load; its now-stale insert must be rejected.
+	close(store.pointRelease)
+	<-getDone
+	re.NoError(gotErr)
+	re.Nil(gotGroup, "the racing lazy load must observe the group as deleted")
+
+	krgm := m.getKeyspaceResourceGroupManager(1)
+	re.NotNil(krgm)
+	re.Nil(krgm.getMutableResourceGroup("race-group"), "deleted group must not be resurrected by the racing lazy load")
+
+	// Finishing async loading must not bring the deleted group back either.
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		groups, err := m.GetResourceGroupList(1, false)
+		if err != nil {
+			return false
+		}
+		for _, g := range groups {
+			if g.Name == "race-group" {
+				return false
+			}
+		}
+		return true
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }

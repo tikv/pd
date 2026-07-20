@@ -78,6 +78,11 @@ type keyspaceResourceGroupManager struct {
 	reservedGroups  map[string]struct{}
 	groupRUTrackers map[string]*groupRUTracker
 	serviceLimiter  *serviceLimiter
+	// deleteGen is bumped under the write lock every time a group is removed
+	// from the cache. A lazy load snapshots it before its lock-free storage
+	// read and re-checks it under the lock before inserting, so a group
+	// deleted after the read is never resurrected by the now-stale result.
+	deleteGen uint64
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -187,7 +192,17 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name stri
 	delete(krgm.groups, name)
 	delete(krgm.groupRUTrackers, name)
 	delete(krgm.reservedGroups, name)
+	// Signal any in-flight lazy load that a delete happened, so it won't
+	// reinsert a copy read from storage before this deletion.
+	krgm.deleteGen++
 	krgm.Unlock()
+}
+
+// loadDeleteGen returns the current delete generation counter.
+func (krgm *keyspaceResourceGroupManager) loadDeleteGen() uint64 {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	return krgm.deleteGen
 }
 
 func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name string, rawValue string) error {
