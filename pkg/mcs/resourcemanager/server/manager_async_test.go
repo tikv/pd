@@ -83,7 +83,12 @@ func (s *blockingResourceGroupStorage) unblock() {
 	})
 }
 
-func newAsyncTestGroup(name string, fillRate uint64) *resource_manager.ResourceGroup {
+// asyncTestGroupFillRate is the fill rate used by all async-loading test
+// groups; kept as a named constant so the setup and the assertions stay in
+// sync.
+const asyncTestGroupFillRate = 100
+
+func newAsyncTestGroup(name string) *resource_manager.ResourceGroup {
 	return &resource_manager.ResourceGroup{
 		Name:     name,
 		Mode:     resource_manager.GroupMode_RUMode,
@@ -91,8 +96,8 @@ func newAsyncTestGroup(name string, fillRate uint64) *resource_manager.ResourceG
 		RUSettings: &resource_manager.GroupRequestUnitSettings{
 			RU: &resource_manager.TokenBucket{
 				Settings: &resource_manager.TokenLimitSettings{
-					FillRate:   fillRate,
-					BurstLimit: int64(fillRate),
+					FillRate:   asyncTestGroupFillRate,
+					BurstLimit: asyncTestGroupFillRate,
 				},
 			},
 		},
@@ -109,7 +114,7 @@ func stopAsyncTestManager(m *Manager) {
 func TestAsyncLoadResourceGroupsLazyGet(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(1, "lazy-group", newAsyncTestGroup("lazy-group", 100)))
+	re.NoError(store.SaveResourceGroupSetting(1, "lazy-group", newAsyncTestGroup("lazy-group")))
 
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = store
@@ -129,7 +134,7 @@ func TestAsyncLoadResourceGroupsLazyGet(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(group)
 	re.Equal("lazy-group", group.Name)
-	re.Equal(float64(100), group.RUSettings.RU.getFillRate())
+	re.Equal(float64(asyncTestGroupFillRate), group.RUSettings.RU.getFillRate())
 
 	store.unblock()
 	testutil.Eventually(re, func() bool {
@@ -141,7 +146,7 @@ func TestAsyncLoadResourceGroupsLazyGet(t *testing.T) {
 func TestAsyncLoadResourceGroupsDoesNotRestoreDeletedLazyGroup(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(1, "deleted-group", newAsyncTestGroup("deleted-group", 100)))
+	re.NoError(store.SaveResourceGroupSetting(1, "deleted-group", newAsyncTestGroup("deleted-group")))
 
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = store
@@ -182,7 +187,7 @@ func TestAsyncLoadResourceGroupsDoesNotRestoreDeletedLazyGroup(t *testing.T) {
 func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(constant.NullKeyspaceID, "legacy-group", newAsyncTestGroup("legacy-group", 100)))
+	re.NoError(store.SaveResourceGroupSetting(constant.NullKeyspaceID, "legacy-group", newAsyncTestGroup("legacy-group")))
 
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = store
@@ -196,7 +201,7 @@ func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(group)
 	re.Equal("legacy-group", group.Name)
-	re.Equal(float64(100), group.RUSettings.RU.getFillRate())
+	re.Equal(float64(asyncTestGroupFillRate), group.RUSettings.RU.getFillRate())
 
 	store.unblock()
 	testutil.Eventually(re, func() bool {
@@ -215,7 +220,7 @@ func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
 func TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
-	group := newAsyncTestGroup("flaky-group", 100)
+	group := newAsyncTestGroup("flaky-group")
 	re.NoError(store.SaveResourceGroupSetting(1, "flaky-group", group))
 	re.NoError(store.SaveResourceGroupStates(1, "flaky-group", FromProtoResourceGroup(group).GetGroupStates()))
 
