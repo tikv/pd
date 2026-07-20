@@ -69,15 +69,12 @@ func canonicalizeURLs(raws []string) []string {
 // differences (e.g. http://pd.example:2379 vs http://PD.EXAMPLE:2379) are still
 // detected as the same endpoint.
 //
-// It is read-only (no etcd write, no quorum requirement), so it can run on the
-// join and restart-with-data paths without ever blocking a member that needs to
-// restart to *restore* quorum.
-//
-// Scope / follow-ups: this only detects a conflict against members that have
-// already published their client URLs, so it does not by itself close the
-// window between two concurrent joiners/restarts before either publishes, nor
-// does it cover a member bootstrapped with --initial-cluster (which never
-// reaches this path). Making membership uniqueness authoritative (an atomic
+// Scope / follow-ups: the caller runs this only on the fresh-join path (against
+// a linearizable member list). It detects a conflict only against members that
+// have already published their client URLs, so it does not by itself close the
+// window between two concurrent joiners before either publishes, nor does it
+// cover a restart or a member bootstrapped with --initial-cluster (which never
+// reach this path). Making membership uniqueness authoritative (an atomic
 // reservation bound to the member lifecycle) and verifying responder identity in
 // health checks are tracked separately.
 func checkClientURLConflict(

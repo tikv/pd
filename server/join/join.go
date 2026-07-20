@@ -43,39 +43,6 @@ const (
 // listMemberRetryTimes is the retry times of list member.
 var listMemberRetryTimes = 20
 
-var (
-	// restartListMemberRetryTimes is how many times a restarting member retries
-	// listing cluster members (with exponential backoff) before skipping the
-	// best-effort advertise-client-urls uniqueness check.
-	restartListMemberRetryTimes = 3
-	// restartListMemberBackoff is the initial backoff between those retries; it
-	// doubles each time (2s, 4s, 8s), which together with the per-request
-	// timeouts spans roughly 20s before giving up.
-	restartListMemberBackoff = 2 * time.Second
-)
-
-// retryListEtcdMembers retries ListEtcdMembers with exponential backoff. It is
-// used on the restart path so a transient failure does not immediately skip the
-// client-URL uniqueness check; it returns the last error if all retries fail.
-func retryListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
-	var (
-		listResp *clientv3.MemberListResponse
-		err      error
-	)
-	backoff := restartListMemberBackoff
-	for i := range restartListMemberRetryTimes {
-		time.Sleep(backoff)
-		backoff *= 2
-		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
-		if err == nil {
-			return listResp, nil
-		}
-		log.Warn("retry listing members on restart failed",
-			zap.Int("retry", i+1), errs.ZapError(err))
-	}
-	return nil, err
-}
-
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
@@ -130,10 +97,19 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	initialCluster := ""
-	dataExists := isDataExist(filepath.Join(cfg.DataDir, "member"))
+	// Cases with data directory: the local etcd reads its configuration from the
+	// data directory, so return immediately without any remote call. A restart is
+	// therefore never delayed or blocked (e.g. during a quorum outage). As a
+	// result the advertise-client-urls uniqueness check below only covers fresh
+	// joins; enforcing it authoritatively on restart is a follow-up (it needs the
+	// persisted member ID and a pre-publish check point).
+	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
+		cfg.InitialCluster = initialCluster
+		cfg.InitialClusterState = embed.ClusterStateFlagExisting
+		return nil
+	}
 
-	// A client to the target cluster is needed both to verify the advertised
-	// client URL is unique and, for a fresh join, to run MemberAdd.
+	// Below are cases without a data directory (a fresh join or a re-join).
 	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
@@ -147,64 +123,18 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		LogConfig:   &lgc,
 	})
 	if err != nil {
-		// A restart (data already exists) must not be blocked when the cluster
-		// is unreachable; the member starts from its local data directory, so
-		// the client-URL check is best-effort in that case.
-		if dataExists {
-			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to create etcd client",
-				errs.ZapError(err))
-			cfg.InitialCluster = initialCluster
-			cfg.InitialClusterState = embed.ClusterStateFlagExisting
-			return nil
-		}
 		return errors.WithStack(err)
 	}
 	defer client.Close()
 
+	// A non-linearizable list is enough to determine this member's own state
+	// (existed / joinedFailedToStart / abnormal); it must not require quorum so a
+	// member re-joining after a failed start can still recover.
 	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
-		if !dataExists {
-			return err
-		}
-		// Restart: a transient failure should not silently skip the check.
-		// Retry with exponential backoff, and only skip (best-effort) if the
-		// cluster is still unreachable afterwards — the member must still be
-		// able to start from its local data directory.
-		listResp, err = retryListEtcdMembers(client)
-		if err != nil {
-			log.Warn("skip advertise-client-urls uniqueness check on restart: failed to list members after retries",
-				errs.ZapError(err))
-			cfg.InitialCluster = initialCluster
-			cfg.InitialClusterState = embed.ClusterStateFlagExisting
-			return nil
-		}
-	}
-
-	// Reject a member — whether joining fresh or restarting with a modified
-	// advertise-client-urls — whose advertised client URL is already used by
-	// another published member. This is read-only (no quorum needed) and runs
-	// before the local etcd (re)starts and republishes its attributes. See issue
-	// #10999. Concurrent (pre-publish) races and initial-cluster nodes are not
-	// covered here; see checkClientURLConflict for scope.
-	if err := checkClientURLConflict(
-		strings.Split(cfg.AdvertiseClientUrls, ","),
-		strings.Split(cfg.AdvertisePeerUrls, ","),
-		listResp.Members,
-	); err != nil {
 		return err
 	}
 
-	// Cases with data directory: the local etcd reads its configuration from the
-	// data directory, nothing more to prepare here. The registry claim is
-	// intentionally skipped on this path — it writes to etcd (needs quorum), and
-	// a restart must not depend on quorum.
-	if dataExists {
-		cfg.InitialCluster = initialCluster
-		cfg.InitialClusterState = embed.ClusterStateFlagExisting
-		return nil
-	}
-
-	// Below are cases without data directory.
 	existed := false
 	joinedFailedToStart := false
 	advertisePeerURLs := strings.Split(cfg.AdvertisePeerUrls, ",")
@@ -242,6 +172,23 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	{
 		// No need to add member if the PD is already in the cluster.
 		if !joinedFailedToStart {
+			// Admission for a genuinely new member: reject if its advertised
+			// client URL is already used by another member. Use a linearizable
+			// member list so a stale/lagging local view cannot miss a conflict
+			// that has already been published; a genuine join needs quorum for
+			// MemberAdd anyway. The joinedFailedToStart recovery path skips this,
+			// so it never depends on quorum. See issue #10999.
+			linResp, lerr := etcdutil.ListEtcdMembersLinearizable(client.Ctx(), client)
+			if lerr != nil {
+				return lerr
+			}
+			if cerr := checkClientURLConflict(
+				strings.Split(cfg.AdvertiseClientUrls, ","),
+				strings.Split(cfg.AdvertisePeerUrls, ","),
+				linResp.Members,
+			); cerr != nil {
+				return cerr
+			}
 			// First adds member through the API
 			addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
 			if err != nil {
