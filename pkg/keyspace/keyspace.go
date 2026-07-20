@@ -923,10 +923,11 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		delete(meta.Config, MetaServiceGroupAddressesKey)
 		newConfig := meta.GetConfig()
 		// Reassign the meta-service group before moving the TSO keyspace group.
-		// reassignKeyspaceLocked only stages its changes in txn (discarded if the
-		// txn doesn't commit), while UpdateKeyspaceGroup persists immediately. Doing
-		// the fallible meta-service validation first avoids leaving the TSO group move
-		// persisted but unreverted when the meta-service reassignment fails.
+		// reassignKeyspaceLocked validates the target and updates the in-memory
+		// assignment hint (it does not write storage), while UpdateKeyspaceGroup
+		// persists immediately. Doing the fallible meta-service validation first
+		// avoids leaving the TSO group move persisted but unreverted when the
+		// meta-service reassignment fails.
 		oldMetaServiceGroup = oldConfig[MetaServiceGroupIDKey]
 		newMetaServiceGroup = newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {

@@ -16,11 +16,8 @@ package keyspace
 
 import (
 	"context"
-	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -268,10 +265,10 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() 
 	re.ErrorIs(err, ErrInvalidAssignmentCount)
 }
 
-// TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that adding a group
-// whose status still lingers in storage (e.g. from an earlier best-effort delete
-// that failed) resets that persisted status to zero, so RefreshCache does not
-// resurrect the stale count/enabled state.
+// TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that re-adding a
+// group whose Enabled flag still lingers in storage resets it, so RefreshCache
+// starts the group disabled instead of resurrecting the stale flag. The count is
+// derived from keyspace metadata, so it starts at zero.
 func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForReaddedGroup() {
 	re := suite.Require()
 	const groupID = "etcd-group-readded"
@@ -286,7 +283,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForRea
 	re.NoError(suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil,
 		func() error { return nil }, nil))
 
-	// Reloading from storage must see a zero status, not the stale one.
+	// Reloading must see a disabled group with a zero derived count, not the stale one.
 	re.NoError(suite.manager.RefreshCache())
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
@@ -316,40 +313,31 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re.NoError(err)
 }
 
-func (suite *metaServiceGroupTestSuite) TestRefreshCacheLoadsFromStorage() {
+// TestRefreshCacheRebuildsFromStorageAndScan verifies that RefreshCache takes the
+// Enabled flag from storage (authoritative for that field) but rebuilds
+// AssignmentCount from the keyspace scan, ignoring any stale persisted count.
+func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndScan() {
 	re := suite.Require()
-	status := &endpoint.MetaServiceGroupStatus{
-		AssignmentCount: 10,
-		Enabled:         true,
-	}
+	// Persist a stale status: the persisted count must be ignored, the flag kept.
 	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-0", status)
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-0",
+			&endpoint.MetaServiceGroupStatus{AssignmentCount: 10, Enabled: true})
 	})
 	re.NoError(err)
+	// The authoritative counter reports the real assignment count.
+	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if _, ok := ids["etcd-group-0"]; ok {
+			res["etcd-group-0"] = 3
+		}
+		return res, nil
+	})
 
 	re.NoError(suite.manager.RefreshCache())
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
-	re.Equal(10, statusMap["etcd-group-0"].AssignmentCount)
-	re.True(statusMap["etcd-group-0"].Enabled)
-}
-
-func (suite *metaServiceGroupTestSuite) TestFlushAfterWriteThreshold() {
-	re := suite.Require()
-	suite.enableAllGroups()
-	assigned, err := suite.manager.AssignToGroup(suite.ctx, flushThreshold)
-	re.NoError(err)
-	re.NotEmpty(assigned)
-
-	re.Eventually(func() bool {
-		var statusMap map[string]*endpoint.MetaServiceGroupStatus
-		err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
-			var err error
-			statusMap, err = suite.manager.store.LoadMetaServiceGroupStatus(txn, mockMetaServiceGroups())
-			return err
-		})
-		return err == nil && statusMap[assigned] != nil && statusMap[assigned].AssignmentCount == flushThreshold
-	}, 5*time.Second, 100*time.Millisecond)
+	re.True(statusMap["etcd-group-0"].Enabled)             // from storage
+	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount) // from the scan, not the stale 10
 }
 
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {
@@ -360,71 +348,4 @@ func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 			Enabled: &enabled,
 		}))
 	}
-}
-
-// blockingMetaServiceGroupStorage pauses the first SaveMetaServiceGroupStatus so
-// a flush can be held mid-write to exercise its concurrency with PatchStatus.
-type blockingMetaServiceGroupStorage struct {
-	*endpoint.StorageEndpoint
-	blockNextSave atomic.Bool
-	saveStarted   chan struct{}
-	unblockSave   chan struct{}
-}
-
-func (s *blockingMetaServiceGroupStorage) SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *endpoint.MetaServiceGroupStatus) error {
-	if s.blockNextSave.CompareAndSwap(true, false) {
-		close(s.saveStarted)
-		<-s.unblockSave
-	}
-	return s.StorageEndpoint.SaveMetaServiceGroupStatus(txn, id, status)
-}
-
-// TestFlushDoesNotOverwriteConcurrentPatchStatus verifies that an in-flight flush
-// cannot clobber a status persisted by a concurrent PatchStatus. flushToStorage
-// holds the mgm lock across its storage write, so PatchStatus serializes after it
-// and its value is the persisted winner.
-func TestFlushDoesNotOverwriteConcurrentPatchStatus(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	store := &blockingMetaServiceGroupStorage{
-		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
-		saveStarted:     make(chan struct{}),
-		unblockSave:     make(chan struct{}),
-	}
-	manager, err := NewMetaServiceGroupManager(ctx, store, mockMetaServiceGroups())
-	re.NoError(err)
-
-	const groupID = "etcd-group-0"
-	manager.statusMu.Lock()
-	manager.cachedStatus[groupID] = &endpoint.MetaServiceGroupStatus{AssignmentCount: 1, Enabled: true}
-	manager.dirtyCount = 1
-	manager.statusMu.Unlock()
-
-	// Start a flush and pause it inside the storage write, holding the mgm lock.
-	store.blockNextSave.Store(true)
-	flushErr := make(chan error, 1)
-	go func() { flushErr <- manager.flushToStorage() }()
-	<-store.saveStarted
-
-	// PatchStatus blocks on the mgm lock the paused flush holds, so run it in a
-	// goroutine; it can only complete once the flush releases the lock.
-	const newCount = 99
-	patchErr := make(chan error, 1)
-	go func() {
-		c := newCount
-		patchErr <- manager.PatchStatus(ctx, groupID, &MetaServiceGroupStatusPatch{AssignmentCount: &c})
-	}()
-
-	// Let the flush finish; PatchStatus then serializes strictly after it.
-	close(store.unblockSave)
-	re.NoError(<-flushErr)
-	re.NoError(<-patchErr)
-
-	// The patch applied after the flush must be the persisted winner.
-	re.NoError(manager.RefreshCache())
-	statusMap, err := manager.GetStatus(ctx)
-	re.NoError(err)
-	re.Equal(newCount, statusMap[groupID].AssignmentCount)
 }

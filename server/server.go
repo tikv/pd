@@ -538,14 +538,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.metaServiceGroupManager.SetLeaderChecker(s.IsServing)
-	s.AddServiceReadyCallback(func(ctx context.Context) error {
+	s.AddServiceReadyCallback(func(_ context.Context) error {
 		if s.metaServiceGroupManager == nil {
 			return nil
 		}
-		// ctx is this leadership term's context (canceled when the lease is lost),
-		// so status flushes stop writing once the term ends.
-		s.metaServiceGroupManager.SetLeaderContext(ctx)
+		// Rebuild the derived assignment counts from keyspace metadata at the start
+		// of every leadership term.
 		return s.metaServiceGroupManager.RefreshCache()
 	})
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
