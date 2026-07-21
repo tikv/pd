@@ -26,12 +26,15 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -67,6 +70,69 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 	}
 }
 
+func TestRuleWatcherReconcilesDeletedRuleOnReload(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepareEtcd(t)
+	defer clean()
+
+	rules := []*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID,
+			ID:      placement.DefaultRuleID,
+			Role:    placement.Voter,
+			Count:   3,
+		},
+		{
+			GroupID: "test",
+			ID:      "deleted",
+			Role:    placement.Learner,
+			Count:   1,
+		},
+	}
+	for _, rule := range rules {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RuleKeyPath(rule.StoreKey()), string(value))
+		re.NoError(err)
+	}
+
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ruleManager := placement.NewRuleManager(ctx, storage, nil, mockconfig.NewTestOptions())
+	re.NoError(ruleManager.Initialize(3, nil, "", true))
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                 watchCtx,
+		cancel:              cancel,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleStorage:         storage,
+		checkerController:   newTestCheckerController(watchCtx),
+		ruleManager:         ruleManager,
+	}
+	re.NoError(rw.initializeRuleWatcher())
+	defer rw.Close()
+	re.NotNil(ruleManager.GetRule("test", "deleted"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	}()
+	time.Sleep(1100 * time.Millisecond)
+	_, err := client.Delete(ctx, keypath.RuleKeyPath(rules[1].StoreKey()))
+	re.NoError(err)
+	advanceResp, err := client.Put(ctx, "TestRuleWatcherReconcilesDeletedRuleOnReload", "")
+	re.NoError(err)
+	_, err = client.Compact(ctx, advanceResp.Header.Revision)
+	re.NoError(err)
+	time.Sleep(100 * time.Millisecond)
+
+	rw.ruleWatcher.ForceLoad()
+	testutil.Eventually(re, func() bool {
+		return ruleManager.GetRule("test", "deleted") == nil
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+}
+
 func newTestCheckerController(ctx context.Context) *checker.Controller {
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
@@ -100,7 +166,7 @@ func runWatcherLoadLabelRule(
 	cancel()
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+func prepareEtcd(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
@@ -113,6 +179,18 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
+
+	return ctx, client, func() {
+		cancel()
+		client.Close()
+		etcd.Close()
+		os.RemoveAll(cfg.Dir)
+	}
+}
+
+func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+	re := require.New(t)
+	ctx, client, clean := prepareEtcd(t)
 
 	ops := make([]clientv3.Op, 0, etcdutil.MaxEtcdTxnOps)
 	for i := 1; i < rulesNum+1; i++ {
@@ -128,14 +206,9 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 	}
 	if len(ops) > 0 {
-		_, err = client.Txn(ctx).Then(ops...).Commit()
+		_, err := client.Txn(ctx).Then(ops...).Commit()
 		re.NoError(err)
 	}
 
-	return ctx, client, func() {
-		cancel()
-		client.Close()
-		etcd.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, clean
 }

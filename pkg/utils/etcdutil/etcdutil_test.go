@@ -1050,6 +1050,120 @@ func (suite *loopWatcherTestSuite) TestWatcherReconcilesDeletedKeysAfterCompacti
 	checkCache(map[string]string{keepKey: "keep"})
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherRetriesReconciliationAfterPostCallbackFailure() {
+	re := suite.Require()
+	const prefix = "TestWatcherRetriesReconciliationAfterPostCallbackFailure/"
+	key := prefix + "deleted"
+	suite.put(re, key, "value")
+
+	cache := make(map[string]string)
+	var pending map[string]string
+	postErr := errors.New("post callback failed")
+	failPost := false
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			pending[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			if failPost {
+				return postErr
+			}
+			cache = pending
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	_, err = suite.client.Delete(suite.ctx, key)
+	re.NoError(err)
+	failPost = true
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, postErr)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = false
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbackFailure() {
+	re := suite.Require()
+	const prefix = "TestWatcherRetriesWatchDeleteAfterPostCallbackFailure/"
+	key := prefix + "deleted"
+	suite.put(re, key, "value")
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	cache := make(map[string]string)
+	var pending map[string]string
+	postErr := errors.New("post callback failed")
+	failPost := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			pending[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			if failPost {
+				cancel()
+				return postErr
+			}
+			cache = pending
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	revision, err := watcher.load(ctx)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = true
+	_, err = suite.client.Delete(suite.ctx, key)
+	re.NoError(err)
+	_, err = watcher.watch(ctx, revision)
+	re.NoError(err)
+	re.Equal(map[string]string{key: "value"}, cache)
+
+	failPost = false
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 	re := suite.Require()
 	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)

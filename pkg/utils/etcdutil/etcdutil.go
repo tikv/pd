@@ -632,6 +632,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Error("run pre event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
+			var appliedEvents []*clientv3.Event
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
@@ -640,7 +641,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						lw.recordLoadedKey(event.Kv)
+						if lw.reconcileDeletedKeys {
+							appliedEvents = append(appliedEvents, event)
+						}
 						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
@@ -651,15 +654,25 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						lw.forgetLoadedKey(event.Kv)
+						if lw.reconcileDeletedKeys {
+							appliedEvents = append(appliedEvents, event)
+						}
 						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
 				}
 			}
-			if err := lw.postEventsFn(wresp.Events); err != nil {
-				log.Error("run post event failed in watch loop", zap.Error(err),
+			if postErr := lw.postEventsFn(wresp.Events); postErr != nil {
+				log.Error("run post event failed in watch loop", zap.Error(postErr),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+			} else {
+				for _, event := range appliedEvents {
+					if event.Type == clientv3.EventTypeDelete {
+						delete(lw.loadedKeys, string(event.Kv.Key))
+					} else {
+						lw.loadedKeys[string(event.Kv.Key)] = struct{}{}
+					}
+				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -686,6 +699,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		preErr           error
 		callbackErr      error
 		snapshotKeys     map[string]struct{}
+		loadCompleted    bool
 	)
 	if lw.reconcileDeletedKeys {
 		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
@@ -704,6 +718,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			if err == nil {
 				err = postErr
 			}
+		}
+		if loadCompleted && err == nil && lw.reconcileDeletedKeys {
+			lw.loadedKeys = snapshotKeys
 		}
 	}()
 	if preErr != nil {
@@ -763,7 +780,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 			} else {
-				lw.recordLoadedKey(item)
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
@@ -773,20 +789,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			if callbackErr == nil {
 				callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
 			}
+			loadCompleted = true
 			return snapshotRevision + 1, callbackErr
 		}
-	}
-}
-
-func (lw *LoopWatcher) recordLoadedKey(kv *mvccpb.KeyValue) {
-	if lw.reconcileDeletedKeys {
-		lw.loadedKeys[string(kv.Key)] = struct{}{}
-	}
-}
-
-func (lw *LoopWatcher) forgetLoadedKey(kv *mvccpb.KeyValue) {
-	if lw.reconcileDeletedKeys {
-		delete(lw.loadedKeys, string(kv.Key))
 	}
 }
 
@@ -809,7 +814,6 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) err
 				zap.String("key", key), zap.Error(err))
 			continue
 		}
-		delete(lw.loadedKeys, key)
 	}
 	return firstErr
 }
