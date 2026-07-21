@@ -416,14 +416,11 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 			}
 		}
 	}
-	if err := persist(); err != nil {
-		return err
-	}
-	// Clear the persisted Enabled flag for groups leaving the set and for groups
-	// entering it, so a re-added group starts disabled instead of inheriting a
-	// stale Enabled left in storage. This is done before mutating memory and fails
-	// hard on error (the operation is idempotent on retry), so the reset invariant
-	// always holds rather than being best-effort.
+	// Reset the persisted Enabled flag of groups entering the set BEFORE persisting
+	// the config, so a re-added group starts disabled instead of inheriting a stale
+	// flag left in storage. Failing hard here keeps the reset invariant without
+	// leaving the config and the in-memory view diverged: nothing below has changed
+	// yet, so the operation is a clean, retryable no-op on error.
 	m.statusMu.Lock()
 	var addedGroups []string
 	for id := range metaServiceGroups {
@@ -432,12 +429,9 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		}
 	}
 	m.statusMu.Unlock()
-	clearGroups := make([]string, 0, len(deletedGroups)+len(addedGroups))
-	clearGroups = append(clearGroups, deletedGroups...)
-	clearGroups = append(clearGroups, addedGroups...)
-	if len(clearGroups) > 0 {
+	if len(addedGroups) > 0 {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-			for _, id := range clearGroups {
+			for _, id := range addedGroups {
 				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
 					return err
 				}
@@ -447,9 +441,13 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 			return err
 		}
 	}
-	// Apply the change to the in-memory view only after the storage writes above.
-	// Added groups start at zero: a new group has no keyspaces, and the delete guard
-	// guarantees a removed (hence re-addable) group had none either.
+	if err := persist(); err != nil {
+		return err
+	}
+	// Apply the change to the in-memory view only after the config is persisted, so
+	// the two never diverge. Added groups start at zero: a new group has no
+	// keyspaces, and the delete guard guarantees a removed (hence re-addable) group
+	// had none either.
 	m.metaServiceGroups = metaServiceGroups
 	m.statusMu.Lock()
 	for id := range metaServiceGroups {
@@ -461,6 +459,22 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		delete(m.cachedStatus, id)
 	}
 	m.statusMu.Unlock()
+	// Best-effort cleanup of the deleted groups' now-orphan persisted status. It is
+	// safe if this fails: RefreshCache only loads status for current groups, so an
+	// orphan key is never read, and a future re-add clears it via the reset above.
+	if len(deletedGroups) > 0 {
+		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+			for _, id := range deletedGroups {
+				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			log.Warn("[keyspace] failed to clear status for deleted meta-service groups",
+				zap.Strings("deleted-groups", deletedGroups), zap.Error(err))
+		}
+	}
 	return nil
 }
 
