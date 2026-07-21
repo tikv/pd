@@ -1037,10 +1037,12 @@ func (manager *Manager) enableNewKeyspace(id uint32, now int64) (*keyspacepb.Key
 		if meta == nil {
 			return errs.ErrKeyspaceNotFound
 		}
-		if err = manager.transformKeyspaceState(txn, meta, keyspacepb.KeyspaceState_ENABLED, now); err != nil {
-			return err
+		err = manager.store.SaveKeyspaceMeta(txn, meta)
+		if err == nil {
+			err = manager.transformKeyspaceState(txn, meta, keyspacepb.KeyspaceState_ENABLED, now)
 		}
-		return manager.store.SaveKeyspaceMeta(txn, meta)
+
+		return err
 	})
 	if err != nil {
 		return nil, err
