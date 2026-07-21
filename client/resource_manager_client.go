@@ -157,7 +157,16 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
 		c.inner.resourceManagerErrorHandler(err)
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		causeErr := err
+		switch ctxErr := ctx.Err(); ctxErr {
+		case context.Canceled, context.DeadlineExceeded:
+			causeErr = ctxErr
+		}
+		return nil, &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: resourceGroupName,
+			Cause:             err.Error(),
+			Err:               causeErr,
+		}
 	}
 	resErr := resp.GetError()
 	if resErr != nil {

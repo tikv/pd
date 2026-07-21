@@ -109,10 +109,23 @@ var (
 type ErrClientGetResourceGroup struct {
 	ResourceGroupName string
 	Cause             string
+	Err               error
 }
 
 func (e *ErrClientGetResourceGroup) Error() string {
-	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, e.Cause)
+	cause := e.Cause
+	if cause == "" && e.Err != nil {
+		cause = e.Err.Error()
+	}
+	if cause == "" {
+		cause = "unknown error"
+	}
+	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, cause)
+}
+
+// Unwrap returns the underlying error so callers can inspect the original gRPC or context error.
+func (e *ErrClientGetResourceGroup) Unwrap() error {
+	return e.Err
 }
 
 // scheduler errors
