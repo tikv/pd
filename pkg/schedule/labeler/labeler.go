@@ -360,7 +360,7 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 
 func (l *RegionLabeler) setLabelRuleInMemoryLocked(rule *LabelRule) {
 	if old, ok := l.labelRules[rule.ID]; ok {
-		if !l.keyspaceRules.Remove(old) {
+		if !l.keyspaceRules.Remove(rule.ID, old) {
 			delete(l.genericRules, old.ID)
 			l.rangeListDirty = true
 		}
@@ -377,7 +377,7 @@ func (l *RegionLabeler) deleteLabelRuleInMemoryLocked(id string) {
 	if !ok {
 		return
 	}
-	if !l.keyspaceRules.Remove(rule) {
+	if !l.keyspaceRules.Remove(id, rule) {
 		delete(l.genericRules, id)
 		l.rangeListDirty = true
 	}

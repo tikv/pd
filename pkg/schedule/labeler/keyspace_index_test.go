@@ -99,9 +99,9 @@ func TestKeyspaceRuleIndex(t *testing.T) {
 		makeRegionForKeyspace(43, keyspaceTxnMode).GetStartKey(),
 		makeRegionForKeyspace(43, keyspaceTxnMode).GetEndKey(),
 	))
-	re.True(index.Remove(txnOwner))
+	re.True(index.Remove(txnOwner.ID, txnOwner))
 
-	re.True(index.Remove(rule))
+	re.True(index.Remove(rule.ID, rule))
 	re.False(index.Contains(rule))
 	re.Empty(index.GetSplitKeys(rawStart[:], rawEnd[:]))
 }
@@ -183,6 +183,28 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 	re.False(regionLabeler.rangeListDirty)
 	re.False(regionLabeler.keyspaceRules.Contains(updated))
 	re.Equal("yes", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, keyspaceTxnMode), "generic"))
+}
+
+func TestRegionLabelerUpdatesMutatedKeyspaceRule(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+
+	rule := makeKeyspaceRuleForTest(42, keyspaceTxnMode)
+	re.NoError(regionLabeler.SetLabelRule(rule))
+
+	fetched := regionLabeler.GetLabelRule(rule.ID)
+	fetched.Data = makeKeyspaceRuleForTest(42, keyspaceRawMode).Data
+	re.NoError(regionLabeler.SetLabelRule(fetched))
+	re.Equal("42", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, keyspaceRawMode), "id"))
+	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, keyspaceTxnMode), "id"))
+
+	fetched.Labels[0].Value = "mutated"
+	re.NoError(regionLabeler.DeleteLabelRule(fetched.ID))
+	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, keyspaceRawMode), "id"))
 }
 
 func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {

@@ -163,22 +163,22 @@ func (i *keyspaceRuleIndex) Add(rule *LabelRule) bool {
 	return true
 }
 
-// Remove deletes a rule from the keyspace index. It returns false when the
-// rule is generic or the indexed slots are owned by a different rule.
-func (i *keyspaceRuleIndex) Remove(rule *LabelRule) bool {
-	ranges, count, ok := keyspaceRanges(rule)
+// Remove deletes all slots owned by rule for the keyspace rule ID. It returns
+// false when the ID is not canonical or no indexed slot is owned by rule.
+func (i *keyspaceRuleIndex) Remove(ruleID string, rule *LabelRule) bool {
+	id, _, ok := parseKeyspaceRuleID(ruleID)
 	if !ok {
 		return false
 	}
-	for _, r := range ranges[:count] {
-		if i.ruleSet(r.mode).get(r.id) != rule {
-			return false
+	removed := false
+	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+		set := i.ruleSet(mode)
+		if set.get(id) == rule {
+			set.clear(id)
+			removed = true
 		}
 	}
-	for _, r := range ranges[:count] {
-		i.ruleSet(r.mode).clear(r.id)
-	}
-	return true
+	return removed
 }
 
 // Contains reports whether all canonical slots are owned by rule.
@@ -264,16 +264,10 @@ func keyspaceRanges(rule *LabelRule) ([2]keyspaceRuleRange, int, bool) {
 	if label.Key != keyspaceIDLabelKey || label.TTL != "" || label.StartAt != "" || label.expire != nil {
 		return ranges, 0, false
 	}
-	if !strings.HasPrefix(rule.ID, keyspaceRuleIDPrefix) {
+	id, idText, ok := parseKeyspaceRuleID(rule.ID)
+	if !ok || label.Value != idText {
 		return ranges, 0, false
 	}
-	idText := strings.TrimPrefix(rule.ID, keyspaceRuleIDPrefix)
-	id64, err := strconv.ParseUint(idText, 10, 32)
-	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
-	if err != nil || id64 > uint64(keyspaceMaxID) || hasLeadingZero || label.Value != idText {
-		return ranges, 0, false
-	}
-	id := uint32(id64)
 	keyRanges := rule.GetKeyRanges()
 	if len(keyRanges) == 0 || len(keyRanges) > 2 {
 		return ranges, 0, false
@@ -308,6 +302,19 @@ func keyspaceRanges(rule *LabelRule) ([2]keyspaceRuleRange, int, bool) {
 		count++
 	}
 	return ranges, count, true
+}
+
+func parseKeyspaceRuleID(ruleID string) (uint32, string, bool) {
+	if !strings.HasPrefix(ruleID, keyspaceRuleIDPrefix) {
+		return 0, "", false
+	}
+	idText := strings.TrimPrefix(ruleID, keyspaceRuleIDPrefix)
+	id64, err := strconv.ParseUint(idText, 10, 32)
+	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
+	if err != nil || id64 > uint64(keyspaceMaxID) || hasLeadingZero {
+		return 0, "", false
+	}
+	return uint32(id64), idText, true
 }
 
 func canonicalKeyspaceRange(keyRange *KeyRangeRule, id uint32) (byte, bool) {
