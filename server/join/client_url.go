@@ -17,6 +17,7 @@ package join
 import (
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
@@ -32,11 +33,11 @@ import (
 // (notably IPv6) are reduced to their canonical form. If the input cannot be
 // parsed it is returned trimmed but otherwise unchanged, so comparison degrades
 // to the raw string rather than silently treating a bad URL as matching.
-func canonicalizeURL(raw string) string {
+func canonicalizeURL(raw string) (string, error) {
 	s := strings.TrimSpace(raw)
 	u, err := url.Parse(s)
 	if err != nil || u.Host == "" {
-		return s
+		return s, err
 	}
 	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if ip := net.ParseIP(host); ip != nil {
@@ -44,18 +45,30 @@ func canonicalizeURL(raw string) string {
 	}
 	hostport := host
 	if port := u.Port(); port != "" {
-		hostport = net.JoinHostPort(host, port)
+		// Convert forms such as "02379" to "2379".
+		portNum, err := strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return s, err
+		}
+		hostport = net.JoinHostPort(
+			host,
+			strconv.FormatUint(portNum, 10),
+		)
 	}
-	return strings.ToLower(u.Scheme) + "://" + hostport
+	return strings.ToLower(u.Scheme) + "://" + hostport, nil
 }
 
 // canonicalizeURLs canonicalizes each URL in the slice.
-func canonicalizeURLs(raws []string) []string {
+func canonicalizeURLs(raws []string) ([]string, error) {
 	out := make([]string, len(raws))
 	for i, raw := range raws {
-		out[i] = canonicalizeURL(raw)
+		var err error
+		out[i], err = canonicalizeURL(raw)
+		if err != nil {
+			return nil, errors.Wrapf(err, "invalid URL %q", raw)
+		}
 	}
-	return out
+	return out, nil
 }
 
 // checkClientURLConflict rejects the member if any *other* member in the current
@@ -84,20 +97,35 @@ func checkClientURLConflict(
 	advertisePeerURLs []string,
 	members []*etcdserverpb.Member,
 ) error {
-	selfPeers := canonicalizeURLs(advertisePeerURLs)
+	selfPeers, err := canonicalizeURLs(advertisePeerURLs)
+	if err != nil {
+		return err
+	}
 	// canonical client URL -> the original string, for a readable error.
 	self := make(map[string]string, len(advertiseClientURLs))
 	for _, raw := range advertiseClientURLs {
-		self[canonicalizeURL(raw)] = raw
+		canon, err := canonicalizeURL(raw)
+		if err != nil {
+			return err
+		}
+		self[canon] = raw
 	}
 	for _, m := range members {
 		// Skip only our own entry, matched by peer URLs so a different member
 		// sharing our name is still checked.
-		if slice.EqualWithoutOrder(canonicalizeURLs(m.PeerURLs), selfPeers) {
+		canonPeerURLs, err := canonicalizeURLs(m.PeerURLs)
+		if err != nil {
+			return err
+		}
+		if slice.EqualWithoutOrder(canonPeerURLs, selfPeers) {
 			continue
 		}
 		for _, owned := range m.ClientURLs {
-			if orig, ok := self[canonicalizeURL(owned)]; ok {
+			canonOwned, err := canonicalizeURL(owned)
+			if err != nil {
+				return err
+			}
+			if orig, ok := self[canonOwned]; ok {
 				return errors.Errorf(
 					"advertise-client-urls %q is already used by member %q (id %d)",
 					orig, m.Name, m.ID)

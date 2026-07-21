@@ -19,7 +19,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.uber.org/goleak"
+
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestCanonicalizeURL(t *testing.T) {
 	re := require.New(t)
@@ -35,10 +42,13 @@ func TestCanonicalizeURL(t *testing.T) {
 		{"http://[2001:0db8:0000:0000:0000:0000:0000:0001]:2379", "http://[2001:db8::1]:2379"}, // IPv6 canonical form
 		{"http://[2001:DB8::1]:2379", "http://[2001:db8::1]:2379"},                             // IPv6 case
 		{"https://10.0.0.1:2379", "https://10.0.0.1:2379"},
+		{"https://10.0.0.1:02379", "https://10.0.0.1:2379"},
 		{"not a url", "not a url"}, // unparsable, returned as-is (trimmed)
 	}
 	for _, tc := range testCases {
-		re.Equal(tc.want, canonicalizeURL(tc.in), tc.in)
+		u, err := canonicalizeURL(tc.in)
+		re.NoError(err)
+		re.Equal(tc.want, u, tc.in)
 	}
 }
 
