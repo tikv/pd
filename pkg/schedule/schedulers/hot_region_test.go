@@ -1467,6 +1467,97 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	clearPendingInfluence(hb)
 }
 
+func TestHotReadRegionScheduleSkipsLeaderEvictedMoveLeaderTarget(t *testing.T) {
+	testCases := []struct {
+		name string
+		opt  core.StoreCreateOption
+	}{
+		{name: "slow-store", opt: core.SlowStoreEvicted()},
+		{name: "stopping-store", opt: core.StoppingStoreEvicted()},
+		{name: "slow-trend", opt: core.SlowTrendEvicted()},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+			scheduler, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+			re.NoError(err)
+			hb := scheduler.(*hotScheduler)
+			hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			hb.conf.setHistorySampleDuration(0)
+
+			tc.AddRegionStore(1, 3)
+			tc.AddRegionStore(2, 2)
+			tc.AddRegionStore(3, 2)
+			tc.AddRegionStore(4, 2)
+			tc.AddRegionStore(5, 0)
+
+			tc.UpdateStorageReadBytes(1, 7.5*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageReadBytes(2, 4.9*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageReadBytes(3, 3.7*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageReadBytes(4, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageReadBytes(5, 0)
+			tc.PutStore(tc.GetStore(5).Clone(testCase.opt))
+
+			addRegionInfo(tc, utils.Read, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+				{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
+				{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
+				{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+			})
+
+			testutil.Eventually(re, func() bool {
+				return tc.IsRegionHot(tc.GetRegion(1)) && !tc.IsRegionHot(tc.GetRegion(11))
+			})
+
+			ops, _ := hb.Schedule(tc, false)
+			re.Len(ops, 1)
+			operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
+		})
+	}
+}
+
+func TestHotReadPeerScheduleSkipsLeaderEvictedTarget(t *testing.T) {
+	testCases := []struct {
+		name string
+		opt  core.StoreCreateOption
+	}{
+		{name: "slow-store", opt: core.SlowStoreEvicted()},
+		{name: "stopping-store", opt: core.StoppingStoreEvicted()},
+		{name: "slow-trend", opt: core.SlowTrendEvicted()},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+			for id := uint64(1); id <= 6; id++ {
+				tc.PutStoreWithLabels(id)
+			}
+
+			sche, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+			re.NoError(err)
+			hb := sche.(*hotScheduler)
+			hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			tc.PutStore(tc.GetStore(4).Clone(testCase.opt))
+
+			tc.UpdateStorageReadStats(1, 20*units.MiB, 20*units.MiB)
+			tc.UpdateStorageReadStats(2, 19*units.MiB, 19*units.MiB)
+			tc.UpdateStorageReadStats(3, 19*units.MiB, 19*units.MiB)
+			tc.UpdateStorageReadStats(4, 0*units.MiB, 0*units.MiB)
+			tc.AddRegionWithPeerReadInfo(1, 3, 1, uint64(0.9*units.KiB*float64(10)), uint64(0.9*units.KiB*float64(10)), 10, []uint64{1, 2}, 3)
+
+			ops, _ := hb.Schedule(tc, false)
+			re.Empty(ops)
+		})
+	}
+}
+
 func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	re := require.New(t)
 
