@@ -231,7 +231,7 @@ type PersistConfig struct {
 	replication    atomic.Value
 	storeConfig    atomic.Value
 	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
+	// Store as `chan struct{}`.
 	schedulersUpdatingNotifier atomic.Value
 }
 
@@ -249,16 +249,30 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 }
 
 // SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan struct{}) {
 	o.schedulersUpdatingNotifier.Store(notifier)
 }
 
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+// ClearSchedulersUpdatingNotifier clears the schedulers updating notifier if it
+// still matches the given notifier.
+func (o *PersistConfig) ClearSchedulersUpdatingNotifier(notifier chan struct{}) {
+	if notifier == nil {
+		return
+	}
+	current := o.getSchedulersUpdatingNotifier()
+	if current != notifier {
+		return
+	}
+	var empty chan struct{}
+	o.schedulersUpdatingNotifier.CompareAndSwap(current, empty)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan struct{} {
 	v := o.schedulersUpdatingNotifier.Load()
 	if v == nil {
 		return nil
 	}
-	return v.(chan<- struct{})
+	return v.(chan struct{})
 }
 
 func (o *PersistConfig) tryNotifySchedulersUpdating() {
@@ -266,7 +280,11 @@ func (o *PersistConfig) tryNotifySchedulersUpdating() {
 	if notifier == nil {
 		return
 	}
-	notifier <- struct{}{}
+	// Scheduler update notifications are coalesced; one pending signal is enough.
+	select {
+	case notifier <- struct{}{}:
+	default:
+	}
 }
 
 // GetClusterVersion returns the cluster version.
