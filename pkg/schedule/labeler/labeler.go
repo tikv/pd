@@ -441,21 +441,28 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 	now := time.Now()
 	value, index := "", -1
 	// search ranges
-	if data := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey()); data != nil {
-		for _, rule := range data {
-			r := rule.(*LabelRule)
-			if r.Index <= index && value != "" {
+	rules, keyspaceRule, ok := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey())
+	if !ok {
+		return ""
+	}
+	applyRule := func(r *LabelRule) {
+		if r.Index <= index && value != "" {
+			return
+		}
+		for _, label := range r.Labels {
+			if label.expireBefore(now) {
 				continue
 			}
-			for _, l := range r.Labels {
-				if l.expireBefore(now) {
-					continue
-				}
-				if l.Key == key {
-					value, index = l.Value, r.Index
-				}
+			if label.Key == key {
+				value, index = label.Value, r.Index
 			}
 		}
+	}
+	for _, rule := range rules {
+		applyRule(rule.(*LabelRule))
+	}
+	if keyspaceRule != nil {
+		applyRule(keyspaceRule)
 	}
 	return value
 }
@@ -478,17 +485,23 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 	labels := make(map[string]valueIndex)
 	now := time.Now()
 	// search ranges
-	if data := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey()); data != nil {
-		for _, rule := range data {
-			r := rule.(*LabelRule)
-			for _, l := range r.Labels {
-				if l.expireBefore(now) {
+	rules, keyspaceRule, ok := l.getRangeRulesLocked(region.GetStartKey(), region.GetEndKey())
+	if ok {
+		applyRule := func(r *LabelRule) {
+			for _, label := range r.Labels {
+				if label.expireBefore(now) {
 					continue
 				}
-				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
-					labels[l.Key] = valueIndex{l.Value, r.Index}
+				if old, ok := labels[label.Key]; !ok || old.index < r.Index {
+					labels[label.Key] = valueIndex{label.Value, r.Index}
 				}
 			}
+		}
+		for _, rule := range rules {
+			applyRule(rule.(*LabelRule))
+		}
+		if keyspaceRule != nil {
+			applyRule(keyspaceRule)
 		}
 	}
 	result := make([]*RegionLabel, 0, len(labels))
@@ -501,21 +514,16 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 	return result
 }
 
-func (l *RegionLabeler) getRangeRulesLocked(start, end []byte) []any {
-	if l.rangeList.HasSplitKey(start, end) {
-		return nil
+func (l *RegionLabeler) getRangeRulesLocked(start, end []byte) ([]any, *LabelRule, bool) {
+	rules, ok := l.rangeList.GetDataByRange(start, end)
+	if !ok {
+		return nil, nil, false
 	}
-	_, rules := l.rangeList.GetDataByKey(start)
 	keyspaceRule := l.keyspaceRules.GetRule(start, end)
 	if keyspaceRule == nil && l.keyspaceRules.HasSplitKey(start, end) {
-		return nil
+		return nil, nil, false
 	}
-	if keyspaceRule == nil {
-		return rules
-	}
-	result := make([]any, 0, len(rules)+1)
-	result = append(result, rules...)
-	return append(result, keyspaceRule)
+	return rules, keyspaceRule, true
 }
 
 // MakeKeyRanges is a helper function to make key ranges.

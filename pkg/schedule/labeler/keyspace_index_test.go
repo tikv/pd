@@ -81,6 +81,26 @@ func TestKeyspaceRuleIndex(t *testing.T) {
 	}, splitKeys)
 	re.True(index.HasSplitKey(rawStart[:], rawEnd[:]))
 
+	// A rejected multi-range add must not populate its free slot before it
+	// discovers a collision in another slot.
+	txnOwner := makeKeyspaceRuleForTest(43, keyspaceTxnMode)
+	re.NoError(txnOwner.checkAndAdjust())
+	re.True(index.Add(txnOwner))
+	collision := makeKeyspaceRuleForTest(43, keyspaceRawMode, keyspaceTxnMode)
+	re.NoError(collision.checkAndAdjust())
+	re.False(index.Add(collision))
+	re.True(index.Contains(txnOwner))
+	re.False(index.Contains(collision))
+	re.Nil(index.GetRule(
+		makeRegionForKeyspace(43, keyspaceRawMode).GetStartKey(),
+		makeRegionForKeyspace(43, keyspaceRawMode).GetEndKey(),
+	))
+	re.Same(txnOwner, index.GetRule(
+		makeRegionForKeyspace(43, keyspaceTxnMode).GetStartKey(),
+		makeRegionForKeyspace(43, keyspaceTxnMode).GetEndKey(),
+	))
+	re.True(index.Remove(txnOwner))
+
 	re.True(index.Remove(rule))
 	re.False(index.Contains(rule))
 	re.Empty(index.GetSplitKeys(rawStart[:], rawEnd[:]))
@@ -146,6 +166,11 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 		re.Equal("42", regionLabeler.GetRegionLabel(region, "id"))
 		re.Equal("yes", regionLabeler.GetRegionLabel(region, "generic"))
 	}
+	startRegion := makeRegionForKeyspace(42, keyspaceTxnMode)
+	endRegion := makeRegionForKeyspace(43, keyspaceTxnMode)
+	crossingRegion := core.NewTestRegionInfo(2, 1, startRegion.GetStartKey(), endRegion.GetEndKey())
+	re.Empty(regionLabeler.GetRegionLabel(crossingRegion, "id"))
+	re.Empty(regionLabeler.GetRegionLabel(crossingRegion, "generic"))
 
 	// Changing the deterministic rule only touches its old and new slots.
 	updated := makeKeyspaceRuleForTest(42, keyspaceTxnMode)
@@ -201,6 +226,28 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 				regionLabeler.setLabelRuleInMemoryLocked(target)
 				regionLabeler.BuildRangeListLocked()
 				regionLabeler.Unlock()
+			}
+		})
+
+		b.Run(fmt.Sprintf("lookup/%d", count), func(b *testing.B) {
+			regionLabeler := &RegionLabeler{
+				labelRules:     make(map[string]*LabelRule, count),
+				genericRules:   make(map[string]*LabelRule),
+				rangeListDirty: true,
+			}
+			for id := range count {
+				rule := makeKeyspaceRuleForTest(uint32(id), keyspaceTxnMode)
+				require.NoError(b, rule.checkAndAdjust())
+				regionLabeler.labelRules[rule.ID] = rule
+			}
+			regionLabeler.BuildRangeListLocked()
+			region := makeRegionForKeyspace(uint32(count/2), keyspaceTxnMode)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if value := regionLabeler.GetRegionLabel(region, keyspaceIDLabelKey); value == "" {
+					b.Fatal("keyspace label not found")
+				}
 			}
 		})
 	}
