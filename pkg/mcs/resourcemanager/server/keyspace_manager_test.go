@@ -15,7 +15,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -26,9 +28,51 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+type transactionalDeleteGuardStorage struct {
+	storage.Storage
+}
+
+func (transactionalDeleteGuardStorage) DeleteResourceGroupSetting(uint32, string) error {
+	return errors.New("direct setting delete should use a transaction")
+}
+
+func (transactionalDeleteGuardStorage) DeleteResourceGroupStates(uint32, string) error {
+	return errors.New("direct state delete should use a transaction")
+}
+
+func (s transactionalDeleteGuardStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
+	return s.Storage.RunInTxn(ctx, f)
+}
+
+func newTestResourceGroup(name string, priority uint32, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
+	return &rmpb.ResourceGroup{
+		Name:     name,
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: priority,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   fillRate,
+					BurstLimit: burstLimit,
+				},
+			},
+		},
+	}
+}
+
+func mustMarshalResourceGroup(t *testing.T, group *rmpb.ResourceGroup) string {
+	t.Helper()
+	data, err := proto.Marshal(group)
+	require.NoError(t, err)
+	return string(data)
+}
 
 func TestInitDefaultResourceGroup(t *testing.T) {
 	re := require.New(t)
@@ -166,37 +210,95 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.Error(err)
 }
 
-func TestDeleteResourceGroup(t *testing.T) {
-	re := require.New(t)
+func TestDeleteResourceGroupBehavior(t *testing.T) {
+	t.Run("removes_group_and_tracker_from_cache", func(t *testing.T) {
+		re := require.New(t)
 
-	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("test_group", 5, 100, 200)
+		re.NoError(krgm.addResourceGroup(group))
+		krgm.groupRUTrackers[group.GetName()] = newGroupRUTracker()
 
-	// Add a resource group first.
-	group := &rmpb.ResourceGroup{
-		Name:     "test_group",
-		Mode:     rmpb.GroupMode_RUMode,
-		Priority: 5,
-	}
-	err := krgm.addResourceGroup(group)
-	re.NoError(err)
+		re.NotNil(krgm.getResourceGroup(group.GetName(), false))
+		re.NoError(krgm.deleteResourceGroup(group.GetName()))
+		re.Nil(krgm.getResourceGroup(group.GetName(), false))
+		_, ok := krgm.groupRUTrackers[group.GetName()]
+		re.False(ok)
 
-	// Verify the group exists.
-	re.NotNil(krgm.getResourceGroup(group.GetName(), false))
+		krgm.initDefaultResourceGroup()
+		re.Error(krgm.deleteResourceGroup(DefaultResourceGroupName))
+		re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+	})
 
-	// Delete the group.
-	err = krgm.deleteResourceGroup(group.GetName())
-	re.NoError(err)
+	t.Run("uses_transactional_delete", func(t *testing.T) {
+		re := require.New(t)
 
-	// Verify the group was deleted.
-	re.Nil(krgm.getResourceGroup(group.GetName(), false))
+		memStorage := transactionalDeleteGuardStorage{Storage: storage.NewStorageWithMemoryBackend()}
+		krgm := newKeyspaceResourceGroupManager(1, memStorage)
+		group := newTestResourceGroup("test_group", 5, 100, 200)
 
-	// Try to delete the default group.
-	krgm.initDefaultResourceGroup()
-	err = krgm.deleteResourceGroup(DefaultResourceGroupName)
-	re.Error(err) // Should not be able to delete default group.
+		re.NoError(krgm.addResourceGroup(group))
+		re.NoError(krgm.deleteResourceGroup(group.GetName()))
+		re.Nil(krgm.getResourceGroup(group.GetName(), false))
 
-	// Verify default group still exists.
-	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
+		settingsValue, err := memStorage.Load(keypath.KeyspaceResourceGroupSettingPath(1, group.GetName()))
+		re.NoError(err)
+		re.Empty(settingsValue)
+
+		statesValue, err := memStorage.Load(keypath.KeyspaceResourceGroupStatePath(1, group.GetName()))
+		re.NoError(err)
+		re.Empty(statesValue)
+	})
+
+	t.Run("clears_persisted_states_in_metadata_only_role", func(t *testing.T) {
+		re := require.New(t)
+
+		memStorage := storage.NewStorageWithMemoryBackend()
+		krgm := newKeyspaceResourceGroupManager(1, memStorage, ResourceGroupWriteRolePDMetaOnly)
+		group := newTestResourceGroup("test_group", 5, 100, 200)
+		re.NoError(krgm.addResourceGroup(group))
+
+		now := time.Now()
+		re.NoError(memStorage.SaveResourceGroupStates(1, group.Name, &GroupStates{
+			RU: &GroupTokenBucketState{
+				Tokens:     321,
+				LastUpdate: &now,
+			},
+			RUConsumption: &rmpb.Consumption{RRU: 11, WRU: 22},
+		}))
+
+		stateCount := 0
+		re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+			if keyspaceID == 1 && name == group.Name {
+				stateCount++
+			}
+		}))
+		re.Equal(1, stateCount)
+
+		re.NoError(krgm.deleteResourceGroup(group.Name))
+
+		stateCount = 0
+		re.NoError(memStorage.LoadResourceGroupStates(func(keyspaceID uint32, name, _ string) {
+			if keyspaceID == 1 && name == group.Name {
+				stateCount++
+			}
+		}))
+		re.Zero(stateCount)
+	})
+
+	t.Run("cache_only_helper_removes_group_and_tracker", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("test_group", 5, 100, 200)
+		re.NoError(krgm.addResourceGroup(group))
+		krgm.groupRUTrackers[group.Name] = newGroupRUTracker()
+
+		krgm.deleteResourceGroupFromCache(group.Name)
+		re.Nil(krgm.getMutableResourceGroup(group.Name))
+		_, ok := krgm.groupRUTrackers[group.Name]
+		re.False(ok)
+	})
 }
 
 func TestGetResourceGroup(t *testing.T) {
@@ -266,44 +368,102 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Len(groups, 3)
 }
 
-func TestAddResourceGroupFromRaw(t *testing.T) {
-	re := require.New(t)
+func TestResourceGroupFromRawBehavior(t *testing.T) {
+	t.Run("adds_valid_group_from_raw", func(t *testing.T) {
+		re := require.New(t)
 
-	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("test_group", 5, 100, 200)
 
-	// Create a resource group.
-	group := &rmpb.ResourceGroup{
-		Name:     "test_group",
-		Mode:     rmpb.GroupMode_RUMode,
-		Priority: 5,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
-				},
-			},
-		},
-	}
+		re.NoError(krgm.addResourceGroupFromRaw(group.GetName(), mustMarshalResourceGroup(t, group)))
 
-	// Marshal to bytes.
-	data, err := proto.Marshal(group)
-	re.NoError(err)
+		addedGroup, exists := krgm.groups[group.GetName()]
+		re.True(exists)
+		re.Equal(group.GetName(), addedGroup.Name)
+		re.Equal(group.GetMode(), addedGroup.Mode)
+		re.Equal(group.GetPriority(), addedGroup.Priority)
+	})
 
-	// Add from raw.
-	err = krgm.addResourceGroupFromRaw(group.GetName(), string(data))
-	re.NoError(err)
+	t.Run("rejects_invalid_bytes_when_adding", func(t *testing.T) {
+		re := require.New(t)
 
-	// Verify the group was added correctly.
-	addedGroup, exists := krgm.groups[group.GetName()]
-	re.True(exists)
-	re.Equal(group.GetName(), addedGroup.Name)
-	re.Equal(group.GetMode(), addedGroup.Mode)
-	re.Equal(group.GetPriority(), addedGroup.Priority)
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		err := krgm.addResourceGroupFromRaw("test_group", "invalid_data")
+		re.Error(err)
+	})
 
-	// Test with invalid raw value.
-	err = krgm.addResourceGroupFromRaw(group.GetName(), "invalid_data")
-	re.Error(err)
+	t.Run("rejects_invalid_proto_when_adding", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("invalid_priority_group", maxPriority+1, 100, 200)
+		err := krgm.addResourceGroupFromRaw(group.GetName(), mustMarshalResourceGroup(t, group))
+		re.ErrorIs(err, errs.ErrInvalidGroup)
+		re.Nil(krgm.getMutableResourceGroup(group.GetName()))
+	})
+
+	t.Run("upserts_existing_group_preserving_runtime_fields", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("test_group", 5, 100, 200)
+		re.NoError(krgm.addResourceGroup(group))
+
+		mutableGroup := krgm.getMutableResourceGroup(group.Name)
+		re.NotNil(mutableGroup)
+		mutableGroup.RUSettings.RU.Tokens = 123.45
+		mutableGroup.RUConsumption = &rmpb.Consumption{RRU: 12, WRU: 34}
+
+		updatedGroup := newTestResourceGroup(group.Name, 9, 500, 600)
+		re.NoError(krgm.upsertResourceGroupFromRaw(group.Name, mustMarshalResourceGroup(t, updatedGroup)))
+
+		current := krgm.getMutableResourceGroup(group.Name)
+		re.NotNil(current)
+		re.Equal(uint32(9), current.Priority)
+		re.Equal(float64(500), current.getFillRate())
+		re.Equal(int64(600), current.getBurstLimit())
+		re.InDelta(123.45, current.RUSettings.RU.Tokens, 0.001)
+		re.Equal(float64(12), current.RUConsumption.RRU)
+		re.Equal(float64(34), current.RUConsumption.WRU)
+	})
+
+	t.Run("inserts_new_group_on_upsert", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("new_group", 3, 111, 222)
+		re.NoError(krgm.upsertResourceGroupFromRaw(group.GetName(), mustMarshalResourceGroup(t, group)))
+		re.NotNil(krgm.getMutableResourceGroup(group.GetName()))
+	})
+
+	t.Run("rejects_invalid_bytes_when_upserting", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		err := krgm.upsertResourceGroupFromRaw("test_group", "invalid_data")
+		re.Error(err)
+	})
+
+	t.Run("rejects_mismatched_payload_name_when_upserting", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("payload_name", 1, 100, 200)
+		err := krgm.upsertResourceGroupFromRaw("key_name", mustMarshalResourceGroup(t, group))
+		re.Error(err)
+		re.Nil(krgm.getMutableResourceGroup("key_name"))
+		re.Nil(krgm.getMutableResourceGroup(group.GetName()))
+	})
+
+	t.Run("rejects_invalid_new_group_when_upserting", func(t *testing.T) {
+		re := require.New(t)
+
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		group := newTestResourceGroup("invalid_priority_group", maxPriority+1, 100, 200)
+		err := krgm.upsertResourceGroupFromRaw(group.GetName(), mustMarshalResourceGroup(t, group))
+		re.ErrorIs(err, errs.ErrInvalidGroup)
+		re.Nil(krgm.getMutableResourceGroup(group.GetName()))
+	})
 }
 
 func TestSetRawStatesIntoResourceGroup(t *testing.T) {

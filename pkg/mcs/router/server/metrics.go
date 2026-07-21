@@ -16,6 +16,10 @@ package server
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/routerpb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 const (
@@ -24,6 +28,8 @@ const (
 )
 
 var (
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
+
 	queryRegionDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -51,7 +57,12 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(regionRequestCounter)
 	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionSyncerStatus)
+}
+
+func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) routerpb.Router_QueryRegionServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
 }

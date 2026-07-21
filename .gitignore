@@ -34,3 +34,6 @@ tmp*
 .specstory/
 .cursorindexingignore
 .gocache/
+!.claude/
+.claude/*
+!.claude/skills

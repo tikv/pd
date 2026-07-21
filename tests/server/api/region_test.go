@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"testing"
@@ -374,12 +375,13 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
+	expected := &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r2); err != nil {
 			return false
 		}
 		r2.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+		return reflect.DeepEqual(expected, r2)
 	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "pending-peer")
@@ -398,36 +400,37 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
+	expected = &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r5); err != nil {
 			return false
 		}
 		r5.Adjust()
-		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+		return reflect.DeepEqual(expected, r5)
 	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-size")
 	r6 := make([]*api.HistItem, 1)
+	histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r6); err != nil {
 			return false
 		}
-		histSizes := []*api.HistItem{{Start: 1, End: 1, Count: 1}}
-		return suite.Equal(histSizes, r6)
+		return reflect.DeepEqual(histSizes, r6)
 	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	tests.MustPutRegionInfo(re, cluster, r)
 	url = fmt.Sprintf("%s/regions/check/%s", urlPrefix, "hist-keys")
 	r7 := make([]*api.HistItem, 1)
+	histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
 	testutil.Eventually(re, func() bool {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, &r7); err != nil {
 			return false
 		}
-		histKeys := []*api.HistItem{{Start: 1000, End: 1999, Count: 1}}
-		return suite.Equal(histKeys, r7)
+		return reflect.DeepEqual(histKeys, r7)
 	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
@@ -445,8 +448,8 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 		if err := testutil.ReadGetJSON(re, tests.TestDialClient, url, r8); err != nil {
 			return false
 		}
-		r4.Adjust()
-		return r8.Count == 1 && len(r8.Regions) > 0 && suite.Equal(r.GetID(), r8.Regions[0].ID)
+		r8.Adjust()
+		return r8.Count == 1 && len(r8.Regions) > 0 && r.GetID() == r8.Regions[0].ID
 	})
 }
 

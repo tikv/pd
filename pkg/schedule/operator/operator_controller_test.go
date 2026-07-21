@@ -720,10 +720,19 @@ func (suite *operatorControllerTestSuite) TestInfluenceOpt() {
 	op.Start()
 	inf := controller.GetOpInfluence(cluster.GetBasicCluster())
 	re.Len(inf.StoresInfluence, 1)
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), nil)
+	re.Len(inf.StoresInfluence, 1)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("200")}}))
 	re.Empty(inf.StoresInfluence)
 	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
 	re.Len(inf.StoresInfluence, 1)
+	cluster.ResetRegionCache()
+	inf = controller.GetOpInfluence(cluster.GetBasicCluster(), WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Empty(inf.StoresInfluence)
+	inf = controller.GetOpInfluence(nil, WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}}))
+	re.Empty(inf.StoresInfluence)
+	opt := WithRangeOption([]keyutil.KeyRange{{StartKey: []byte("100"), EndKey: []byte("400")}})
+	re.False(opt(nil))
 }
 
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {

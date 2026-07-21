@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
@@ -141,6 +142,30 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 			KeyspaceId: keyspaceID,
 		}
+		missingGroup := &rmpb.ResourceGroup{
+			Name:     "test_group_non_existing",
+			Mode:     groupToAdd.Mode,
+			Priority: groupToAdd.Priority,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   groupToAdd.GetRUSettings().GetRU().GetSettings().GetFillRate(),
+						BurstLimit: groupToAdd.GetRUSettings().GetRU().GetSettings().GetBurstLimit(),
+					},
+				},
+			},
+			KeyspaceId: keyspaceID,
+		}
+		bodyBytes, statusCode := sendRequest(
+			re,
+			suite.cluster.GetLeaderServer().GetAddr(),
+			http.MethodPut,
+			"/config/group",
+			nil,
+			missingGroup,
+		)
+		re.Equal(http.StatusNotFound, statusCode)
+		re.NotEmpty(string(bodyBytes))
 		suite.mustAddResourceGroup(re, groupToAdd)
 		// Get the resource group.
 		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
@@ -365,12 +390,46 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 	}
 	// Try to set a non-existing keyspace's service limit.
 	resp, statusCode := tryToSetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace", 1.0)
-	re.Equal(http.StatusBadRequest, statusCode)
-	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
+	re.Equal(http.StatusNotFound, statusCode)
+	re.Equal(errs.ErrKeyspaceNotExistsByName.FastGenByArgs("non_existing_keyspace").Error(), resp)
 	// Try to get a non-existing keyspace's service limit.
 	limit, statusCode := tryToGetKeyspaceServiceLimit(re, leaderAddr, "non_existing_keyspace")
-	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal(http.StatusNotFound, statusCode)
 	re.Equal(0.0, limit)
+
+	// Test RU version via controller config API.
+	// Initially no RU version policy in controller config.
+	config := suite.mustGetControllerConfig(re)
+	re.Nil(config.RUVersionPolicy)
+	// Set a negative ru_version, should fail.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", -1)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 0)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("ru_version must be positive", resp)
+	// Set ru_version > 0 should update the controller config's RUVersionPolicy.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 3)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	// The keyspace ID is resolved from the name; check the overrides map has the entry.
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Update ru_version to a different value.
+	resp, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "test_keyspace", 5)
+	re.Equal(http.StatusOK, statusCode)
+	re.Equal("Success!", resp)
+	config = suite.mustGetControllerConfig(re)
+	re.NotNil(config.RUVersionPolicy)
+	re.NotEmpty(config.RUVersionPolicy.Overrides)
+	// Try to set a non-existing keyspace's RU version.
+	_, statusCode = tryToSetKeyspaceRUVersion(re, leaderAddr, "non_existing_keyspace", 3)
+	re.Equal(http.StatusBadRequest, statusCode)
+}
+
+type serviceLimitResponse struct {
+	ServiceLimit float64 `json:"service_limit"`
 }
 
 func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceName string) (float64, int) {
@@ -378,9 +437,7 @@ func tryToGetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
-	var limiter struct {
-		ServiceLimit float64 `json:"service_limit"`
-	}
+	var limiter serviceLimitResponse
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
 	return limiter.ServiceLimit, statusCode
 }
@@ -394,6 +451,20 @@ func tryToSetKeyspaceServiceLimit(re *require.Assertions, leaderAddr, keyspaceNa
 		nil,
 		apis.KeyspaceServiceLimitRequest{
 			ServiceLimit: limit,
+		},
+	)
+	return string(bodyBytes), statusCode
+}
+
+func tryToSetKeyspaceRUVersion(re *require.Assertions, leaderAddr, keyspaceName string, ruVersion int32) (string, int) {
+	bodyBytes, statusCode := sendRequest(
+		re,
+		leaderAddr,
+		http.MethodPost,
+		"/config/controller/ru-version/"+keyspaceName,
+		nil,
+		apis.SetKeyspaceRUVersionRequest{
+			RUVersion: ruVersion,
 		},
 	)
 	return string(bodyBytes), statusCode

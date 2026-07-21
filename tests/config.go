@@ -118,6 +118,15 @@ func (c *clusterConfig) join() *serverConfig {
 	return sc
 }
 
+func (c *clusterConfig) regenerateInitialServerURLs() {
+	for _, s := range c.InitialServers {
+		s.ClientURLs = tempurl.Alloc()
+		s.PeerURLs = tempurl.Alloc()
+		s.AdvertiseClientURLs = s.ClientURLs
+		s.AdvertisePeerURLs = s.PeerURLs
+	}
+}
+
 func (c *clusterConfig) nextServerName() string {
 	return fmt.Sprintf("pd%d", len(c.InitialServers)+len(c.JoinServers)+1)
 }

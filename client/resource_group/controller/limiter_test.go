@@ -139,6 +139,128 @@ func TestReconfig(t *testing.T) {
 	re.Equal(int64(-1), lim.GetBurst())
 }
 
+// TestLastStaysMonotonicOnStaleNow guards the assumption used by
+// groupCostController.acquireTokens: a mutator's now is captured before it
+// takes lim.mu, so under concurrency a sibling request on the same per-group
+// limiter can advance lim.last past that now. The stale (backward) now must
+// not rewind the limiter's logical clock.
+//
+// In every sub-case the shared Reserve below plays that concurrent sibling: it
+// advances lim.last to advancedAt, after which each mutator runs with the
+// earlier staleNow.
+func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
+	tests := []struct {
+		name         string
+		mutate       func(lim *Limiter, r *Reservation, staleNow time.Time)
+		expectedPool float64
+		checkPool    bool
+	}{
+		{
+			name: "remove tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RemoveTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		{
+			name: "refund tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RefundTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
+		// CancelAt is covered by TestAcquireTokensCancelKeepsLastMonotonic.
+		{
+			name: "reconfigure",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+				})
+			},
+			expectedPool: 1100,
+			checkPool:    true,
+		},
+		{
+			name: "reconfigure unlimited",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   10,
+					newFillRate: 100,
+					newBurst:    -1,
+				})
+			},
+			checkPool: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			resetTime()
+			nc := make(chan notifyMsg, 1)
+			lim := NewLimiter(t0, 100, 0, 0, nc) // fillRate 100/s, burst 0 (no clamp)
+
+			advancedAt := t0.Add(10 * time.Second)
+			staleNow := t0.Add(9 * time.Second)
+			checkAt := t0.Add(11 * time.Second)
+
+			// Advance last through the public API to t0+10s and leave pool =
+			// 100*10 - 10 = 990.
+			r := lim.Reserve(context.Background(), InfDuration, advancedAt, 10)
+			re.True(r.reserved)
+			_, pool := lim.getTokens(advancedAt)
+			re.InDelta(990, pool, 1e-6)
+
+			tt.mutate(lim, r, staleNow)
+			re.Equal(advancedAt, lim.last)
+
+			if tt.checkPool {
+				// Accrual over t0+10s..t0+11s is 1s*100 = 100. A rewound
+				// last (to t0+9s) would over-accrue by another 100 tokens.
+				_, pool = lim.getTokens(checkAt)
+				re.InDelta(tt.expectedPool, pool, 1e-6)
+			}
+		})
+	}
+}
+
+func TestRefundTokens(t *testing.T) {
+	re := require.New(t)
+	nc := make(chan notifyMsg, 1)
+	lim := NewLimiter(t0, 0, 0, 100, nc)
+
+	// Consume some tokens.
+	lim.RemoveTokens(t0, 30)
+	checkTokens(re, lim, t0, 70)
+
+	// Refund part of them.
+	lim.RefundTokens(t0, 20)
+	checkTokens(re, lim, t0, 90)
+
+	// Refund beyond the initial amount - allowed (no burst cap when burst==0).
+	lim.RefundTokens(t0, 50)
+	checkTokens(re, lim, t0, 140)
+
+	// With burst > 0, refund up to burst stays.
+	limBurst := NewLimiter(t0, 0, 100, 50, nc)
+	limBurst.RemoveTokens(t0, 30)
+	checkTokens(re, limBurst, t0, 20)
+	limBurst.RefundTokens(t0, 80) // tokens = 20 + 80 = 100, burst = 100
+	checkTokens(re, limBurst, t0, 100)
+
+	// Refund beyond burst - capped by getTokens.
+	limBurst.RefundTokens(t0, 50) // tokens = 100 + 50 = 150, capped to 100
+	checkTokens(re, limBurst, t0, 100)
+
+	// Burstable (burst < 0): RefundTokens is a no-op.
+	limUnlimited := NewLimiter(t0, 0, -1, 100, nc)
+	limUnlimited.RefundTokens(t0, 50)
+	checkTokens(re, limUnlimited, t0, 100)
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)

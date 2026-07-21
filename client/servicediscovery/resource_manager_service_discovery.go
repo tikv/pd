@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
@@ -44,6 +43,8 @@ const (
 	resourceManagerSvcDiscoveryFormat = "/ms/%d/" + resourceManagerServiceName + "/primary"
 	resourceManagerInitRetryTime      = 3
 )
+
+var serviceURLRetryInterval = 3 * time.Second
 
 // ResourceManagerDiscovery is used to discover the resource manager service.
 type ResourceManagerDiscovery struct {
@@ -161,11 +162,6 @@ func (r *ResourceManagerDiscovery) GetServiceURL() string {
 func (r *ResourceManagerDiscovery) GetConn() *grpc.ClientConn {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if r.conn == nil {
-		log.Warn("[resource-manager] gRPC connection is not established yet",
-			zap.String("discovery-key", r.discoveryKey))
-		return nil
-	}
 	return r.conn
 }
 
@@ -178,9 +174,10 @@ func (r *ResourceManagerDiscovery) discoverServiceURL() (string, int64, error) {
 		return "", 0, err
 	}
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Warn("[resource-manager] no resource-manager serving endpoint found",
-			zap.String("discovery-key", r.discoveryKey))
-		return "", 0, errs.ErrClientGetServingEndpoint
+		if resp == nil || resp.Header == nil {
+			return "", 0, nil
+		}
+		return "", resp.Header.Revision, nil
 	} else if resp.Count > 1 {
 		return "", 0, errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
 	}
@@ -222,6 +219,7 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 	// This enables runtime switching between deployment modes.
 	ticker := time.NewTicker(initRetryInterval)
 	defer ticker.Stop()
+	var lastUpdateTime time.Time
 
 	discoverAndUpdate := func() {
 		url, newRevision, err := r.discoverServiceURL()
@@ -229,10 +227,6 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			log.Warn("[resource-manager] failed to discover service URL",
 				zap.String("discovery-key", r.discoveryKey),
 				zap.Error(err))
-			// Endpoint is absent; keep connection cleared so the client can fall back to PD.
-			if errors.ErrorEqual(err, errs.ErrClientGetServingEndpoint) {
-				r.resetConn("")
-			}
 			return
 		}
 		if newRevision > revision {
@@ -251,7 +245,25 @@ func (r *ResourceManagerDiscovery) updateServiceURLLoop(revision int64) {
 			}
 			discoverAndUpdate()
 		case <-r.updateServiceURLCh:
-			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.serviceURL))
+			if !lastUpdateTime.IsZero() {
+				since := time.Since(lastUpdateTime)
+				if since < serviceURLRetryInterval {
+					wait := serviceURLRetryInterval - since
+					log.Info("[resource-manager] delay updating service URL due to backoff",
+						zap.Duration("since", since),
+						zap.Duration("wait", wait))
+					timer := time.NewTimer(wait)
+					select {
+					case <-r.ctx.Done():
+						timer.Stop()
+						log.Info("[resource-manager] exit update service URL loop due to context canceled")
+						return
+					case <-timer.C:
+					}
+				}
+			}
+			lastUpdateTime = time.Now()
+			log.Info("[resource-manager] updating service URL", zap.String("old-url", r.GetServiceURL()))
 			discoverAndUpdate()
 		}
 	}

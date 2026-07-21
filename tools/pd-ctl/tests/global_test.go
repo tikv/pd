@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -84,4 +85,58 @@ func TestSendAndGetComponent(t *testing.T) {
 	output, err = ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+}
+
+func TestRegionNoProxyHeader(t *testing.T) {
+	re := require.New(t)
+	var (
+		mu    sync.Mutex
+		count = 0
+	)
+	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/regions", func(w http.ResponseWriter, r *http.Request) {
+			mu.Lock()
+			if vals := r.Header.Values(apiutil.PDAllowFollowerHandleHeader); len(vals) > 0 {
+				count++
+			}
+			mu.Unlock()
+			fmt.Fprint(w, `{}`)
+		})
+		info := apiutil.APIServiceGroup{IsCore: true}
+		return mux, info, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestClusterWithHandlers(ctx, 1, []server.HandlerBuilder{handler})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+
+	cmd := cmd.GetRootCmd()
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region")
+	re.NoError(err)
+	re.Equal(0, count)
+
+	// PD-Allow-follower-handle is only added when --no-forward=true.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward")
+	re.NoError(err)
+	re.Equal(1, count)
+
+	// --no-forward=false should not add PD-Allow-follower-handle.
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=false")
+	re.NoError(err)
+	re.Equal(1, count)
+
+	_, err = ExecuteCommand(cmd, "-u", pdAddr, "region", "--no-forward=true")
+	re.NoError(err)
+	re.Equal(2, count)
 }

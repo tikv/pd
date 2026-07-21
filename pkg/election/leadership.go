@@ -73,9 +73,6 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
-	// primaryWatch is for the primary watch only,
-	// which is used to reuse `Watch` interface in `Leadership`.
-	primaryWatch atomic.Bool
 }
 
 // NewLeadership creates a new Leadership.
@@ -130,16 +127,6 @@ func (ls *Leadership) GetLeaderValue() string {
 		return ""
 	}
 	return leaderValue.(string)
-}
-
-// SetPrimaryWatch sets the primary watch flag.
-func (ls *Leadership) SetPrimaryWatch(val bool) {
-	ls.primaryWatch.Store(val)
-}
-
-// IsPrimary gets the primary watch flag.
-func (ls *Leadership) IsPrimary() bool {
-	return ls.primaryWatch.Load()
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -206,7 +193,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	finalCmps = append(finalCmps, clientv3.Compare(clientv3.CreateRevision(ls.leaderKey), "=", 0))
 	resp, err := kv.NewSlowLogTxn(ls.client).
 		If(finalCmps...).
-		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID)))).
+		Then(clientv3.OpPut(ls.leaderKey, leaderData, clientv3.WithLease(newLease.GetID()))).
 		Commit()
 	log.Info("check campaign resp", zap.Any("resp", resp))
 	if err != nil {
@@ -248,13 +235,29 @@ func (ls *Leadership) leaderCmp() clientv3.Cmp {
 	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue())
 }
 
-// DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
-func (ls *Leadership) DeleteLeaderKey() error {
-	resp, err := kv.NewSlowLogTxn(ls.client).Then(clientv3.OpDelete(ls.leaderKey)).Commit()
+// DeleteLeaderKeyByRevision deletes the leader key only when its mod revision
+// is the same as the observed revision.
+func (ls *Leadership) DeleteLeaderKeyByRevision(revision int64) error {
+	return ls.removeLeaderKey(clientv3.Compare(clientv3.ModRevision(ls.leaderKey), "=", revision))
+}
+
+func (ls *Leadership) removeLeaderKey(cmp clientv3.Cmp) error {
+	resp, err := kv.NewSlowLogTxn(ls.client).
+		If(cmp).
+		Then(clientv3.OpDelete(ls.leaderKey)).
+		Else(clientv3.OpGet(ls.leaderKey)).
+		Commit()
 	if err != nil {
 		return errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
+		if len(resp.Responses) == 1 && len(resp.Responses[0].GetResponseRange().Kvs) == 0 {
+			// The leader key has already gone. Treat it as deleted so the caller can
+			// continue campaigning without blocking on an idempotent cleanup.
+			ls.Reset()
+			log.Info("leader key has already been deleted", zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
+			return nil
+		}
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	// Reset the lease as soon as possible.
@@ -405,13 +408,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
-				// ONLY `{service}/primary/transfer` API update primary will meet this condition.
-				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
-					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
-						zap.String("leader-key", ls.leaderKey), zap.ByteString("cur-value", ev.Kv.Value),
-						zap.String("purpose", ls.purpose))
-					return
-				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -433,6 +429,5 @@ func (ls *Leadership) Reset() {
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
 	}
-	ls.SetPrimaryWatch(false)
 	ls.leaderValue.Store("")
 }

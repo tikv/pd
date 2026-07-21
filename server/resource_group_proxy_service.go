@@ -25,12 +25,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 type resourceGroupProxyServer struct {
 	*GrpcServer
+	metadataManager *rm_server.Manager
 }
 
 func (s *resourceGroupProxyServer) getResourceManagerDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, error) {
@@ -57,6 +60,25 @@ func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
 	s.closeDelegateClient(forwardedHost)
 }
 
+func (s *resourceGroupProxyServer) getPDMetadataWriteDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, string, error) {
+	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if forwardedHost == "" {
+		leader := s.GetLeader()
+		if leader == nil || len(leader.GetClientUrls()) == 0 {
+			return nil, "", status.Error(codes.Unavailable, "pd leader is not available")
+		}
+		forwardedHost = leader.GetClientUrls()[0]
+	}
+	if s.isLocalRequest(forwardedHost) {
+		return nil, "", nil
+	}
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
+		return nil, "", err
+	}
+	return resource_manager.NewResourceManagerClient(client), forwardedHost, nil
+}
+
 // ListResourceGroups implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) ListResourceGroups(ctx context.Context, req *resource_manager.ListResourceGroupsRequest) (*resource_manager.ListResourceGroupsResponse, error) {
 	client, err := s.getResourceManagerDelegateClient(ctx)
@@ -65,7 +87,9 @@ func (s *resourceGroupProxyServer) ListResourceGroups(ctx context.Context, req *
 	}
 	resp, err := client.ListResourceGroups(ctx, req)
 	if err != nil {
-		s.closeClient(ctx)
+		if grpcutil.NeedRebuildConnection(err) {
+			s.closeClient(ctx)
+		}
 		return nil, err
 	}
 	return resp, nil
@@ -79,7 +103,9 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 	}
 	resp, err := client.GetResourceGroup(ctx, req)
 	if err != nil {
-		s.closeClient(ctx)
+		if grpcutil.NeedRebuildConnection(err) {
+			s.closeClient(ctx)
+		}
 		return nil, err
 	}
 	return resp, nil
@@ -87,44 +113,89 @@ func (s *resourceGroupProxyServer) GetResourceGroup(ctx context.Context, req *re
 
 // AddResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
+	if req.GetGroup() == nil {
+		return nil, status.Error(codes.InvalidArgument, "resource group is required")
+	}
+	delegateClient, forwardedHost, err := s.getPDMetadataWriteDelegateClient(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.AddResourceGroup(ctx, req)
-	if err != nil {
-		s.closeClient(ctx)
+	if delegateClient != nil {
+		resp, err := delegateClient.AddResourceGroup(grpcutil.ResetForwardContext(ctx), req)
+		if err != nil {
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+	if s.metadataManager == nil {
+		return nil, status.Error(codes.Internal, "resource group metadata manager is not initialized")
+	}
+	if err := s.metadataManager.AddResourceGroup(req.GetGroup()); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // ModifyResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req *resource_manager.PutResourceGroupRequest) (*resource_manager.PutResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
+	if req.GetGroup() == nil {
+		return nil, status.Error(codes.InvalidArgument, "resource group is required")
+	}
+	delegateClient, forwardedHost, err := s.getPDMetadataWriteDelegateClient(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.ModifyResourceGroup(ctx, req)
-	if err != nil {
-		s.closeClient(ctx)
+	if delegateClient != nil {
+		resp, err := delegateClient.ModifyResourceGroup(grpcutil.ResetForwardContext(ctx), req)
+		if err != nil {
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+	if s.metadataManager == nil {
+		return nil, status.Error(codes.Internal, "resource group metadata manager is not initialized")
+	}
+	if err := s.metadataManager.ModifyResourceGroup(req.GetGroup()); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // DeleteResourceGroup implements the resource_manager.ResourceManagerServer interface.
 func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req *resource_manager.DeleteResourceGroupRequest) (*resource_manager.DeleteResourceGroupResponse, error) {
-	client, err := s.getResourceManagerDelegateClient(ctx)
+	if req.GetResourceGroupName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "resource group name is required")
+	}
+	delegateClient, forwardedHost, err := s.getPDMetadataWriteDelegateClient(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.DeleteResourceGroup(ctx, req)
-	if err != nil {
-		s.closeClient(ctx)
+	if delegateClient != nil {
+		resp, err := delegateClient.DeleteResourceGroup(grpcutil.ResetForwardContext(ctx), req)
+		if err != nil {
+			if grpcutil.NeedRebuildConnection(err) {
+				s.closeDelegateClient(forwardedHost)
+			}
+			return nil, err
+		}
+		return resp, nil
+	}
+	if s.metadataManager == nil {
+		return nil, status.Error(codes.Internal, "resource group metadata manager is not initialized")
+	}
+	if err := s.metadataManager.DeleteResourceGroup(
+		rm_server.ExtractKeyspaceID(req.GetKeyspaceId()),
+		req.GetResourceGroupName(),
+	); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return &resource_manager.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
 
 // AcquireTokenBuckets implements the resource_manager.ResourceManagerServer interface.

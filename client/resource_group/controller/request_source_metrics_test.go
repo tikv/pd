@@ -15,7 +15,7 @@ import (
 	controllerMetrics "github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
-func counterValue(t *testing.T, metric prometheus.Counter) float64 {
+func requestSourceCounterValue(t *testing.T, metric prometheus.Counter) float64 {
 	t.Helper()
 	pb := &dto.Metric{}
 	require.NoError(t, metric.Write(pb))
@@ -74,8 +74,8 @@ func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
 
 	re.Equal(1, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Equal(reqConsumption.WRU, counterValue(t, sourceMetrics.wru))
-	re.Equal(respConsumption.RRU, counterValue(t, sourceMetrics.rru))
+	re.Equal(reqConsumption.WRU, requestSourceCounterValue(t, sourceMetrics.wru))
+	re.Equal(respConsumption.RRU, requestSourceCounterValue(t, sourceMetrics.rru))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
@@ -477,8 +477,8 @@ func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, newGC, req.requestSource)
 	re.Equal(1, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
-	re.Greater(counterValue(t, sourceMetrics.rru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.rru), float64(0))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	// Cleanup for this test.
@@ -548,8 +548,8 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc2, req.requestSource)
 	re.Equal(1, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
-	re.Greater(counterValue(t, sourceMetrics.rru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.rru), float64(0))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	// Cleanup for this test.
@@ -658,15 +658,15 @@ func TestFailedWriteMatchesControllerConsumption(t *testing.T) {
 	controllerRRU := gc.mu.consumption.RRU
 	gc.mu.Unlock()
 
-	re.InDelta(controllerWRU, counterValue(t, sourceMetrics.wru), 1e-9,
+	re.InDelta(controllerWRU, requestSourceCounterValue(t, sourceMetrics.wru), 1e-9,
 		"per-source WRU diverges from controller consumption — failed-write payback dropped?")
-	re.InDelta(controllerRRU, counterValue(t, sourceMetrics.rru), 1e-9,
+	re.InDelta(controllerRRU, requestSourceCounterValue(t, sourceMetrics.rru), 1e-9,
 		"per-source RRU diverges from controller consumption")
 
 	// Sanity: failed writes still consume some WRU (calculateWriteCost adds
 	// per-batch and replication terms that payBackWriteCost does not refund),
 	// so the counter is non-zero.
-	re.Greater(counterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
 
 	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "rru")
 	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "wru")

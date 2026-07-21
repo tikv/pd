@@ -20,6 +20,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -27,6 +28,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -34,6 +37,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -53,7 +57,7 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
 	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
-	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
 	return mockProvider
 }
 
@@ -63,11 +67,15 @@ func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resour
 		err = errors.New("fake get resource group error")
 	})
 	if err != nil {
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error(), Err: err}
 	}
 
 	args := m.Called(ctx, resourceGroupName, opts)
-	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
+	var group *rmpb.ResourceGroup
+	if ret := args.Get(0); ret != nil {
+		group = ret.(*rmpb.ResourceGroup)
+	}
+	return group, args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
@@ -100,9 +108,9 @@ func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error) {
 	args := m.Called(ctx, key, opts)
-	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
+	return args.Get(0).(chan *metastorage.WatchResponse), args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
@@ -169,8 +177,17 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	require.Equal(t, c2.mu.consumption, &totalConsumption)
 	c2.mu.Unlock()
 
+	controller.ReportRUV2Consumption("test-group", 3.0, 4.0, 5.0)
+	c2.mu.Lock()
+	totalConsumption.TikvRUV2 += 3.0
+	totalConsumption.TidbRUV2 += 4.0
+	totalConsumption.TiflashRUV2 += 5.0
+	require.Equal(t, c2.mu.consumption, &totalConsumption)
+	c2.mu.Unlock()
+
 	// test report with unknown group
 	controller.ReportConsumption("unknown-name", delta)
+	controller.ReportRUV2Consumption("unknown-name", 1.0, 1.0, 1.0)
 
 	var expectResp []*rmpb.TokenBucketResponse
 	recTestGroupAcquireTokenRequest := make(chan bool)
@@ -294,81 +311,303 @@ func TestTryGetController(t *testing.T) {
 }
 
 func TestGetResourceGroup(t *testing.T) {
-	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Enable the failpoint to simulate an error when getting the resource group.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	}()
-
-	mockProvider := newMockResourceGroupProvider()
-
-	expectResourceGroupName := "test-group"
-	expectRUSettings := &rmpb.GroupRequestUnitSettings{
-		RU: &rmpb.TokenBucket{
-			Settings: &rmpb.TokenLimitSettings{
-				FillRate:   uint64(50),
-				BurstLimit: int64(100),
-			},
-		},
-	}
-	expectResourceGroup := &rmpb.ResourceGroup{
-		Name:       expectResourceGroupName,
-		Mode:       rmpb.GroupMode_RUMode,
-		RUSettings: expectRUSettings,
-	}
-
-	opts := []ResourceControlCreateOption{WithDegradedRUSettings(expectRUSettings)}
-
-	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
-	re.NoError(err)
-	controller.Start(ctx)
-
-	testResourceGroup := &rmpb.ResourceGroup{
-		Name: "test-group",
-		Mode: rmpb.GroupMode_RUMode,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate: 1000000,
+	newResourceGroup := func(name string, fillRate uint64, burstLimit int64) *rmpb.ResourceGroup {
+		return &rmpb.ResourceGroup{
+			Name: name,
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   fillRate,
+						BurstLimit: burstLimit,
+					},
 				},
 			},
+		}
+	}
+	wrapGetResourceGroupErr := func(name string, err error) error {
+		if err == nil {
+			return nil
+		}
+		return &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: name,
+			Cause:             err.Error(),
+			Err:               err,
+		}
+	}
+	newController := func(t *testing.T, provider *MockResourceGroupProvider, opts ...ResourceControlCreateOption) *ResourceGroupsController {
+		re := require.New(t)
+		controller, err := NewResourceGroupController(ctx, 1, provider, nil, constants.NullKeyspaceID, opts...)
+		re.NoError(err)
+		return controller
+	}
+
+	degradedRUSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   50,
+				BurstLimit: 100,
+			},
 		},
 	}
-	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+	degradedResourceGroup := newResourceGroup("test-group", 50, 100)
 
-	// case1: when GetResourceGroup return error, it should return the expectResourceGroup.
-	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(expectResourceGroup, gc.getMeta())
+	t.Run("transient-rm-unavailability-uses-degraded-and-recovers", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
-	// case2: when GetResourceGroup return error again, It should still return the expectResourceGroup.
-	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(expectResourceGroup, gc.getMeta())
+		realGroup := newResourceGroup("test-group", 1000000, 0)
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", status.Error(codes.Unavailable, "resource manager unavailable"))).
+			Once()
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return(realGroup, nil).
+			Once()
 
-	// case3: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
-	re.NoError(err)
-	re.Equal(testResourceGroup, gc.getMeta())
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(degradedResourceGroup, gc.getMeta())
 
-	// case4: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError"))
-	}()
+		gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(realGroup, gc.getMeta())
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 2)
+	})
 
-	controller02, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
-	re.NoError(err)
-	controller02.Start(ctx)
+	t.Run("resource-group-not-found-returns-original-error", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
 
-	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
-	re.Error(err)
-	re.Nil(gc02)
+		notFoundErr := wrapGetResourceGroupErr("test-group",
+			status.Error(codes.Unknown, "[PD:resourcemanager:ErrGroupNotExists]the test-group resource group does not exist"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), notFoundErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(notFoundErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("caller-cancellation-returns-context-canceled", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.Canceled)).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.ErrorIs(err, context.Canceled)
+		re.Equal(context.Canceled, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("caller-deadline-returns-context-deadline-exceeded", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", context.DeadlineExceeded)).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.ErrorIs(err, context.DeadlineExceeded)
+		re.Equal(context.DeadlineExceeded, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("server-grpc-status-without-degraded-settings-preserves-original-error", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			code codes.Code
+		}{
+			{name: "canceled", code: codes.Canceled},
+			{name: "deadline-exceeded", code: codes.DeadlineExceeded},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				re := require.New(t)
+				activeCtx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+
+				mockProvider := newMockResourceGroupProvider()
+				controller := newController(t, mockProvider)
+
+				serverErr := status.Error(tc.code, "resource manager returned an error")
+				wrappedErr := &errs.ErrClientGetResourceGroup{
+					ResourceGroupName: "test-group",
+					Cause:             serverErr.Error(),
+					Err:               serverErr,
+				}
+				mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+					Return((*rmpb.ResourceGroup)(nil), wrappedErr).
+					Once()
+
+				gc, err := controller.tryGetResourceGroupController(activeCtx, "test-group", false)
+				re.Nil(gc)
+				re.Same(wrappedErr, err)
+				re.Same(serverErr, wrappedErr.Err)
+				re.Equal(tc.code, status.Code(err))
+				mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+			})
+		}
+	})
+
+	t.Run("grpc-deadline-exceeded-uses-degraded-group", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), wrapGetResourceGroupErr("test-group", status.Error(codes.DeadlineExceeded, "rpc deadline exceeded"))).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.NoError(err)
+		re.Equal(degradedResourceGroup, gc.getMeta())
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("generic-non-retryable-error-returns-original-error", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider, WithDegradedRUSettings(degradedRUSettings))
+
+		permissionErr := wrapGetResourceGroupErr("test-group", status.Error(codes.PermissionDenied, "permission denied"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), permissionErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(permissionErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+
+	t.Run("without-degraded-settings-propagates-transient-error", func(t *testing.T) {
+		re := require.New(t)
+		mockProvider := newMockResourceGroupProvider()
+		controller := newController(t, mockProvider)
+
+		unavailableErr := wrapGetResourceGroupErr("test-group", status.Error(codes.Unavailable, "resource manager unavailable"))
+		mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).
+			Return((*rmpb.ResourceGroup)(nil), unavailableErr).
+			Once()
+
+		gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+		re.Error(err)
+		re.Same(unavailableErr, err)
+		re.Nil(gc)
+		mockProvider.AssertNumberOfCalls(t, "GetResourceGroup", 1)
+	})
+}
+
+func TestGetResourceGroupRuntimeState(t *testing.T) {
+	testCases := []struct {
+		name                            string
+		responseBurstLimit              int64
+		sendResponse                    bool
+		resourceGroupName               string
+		expectOK                        bool
+		expectResourceGroupRuntimeState ResourceGroupRuntimeState
+	}{
+		{
+			name:              "unknown before first token response",
+			resourceGroupName: "test-group",
+		},
+		{
+			name:               "unlimited response remains burstable",
+			responseBurstLimit: -1,
+			sendResponse:       true,
+			resourceGroupName:  "test-group",
+			expectOK:           true,
+		},
+		{
+			name:               "override limited burst from token response",
+			responseBurstLimit: 100,
+			sendResponse:       true,
+			resourceGroupName:  "test-group",
+			expectOK:           true,
+			expectResourceGroupRuntimeState: ResourceGroupRuntimeState{
+				HasLimitedBurst: true,
+			},
+		},
+		{
+			name:               "unknown resource group",
+			responseBurstLimit: 100,
+			sendResponse:       true,
+			resourceGroupName:  "unknown",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+
+			group := &rmpb.ResourceGroup{
+				Name: "test-group",
+				Mode: rmpb.GroupMode_RUMode,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate:   1000,
+							BurstLimit: -1,
+						},
+					},
+				},
+			}
+			gc, err := newGroupCostController(
+				group,
+				DefaultRUConfig(),
+				make(chan notifyMsg),
+				make(chan *groupCostController),
+				newRequestSourceMetricsState(group.Name),
+			)
+			re.NoError(err)
+
+			controller := &ResourceGroupsController{}
+			controller.groupsController.Store(group.Name, gc)
+
+			if tc.sendResponse {
+				controller.handleTokenBucketResponse([]*rmpb.TokenBucketResponse{
+					{
+						ResourceGroupName: group.Name,
+						GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+							{
+								GrantedTokens: &rmpb.TokenBucket{
+									Settings: &rmpb.TokenLimitSettings{
+										FillRate:   1000,
+										BurstLimit: tc.responseBurstLimit,
+									},
+									Tokens: 1000,
+								},
+							},
+						},
+					},
+				})
+				// Mirror the main loop, which refreshes the derived state
+				// (e.g. burstable) after handling token bucket responses.
+				gc.updateRunState()
+				gc.updateAvgRequestResourcePerSec()
+			}
+
+			state, ok := controller.GetResourceGroupRuntimeState(tc.resourceGroupName)
+			re.Equal(tc.expectOK, ok)
+			re.Equal(tc.expectResourceGroupRuntimeState, state)
+		})
+	}
 }
 
 func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
@@ -421,4 +660,185 @@ func TestTokenBucketsRequestWithKeyspaceID(t *testing.T) {
 	}
 	checkKeyspace(constants.NullKeyspaceID)
 	checkKeyspace(1)
+}
+
+func TestGetRUVersionDefault(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Default should return 1 (v1) when no policy is set.
+	re.Equal(int32(1), gc.GetRUVersion())
+}
+
+func TestGetRUVersionAfterSet(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 1)
+	re.NoError(err)
+
+	// Simulate ru_version update via atomic store.
+	gc.ruVersion.Store(3)
+	re.Equal(int32(3), gc.GetRUVersion())
+
+	// Zero should return 1 (default).
+	gc.ruVersion.Store(0)
+	re.Equal(int32(1), gc.GetRUVersion())
+
+	// Negative should also return 1 (default).
+	gc.ruVersion.Store(-1)
+	re.Equal(int32(1), gc.GetRUVersion())
+}
+
+func TestRUVersionFromControllerConfig(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Simulate a controller config with RUVersionPolicy containing an override for keyspace 42.
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   1,
+		Overrides: map[uint32]RUVersion{42: 3},
+	}
+	gc.updateRUVersionFromConfig(config)
+	re.Equal(int32(3), gc.GetRUVersion())
+}
+
+func TestRUVersionOverrideFromControllerConfig(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Override takes precedence over default.
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   5,
+		Overrides: map[uint32]RUVersion{42: 3, 100: 7},
+	}
+	gc.updateRUVersionFromConfig(config)
+	re.Equal(int32(3), gc.GetRUVersion())
+}
+
+func TestRUVersionDefaultFallback(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	// keyspaceID = 42, no override for 42
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	config := DefaultConfig()
+	config.RUVersionPolicy = &RUVersionPolicy{
+		Default:   5,
+		Overrides: map[uint32]RUVersion{100: 7},
+	}
+	gc.updateRUVersionFromConfig(config)
+	// No override for keyspace 42, use default.
+	re.Equal(int32(5), gc.GetRUVersion())
+}
+
+func TestRUVersionNilPolicy(t *testing.T) {
+	re := require.New(t)
+	mockProvider := newMockResourceGroupProvider()
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+
+	// Set a non-default version first.
+	gc.ruVersion.Store(5)
+	re.Equal(int32(5), gc.GetRUVersion())
+
+	// Nil policy resets to 0 (GetRUVersion returns 1 as default).
+	config := DefaultConfig()
+	config.RUVersionPolicy = nil
+	gc.updateRUVersionFromConfig(config)
+	re.Equal(int32(1), gc.GetRUVersion())
+}
+
+func TestRUVersionFromInitialControllerConfig(t *testing.T) {
+	re := require.New(t)
+
+	// Simulate a provider that returns a controller config with RUVersionPolicy.
+	configWithPolicy := &Config{
+		BaseConfig: BaseConfig{
+			RUVersionPolicy: &RUVersionPolicy{
+				Default:   1,
+				Overrides: map[uint32]RUVersion{42: 3},
+			},
+		},
+	}
+	configBytes, err := json.Marshal(configWithPolicy)
+	re.NoError(err)
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+		Kvs: []*meta_storagepb.KeyValue{
+			{Value: configBytes},
+		},
+	}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
+
+	gc, err := NewResourceGroupController(context.Background(), 1, mockProvider, nil, 42)
+	re.NoError(err)
+	// The initial load should set ruVersion from the policy.
+	re.Equal(int32(3), gc.GetRUVersion())
+}
+
+func TestRUVersionWatchViaControllerConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{
+		Header: &meta_storagepb.ResponseHeader{Revision: 1},
+	}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+
+	watchConfigChan := make(chan *metastorage.WatchResponse, 1)
+	mockProvider.On("Watch", mock.Anything, pd.ControllerConfigPathPrefixBytes, mock.Anything).Return(watchConfigChan, nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan *metastorage.WatchResponse), nil)
+
+	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 42)
+	re.NoError(err)
+	controller.Start(ctx)
+
+	// Case 1: Config with RUVersionPolicy containing override for keyspace 42
+	configWithPolicy := &Config{
+		BaseConfig: BaseConfig{
+			RUVersionPolicy: &RUVersionPolicy{
+				Default:   1,
+				Overrides: map[uint32]RUVersion{42: 3},
+			},
+		},
+	}
+	val, _ := json.Marshal(configWithPolicy)
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
+			Type: meta_storagepb.Event_PUT,
+			Kv:   &meta_storagepb.KeyValue{Value: val},
+		}},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRUVersion() == 3
+	})
+
+	// Case 2: Config without RUVersionPolicy (nil) resets to default
+	configNoPolicy := &Config{}
+	val, _ = json.Marshal(configNoPolicy)
+	watchConfigChan <- &metastorage.WatchResponse{
+		Events: []*meta_storagepb.Event{{
+			Type: meta_storagepb.Event_PUT,
+			Kv:   &meta_storagepb.KeyValue{Value: val},
+		}},
+	}
+	testutil.Eventually(re, func() bool {
+		return controller.GetRUVersion() == 1 // Reset to default
+	})
 }

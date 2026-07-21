@@ -208,6 +208,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys").Set(storeFlowStats.GetLoad(utils.StoreReadKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate").Set(storeFlowStats.GetLoad(utils.StoreWriteQuery))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate").Set(storeFlowStats.GetLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_cpu_usage").Set(storeFlowStats.GetLoad(utils.StoreReadCPU))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_cpu_usage").Set(storeFlowStats.GetLoad(utils.StoreCPUUsage))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_read_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskReadRate))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_disk_write_rate").Set(storeFlowStats.GetLoad(utils.StoreDiskWriteRate))
@@ -220,6 +221,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadKeys))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_write_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreWriteQuery))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_query_rate_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadQuery))
+	storeStatusGauge.WithLabelValues(storeAddress, id, "store_read_cpu_usage_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreReadCPU))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_bytes_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteBytes))
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteKeys))
 }
@@ -234,6 +236,7 @@ func (s *storeStatistics) collect() {
 	configs["merge-schedule-limit"] = float64(s.opt.GetMergeScheduleLimit())
 	configs["replica-schedule-limit"] = float64(s.opt.GetReplicaScheduleLimit())
 	configs["affinity-schedule-limit"] = float64(s.opt.GetAffinityScheduleLimit())
+	configs["split-scatter-schedule-limit"] = float64(s.opt.GetSplitScatterScheduleLimit())
 	configs["max-replicas"] = float64(s.opt.GetMaxReplicas())
 	configs["high-space-ratio"] = s.opt.GetHighSpaceRatio()
 	configs["low-space-ratio"] = s.opt.GetLowSpaceRatio()
@@ -306,6 +309,8 @@ func ResetStoreStatistics(storeAddress string, id string) {
 		"store_read_rate_keys",
 		"store_write_query_rate",
 		"store_read_query_rate",
+		"store_read_cpu_usage",
+		"store_read_cpu_usage_instant",
 		"store_regions_write_rate_bytes",
 		"store_regions_write_rate_keys",
 		"store_slow_trend_cause_value",

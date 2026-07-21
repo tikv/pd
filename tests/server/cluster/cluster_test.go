@@ -1651,8 +1651,9 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	// region heartbeat
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc1, id, 1)
-	time.Sleep(time.Second)
-	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	testutil.Eventually(re, func() bool {
+		return rc1.GetCoordinator().AreSchedulersInitialized()
+	})
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
 	testutil.Eventually(re, func() bool {
@@ -1676,7 +1677,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	id = leaderServer.GetAllocator()
 	putRegionWithLeader(re, rc, id, 1)
 	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsPrepared()
+		return rc.GetCoordinator().AreSchedulersInitialized()
 	})
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()

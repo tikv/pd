@@ -84,13 +84,12 @@ type groupCostController struct {
 		// lastResourceConsumptions    []*rmpb.ResourceItem
 		lastRequestConsumption *rmpb.Consumption
 
-		// initialRequestCompleted is set to true when the first token bucket
-		// request completes successfully.
-		initialRequestCompleted bool
-
 		requestUnitTokens *tokenCounter
 	}
 
+	// initialRequestCompleted is set to true when the first token bucket
+	// request completes successfully.
+	initialRequestCompleted atomic.Bool
 	// tombstone is set to true when the resource group is deleted.
 	tombstone atomic.Bool
 	// inactive is set to true when the resource group has not been updated for a long time.
@@ -107,6 +106,14 @@ type groupMetricsCollection struct {
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
 	sourceState                       *requestSourceMetricsState
+
+	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
+	// on the hot path.
+	prechargeCounter        prometheus.Counter
+	prechargeBytesCounter   prometheus.Counter
+	actualBytesCounter      prometheus.Counter
+	predictionResidualBytes prometheus.Observer
+	noPrechargeCounter      prometheus.Counter
 }
 
 type requestSourceMetrics struct {
@@ -157,6 +164,13 @@ func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 		sourceState:                       sourceState,
+
+		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
+		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
+		actualBytesCounter:      metrics.PagingActualBytesCounter.WithLabelValues(name),
+		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
+
+		noPrechargeCounter: metrics.CopReadNoPrechargeCounter.WithLabelValues(name),
 	}
 }
 
@@ -208,6 +222,42 @@ func (mc *groupMetricsCollection) addRequestSourceRU(requestSource string, consu
 	}
 }
 
+// deletePagingLabels removes the per-resource-group paging_* metric series
+// when the group is being deleted or tombstoned, so stale label series do
+// not linger in Prometheus until the process restarts. Keep this list in
+// sync with initMetrics — adding a paging metric there must be paired
+// with a deletion here.
+func (*groupMetricsCollection) deletePagingLabels(name string) {
+	metrics.CopReadPrechargeCounter.DeleteLabelValues(name)
+	metrics.CopReadNoPrechargeCounter.DeleteLabelValues(name)
+	metrics.PagingPrechargeBytesCounter.DeleteLabelValues(name)
+	metrics.PagingActualBytesCounter.DeleteLabelValues(name)
+	metrics.PagingPredictionResidualBytes.DeleteLabelValues(name)
+}
+
+// observePagingRequest records request-boundary cop read pre-charge counters.
+// Callers must gate the call on pagingReadEstimate(...).ok so the metric stays
+// scoped to coprocessor reads and excludes point gets, batch gets, scans, and
+// other bounded-size reads.
+func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
+	if bytesForEst == 0 {
+		gmc.noPrechargeCounter.Inc()
+		return
+	}
+	gmc.prechargeCounter.Inc()
+	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+}
+
+// observePagingResponse records response-boundary paging metrics for
+// precharged coprocessor RPCs.
+func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
+	if bytesForEst == 0 {
+		return
+	}
+	gmc.actualBytesCounter.Add(float64(actual))
+	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
+}
+
 type tokenCounter struct {
 	fillRate uint64
 
@@ -224,6 +274,8 @@ type tokenCounter struct {
 		setupNotificationCh        <-chan time.Time
 		setupNotificationThreshold float64
 		setupNotificationTimer     *time.Timer
+		// cancelCh wakes up handleTokenBucketUpdateEvent when the timer is stopped.
+		cancelCh chan struct{}
 	}
 
 	lastDeadline time.Time
@@ -352,11 +404,11 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
+	gc.burstable.Store(isBurstable)
 	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
 		return
 	}
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
-	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) resetEmergencyTokenAcquisition() {
@@ -367,18 +419,27 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context)
 	counter := gc.run.requestUnitTokens
 	counter.notify.mu.Lock()
 	ch := counter.notify.setupNotificationCh
+	cancelCh := counter.notify.cancelCh
 	counter.notify.mu.Unlock()
-	if ch == nil {
+	if ch == nil || cancelCh == nil {
 		return
 	}
 	select {
 	case <-ch:
 		counter.notify.mu.Lock()
-		counter.notify.setupNotificationTimer = nil
-		counter.notify.setupNotificationCh = nil
+		if counter.notify.setupNotificationCh != ch || counter.notify.cancelCh != cancelCh {
+			counter.notify.mu.Unlock()
+			return
+		}
 		threshold := counter.notify.setupNotificationThreshold
-		counter.notify.mu.Unlock()
+		cancelCh = resetCounterNotifyLocked(counter)
 		counter.limiter.SetupNotificationThreshold(threshold)
+		counter.notify.mu.Unlock()
+		if cancelCh != nil {
+			close(cancelCh)
+		}
+	case <-cancelCh:
+		return
 	case <-ctx.Done():
 		return
 	}
@@ -389,6 +450,14 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
 	})
+	// A freshly created controller might be published between the `updateRunState`
+	// and `updateAvgRequestResourcePerSec` passes of the same tick. In that case,
+	// `gc.run.now` still equals the `avgLastTime` set by `initRunState`, and the
+	// division below would be 0/0 = NaN, permanently poisoning `avgRUPerSec`.
+	// Skip the sample until the run state actually advances.
+	if deltaDuration <= 0 {
+		return false
+	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	failpoint.Inject("acceleratedSpeedTrend", func() {
@@ -404,7 +473,7 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 }
 
 func (gc *groupCostController) shouldReportConsumption() bool {
-	if !gc.run.initialRequestCompleted {
+	if !gc.initialRequestCompleted.Load() {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
@@ -428,7 +497,7 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 func (gc *groupCostController) handleTokenBucketResponse(resp *rmpb.TokenBucketResponse) {
 	gc.run.requestInProgress = false
 	gc.handleRUTokenResponse(resp)
-	gc.run.initialRequestCompleted = true
+	gc.initialRequestCompleted.Store(true)
 }
 
 func (gc *groupCostController) handleRUTokenResponse(resp *rmpb.TokenBucketResponse) {
@@ -479,6 +548,7 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 		}
 		counter.notify.setupNotificationTimer = time.NewTimer(timerDuration)
 		counter.notify.setupNotificationCh = counter.notify.setupNotificationTimer.C
+		counter.notify.cancelCh = make(chan struct{})
 		counter.notify.setupNotificationThreshold = 1
 		counter.notify.mu.Unlock()
 		counter.lastDeadline = deadline
@@ -495,12 +565,22 @@ func (gc *groupCostController) modifyTokenCounter(counter *tokenCounter, bucket 
 
 func initCounterNotify(counter *tokenCounter) {
 	counter.notify.mu.Lock()
+	cancelCh := resetCounterNotifyLocked(counter)
+	counter.notify.mu.Unlock()
+	if cancelCh != nil {
+		close(cancelCh)
+	}
+}
+
+func resetCounterNotifyLocked(counter *tokenCounter) chan struct{} {
 	if counter.notify.setupNotificationTimer != nil {
 		counter.notify.setupNotificationTimer.Stop()
-		counter.notify.setupNotificationTimer = nil
-		counter.notify.setupNotificationCh = nil
 	}
-	counter.notify.mu.Unlock()
+	cancelCh := counter.notify.cancelCh
+	counter.notify.setupNotificationTimer = nil
+	counter.notify.setupNotificationCh = nil
+	counter.notify.cancelCh = nil
+	return cancelCh
 }
 
 func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType) *rmpb.TokenBucketRequest {
@@ -635,9 +715,10 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
+	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
-	add(gc.mu.consumption, delta)
+	add(gc.mu.consumption, reportedDelta)
 	gc.mu.Unlock()
 
 	if !gc.burstable.Load() {
@@ -650,7 +731,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
-			sub(gc.mu.consumption, delta)
+			sub(gc.mu.consumption, reportedDelta)
 			gc.mu.Unlock()
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
@@ -659,6 +740,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
+	}
+	if bytesForEst, ok := pagingReadEstimate(info); ok {
+		gc.metrics.observePagingRequest(bytesForEst)
 	}
 
 	gc.mu.Lock()
@@ -685,31 +769,34 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	if !gc.burstable.Load() {
-		counter := gc.run.requestUnitTokens
-		if v := getRUValueFromConsumption(delta); v > 0 {
-			counter.limiter.RemoveTokens(time.Now(), v)
-		}
-	}
-
-	gc.mu.Lock()
-	// Record the consumption of the request.
-	add(gc.mu.consumption, delta)
-	// Build the round-trip net consumption for this request: AfterKVRequest's
-	// delta (which includes payBackWriteCost on failed writes) plus the cost
-	// added in BeforeKVRequest. Used both for store/global penalty bookkeeping
-	// and for the per-source RU counter, so the latter mirrors the controller's
-	// own consumption.
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	if isPagingRead {
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
+	}
+	if !gc.burstable.Load() {
+		counter := gc.run.requestUnitTokens
+		if v := getRUValueFromConsumption(delta); v > 0 {
+			counter.limiter.RemoveTokens(time.Now(), v)
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			counter.limiter.RefundTokens(time.Now(), -v)
+		}
+	}
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(req.RequestSource(), count)
+	gc.metrics.addRequestSourceRU(requestSource(req), count)
 
 	return delta, nil
 }
@@ -721,39 +808,57 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	var waitDuration time.Duration
-	if !gc.burstable.Load() {
-		allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
-		d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
-		if err != nil {
-			if errs.ErrClientResourceGroupThrottled.Equal(err) {
-				gc.metrics.failedRequestCounterWithThrottled.Inc()
-				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
-			} else {
-				gc.metrics.failedRequestCounterWithOthers.Inc()
-			}
-			return nil, waitDuration, err
-		}
-		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
-	}
-
-	gc.mu.Lock()
-	// Record the consumption of the request.
-	add(gc.mu.consumption, delta)
-	// See onResponseImpl for the rationale of `count` — it represents the
-	// round-trip net consumption of this request and is reused for the
-	// per-source RU counter so that it tracks the controller's consumption.
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
+	bytesForEst, isPagingRead := pagingReadEstimate(req)
+	var waitDuration time.Duration
+	if !gc.burstable.Load() {
+		v := getRUValueFromConsumption(delta)
+		if v > 0 && isPagingRead && bytesForEst > 0 {
+			// The precharged request has already consumed TiKV resources.
+			// Debit any positive settlement delta immediately so future
+			// requests observe the debt instead of queueing this completed
+			// request for response-side admission.
+			gc.run.requestUnitTokens.limiter.RemoveTokens(time.Now(), v)
+			gc.metrics.successfulRequestDuration.Observe(0)
+		} else if v > 0 {
+			allowDebt := delta.ReadBytes+delta.WriteBytes < bigRequestThreshold || !gc.isThrottled.Load()
+			d, err := gc.acquireTokens(ctx, delta, &waitDuration, allowDebt)
+			if err != nil {
+				if errs.ErrClientResourceGroupThrottled.Equal(err) {
+					gc.metrics.failedRequestCounterWithThrottled.Inc()
+					gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+				} else {
+					gc.metrics.failedRequestCounterWithOthers.Inc()
+				}
+				return nil, waitDuration, err
+			}
+			gc.metrics.successfulRequestDuration.Observe(d.Seconds())
+			waitDuration += d
+		} else if v < 0 && isPagingRead && bytesForEst > 0 {
+			// Paging over-estimate: refund the excess pre-charge.
+			gc.run.requestUnitTokens.limiter.RefundTokens(time.Now(), -v)
+			gc.metrics.successfulRequestDuration.Observe(0)
+		} else {
+			gc.metrics.successfulRequestDuration.Observe(0)
+		}
+	}
+	if isPagingRead {
+		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
+	}
+
+	gc.mu.Lock()
+	add(gc.mu.consumption, reportedDelta)
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
 
-	gc.metrics.addRequestSourceRU(req.RequestSource(), count)
+	gc.metrics.addRequestSourceRU(requestSource(req), count)
 
 	return delta, waitDuration, nil
 }
@@ -761,6 +866,14 @@ func (gc *groupCostController) onResponseWaitImpl(
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {
 	gc.mu.Lock()
 	add(gc.mu.consumption, consumption)
+	gc.mu.Unlock()
+}
+
+func (gc *groupCostController) addRUV2Consumption(tikvRUV2, tidbRUV2, tiflashRUV2 float64) {
+	gc.mu.Lock()
+	gc.mu.consumption.TikvRUV2 += tikvRUV2
+	gc.mu.consumption.TidbRUV2 += tidbRUV2
+	gc.mu.consumption.TiflashRUV2 += tiflashRUV2
 	gc.mu.Unlock()
 }
 

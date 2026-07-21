@@ -48,7 +48,7 @@ Tests
 Code changes
 
 - Has the configuration change
-- Has HTTP API interfaces changed (Don't forget to [add the declarative for the new API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
+- Has HTTP APIs changed (Don't forget to [add the declarative for the new API](https://github.com/tikv/pd/blob/master/docs/development.md#updating-api-documentation))
 - Has persistent data change
 
 Side effects

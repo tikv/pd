@@ -21,6 +21,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 const (
@@ -47,6 +49,8 @@ const (
 )
 
 var (
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
+
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
@@ -62,6 +66,43 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	activeRequestUnitCost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "active_request_unit_sum",
+			Help:      "Counter of the active request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+
+	// RUv2 metrics (experimental v2 RU calculation, recording only).
+	requestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "request_unit_v2_sum",
+			Help:      "Counter of the total experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tikvRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tikv_request_unit_v2_sum",
+			Help:      "Counter of the TiKV-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tidbRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tidb_request_unit_v2_sum",
+			Help:      "Counter of the TiDB-side experimental v2 request unit cost for all resource groups.",
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+	tiflashRequestUnitV2Cost = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "tiflash_request_unit_v2_sum",
+			Help:      "Counter of the TiFlash-side experimental v2 request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
@@ -170,6 +211,15 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
 type metrics struct {
@@ -201,8 +251,14 @@ type trackerKey struct {
 }
 
 func init() {
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
+	prometheus.MustRegister(activeRequestUnitCost)
+	prometheus.MustRegister(requestUnitV2Cost)
+	prometheus.MustRegister(tikvRequestUnitV2Cost)
+	prometheus.MustRegister(tidbRequestUnitV2Cost)
+	prometheus.MustRegister(tiflashRequestUnitV2Cost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)
 	prometheus.MustRegister(readByteCost)
 	prometheus.MustRegister(writeByteCost)
@@ -217,6 +273,7 @@ func init() {
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(pushRUMetricsDuration)
 }
 
 func newMetrics() *metrics {
@@ -293,8 +350,11 @@ func (m *metrics) recordConsumption(
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
+	if consumption == nil {
+		return
+	}
 	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
-	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig)
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig, keyspaceID)
 	m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
@@ -307,6 +367,11 @@ func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string)
 type counterMetrics struct {
 	RRUMetrics                 prometheus.Counter
 	WRUMetrics                 prometheus.Counter
+	ActiveRUMetrics            prometheus.Counter
+	TotalRUV2Metrics           prometheus.Counter
+	TiKVRUV2Metrics            prometheus.Counter
+	TiDBRUV2Metrics            prometheus.Counter
+	TiFlashRUV2Metrics         prometheus.Counter
 	SQLLayerRUMetrics          prometheus.Counter
 	ReadByteMetrics            prometheus.Counter
 	WriteByteMetrics           prometheus.Counter
@@ -322,6 +387,11 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 	return &counterMetrics{
 		RRUMetrics:                 readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WRUMetrics:                 writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ActiveRUMetrics:            activeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TotalRUV2Metrics:           requestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiKVRUV2Metrics:            tikvRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiDBRUV2Metrics:            tidbRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		TiFlashRUV2Metrics:         tiflashRequestUnitV2Cost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		SQLLayerRUMetrics:          sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
 		ReadByteMetrics:            readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
 		WriteByteMetrics:           writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
@@ -334,13 +404,49 @@ func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetr
 	}
 }
 
-func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) {
+func calculateSQLRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) float64 {
+	if consumption.TotalCpuTimeMs <= 0 || consumption.SqlLayerCpuTimeMs <= 0 {
+		return 0
+	}
+	if controllerConfig == nil {
+		return 0
+	}
+	return consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost
+}
+
+func calculateActiveRU(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) float64 {
+	if controllerConfig.getKeyspaceRUVersion(keyspaceID) == RUVersionV2 {
+		return consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2
+	}
+	return consumption.RRU + consumption.WRU + calculateSQLRU(consumption, controllerConfig)
+}
+
+func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig, keyspaceID uint32) {
+	if consumption == nil {
+		return
+	}
 	// RU info.
 	if consumption.RRU > 0 {
 		m.RRUMetrics.Add(consumption.RRU)
 	}
 	if consumption.WRU > 0 {
 		m.WRUMetrics.Add(consumption.WRU)
+	}
+	if activeRU := calculateActiveRU(consumption, controllerConfig, keyspaceID); activeRU > 0 {
+		m.ActiveRUMetrics.Add(activeRU)
+	}
+	// RUv2 info (experimental).
+	if consumption.TikvRUV2 > 0 {
+		m.TiKVRUV2Metrics.Add(consumption.TikvRUV2)
+	}
+	if consumption.TidbRUV2 > 0 {
+		m.TiDBRUV2Metrics.Add(consumption.TidbRUV2)
+	}
+	if consumption.TiflashRUV2 > 0 {
+		m.TiFlashRUV2Metrics.Add(consumption.TiflashRUV2)
+	}
+	if ruv2 := consumption.TikvRUV2 + consumption.TidbRUV2 + consumption.TiflashRUV2; ruv2 > 0 {
+		m.TotalRUV2Metrics.Add(ruv2)
 	}
 	// Byte info.
 	if consumption.ReadBytes > 0 {
@@ -351,11 +457,16 @@ func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *Co
 	}
 	// CPU time info.
 	if consumption.TotalCpuTimeMs > 0 {
-		if consumption.SqlLayerCpuTimeMs > 0 {
-			m.SQLLayerRUMetrics.Add(consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost)
+		if sqlRU := calculateSQLRU(consumption, controllerConfig); sqlRU > 0 {
+			m.SQLLayerRUMetrics.Add(sqlRU)
 			m.SQLCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
 		}
-		m.KvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+		// A well-behaved client keeps TotalCpuTimeMs >= SqlLayerCpuTimeMs, but the
+		// values are reported by the client and not validated here. Guard against a
+		// negative KV CPU time so a malformed report cannot panic prometheus.Counter.Add.
+		if kvCPUTimeMs := consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs; kvCPUTimeMs > 0 {
+			m.KvCPUMetrics.Add(kvCPUTimeMs)
+		}
 	}
 	// RPC count info.
 	if consumption.KvReadRpcCount > 0 {
@@ -434,6 +545,11 @@ func setOrRemoveServiceLimitMetrics(keyspaceName string, limit float64) {
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	activeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	requestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tikvRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tidbRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	tiflashRequestUnitV2Cost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
 	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
 	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
@@ -504,4 +620,8 @@ func (t *maxPerSecCostTracker) flushMetrics() {
 		t.maxPerSecRRU = 0
 		t.maxPerSecWRU = 0
 	}
+}
+
+func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
 }

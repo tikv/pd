@@ -14,7 +14,13 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
+
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+)
 
 const (
 	namespace       = "scheduling"
@@ -22,6 +28,8 @@ const (
 )
 
 var (
+	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
+
 	// Store heartbeat metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -86,6 +94,7 @@ var (
 )
 
 func init() {
+	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
@@ -93,4 +102,12 @@ func init() {
 	prometheus.MustRegister(regionBucketsHandleDuration)
 	prometheus.MustRegister(regionBucketsCounter)
 	prometheus.MustRegister(regionBucketsReportInterval)
+}
+
+func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartbeatServer) schedulingpb.Scheduling_RegionHeartbeatServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+}
+
+func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsServer) schedulingpb.Scheduling_RegionBucketsServer {
+	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-buckets")
 }

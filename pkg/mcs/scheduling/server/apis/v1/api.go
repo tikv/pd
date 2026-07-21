@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
+	pdcore "github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -93,7 +94,13 @@ type AffinityGroupsResponse struct {
 
 // GetCluster returns the cluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
-	return s.Server.GetCluster()
+	cluster := s.Server.GetCluster()
+	if cluster == nil {
+		// Avoid converting a nil *Cluster into a non-nil SchedulerCluster interface.
+		// Otherwise, scheduling APIs can panic before the cluster is bootstrapped.
+		return nil
+	}
+	return cluster
 }
 
 func createIndentRender() *render.Render {
@@ -1289,8 +1296,8 @@ func accelerateRegionsScheduleInRange(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	rawStartKey, ok1 := input["start_key"].(string)
-	rawEndKey, ok2 := input["end_key"].(string)
+	startKeyHex, ok1 := input["start_key"].(string)
+	endKeyHex, ok2 := input["end_key"].(string)
 	if !ok1 || !ok2 {
 		c.String(http.StatusBadRequest, "start_key or end_key is not string")
 		return
@@ -1303,12 +1310,12 @@ func accelerateRegionsScheduleInRange(c *gin.Context) {
 		return
 	}
 
-	err = handler.AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey, limit)
+	err = handler.AccelerateRegionsScheduleInRange(startKeyHex, endKeyHex, limit)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.String(http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
+	c.String(http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", startKeyHex, endKeyHex))
 }
 
 // @Tags     region
@@ -1341,19 +1348,19 @@ func accelerateRegionsScheduleInRanges(c *gin.Context) {
 	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
 	var startKeys, endKeys [][]byte
 	for _, rg := range input {
-		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		startKey, startKeyHex, err := apiutil.ParseKey("start_key", rg)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		endKey, endKeyHex, err := apiutil.ParseKey("end_key", rg)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 		startKeys = append(startKeys, startKey)
 		endKeys = append(endKeys, endKey)
-		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", startKeyHex, endKeyHex))
 	}
 	err = handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
 	if err != nil {
@@ -1380,8 +1387,8 @@ func scatterRegions(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	rawStartKey, ok1 := input["start_key"].(string)
-	rawEndKey, ok2 := input["end_key"].(string)
+	startKeyHex, ok1 := input["start_key"].(string)
+	endKeyHex, ok2 := input["end_key"].(string)
 	group, _ := input["group"].(string)
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
@@ -1390,7 +1397,7 @@ func scatterRegions(c *gin.Context) {
 
 	opsCount, failures, err := func() (int, map[uint64]error, error) {
 		if ok1 && ok2 {
-			return handler.ScatterRegionsByRange(rawStartKey, rawEndKey, group, retryLimit)
+			return handler.ScatterRegionsByRange(startKeyHex, endKeyHex, group, retryLimit)
 		}
 		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
 		if !ok {
@@ -1428,16 +1435,29 @@ func splitRegions(c *gin.Context) {
 		c.String(http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]any)
-	if len(rawSplitKeys) < 1 {
+	splitKeyValues, ok := s.([]any)
+	if !ok {
+		c.String(http.StatusBadRequest, "split_keys should be an array.")
+		return
+	}
+	if len(splitKeyValues) < 1 {
 		c.String(http.StatusBadRequest, "empty split keys.")
 		return
+	}
+	splitKeyHexes := make([]string, 0, len(splitKeyValues))
+	for _, splitKeyValue := range splitKeyValues {
+		splitKeyHex, ok := splitKeyValue.(string)
+		if !ok {
+			c.String(http.StatusBadRequest, "split_keys should contain only strings.")
+			return
+		}
+		splitKeyHexes = append(splitKeyHexes, splitKeyHex)
 	}
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
 		retryLimit = int(rl)
 	}
-	s, err := handler.SplitRegions(c.Request.Context(), rawSplitKeys, retryLimit)
+	s, err := handler.SplitRegions(c.Request.Context(), splitKeyHexes, retryLimit)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
@@ -1455,14 +1475,14 @@ func splitRegions(c *gin.Context) {
 // @Router   /regions/replicated [get]
 func checkRegionsReplicated(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
-	rawStartKey, ok1 := c.GetQuery("startKey")
-	rawEndKey, ok2 := c.GetQuery("endKey")
+	startKeyHex, ok1 := c.GetQuery("startKey")
+	endKeyHex, ok2 := c.GetQuery("endKey")
 	if !ok1 || !ok2 {
 		c.String(http.StatusBadRequest, "there is no start_key or end_key")
 		return
 	}
 
-	state, err := handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
+	state, err := handler.CheckRegionsReplicated(startKeyHex, endKeyHex)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -1481,13 +1501,17 @@ func checkRegionsReplicated(c *gin.Context) {
 // @Router      /stores/{id} [get]
 func getStoreByID(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	basicCluster, ok := getBasicCluster(c, svr)
+	if !ok {
+		return
+	}
 	idStr := c.Param("id")
 	storeID, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	store := svr.GetBasicCluster().GetStore(storeID)
+	store := basicCluster.GetStore(storeID)
 	if store == nil {
 		c.String(http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 		return
@@ -1505,14 +1529,18 @@ func getStoreByID(c *gin.Context) {
 // @Router      /stores [get]
 func getAllStores(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	stores := svr.GetBasicCluster().GetMetaStores()
+	basicCluster, ok := getBasicCluster(c, svr)
+	if !ok {
+		return
+	}
+	stores := basicCluster.GetMetaStores()
 	StoresInfo := &response.StoresInfo{
 		Stores: make([]*response.StoreInfo, 0, len(stores)),
 	}
 
 	for _, s := range stores {
 		storeID := s.GetId()
-		store := svr.GetBasicCluster().GetStore(storeID)
+		store := basicCluster.GetStore(storeID)
 		if store == nil {
 			c.String(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 			return
@@ -1534,7 +1562,11 @@ func getAllStores(c *gin.Context) {
 // @Router   /regions [get]
 func getAllRegions(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	regions := svr.GetBasicCluster().GetRegions()
+	basicCluster, ok := getBasicCluster(c, svr)
+	if !ok {
+		return
+	}
+	regions := basicCluster.GetRegions()
 	b, err := response.MarshalRegionsInfoJSON(c.Request.Context(), regions)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
@@ -1550,7 +1582,11 @@ func getAllRegions(c *gin.Context) {
 // @Router   /regions/count [get]
 func getRegionCount(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	count := svr.GetBasicCluster().GetTotalRegionCount()
+	basicCluster, ok := getBasicCluster(c, svr)
+	if !ok {
+		return
+	}
+	count := basicCluster.GetTotalRegionCount()
 	c.IndentedJSON(http.StatusOK, &response.RegionsInfo{Count: count})
 }
 
@@ -1563,6 +1599,10 @@ func getRegionCount(c *gin.Context) {
 // @Router   /regions/{id} [get]
 func getRegionByID(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	basicCluster, ok := getBasicCluster(c, svr)
+	if !ok {
+		return
+	}
 	idStr := c.Param("id")
 	regionID, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -1573,7 +1613,7 @@ func getRegionByID(c *gin.Context) {
 		c.String(http.StatusBadRequest, errs.ErrRegionInvalidID.FastGenByArgs().Error())
 		return
 	}
-	regionInfo := svr.GetBasicCluster().GetRegion(regionID)
+	regionInfo := basicCluster.GetRegion(regionID)
 	if regionInfo == nil {
 		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return
@@ -1606,7 +1646,7 @@ func transferPrimary(c *gin.Context) {
 		newPrimary = v
 	}
 
-	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
+	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant(),
 		constant.SchedulingServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -1631,6 +1671,15 @@ func getAffinityManager(c *gin.Context) (*affinity.Manager, bool) {
 		return nil, false
 	}
 	return manager, true
+}
+
+func getBasicCluster(c *gin.Context, svr *scheserver.Server) (*pdcore.BasicCluster, bool) {
+	basicCluster := svr.GetBasicCluster()
+	if basicCluster == nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return nil, false
+	}
+	return basicCluster, true
 }
 
 // @Tags     affinity-groups
