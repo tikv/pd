@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/client/errs"
 	controllerMetrics "github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
@@ -35,17 +37,40 @@ func collectorMetricCount(collector prometheus.Collector) int {
 	return count
 }
 
-func requestSourceStateSnapshot(t *testing.T, gc *groupCostController, requestSource string) (*requestSourceMetrics, int) {
+type requestSourceMetricsSnapshot struct {
+	rruConsume prometheus.Counter
+	rruRefund  prometheus.Counter
+	wruConsume prometheus.Counter
+	wruRefund  prometheus.Counter
+}
+
+func requestSourceStateSnapshot(t *testing.T, gc *groupCostController, requestSource string) (*requestSourceMetricsSnapshot, int) {
 	t.Helper()
 	require.NotNil(t, gc.metrics.sourceState)
 
 	gc.metrics.sourceState.mu.RLock()
 	defer gc.metrics.sourceState.mu.RUnlock()
 
-	return gc.metrics.sourceState.items[requestSource], len(gc.metrics.sourceState.items)
+	snapshot := &requestSourceMetricsSnapshot{}
+	for key, metric := range gc.metrics.sourceState.items {
+		if key.requestSource != requestSource {
+			continue
+		}
+		switch {
+		case key.ruType == requestSourceRUTypeRRU && key.direction == requestSourceDirectionConsume:
+			snapshot.rruConsume = metric
+		case key.ruType == requestSourceRUTypeRRU && key.direction == requestSourceDirectionRefund:
+			snapshot.rruRefund = metric
+		case key.ruType == requestSourceRUTypeWRU && key.direction == requestSourceDirectionConsume:
+			snapshot.wruConsume = metric
+		case key.ruType == requestSourceRUTypeWRU && key.direction == requestSourceDirectionRefund:
+			snapshot.wruRefund = metric
+		}
+	}
+	return snapshot, len(gc.metrics.sourceState.items)
 }
 
-func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
+func TestRequestSourceMetricsRecordAndCacheAccountingDeltas(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
 	req := &TestRequestInfo{
@@ -65,27 +90,84 @@ func TestRequestSourceMetricsCachedByResourceGroup(t *testing.T) {
 
 	reqConsumption, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
 	re.NoError(err)
-	respConsumption, err := gc.onResponseImpl(req, resp)
-	re.NoError(err)
 	re.NotZero(reqConsumption.WRU)
-	re.NotZero(respConsumption.RRU)
 
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
-
 	re.Equal(1, cacheSize)
+	re.NotNil(sourceMetrics.wruConsume)
+	re.Nil(sourceMetrics.wruRefund)
+	re.Nil(sourceMetrics.rruConsume)
+	re.Equal(reqConsumption.WRU, requestSourceCounterValue(t, sourceMetrics.wruConsume))
+	re.Equal(beforeCount+1, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	respConsumption, err := gc.onResponseImpl(req, resp)
+	re.NoError(err)
+	re.NotZero(respConsumption.RRU)
+
+	sourceMetrics, cacheSize = requestSourceStateSnapshot(t, gc, req.requestSource)
+
+	re.Equal(2, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Equal(reqConsumption.WRU, requestSourceCounterValue(t, sourceMetrics.wru))
-	re.Equal(respConsumption.RRU, requestSourceCounterValue(t, sourceMetrics.rru))
+	re.Equal(reqConsumption.WRU, requestSourceCounterValue(t, sourceMetrics.wruConsume))
+	re.Equal(respConsumption.RRU, requestSourceCounterValue(t, sourceMetrics.rruConsume))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	_, _, _, _, err = gc.onRequestWaitImpl(context.Background(), req)
 	re.NoError(err)
 	cachedMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
-	re.Equal(1, cacheSize)
-	re.Same(sourceMetrics, cachedMetrics)
+	re.Equal(2, cacheSize)
+	re.Same(sourceMetrics.wruConsume, cachedMetrics.wruConsume)
+	re.Same(sourceMetrics.rruConsume, cachedMetrics.rruConsume)
 
-	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "rru")
-	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "wru")
+	gc.metrics.sourceState.cleanup()
+}
+
+func TestRequestSourceMetricsSkipRejectedAndZeroDeltas(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	req := &TestRequestInfo{
+		isWrite:       true,
+		writeBytes:    10000000,
+		requestSource: "internal_rejected_request",
+	}
+	beforeCount := collectorMetricCount(controllerMetrics.RequestSourceRUCounter)
+
+	_, _, _, _, err := gc.onRequestWaitImpl(context.Background(), req)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+	_, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Zero(cacheSize)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+
+	gc.metrics.addRequestSourceRUDelta(req.requestSource, &rmpb.Consumption{})
+	_, cacheSize = requestSourceStateSnapshot(t, gc, req.requestSource)
+	re.Zero(cacheSize)
+	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
+}
+
+func TestRequestSourceMetricsConcurrentLazyCreation(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	const workers = 64
+	requestSource := "internal_concurrent_metric_creation"
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			gc.metrics.addRequestSourceRUDelta(requestSource, &rmpb.Consumption{RRU: 1, WRU: -1})
+		}()
+	}
+	wg.Wait()
+
+	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc, requestSource)
+	re.Equal(2, cacheSize)
+	re.NotNil(sourceMetrics.rruConsume)
+	re.NotNil(sourceMetrics.wruRefund)
+	re.Equal(float64(workers), requestSourceCounterValue(t, sourceMetrics.rruConsume))
+	re.Equal(float64(workers), requestSourceCounterValue(t, sourceMetrics.wruRefund))
+
+	gc.metrics.sourceState.cleanup()
 }
 
 func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
@@ -182,7 +264,7 @@ func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc, req.requestSource)
 	re.NotNil(sourceMetrics)
-	re.Equal(1, cacheSize)
+	re.Equal(2, cacheSize)
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	gc.mu.Lock()
@@ -196,8 +278,8 @@ func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 	re.False(ok)
 	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
-	sourceMetrics.rru.Add(1)
-	sourceMetrics.wru.Add(1)
+	sourceMetrics.rruConsume.Add(1)
+	sourceMetrics.wruConsume.Add(1)
 
 	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }
@@ -254,7 +336,7 @@ func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
 	re.Zero(cacheSize)
 	re.Equal(beforeCount, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
-	gc.metrics.addRequestSourceRU(req.requestSource, &rmpb.Consumption{RRU: 1, WRU: 1})
+	gc.metrics.addRequestSourceRUDelta(req.requestSource, &rmpb.Consumption{RRU: 1, WRU: 1})
 
 	_, cacheSize = requestSourceStateSnapshot(t, gc, req.requestSource)
 	re.Zero(cacheSize)
@@ -475,10 +557,10 @@ func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 	re.NoError(err)
 
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, newGC, req.requestSource)
-	re.Equal(1, cacheSize)
+	re.Equal(2, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
-	re.Greater(requestSourceCounterValue(t, sourceMetrics.rru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.wruConsume), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.rruConsume), float64(0))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	// Cleanup for this test.
@@ -546,10 +628,10 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 	re.NoError(err)
 
 	sourceMetrics, cacheSize := requestSourceStateSnapshot(t, gc2, req.requestSource)
-	re.Equal(1, cacheSize)
+	re.Equal(2, cacheSize)
 	re.NotNil(sourceMetrics)
-	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
-	re.Greater(requestSourceCounterValue(t, sourceMetrics.rru), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.wruConsume), float64(0))
+	re.Greater(requestSourceCounterValue(t, sourceMetrics.rruConsume), float64(0))
 	re.Equal(beforeCount+2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	// Cleanup for this test.
@@ -558,7 +640,7 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 
 // TestStopCleansUpRequestSourceMetricsState verifies the loopCtx.Done()
 // shutdown path: per-group state is closed, cached label tuples are deleted
-// from the vec, and post-stop addRequestSourceRU does not re-register series.
+// from the vec, and post-stop addRequestSourceRUDelta does not re-register series.
 func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -612,22 +694,20 @@ func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 		return ms.closed && len(ms.items) == 0
 	}, 5*time.Second, 10*time.Millisecond)
 
-	// Shutdown must delete exactly the two labels (rru, wru) registered by this group.
+	// This request registered one consume series for RRU and one for WRU.
 	re.Equal(beforeCount-2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 
 	// Post-stop accounting must not re-register any series.
-	gc.metrics.addRequestSourceRU("internal_stop_cleanup_later", &rmpb.Consumption{RRU: 1, WRU: 1})
+	gc.metrics.addRequestSourceRUDelta("internal_stop_cleanup_later", &rmpb.Consumption{RRU: 1, WRU: 1})
 	ms.mu.RLock()
 	re.Empty(ms.items)
 	ms.mu.RUnlock()
 	re.Equal(beforeCount-2, collectorMetricCount(controllerMetrics.RequestSourceRUCounter))
 }
 
-// TestFailedWriteMatchesControllerConsumption verifies that the per-source RU
-// counter mirrors the controller's own consumption, even when payBackWriteCost
-// reduces the controller's WRU on failed writes. The metric exports
-// round-trip net consumption at response time, so the cumulative source
-// counter must equal gc.mu.consumption across mixed success / failure traffic.
+// TestFailedWriteMatchesControllerConsumption verifies that consume minus
+// refund mirrors the controller's own consumption when payBackWriteCost
+// produces a negative response-side WRU delta.
 func TestFailedWriteMatchesControllerConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
@@ -658,16 +738,20 @@ func TestFailedWriteMatchesControllerConsumption(t *testing.T) {
 	controllerRRU := gc.mu.consumption.RRU
 	gc.mu.Unlock()
 
-	re.InDelta(controllerWRU, requestSourceCounterValue(t, sourceMetrics.wru), 1e-9,
+	re.NotNil(sourceMetrics.wruConsume)
+	re.NotNil(sourceMetrics.wruRefund)
+	netWRU := requestSourceCounterValue(t, sourceMetrics.wruConsume) -
+		requestSourceCounterValue(t, sourceMetrics.wruRefund)
+	re.InDelta(controllerWRU, netWRU, 1e-9,
 		"per-source WRU diverges from controller consumption — failed-write payback dropped?")
-	re.InDelta(controllerRRU, requestSourceCounterValue(t, sourceMetrics.rru), 1e-9,
-		"per-source RRU diverges from controller consumption")
+	re.Zero(controllerRRU)
+	re.Nil(sourceMetrics.rruConsume)
+	re.Nil(sourceMetrics.rruRefund)
 
 	// Sanity: failed writes still consume some WRU (calculateWriteCost adds
 	// per-batch and replication terms that payBackWriteCost does not refund),
 	// so the counter is non-zero.
-	re.Greater(requestSourceCounterValue(t, sourceMetrics.wru), float64(0))
+	re.Greater(netWRU, float64(0))
 
-	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "rru")
-	controllerMetrics.RequestSourceRUCounter.DeleteLabelValues(gc.name, req.requestSource, "wru")
+	gc.metrics.sourceState.cleanup()
 }

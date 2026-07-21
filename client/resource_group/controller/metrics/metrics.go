@@ -25,6 +25,7 @@ const (
 	resourceGroupNameLabel    = "name"
 	newResourceGroupNameLabel = "resource_group"
 	requestSourceLabel        = "request_source"
+	directionLabel            = "direction"
 
 	typeLabel = "type"
 )
@@ -177,9 +178,9 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   namespace,
 			Subsystem:   requestSubsystem,
 			Name:        "ru_total",
-			Help:        "Counter of request RU consumption grouped by resource group and request source.",
+			Help:        "Counter of request RU accounting deltas grouped by resource group and request source. Refund deltas are stored as positive values under direction=refund.",
 			ConstLabels: constLabels,
-		}, []string{newResourceGroupNameLabel, requestSourceLabel, typeLabel})
+		}, []string{newResourceGroupNameLabel, requestSourceLabel, typeLabel, directionLabel})
 
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
