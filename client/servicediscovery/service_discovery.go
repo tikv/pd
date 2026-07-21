@@ -890,6 +890,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
+	var lastErr error
 	for _, url := range c.GetServiceURLs() {
 		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
@@ -905,6 +906,7 @@ func (c *serviceDiscovery) updateMember() error {
 		}
 		// Failed to get members
 		if err != nil {
+			lastErr = err
 			logutil.SamplerLogger().Info("[pd] cannot update member from this url",
 				zap.String("url", url),
 				errs.ZapError(err))
@@ -918,6 +920,9 @@ func (c *serviceDiscovery) updateMember() error {
 		c.updateURLs(members.GetMembers())
 
 		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
+	}
+	if lastErr != nil {
+		return lastErr
 	}
 	return errs.ErrClientGetMember.FastGenByArgs()
 }

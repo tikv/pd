@@ -29,11 +29,13 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -451,4 +453,43 @@ func TestGRPCDialOption(t *testing.T) {
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)
+}
+
+type failedGetMembersServer struct {
+	pdpb.UnimplementedPDServer
+}
+
+func (*failedGetMembersServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
+	return nil, status.Error(codes.Unavailable, "distinct get members failure")
+}
+
+func TestUpdateMemberReturnsDetailedError(t *testing.T) {
+	re := require.New(t)
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+
+	grpcServer := grpc.NewServer()
+	pdpb.RegisterPDServer(grpcServer, &failedGetMembersServer{})
+	serveDone := make(chan struct{})
+	go func() {
+		_ = grpcServer.Serve(lis)
+		close(serveDone)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		<-serveDone
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cli := &serviceDiscovery{
+		ctx:    ctx,
+		option: opt.NewOption(),
+	}
+	cli.urls.Store([]string{tlsutil.ModifyURLScheme(lis.Addr().String(), nil)})
+	t.Cleanup(cli.Close)
+
+	err = cli.updateMember()
+	re.ErrorIs(err, errs.ErrClientGetMember)
+	re.ErrorContains(err, "distinct get members failure")
 }
