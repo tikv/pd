@@ -683,6 +683,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		startKey         = lw.key
 		limit            = lw.loadBatchSize
 		snapshotRevision int64
+		preErr           error
 		callbackErr      error
 		snapshotKeys     map[string]struct{}
 	)
@@ -691,7 +692,11 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
-	preErr := lw.preEventsFn([]*clientv3.Event{})
+	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
+		preErr = err
+		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
+			zap.String("key", lw.key), zap.Error(err))
+	}
 	defer func() {
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
@@ -702,8 +707,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 	}()
 	if preErr != nil {
-		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
-			zap.String("key", lw.key), zap.Error(preErr))
 		return 0, preErr
 	}
 
