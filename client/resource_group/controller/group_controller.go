@@ -265,23 +265,23 @@ func (*groupMetricsCollection) deletePagingLabels(name string) {
 // Callers must gate the call on pagingReadEstimate(...).ok so the metric stays
 // scoped to coprocessor reads and excludes point gets, batch gets, scans, and
 // other bounded-size reads.
-func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
+func (mc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
 	if bytesForEst == 0 {
-		gmc.noPrechargeCounter.Inc()
+		mc.noPrechargeCounter.Inc()
 		return
 	}
-	gmc.prechargeCounter.Inc()
-	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+	mc.prechargeCounter.Inc()
+	mc.prechargeBytesCounter.Add(float64(bytesForEst))
 }
 
 // observePagingResponse records response-boundary paging metrics for
 // precharged coprocessor RPCs.
-func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
+func (mc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
 	if bytesForEst == 0 {
 		return
 	}
-	gmc.actualBytesCounter.Add(float64(actual))
-	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
+	mc.actualBytesCounter.Add(float64(actual))
+	mc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
 }
 
 type tokenCounter struct {
