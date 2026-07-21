@@ -1660,11 +1660,11 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			groupsToMerge = make([]uint32, 0, maxBatchSize)
 		)
 		for idx, group := range groups.GetAll() {
-			if group.ID == constant.DefaultKeyspaceGroupID {
-				continue
+			if group.ID != constant.DefaultKeyspaceGroupID {
+				groupsToMerge = append(groupsToMerge, group.ID)
 			}
-			groupsToMerge = append(groupsToMerge, group.ID)
-			if len(groupsToMerge) < maxBatchSize && idx < mergeNum-1 {
+			if len(groupsToMerge) == 0 ||
+				(len(groupsToMerge) < maxBatchSize && idx < mergeNum-1) {
 				continue
 			}
 			log.Info("merge keyspace groups into the default one",
