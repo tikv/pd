@@ -183,6 +183,7 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.ttlConfigWatcher.SetReconcileDeletedKeys()
 	cw.ttlConfigWatcher.StartWatchLoop()
 	return cw.ttlConfigWatcher.WaitLoad()
 }
@@ -234,6 +235,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	cw.schedulerConfigWatcher.SetReconcileDeletedKeys()
 	cw.schedulerConfigWatcher.StartWatchLoop()
 	return cw.schedulerConfigWatcher.WaitLoad()
 }

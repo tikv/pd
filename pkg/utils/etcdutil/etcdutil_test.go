@@ -17,8 +17,10 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -419,6 +421,17 @@ func TestLoopWatcherTestSuite(t *testing.T) {
 	suite.Run(t, new(loopWatcherTestSuite))
 }
 
+func TestNextCompactionReloadRetryInterval(t *testing.T) {
+	re := require.New(t)
+	base := time.Second
+	maxInterval := 4 * time.Second
+
+	re.Equal(base, nextCompactionReloadRetryInterval(0, base, maxInterval))
+	re.Equal(2*base, nextCompactionReloadRetryInterval(base, base, maxInterval))
+	re.Equal(maxInterval, nextCompactionReloadRetryInterval(2*base, base, maxInterval))
+	re.Equal(maxInterval, nextCompactionReloadRetryInterval(maxInterval, base, maxInterval))
+}
+
 func (suite *loopWatcherTestSuite) SetupSuite() {
 	re := suite.Require()
 	var err error
@@ -445,10 +458,16 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 
 func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	cache := make(map[string]struct{})
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestLoadNoExistedKey",
@@ -467,16 +486,72 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
+	suite.Run("pre callback", func() {
+		re := suite.Require()
+		preErr := errors.New("pre callback failed")
+		postCalled := false
+		watcher := NewLoopWatcher(
+			suite.ctx,
+			&suite.wg,
+			suite.client,
+			"test",
+			"TestWatcherLoadReturnsLifecycleErrors/pre",
+			func([]*clientv3.Event) error { return preErr },
+			func(*mvccpb.KeyValue) error {
+				re.Fail("put callback should not be called")
+				return nil
+			},
+			func(*mvccpb.KeyValue) error { return nil },
+			func([]*clientv3.Event) error {
+				postCalled = true
+				return nil
+			},
+			true, /* withPrefix */
+		)
+
+		_, err := watcher.load(suite.ctx)
+		re.ErrorIs(err, preErr)
+		re.True(postCalled)
+	})
+
+	suite.Run("post callback", func() {
+		re := suite.Require()
+		postErr := errors.New("post callback failed")
+		watcher := NewLoopWatcher(
+			suite.ctx,
+			&suite.wg,
+			suite.client,
+			"test",
+			"TestWatcherLoadReturnsLifecycleErrors/post",
+			func([]*clientv3.Event) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func([]*clientv3.Event) error { return postErr },
+			true, /* withPrefix */
+		)
+
+		_, err := watcher.load(suite.ctx)
+		re.ErrorIs(err, postErr)
+	})
+}
+
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
 	cache := make(map[string]struct{})
 	testutil.GenerateTestDataConcurrently(int(maxLoadBatchSize)*2, func(i int) {
 		suite.put(re, fmt.Sprintf("TestLoadWithLimitChange%d", i), "")
 	})
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestLoadWithLimitChange",
@@ -498,6 +573,12 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
 	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+	}()
 	cache := struct {
 		syncutil.RWMutex
 		data map[string]struct{}
@@ -506,8 +587,8 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	}
 	result := make([]string, 0)
 	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
+		ctx,
+		&watcherWG,
 		suite.client,
 		"test",
 		"TestCallBack",
@@ -549,7 +630,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	// delete 10 keys
 	for i := range 10 {
 		key := fmt.Sprintf("TestCallBack%d", i)
-		_, err = suite.client.Delete(suite.ctx, key)
+		_, err = suite.client.Delete(ctx, key)
 		re.NoError(err)
 	}
 	time.Sleep(time.Second)
@@ -629,6 +710,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	err := watcher.WaitLoad()
 	re.NoError(err)
 	re.Len(cache, count)
+	re.Nil(watcher.loadedKeys)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() {
@@ -811,10 +893,23 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompaction() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
+	var watcherWG sync.WaitGroup
 
 	watcherClient, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
+	var replacementClient *clientv3.Client
+	failpointEnabled := false
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+		if failpointEnabled {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient"))
+		}
+		if replacementClient != nil {
+			re.NoError(replacementClient.Close())
+		}
+		_ = watcherClient.Close()
+	}()
 	cache := struct {
 		syncutil.RWMutex
 		data string
@@ -830,7 +925,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompaction() {
 	const key = "TestWatcherReloadsAfterCompaction"
 	watcher := NewLoopWatcher(
 		ctx,
-		&suite.wg,
+		&watcherWG,
 		watcherClient,
 		"test",
 		key,
@@ -854,9 +949,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompaction() {
 	checkCache("before-compaction")
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient"))
-	}()
+	failpointEnabled = true
 	re.NoError(watcherClient.Close())
 
 	_, err = suite.client.Put(ctx, key, "after-compaction")
@@ -866,11 +959,136 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompaction() {
 	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
 	re.NoError(err)
 
-	replacementClient, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
+	replacementClient, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
 	re.NoError(err)
-	defer replacementClient.Close()
 	watcher.updateClientCh <- replacementClient
 	checkCache("after-compaction")
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReconcilesDeletedKeysAfterCompaction() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	var watcherWG sync.WaitGroup
+
+	const prefix = "TestWatcherReconcilesDeletedKeysAfterCompaction/"
+	keepKey := prefix + "keep"
+	deletedKey := prefix + "deleted"
+	suite.put(re, keepKey, "keep")
+	suite.put(re, deletedKey, "deleted")
+
+	watcherClient, err := CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
+	re.NoError(err)
+	var replacementClient *clientv3.Client
+	failpointEnabled := false
+	defer func() {
+		cancel()
+		watcherWG.Wait()
+		if failpointEnabled {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient"))
+		}
+		if replacementClient != nil {
+			re.NoError(replacementClient.Close())
+		}
+		_ = watcherClient.Close()
+	}()
+	cache := struct {
+		syncutil.RWMutex
+		data map[string]string
+	}{
+		data: make(map[string]string),
+	}
+	checkCache := func(expected map[string]string) {
+		testutil.Eventually(re, func() bool {
+			cache.RLock()
+			defer cache.RUnlock()
+			return maps.Equal(cache.data, expected)
+		}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+	}
+
+	watcher := NewLoopWatcher(
+		ctx,
+		&watcherWG,
+		watcherClient,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			defer cache.Unlock()
+			cache.data[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			defer cache.Unlock()
+			delete(cache.data, string(kv.Key))
+			return nil
+		},
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+	watcher.watchChangeRetryInterval = 100 * time.Millisecond
+	watcher.StartWatchLoop()
+	re.NoError(watcher.WaitLoad())
+	checkCache(map[string]string{keepKey: "keep", deletedKey: "deleted"})
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)"))
+	failpointEnabled = true
+	re.NoError(watcherClient.Close())
+
+	_, err = suite.client.Delete(ctx, deletedKey)
+	re.NoError(err)
+	advanceResp, err := suite.client.Put(ctx, strings.TrimSuffix(prefix, "/")+"-advance-revision", "")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
+	re.NoError(err)
+
+	replacementClient, err = CreateEtcdClient(nil, suite.config.ListenClientUrls, TestEtcdClientPurpose, true)
+	re.NoError(err)
+	watcher.updateClientCh <- replacementClient
+	checkCache(map[string]string{keepKey: "keep"})
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
+	defer cancel()
+
+	const key = "TestWatcherBacksOffFailedCompactionReload"
+	suite.put(re, key, "invalid")
+	resp, err := EtcdKVGet(suite.client, key)
+	re.NoError(err)
+	watchRevision := resp.Header.Revision
+	advanceResp, err := suite.client.Put(ctx, key+"-advance-revision", "")
+	re.NoError(err)
+	_, err = suite.etcd.Server.Compact(ctx, &etcdserverpb.CompactionRequest{Revision: advanceResp.Header.Revision})
+	re.NoError(err)
+
+	callbackErr := errors.New("callback failed")
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return callbackErr },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.watchChangeRetryInterval = 50 * time.Millisecond
+
+	_, err = watcher.watch(ctx, watchRevision)
+	re.ErrorIs(err, callbackErr)
+	re.Equal(50*time.Millisecond, watcher.compactionReloadRetryInterval)
+
+	retryStart := time.Now()
+	_, err = watcher.watch(ctx, watchRevision)
+	re.ErrorIs(err, callbackErr)
+	re.GreaterOrEqual(time.Since(retryStart), 45*time.Millisecond)
+	re.Equal(100*time.Millisecond, watcher.compactionReloadRetryInterval)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {

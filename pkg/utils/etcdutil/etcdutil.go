@@ -338,10 +338,11 @@ func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 }
 
 const (
-	defaultEtcdRetryInterval      = time.Second
-	defaultLoadFromEtcdRetryTimes = 3
-	maxLoadBatchSize              = int64(10000)
-	minLoadBatchSize              = int64(100)
+	defaultEtcdRetryInterval         = time.Second
+	defaultLoadFromEtcdRetryTimes    = 3
+	maxCompactionReloadRetryInterval = time.Minute
+	maxLoadBatchSize                 = int64(10000)
+	minLoadBatchSize                 = int64(100)
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -386,11 +387,19 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
+	// compactionReloadRetryInterval is the additional backoff before retrying a failed compaction reload.
+	compactionReloadRetryInterval time.Duration
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
 	// watchChTimeoutDuration is the timeout duration for a watchChan.
 	watchChTimeoutDuration time.Duration
+
+	// reconcileDeletedKeys indicates whether a full load should delete keys that
+	// existed in the previous successfully applied state but not in the snapshot.
+	reconcileDeletedKeys bool
+	// loadedKeys tracks successfully applied keys only when reconcileDeletedKeys is enabled.
+	loadedKeys map[string]struct{}
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -589,10 +598,25 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
+				if lw.compactionReloadRetryInterval > 0 {
+					retryTimer := time.NewTimer(lw.compactionReloadRetryInterval)
+					select {
+					case <-ctx.Done():
+						retryTimer.Stop()
+						return revision, nil
+					case <-retryTimer.C:
+					}
+				}
 				loadedRevision, loadErr := lw.load(ctx)
 				if loadErr != nil {
+					lw.compactionReloadRetryInterval = nextCompactionReloadRetryInterval(
+						lw.compactionReloadRetryInterval,
+						lw.watchChangeRetryInterval,
+						maxCompactionReloadRetryInterval,
+					)
 					return revision, loadErr
 				}
+				lw.compactionReloadRetryInterval = 0
 				revision = loadedRevision
 				continue
 			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
@@ -616,6 +640,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
+						lw.recordLoadedKey(event.Kv)
 						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
@@ -626,6 +651,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
+						lw.forgetLoadedKey(event.Kv)
 						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
@@ -641,25 +667,45 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}
 }
 
+func nextCompactionReloadRetryInterval(current, base, maxInterval time.Duration) time.Duration {
+	if current <= 0 {
+		return base
+	}
+	next := current * 2
+	if next > maxInterval {
+		return maxInterval
+	}
+	return next
+}
+
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	var (
 		startKey         = lw.key
 		limit            = lw.loadBatchSize
 		snapshotRevision int64
 		callbackErr      error
+		snapshotKeys     map[string]struct{}
 	)
+	if lw.reconcileDeletedKeys {
+		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
+	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
-	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
-		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
-			zap.String("key", lw.key), zap.Error(err))
-	}
+	preErr := lw.preEventsFn([]*clientv3.Event{})
 	defer func() {
-		if err := lw.postEventsFn([]*clientv3.Event{}); err != nil {
+		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-				zap.String("key", lw.key), zap.Error(err))
+				zap.String("key", lw.key), zap.Error(postErr))
+			if err == nil {
+				err = postErr
+			}
 		}
 	}()
+	if preErr != nil {
+		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
+			zap.String("key", lw.key), zap.Error(preErr))
+		return 0, preErr
+	}
 
 	for {
 		select {
@@ -703,6 +749,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				// we need to skip the last key for the current batch.
 				continue
 			}
+			if lw.reconcileDeletedKeys {
+				snapshotKeys[string(item.Key)] = struct{}{}
+			}
 			putErr := lw.putFn(item)
 			if putErr != nil {
 				if callbackErr == nil {
@@ -711,15 +760,55 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 			} else {
+				lw.recordLoadedKey(item)
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
+			if callbackErr == nil {
+				callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+			}
 			return snapshotRevision + 1, callbackErr
 		}
 	}
+}
+
+func (lw *LoopWatcher) recordLoadedKey(kv *mvccpb.KeyValue) {
+	if lw.reconcileDeletedKeys {
+		lw.loadedKeys[string(kv.Key)] = struct{}{}
+	}
+}
+
+func (lw *LoopWatcher) forgetLoadedKey(kv *mvccpb.KeyValue) {
+	if lw.reconcileDeletedKeys {
+		delete(lw.loadedKeys, string(kv.Key))
+	}
+}
+
+func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) error {
+	if !lw.reconcileDeletedKeys {
+		return nil
+	}
+	var firstErr error
+	for key := range lw.loadedKeys {
+		if _, ok := snapshotKeys[key]; ok {
+			continue
+		}
+		kv := &mvccpb.KeyValue{Key: []byte(key)}
+		if err := lw.deleteFn(kv); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Error("delete failed in watch loop when reconciling loaded keys",
+				zap.String("name", lw.name), zap.String("watch-key", lw.key),
+				zap.String("key", key), zap.Error(err))
+			continue
+		}
+		delete(lw.loadedKeys, key)
+	}
+	return firstErr
 }
 
 func (lw *LoopWatcher) buildLoadingOpts(limit, revision int64) []clientv3.OpOption {
@@ -786,4 +875,12 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// SetReconcileDeletedKeys enables deletion reconciliation for full loads.
+// It must be called before StartWatchLoop. Since this keeps one entry per
+// watched key, callers should only enable it for prefixes with bounded key cardinality.
+func (lw *LoopWatcher) SetReconcileDeletedKeys() {
+	lw.reconcileDeletedKeys = true
+	lw.loadedKeys = make(map[string]struct{})
 }
