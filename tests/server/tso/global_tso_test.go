@@ -155,7 +155,9 @@ func TestLogicalOverflow(t *testing.T) {
 		re.NoError(err)
 		defer tsoClient.CloseSend()
 
-		begin := time.Now()
+		var prevTS *pdpb.Timestamp
+		var firstTS *pdpb.Timestamp
+		var lastTS *pdpb.Timestamp
 		for i := range 3 {
 			req := &pdpb.TsoRequest{
 				Header:     testutil.NewRequestHeader(clusterID),
@@ -163,15 +165,23 @@ func TestLogicalOverflow(t *testing.T) {
 				DcLocation: tso.GlobalDCLocation,
 			}
 			re.NoError(tsoClient.Send(req))
-			_, err = tsoClient.Recv()
+			resp, err := tsoClient.Recv()
 			re.NoError(err)
-			if i == 1 {
-				// the 2nd request may (but not must) overflow, as max logical interval is 262144
-				re.Less(time.Since(begin), updateInterval+50*time.Millisecond) // additional 50ms for gRPC latency
+			currentTS := checkAndReturnTimestampResponse(re, req, resp)
+			if i == 0 {
+				firstTS = currentTS
 			}
+			if prevTS != nil {
+				re.GreaterOrEqual(currentTS.GetPhysical(), prevTS.GetPhysical())
+				if currentTS.GetPhysical() == prevTS.GetPhysical() {
+					re.Greater(currentTS.GetLogical(), prevTS.GetLogical())
+				}
+			}
+			prevTS = currentTS
+			lastTS = currentTS
 		}
-		// the 3rd request must overflow
-		re.GreaterOrEqual(time.Since(begin), updateInterval)
+		// 3 * 150000 > 262144, so the physical part must advance at least once.
+		re.Greater(lastTS.GetPhysical(), firstTS.GetPhysical())
 	}
 
 	for _, updateInterval := range []int{1, 5, 30, 50} {
