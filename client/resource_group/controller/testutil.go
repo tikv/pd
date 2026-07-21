@@ -73,7 +73,7 @@ func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
 }
 
-// RequestSource implements the RequestInfo interface.
+// RequestSource implements the optional request-source provider recognized by the controller.
 func (tri *TestRequestInfo) RequestSource() string {
 	return tri.requestSource
 }
