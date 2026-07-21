@@ -27,7 +27,11 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -47,22 +51,34 @@ func TestLoadLargeRules(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t)
 	defer clean()
-	runWatcherLoadLabelRule(ctx, re, client)
+	runWatcherLoadLabelRule(ctx, re, client, newTestCheckerController(ctx))
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
 	ctx, client, clean := prepare(b)
 	defer clean()
+	checkerController := newTestCheckerController(ctx)
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
 	for range b.N {
-		runWatcherLoadLabelRule(ctx, re, client)
+		runWatcherLoadLabelRule(ctx, re, client, checkerController)
 	}
 }
 
-func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
+func newTestCheckerController(ctx context.Context) *checker.Controller {
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
+	return checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+}
+
+func runWatcherLoadLabelRule(
+	ctx context.Context,
+	re *require.Assertions,
+	client *clientv3.Client,
+	checkerController *checker.Controller,
+) {
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
 	re.NoError(err)
@@ -76,6 +92,7 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		etcdClient:            client,
 		ruleStorage:           storage,
 		regionLabeler:         labelerManager,
+		checkerController:     checkerController,
 	}
 	err = rw.initializeRegionLabelWatcher()
 	re.NoError(err)
