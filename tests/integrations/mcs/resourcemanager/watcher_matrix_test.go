@@ -106,7 +106,7 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherKeepsLegacyKeyspa
 	legacyReq := &rmpb.GetResourceGroupRequest{ResourceGroupName: legacyGroup.GetName()}
 	keyspaceReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: keyspaceGroup.GetName(),
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	suite.waitForGroup(re, rmClient, legacyReq, 1, 100)
 	suite.waitForGroup(re, rmClient, keyspaceReq, 9, 900)
@@ -135,7 +135,7 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherBootstrapsAfterRM
 	defer initialConn.Close()
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: group.GetName(),
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	suite.waitForGroup(re, initialRMClient, req, 7, 700)
 
@@ -168,7 +168,7 @@ func (suite *resourceManagerWatcherMatrixTestSuite) TestWatcherRecoversAfterComp
 
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: group.GetName(),
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	suite.waitForGroup(re, rmClient, req, 5, 500)
 
@@ -209,7 +209,7 @@ func newWatcherMatrixResourceGroup(name string, priority uint32, fillRate uint64
 		},
 	}
 	if keyspaceID != nil {
-		group.KeyspaceId = &rmpb.KeyspaceIDValue{Value: *keyspaceID}
+		group.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: *keyspaceID}}
 	}
 	return group
 }

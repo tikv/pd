@@ -125,8 +125,8 @@ func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.K
 	defer func() { metrics.CmdDurationLoadKeyspaceByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: c.requestHeader(),
-		Id:     id,
+		Header:   c.requestHeader(),
+		Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: id},
 	}
 	protoClient := c.keyspaceClient()
 	if protoClient == nil {

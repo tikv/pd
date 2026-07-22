@@ -196,9 +196,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	rmClient := rmpb.NewResourceManagerClient(rmConn)
 	getReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: groupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	pdResp, err := pdClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
@@ -228,7 +226,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	_, err = rmClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
 	assertMetadataWriteRejected(err)
@@ -240,9 +238,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	addGetReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	pdAddGetResp, err := pdClient.GetResourceGroup(ctx, addGetReq)
 	re.NoError(err)
@@ -287,17 +283,13 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	_, err = rmClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	assertMetadataWriteRejected(err)
 
 	deleteResp, err := pdClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	re.NoError(err)
 	re.Nil(deleteResp.GetError())
@@ -337,7 +329,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 
 	addResp, err := leaderClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
@@ -353,7 +345,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 
 	getReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: groupName,
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	modifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
@@ -364,7 +356,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 
 	deleteResp, err := followerClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: groupName,
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	re.NoError(err)
 	re.Equal("Success!", deleteResp.GetBody())
@@ -386,7 +378,7 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 				Settings: &rmpb.TokenLimitSettings{FillRate: fillRate, BurstLimit: 200},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	payload, err := json.Marshal(group)
 	re.NoError(err)
