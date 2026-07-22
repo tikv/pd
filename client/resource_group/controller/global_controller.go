@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	goerrors "errors"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -531,6 +534,61 @@ func NewResourceGroupNotExistErr(name string) error {
 	return &errs.ErrClientGetResourceGroup{ResourceGroupName: name, Cause: "resource group does not exist"}
 }
 
+func unwrapGetResourceGroupError(err error) error {
+	for err != nil {
+		var groupErr *errs.ErrClientGetResourceGroup
+		if !goerrors.As(err, &groupErr) || groupErr.Err == nil || groupErr.Err == err {
+			return err
+		}
+		err = groupErr.Err
+	}
+	return nil
+}
+
+func normalizeGetResourceGroupError(err error) error {
+	switch {
+	case goerrors.Is(err, context.Canceled):
+		return context.Canceled
+	case goerrors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	default:
+		return err
+	}
+}
+
+func isResourceGroupNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "PD:resourcemanager:ErrGroupNotExists") ||
+		strings.Contains(msg, "resource group does not exist")
+}
+
+func (c *ResourceGroupsController) shouldUseDegradedResourceGroup(err error) bool {
+	if c.degradedRUSettings == nil || err == nil {
+		return false
+	}
+	if isResourceGroupNotFoundError(err) {
+		return false
+	}
+	if goerrors.Is(err, context.Canceled) || goerrors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	causeErr := unwrapGetResourceGroupError(err)
+	if errs.IsLeaderChange(causeErr) {
+		return true
+	}
+	switch status.Code(causeErr) {
+	case codes.Canceled:
+		return false
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
 	group := &rmpb.ResourceGroup{
 		Name:       resourceGroupName,
@@ -559,11 +617,11 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if c.degradedRUSettings != nil {
+		if c.shouldUseDegradedResourceGroup(err) {
 			isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
 		} else {
-			return nil, err
+			return nil, normalizeGetResourceGroupError(err)
 		}
 	}
 	if group == nil {
@@ -638,6 +696,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true

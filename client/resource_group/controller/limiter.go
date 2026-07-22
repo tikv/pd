@@ -330,7 +330,7 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 //
 // Token overshoot above burst is intentional here: getTokens clamps the
 // value on the next call, so RefundTokens never permanently leaks past
-// the burst cap. maybeNotify is intentionally not called either because
+// the burst cap. maybeNotify is intentionally not called either —
 // refunding can only raise the token count, never push the limiter into
 // the low-token state.
 func (lim *Limiter) RefundTokens(now time.Time, amount float64) {

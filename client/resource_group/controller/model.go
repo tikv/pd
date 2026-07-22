@@ -45,6 +45,8 @@ const (
 
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
+// Implementations may additionally provide PredictedReadBytes() and IsCop() methods to opt
+// into paging pre-charge accounting; missing methods are treated as no hint and non-cop.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
@@ -52,6 +54,57 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+}
+
+type predictedReadBytesProvider interface {
+	// PredictedReadBytes returns the caller-supplied read-bytes hint. The
+	// controller only uses it for coprocessor reads; non-cop hints are
+	// ignored by paging accounting.
+	PredictedReadBytes() uint64
+}
+
+type copRequestInfo interface {
+	// IsCop reports whether this request targets the coprocessor endpoint
+	// (CmdCop / CmdCopStream). Only coprocessor reads participate in paging
+	// pre-charge, settlement, and metrics; point gets, batch gets, scans and
+	// other bounded-size reads bypass paging even when they carry a
+	// PredictedReadBytes hint.
+	IsCop() bool
+}
+
+func predictedReadBytes(req RequestInfo) uint64 {
+	provider, ok := req.(predictedReadBytesProvider)
+	if !ok {
+		return 0
+	}
+	return provider.PredictedReadBytes()
+}
+
+func isCopRequest(req RequestInfo) bool {
+	copReq, ok := req.(copRequestInfo)
+	return ok && copReq.IsCop()
+}
+
+// pagingReadEstimate returns the predicted read-bytes hint for coprocessor
+// read requests. The boolean reports whether the request participates in
+// cop-read pre-charge accounting at all; a true result with 0 bytes means
+// the cop read did not carry a usable pre-charge hint.
+func pagingReadEstimate(req RequestInfo) (uint64, bool) {
+	if req.IsWrite() || !isCopRequest(req) {
+		return 0, false
+	}
+	return predictedReadBytes(req), true
+}
+
+// estimatedReadBytes returns the predicted read-bytes hint for coprocessor
+// read requests. Writes and non-coprocessor reads always return 0 so cop-read
+// pre-charge and settlement stay gated to coprocessor RPCs.
+func estimatedReadBytes(req RequestInfo) uint64 {
+	bytesForEst, ok := pagingReadEstimate(req)
+	if !ok {
+		return 0
+	}
+	return bytesForEst
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -104,6 +157,10 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
 		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+		// Paging pre-charge
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU += float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	}
 	if req.AccessLocationType() == AccessCrossZone {
 		if req.IsWrite() {
@@ -138,6 +195,10 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 	if !req.IsWrite() {
 		// For now, we can only collect the KV CPU cost for a read request.
 		kc.calculateCPUCost(consumption, res)
+		// Paging settlement
+		if bytesForEst := estimatedReadBytes(req); bytesForEst > 0 {
+			consumption.RRU -= float64(kc.ReadBytesCost) * float64(bytesForEst)
+		}
 	} else if !res.Succeed() {
 		// If the write request is not successfully returned, we need to pay back the WRU cost.
 		kc.payBackWriteCost(consumption, req)
@@ -193,6 +254,27 @@ func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
 	return &cloned
 }
 
+func (kc *KVCalculator) pagingPrechargeRRU(req RequestInfo) float64 {
+	bytesForEst := estimatedReadBytes(req)
+	if bytesForEst == 0 {
+		return 0
+	}
+	return float64(kc.ReadBytesCost) * float64(bytesForEst)
+}
+
+func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmpb.Consumption, req RequestInfo, sign float64) {
+	if consumption == nil {
+		return
+	}
+	for _, calc := range calculators {
+		kvCalc, ok := calc.(*KVCalculator)
+		if !ok {
+			continue
+		}
+		consumption.RRU += sign * kvCalc.pagingPrechargeRRU(req)
+	}
+}
+
 func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
 	if !req.IsWrite() {
 		return nil
@@ -208,36 +290,23 @@ func writeReservationConsumption(calculators []ResourceCalculator, req RequestIn
 	return reservation
 }
 
-func writeRefundConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	if !req.IsWrite() {
-		return nil
-	}
-	refund := &rmpb.Consumption{}
-	for _, calc := range calculators {
-		kvCalc, ok := calc.(*KVCalculator)
-		if !ok {
-			continue
-		}
-		kvCalc.payBackWriteCost(refund, req)
-	}
-	return refund
-}
-
 func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if !req.IsWrite() && estimatedReadBytes(req) == 0 {
+		return tokenDelta
+	}
 	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, -1)
 	sub(reported, writeReservationConsumption(calculators, req))
 	return reported
 }
 
-func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, resp ResponseInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
-	reported := cloneConsumption(tokenDelta)
-	if req.IsWrite() {
-		if resp.Succeed() {
-			add(reported, writeReservationConsumption(calculators, req))
-		} else {
-			sub(reported, writeRefundConsumption(calculators, req))
-		}
+func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+	if !req.IsWrite() && estimatedReadBytes(req) == 0 {
+		return tokenDelta
 	}
+	reported := cloneConsumption(tokenDelta)
+	adjustPagingPrechargeRRU(calculators, reported, req, 1)
+	add(reported, writeReservationConsumption(calculators, req))
 	return reported
 }
 

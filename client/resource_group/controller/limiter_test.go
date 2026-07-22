@@ -163,6 +163,14 @@ func TestLastStaysMonotonicOnStaleNow(t *testing.T) {
 			expectedPool: 1090,
 			checkPool:    true,
 		},
+		{
+			name: "refund tokens",
+			mutate: func(lim *Limiter, _ *Reservation, staleNow time.Time) {
+				lim.RefundTokens(staleNow, 0)
+			},
+			expectedPool: 1090,
+			checkPool:    true,
+		},
 		// CancelAt is covered by TestAcquireTokensCancelKeepsLastMonotonic.
 		{
 			name: "reconfigure",
