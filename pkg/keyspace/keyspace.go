@@ -73,6 +73,9 @@ const (
 	MetaServiceGroupIDKey = "meta_service_group_id"
 	// MetaServiceGroupAddressesKey is the key for meta-service group addresses in keyspace config.
 	MetaServiceGroupAddressesKey = "meta_service_group_addrs"
+
+	// WaitRegionSplitKey is the key for wait split in keyspace config, it indicate that keyspace is ready to wait for split.
+	WaitRegionSplitKey = "wait_region_split"
 )
 
 // Config is the interface for keyspace config.
@@ -332,6 +335,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		config = make(map[string]string)
 	}
 	config[RegionBoundType] = boundType.String()
+	config[WaitRegionSplitKey] = strconv.FormatBool(tracer.waitSplit)
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
 		Id:             tracer.keyspaceID,
@@ -413,20 +417,11 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		failpoint.Inject("waitSplitKeyspaceFailed", func() {
 			err = errors.New("failpoint triggered: waitSplitKeyspaceFailed")
 		})
-		if err != nil {
-			// The keyspace metadata, keyspace-group membership and region label rule
-			// are already committed atomically. Keep the keyspace disabled until a
-			// later split/recovery path enables it explicitly.
-			log.Warn("[create-keyspace] wait keyspace region split failed; keyspace is created but remains disabled",
-				zap.Uint32("keyspace-id", keyspace.GetId()),
-				zap.String("keyspace-name", keyspace.GetName()),
-				zap.Error(err),
-			)
-			tracer.OnCreateKeyspaceComplete()
-			return keyspace, nil
+		if err == nil {
+			// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
+			err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
 		}
-		// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
-		keyspace, err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
+
 	}
 
 	tracer.OnSplitRegionFinished()
@@ -436,6 +431,15 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			zap.String("keyspace-name", tracer.keyspaceName),
 			zap.Error(err),
 		)
+		tracer.OnCreateKeyspaceComplete()
+
+		if err := manager.rollbackSavekeyspace(keyspace); err != nil {
+			log.Warn("[keyspace] failed to rollback keyspace",
+				zap.Uint32("keyspace-id", tracer.keyspaceID),
+				zap.String("keyspace-name", tracer.keyspaceName),
+				errs.ZapError(err),
+			)
+		}
 		return nil, err
 	}
 	tracer.OnCreateKeyspaceComplete()
@@ -559,6 +563,27 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 	}, cb
 }
 
+func (manager *Manager) rollbackSavekeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
+	manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		err := manager.store.RemoveKeyspace(txn, keyspace.Id, keyspace.Name)
+		if err != nil {
+			return err
+		}
+		cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
+		if !ok {
+			return errors.New("cluster does not support region label")
+		}
+		ruleID := getRegionLabelID(keyspace.Id)
+		regionLabeler := cl.GetRegionLabeler()
+		err = regionLabeler.DeleteLabelRule(ruleID)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	return nil
+}
+
 // saveKeyspaceRegionLabelerTxnOp returns a txn op that adds the keyspace's
 // boundaries to the region label. The corresponding region will then be split by
 // the Coordinator's patrolRegion. The post-commit callback updates the in-memory
@@ -620,6 +645,11 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32, boundType regionBound
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(meta *keyspacepb.KeyspaceMeta) bool {
 	config := meta.GetConfig()
+	wait, ok := config[WaitRegionSplitKey]
+	// only this key exist and set as false means the keyspace is not waiting for split, so we can return true directly.
+	if ok && wait == "false" {
+		return true
+	}
 	val, ok := config[RegionBoundType]
 	// if config does not contain region bound type, we use the default one from manager.
 	if !ok {
@@ -1024,13 +1054,13 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	return meta, nil
 }
 
-func (manager *Manager) enableNewKeyspace(id uint32, now int64) (*keyspacepb.KeyspaceMeta, error) {
+func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
 		var err error
-		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
+		meta, err := manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
@@ -1045,12 +1075,12 @@ func (manager *Manager) enableNewKeyspace(id uint32, now int64) (*keyspacepb.Key
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
-	return meta, nil
+	return nil
 }
 
 // unassignKeyspaceFromMetaServiceGroup removes the keyspace's meta-service group
