@@ -92,6 +92,16 @@ type Limiter struct {
 	// goroutines waiting in acquireTokens() retry loops.
 	reconfiguredCh chan struct{}
 
+	// queuedHead and queuedTail track the dynamically scheduled reservations
+	// used by the resource-control request path. Public Reservations remain
+	// fixed tickets and are never added to this queue.
+	queuedHead *queuedReservation
+	queuedTail *queuedReservation
+	// queuedUpdateCh is replaced whenever a queued reservation's schedule or
+	// state changes. All dynamic waiters share it so a mutation needs one wakeup
+	// broadcast rather than one channel allocation per reservation.
+	queuedUpdateCh chan struct{}
+
 	// metrics
 	metrics *limiterMetricsCollection
 }
@@ -198,21 +208,25 @@ func (r *Reservation) CancelAt(now time.Time) {
 	if r.tokens == 0 || r.lim.burst < 0 || r.lim.fillRate == Inf {
 		return
 	}
-	_, tokens := r.lim.getTokens(now)
+	effectiveNow := r.lim.effectiveNowLocked(now)
+	_, tokens := r.lim.getTokens(effectiveNow)
 	// calculate new number of tokens
 	tokens += r.tokens
 
 	// update state
-	r.lim.updateLast(now)
+	r.lim.updateLast(effectiveNow)
 	r.lim.tokens = tokens
+	r.lim.reflowQueuedReservationsLocked(r.lim.last)
 }
 
 // Reserve returns a Reservation that indicates how long the caller must wait before n events happen.
 // The Limiter takes this Reservation into account when allowing future events.
 // The returned Reservation's Reserved() method returns false if wait duration exceeds deadline.
+// Its scheduled action time is fixed when Reserve returns; later token or
+// configuration changes do not rewrite the Reservation.
 // Usage example:
 //
-//	r := lim.Reserve(time.Now(), 1)
+//	r := lim.Reserve(context.Background(), time.Second, time.Now(), 1)
 //	if !r.Reserved() {
 //	  // Not allowed to act! Did you remember to set lim.burst to be > 0 ?
 //	  return
@@ -320,28 +334,39 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 	if lim.burst < 0 || lim.fillRate == Inf {
 		return
 	}
-	_, tokens := lim.getTokens(now)
-	lim.updateLast(now)
+	effectiveNow := lim.effectiveNowLocked(now)
+	_, tokens := lim.getTokens(effectiveNow)
+	lim.updateLast(effectiveNow)
 	lim.tokens = tokens - amount
+	lim.reflowQueuedReservationsLocked(lim.last)
 	lim.maybeNotify()
 }
 
 // RefundTokens adds tokens back to the limiter.
 //
-// Token overshoot above burst is intentional here: getTokens clamps the
-// value on the next call, so RefundTokens never permanently leaks past
-// the burst cap. maybeNotify is intentionally not called either —
-// refunding can only raise the token count, never push the limiter into
-// the low-token state.
+// Without queued reservations, token overshoot above burst is intentional:
+// getTokens clamps the value on the next call. Reflowing queued reservations
+// preserves credit already committed to them; a later admission clamps any
+// unused positive balance.
+// maybeNotify is intentionally not called because refunding cannot push the
+// limiter into the low-token state.
 func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	if lim.burst < 0 || lim.fillRate == Inf {
 		return
 	}
-	_, tokens := lim.getTokens(now)
-	lim.updateLast(now)
+	effectiveNow := lim.effectiveNowLocked(now)
+	_, tokens := lim.getTokens(effectiveNow)
+	lim.updateLast(effectiveNow)
 	lim.tokens = tokens + amount
+	lim.reflowQueuedReservationsLocked(lim.last)
+	// Reflow first so accepted reservations keep their FIFO priority, then wake
+	// retry loops whose initial admission may now succeed with the refund.
+	if lim.reconfiguredCh != nil {
+		close(lim.reconfiguredCh)
+		lim.reconfiguredCh = nil
+	}
 }
 
 type tokenBucketReconfigureArgs struct {
@@ -372,12 +397,18 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Float64("old-rate", float64(lim.fillRate)),
 		zap.Float64("old-notify-threshold", lim.notifyThreshold),
 		zap.Int64("old-burst", lim.burst))
+	effectiveNow := lim.effectiveNowLocked(now)
+	if lim.admitDueQueuedReservationsLocked(effectiveNow) {
+		lim.signalQueuedUpdateLocked()
+	}
 	if args.newBurst < 0 {
-		lim.updateLast(now)
-		lim.tokens = args.newTokens
+		lim.updateLast(effectiveNow)
+		// reflowQueuedReservationsLocked restores pending debits before it
+		// admits the whole queue under the unlimited configuration.
+		lim.tokens = args.newTokens - lim.queuedTokensLocked()
 	} else {
-		_, tokens := lim.getTokens(now)
-		lim.updateLast(now)
+		_, tokens := lim.getTokens(effectiveNow)
+		lim.updateLast(effectiveNow)
 		lim.tokens = tokens + args.newTokens
 	}
 	lim.fillRate = fillRate(args.newFillRate)
@@ -386,6 +417,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 	for _, opt := range opts {
 		opt(lim)
 	}
+	lim.reflowQueuedReservationsLocked(lim.last)
 	lim.maybeNotify()
 	// Wake up all goroutines waiting in acquireTokens retry loops.
 	if lim.reconfiguredCh != nil {
@@ -405,6 +437,31 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	defer lim.mu.Unlock()
 	_, tokens := lim.getTokens(now)
 	return tokens
+}
+
+func (lim *Limiter) onReservationRejectedLocked(
+	last time.Time, waitDuration, waitLimit time.Duration, tokensToReserve float64,
+) {
+	if time.Since(lim.last) > reserveWarnLogInterval {
+		log.Warn("[resource group controller] cannot reserve enough tokens",
+			zap.Duration("need-wait-duration", waitDuration),
+			zap.Duration("max-wait-duration", waitLimit),
+			zap.Float64("current-ltb-tokens", lim.tokens),
+			zap.Float64("current-ltb-rate", float64(lim.fillRate)),
+			zap.Float64("request-tokens", tokensToReserve),
+			zap.Float64("notify-threshold", lim.notifyThreshold),
+			zap.Bool("is-low-process", lim.isLowProcess),
+			zap.Int64("burst", lim.burst),
+			zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
+			zap.String("name", lim.name))
+	}
+	lim.updateLast(last)
+	if lim.fillRate == 0 {
+		lim.notify()
+	} else if lim.remainingNotifyTimes > 0 {
+		lim.remainingNotifyTimes--
+		lim.notify()
+	}
 }
 
 func (lim *Limiter) updateLast(t time.Time) {
@@ -463,30 +520,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
-		// print log if the limiter cannot reserve for a while.
-		if time.Since(lim.last) > reserveWarnLogInterval {
-			log.Warn("[resource group controller] cannot reserve enough tokens",
-				zap.Duration("need-wait-duration", waitDuration),
-				zap.Duration("max-wait-duration", maxFutureReserve),
-				zap.Float64("current-ltb-tokens", lim.tokens),
-				zap.Float64("current-ltb-rate", float64(lim.fillRate)),
-				zap.Float64("request-tokens", n),
-				zap.Float64("notify-threshold", lim.notifyThreshold),
-				zap.Bool("is-low-process", lim.isLowProcess),
-				zap.Int64("burst", lim.burst),
-				zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
-				zap.String("name", lim.name))
-		}
-		lim.updateLast(last)
-		if lim.fillRate == 0 {
-			lim.notify()
-		} else if lim.remainingNotifyTimes > 0 {
-			// When fillrate is greater than 0, the speed limit is already set.
-			// If limiter are in limit state, the server has allocated tokens as much as possible. Don't need to request tokens.
-			// But there is a special case, see issue https://github.com/tikv/pd/issues/6300.
-			lim.remainingNotifyTimes--
-			lim.notify()
-		}
+		lim.onReservationRejectedLocked(last, waitDuration, maxFutureReserve, n)
 	}
 	return r
 }
@@ -549,7 +583,9 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	}
 	cancel := func() {
 		for _, res := range reservations {
-			res.CancelAt(now)
+			if res != nil {
+				res.CancelAt(now)
+			}
 		}
 	}
 	longestDelayDuration := time.Duration(0)
@@ -562,10 +598,10 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 			if res.err != nil {
 				return res.needWaitDuration, res.err
 			}
-			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.fillRate, res.remainingTokens)
+			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(
+				res.needWaitDuration, res.fillRate, res.remainingTokens)
 		}
-		delay := res.DelayFrom(now)
-		if delay > longestDelayDuration {
+		if delay := res.DelayFrom(now); delay > longestDelayDuration {
 			longestDelayDuration = delay
 		}
 	}
@@ -573,16 +609,13 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 		return 0, nil
 	}
 	failpoint.InjectCall("waitReservationsBeforeSelect")
-	t := time.NewTimer(longestDelayDuration)
-	defer t.Stop()
+	timer := time.NewTimer(longestDelayDuration)
+	defer timer.Stop()
 
 	select {
-	case <-t.C:
-		// We can proceed.
+	case <-timer.C:
 		return longestDelayDuration, nil
 	case <-ctx.Done():
-		// Context was canceled before we could proceed.  Cancel the
-		// reservation, which may permit other events to proceed sooner.
 		cancel()
 		return 0, ctx.Err()
 	}

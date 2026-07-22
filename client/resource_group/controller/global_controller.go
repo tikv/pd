@@ -108,7 +108,10 @@ func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 	}
 }
 
-// WithMaxWaitDuration is the option to set the max wait duration for acquiring token buckets.
+// WithMaxWaitDuration sets the maximum predicted wait accepted when a request
+// first reserves tokens. A reservation accepted within this limit keeps its
+// queue position if later limiter changes extend its actual wait; callers that
+// need an end-to-end hard deadline should set one on the request context.
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.ruConfig.LTBMaxWaitDuration = d
