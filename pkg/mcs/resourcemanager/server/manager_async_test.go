@@ -338,7 +338,9 @@ func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
 	// Release the paused lazy load; its now-stale insert must be rejected.
 	close(store.pointRelease)
 	<-getDone
-	re.NoError(gotErr)
+	// The generation mismatch makes the lazy load retry its storage read,
+	// which now correctly observes the group as deleted.
+	re.ErrorContains(gotErr, "does not exist")
 	re.Nil(gotGroup, "the racing lazy load must observe the group as deleted")
 
 	krgm := m.getKeyspaceResourceGroupManager(1)
@@ -492,4 +494,113 @@ func TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings(t *testing.T) {
 	re.False(krgm.isReserved("mod-group"), "state adoption must clear the reserved marker")
 	re.Equal(float64(123), krgm.getMutableResourceGroup("mod-group").GetGroupStates().RUConsumption.RRU,
 		"the scanned state must be adopted into the cached entry")
+}
+
+// TestAsyncLoadResourceGroupsFreshStoreDefaultPersisted guards against the
+// fresh-store dead end: initReservedInCache pre-inserts a synthetic default
+// placeholder, and on a store with nothing persisted, the confirmed-not-found
+// fallback used to bail out on its cache-exists check, leaving the default
+// group an unconfirmed placeholder forever — settings never persisted and its
+// state persistence permanently skipped.
+func TestAsyncLoadResourceGroupsFreshStoreDefaultPersisted(t *testing.T) {
+	re := require.New(t)
+	// A completely fresh store: nothing persisted at all.
+	store := newBlockingResourceGroupStorage()
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+
+	// Fetch the default group while async loading is still in progress: the
+	// point load confirms nothing is persisted, so the placeholder must be
+	// promoted to a real, persisted default group.
+	group, err := m.GetResourceGroup(constant.NullKeyspaceID, DefaultResourceGroupName, false)
+	re.NoError(err)
+	re.NotNil(group)
+	krgm := m.getKeyspaceResourceGroupManager(constant.NullKeyspaceID)
+	re.NotNil(krgm)
+	re.False(krgm.isReserved(DefaultResourceGroupName), "the default group must be confirmed after synthesis")
+	raw, err := store.LoadResourceGroupSetting(constant.NullKeyspaceID, DefaultResourceGroupName)
+	re.NoError(err)
+	re.NotEmpty(raw, "the synthesized default group settings must be persisted")
+
+	// Loading completion must keep it confirmed.
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(constant.NullKeyspaceID, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+	re.False(krgm.isReserved(DefaultResourceGroupName))
+}
+
+// TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad guards against
+// the delete-generation check being too coarse: deleting group B while group A
+// is being lazily loaded must not make A's request spuriously report the group
+// as missing — the lazy load retries its storage read and succeeds.
+func TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	re.NoError(store.SaveResourceGroupSetting(1, "group-a", newAsyncTestGroup("group-a")))
+	re.NoError(store.SaveResourceGroupSetting(1, "group-b", newAsyncTestGroup("group-b")))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+
+	// Start a lazy Get of group-a and pause it inside its state read, i.e.
+	// after it has read the group from storage but before it inserts.
+	store.pausePointState.Store(true)
+	var (
+		gotGroup *ResourceGroup
+		gotErr   error
+	)
+	getDone := make(chan struct{})
+	go func() {
+		defer close(getDone)
+		gotGroup, gotErr = m.GetResourceGroup(1, "group-a", false)
+	}()
+	select {
+	case <-store.pointReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the lazy load to reach its state read")
+	}
+
+	// Delete the unrelated group-b while group-a's lazy load is paused; this
+	// bumps the keyspace's delete generation.
+	re.NoError(m.DeleteResourceGroup(1, "group-b"))
+
+	// Release group-a's lazy load: the generation mismatch must make it retry
+	// and succeed, not report group-a as missing.
+	close(store.pointRelease)
+	<-getDone
+	re.NoError(gotErr)
+	re.NotNil(gotGroup, "an unrelated delete must not fail the lazy load")
+	re.Equal("group-a", gotGroup.Name)
+
+	// After loading completes, group-a is present and group-b stays deleted.
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		groups, err := m.GetResourceGroupList(1, false)
+		if err != nil {
+			return false
+		}
+		foundA := false
+		for _, g := range groups {
+			if g.Name == "group-b" {
+				return false
+			}
+			if g.Name == "group-a" {
+				foundA = true
+			}
+		}
+		return foundA
+	}, testutil.WithTickInterval(20*time.Millisecond))
 }

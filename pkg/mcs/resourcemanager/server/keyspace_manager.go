@@ -240,8 +240,16 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	krgm.RLock()
 	_, ok := krgm.groups[DefaultResourceGroupName]
+	kind, reserved := krgm.reservedGroups[DefaultResourceGroupName]
 	krgm.RUnlock()
-	if ok {
+	// A cached entry only makes initialization unnecessary if it's confirmed
+	// data, or at least has confirmed settings (reservedStateOnly), which must
+	// not be overwritten with synthetic ones. A reservedPlaceholder means
+	// nothing is persisted for the default group (e.g. a fresh store): it must
+	// still be created and persisted here, otherwise it would stay an
+	// unconfirmed placeholder forever, with its settings never stored and its
+	// state persistence permanently skipped.
+	if ok && (!reserved || kind == reservedStateOnly) {
 		return
 	}
 	defaultGroup := newDefaultResourceGroup()
