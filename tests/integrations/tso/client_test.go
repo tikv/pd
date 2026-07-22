@@ -722,12 +722,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 // discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
 func TestDynamicSwitchingPDToTSO(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
-	}()
+	enableDynamicSwitchingTestFailpoints(t, re)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -754,7 +749,7 @@ func TestDynamicSwitchingPDToTSO(t *testing.T) {
 
 	// Without TSO microservice, PD should serve TSO locally.
 	var globalLastTS uint64
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 	re.False(pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName))
 
 	// Start TSO microservice.
@@ -767,23 +762,19 @@ func TestDynamicSwitchingPDToTSO(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
-// TestDynamicSwitchingTSOToPDFallback tests that when a TSO microservice goes away,
-// PD resumes serving TSO locally and timestamps remain monotonically increasing.
+// TestDynamicSwitchingRoundTrip tests that PD can repeatedly switch between serving
+// TSO locally and forwarding to a TSO microservice while timestamps remain monotonically
+// increasing across every transition.
 //
 // NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
 // so it only validates server-side dynamic switching behavior. Client-side service-mode
 // discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
-func TestDynamicSwitchingTSOToPDFallback(t *testing.T) {
+func TestDynamicSwitchingRoundTrip(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
-	}()
+	enableDynamicSwitchingTestFailpoints(t, re)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -808,15 +799,20 @@ func TestDynamicSwitchingTSOToPDFallback(t *testing.T) {
 	re.NoError(err)
 	defer pdClient.Close()
 
-	// Start TSO microservice and wait for transition.
+	// Initially, PD should serve TSO locally.
 	var globalLastTS uint64
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+	re.False(pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName))
+
+	// Start the first TSO microservice and wait for transition.
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
+	defer tsoCluster.Destroy()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	testutil.Eventually(re, func() bool {
 		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 
 	// Destroy TSO microservice.
 	tsoCluster.Destroy()
@@ -825,24 +821,30 @@ func TestDynamicSwitchingTSOToPDFallback(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return !pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+
+	// Start a fresh TSO microservice and verify that PD can switch away from its
+	// fallback allocator again without breaking timestamp monotonicity.
+	tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+	})
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
-// TestDynamicSwitchingWithLeaderTransfer tests that TSO service survives
-// PD leader transfers when a TSO microservice is active, and timestamps
-// remain monotonically increasing across transfers.
+// TestDynamicSwitchingWithLeaderTransfer tests that TSO requests recover after
+// PD leader transfers when a TSO microservice is active, and timestamps remain
+// monotonically increasing across transfers.
 //
 // NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
 // so it only validates server-side dynamic switching behavior. Client-side service-mode
 // discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
 func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
-	}()
+	enableDynamicSwitchingTestFailpoints(t, re)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -869,7 +871,7 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 
 	// PD should start serving TSO.
 	var globalLastTS uint64
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 
 	// Start TSO microservice and wait for ServiceIndependent.
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
@@ -880,47 +882,79 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 	})
 
-	// Resign the leader and verify TSO service stays available with monotonic timestamps.
+	// Resign the leader and verify TSO requests recover with monotonic timestamps.
 	for range 2 {
-		leaderName = pdCluster.WaitLeader()
-		re.NotEmpty(leaderName)
-		err = pdCluster.GetServer(leaderName).ResignLeaderWithRetry()
+		oldLeaderName := pdCluster.WaitLeader()
+		re.NotEmpty(oldLeaderName)
+		err = pdCluster.GetServer(oldLeaderName).ResignLeaderWithRetry()
 		re.NoError(err)
-		leaderName = pdCluster.WaitLeader()
-		re.NotEmpty(leaderName)
+		newLeaderName := pdCluster.WaitLeader()
+		re.NotEmpty(newLeaderName)
+		re.NotEqual(oldLeaderName, newLeaderName)
 
 		// ServiceIndependent must remain set after leader resignation.
-		newLeader := pdCluster.GetServer(leaderName)
+		newLeader := pdCluster.GetServer(newLeaderName)
 		testutil.Eventually(re, func() bool {
 			return newLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 		})
-		// TSO should remain available and monotonic after each leader transfer.
-		waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS, 10)
+		// The existing client should recover and remain monotonic after each leader transfer.
+		waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+
+		// A client initialized from the new leader should also use a working TSO
+		// forwarding path and preserve monotonicity with the existing client.
+		newLeaderClient, err := pd.NewClientWithContext(ctx,
+			caller.TestComponent,
+			[]string{newLeader.GetAddr()}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+		re.NoError(err)
+		waitAndCheckTSOMonotonic(ctx, re, newLeaderClient, &globalLastTS)
+		newLeaderClient.Close()
 	}
 }
 
+func enableDynamicSwitchingTestFailpoints(t *testing.T, re *require.Assertions) {
+	t.Helper()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
+	})
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
+	})
+}
+
+const tsoMonotonicitySuccessCount = 10
+
 // waitAndCheckTSOMonotonic waits for TSO to become available and then verifies that
-// `successCount` consecutive successful TSO requests return globally increasing timestamps
-// relative to *globalLastTS. Unlike calling WaitForTSOServiceAvailable + a separate
+// consecutive successful TSO requests return globally increasing timestamps relative to
+// *globalLastTS. Unlike calling WaitForTSOServiceAvailable + a separate
 // monotonicity check, this function validates every successful GetTS (including the first
 // one after a switchover) against globalLastTS, so a regression at the exact transition
 // boundary cannot slip through.
 func waitAndCheckTSOMonotonic(
-	ctx context.Context, re *require.Assertions, pdClient pd.Client, globalLastTS *uint64, successCount int,
+	ctx context.Context, re *require.Assertions, pdClient pd.Client, globalLastTS *uint64,
 ) {
-	var successes int
+	var (
+		successes       int
+		monotonicityErr error
+	)
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := pdClient.GetTS(ctx)
 		if err != nil {
+			successes = 0
 			return false
 		}
 		ts := tsoutil.ComposeTS(physical, logical)
-		re.Greater(ts, *globalLastTS,
-			"TSO is not globally increasing: last %d, current %d", *globalLastTS, ts)
+		if ts <= *globalLastTS {
+			monotonicityErr = fmt.Errorf(
+				"TSO is not globally increasing: last %d, current %d", *globalLastTS, ts)
+			return true
+		}
 		*globalLastTS = ts
 		successes++
-		return successes >= successCount
+		return successes >= tsoMonotonicitySuccessCount
 	})
+	re.NoError(monotonicityErr)
 }
 
 func checkTSO(

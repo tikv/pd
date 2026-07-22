@@ -53,7 +53,17 @@ func TestIsServiceIndependent(t *testing.T) {
 	// Keyspace groups enabled, dynamic switching disabled: TSO always independent
 	// (microservice is expected to be running).
 	s2 := newTestServer(t, true, false)
+	s2.cluster = &servercluster.RaftCluster{}
 	re.True(s2.IsServiceIndependent(constant.TSOServiceName))
+	// The dynamic-switching override is TSO-specific. Other services still
+	// follow the cluster's independent-service state.
+	re.False(s2.IsServiceIndependent(constant.SchedulingServiceName))
+	s2.cluster.SetServiceIndependent(constant.SchedulingServiceName)
+	re.True(s2.IsServiceIndependent(constant.SchedulingServiceName))
+	// A closed server never reports a service as independent, even when TSO
+	// dynamic switching is disabled.
+	atomic.StoreInt64(&s2.isRunning, 0)
+	re.False(s2.IsServiceIndependent(constant.TSOServiceName))
 
 	// Keyspace groups enabled, dynamic switching enabled: depends on cluster state.
 	s3 := newTestServer(t, true, true)
@@ -64,7 +74,7 @@ func TestIsServiceIndependent(t *testing.T) {
 	s3.cluster.SetServiceIndependent(constant.TSOServiceName)
 	re.True(s3.IsServiceIndependent(constant.TSOServiceName))
 
-	// Server closed: false.
+	// Server closed: false when dynamic switching is enabled as well.
 	atomic.StoreInt64(&s3.isRunning, 0)
 	re.False(s3.IsServiceIndependent(constant.TSOServiceName))
 }
