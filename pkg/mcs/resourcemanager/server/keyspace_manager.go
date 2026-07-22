@@ -67,15 +67,32 @@ type consumptionItem struct {
 	isTiFlash    bool
 }
 
+// reservedKind describes why a cached resource group entry is still
+// considered unconfirmed.
+type reservedKind int
+
+const (
+	// reservedPlaceholder marks an entry whose settings and state are both
+	// synthetic, e.g. the default group pre-inserted by
+	// ensureReservedDefaultGroupInCache before async loading runs. The async
+	// bulk merge may replace such an entry wholesale.
+	reservedPlaceholder reservedKind = iota
+	// reservedStateOnly marks an entry whose settings were confirmed from
+	// storage (and may have been modified and persisted since) but whose
+	// state failed to load. The async bulk merge must only adopt the scanned
+	// state into it, never replace its settings with the scan's older copy.
+	reservedStateOnly
+)
+
 type keyspaceResourceGroupManager struct {
 	syncutil.RWMutex
 	groups map[string]*ResourceGroup
-	// reservedGroups tracks names whose entry in groups is still just the
-	// synthetic placeholder inserted by ensureReservedDefaultGroupInCache or
-	// restoreDefaultResourceGroupFromReserved, not yet confirmed by a storage
-	// load or a real write. It shares the same lock as groups so a lazy load
-	// can atomically decide whether it's safe to replace the placeholder.
-	reservedGroups  map[string]struct{}
+	// reservedGroups tracks names whose entry in groups is not yet fully
+	// confirmed by a storage load or a real write, together with how much of
+	// it is unconfirmed (see reservedKind). It shares the same lock as groups
+	// so a lazy load can atomically decide whether it's safe to replace the
+	// entry.
+	reservedGroups  map[string]reservedKind
 	groupRUTrackers map[string]*groupRUTracker
 	serviceLimiter  *serviceLimiter
 	// deleteGen is bumped under the write lock every time a group is removed
@@ -100,7 +117,7 @@ func newKeyspaceResourceGroupManager(
 	}
 	return &keyspaceResourceGroupManager{
 		groups:          make(map[string]*ResourceGroup),
-		reservedGroups:  make(map[string]struct{}),
+		reservedGroups:  make(map[string]reservedKind),
 		groupRUTrackers: make(map[string]*groupRUTracker),
 		keyspaceID:      keyspaceID,
 		storage:         storage,
@@ -245,7 +262,7 @@ func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
 	krgm.Lock()
 	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
 		krgm.groups[DefaultResourceGroupName] = defaultGroup
-		krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
+		krgm.reservedGroups[DefaultResourceGroupName] = reservedPlaceholder
 		inserted = true
 	}
 	krgm.Unlock()
@@ -273,7 +290,7 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 	defaultGroup := newDefaultResourceGroup()
 	krgm.Lock()
 	krgm.groups[DefaultResourceGroupName] = defaultGroup
-	krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
+	krgm.reservedGroups[DefaultResourceGroupName] = reservedPlaceholder
 	krgm.Unlock()
 	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
 }

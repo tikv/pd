@@ -547,16 +547,32 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 			krgm.Lock()
 			for name, group := range tempKrgm.groups {
 				key := trackerKey{keyspaceID: keyspaceID, groupName: name}
-				if !m.syncLoadedGroups[key] {
-					krgm.groups[name] = group
-					// This group is now confirmed, fully-loaded data (settings
-					// and state); it must no longer be treated as an
-					// unconfirmed placeholder by loadResourceGroupIfNeeded or
-					// skipped by the state persist loop.
-					delete(krgm.reservedGroups, name)
-					groupsToSync = append(groupsToSync, group)
-					loaded++
+				if m.syncLoadedGroups[key] {
+					continue
 				}
+				if kind, reserved := krgm.reservedGroups[name]; reserved && kind == reservedStateOnly {
+					if existing, ok := krgm.groups[name]; ok {
+						// The cached entry's settings are confirmed and may
+						// carry a modification persisted after this scan
+						// started; only its state is missing. Adopt the
+						// scanned state into the existing entry instead of
+						// replacing it, so the newer settings aren't
+						// clobbered by the scan's older copy.
+						existing.SetStatesIntoResourceGroup(group.GetGroupStates())
+						delete(krgm.reservedGroups, name)
+						groupsToSync = append(groupsToSync, existing)
+						loaded++
+						continue
+					}
+				}
+				krgm.groups[name] = group
+				// This group is now confirmed, fully-loaded data (settings
+				// and state); it must no longer be treated as an
+				// unconfirmed placeholder by loadResourceGroupIfNeeded or
+				// skipped by the state persist loop.
+				delete(krgm.reservedGroups, name)
+				groupsToSync = append(groupsToSync, group)
+				loaded++
 			}
 			krgm.Unlock()
 			tempKrgm.RUnlock()
@@ -705,7 +721,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	if stateLoaded {
 		delete(krgm.reservedGroups, name)
 	} else {
-		krgm.reservedGroups[name] = struct{}{}
+		krgm.reservedGroups[name] = reservedStateOnly
 	}
 	krgm.Unlock()
 	if inserted {

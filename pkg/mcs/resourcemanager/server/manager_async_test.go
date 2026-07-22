@@ -421,3 +421,75 @@ func TestAsyncLoadResourceGroupsStaleLoaderDoesNotPolluteNewTerm(t *testing.T) {
 		re.NotEqual("stale-group", g.Name)
 	}
 }
+
+// TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings reproduces the
+// stale-settings clobber: a group's lazy load reads its settings but fails to
+// read its state, then the group is modified (and the modification persisted)
+// while the async bulk scan still holds the pre-modification settings. The
+// bulk merge must adopt only the scanned state into the cached entry, not
+// replace it wholesale, so the modified settings survive in the serving cache.
+func TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	group := newAsyncTestGroup("mod-group")
+	re.NoError(store.SaveResourceGroupSetting(1, "mod-group", group))
+	// Persist a state with a recognizable consumption so the test can tell
+	// that the merge really adopted the scanned state.
+	states := FromProtoResourceGroup(group).GetGroupStates()
+	states.RUConsumption.RRU = 123
+	re.NoError(store.SaveResourceGroupStates(1, "mod-group", states))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+	defer store.unblockStates()
+
+	store.waitEntered(t)
+
+	// Let the bulk loader capture the pre-modification settings, then hold it
+	// right before its states scan (i.e. before it merges).
+	store.pauseNextStates.Store(true)
+	store.unblock()
+	select {
+	case <-store.statesReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the bulk loader to reach its states scan")
+	}
+
+	// Lazily load the group with a failing state read: it is cached with
+	// confirmed settings but unconfirmed (fresh) state.
+	store.failNextState.Store(true)
+	fetched, err := m.GetResourceGroup(1, "mod-group", false)
+	re.NoError(err)
+	re.NotNil(fetched)
+	krgm := m.getKeyspaceResourceGroupManager(1)
+	re.NotNil(krgm)
+	re.True(krgm.isReserved("mod-group"))
+
+	// Modify the group (fill rate 100 -> 200) and persist it. The state read
+	// of Modify's own lazy load fails again, so the entry stays state-only
+	// reserved and out of syncLoadedGroups.
+	store.failNextState.Store(true)
+	modified := newAsyncTestGroup("mod-group")
+	modified.RUSettings.RU.Settings.FillRate = 200
+	modified.KeyspaceId = &resource_manager.KeyspaceIDValue{Value: 1}
+	re.NoError(m.ModifyResourceGroup(modified))
+
+	// Release the bulk loader; its merge must keep the modified settings and
+	// only adopt the scanned state.
+	store.unblockStates()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(1, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	got, err := m.GetResourceGroup(1, "mod-group", false)
+	re.NoError(err)
+	re.NotNil(got)
+	re.Equal(float64(200), got.RUSettings.RU.getFillRate(), "modified settings must survive the bulk merge")
+	re.False(krgm.isReserved("mod-group"), "state adoption must clear the reserved marker")
+	re.Equal(float64(123), krgm.getMutableResourceGroup("mod-group").GetGroupStates().RUConsumption.RRU,
+		"the scanned state must be adopted into the cached entry")
+}
