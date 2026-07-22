@@ -119,6 +119,12 @@ type Manager struct {
 	loadingState int32 // atomic access
 	// syncLoadedGroups records groups that were loaded synchronously (e.g., by lazy loading)
 	syncLoadedGroups map[trackerKey]bool
+	// loadEpoch is bumped (under the manager lock) every time initMetadata
+	// resets the loading state for a new term. The async loader captures it at
+	// start and re-checks it before every shared-state mutation, so a loader
+	// from a previous term that was blocked in a storage scan can never merge
+	// stale data into, or publish completion for, a newer term.
+	loadEpoch uint64
 }
 
 // LoadingState represents the current loading state of resource groups
@@ -392,13 +398,22 @@ func (m *Manager) initControllerConfig() error {
 		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
 		return err
 	}
-	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+	// Unmarshal into a clone and publish it under the lock: on a
+	// re-initialization after a leadership change, the previous term's
+	// background goroutines may still be reading the current config.
+	m.RLock()
+	controllerConfig := cloneControllerConfig(m.controllerConfig)
+	m.RUnlock()
+	if err = json.Unmarshal([]byte(v), &controllerConfig); err != nil {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
 
 	// re-save the config to make sure the config has been persisted.
 	if m.writeRole.AllowsMetadataWrite() {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
 			return err
 		}
 	}
@@ -413,6 +428,8 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 	m.Lock()
 	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
 	m.syncLoadedGroups = make(map[trackerKey]bool)
+	m.loadEpoch++
+	epoch := m.loadEpoch
 	atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
 	m.Unlock()
 
@@ -422,7 +439,7 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 	}
 
 	m.wg.Add(1)
-	go m.asyncLoadResourceGroups(ctx)
+	go m.asyncLoadResourceGroups(ctx, epoch)
 	return nil
 }
 
@@ -446,7 +463,21 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	return m.loadServiceLimits()
 }
 
-func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
+// storeLoadingStateIfCurrent stores the loading state only if the manager has
+// not been reinitialized since the loader with the given epoch started. It
+// returns false when the loader is stale and must exit without touching any
+// further shared state.
+func (m *Manager) storeLoadingStateIfCurrent(epoch uint64, state int32) bool {
+	m.Lock()
+	defer m.Unlock()
+	if m.loadEpoch != epoch {
+		return false
+	}
+	atomic.StoreInt32(&m.loadingState, state)
+	return true
+}
+
+func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 
@@ -471,18 +502,40 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
 			}
 		}
 
-		atomic.StoreInt32(&m.loadingState, LoadingStateInProgress)
+		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateInProgress) {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
 		startTime := time.Now()
 		tempKrgms, err := m.loadKeyspaceResourceGroupsFromStorage()
+		// The storage scans above can block for a long time; re-check for
+		// cancellation before touching any shared state, so a loader whose
+		// term already ended doesn't pollute a newer term's state.
+		select {
+		case <-ctx.Done():
+			log.Info("async loading resource groups cancelled")
+			return
+		default:
+		}
 		if err != nil {
 			log.Error("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
-			atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+			if !m.storeLoadingStateIfCurrent(epoch, LoadingStateNotStarted) {
+				log.Info("async loading resource groups aborted: manager was reinitialized")
+				return
+			}
 			retry++
 			continue
 		}
 
 		loaded := 0
 		m.Lock()
+		if m.loadEpoch != epoch {
+			// The manager was reinitialized for a new term while this loader
+			// was scanning; its result is stale and must not be merged.
+			m.Unlock()
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
 		for keyspaceID, tempKrgm := range tempKrgms {
 			krgm := m.krgms[keyspaceID]
 			if krgm == nil {
@@ -515,7 +568,10 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context) {
 		m.Unlock()
 
 		m.initReserved()
-		atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
+		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateCompleted) {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
 		duration := time.Since(startTime)
 		asyncLoadGroupDuration.Observe(duration.Seconds())
 		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))

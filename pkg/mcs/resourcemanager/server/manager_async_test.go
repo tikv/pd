@@ -50,15 +50,26 @@ type blockingResourceGroupStorage struct {
 	pausePointState atomic.Bool
 	pointReached    chan struct{}
 	pointRelease    chan struct{}
+
+	// pauseNextStates, when true, makes the very next bulk
+	// LoadResourceGroupStates call signal statesReached and then block on
+	// statesRelease, so a test can hold an async loader after it has captured
+	// the settings scan but before it merges.
+	pauseNextStates   atomic.Bool
+	statesReached     chan struct{}
+	statesRelease     chan struct{}
+	statesReleaseOnce sync.Once
 }
 
 func newBlockingResourceGroupStorage() *blockingResourceGroupStorage {
 	return &blockingResourceGroupStorage{
-		Storage:      storage.NewStorageWithMemoryBackend(),
-		entered:      make(chan struct{}),
-		release:      make(chan struct{}),
-		pointReached: make(chan struct{}),
-		pointRelease: make(chan struct{}),
+		Storage:       storage.NewStorageWithMemoryBackend(),
+		entered:       make(chan struct{}),
+		release:       make(chan struct{}),
+		pointReached:  make(chan struct{}),
+		pointRelease:  make(chan struct{}),
+		statesReached: make(chan struct{}),
+		statesRelease: make(chan struct{}),
 	}
 }
 
@@ -81,6 +92,14 @@ func (s *blockingResourceGroupStorage) LoadResourceGroupState(keyspaceID uint32,
 	return s.Storage.LoadResourceGroupState(keyspaceID, name)
 }
 
+func (s *blockingResourceGroupStorage) LoadResourceGroupStates(f func(keyspaceID uint32, name, rawValue string)) error {
+	if s.pauseNextStates.CompareAndSwap(true, false) {
+		close(s.statesReached)
+		<-s.statesRelease
+	}
+	return s.Storage.LoadResourceGroupStates(f)
+}
+
 func (s *blockingResourceGroupStorage) waitEntered(t *testing.T) {
 	t.Helper()
 	select {
@@ -93,6 +112,12 @@ func (s *blockingResourceGroupStorage) waitEntered(t *testing.T) {
 func (s *blockingResourceGroupStorage) unblock() {
 	s.releaseOnce.Do(func() {
 		close(s.release)
+	})
+}
+
+func (s *blockingResourceGroupStorage) unblockStates() {
+	s.statesReleaseOnce.Do(func() {
+		close(s.statesRelease)
 	})
 }
 
@@ -334,4 +359,65 @@ func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
 		}
 		return true
 	}, testutil.WithTickInterval(20*time.Millisecond))
+}
+
+// TestAsyncLoadResourceGroupsStaleLoaderDoesNotPolluteNewTerm reproduces the
+// stale-loader race: a loader from an old term is blocked in its storage scan
+// while the leadership changes and Init runs again for a new term. When the
+// old loader finally wakes up, it must not merge its stale scan into the new
+// term's maps, clear the new term's syncLoadedGroups, or publish completion.
+func TestAsyncLoadResourceGroupsStaleLoaderDoesNotPolluteNewTerm(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	group := newAsyncTestGroup("stale-group")
+	re.NoError(store.SaveResourceGroupSetting(1, "stale-group", group))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	// Term 1: the loader blocks at the start of its settings scan.
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+	defer store.unblockStates()
+
+	store.waitEntered(t)
+
+	// Let the term-1 loader run its settings scan (capturing stale-group into
+	// its temp result) and then block again in the states scan, i.e. after it
+	// has read storage but before it merges.
+	store.pauseNextStates.Store(true)
+	store.unblock()
+	select {
+	case <-store.statesReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the term-1 loader to reach its states scan")
+	}
+
+	// Leadership changes: cancel term 1 and reinitialize for term 2. The
+	// term-2 loader hits neither block (both were consumed) and completes.
+	cancelTerm1()
+	re.NoError(m.Init(context.Background()))
+	testutil.Eventually(re, func() bool {
+		groups, err := m.GetResourceGroupList(1, false)
+		return err == nil && len(groups) == 2
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	// Delete the group in term 2, after loading completed.
+	re.NoError(m.DeleteResourceGroup(1, "stale-group"))
+
+	// Release the stale term-1 loader. It must observe its cancelled context /
+	// stale epoch and exit without resurrecting the deleted group or touching
+	// the new term's loading state.
+	store.unblockStates()
+	time.Sleep(200 * time.Millisecond)
+
+	krgm := m.getKeyspaceResourceGroupManager(1)
+	re.NotNil(krgm)
+	re.Nil(krgm.getMutableResourceGroup("stale-group"), "stale loader must not merge into the new term")
+	groups, err := m.GetResourceGroupList(1, false)
+	re.NoError(err)
+	for _, g := range groups {
+		re.NotEqual("stale-group", g.Name)
+	}
 }
