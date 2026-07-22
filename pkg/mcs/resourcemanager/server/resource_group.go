@@ -322,7 +322,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup(keyspaceID uint32) *rmpb.Resourc
 			},
 			RunawaySettings:    rg.Runaway,
 			BackgroundSettings: rg.Background,
-			KeyspaceId:         &rmpb.KeyspaceIDValue{Value: keyspaceID},
+			KeyspaceId:         &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 		}
 
 		if rg.RUConsumption != nil {

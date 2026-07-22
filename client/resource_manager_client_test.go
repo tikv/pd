@@ -185,9 +185,7 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 		for _, tokenReq := range req.GetRequests() {
 			resp.Responses = append(resp.Responses, &rmpb.TokenBucketResponse{
 				ResourceGroupName: tokenReq.GetResourceGroupName(),
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: constants.NullKeyspaceID,
-				},
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: constants.NullKeyspaceID}},
 			})
 		}
 		if err := stream.Send(resp); err != nil {

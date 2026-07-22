@@ -2148,7 +2148,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Len(rgs, 2) // Including the default resource group.
 	for _, r := range rgs {
 		re.NotNil(r.KeyspaceId)
-		re.Equal(r.KeyspaceId.Value, keyspaceID)
+		re.Equal(r.KeyspaceId.GetValue(), keyspaceID)
 		switch r.Name {
 		case server.DefaultResourceGroupName:
 		case group.Name:
@@ -2197,7 +2197,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.NotEqual(rg.RUStats, testConsumption)
 
 	// Test AcquireTokenBuckets with keyspace id
-	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
+	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}
 	_, err = clientKeyspace.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
 	time.Sleep(10 * time.Millisecond)
@@ -2253,7 +2253,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 			Name:       groupName,
 			Mode:       rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 10000}, Tokens: 100000}},
-			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+			KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 		}
 		_, err = clients[i].AddResourceGroup(ctx, groups[i])
 		re.NoError(err)
@@ -2473,14 +2473,14 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	re.NoError(err)
 	re.Equal(groupName, g.Name)
 	re.NotNil(g.KeyspaceId)
-	re.Equal(keyspaceA, g.KeyspaceId.Value)
+	re.Equal(keyspaceA, g.KeyspaceId.GetValue())
 
 	// Try to modify the group with a different keyspace ID using Client A
 	modifiedGroup := &rmpb.ResourceGroup{
 		Name:       groupName,
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceB},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceB}},
 	}
 
 	// It should be failed because the keyspace ID does not match

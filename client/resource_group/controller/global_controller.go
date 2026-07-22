@@ -684,9 +684,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
-			request.KeyspaceId = &rmpb.KeyspaceIDValue{
-				Value: c.keyspaceID,
-			}
+			request.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.keyspaceID}}
 			c.run.currentRequests = append(c.run.currentRequests, request)
 			gc.metrics.tokenRequestCounter.Inc()
 		}

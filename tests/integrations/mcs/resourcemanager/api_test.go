@@ -124,9 +124,8 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 		)
 		re.NoError(err)
-		keyspaceID := &rmpb.KeyspaceIDValue{
-			Value: meta.GetId(),
-		}
+		keyspaceID := &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: meta.GetId()}}
+
 		// Add a resource group.
 		groupToAdd := &rmpb.ResourceGroup{
 			Name:     "test_group",
@@ -254,9 +253,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
 						},
 					},
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			suite.mustUpdateResourceGroup(re, groupToUpdate)
 		},
