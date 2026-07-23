@@ -947,10 +947,7 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 	for range 2 {
 		oldLeaderName := pdCluster.WaitLeader()
 		re.NotEmpty(oldLeaderName)
-		err = pdCluster.GetServer(oldLeaderName).ResignLeaderWithRetry()
-		re.NoError(err)
-		newLeaderName := pdCluster.WaitLeader()
-		re.NotEmpty(newLeaderName)
+		newLeaderName := transferPDLeaderWithFailpoints(t, re, pdCluster, oldLeaderName)
 		re.NotEqual(oldLeaderName, newLeaderName)
 
 		// ServiceIndependent must remain set after leader resignation.
@@ -970,6 +967,54 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 		waitAndCheckTSOMonotonic(ctx, re, newLeaderClient, &globalLastTS)
 		newLeaderClient.Close()
 	}
+}
+
+func transferPDLeaderWithFailpoints(
+	t *testing.T, re *require.Assertions, pdCluster *tests.TestCluster, oldLeaderName string,
+) string {
+	t.Helper()
+
+	oldLeader := pdCluster.GetServer(oldLeaderName)
+	var newLeaderName string
+	for name := range pdCluster.GetServers() {
+		if name != oldLeaderName {
+			newLeaderName = name
+			break
+		}
+	}
+	re.NotEmpty(newLeaderName)
+	newLeader := pdCluster.GetServer(newLeaderName)
+
+	failpoints := []struct {
+		name string
+		expr string
+	}{
+		{
+			name: "github.com/tikv/pd/server/leaderLoopCheckAgain",
+			expr: fmt.Sprintf("return(\"%d\")", oldLeader.GetServerID()),
+		},
+		{
+			name: "github.com/tikv/pd/server/exitCampaignLeader",
+			expr: fmt.Sprintf("return(\"%d\")", oldLeader.GetServerID()),
+		},
+		{
+			name: "github.com/tikv/pd/server/timeoutWaitPDLeader",
+			expr: fmt.Sprintf("return(\"%d\")", newLeader.GetServerID()),
+		},
+	}
+	enabledFailpoints := make([]string, 0, len(failpoints))
+	defer func() {
+		for _, name := range enabledFailpoints {
+			re.NoError(failpoint.Disable(name))
+		}
+	}()
+	for _, fp := range failpoints {
+		re.NoError(failpoint.Enable(fp.name, fp.expr))
+		enabledFailpoints = append(enabledFailpoints, fp.name)
+	}
+
+	testutil.Eventually(re, newLeader.IsLeader)
+	return newLeaderName
 }
 
 func enableDynamicSwitchingTestFailpoints(t *testing.T, re *require.Assertions) {
