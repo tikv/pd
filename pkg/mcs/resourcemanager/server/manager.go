@@ -97,7 +97,16 @@ type Manager struct {
 	enableMetadataWatcher bool
 	controllerConfig      *ControllerConfig
 	krgms                 map[uint32]*keyspaceResourceGroupManager
-	storage               interface {
+	// metadataSnapshotGeneration is incremented for each full metadata load.
+	// The active generation is attached to concurrent API writes so the
+	// successful reconciliation cannot remove them.
+	metadataSnapshotGeneration       uint64
+	activeMetadataSnapshotGeneration uint64
+	// metadataSnapshotMu closes the boundary race between starting a snapshot
+	// and metadata API writes. Writers that began before a snapshot complete
+	// before its revision is read; overlapping writers inherit its generation.
+	metadataSnapshotMu syncutil.RWMutex
+	storage            interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
 		// Used to get the keyspace meta info.
@@ -237,8 +246,11 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	m.metadataSnapshotMu.RLock()
+	defer m.metadataSnapshotMu.RUnlock()
 	// If the keyspace is not found, create a new keyspace resource group manager.
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
+	generation := m.getActiveMetadataSnapshotGeneration()
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimitWithGeneration(serviceLimit, generation)
 	return nil
 }
 
@@ -294,6 +306,51 @@ func (m *Manager) getKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceRe
 	m.RLock()
 	defer m.RUnlock()
 	return m.krgms[keyspaceID]
+}
+
+func (m *Manager) beginMetadataSnapshot() uint64 {
+	m.metadataSnapshotMu.Lock()
+	defer m.metadataSnapshotMu.Unlock()
+	m.Lock()
+	m.metadataSnapshotGeneration++
+	// Generation zero is reserved for data that was not loaded from a snapshot.
+	if m.metadataSnapshotGeneration == 0 {
+		m.metadataSnapshotGeneration++
+	}
+	m.activeMetadataSnapshotGeneration = m.metadataSnapshotGeneration
+	generation := m.activeMetadataSnapshotGeneration
+	m.Unlock()
+	return generation
+}
+
+func (m *Manager) finishMetadataSnapshot(generation uint64, loadErr error) error {
+	if generation == 0 {
+		return nil
+	}
+	if loadErr == nil {
+		// Keep the generation active until reconciliation finishes. API writes
+		// that overlap this scan will therefore be marked and retained.
+		m.RLock()
+		for _, krgm := range m.krgms {
+			krgm.reconcileMetadataSnapshot(generation)
+		}
+		m.RUnlock()
+	}
+	// Wait for API writes that observed this generation before clearing it.
+	m.metadataSnapshotMu.Lock()
+	defer m.metadataSnapshotMu.Unlock()
+	m.Lock()
+	if m.activeMetadataSnapshotGeneration == generation {
+		m.activeMetadataSnapshotGeneration = 0
+	}
+	m.Unlock()
+	return nil
+}
+
+func (m *Manager) getActiveMetadataSnapshotGeneration() uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.activeMetadataSnapshotGeneration
 }
 
 func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupName string) (*keyspaceResourceGroupManager, error) {
@@ -445,10 +502,14 @@ func (m *Manager) applyControllerConfigFromRaw(rawValue string) error {
 	return nil
 }
 
-func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawValue string) error {
+func (m *Manager) applyResourceGroupSettingFromRawWithGeneration(
+	keyspaceID uint32,
+	name, rawValue string,
+	metadataSnapshotGeneration uint64,
+) error {
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
 	krgm.ensureReservedDefaultGroupInCache()
-	if err := krgm.upsertResourceGroupFromRaw(name, rawValue); err != nil {
+	if err := krgm.upsertResourceGroupFromRawWithGeneration(name, rawValue, metadataSnapshotGeneration); err != nil {
 		log.Error("failed to apply resource group settings from watcher",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("group-name", name),
@@ -459,7 +520,11 @@ func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawV
 	return nil
 }
 
-func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) error {
+func (m *Manager) applyServiceLimitFromRawWithGeneration(
+	keyspaceID uint32,
+	rawValue string,
+	metadataSnapshotGeneration uint64,
+) error {
 	var serviceLimit float64
 	if err := json.Unmarshal([]byte(rawValue), &serviceLimit); err != nil {
 		log.Error("failed to apply service limit from watcher",
@@ -470,7 +535,7 @@ func (m *Manager) applyServiceLimitFromRaw(keyspaceID uint32, rawValue string) e
 	}
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
 	krgm.ensureReservedDefaultGroupInCache()
-	krgm.setServiceLimitFromStorage(serviceLimit)
+	krgm.setServiceLimitFromStorageWithGeneration(serviceLimit, metadataSnapshotGeneration)
 	return nil
 }
 
@@ -567,6 +632,8 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	m.metadataSnapshotMu.RLock()
+	defer m.metadataSnapshotMu.RUnlock()
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
 	// so we need to initialize the default resource group for the keyspace as well.
@@ -574,7 +641,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.addResourceGroup(grouppb)
+	return krgm.addResourceGroupWithGeneration(grouppb, m.getActiveMetadataSnapshotGeneration())
 }
 
 // ModifyResourceGroup modifies an existing resource group.
@@ -582,12 +649,14 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	m.metadataSnapshotMu.RLock()
+	defer m.metadataSnapshotMu.RUnlock()
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
 	if err != nil {
 		return err
 	}
-	return krgm.modifyResourceGroup(grouppb)
+	return krgm.modifyResourceGroupWithGeneration(grouppb, m.getActiveMetadataSnapshotGeneration())
 }
 
 // DeleteResourceGroup deletes a resource group.
@@ -595,6 +664,8 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	m.metadataSnapshotMu.RLock()
+	defer m.metadataSnapshotMu.RUnlock()
 	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {

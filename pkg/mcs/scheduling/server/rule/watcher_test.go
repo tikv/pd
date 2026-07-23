@@ -162,8 +162,8 @@ func runWatcherLoadLabelRule(
 	}
 	err = rw.initializeRegionLabelWatcher()
 	re.NoError(err)
+	defer rw.Close()
 	re.Len(labelerManager.GetAllLabelRules(), rulesNum)
-	cancel()
 }
 
 func prepareEtcd(t require.TestingT) (context.Context, *clientv3.Client, func()) {

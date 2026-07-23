@@ -375,6 +375,10 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
+	// preLoadFn and postLoadFn delimit a full load so consumers can reconcile
+	// their own state without requiring LoopWatcher to retain every loaded key.
+	preLoadFn  func()
+	postLoadFn func(error) error
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
@@ -693,34 +697,73 @@ func nextCompactionReloadRetryInterval(current, base, maxInterval time.Duration)
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	var (
-		startKey         = lw.key
-		limit            = lw.loadBatchSize
-		snapshotRevision int64
-		preErr           error
-		callbackErr      error
-		snapshotKeys     map[string]struct{}
-		loadCompleted    bool
+		startKey              = lw.key
+		limit                 = lw.loadBatchSize
+		snapshotRevision      int64
+		preErr                error
+		callbackErr           error
+		snapshotKeys          map[string]struct{}
+		reconciledDeletedKeys []string
+		loadCompleted         bool
 	)
 	if lw.reconcileDeletedKeys {
 		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
 	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
+	if lw.preLoadFn != nil {
+		lw.preLoadFn()
+	}
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		preErr = err
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
+		callbacksCommitted := false
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
 			if err == nil {
 				err = postErr
 			}
+		} else {
+			callbacksCommitted = true
 		}
-		if loadCompleted && err == nil && lw.reconcileDeletedKeys {
+		if lw.postLoadFn != nil {
+			loadErr := err
+			if !loadCompleted && loadErr == nil {
+				// A canceled context is a graceful stop for LoopWatcher, but it is
+				// not a complete snapshot and must not trigger consumer reconciliation.
+				loadErr = ctx.Err()
+				if loadErr == nil {
+					loadErr = errors.New("full load did not complete")
+				}
+			}
+			if postLoadErr := lw.postLoadFn(loadErr); postLoadErr != nil {
+				callbacksCommitted = false
+				if err == nil {
+					err = postLoadErr
+				}
+			}
+		}
+		if !callbacksCommitted || preErr != nil || !lw.reconcileDeletedKeys {
+			return
+		}
+		if loadCompleted && callbackErr == nil {
 			lw.loadedKeys = snapshotKeys
+			return
+		}
+		// Some callbacks may have succeeded before another callback failed. The
+		// successful operations were committed by postEventsFn and must be
+		// reflected in loadedKeys. In particular, removing successfully reconciled
+		// deletions prevents retries from invoking non-idempotent delete callbacks
+		// twice; recording puts ensures a later deletion can still be reconciled.
+		for key := range snapshotKeys {
+			lw.loadedKeys[key] = struct{}{}
+		}
+		for _, key := range reconciledDeletedKeys {
+			delete(lw.loadedKeys, key)
 		}
 	}()
 	if preErr != nil {
@@ -769,9 +812,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				// we need to skip the last key for the current batch.
 				continue
 			}
-			if lw.reconcileDeletedKeys {
-				snapshotKeys[string(item.Key)] = struct{}{}
-			}
 			putErr := lw.putFn(item)
 			if putErr != nil {
 				if callbackErr == nil {
@@ -780,6 +820,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 			} else {
+				if lw.reconcileDeletedKeys {
+					snapshotKeys[string(item.Key)] = struct{}{}
+				}
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
@@ -787,7 +830,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
 			if callbackErr == nil {
-				callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+				reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
 			}
 			loadCompleted = true
 			return snapshotRevision + 1, callbackErr
@@ -795,11 +838,12 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 }
 
-func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) error {
+func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]string, error) {
 	if !lw.reconcileDeletedKeys {
-		return nil
+		return nil, nil
 	}
 	var firstErr error
+	var reconciledDeletedKeys []string
 	for key := range lw.loadedKeys {
 		if _, ok := snapshotKeys[key]; ok {
 			continue
@@ -814,8 +858,9 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) err
 				zap.String("key", key), zap.Error(err))
 			continue
 		}
+		reconciledDeletedKeys = append(reconciledDeletedKeys, key)
 	}
-	return firstErr
+	return reconciledDeletedKeys, firstErr
 }
 
 func (lw *LoopWatcher) buildLoadingOpts(limit, revision int64) []clientv3.OpOption {
@@ -882,6 +927,14 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// SetLoadHooks installs callbacks around every full load. postLoadFn receives
+// the load result after postEventsFn has run. It must be called before
+// StartWatchLoop.
+func (lw *LoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(error) error) {
+	lw.preLoadFn = preLoadFn
+	lw.postLoadFn = postLoadFn
 }
 
 // SetReconcileDeletedKeys enables deletion reconciliation for full loads.

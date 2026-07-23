@@ -103,6 +103,8 @@ func (*testBasicServer) AddServiceReadyCallback(...func(context.Context) error) 
 type fakeMetadataLoopWatcher struct {
 	startWatchLoopFn func()
 	waitLoadFn       func() error
+	preLoadFn        func()
+	postLoadFn       func(error) error
 }
 
 func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
@@ -112,10 +114,24 @@ func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
 }
 
 func (w *fakeMetadataLoopWatcher) WaitLoad() error {
-	if w.waitLoadFn != nil {
-		return w.waitLoadFn()
+	if w.preLoadFn != nil {
+		w.preLoadFn()
 	}
-	return nil
+	var err error
+	if w.waitLoadFn != nil {
+		err = w.waitLoadFn()
+	}
+	if w.postLoadFn != nil {
+		if postLoadErr := w.postLoadFn(err); err == nil {
+			err = postLoadErr
+		}
+	}
+	return err
+}
+
+func (w *fakeMetadataLoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(error) error) {
+	w.preLoadFn = preLoadFn
+	w.postLoadFn = postLoadFn
 }
 
 type failingControllerConfigStorage struct {

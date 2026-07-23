@@ -1106,6 +1106,112 @@ func (suite *loopWatcherTestSuite) TestWatcherRetriesReconciliationAfterPostCall
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherCommitsPartialReconciliationProgress() {
+	re := suite.Require()
+	const prefix = "TestWatcherCommitsPartialReconciliationProgress/"
+	firstKey := prefix + "first"
+	secondKey := prefix + "second"
+	suite.put(re, firstKey, "first")
+	suite.put(re, secondKey, "second")
+
+	cache := make(map[string]string)
+	transientErr := errors.New("transient delete failure")
+	duplicateDeleteErr := errors.New("delete callback called twice")
+	failSecondDelete := true
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache[string(kv.Key)] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			key := string(kv.Key)
+			if key == secondKey && failSecondDelete {
+				failSecondDelete = false
+				return transientErr
+			}
+			if _, ok := cache[key]; !ok {
+				return duplicateDeleteErr
+			}
+			delete(cache, key)
+			return nil
+		},
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Len(cache, 2)
+
+	_, err = suite.client.Delete(suite.ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, transientErr)
+	re.Equal(map[string]string{secondKey: "second"}, cache)
+
+	_, err = watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadHooksObserveFinalResult() {
+	re := suite.Require()
+	const key = "TestWatcherLoadHooksObserveFinalResult"
+	suite.put(re, key, "value")
+
+	callbackErr := errors.New("callback failed")
+	failPut := false
+	preLoadCalls := 0
+	postLoadResults := make([]error, 0, 3)
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error {
+			if failPut {
+				return callbackErr
+			}
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetLoadHooks(
+		func() { preLoadCalls++ },
+		func(loadErr error) error {
+			postLoadResults = append(postLoadResults, loadErr)
+			return nil
+		},
+	)
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	failPut = true
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, callbackErr)
+	canceledCtx, cancel := context.WithCancel(suite.ctx)
+	cancel()
+	_, err = watcher.load(canceledCtx)
+	re.NoError(err)
+
+	re.Equal(3, preLoadCalls)
+	re.Len(postLoadResults, 3)
+	re.NoError(postLoadResults[0])
+	re.ErrorIs(postLoadResults[1], callbackErr)
+	re.ErrorIs(postLoadResults[2], context.Canceled)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbackFailure() {
 	re := suite.Require()
 	const prefix = "TestWatcherRetriesWatchDeleteAfterPostCallbackFailure/"

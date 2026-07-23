@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -351,6 +352,133 @@ func TestMetadataWatcherHandleDelete(t *testing.T) {
 		re.Equal(float64(1), mutableDefault.RUConsumption.RRU)
 		re.Equal(float64(2), mutableDefault.RUConsumption.WRU)
 	})
+}
+
+func TestMetadataSnapshotReconciliation(t *testing.T) {
+	t.Run("removes_entries_missing_from_successful_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+
+		firstGeneration := m.beginMetadataSnapshot()
+		staleGroup := newMetadataWatcherResourceGroup("stale_group", 5, 100, 200)
+		keptGroup := newMetadataWatcherResourceGroup("kept_group", 5, 100, -1)
+		customDefault := newMetadataWatcherResourceGroup(DefaultResourceGroupName, 1, 1000, -1)
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/stale_group",
+			mustMarshalResourceGroup(t, staleGroup),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, keptGroup),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/default",
+			mustMarshalResourceGroup(t, customDefault),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"123.5",
+			firstGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(firstGeneration, nil))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.NotNil(krgm)
+		re.Equal(int64(123), krgm.getMutableResourceGroup("kept_group").getOverrideBurstLimit())
+
+		secondGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, keptGroup),
+			secondGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(secondGeneration, nil))
+
+		re.Nil(krgm.getResourceGroup("stale_group", false))
+		re.NotNil(krgm.getResourceGroup("kept_group", false))
+		re.Zero(m.GetKeyspaceServiceLimiter(10).ServiceLimit)
+		re.Equal(int64(-1), krgm.getMutableResourceGroup("kept_group").getOverrideBurstLimit())
+		defaultGroup := krgm.getResourceGroup(DefaultResourceGroupName, false)
+		re.NotNil(defaultGroup)
+		re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
+		re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
+		re.Equal(uint32(middlePriority), defaultGroup.Priority)
+	})
+
+	t.Run("does_not_remove_entries_after_failed_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("kept_group", 5, 100, 200)
+
+		firstGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, group),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"123.5",
+			firstGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(firstGeneration, nil))
+
+		failedGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.finishMetadataSnapshot(failedGeneration, errors.New("load failed")))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.NotNil(krgm.getResourceGroup("kept_group", false))
+		re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+		re.Zero(m.getActiveMetadataSnapshotGeneration())
+	})
+
+	t.Run("retains_api_writes_overlapping_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("api_group", 5, 100, 200)
+		re.NoError(m.AddResourceGroup(group))
+		re.NoError(m.SetKeyspaceServiceLimit(10, 100))
+
+		generation := m.beginMetadataSnapshot()
+		group.Priority = 6
+		re.NoError(m.ModifyResourceGroup(group))
+		// Setting the same value must still mark the limiter as observed.
+		re.NoError(m.SetKeyspaceServiceLimit(10, 100))
+		addedGroup := newMetadataWatcherResourceGroup("added_during_snapshot", 7, 200, 300)
+		re.NoError(m.AddResourceGroup(addedGroup))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.Equal(uint32(6), krgm.getResourceGroup("api_group", false).Priority)
+		re.NotNil(krgm.getResourceGroup("added_during_snapshot", false))
+		re.InDelta(100, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+	})
+}
+
+func BenchmarkMetadataSnapshotReconciliation100KKeyspaces(b *testing.B) {
+	const generation = uint64(1)
+	manager := newMetadataWatcherTestManager(nil)
+	for keyspaceID := range uint32(100_000) {
+		krgm := newKeyspaceResourceGroupManager(keyspaceID, nil)
+		defaultGroup := newDefaultResourceGroup()
+		defaultGroup.metadataSnapshotGeneration = generation
+		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		krgm.serviceLimiter.metadataSnapshotGeneration = generation
+		manager.krgms[keyspaceID] = krgm
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		manager.RLock()
+		for _, krgm := range manager.krgms {
+			krgm.reconcileMetadataSnapshot(generation)
+		}
+		manager.RUnlock()
+	}
 }
 
 func TestInitializeMetadataWatcher(t *testing.T) {

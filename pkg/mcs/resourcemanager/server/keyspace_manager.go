@@ -142,6 +142,14 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, r
 }
 
 func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string, rawValue string) error {
+	return krgm.upsertResourceGroupFromRawWithGeneration(name, rawValue, 0)
+}
+
+func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRawWithGeneration(
+	name string,
+	rawValue string,
+	metadataSnapshotGeneration uint64,
+) error {
 	group, err := krgm.parseResourceGroupFromRaw(name, rawValue)
 	if err != nil {
 		return err
@@ -152,9 +160,10 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 
 	krgm.RLock()
 	existing := krgm.groups[group.Name]
-	krgm.RUnlock()
 	if existing != nil {
-		if err := existing.ApplySettings(group); err != nil {
+		err := existing.patchSettingsWithGeneration(group, false, metadataSnapshotGeneration)
+		krgm.RUnlock()
+		if err != nil {
 			log.Error("failed to apply the keyspace resource group settings from raw value",
 				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
 			return err
@@ -162,8 +171,10 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 		krgm.syncBurstabilityWithServiceLimit(existing)
 		return nil
 	}
+	krgm.RUnlock()
 
 	resourceGroup := FromProtoResourceGroup(group)
+	resourceGroup.metadataSnapshotGeneration = metadataSnapshotGeneration
 	krgm.Lock()
 	krgm.groups[group.Name] = resourceGroup
 	krgm.Unlock()
@@ -250,10 +261,18 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 }
 
 func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	return krgm.addResourceGroupWithGeneration(grouppb, 0)
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroupWithGeneration(
+	grouppb *rmpb.ResourceGroup,
+	metadataSnapshotGeneration uint64,
+) error {
 	if err := validateResourceGroupProto(grouppb); err != nil {
 		return err
 	}
 	group := FromProtoResourceGroup(grouppb)
+	group.metadataSnapshotGeneration = metadataSnapshotGeneration
 	if krgm.writeRole.AllowsMetadataWrite() {
 		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
 			return err
@@ -272,19 +291,28 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 }
 
 func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) error {
+	return krgm.modifyResourceGroupWithGeneration(group, 0)
+}
+
+func (krgm *keyspaceResourceGroupManager) modifyResourceGroupWithGeneration(
+	group *rmpb.ResourceGroup,
+	metadataSnapshotGeneration uint64,
+) error {
 	if group == nil || group.Name == "" {
 		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	krgm.RLock()
 	curGroup, ok := krgm.groups[group.Name]
-	krgm.RUnlock()
 	if !ok {
+		krgm.RUnlock()
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 	if !krgm.writeRole.AllowsMetadataWrite() {
+		krgm.RUnlock()
 		return errMetadataWriteDisabled
 	}
-	err := curGroup.PatchSettings(group)
+	err := curGroup.patchSettingsWithGeneration(group, true, metadataSnapshotGeneration)
+	krgm.RUnlock()
 	if err != nil {
 		return err
 	}
@@ -345,16 +373,6 @@ func (krgm *keyspaceResourceGroupManager) getMutableResourceGroup(name string) *
 	return krgm.groups[name]
 }
 
-func (krgm *keyspaceResourceGroupManager) getMutableResourceGroupList() []*ResourceGroup {
-	krgm.Lock()
-	defer krgm.Unlock()
-	res := make([]*ResourceGroup, 0, len(krgm.groups))
-	for _, group := range krgm.groups {
-		res = append(res, group)
-	}
-	return res
-}
-
 func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includeDefault bool) []*ResourceGroup {
 	krgm.RLock()
 	res := make([]*ResourceGroup, 0, len(krgm.groups))
@@ -398,28 +416,49 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 }
 
 func (krgm *keyspaceResourceGroupManager) setServiceLimit(serviceLimit float64) {
-	krgm.updateServiceLimit(serviceLimit, true)
+	krgm.updateServiceLimit(serviceLimit, true, 0)
+}
+
+func (krgm *keyspaceResourceGroupManager) setServiceLimitWithGeneration(
+	serviceLimit float64,
+	metadataSnapshotGeneration uint64,
+) {
+	krgm.updateServiceLimit(serviceLimit, true, metadataSnapshotGeneration)
 }
 
 func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorage(serviceLimit float64) {
-	krgm.updateServiceLimit(serviceLimit, false)
+	krgm.updateServiceLimit(serviceLimit, false, 0)
 }
 
-func (krgm *keyspaceResourceGroupManager) updateServiceLimit(serviceLimit float64, persist bool) {
+func (krgm *keyspaceResourceGroupManager) setServiceLimitFromStorageWithGeneration(
+	serviceLimit float64,
+	metadataSnapshotGeneration uint64,
+) {
+	krgm.updateServiceLimit(serviceLimit, false, metadataSnapshotGeneration)
+}
+
+func (krgm *keyspaceResourceGroupManager) updateServiceLimit(
+	serviceLimit float64,
+	persist bool,
+	metadataSnapshotGeneration uint64,
+) {
 	krgm.RLock()
 	serviceLimiter := krgm.serviceLimiter
 	krgm.RUnlock()
 	// Set the new service limit to the limiter.
-	if persist {
-		serviceLimiter.setServiceLimit(serviceLimit)
-	} else {
-		serviceLimiter.setServiceLimitNoPersist(serviceLimit)
-	}
+	serviceLimiter.setServiceLimitWithGeneration(serviceLimit, persist, metadataSnapshotGeneration)
+
+	krgm.Lock()
+	defer krgm.Unlock()
+	// Re-read the limit while holding the keyspace lock. If concurrent updates
+	// interleaved before this point, applying the latest value keeps all group
+	// overrides consistent without holding the keyspace lock across storage I/O.
+	serviceLimit = serviceLimiter.getServiceLimit()
 	// Cleanup the overrides if the service limit is set to 0.
 	if serviceLimit <= 0 {
-		krgm.cleanupOverrides()
+		krgm.cleanupOverridesLocked()
 	} else {
-		krgm.invalidateBurstability(serviceLimit)
+		krgm.invalidateBurstabilityLocked(serviceLimit)
 	}
 }
 
@@ -440,6 +479,41 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 		return 0, false
 	}
 	return serviceLimit, true
+}
+
+// reconcileMetadataSnapshot removes cached metadata that was not observed in a
+// successful full load. The generation lives on the cached objects, so the scan
+// is O(number of cached groups) and does not allocate a second per-key map.
+func (krgm *keyspaceResourceGroupManager) reconcileMetadataSnapshot(generation uint64) {
+	krgm.Lock()
+	defer krgm.Unlock()
+
+	serviceLimitReset := krgm.serviceLimiter.resetIfNotSeenInMetadataSnapshot(generation)
+	serviceLimit := krgm.serviceLimiter.getServiceLimit()
+	var restoredDefault *ResourceGroup
+	for name, group := range krgm.groups {
+		if serviceLimitReset {
+			group.overrideFillRateAndBurstLimit(-1, -1)
+		}
+		groupGeneration := group.getMetadataSnapshotGeneration()
+		if groupGeneration != generation {
+			if name == DefaultResourceGroupName {
+				// A zero generation means this is already the synthesized reserved
+				// default. Avoid rebuilding it on every compaction reload.
+				if groupGeneration != 0 {
+					restoredDefault = newDefaultResourceGroup()
+					krgm.groups[name] = restoredDefault
+				}
+				continue
+			}
+			delete(krgm.groups, name)
+			delete(krgm.groupRUTrackers, name)
+			continue
+		}
+	}
+	if restoredDefault != nil && serviceLimit > 0 {
+		krgm.syncBurstabilityWithServiceLimitLocked(restoredDefault, serviceLimit)
+	}
 }
 
 func (krgm *keyspaceResourceGroupManager) getOrCreateGroupRUTracker(name string) *groupRUTracker {
@@ -873,9 +947,8 @@ func (di *demandInfo) allocateBurstRUDemand(
 	return remainingServiceLimit
 }
 
-// Cleanup the overrides for all the resource groups.
-func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
-	for _, group := range krgm.getMutableResourceGroupList() {
+func (krgm *keyspaceResourceGroupManager) cleanupOverridesLocked() {
+	for _, group := range krgm.groups {
 		group.overrideFillRateAndBurstLimit(-1, -1)
 	}
 }
@@ -883,11 +956,15 @@ func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 // Newly loaded groups can miss the initial service-limit replay, so apply the
 // same baseline burst invalidation when they enter the cache.
 func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimit(group *ResourceGroup) {
-	if group == nil || group.getBurstLimit(true) >= 0 || group.getOverrideBurstLimit() >= 0 {
-		return
-	}
 	serviceLimit, isSet := krgm.getServiceLimit()
 	if !isSet || serviceLimit <= 0 {
+		return
+	}
+	krgm.syncBurstabilityWithServiceLimitLocked(group, serviceLimit)
+}
+
+func (*keyspaceResourceGroupManager) syncBurstabilityWithServiceLimitLocked(group *ResourceGroup, serviceLimit float64) {
+	if group == nil || group.getBurstLimit(true) >= 0 || group.getOverrideBurstLimit() >= 0 {
 		return
 	}
 	group.overrideBurstLimit(int64(serviceLimit))
@@ -896,8 +973,8 @@ func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimit(group
 // Since the burstable resource groups won't require tokens from the server anymore,
 // we have to override the burst limit of all the resource groups to the service limit.
 // This ensures the burstability of the resource groups can be properly invalidated.
-func (krgm *keyspaceResourceGroupManager) invalidateBurstability(serviceLimit float64) {
-	for _, group := range krgm.getMutableResourceGroupList() {
+func (krgm *keyspaceResourceGroupManager) invalidateBurstabilityLocked(serviceLimit float64) {
+	for _, group := range krgm.groups {
 		if group.getBurstLimit(true) >= 0 {
 			continue
 		}
