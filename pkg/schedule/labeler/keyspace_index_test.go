@@ -160,6 +160,36 @@ func TestKeyspaceRuleSetUsesSparseChunks(t *testing.T) {
 	re.Empty(set.chunks)
 }
 
+func TestKeyspaceRuleIndexReplaceReusesSparseStorage(t *testing.T) {
+	for _, id := range []uint32{1, keyspaceMaxID} {
+		t.Run(strconv.FormatUint(uint64(id), 10), func(t *testing.T) {
+			re := require.New(t)
+			first := makeKeyspaceRuleForTest(id, keyspaceTxnMode)
+			second := makeKeyspaceRuleForTest(id, keyspaceTxnMode)
+			re.NoError(first.checkAndAdjust())
+			re.NoError(second.checkAndAdjust())
+
+			var index keyspaceRuleIndex
+			re.True(index.Add(first))
+			chunkID := int(id) >> keyspaceChunkBits
+			chunksLen := len(index.txn.chunks)
+			chunk := index.txn.chunks[chunkID]
+			current, replacement := first, second
+			allocs := testing.AllocsPerRun(100, func() {
+				if !index.Replace(current, replacement) {
+					panic("failed to replace keyspace rule")
+				}
+				current, replacement = replacement, current
+			})
+
+			re.Zero(allocs)
+			re.Len(index.txn.chunks, chunksLen)
+			re.Same(chunk, index.txn.chunks[chunkID])
+			re.Same(current, index.txn.get(id))
+		})
+	}
+}
+
 func buildLegacyRangeList(rules []*LabelRule) rangelist.List {
 	builder := rangelist.NewBuilder()
 	for _, rule := range rules {

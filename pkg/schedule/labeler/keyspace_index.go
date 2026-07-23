@@ -83,6 +83,11 @@ func (s *keyspaceRuleSet) set(id uint32, rule *LabelRule) {
 	chunk.bits[slot>>6] |= uint64(1) << (id & 63)
 }
 
+func (s *keyspaceRuleSet) replace(id uint32, rule *LabelRule) {
+	chunk := s.chunks[int(id)>>keyspaceChunkBits]
+	chunk.rules[int(id)&keyspaceChunkMask] = rule
+}
+
 func (s *keyspaceRuleSet) clear(id uint32) {
 	// Remove checks that the target slot is owned before calling clear.
 	if len(s.chunks) == 0 || id > keyspaceMaxID {
@@ -209,6 +214,52 @@ func (i *keyspaceRuleIndex) Add(rule *LabelRule) bool {
 	}
 	for _, r := range ranges[:count] {
 		i.ruleSet(r.mode).set(r.id, rule)
+	}
+	return true
+}
+
+// Replace updates the slots owned by old to point to rule. It returns false
+// when old is not indexed, rule is not canonical, or a different rule occupies
+// one of rule's slots.
+func (i *keyspaceRuleIndex) Replace(old, rule *LabelRule) bool {
+	ranges, count, ok := keyspaceRanges(rule)
+	if !ok {
+		return false
+	}
+	id := ranges[0].id
+	owned := false
+	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+		if i.ruleSet(mode).get(id) == old {
+			owned = true
+		}
+	}
+	if !owned {
+		return false
+	}
+	for _, r := range ranges[:count] {
+		if current := i.ruleSet(r.mode).get(r.id); current != nil && current != old {
+			return false
+		}
+	}
+
+	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+		set := i.ruleSet(mode)
+		current := set.get(id)
+		wanted := false
+		for _, r := range ranges[:count] {
+			if r.mode == mode {
+				wanted = true
+				break
+			}
+		}
+		switch {
+		case current == old && wanted:
+			set.replace(id, rule)
+		case current == old:
+			set.clear(id)
+		case wanted:
+			set.set(id, rule)
+		}
 	}
 	return true
 }
