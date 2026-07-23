@@ -58,6 +58,8 @@ var (
 	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
 	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
 	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
+	// ErrAssignmentCountPatchUnsupported is returned when patching the derived assignment count.
+	ErrAssignmentCountPatchUnsupported = errors.New("assignment count patch is unsupported")
 	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a
 	// disabled meta-service group, which is not eligible for assignment.
 	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")

@@ -173,15 +173,17 @@ func copyStatusMap(statusMap map[string]*endpoint.MetaServiceGroupStatus) map[st
 // MetaServiceGroupStatusPatch represents a patch operation for a meta-service group.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MetaServiceGroupStatusPatch struct {
-	AssignmentCount *int  `json:"assignment_count,omitempty"` // nil means no change, 0 means reset to 0
+	AssignmentCount *int  `json:"assignment_count,omitempty"` // unsupported; assignment count is derived
 	Enabled         *bool `json:"enabled,omitempty"`          // nil means no change, true means enable, false means disable
 }
 
 // PatchStatus applies a patch to the status of a meta-service group. Only the
-// Enabled flag is persisted; a patched AssignmentCount is applied to the derived
-// in-memory hint and is superseded by the next RefreshCache, kept for API
-// compatibility.
+// Enabled flag can be patched and persisted; AssignmentCount is derived from
+// authoritative keyspace metadata and cannot be patched.
 func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
+	if patch.AssignmentCount != nil {
+		return ErrAssignmentCountPatchUnsupported
+	}
 	if patch.AssignmentCount != nil && *patch.AssignmentCount < 0 {
 		return ErrInvalidAssignmentCount
 	}
@@ -205,9 +207,6 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if status == nil {
 		status = &endpoint.MetaServiceGroupStatus{}
 		m.cachedStatus[groupID] = status
-	}
-	if patch.AssignmentCount != nil {
-		status.AssignmentCount = *patch.AssignmentCount
 	}
 	if patch.Enabled != nil {
 		status.Enabled = *patch.Enabled

@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -23,6 +24,16 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
+
+var errInjectedStatusCleanup = errors.New("injected status cleanup failure")
+
+type cleanupFailingMetaServiceGroupStorage struct {
+	*endpoint.StorageEndpoint
+}
+
+func (*cleanupFailingMetaServiceGroupStorage) RemoveMetaServiceGroupStatus(kv.Txn, string) error {
+	return errInjectedStatusCleanup
+}
 
 type metaServiceGroupTestSuite struct {
 	suite.Suite
@@ -265,6 +276,13 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() 
 	re.ErrorIs(err, ErrInvalidAssignmentCount)
 }
 
+func (suite *metaServiceGroupTestSuite) TestPatchStatusRejectsAssignmentCount() {
+	re := suite.Require()
+	count := 7
+	err := suite.manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{AssignmentCount: &count})
+	re.ErrorIs(err, ErrAssignmentCountPatchUnsupported)
+}
+
 // TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that re-adding a
 // group whose Enabled flag still lingers in storage resets it, so RefreshCache
 // starts the group disabled instead of resurrecting the stale flag. The count is
@@ -290,6 +308,29 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForRea
 	re.NotNil(statusMap[groupID])
 	re.Equal(0, statusMap[groupID].AssignmentCount)
 	re.False(statusMap[groupID].Enabled)
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyDoesNotCommitConfigWhenAddedStatusResetFails() {
+	re := suite.Require()
+	store := &cleanupFailingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+	}
+	manager, err := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	re.NoError(err)
+
+	groups := mockMetaServiceGroups()
+	groups["etcd-group-readded"] = "etcd-group-readded.tidb-serverless.cluster.svc.local"
+	configPersisted := false
+	err = manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		configPersisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, errInjectedStatusCleanup)
+	re.False(configPersisted)
+	re.NotContains(manager.GetGroups(), "etcd-group-readded")
+	statusMap, err := manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.NotContains(statusMap, "etcd-group-readded")
 }
 
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {

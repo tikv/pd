@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -41,6 +42,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
+
+var errInjectedTxnFailure = errors.New("injected txn failure")
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -1127,6 +1130,47 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	ks3 := &keyspacepb.KeyspaceMeta{Id: 102, Name: "ks-disabled-group", Config: cfg3}
 	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
+}
+
+func TestRunTxnWithMetaGroupLockRollsBackBeforeUnlock(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	mgm, err := NewMetaServiceGroupManager(ctx, store, map[string]string{})
+	re.NoError(err)
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, mgm)
+
+	lockAttempted := make(chan struct{})
+	lockAcquired := make(chan struct{})
+	err = manager.runTxnWithMetaGroupLock(func(kv.Txn) error {
+		go func() {
+			close(lockAttempted)
+			manager.mgm.Lock()
+			defer manager.mgm.Unlock()
+			close(lockAcquired)
+		}()
+		<-lockAttempted
+		return errInjectedTxnFailure
+	}, func() {
+		re.Never(func() bool {
+			select {
+			case <-lockAcquired:
+				return true
+			default:
+				return false
+			}
+		}, 50*time.Millisecond, time.Millisecond)
+	})
+	re.ErrorIs(err, errInjectedTxnFailure)
+	re.Eventually(func() bool {
+		select {
+		case <-lockAcquired:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
 }
 
 func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
