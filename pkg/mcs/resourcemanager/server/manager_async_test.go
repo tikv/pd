@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -248,14 +249,11 @@ func TestAsyncLoadResourceGroupsLazyGetLegacyKeyspace(t *testing.T) {
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }
 
-// TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure guards against a
-// group getting stuck marked reserved forever after a transient
-// LoadResourceGroupState failure during lazy loading: once the async bulk
-// load subsequently installs the fully-loaded (settings and state)
-// confirmed data for the same group, the reserved marker must be cleared,
-// otherwise loadResourceGroupIfNeeded and the state persist loop would keep
-// treating already-recovered, correct data as an unconfirmed placeholder.
-func TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure(t *testing.T) {
+// TestAsyncLoadResourceGroupsDoesNotServeStateLoadFailure guards against a
+// group with confirmed settings but failed state loading being exposed with a
+// fresh token bucket before the async bulk loader can recover its persisted
+// state.
+func TestAsyncLoadResourceGroupsDoesNotServeStateLoadFailure(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
 	group := newAsyncTestGroup("flaky-group")
@@ -270,22 +268,22 @@ func TestAsyncLoadResourceGroupsRecoversFromStateLoadFailure(t *testing.T) {
 
 	store.waitEntered(t)
 
-	// Make the lazy load's own state read fail once, so the group is cached
-	// as a metadata-only, still-reserved entry.
+	// Make the lazy load's own state read fail once. The group must remain
+	// unavailable rather than being returned with a fresh token bucket state.
 	store.failNextState.Store(true)
 	fetched, err := m.GetResourceGroup(1, "flaky-group", false)
-	re.NoError(err)
-	re.NotNil(fetched)
+	re.Error(err)
+	re.Nil(fetched)
 
 	krgm := m.getKeyspaceResourceGroupManager(1)
 	re.NotNil(krgm)
-	re.True(krgm.isReserved("flaky-group"), "group should still be reserved after a failed state load")
+	re.Nil(krgm.getMutableResourceGroup("flaky-group"), "failed state load must not publish the group")
 
 	// Let the async bulk load proceed; its own state read is unaffected
 	// (failNextState was already consumed) and should install confirmed data.
 	store.unblock()
 	testutil.Eventually(re, func() bool {
-		return !krgm.isReserved("flaky-group")
+		return krgm.getMutableResourceGroup("flaky-group") != nil && !krgm.isReserved("flaky-group")
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }
 
@@ -424,22 +422,16 @@ func TestAsyncLoadResourceGroupsStaleLoaderDoesNotPolluteNewTerm(t *testing.T) {
 	}
 }
 
-// TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings reproduces the
-// stale-settings clobber: a group's lazy load reads its settings but fails to
-// read its state, then the group is modified (and the modification persisted)
-// while the async bulk scan still holds the pre-modification settings. The
-// bulk merge must adopt only the scanned state into the cached entry, not
-// replace it wholesale, so the modified settings survive in the serving cache.
-func TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings(t *testing.T) {
+// TestAsyncLoadResourceGroupsLazyPublishAndMarkAreAtomic reproduces the race
+// where a lazy load publishes a cache entry before recording it in
+// syncLoadedGroups. A bulk merge entering that gap can overwrite mutable state
+// updated by token-bucket handling with its older scan result.
+func TestAsyncLoadResourceGroupsLazyPublishAndMarkAreAtomic(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
-	group := newAsyncTestGroup("mod-group")
-	re.NoError(store.SaveResourceGroupSetting(1, "mod-group", group))
-	// Persist a state with a recognizable consumption so the test can tell
-	// that the merge really adopted the scanned state.
-	states := FromProtoResourceGroup(group).GetGroupStates()
-	states.RUConsumption.RRU = 123
-	re.NoError(store.SaveResourceGroupStates(1, "mod-group", states))
+	group := newAsyncTestGroup("atomic-group")
+	re.NoError(store.SaveResourceGroupSetting(1, "atomic-group", group))
+	re.NoError(store.SaveResourceGroupStates(1, "atomic-group", FromProtoResourceGroup(group).GetGroupStates()))
 
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = store
@@ -450,8 +442,7 @@ func TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings(t *testing.T) {
 
 	store.waitEntered(t)
 
-	// Let the bulk loader capture the pre-modification settings, then hold it
-	// right before its states scan (i.e. before it merges).
+	// Let the bulk loader capture fill rate 100, then hold it before merge.
 	store.pauseNextStates.Store(true)
 	store.unblock()
 	select {
@@ -460,40 +451,45 @@ func TestAsyncLoadResourceGroupsMergeKeepsModifiedSettings(t *testing.T) {
 		t.Fatal("timed out waiting for the bulk loader to reach its states scan")
 	}
 
-	// Lazily load the group with a failing state read: it is cached with
-	// confirmed settings but unconfirmed (fresh) state.
-	store.failNextState.Store(true)
-	fetched, err := m.GetResourceGroup(1, "mod-group", false)
-	re.NoError(err)
-	re.NotNil(fetched)
-	krgm := m.getKeyspaceResourceGroupManager(1)
-	re.NotNil(krgm)
-	re.True(krgm.isReserved("mod-group"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/lazyLoadAfterCachePublish", `pause`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/lazyLoadAfterCachePublish"))
+	}()
 
-	// Modify the group (fill rate 100 -> 200) and persist it. The state read
-	// of Modify's own lazy load fails again, so the entry stays state-only
-	// reserved and out of syncLoadedGroups.
-	store.failNextState.Store(true)
-	modified := newAsyncTestGroup("mod-group")
-	modified.RUSettings.RU.Settings.FillRate = 200
-	modified.KeyspaceId = &resource_manager.KeyspaceIDValue{Value: 1}
-	re.NoError(m.ModifyResourceGroup(modified))
+	getDone := make(chan struct{})
+	go func() {
+		defer close(getDone)
+		_, err := m.GetResourceGroup(1, "atomic-group", false)
+		re.NoError(err)
+	}()
 
-	// Release the bulk loader; its merge must keep the modified settings and
-	// only adopt the scanned state.
+	var krgm *keyspaceResourceGroupManager
+	testutil.Eventually(re, func() bool {
+		krgm = m.getKeyspaceResourceGroupManager(1)
+		if krgm == nil {
+			return false
+		}
+		return krgm.getMutableResourceGroup("atomic-group") != nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	krgm.getMutableResourceGroup("atomic-group").UpdateRUConsumption(&resource_manager.Consumption{RRU: 10})
+
+	// With the lazy load paused at the cache-publish hook, the bulk merge must
+	// not be able to overwrite the updated cache entry.
 	store.unblockStates()
 	testutil.Eventually(re, func() bool {
 		_, err := m.GetResourceGroupList(1, false)
 		return err == nil
 	}, testutil.WithTickInterval(20*time.Millisecond))
 
-	got, err := m.GetResourceGroup(1, "mod-group", false)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/lazyLoadAfterCachePublish"))
+	<-getDone
+
+	got, err := m.GetResourceGroup(1, "atomic-group", false)
 	re.NoError(err)
 	re.NotNil(got)
-	re.Equal(float64(200), got.RUSettings.RU.getFillRate(), "modified settings must survive the bulk merge")
-	re.False(krgm.isReserved("mod-group"), "state adoption must clear the reserved marker")
-	re.Equal(float64(123), krgm.getMutableResourceGroup("mod-group").GetGroupStates().RUConsumption.RRU,
-		"the scanned state must be adopted into the cached entry")
+	re.Equal(float64(10), krgm.getMutableResourceGroup("atomic-group").GetGroupStates().RUConsumption.RRU,
+		"bulk merge must not overwrite the published lazy-loaded group")
 }
 
 // TestAsyncLoadResourceGroupsFreshStoreDefaultPersisted guards against the

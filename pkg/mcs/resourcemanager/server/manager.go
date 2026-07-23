@@ -550,21 +550,6 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 				if m.syncLoadedGroups[key] {
 					continue
 				}
-				if kind, reserved := krgm.reservedGroups[name]; reserved && kind == reservedStateOnly {
-					if existing, ok := krgm.groups[name]; ok {
-						// The cached entry's settings are confirmed and may
-						// carry a modification persisted after this scan
-						// started; only its state is missing. Adopt the
-						// scanned state into the existing entry instead of
-						// replacing it, so the newer settings aren't
-						// clobbered by the scan's older copy.
-						existing.SetStatesIntoResourceGroup(group.GetGroupStates())
-						delete(krgm.reservedGroups, name)
-						groupsToSync = append(groupsToSync, existing)
-						loaded++
-						continue
-					}
-				}
 				krgm.groups[name] = group
 				// This group is now confirmed, fully-loaded data (settings
 				// and state); it must no longer be treated as an
@@ -632,36 +617,33 @@ func (m *Manager) loadKeyspaceResourceGroupsFromStorage() (map[uint32]*keyspaceR
 	return tempKrgms, nil
 }
 
-// loadResourceGroup loads a single resource group from storage. The returned
-// stateLoaded reports whether the group's persisted state was successfully
-// read; the caller must not mark such a group as sync-loaded, so that a
-// concurrent or later async bulk load can still fill in its real state.
-func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (group *ResourceGroup, stateLoaded bool, err error) {
+// loadResourceGroup loads a single resource group from storage.
+func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
 	rawValue, err := m.storage.LoadResourceGroupSetting(keyspaceID, name)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	if rawValue == "" {
-		return nil, false, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
 	}
 	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
 	if err := krgm.addResourceGroupFromRaw(name, rawValue); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	state, err := m.storage.LoadResourceGroupState(keyspaceID, name)
 	if err != nil {
-		log.Warn("failed to load resource group state, continuing without state",
+		log.Warn("failed to load resource group state",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("group-name", name),
 			zap.Error(err))
-		return krgm.getMutableResourceGroup(name), false, nil
+		return nil, err
 	}
 	if state != "" {
 		if err := krgm.setRawStatesIntoResourceGroup(name, state); err != nil {
-			return nil, false, err
+			return nil, err
 		}
 	}
-	return krgm.getMutableResourceGroup(name), true, nil
+	return krgm.getMutableResourceGroup(name), nil
 }
 
 func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
@@ -690,7 +672,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		// so a Delete that lands after the read is detected under the insert
 		// lock and can't be undone by the now-stale result.
 		deleteGen := krgm.loadDeleteGen()
-		group, stateLoaded, err := m.loadResourceGroup(keyspaceID, name)
+		group, err := m.loadResourceGroup(keyspaceID, name)
 		if err != nil {
 			if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
 				// No persisted default group settings exist yet (e.g. a brand-new
@@ -704,9 +686,12 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return err
 		}
 		inserted := false
+		markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
+		m.Lock()
 		krgm.Lock()
 		if krgm.deleteGen != deleteGen {
 			krgm.Unlock()
+			m.Unlock()
 			if attempt >= maxLoadAttempts {
 				return nil
 			}
@@ -721,29 +706,15 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			krgm.groups[name] = group
 			inserted = true
 		}
-		// Only clear the placeholder mark once the state was actually read; a
-		// metadata-only group (state load failed) must stay reserved so a later
-		// call or the async bulk merge remains free to fill in the real state,
-		// instead of this partial result being treated as final forever.
-		if stateLoaded {
-			delete(krgm.reservedGroups, name)
-		} else {
-			krgm.reservedGroups[name] = reservedStateOnly
-		}
+		delete(krgm.reservedGroups, name)
 		krgm.Unlock()
+		if m.syncLoadedGroups != nil {
+			m.syncLoadedGroups[markKey] = true
+		}
+		m.Unlock()
+		failpoint.Inject("lazyLoadAfterCachePublish", func() {})
 		if inserted {
 			krgm.syncBurstabilityWithServiceLimit(group)
-		}
-		// Only mark the group as sync-loaded when its persisted state was actually
-		// read; otherwise a later async bulk load must remain free to fill in the
-		// real state instead of being skipped forever.
-		if stateLoaded {
-			markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
-			m.Lock()
-			if m.syncLoadedGroups != nil {
-				m.syncLoadedGroups[markKey] = true
-			}
-			m.Unlock()
 		}
 		syncLoadGroupCounter.Inc()
 		return nil
