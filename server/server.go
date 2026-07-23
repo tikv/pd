@@ -525,6 +525,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	s.cluster.SetResetSchedulingCacheFunc(func(ctx context.Context) error {
+		return s.DeleteRegionCacheInSchedulingServer(ctx)
+	})
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -2330,6 +2333,29 @@ func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) 
 		}
 	}
 	return "", false
+}
+
+// DeleteRegionCacheInSchedulingServer deletes all or one region from the cache
+// of the primary scheduling server.
+func (s *Server) DeleteRegionCacheInSchedulingServer(ctx context.Context, id ...uint64) error {
+	addr, ok := s.GetServicePrimaryAddr(ctx, mcs.SchedulingServiceName)
+	if !ok {
+		return errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
+	}
+	var idStr string
+	if len(id) > 0 {
+		idStr = strconv.FormatUint(id[0], 10)
+	}
+	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
+	resp, err := apiutil.DoDeleteWithContext(ctx, s.GetHTTPClient(), url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
+	}
+	return nil
 }
 
 // SetServicePrimaryAddr sets the primary address directly.

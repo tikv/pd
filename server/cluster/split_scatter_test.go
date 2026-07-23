@@ -28,6 +28,7 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -42,6 +43,23 @@ const (
 	splitScatterNoCPUUsage       uint64 = 0
 	splitScatterReportedCPUUsage uint64 = 1
 )
+
+func TestResetPreparedAndResetRegionCacheForwardsToScheduling(t *testing.T) {
+	re := require.New(t)
+	cluster, _ := newSplitScatterTestCluster(t)
+	cluster.SetServiceIndependent(constant.SchedulingServiceName)
+
+	forwarded := 0
+	cluster.SetResetSchedulingCacheFunc(func(context.Context) error {
+		forwarded++
+		return nil
+	})
+	re.NoError(cluster.ResetPreparedAndResetRegionCache(context.Background()))
+
+	re.Equal(1, forwarded)
+	re.False(cluster.GetCoordinator().GetPrepareChecker().IsPrepared())
+	re.Zero(cluster.GetTotalRegionCount())
+}
 
 func TestHandleAskBatchSplitSchedulesSplitScatterInPatrol(t *testing.T) {
 	re := require.New(t)
@@ -168,6 +186,7 @@ func newSplitScatterTestCluster(t *testing.T) (*RaftCluster, context.CancelFunc)
 	re.NoError(err)
 	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, cluster.BasicCluster, false)
 	cluster.initCoordinator(ctx, cluster, hbStreams)
+	cluster.GetCoordinator().GetPrepareChecker().SetPrepared()
 	t.Cleanup(func() {
 		hbStreams.Close()
 	})
