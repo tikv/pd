@@ -63,6 +63,7 @@ func init() {
 	prometheus.MustRegister(regionSyncerStatus)
 }
 
-func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) routerpb.Router_QueryRegionServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+func newQueryRegionMetricsStream(stream routerpb.Router_QueryRegionServer) (routerpb.Router_QueryRegionServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+	return metricsStream, metricsStream.Close
 }

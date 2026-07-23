@@ -16,6 +16,7 @@ package grpcutil
 
 import (
 	"net"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,6 +25,19 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 )
+
+type streamMetricLabels struct {
+	hist    *prometheus.HistogramVec
+	request string
+	target  string
+}
+
+var streamMetrics = struct {
+	sync.Mutex
+	activeStreams map[streamMetricLabels]int
+}{
+	activeStreams: make(map[streamMetricLabels]int),
+}
 
 // NewGRPCStreamSendDuration creates a HistogramVec for measuring gRPC stream
 // Send operation durations, using consistent bucket settings across services.
@@ -36,6 +50,29 @@ func NewGRPCStreamSendDuration(namespace, subsystem string) *prometheus.Histogra
 			Help:      "Bucketed histogram of duration (s) of gRPC stream Send operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
 		}, []string{"request", "target"})
+}
+
+func acquireStreamMetric(hist *prometheus.HistogramVec, stream grpc.ServerStream, request string) (prometheus.Observer, func()) {
+	labels := streamMetricLabels{hist: hist, request: request, target: targetIP(stream)}
+
+	streamMetrics.Lock()
+	observer := hist.WithLabelValues(labels.request, labels.target)
+	streamMetrics.activeStreams[labels]++
+	streamMetrics.Unlock()
+
+	var once sync.Once
+	return observer, func() {
+		once.Do(func() {
+			streamMetrics.Lock()
+			defer streamMetrics.Unlock()
+			if streamMetrics.activeStreams[labels] > 1 {
+				streamMetrics.activeStreams[labels]--
+				return
+			}
+			delete(streamMetrics.activeStreams, labels)
+			hist.DeleteLabelValues(labels.request, labels.target)
+		})
+	}
 }
 
 // targetIP extracts the target IP (without port) from a gRPC server stream's peer info.
@@ -69,6 +106,7 @@ type MetricsStream[SendT any, RecvT any] struct {
 	sendFn  func(SendT) error
 	recvFn  func() (RecvT, error)
 	sendObs prometheus.Observer
+	release func()
 }
 
 // NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
@@ -91,6 +129,30 @@ func NewMetricsStream[SendT any, RecvT any](
 		sendFn:       sendFn,
 		recvFn:       recvFn,
 		sendObs:      obs,
+	}
+}
+
+// NewMetricsStreamWithCleanup creates a MetricsStream that removes the metric
+// labels after the last active stream for the same request and target closes.
+// Close must be called when the stream handler exits.
+func NewMetricsStreamWithCleanup[SendT any, RecvT any](
+	stream grpc.ServerStream,
+	sendFn func(SendT) error,
+	recvFn func() (RecvT, error),
+	hist *prometheus.HistogramVec,
+	requestLabel string,
+) *MetricsStream[SendT, RecvT] {
+	metricsStream := NewMetricsStream(stream, sendFn, recvFn, nil, requestLabel)
+	if hist != nil {
+		metricsStream.sendObs, metricsStream.release = acquireStreamMetric(hist, stream, requestLabel)
+	}
+	return metricsStream
+}
+
+// Close releases the stream's metric labels. It is safe to call more than once.
+func (s *MetricsStream[SendT, RecvT]) Close() {
+	if s.release != nil {
+		s.release()
 	}
 }
 

@@ -246,29 +246,34 @@ func init() {
 	prometheus.MustRegister(regionRequestCounter)
 }
 
-func newTsoMetricsStream(stream pdpb.PD_TsoServer) pdpb.PD_TsoServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+func newTsoMetricsStream(stream pdpb.PD_TsoServer) (pdpb.PD_TsoServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+	return metricsStream, metricsStream.Close
 }
 
-func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) pdpb.PD_RegionHeartbeatServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+func newRegionHeartbeatMetricsStream(stream pdpb.PD_RegionHeartbeatServer) (pdpb.PD_RegionHeartbeatServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+	return metricsStream, metricsStream.Close
 }
 
 func newReportBucketsMetricsStream(stream pdpb.PD_ReportBucketsServer) pdpb.PD_ReportBucketsServer {
 	return grpcutil.NewMetricsStream(stream, stream.SendAndClose, stream.Recv, grpcStreamSendDuration, "report-buckets")
 }
 
-func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) pdpb.PD_QueryRegionServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+func newQueryRegionMetricsStream(stream pdpb.PD_QueryRegionServer) (pdpb.PD_QueryRegionServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "query-region")
+	return metricsStream, metricsStream.Close
 }
 
-func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) pdpb.PD_SyncRegionsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
+func newSyncRegionsMetricsStream(stream pdpb.PD_SyncRegionsServer) (pdpb.PD_SyncRegionsServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "sync-regions")
+	return metricsStream, metricsStream.Close
 }
 
-func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) pdpb.PD_WatchGlobalConfigServer {
+func newWatchGlobalConfigMetricsStream(stream pdpb.PD_WatchGlobalConfigServer) (pdpb.PD_WatchGlobalConfigServer, func()) {
 	if stream == nil {
-		return stream
+		return stream, func() {}
 	}
-	return grpcutil.NewMetricsStream[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup[*pdpb.WatchGlobalConfigResponse, any](stream, stream.Send, nil, grpcStreamSendDuration, "watch-global-config")
+	return metricsStream, metricsStream.Close
 }

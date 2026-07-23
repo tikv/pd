@@ -84,7 +84,8 @@ func (s *Service) checkServing() error {
 
 // Watch watches the key with a given prefix and revision.
 func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.MetaStorage_WatchServer) error {
-	server = newWatchMetricsStream(server)
+	server, closeMetrics := newWatchMetricsStream(server)
+	defer closeMetrics()
 	if err := s.checkServing(); err != nil {
 		return err
 	}
