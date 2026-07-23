@@ -93,6 +93,40 @@ func TestRegister(t *testing.T) {
 	etcd.Close()
 }
 
+func TestRegisterConflict(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Register the first instance.
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-1", 2)
+	re.NoError(sr1.Register())
+	// A second live instance with the same advertised address must not
+	// overwrite the registry entry of the first one.
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-2", 2)
+	err := sr2.Register()
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-1", string(resp.Kvs[0].Value))
+
+	// After the first instance stops the keepalive (simulating a crash), the
+	// stale entry expires with its lease and a new instance with the same
+	// address can register within the retry window.
+	sr1.cancel()
+	sr3 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "instance-3", 2)
+	re.NoError(sr3.Register())
+	resp, err = client.Get(ctx, sr3.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("instance-3", string(resp.Kvs[0].Value))
+	re.NoError(sr3.Deregister())
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys

@@ -16,6 +16,7 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,6 +32,14 @@ import (
 
 // DefaultLeaseInSeconds is the default lease time in seconds.
 const DefaultLeaseInSeconds = 5
+
+// registerRetryInterval is the interval to retry the registration when the
+// registry key is occupied by a stale entry that has not expired yet.
+const registerRetryInterval = time.Second
+
+// errServiceAddrOccupied indicates that the registry key of the advertised
+// address is already claimed by another live instance.
+var errServiceAddrOccupied = errors.New("service registry key is occupied by another live instance")
 
 // ServiceRegister is used to register the service to etcd.
 type ServiceRegister struct {
@@ -58,7 +67,28 @@ func NewServiceRegister(ctx context.Context, cli *clientv3.Client, serviceName, 
 
 // Register registers the service to etcd.
 func (sr *ServiceRegister) Register() error {
-	id, err := sr.putWithTTL()
+	var (
+		id  clientv3.LeaseID
+		err error
+	)
+	// A stale registry entry left by a crashed instance with the same advertised
+	// address will be removed automatically once its lease expires, so retry
+	// within the lease TTL before giving up.
+	deadline := time.Now().Add(time.Duration(sr.ttl+1) * time.Second)
+	for {
+		id, err = sr.putWithTTL()
+		if err == nil || !errors.Is(err, errServiceAddrOccupied) || time.Now().After(deadline) {
+			break
+		}
+		log.Warn("the service registry key is occupied, retrying",
+			zap.String("key", sr.key), zap.Error(err))
+		select {
+		case <-sr.ctx.Done():
+			sr.cancel()
+			return fmt.Errorf("register the key %s canceled: %w", sr.key, sr.ctx.Err())
+		case <-time.After(registerRetryInterval):
+		}
+	}
 	if err != nil {
 		sr.cancel()
 		return fmt.Errorf("put the key with lease %s failed: %v", sr.key, err)
@@ -111,10 +141,65 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 	}
 }
 
+// putWithTTL claims the registry key with a new lease. To prevent an instance
+// that advertises a duplicate address from overwriting the registry entry of
+// another live instance (and further joining the primary election with the
+// same identity), the key is only claimed when it does not exist yet, or when
+// it still holds this instance's own value.
 func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
-	return etcdutil.EtcdKVPutWithTTL(ctx, sr.cli, sr.key, sr.value, sr.ttl)
+	grantResp, err := sr.cli.Grant(ctx, sr.ttl)
+	if err != nil {
+		return 0, err
+	}
+	leaseID := grantResp.ID
+	put := clientv3.OpPut(sr.key, sr.value, clientv3.WithLease(leaseID))
+	resp, err := sr.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(sr.key), "=", 0)).
+		Then(put).
+		Else(clientv3.OpGet(sr.key)).
+		Commit()
+	if err != nil {
+		sr.revokeLease(ctx, leaseID)
+		return 0, err
+	}
+	if resp.Succeeded {
+		return leaseID, nil
+	}
+	// The key already exists. If it holds a different value, it is claimed by
+	// another live instance, so reject the registration instead of overwriting
+	// the entry.
+	kvs := resp.Responses[0].GetResponseRange().Kvs
+	if len(kvs) > 0 && string(kvs[0].Value) != sr.value {
+		sr.revokeLease(ctx, leaseID)
+		return 0, fmt.Errorf("key %s, existing value %s: %w", sr.key, string(kvs[0].Value), errServiceAddrOccupied)
+	}
+	// The key still holds this instance's own value (e.g. re-registering after
+	// a keepalive failure while the previous lease has not expired yet), take
+	// it over with the new lease.
+	takeoverResp, err := sr.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.Value(sr.key), "=", sr.value)).
+		Then(put).
+		Commit()
+	if err != nil {
+		sr.revokeLease(ctx, leaseID)
+		return 0, err
+	}
+	if !takeoverResp.Succeeded {
+		// The key changed in between, let the caller retry.
+		sr.revokeLease(ctx, leaseID)
+		return 0, fmt.Errorf("key %s changed during the takeover: %w", sr.key, errServiceAddrOccupied)
+	}
+	return leaseID, nil
+}
+
+// revokeLease revokes the lease in a best-effort manner to avoid leaking it
+// when the registration fails.
+func (sr *ServiceRegister) revokeLease(ctx context.Context, leaseID clientv3.LeaseID) {
+	if _, err := sr.cli.Revoke(ctx, leaseID); err != nil {
+		log.Warn("revoke the lease failed", zap.String("key", sr.key), zap.Error(err))
+	}
 }
 
 // Deregister deregisters the service from etcd.
