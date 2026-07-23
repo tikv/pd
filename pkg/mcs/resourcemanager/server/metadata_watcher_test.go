@@ -458,10 +458,10 @@ func TestMetadataSnapshotReconciliation(t *testing.T) {
 	})
 }
 
-func BenchmarkMetadataSnapshotReconciliation100KKeyspaces(b *testing.B) {
+func BenchmarkMetadataSnapshotReconciliation1MKeyspaces(b *testing.B) {
 	const generation = uint64(1)
 	manager := newMetadataWatcherTestManager(nil)
-	for keyspaceID := range uint32(100_000) {
+	for keyspaceID := range uint32(1_000_000) {
 		krgm := newKeyspaceResourceGroupManager(keyspaceID, nil)
 		defaultGroup := newDefaultResourceGroup()
 		defaultGroup.metadataSnapshotGeneration = generation
