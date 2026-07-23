@@ -518,7 +518,8 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 		default:
 		}
 		if err != nil {
-			log.Error("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
+			// Use warn level since the loader retries indefinitely until it succeeds.
+			log.Warn("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
 			if !m.storeLoadingStateIfCurrent(epoch, LoadingStateNotStarted) {
 				log.Info("async loading resource groups aborted: manager was reinitialized")
 				return
