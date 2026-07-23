@@ -62,10 +62,6 @@ type RPCClient interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error)
-	// GetStoreResponse gets the complete GetStore response. It retains PD's
-	// optional store scheduling state for callers that need scheduling decisions
-	// in addition to store metadata.
-	GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error)
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -119,6 +115,14 @@ type RPCClient interface {
 	KeyspaceClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// RPCClientExt is an optional extension for callers that need fields carried
+// by complete RPC responses in addition to the existing RPCClient methods. It
+// is deliberately separate from RPCClient so new optional response APIs do not
+// break existing pd.Client implementations and mocks.
+type RPCClientExt interface {
+	GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error)
 }
 
 // Client is a PD (Placement Driver) RPC client.
@@ -1044,7 +1048,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetSt
 	return handleStoreResponse(resp)
 }
 
-// GetStoreResponse implements the RPCClient interface.
+// GetStoreResponse implements the RPCClientExt interface.
 func (c *client) GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
