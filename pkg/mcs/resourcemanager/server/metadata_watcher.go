@@ -212,6 +212,13 @@ func (m *Manager) handleMetadataWatchPutWithGeneration(
 	if !ok {
 		return nil
 	}
+	if metadataSnapshotGeneration != 0 {
+		m.metadataSnapshotMutationMu.Lock()
+		defer m.metadataSnapshotMutationMu.Unlock()
+		if m.metadataSnapshotMutations[key] == metadataSnapshotGeneration {
+			return nil
+		}
+	}
 	switch target.entryType {
 	case resourceGroupWatchEntryController:
 		return m.applyControllerConfigFromRaw(rawValue)

@@ -445,16 +445,36 @@ func TestMetadataSnapshotReconciliation(t *testing.T) {
 		generation := m.beginMetadataSnapshot()
 		group.Priority = 6
 		re.NoError(m.ModifyResourceGroup(group))
-		// Setting the same value must still mark the limiter as observed.
-		re.NoError(m.SetKeyspaceServiceLimit(10, 100))
+		re.NoError(m.SetKeyspaceServiceLimit(10, 200))
 		addedGroup := newMetadataWatcherResourceGroup("added_during_snapshot", 7, 200, 300)
 		re.NoError(m.AddResourceGroup(addedGroup))
+		deletedGroup := newMetadataWatcherResourceGroup("deleted_during_snapshot", 8, 300, 400)
+		re.NoError(m.AddResourceGroup(deletedGroup))
+		re.NoError(m.DeleteResourceGroup(10, deletedGroup.Name))
+
+		// Model stale values read at the snapshot revision before the API writes.
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/api_group",
+			mustMarshalResourceGroup(t, newMetadataWatcherResourceGroup("api_group", 5, 100, 200)),
+			generation,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"100",
+			generation,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/deleted_during_snapshot",
+			mustMarshalResourceGroup(t, deletedGroup),
+			generation,
+		))
 		re.NoError(m.finishMetadataSnapshot(generation, nil))
 
 		krgm := m.getKeyspaceResourceGroupManager(10)
 		re.Equal(uint32(6), krgm.getResourceGroup("api_group", false).Priority)
 		re.NotNil(krgm.getResourceGroup("added_during_snapshot", false))
-		re.InDelta(100, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+		re.Nil(krgm.getResourceGroup("deleted_during_snapshot", false))
+		re.InDelta(200, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 	})
 }
 

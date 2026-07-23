@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -102,11 +103,15 @@ type Manager struct {
 	// successful reconciliation cannot remove them.
 	metadataSnapshotGeneration       uint64
 	activeMetadataSnapshotGeneration uint64
-	// metadataSnapshotMu closes the boundary race between starting a snapshot
-	// and metadata API writes. Writers that began before a snapshot complete
-	// before its revision is read; overlapping writers inherit its generation.
+	// metadataSnapshotMu serializes snapshot generation changes with metadata
+	// API writes. Writers that overlap a snapshot inherit its generation.
 	metadataSnapshotMu syncutil.RWMutex
-	storage            interface {
+	// metadataSnapshotMutationMu orders API writes with callbacks from a fixed
+	// metadata snapshot. The map also acts as a tombstone for API deletes until
+	// that snapshot has finished.
+	metadataSnapshotMutationMu syncutil.Mutex
+	metadataSnapshotMutations  map[string]uint64
+	storage                    interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
 		// Used to get the keyspace meta info.
@@ -246,12 +251,11 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.metadataSnapshotMu.RLock()
-	defer m.metadataSnapshotMu.RUnlock()
-	// If the keyspace is not found, create a new keyspace resource group manager.
-	generation := m.getActiveMetadataSnapshotGeneration()
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimitWithGeneration(serviceLimit, generation)
-	return nil
+	return m.withMetadataAPIWrite(keypath.KeyspaceServiceLimitPath(keyspaceID), func(generation uint64) error {
+		// If the keyspace is not found, create a new keyspace resource group manager.
+		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimitWithGeneration(serviceLimit, generation)
+		return nil
+	})
 }
 
 // SetKeyspaceRUVersion sets the RU version for a specific keyspace in the controller config.
@@ -323,27 +327,53 @@ func (m *Manager) beginMetadataSnapshot() uint64 {
 	return generation
 }
 
+func (m *Manager) withMetadataAPIWrite(key string, fn func(uint64) error) error {
+	m.metadataSnapshotMu.RLock()
+	defer m.metadataSnapshotMu.RUnlock()
+	generation := m.getActiveMetadataSnapshotGeneration()
+	if generation == 0 {
+		return fn(0)
+	}
+	m.metadataSnapshotMutationMu.Lock()
+	defer m.metadataSnapshotMutationMu.Unlock()
+	if err := fn(generation); err != nil {
+		return err
+	}
+	if m.metadataSnapshotMutations == nil {
+		m.metadataSnapshotMutations = make(map[string]uint64)
+	}
+	m.metadataSnapshotMutations[key] = generation
+	return nil
+}
+
 func (m *Manager) finishMetadataSnapshot(generation uint64, loadErr error) error {
 	if generation == 0 {
 		return nil
 	}
+	// Wait for every API write that observed this generation before reconciling.
+	// Holding the write lock through the scan also prevents a successful API
+	// mutation from racing with deletion of an entry missing from the snapshot.
+	m.metadataSnapshotMu.Lock()
+	defer m.metadataSnapshotMu.Unlock()
 	if loadErr == nil {
-		// Keep the generation active until reconciliation finishes. API writes
-		// that overlap this scan will therefore be marked and retained.
 		m.RLock()
 		for _, krgm := range m.krgms {
 			krgm.reconcileMetadataSnapshot(generation)
 		}
 		m.RUnlock()
 	}
-	// Wait for API writes that observed this generation before clearing it.
-	m.metadataSnapshotMu.Lock()
-	defer m.metadataSnapshotMu.Unlock()
 	m.Lock()
 	if m.activeMetadataSnapshotGeneration == generation {
 		m.activeMetadataSnapshotGeneration = 0
 	}
 	m.Unlock()
+	m.metadataSnapshotMutationMu.Lock()
+	for key, mutationGeneration := range m.metadataSnapshotMutations {
+		if mutationGeneration == generation {
+			delete(m.metadataSnapshotMutations, key)
+		}
+	}
+	m.metadataSnapshotMutationMu.Unlock()
 	return nil
 }
 
@@ -632,16 +662,17 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.metadataSnapshotMu.RLock()
-	defer m.metadataSnapshotMu.RUnlock()
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
-	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
-	// so we need to initialize the default resource group for the keyspace as well.
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
-	if krgm == nil {
-		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
-	}
-	return krgm.addResourceGroupWithGeneration(grouppb, m.getActiveMetadataSnapshotGeneration())
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, grouppb.GetName())
+	return m.withMetadataAPIWrite(key, func(generation uint64) error {
+		// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
+		// so we need to initialize the default resource group for the keyspace as well.
+		krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+		if krgm == nil {
+			return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+		}
+		return krgm.addResourceGroupWithGeneration(grouppb, generation)
+	})
 }
 
 // ModifyResourceGroup modifies an existing resource group.
@@ -649,14 +680,15 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.metadataSnapshotMu.RLock()
-	defer m.metadataSnapshotMu.RUnlock()
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
-	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
-	if err != nil {
-		return err
-	}
-	return krgm.modifyResourceGroupWithGeneration(grouppb, m.getActiveMetadataSnapshotGeneration())
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, grouppb.GetName())
+	return m.withMetadataAPIWrite(key, func(generation uint64) error {
+		krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
+		if err != nil {
+			return err
+		}
+		return krgm.modifyResourceGroupWithGeneration(grouppb, generation)
+	})
 }
 
 // DeleteResourceGroup deletes a resource group.
@@ -664,14 +696,15 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.metadataSnapshotMu.RLock()
-	defer m.metadataSnapshotMu.RUnlock()
-	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
-	}
-	return krgm.deleteResourceGroup(name)
+	key := keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name)
+	return m.withMetadataAPIWrite(key, func(uint64) error {
+		// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
+		krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+		if krgm == nil {
+			return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+		}
+		return krgm.deleteResourceGroup(name)
+	})
 }
 
 // GetResourceGroup returns a copy of a resource group.
