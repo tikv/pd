@@ -143,8 +143,10 @@
 
 ## PRs & Commits
 - Follow `.github/pull_request_template.md`; include `Issue Number: close|ref #...` line.
-- Commit subject: `pkg: message`, <=70 chars; blank line; body wrapped 80 chars; add `Signed-off-by` via `git commit -s`.
-- Multi-area: separate packages with commas; use `*:` for broad changes.
+- Run `make check` before submitting a PR.
+- Commit subject: `pkg: message`, ≤70 chars; blank line; body wrapped 80 chars; body explains why and how.
+- Package scope: 1 pkg → `pkg:`, 2 pkgs → `pkg1, pkg2:`, 3+ non-test pkgs → `*:`.
+- `Signed-off-by` via `git commit -s`; must be the human author's identity — never agent identity.
 
 ## Agent Skills
 
