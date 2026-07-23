@@ -2,6 +2,9 @@ module github.com/tikv/pd/client
 
 go 1.25.10
 
+// Temporary replacement for kvproto PR #1503. Remove it after the PR merges.
+replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20260723025057-6a82baebdef0
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5

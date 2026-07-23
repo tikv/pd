@@ -62,6 +62,10 @@ type RPCClient interface {
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
 	GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error)
+	// GetStoreResponse gets the complete GetStore response. It retains PD's
+	// optional store scheduling state for callers that need scheduling decisions
+	// in addition to store metadata.
+	GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error)
 	// GetAllStores gets all stores from pd.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -1033,6 +1037,15 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
 
 // GetStore implements the RPCClient interface.
 func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
+	resp, err := c.GetStoreResponse(ctx, storeID, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return handleStoreResponse(resp)
+}
+
+// GetStoreResponse implements the RPCClient interface.
+func (c *client) GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1077,7 +1090,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetSt
 	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleStoreResponse(resp)
+	return resp, nil
 }
 
 func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {

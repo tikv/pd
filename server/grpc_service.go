@@ -786,6 +786,9 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 		Header: grpcutil.WrapHeader(),
 		Store:  store.GetMeta(),
 		Stats:  store.GetStoreStats(),
+		SchedulingState: &pdpb.StoreSchedulingState{
+			EvictedAsSlowStore: store.EvictedAsSlowStore(),
+		},
 	}, nil
 }
 
