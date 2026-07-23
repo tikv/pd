@@ -54,7 +54,7 @@ type testCacheCase struct {
 func TestCache(t *testing.T) {
 	re := require.New(t)
 	tests := []*testCacheCase{
-		{utils.Read, transferLeader, 3, utils.Update},
+		{utils.Read, transferLeader, 5, utils.Update},
 		{utils.Read, movePeer, 4, utils.Remove},
 		{utils.Read, addReplica, 4, utils.Update},
 		{utils.Write, transferLeader, 3, utils.Remove},
@@ -100,6 +100,9 @@ func checkFlow(cache *HotPeerCache, region *core.RegionInfo, peers []*metapb.Pee
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	res = append(res, cache.CollectExpiredItems(region)...)
+	if cache.kind == utils.Read {
+		res = append(res, cache.CheckLeaderChange(region)...)
+	}
 	return append(res, cache.CheckPeerFlow(region, peers, region.GetLoads(), interval)...)
 }
 
