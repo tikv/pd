@@ -15,7 +15,9 @@
 package grpcutil
 
 import (
+	"context"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,17 +27,64 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-// NewGRPCStreamSendDuration creates a HistogramVec for measuring gRPC stream
+// StreamSendDurationCollector measures gRPC stream Send durations and owns the
+// lifecycle of HistogramVec children whose target label is derived from peer IPs.
+type StreamSendDurationCollector struct {
+	hist     *prometheus.HistogramVec
+	mu       sync.Mutex
+	children map[streamChildKey]int
+}
+
+type streamChildKey struct {
+	request string
+	target  string
+}
+
+// NewGRPCStreamSendDuration creates a histogram for measuring gRPC stream
 // Send operation durations, using consistent bucket settings across services.
-func NewGRPCStreamSendDuration(namespace, subsystem string) *prometheus.HistogramVec {
-	return prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
+func NewGRPCStreamSendDuration(namespace, subsystem string) *StreamSendDurationCollector {
+	return &StreamSendDurationCollector{
+		hist: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "grpc_stream_send_duration_seconds",
 			Help:      "Bucketed histogram of duration (s) of gRPC stream Send operations.",
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 20), // 0.1ms ~ 52s
-		}, []string{"request", "target"})
+		}, []string{"request", "target"}),
+		children: make(map[streamChildKey]int),
+	}
+}
+
+// Describe implements prometheus.Collector.
+func (d *StreamSendDurationCollector) Describe(ch chan<- *prometheus.Desc) {
+	d.hist.Describe(ch)
+}
+
+// Collect implements prometheus.Collector.
+func (d *StreamSendDurationCollector) Collect(ch chan<- prometheus.Metric) {
+	d.hist.Collect(ch)
+}
+
+func (d *StreamSendDurationCollector) acquire(request, target string) (prometheus.Observer, func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	key := streamChildKey{request: request, target: target}
+	d.children[key]++
+	obs := d.hist.WithLabelValues(key.request, key.target)
+	return obs, func() { d.release(key) }
+}
+
+func (d *StreamSendDurationCollector) release(key streamChildKey) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.children[key]--
+	if d.children[key] > 0 {
+		return
+	}
+	delete(d.children, key)
+	d.hist.DeleteLabelValues(key.request, key.target)
 }
 
 // targetIP extracts the target IP (without port) from a gRPC server stream's peer info.
@@ -74,17 +123,19 @@ type MetricsStream[SendT any, RecvT any] struct {
 // NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
 // It automatically extracts the target IP from the stream's peer info and combines
 // it with requestLabel to create the prometheus observer from hist.
-// If hist is nil, no metrics are recorded.
+// If hist or stream is nil, no metrics are recorded.
 func NewMetricsStream[SendT any, RecvT any](
 	stream grpc.ServerStream,
 	sendFn func(SendT) error,
 	recvFn func() (RecvT, error),
-	hist *prometheus.HistogramVec,
+	hist *StreamSendDurationCollector,
 	requestLabel string,
 ) *MetricsStream[SendT, RecvT] {
 	var obs prometheus.Observer
-	if hist != nil {
-		obs = hist.WithLabelValues(requestLabel, targetIP(stream))
+	if hist != nil && stream != nil {
+		var release func()
+		obs, release = hist.acquire(requestLabel, targetIP(stream))
+		context.AfterFunc(stream.Context(), release)
 	}
 	return &MetricsStream[SendT, RecvT]{
 		ServerStream: stream,
