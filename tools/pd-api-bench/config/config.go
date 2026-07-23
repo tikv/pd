@@ -37,6 +37,9 @@ type Config struct {
 	LogProps *log.ZapProperties
 
 	Client int64 `toml:"client" json:"client"`
+	// EnableRouterClient controls the client-side router client, which uses
+	// QueryRegion for GetRegion/GetPrevRegion/GetRegionByID.
+	EnableRouterClient bool `toml:"enable-router-client" json:"enable-router-client"`
 
 	// tls
 	CaPath   string `toml:"ca-path" json:"ca-path"`
@@ -59,6 +62,7 @@ func NewConfig(flagSet *flag.FlagSet) *Config {
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status", "127.0.0.1:10081", "status address")
 	fs.Int64Var(&cfg.Client, "client", 1, "client number")
+	fs.BoolVar(&cfg.EnableRouterClient, "enable-router-client", true, "enable client-side router client for QueryRegion")
 	fs.StringVar(&cfg.CaPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
 	fs.StringVar(&cfg.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
