@@ -16,7 +16,6 @@ package utils
 
 import (
 	"context"
-	"fmt"
 	"math/rand/v2"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -25,7 +24,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -35,16 +33,20 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// GetExpectedPrimaryFlag gets the expected primary flag.
-func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) string {
+// GetExpectedPrimaryFlag gets the expected primary flag. A read failure is
+// returned as an error rather than collapsed into an empty flag: callers treat an
+// empty flag as "no transfer in progress" and campaign without the affinity guard,
+// so a failed read must NOT be mistaken for "no marker" — otherwise a non-target
+// member could win while a transfer marker actually exists.
+func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) (string, error) {
 	path := keypath.ExpectedPrimaryPath(msParam)
 	primary, err := etcdutil.GetValue(client, path)
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err), zap.String("primary-path", path))
-		return ""
+		return "", err
 	}
 
-	return string(primary)
+	return string(primary), nil
 }
 
 // primaryData is used to store the primary data.
@@ -55,7 +57,7 @@ type primaryData struct {
 }
 
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID) (int64, error) {
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID) error {
 	path := keypath.ExpectedPrimaryPath(msParam)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("primary", primary.output))
 	// write a flag to indicate the expected primary.
@@ -64,86 +66,116 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 		Commit()
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
-		return 0, err
+		return err
 	}
 	if !resp.Succeeded {
 		log.Error("mark expected primary error", zap.String("primary-path", path))
-		return 0, errors.New("mark expected primary txn did not succeed")
+		return errors.New("mark expected primary txn did not succeed")
 	}
-	return resp.Header.Revision, nil
+	return nil
 }
 
-// KeepExpectedPrimaryAlive keeps the expected primary alive.
-// We use lease to keep `expected primary` healthy.
-// ONLY reset by the following conditions:
-// - changed by `{service}/primary/transfer` API.
-// - primary lease expired.
-// ONLY primary called this function.
-func KeepExpectedPrimaryAlive(
-	ctx context.Context,
-	cli *clientv3.Client,
-	exitPrimary chan<- struct{},
-	leaseTimeout int64,
-	msParam *keypath.MsParam,
-	m *member.Participant) (*election.Lease, error) {
-	log.Info("primary start to watch the expected primary",
-		zap.String("service", msParam.ServiceName), zap.String("primary-value", m.ParticipantString()))
-	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
-	lease := election.NewLease(cli, service)
-	if err := lease.Grant(leaseTimeout); err != nil {
-		return nil, err
+// DeleteExpectedPrimaryFlag deletes the expected primary flag once the target has
+// won the campaign, so that in steady state the flag is absent and a subsequent
+// failure of the new primary triggers a free re-election immediately instead of
+// waiting for the flag's TTL to expire.
+//
+// The delete is conditional on the flag still holding `expectedValue` (the value
+// the winner campaigned with). This prevents clobbering a newer transfer that may
+// have already rewritten the flag to a different target while this primary was
+// winning. It is best-effort: the flag's TTL is the backstop, so a failure here is
+// only logged and never blocks serving.
+//
+// The flag is bound to an etcd lease, so after deleting the key we also revoke that
+// lease. Otherwise we would leave the key gone but the lease alive — exactly the
+// inconsistent state that issue #10875 is about — and leak a lease until its TTL
+// expires.
+func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, expectedValue string) {
+	if expectedValue == "" {
+		// Normal election without a transfer in progress, nothing to clean up.
+		return
 	}
-	primary := &primaryData{
-		raw:    m.MemberValue(),
-		output: m.ParticipantString(),
-	}
-	revision, err := markExpectedPrimaryFlag(cli, msParam, primary, lease.ID.Load().(clientv3.LeaseID))
+	path := keypath.ExpectedPrimaryPath(msParam)
+	// Read the key (to capture its lease) and delete it in the same conditional txn.
+	resp, err := kv.NewSlowLogTxn(client).
+		If(clientv3.Compare(clientv3.Value(path), "=", expectedValue)).
+		Then(clientv3.OpGet(path), clientv3.OpDelete(path)).
+		Commit()
 	if err != nil {
-		log.Error("mark expected primary error", errs.ZapError(err))
-		if closeErr := lease.Close(); closeErr != nil {
-			log.Warn("failed to revoke expected primary lease", zap.Error(closeErr))
-		}
-		return nil, err
+		log.Warn("failed to delete expected primary flag", zap.String("primary-path", path), errs.ZapError(err))
+		return
 	}
-	// Keep alive the current expected primary leadership to indicate that the server is still alive.
-	// Watch the expected primary path to check whether the expected primary has changed by `{service}/primary/transfer` API.
-	expectedPrimary := election.NewLeadership(cli, keypath.ExpectedPrimaryPath(msParam), service)
-	expectedPrimary.SetLease(lease)
-	expectedPrimary.Keep(ctx)
-
-	go watchExpectedPrimary(ctx, expectedPrimary, revision+1, exitPrimary)
-	return lease, nil
-}
-
-// watchExpectedPrimary watches `{service}/primary/transfer` API whether changed the expected primary.
-func watchExpectedPrimary(ctx context.Context,
-	expectedPrimary *election.Leadership, revision int64, exitPrimary chan<- struct{}) {
-	expectedPrimary.SetPrimaryWatch(true)
-	// ONLY exited watch by the following conditions:
-	// - changed by `{service}/primary/transfer` API.
-	// - primary lease expired.
-	expectedPrimary.Watch(ctx, revision)
-	expectedPrimary.Reset()
-	defer log.Info("primary exit the primary watch loop")
-	select {
-	case <-ctx.Done():
+	if !resp.Succeeded {
+		log.Info("skip deleting expected primary flag, it has been changed or already gone",
+			zap.String("primary-path", path), zap.String("expected-value", expectedValue))
 		return
-	case exitPrimary <- struct{}{}:
+	}
+	log.Info("delete expected primary flag", zap.String("primary-path", path))
+	// Revoke the lease the flag was bound to, if any, so no lease is leaked.
+	kvs := resp.Responses[0].GetResponseRange().GetKvs()
+	if len(kvs) == 0 || kvs[0].Lease == 0 {
 		return
+	}
+	leaseID := clientv3.LeaseID(kvs[0].Lease)
+	// Bound the revoke: this runs on the campaign path before the primary is promoted
+	// to serving, and the cleanup is best-effort, so a hung RPC must not block serving.
+	ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	if _, err := client.Revoke(ctx, leaseID); err != nil {
+		log.Warn("failed to revoke expected primary flag lease",
+			zap.String("primary-path", path), zap.Int64("lease-id", int64(leaseID)), errs.ZapError(err))
 	}
 }
 
-// TransferPrimary transfers the primary of the specified service.
-// keyspaceGroupID is optional, only used for TSO service.
-func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
+// ExpectedPrimaryCmp returns an etcd comparison asserting the expected primary flag
+// still equals `expectedValue`. The caller appends it to the campaign transaction so
+// that winning the leader key and "I am still the expected primary" become atomic:
+// if a concurrent transfer rewrote the flag after it was read, the campaign txn
+// fails and this member does not become primary. It returns nil when expectedValue
+// is empty (normal election, no transfer in progress), in which case the campaign
+// must not be constrained.
+func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) *clientv3.Cmp {
+	if expectedValue == "" {
+		return nil
+	}
+	cmp := clientv3.Compare(clientv3.Value(keypath.ExpectedPrimaryPath(msParam)), "=", expectedValue)
+	return &cmp
+}
+
+// TransferPrimary transfers the primary of the specified service to a target member.
+//
+// It writes the expected primary flag pointing at the target (with a TTL of a few
+// leader leases, see constant.TransferPrimaryLeaseMultiplier) and then resigns the
+// current primary by revoking its leader lease, so the re-election picks up the
+// target. The flag write
+// happens before the resignation on purpose: it guarantees the affinity guard is in
+// place before the leader key is released, so no other member can win the gap.
+//
+// keyspaceGroupID is optional, only used for TSO service. p must be the participant
+// of the current serving primary (the API ensures the request runs on the primary).
+func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName,
 	oldPrimary, newPrimary string, keyspaceGroupID uint32, tsoMembersMap map[string]bool) error {
-	if lease == nil {
-		return errors.New("current lease is nil, please check leadership")
+	if p == nil || !p.IsServing() {
+		return errors.New("current member is not serving as primary, please check leadership")
 	}
 	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
 	entries, err := discovery.GetMSMembers(serviceName, client)
 	if err != nil {
 		return err
+	}
+
+	if newPrimary != "" {
+		for _, member := range entries {
+			if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+				continue
+			}
+			if isSamePrimary(member, newPrimary) && isSamePrimary(member, oldPrimary) {
+				log.Info("skip transferring primary to itself",
+					zap.String("service", serviceName),
+					zap.String("primary", oldPrimary))
+				return nil
+			}
+		}
 	}
 
 	// Do nothing when I am the only member of cluster.
@@ -157,7 +189,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
 			continue
 		}
-		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
+		if (newPrimary == "" && !isSamePrimary(member, oldPrimary)) || isSamePrimary(member, newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
 	}
@@ -167,15 +199,18 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 
 	nextPrimaryID := rand.IntN(len(primaryIDs))
 
-	// update expected primary flag
-	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLease)
+	// Grant a fresh lease for the expected primary flag, sized to a few leader
+	// leases so it outlives the re-election window. It is not kept alive by anyone:
+	// the target deletes the flag once it wins, otherwise the TTL expires and the
+	// cluster falls back to a free election.
+	leaderLease := p.GetLeadership().GetLease().GetTimeoutSeconds()
+	if leaderLease <= 0 {
+		leaderLease = constant.DefaultLease
+	}
+	expectedLease := constant.TransferPrimaryLeaseMultiplier * leaderLease
+	grantResp, err := client.Grant(client.Ctx(), expectedLease)
 	if err != nil {
 		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
-	}
-
-	// revoke current primary's lease to ensure keepalive goroutine of primary exits.
-	if err := lease.Close(); err != nil {
-		return errors.Errorf("failed to revoke current primary's lease: %v", err)
 	}
 
 	msParam := &keypath.MsParam{
@@ -186,9 +221,19 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		raw:    primaryIDs[nextPrimaryID],
 		output: primaryIDs[nextPrimaryID],
 	}
-	_, err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID)
-	if err != nil {
+	// Mark the expected primary first so the affinity guard is in place before the
+	// current primary releases the leader key below.
+	if err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID); err != nil {
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}
+
+	// Resign the current primary by revoking its leader lease. This makes the local
+	// IsServing() flip to false immediately, so the primary election loop steps down
+	// and re-campaigns, where the affinity guard routes the leadership to the target.
+	p.Resign()
 	return nil
+}
+
+func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
+	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
 }

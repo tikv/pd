@@ -47,6 +47,7 @@ type Storage interface {
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
 	endpoint.KeyspaceGroupStorage
+	endpoint.MetaServiceGroupStorage
 	endpoint.MaintenanceStorage
 	endpoint.AffinityStorage
 }

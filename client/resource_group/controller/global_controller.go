@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	goerrors "errors"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +26,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -322,26 +325,28 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
-		if err != nil {
-			log.Warn("load resource group revision failed", zap.Error(err))
-		}
 		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
 		cfgRevision := resp.GetHeader().GetRevision()
-		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
+
+		failpoint.Inject("staleRevision", func(val failpoint.Value) {
+			if rev, ok := val.(int); ok {
+				cfgRevision = int64(rev)
+			}
+		})
+		var watchMetaChannel, watchConfigChannel chan *metastorage.WatchResponse
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
 		}
 
-		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 		if err != nil {
 			log.Warn("watch resource group config failed", zap.Error(err))
 		}
@@ -363,7 +368,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
-					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -373,7 +378,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 				}
 				if watchConfigChannel == nil {
-					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision))
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -416,8 +421,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
-					metaRevision = item.Kv.ModRevision
+				for _, item := range resp.Events {
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
@@ -467,7 +471,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					})
 					continue
 				}
-				for _, item := range resp {
+				if resp.CompactRevision > cfgRevision {
+					cfgRevision = resp.CompactRevision
+				}
+				for _, item := range resp.Events {
 					cfgRevision = item.Kv.ModRevision
 					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
@@ -527,6 +534,61 @@ func NewResourceGroupNotExistErr(name string) error {
 	return &errs.ErrClientGetResourceGroup{ResourceGroupName: name, Cause: "resource group does not exist"}
 }
 
+func unwrapGetResourceGroupError(err error) error {
+	for err != nil {
+		var groupErr *errs.ErrClientGetResourceGroup
+		if !goerrors.As(err, &groupErr) || groupErr.Err == nil || groupErr.Err == err {
+			return err
+		}
+		err = groupErr.Err
+	}
+	return nil
+}
+
+func normalizeGetResourceGroupError(err error) error {
+	switch {
+	case goerrors.Is(err, context.Canceled):
+		return context.Canceled
+	case goerrors.Is(err, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	default:
+		return err
+	}
+}
+
+func isResourceGroupNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "PD:resourcemanager:ErrGroupNotExists") ||
+		strings.Contains(msg, "resource group does not exist")
+}
+
+func (c *ResourceGroupsController) shouldUseDegradedResourceGroup(err error) bool {
+	if c.degradedRUSettings == nil || err == nil {
+		return false
+	}
+	if isResourceGroupNotFoundError(err) {
+		return false
+	}
+	if goerrors.Is(err, context.Canceled) || goerrors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	causeErr := unwrapGetResourceGroupError(err)
+	if errs.IsLeaderChange(causeErr) {
+		return true
+	}
+	switch status.Code(causeErr) {
+	case codes.Canceled:
+		return false
+	case codes.Unavailable, codes.DeadlineExceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
 	group := &rmpb.ResourceGroup{
 		Name:       resourceGroupName,
@@ -555,11 +617,11 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if c.degradedRUSettings != nil {
+		if c.shouldUseDegradedResourceGroup(err) {
 			isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
 		} else {
-			return nil, err
+			return nil, normalizeGetResourceGroupError(err)
 		}
 	}
 	if group == nil {
@@ -634,6 +696,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				gc.metrics.deletePagingLabels(resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -799,6 +862,27 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 		return nil, err
 	}
 	return gc.getMeta(), nil
+}
+
+// ResourceGroupRuntimeState describes generic local runtime signals derived
+// from token bucket responses.
+type ResourceGroupRuntimeState struct {
+	// HasLimitedBurst is true when the request-unit token bucket has a finite
+	// burst limit instead of unlimited burst.
+	HasLimitedBurst bool
+}
+
+// GetResourceGroupRuntimeState returns the resource group's local runtime
+// state. The second return value is false when the controller has no usable
+// local state for the group.
+func (c *ResourceGroupsController) GetResourceGroupRuntimeState(resourceGroupName string) (ResourceGroupRuntimeState, bool) {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok || gc.tombstone.Load() || !gc.initialRequestCompleted.Load() {
+		return ResourceGroupRuntimeState{}, false
+	}
+	return ResourceGroupRuntimeState{
+		HasLimitedBurst: !gc.burstable.Load(),
+	}, true
 }
 
 // ReportConsumption is used to report ru consumption directly.

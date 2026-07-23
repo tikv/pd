@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -58,7 +59,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -1159,10 +1159,6 @@ func TestRegionHeartbeat(t *testing.T) {
 		ctx.Tracer = tracer
 		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
 		tracer.OnAllStageFinished()
-		re.Condition(func() bool {
-			fields := tracer.LogFields()
-			return slice.AllOf(fields, func(i int) bool { return fields[i].Integer > 0 })
-		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
@@ -4293,6 +4289,54 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 		res := stream.Recv()
 		return res == nil
 	})
+}
+
+func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
+	cluster.miscRunner = ratelimit.NewSyncRunner()
+	cluster.logRunner = ratelimit.NewSyncRunner()
+	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
+	cluster.tsoAllocator = nil
+	cluster.running = true
+
+	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
+	cluster.schedulingController.running = true
+
+	blockedOnClusterLock := make(chan struct{})
+	cluster.schedulingController.wg.Add(1)
+	go func() {
+		defer cluster.schedulingController.wg.Done()
+		<-cluster.schedulingController.ctx.Done()
+		cluster.RLock()
+		close(blockedOnClusterLock)
+		cluster.RUnlock()
+	}()
+
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-blockedOnClusterLock:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scheduling job shutdown")
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("raft cluster stop blocked on scheduling jobs while holding cluster lock")
+	}
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {

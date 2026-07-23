@@ -17,8 +17,10 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
 	"reflect"
 	"sort"
 	"strconv"
@@ -36,6 +38,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -66,6 +69,20 @@ type keyspaceGroupManagerTestSuite struct {
 
 func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceGroupManagerTestSuite))
+}
+
+func TestKeyspaceGroupPrimaryElectionPurposeIncludesGroupID(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal("keyspace group primary election 00000", keyspaceGroupPrimaryElectionPurpose(0))
+	re.Equal("keyspace group primary election 00012", keyspaceGroupPrimaryElectionPurpose(12))
+	re.Equal("keyspace group primary election 12345", keyspaceGroupPrimaryElectionPurpose(12345))
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
@@ -1265,6 +1282,380 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupClearsListLen
 	mfs, err = prometheus.DefaultGatherer.Gather()
 	re.NoError(err)
 	re.False(metricExists(mfs, groupID), "deleteKeyspaceGroup should trigger DeleteKeyspaceListLengthMetric and remove metric")
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestDeleteRequestsUseBackendEndpoints() {
+	testCases := []struct {
+		name     string
+		setup    func(client *http.Client) *KeyspaceGroupManager
+		handler  func(re *require.Assertions, req *http.Request) (*http.Response, error)
+		run      func(re *require.Assertions, kgm *KeyspaceGroupManager)
+		assert   func(re *require.Assertions, kgm *KeyspaceGroupManager)
+		wantURLs []string
+	}{
+		{
+			name: "fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382,http://127.0.0.1:2384",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return nil, errors.New("first endpoint unavailable")
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "status-code-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusInternalServerError,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.Equal(http.StatusOK, resp.StatusCode)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "all-status-codes-fail",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusBadGateway,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusServiceUnavailable,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.Equal(http.StatusServiceUnavailable, resp.StatusCode)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "finish-split",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				kgm := &KeyspaceGroupManager{
+					state:      state{},
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+					metrics: newKeyspaceGroupMetrics(),
+				}
+				kgm.initialize()
+				kgm.kgs[2] = &endpoint.KeyspaceGroup{
+					ID:         2,
+					SplitState: &endpoint.SplitState{SplitSource: 1},
+				}
+				return kgm
+			},
+			handler: func(_ *require.Assertions, _ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       http.NoBody,
+				}, nil
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(kgm.finishSplitKeyspaceGroup(2))
+			},
+			assert: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NotNil(kgm.kgs[2])
+				re.Nil(kgm.kgs[2].SplitState)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/split",
+			},
+		},
+		{
+			name: "finish-split-status-code-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				kgm := &KeyspaceGroupManager{
+					state:      state{},
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+					metrics: newKeyspaceGroupMetrics(),
+				}
+				kgm.initialize()
+				kgm.kgs[2] = &endpoint.KeyspaceGroup{
+					ID:         2,
+					SplitState: &endpoint.SplitState{SplitSource: 1},
+				}
+				return kgm
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/2/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusBadGateway,
+						Body:       http.NoBody,
+					}, nil
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(kgm.finishSplitKeyspaceGroup(2))
+			},
+			assert: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NotNil(kgm.kgs[2])
+				re.Nil(kgm.kgs[2].SplitState)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/2/split",
+			},
+		},
+		{
+			name: "finish-merge",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				kgm := &KeyspaceGroupManager{
+					state:      state{},
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+					metrics: newKeyspaceGroupMetrics(),
+				}
+				kgm.initialize()
+				kgm.kgs[2] = &endpoint.KeyspaceGroup{
+					ID:         2,
+					MergeState: &endpoint.MergeState{MergeList: []uint32{1}},
+				}
+				return kgm
+			},
+			handler: func(_ *require.Assertions, _ *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       http.NoBody,
+				}, nil
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(kgm.finishMergeKeyspaceGroup(2))
+			},
+			assert: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NotNil(kgm.kgs[2])
+				re.Nil(kgm.kgs[2].MergeState)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/2/merge",
+			},
+		},
+		{
+			name: "invalid-endpoints",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "://bad,ftp://127.0.0.1:2379",
+					},
+				}
+			},
+			handler: func(_ *require.Assertions, _ *http.Request) (*http.Response, error) {
+				return nil, nil
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				if resp != nil {
+					re.NoError(resp.Body.Close())
+				}
+				re.Error(err)
+				re.ErrorIs(err, errs.ErrURLParse)
+				re.Contains(err.Error(), "ftp://127.0.0.1:2379")
+				re.Contains(err.Error(), `scheme="ftp"`)
+			},
+			wantURLs: []string{},
+		},
+		{
+			name: "timeout-fallback",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379,http://127.0.0.1:2382",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				requestPath := keyspaceGroupsAPIPrefix + "/1/split"
+				switch req.URL.String() {
+				case "http://127.0.0.1:2379" + requestPath:
+					<-req.Context().Done()
+					return nil, req.Context().Err()
+				case "http://127.0.0.1:2382" + requestPath:
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       http.NoBody,
+					}, nil
+				default:
+					re.FailNow("unexpected request url", req.URL.String())
+					return nil, nil
+				}
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(failpoint.Enable(
+					"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout", "return(50)"))
+				defer func() {
+					re.NoError(failpoint.Disable(
+						"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout"))
+				}()
+
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				re.NoError(err)
+				re.NotNil(resp)
+				re.NoError(resp.Body.Close())
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+				"http://127.0.0.1:2382" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+		{
+			name: "request-timeout",
+			setup: func(client *http.Client) *KeyspaceGroupManager {
+				return &KeyspaceGroupManager{
+					httpClient: client,
+					cfg: &TestServiceConfig{
+						BackendEndpoints: "http://127.0.0.1:2379",
+					},
+				}
+			},
+			handler: func(re *require.Assertions, req *http.Request) (*http.Response, error) {
+				re.NotZero(req.Context())
+				_, ok := req.Context().Deadline()
+				re.True(ok)
+				<-req.Context().Done()
+				return nil, req.Context().Err()
+			},
+			run: func(re *require.Assertions, kgm *KeyspaceGroupManager) {
+				re.NoError(failpoint.Enable(
+					"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout", "return(50)"))
+				defer func() {
+					re.NoError(failpoint.Disable(
+						"github.com/tikv/pd/pkg/tso/finishKeyspaceGroupPerEndpointTimeout"))
+				}()
+
+				start := time.Now()
+				resp, err := kgm.sendDeleteRequestToKeyspaceGroupsAPI("/1/split")
+				if resp != nil {
+					re.NoError(resp.Body.Close())
+				}
+				elapsed := time.Since(start)
+				re.Error(err)
+				re.ErrorIs(err, context.DeadlineExceeded)
+				re.Less(elapsed, time.Second)
+			},
+			wantURLs: []string{
+				"http://127.0.0.1:2379" + keyspaceGroupsAPIPrefix + "/1/split",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		suite.Run(tc.name, func() {
+			re := suite.Require()
+			requestedURLs := make([]string, 0)
+			client := &http.Client{
+				Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					requestedURLs = append(requestedURLs, req.URL.String())
+					return tc.handler(re, req)
+				}),
+			}
+			kgm := tc.setup(client)
+
+			tc.run(re, kgm)
+			re.Equal(tc.wantURLs, requestedURLs)
+			if tc.assert != nil {
+				tc.assert(re, kgm)
+			}
+		})
+	}
 }
 
 // Register TSO server.

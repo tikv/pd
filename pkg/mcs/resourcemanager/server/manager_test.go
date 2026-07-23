@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestMain(m *testing.M) {
@@ -320,6 +321,50 @@ func TestManagerControllerConfigSnapshots(t *testing.T) {
 	})
 }
 
+func TestPushMetricsConfig(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(nil))
+	re.Equal(pushMetricsConfig{}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+	}))
+	re.Equal(pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	}, getPushMetricsConfig(&ControllerConfig{
+		PushMetricsAddress: "127.0.0.1:9091",
+		PushMetricsInterval: typeutil.Duration{
+			Duration: time.Second,
+		},
+	}))
+}
+
+func TestSyncPushMetricsTicker(t *testing.T) {
+	re := require.New(t)
+
+	current := pushMetricsConfig{}
+	ticker := current.syncPushMetricsTicker(pushMetricsConfig{
+		address:  "127.0.0.1:9091",
+		interval: time.Second,
+	}, nil)
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+	re.NotNil(ticker)
+	re.NotNil(ticker.C)
+	re.NotEqual(pushMetricsConfig{address: "127.0.0.1:9090", interval: time.Second}, current)
+
+	sameTicker := current.syncPushMetricsTicker(current, ticker)
+	re.Same(ticker, sameTicker)
+	re.Equal(pushMetricsConfig{address: "127.0.0.1:9091", interval: time.Second}, current)
+
+	ticker = current.syncPushMetricsTicker(pushMetricsConfig{}, ticker)
+	re.Nil(ticker)
+	re.Equal(pushMetricsConfig{}, current)
+}
+
 func TestInitManager(t *testing.T) {
 	re := require.New(t)
 	m := prepareManager()
@@ -429,6 +474,28 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+func TestDispatchConsumptionIncludesOnlyConsumption(t *testing.T) {
+	re := require.New(t)
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	req := &rmpb.TokenBucketRequest{
+		ResourceGroupName: "test_group",
+		ConsumptionSinceLastRequest: &rmpb.Consumption{
+			RRU:        12,
+			WRU:        8,
+			WriteBytes: 1024,
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 42},
+	}
+
+	err := m.dispatchConsumption(req)
+	re.NoError(err)
+
+	item := <-m.consumptionDispatcher
+	re.Equal(uint32(42), item.keyspaceID)
+	re.Equal(req.GetResourceGroupName(), item.resourceGroupName)
+	re.Equal(req.GetConsumptionSinceLastRequest(), item.Consumption)
 }
 
 // Put a keyspace meta into the storage.
