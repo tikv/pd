@@ -1145,6 +1145,52 @@ func TestAcquireTokensFallbackToTimer(t *testing.T) {
 	re.GreaterOrEqual(waitDuration, gc.mainCfg.WaitRetryInterval*time.Duration(gc.mainCfg.WaitRetryTimes))
 }
 
+func TestAcquireTokensAcceptedReservationIsPulledForwardByRefund(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.mainCfg.LTBMaxWaitDuration = 2 * time.Second
+	gc.mainCfg.WaitRetryTimes = 1
+	limiter := gc.run.requestUnitTokens.limiter
+	now := time.Now()
+	limiter.Reconfigure(now, tokenBucketReconfigureArgs{newBurst: -1})
+	limiter.Reconfigure(now, tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1000,
+		newBurst:    0,
+	})
+
+	const fp = "github.com/tikv/pd/client/resource_group/controller/waitReservationsBeforeSelect"
+	reached := make(chan struct{}, 1)
+	re.NoError(failpoint.EnableCall(fp, func() {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		var waitDuration time.Duration
+		_, err := gc.acquireTokens(context.Background(), &rmpb.Consumption{RRU: 1000}, &waitDuration, false)
+		resultCh <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("acquireTokens did not start waiting for its accepted reservation")
+	}
+
+	limiter.RefundTokens(time.Now(), 1000)
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("refund did not pull forward the accepted acquireTokens reservation")
+	}
+}
+
 // TestAcquireTokensCancelKeepsLastMonotonic checks that a stale CancelAt does
 // not rewind lim.last, exercised through two concurrent acquireTokens calls
 // pinned by the waitReservationsBeforeSelect failpoint: A reserves

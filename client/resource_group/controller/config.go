@@ -37,7 +37,8 @@ const (
 	// targetPeriod indicate how long it is expected to cost token when acquiring token.
 	// According to the resource control Grafana panel and Prometheus sampling period, the period should be the factor of 15.
 	defaultTargetPeriod = 5 * time.Second
-	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	// defaultMaxWaitDuration is the maximum predicted wait allowed at initial
+	// token reservation. Accepted reservations may wait longer after reflow.
 	defaultMaxWaitDuration = 30 * time.Second
 	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
 	defaultLTBTokenRPCMaxDelay = 1 * time.Second
@@ -90,7 +91,9 @@ type BaseConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
-	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
+	// LTBMaxWaitDuration is the maximum predicted wait accepted when initially
+	// reserving from the local token bucket. Accepted reservations may wait
+	// longer after reflow; callers provide a context deadline for a hard bound.
 	LTBMaxWaitDuration Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
 	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.

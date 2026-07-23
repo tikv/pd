@@ -28,6 +28,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/client/errs"
 )
 
 const (
@@ -261,6 +265,19 @@ func TestRefundTokens(t *testing.T) {
 	checkTokens(re, limUnlimited, t0, 100)
 }
 
+func TestRefundTokensWakesAcquireRetry(t *testing.T) {
+	lim := NewLimiter(t0, 0, 0, 100, make(chan notifyMsg, 1))
+	reconfiguredCh := lim.GetReconfiguredCh()
+
+	lim.RefundTokens(t0, 50)
+
+	select {
+	case <-reconfiguredCh:
+	default:
+		t.Fatal("RefundTokens should wake acquireTokens retry loops after reflowing accepted reservations")
+	}
+}
+
 func TestNotify(t *testing.T) {
 	nc := make(chan notifyMsg, 1)
 	lim := NewLimiter(t0, 1, 0, 0, nc)
@@ -421,6 +438,626 @@ func TestReconfiguredChWakesMultipleWaiters(t *testing.T) {
 	wg.Wait()
 
 	require.Len(t, wokenUp, numWaiters)
+}
+
+func TestReservationDelayRemainsFixedAfterLimiterMutations(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.Reserve(context.Background(), InfDuration, t0, 500)
+
+	re.True(reservation.Reserved())
+	re.Equal(5*time.Second, reservation.DelayFrom(t0))
+
+	lim.RemoveTokens(t1, 500)
+	re.Equal(4*time.Second, reservation.DelayFrom(t1))
+
+	lim.RefundTokens(t1, 1000)
+	re.Equal(4*time.Second, reservation.DelayFrom(t1))
+
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{
+		newTokens:   1000,
+		newFillRate: 1000,
+	})
+	re.Equal(4*time.Second, reservation.DelayFrom(t1))
+}
+
+func TestWaitNRefundPullsForwardAcceptedReservation(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+
+	const fp = "github.com/tikv/pd/client/resource_group/controller/waitReservationsBeforeSelect"
+	reached := make(chan struct{}, 1)
+	re.NoError(failpoint.EnableCall(fp, func() {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := lim.waitN(ctx, time.Second, now, 1000)
+		resultCh <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("waitN did not start waiting for the accepted reservation")
+	}
+
+	lim.RefundTokens(time.Now(), 1000)
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("refund did not pull forward and wake the accepted reservation")
+	}
+}
+
+func TestQueuedReservationsWithFixedFillRateAreSequenced(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 5000, 0, 0, make(chan notifyMsg, 1))
+
+	const (
+		requestRU  = 1000
+		requestCnt = 10
+	)
+	expectedInterval := time.Duration(float64(time.Second) * requestRU / 5000)
+	var previous time.Time
+	for i := range requestCnt {
+		reservation := lim.reserveQueued(context.Background(), InfDuration, t0, requestRU)
+		re.Equal(queuedReservationWaiting, reservation.state)
+		expected := t0.Add(time.Duration(i+1) * expectedInterval)
+		re.Equal(expected, reservation.timeToAct)
+		if i > 0 {
+			re.False(reservation.timeToAct.Before(previous))
+			re.Equal(expectedInterval, reservation.timeToAct.Sub(previous))
+		}
+		previous = reservation.timeToAct
+	}
+}
+
+func TestReconfigureReflowsQueuedReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	oldReservations := make([]*queuedReservation, 3)
+	for i := range oldReservations {
+		oldReservations[i] = lim.reserveQueued(ctx, InfDuration, t0, 1000)
+		re.Equal(queuedReservationWaiting, oldReservations[i].state)
+	}
+	re.Equal(t0.Add(10*time.Second), oldReservations[0].timeToAct)
+	re.Equal(t0.Add(20*time.Second), oldReservations[1].timeToAct)
+	re.Equal(t0.Add(30*time.Second), oldReservations[2].timeToAct)
+
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{
+		newTokens:   5000,
+		newFillRate: 1000,
+	})
+
+	for i := range oldReservations {
+		re.Zero(queuedDelayFrom(oldReservations[i], t1),
+			"existing sleeping reservations should be reflowed after Reconfigure")
+	}
+
+	newReservation := lim.reserveQueued(ctx, InfDuration, t1, 1000)
+	re.Equal(queuedReservationReady, newReservation.state)
+	re.Equal(t1, newReservation.timeToAct)
+	re.False(newReservation.timeToAct.Before(oldReservations[0].timeToAct),
+		"new reservations must not slip ahead of old sleepers after Reconfigure")
+}
+
+func TestReconfigureWakesQueuedReservationWaiter(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	reservation := lim.reserveQueued(ctx, time.Second, now, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := reservation.wait(ctx)
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	lim.Reconfigure(now.Add(20*time.Millisecond), tokenBucketReconfigureArgs{
+		newTokens:   1000,
+		newFillRate: 1000,
+	})
+
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("reconfigure should reflow and wake the existing future reservation")
+	}
+}
+
+func TestReconfigureToUnlimitedWakesQueuedReservationWaiter(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	reservation := lim.reserveQueued(ctx, 2*time.Second, now, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := reservation.wait(ctx)
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	lim.Reconfigure(now.Add(20*time.Millisecond), tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 0,
+		newBurst:    -1,
+	})
+
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("unlimited reconfigure should wake the existing future reservation")
+	}
+}
+
+func TestReconfigureToUnlimitedResetsLedgerAfterDueReservation(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), InfDuration, t0, 100)
+
+	lim.Reconfigure(t2, tokenBucketReconfigureArgs{
+		newTokens: 50,
+		newBurst:  -1,
+	})
+
+	re.Equal(queuedReservationReady, reservation.state)
+	re.InDelta(50, lim.tokens, 1e-9)
+}
+
+func TestQueuedReservationWaitWakesWhenCanceled(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	reservation := lim.reserveQueued(ctx, 2*time.Second, now, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := reservation.wait(ctx)
+		resultCh <- err
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	reservation.cancelAt(now.Add(20 * time.Millisecond))
+
+	select {
+	case err := <-resultCh:
+		re.ErrorIs(err, errQueuedReservationCanceled)
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("canceling the queued reservation should wake its waiter")
+	}
+}
+
+func TestReconfigureKeepsQueuedReservationsWithinNewFillRateEnvelope(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 5000, 0, 0, make(chan notifyMsg, 1))
+
+	const (
+		pageRU           = 256
+		reservationCount = 20
+	)
+	ctx := context.Background()
+	oldReservations := make([]*queuedReservation, reservationCount)
+	for i := range oldReservations {
+		oldReservations[i] = lim.reserveQueued(ctx, InfDuration, t0, pageRU)
+		re.Equal(queuedReservationWaiting, oldReservations[i].state)
+	}
+
+	reconfigureAt := t0.Add(50 * time.Millisecond)
+	lim.Reconfigure(reconfigureAt, tokenBucketReconfigureArgs{
+		newTokens:   0,
+		newFillRate: 1000,
+		newBurst:    0,
+	})
+
+	reflowedRU := reservedRUInWindow(oldReservations, reconfigureAt, reconfigureAt.Add(time.Second))
+
+	lim.mu.Lock()
+	fillRateAfterReconfigure := lim.fillRate
+	lim.mu.Unlock()
+	re.LessOrEqual(reflowedRU, float64(fillRateAfterReconfigure)+pageRU,
+		"reflow keeps old reservations close to the post-reconfigure envelope")
+}
+
+func TestRemoveTokensReflowsQueuedReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	a := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	b := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	re.Equal(5*time.Second, queuedDelayFrom(a, t0))
+	re.Equal(10*time.Second, queuedDelayFrom(b, t0))
+
+	lim.RemoveTokens(t1, 500)
+	re.Equal(9*time.Second, queuedDelayFrom(a, t1))
+	re.Equal(14*time.Second, queuedDelayFrom(b, t1))
+}
+
+func TestAcceptedQueuedReservationCanMoveBeyondInitialWaitLimit(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), 5*time.Second, t0, 500)
+
+	re.Equal(queuedReservationWaiting, reservation.state)
+	re.Equal(t5, reservation.timeToAct)
+
+	lim.RemoveTokens(t1, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+	re.Equal(t0.Add(15*time.Second), reservation.timeToAct)
+}
+
+func TestMutationDoesNotRevokeDueQueuedReservation(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 100, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), InfDuration, t0, 1000)
+
+	re.Equal(queuedReservationWaiting, reservation.state)
+	re.Equal(t0.Add(10*time.Second), reservation.timeToAct)
+
+	lim.RemoveTokens(t0.Add(20*time.Second), 100)
+	re.Equal(queuedReservationReady, reservation.state)
+	re.Equal(t0.Add(10*time.Second), reservation.timeToAct)
+}
+
+func TestRefundTokensReflowsQueuedReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	a := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	b := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	c := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	re.Equal(5*time.Second, queuedDelayFrom(a, t0))
+	re.Equal(10*time.Second, queuedDelayFrom(b, t0))
+	re.Equal(15*time.Second, queuedDelayFrom(c, t0))
+
+	lim.RefundTokens(t1, 600)
+	re.Zero(queuedDelayFrom(a, t1))
+	re.Equal(3*time.Second, queuedDelayFrom(b, t1))
+	re.Equal(8*time.Second, queuedDelayFrom(c, t1))
+	re.False(b.timeToAct.After(c.timeToAct), "refund reflow must preserve FIFO order")
+
+	lim.RefundTokens(t1, 300)
+	re.Zero(queuedDelayFrom(b, t1))
+	re.Equal(5*time.Second, queuedDelayFrom(c, t1))
+
+	lim.RefundTokens(t1, 1000)
+	re.Zero(queuedDelayFrom(c, t1))
+}
+
+func TestRefundReflowPreservesCommittedCreditAboveBurst(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 100, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+	a := lim.reserveQueued(ctx, InfDuration, t0, 100)
+	b := lim.reserveQueued(ctx, InfDuration, t0, 100)
+
+	lim.RefundTokens(t0, 1000)
+	re.Zero(queuedDelayFrom(a, t0))
+	re.Zero(queuedDelayFrom(b, t0))
+	re.InDelta(800, lim.tokens, 1e-9)
+
+	c := lim.reserveQueued(ctx, InfDuration, t0, 100)
+	re.Equal(queuedReservationReady, a.state)
+	re.Equal(queuedReservationReady, b.state)
+	re.Equal(t0, c.timeToAct)
+	re.InDelta(0, lim.tokens, 1e-9,
+		"new admission clamps unused credit to burst after committed reservations become ready")
+}
+
+func TestRefundDoesNotDiscardAccruedCreditForLargeQueuedReservation(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 100, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), InfDuration, t0, 500)
+	re.Equal(t5, reservation.timeToAct)
+
+	lim.RefundTokens(t2, 50)
+	re.Equal(t0.Add(4500*time.Millisecond), reservation.timeToAct)
+	re.InDelta(-250, lim.tokens, 1e-9)
+}
+
+func TestStaleNowReflowUsesLimiterLogicalClock(t *testing.T) {
+	resetTime()
+	tests := []struct {
+		name      string
+		mutate    func(lim *Limiter, first *queuedReservation, staleNow time.Time)
+		wantFirst time.Time
+		wantLast  time.Time
+	}{
+		{
+			name: "remove tokens",
+			mutate: func(lim *Limiter, _ *queuedReservation, staleNow time.Time) {
+				lim.RemoveTokens(staleNow, 100)
+			},
+			wantFirst: t6,
+			wantLast:  t0.Add(11 * time.Second),
+		},
+		{
+			name: "refund tokens",
+			mutate: func(lim *Limiter, _ *queuedReservation, staleNow time.Time) {
+				lim.RefundTokens(staleNow, 100)
+			},
+			wantFirst: t4,
+			wantLast:  t0.Add(9 * time.Second),
+		},
+		{
+			name: "reconfigure",
+			mutate: func(lim *Limiter, _ *queuedReservation, staleNow time.Time) {
+				lim.Reconfigure(staleNow, tokenBucketReconfigureArgs{
+					newTokens:   100,
+					newFillRate: 100,
+				})
+			},
+			wantFirst: t4,
+			wantLast:  t0.Add(9 * time.Second),
+		},
+		{
+			name: "cancel",
+			mutate: func(_ *Limiter, first *queuedReservation, staleNow time.Time) {
+				first.cancelAt(staleNow)
+			},
+			wantLast: t5,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			re := require.New(t)
+			lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+			first := lim.reserveQueued(context.Background(), InfDuration, t0, 500)
+			last := lim.reserveQueued(context.Background(), InfDuration, t0, 500)
+
+			lim.RemoveTokens(t2, 0)
+			tt.mutate(lim, first, t1)
+
+			re.Equal(t2, lim.last)
+			if !tt.wantFirst.IsZero() {
+				re.Equal(tt.wantFirst, first.timeToAct)
+			}
+			re.Equal(tt.wantLast, last.timeToAct)
+		})
+	}
+}
+
+func TestQueuedReservationUsesLimiterLogicalClockForStaleNow(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	lim.RemoveTokens(t2, 200)
+
+	reservation := lim.reserveQueued(context.Background(), InfDuration, t1, 100)
+	re.Equal(t2, lim.last)
+	re.Equal(t0.Add(3*time.Second), reservation.timeToAct)
+}
+
+func TestRejectedQueuedReservationCleanupAdvancesLogicalClock(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	first := lim.reserveQueued(context.Background(), InfDuration, t0, 500)
+	last := lim.reserveQueued(context.Background(), InfDuration, t0, 1500)
+
+	rejected := lim.reserveQueued(context.Background(), 0, t0.Add(10*time.Second), 2000)
+	re.Equal(queuedReservationRejected, rejected.state)
+	re.Equal(queuedReservationReady, first.state)
+	re.Equal(t0.Add(10*time.Second), lim.last)
+
+	lim.Reconfigure(t1, tokenBucketReconfigureArgs{
+		newFillRate: 200,
+		newBurst:    0,
+	})
+	re.Equal(t0.Add(10*time.Second), lim.last)
+	re.Equal(t0.Add(15*time.Second), last.timeToAct)
+}
+
+func TestQueuedReservationAdmissionUsesShorterContextDeadline(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(100*time.Millisecond))
+	defer cancel()
+
+	reservation := lim.reserveQueued(ctx, time.Second, now, 500)
+	re.Equal(queuedReservationRejected, reservation.state)
+	delay, err := reservation.wait(ctx)
+	re.Equal(500*time.Millisecond, delay)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+}
+
+func TestCancelAtReflowsRemainingQueuedReservations(t *testing.T) {
+	re := require.New(t)
+	resetTime()
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+
+	a := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	b := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	c := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	re.Equal(5*time.Second, queuedDelayFrom(a, t0))
+	re.Equal(10*time.Second, queuedDelayFrom(b, t0))
+	re.Equal(15*time.Second, queuedDelayFrom(c, t0))
+
+	a.cancelAt(t1)
+	re.Equal(4*time.Second, queuedDelayFrom(b, t1))
+	re.Equal(9*time.Second, queuedDelayFrom(c, t1))
+	tokensAfterFirstCancel := lim.tokens
+	a.cancelAt(t1)
+	re.Equal(tokensAfterFirstCancel, lim.tokens, "cancelAt must not refund the same reservation twice")
+}
+
+func TestCancelAtDoesNotCancelOverdueQueuedReservation(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), InfDuration, t0, 100)
+	re.Equal(t1, reservation.timeToAct)
+
+	canceled := reservation.cancelAt(t2)
+	re.False(canceled)
+	re.Equal(queuedReservationReady, reservation.state)
+	re.Equal(t2, lim.last)
+	re.InDelta(100, lim.tokens, 1e-9)
+}
+
+func TestCancelAtUnlinksMiddleAndTailQueuedReservations(t *testing.T) {
+	re := require.New(t)
+	lim := NewLimiter(t0, 100, 0, 0, make(chan notifyMsg, 1))
+	ctx := context.Background()
+	a := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	b := lim.reserveQueued(ctx, InfDuration, t0, 500)
+	c := lim.reserveQueued(ctx, InfDuration, t0, 500)
+
+	b.cancelAt(t1)
+	re.Equal(4*time.Second, queuedDelayFrom(a, t1))
+	re.Equal(9*time.Second, queuedDelayFrom(c, t1))
+
+	c.cancelAt(t1)
+	d := lim.reserveQueued(ctx, InfDuration, t1, 500)
+	re.Equal(9*time.Second, queuedDelayFrom(d, t1))
+}
+
+func TestWaitReservationsCancelHandlesNilReservation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lim := NewLimiter(t0, 1, 0, 0, make(chan notifyMsg, 1))
+	failed := lim.Reserve(ctx, InfDuration, t0, 1)
+
+	delay, err := WaitReservations(context.Background(), t0, []*Reservation{nil, failed})
+	re.Zero(delay)
+	re.ErrorIs(err, context.Canceled)
+}
+
+func TestQueuedReservationWaitFailpointRunsOnceAcrossReflow(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), 2*time.Second, now, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+
+	const fp = "github.com/tikv/pd/client/resource_group/controller/waitReservationsBeforeSelect"
+	reached := make(chan struct{}, 1)
+	var calls atomic.Int32
+	re.NoError(failpoint.EnableCall(fp, func() {
+		if calls.Add(1) == 1 {
+			reached <- struct{}{}
+		}
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := reservation.wait(ctx)
+		resultCh <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("queued reservation wait did not reach the pre-select hook")
+	}
+
+	lim.RefundTokens(now.Add(10*time.Millisecond), 100)
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-resultCh:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("queued reservation wait did not exit after cancellation")
+	}
+	re.Equal(int32(1), calls.Load(), "the synchronization failpoint must remain a one-shot hook")
+}
+
+func TestQueuedReservationWaitReturnsSuccessWhenReadyBeatsContextCancel(t *testing.T) {
+	re := require.New(t)
+	now := time.Now()
+	lim := NewLimiter(now, 1000, 0, 0, make(chan notifyMsg, 1))
+	reservation := lim.reserveQueued(context.Background(), 2*time.Second, now, 1000)
+	re.Equal(queuedReservationWaiting, reservation.state)
+
+	const fp = "github.com/tikv/pd/client/resource_group/controller/waitReservationsBeforeSelect"
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall(fp, func() {
+		close(reached)
+		<-release
+	}))
+	defer func() { re.NoError(failpoint.Disable(fp)) }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := reservation.wait(ctx)
+		resultCh <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("queued reservation wait did not reach the pre-select hook")
+	}
+
+	lim.mu.Lock()
+	lim.removeQueuedReservationLocked(reservation)
+	reservation.state = queuedReservationReady
+	lim.mu.Unlock()
+	cancel()
+	close(release)
+
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("queued reservation wait did not resolve the ready/cancel race")
+	}
+}
+
+func queuedDelayFrom(reservation *queuedReservation, now time.Time) time.Duration {
+	delay := reservation.timeToAct.Sub(now)
+	if delay < 0 {
+		return 0
+	}
+	return delay
+}
+
+func reservedRUInWindow(reservations []*queuedReservation, start, end time.Time) float64 {
+	var total float64
+	for _, reservation := range reservations {
+		if !reservation.timeToAct.Before(start) && reservation.timeToAct.Before(end) {
+			total += reservation.tokens
+		}
+	}
+	return total
 }
 
 const testCaseRunTime = 4 * time.Second

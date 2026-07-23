@@ -581,7 +581,7 @@ retryLoop:
 		counter := gc.run.requestUnitTokens
 		reconfiguredCh := counter.limiter.GetReconfiguredCh()
 		now := time.Now()
-		var res *Reservation
+		d, err = 0, nil
 		if v := getRUValueFromConsumption(delta); v > 0 {
 			// record the consume token histogram if enable controller debug mode.
 			if enableControllerTraceLog.Load() {
@@ -592,9 +592,9 @@ retryLoop:
 				counter.limiter.RemoveTokens(now, v)
 				break retryLoop
 			}
-			res = counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v)
+			d, err = counter.limiter.waitN(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v)
 		}
-		if d, err = WaitReservations(ctx, now, []*Reservation{res}); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
+		if err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 			break retryLoop
 		}
 		gc.metrics.requestRetryCounter.Inc()

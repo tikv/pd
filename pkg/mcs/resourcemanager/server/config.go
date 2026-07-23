@@ -57,7 +57,8 @@ const (
 	// Because the resource manager has not been deployed in microservice mode,
 	// do not enable this function.
 	defaultDegradedModeWaitDuration = time.Second * 0
-	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	// defaultMaxWaitDuration is the maximum predicted wait accepted at initial
+	// local token reservation. Accepted reservations may wait longer after reflow.
 	defaultMaxWaitDuration = 30 * time.Second
 	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
 	defaultLTBTokenRPCMaxDelay = 1 * time.Second
@@ -161,7 +162,9 @@ type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration typeutil.Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
-	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
+	// LTBMaxWaitDuration is the maximum predicted wait accepted when initially
+	// reserving from the local token bucket. Accepted reservations may wait
+	// longer after reflow; callers provide a context deadline for a hard bound.
 	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
 	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
