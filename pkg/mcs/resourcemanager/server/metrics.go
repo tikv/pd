@@ -622,6 +622,7 @@ func (t *maxPerSecCostTracker) flushMetrics() {
 	}
 }
 
-func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
+func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) (rmpb.ResourceManager_AcquireTokenBucketsServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
+	return metricsStream, metricsStream.Close
 }

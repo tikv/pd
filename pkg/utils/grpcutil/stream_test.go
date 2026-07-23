@@ -56,7 +56,7 @@ func TestMetricsStream(t *testing.T) {
 
 		var sent []string
 		fake := newFakeStreamWithPeer()
-		s := NewMetricsStream[string, string](
+		s := NewMetricsStreamWithCleanup[string, string](
 			fake,
 			func(m string) error { sent = append(sent, m); return nil },
 			func() (string, error) { return "data", nil },
@@ -78,6 +78,53 @@ func TestMetricsStream(t *testing.T) {
 		re.Len(mfs, 1)
 		re.Equal("test_stream_grpc_stream_send_duration_seconds", mfs[0].GetName())
 		re.Equal(uint64(3), mfs[0].GetMetric()[0].GetHistogram().GetSampleCount())
+
+		s.Close()
+		mfs, err = reg.Gather()
+		re.NoError(err)
+		re.Empty(mfs)
+	})
+
+	t.Run("SharedTargetLifecycle", func(t *testing.T) {
+		re := require.New(t)
+		reg := prometheus.NewRegistry()
+		h := NewGRPCStreamSendDuration("test", "stream")
+		re.NoError(reg.Register(h))
+
+		fake := newFakeStreamWithPeer()
+		first := NewMetricsStreamWithCleanup[string, string](fake, func(string) error { return nil }, nil, h, "my-rpc")
+		second := NewMetricsStreamWithCleanup[string, string](fake, func(string) error { return nil }, nil, h, "my-rpc")
+		re.NoError(first.Send("first"))
+		re.NoError(second.Send("second"))
+
+		first.Close()
+		mfs, err := reg.Gather()
+		re.NoError(err)
+		re.Len(mfs, 1)
+		re.Equal(uint64(2), mfs[0].GetMetric()[0].GetHistogram().GetSampleCount())
+
+		second.Close()
+		second.Close()
+		mfs, err = reg.Gather()
+		re.NoError(err)
+		re.Empty(mfs)
+	})
+
+	t.Run("PersistentMetricLifecycle", func(t *testing.T) {
+		re := require.New(t)
+		reg := prometheus.NewRegistry()
+		h := NewGRPCStreamSendDuration("test", "stream")
+		re.NoError(reg.Register(h))
+
+		fake := newFakeStreamWithPeer()
+		s := NewMetricsStream[string, string](fake, func(string) error { return nil }, nil, h, "my-rpc")
+		re.NoError(s.Send("message"))
+		s.Close()
+
+		mfs, err := reg.Gather()
+		re.NoError(err)
+		re.Len(mfs, 1)
+		re.Equal(uint64(1), mfs[0].GetMetric()[0].GetHistogram().GetSampleCount())
 	})
 
 	t.Run("ErrorPropagation", func(t *testing.T) {

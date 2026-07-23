@@ -104,10 +104,12 @@ func init() {
 	prometheus.MustRegister(regionBucketsReportInterval)
 }
 
-func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartbeatServer) schedulingpb.Scheduling_RegionHeartbeatServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+func newRegionHeartbeatMetricsStream(stream schedulingpb.Scheduling_RegionHeartbeatServer) (schedulingpb.Scheduling_RegionHeartbeatServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-heartbeat")
+	return metricsStream, metricsStream.Close
 }
 
-func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsServer) schedulingpb.Scheduling_RegionBucketsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-buckets")
+func newRegionBucketsMetricsStream(stream schedulingpb.Scheduling_RegionBucketsServer) (schedulingpb.Scheduling_RegionBucketsServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "region-buckets")
+	return metricsStream, metricsStream.Close
 }

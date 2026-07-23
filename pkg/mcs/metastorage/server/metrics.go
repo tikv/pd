@@ -33,6 +33,7 @@ func init() {
 	prometheus.MustRegister(grpcStreamSendDuration)
 }
 
-func newWatchMetricsStream(server meta_storagepb.MetaStorage_WatchServer) meta_storagepb.MetaStorage_WatchServer {
-	return grpcutil.NewMetricsStream[*meta_storagepb.WatchResponse, any](server, server.Send, nil, grpcStreamSendDuration, "watch")
+func newWatchMetricsStream(server meta_storagepb.MetaStorage_WatchServer) (meta_storagepb.MetaStorage_WatchServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup[*meta_storagepb.WatchResponse, any](server, server.Send, nil, grpcStreamSendDuration, "watch")
+	return metricsStream, metricsStream.Close
 }

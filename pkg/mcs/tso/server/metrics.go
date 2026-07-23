@@ -60,6 +60,7 @@ func init() {
 	prometheus.MustRegister(tsoHandleDuration)
 }
 
-func newTsoMetricsStream(stream tsopb.TSO_TsoServer) tsopb.TSO_TsoServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+func newTsoMetricsStream(stream tsopb.TSO_TsoServer) (tsopb.TSO_TsoServer, func()) {
+	metricsStream := grpcutil.NewMetricsStreamWithCleanup(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "tso")
+	return metricsStream, metricsStream.Close
 }

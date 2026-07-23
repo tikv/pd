@@ -487,7 +487,8 @@ func findLeadersInMembers(members []*pdpb.Member, etcdLeaderID uint64, leader *p
 
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
-	stream = newTsoMetricsStream(stream)
+	stream, closeMetrics := newTsoMetricsStream(stream)
+	defer closeMetrics()
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -1252,7 +1253,8 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
-	stream = newRegionHeartbeatMetricsStream(stream)
+	stream, closeMetrics := newRegionHeartbeatMetricsStream(stream)
+	defer closeMetrics()
 	var (
 		server                      = &heartbeatServer{stream: stream}
 		flowRoundDivisor            = core.GetFlowRoundDivisorByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
@@ -1566,7 +1568,8 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 
 // QueryRegion provides a stream processing of the region query.
 func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
-	stream = newQueryRegionMetricsStream(stream)
+	stream, closeMetrics := newQueryRegionMetricsStream(stream)
+	defer closeMetrics()
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -2041,7 +2044,8 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	stream = newSyncRegionsMetricsStream(stream)
+	stream, closeMetrics := newSyncRegionsMetricsStream(stream)
+	defer closeMetrics()
 	if s.IsClosed() || s.cluster == nil {
 		return errs.ErrNotStarted
 	}
@@ -2478,7 +2482,8 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
-	server = newWatchGlobalConfigMetricsStream(server)
+	server, closeMetrics := newWatchGlobalConfigMetricsStream(server)
+	defer closeMetrics()
 	if s.client == nil {
 		return errs.ErrEtcdNotStarted
 	}
