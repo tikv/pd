@@ -89,9 +89,3 @@ func (l List) GetDataByRange(start, end []byte) ([]any, bool) {
 	}
 	return l.segments[i-1].data, true
 }
-
-// HasSplitKey reports whether there is a split point in (start, end).
-func (l List) HasSplitKey(start, end []byte) bool {
-	_, ok := l.GetDataByRange(start, end)
-	return !ok
-}

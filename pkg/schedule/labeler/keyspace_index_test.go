@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
@@ -137,6 +138,129 @@ func TestKeyspaceRuleIndexBoundaries(t *testing.T) {
 	re.Equal(expected, index.GetSplitKeys(nil, nil))
 }
 
+func TestKeyspaceRuleSetUsesSparseChunks(t *testing.T) {
+	re := require.New(t)
+	var set keyspaceRuleSet
+	rules := []*LabelRule{{ID: "low"}, {ID: "next-chunk"}, {ID: "max"}}
+
+	set.set(1, rules[0])
+	re.Len(set.chunks, 1)
+
+	set.set(keyspaceChunkSize, rules[1])
+	re.Len(set.chunks, 2)
+
+	set.set(keyspaceMaxID, rules[2])
+	re.Len(set.chunks, (int(keyspaceMaxID)>>keyspaceChunkBits)+1)
+
+	set.clear(keyspaceMaxID)
+	re.Len(set.chunks, 2)
+	set.clear(keyspaceChunkSize)
+	re.Len(set.chunks, 1)
+	set.clear(1)
+	re.Empty(set.chunks)
+}
+
+func buildLegacyRangeList(rules []*LabelRule) rangelist.List {
+	builder := rangelist.NewBuilder()
+	for _, rule := range rules {
+		for _, keyRange := range rule.GetKeyRanges() {
+			builder.AddItem(keyRange.StartKey, keyRange.EndKey, rule)
+		}
+	}
+	return builder.Build()
+}
+
+func getLegacyRegionLabels(list rangelist.List, region *core.RegionInfo) map[string]string {
+	labels := make(map[string]string)
+	indexes := make(map[string]int)
+	if index, data := list.GetData(region.GetStartKey(), region.GetEndKey()); index != -1 {
+		for _, item := range data {
+			rule := item.(*LabelRule)
+			for _, label := range rule.Labels {
+				if oldIndex, ok := indexes[label.Key]; !ok || oldIndex < rule.Index {
+					labels[label.Key] = label.Value
+					indexes[label.Key] = rule.Index
+				}
+			}
+		}
+	}
+	return labels
+}
+
+func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := NewRegionLabeler(ctx, store, time.Hour)
+	re.NoError(err)
+
+	var rules []*LabelRule
+	for _, id := range []uint32{0, 1, 63, 64, 1023, 1024, keyspaceMaxID} {
+		rule := makeKeyspaceRuleForTest(id, keyspaceRawMode, keyspaceTxnMode)
+		rules = append(rules, rule)
+		re.NoError(regionLabeler.SetLabelRule(rule))
+	}
+	genericRule := &LabelRule{
+		ID:       "generic",
+		Index:    1,
+		Labels:   []RegionLabel{{Key: "generic", Value: "yes"}},
+		RuleType: KeyRange,
+		Data:     MakeKeyRanges("", ""),
+	}
+	rules = append(rules, genericRule)
+	re.NoError(regionLabeler.SetLabelRule(genericRule))
+	overlayStart := keyspaceBoundary(keyspaceTxnMode, 64)
+	overlayEnd := keyspaceBoundary(keyspaceTxnMode, 65)
+	overlayRule := &LabelRule{
+		ID:       "generic-overlay",
+		Index:    2,
+		Labels:   []RegionLabel{{Key: "id", Value: "override"}},
+		RuleType: KeyRange,
+		Data: MakeKeyRanges(
+			hex.EncodeToString(overlayStart[:]),
+			hex.EncodeToString(overlayEnd[:]),
+		),
+	}
+	rules = append(rules, overlayRule)
+	re.NoError(regionLabeler.SetLabelRule(overlayRule))
+
+	legacy := buildLegacyRangeList(rules)
+	var regions []*core.RegionInfo
+	for _, id := range []uint32{0, 1, 42, 63, 64, 1023, 1024, keyspaceMaxID} {
+		for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+			regions = append(regions, makeRegionForKeyspace(id, mode))
+		}
+	}
+	for _, id := range []uint32{0, 63, 1023} {
+		for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+			left, right := makeRegionForKeyspace(id, mode), makeRegionForKeyspace(id+1, mode)
+			regions = append(regions, core.NewTestRegionInfo(2, 1, left.GetStartKey(), right.GetEndKey()))
+		}
+	}
+	for _, region := range regions {
+		want := getLegacyRegionLabels(legacy, region)
+		got := make(map[string]string)
+		for _, label := range regionLabeler.GetRegionLabels(region) {
+			got[label.Key] = label.Value
+		}
+		re.Equal(want, got, "start=%x end=%x", region.GetStartKey(), region.GetEndKey())
+	}
+
+	for _, keyRange := range [][2][]byte{
+		{nil, nil},
+		{keyspaceBoundaryBytes(keyspaceRawMode, 0), keyspaceBoundaryBytes(keyspaceRawMode, 65)},
+		{keyspaceBoundaryBytes(keyspaceTxnMode, 62), keyspaceBoundaryBytes(keyspaceTxnMode, 65)},
+		{keyspaceBoundaryBytes(keyspaceTxnMode, 1023), keyspaceBoundaryBytes(keyspaceTxnMode, 1025)},
+		{keyspaceBoundaryBytes(keyspaceTxnMode, keyspaceMaxID), nil},
+	} {
+		re.Equal(
+			legacy.GetSplitKeys(keyRange[0], keyRange[1]),
+			regionLabeler.GetSplitKeys(keyRange[0], keyRange[1]),
+		)
+	}
+}
+
 func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
@@ -205,6 +329,33 @@ func TestRegionLabelerUpdatesMutatedKeyspaceRule(t *testing.T) {
 	fetched.Labels[0].Value = "mutated"
 	re.NoError(regionLabeler.DeleteLabelRule(fetched.ID))
 	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, keyspaceRawMode), "id"))
+}
+
+func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
+	rule := makeKeyspaceRuleForTest(0, keyspaceTxnMode)
+	require.NoError(b, rule.checkAndAdjust())
+
+	b.Run("add-one", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			var index keyspaceRuleIndex
+			if !index.Add(rule) {
+				b.Fatal("failed to add keyspace rule")
+			}
+		}
+	})
+
+	b.Run("full-range-split", func(b *testing.B) {
+		var index keyspaceRuleIndex
+		require.True(b, index.Add(rule))
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if keys := index.GetSplitKeys(nil, nil); len(keys) != 2 {
+				b.Fatalf("expected 2 split keys, got %d", len(keys))
+			}
+		}
+	})
 }
 
 func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {

@@ -32,91 +32,141 @@ const (
 	keyspaceChunkBits  = 10
 	keyspaceChunkSize  = 1 << keyspaceChunkBits
 	keyspaceChunkMask  = keyspaceChunkSize - 1
-	keyspaceChunkCount = (int(keyspaceMaxID) + 1) / keyspaceChunkSize
+	keyspaceChunkWords = keyspaceChunkSize / 64
 	keyspaceSlotWords  = (int(keyspaceMaxID) + 1) / 64
 	keyspaceBoundCount = int(keyspaceMaxID) + 2
 )
 
 // A keyspace rule has one fixed-width range per enabled API mode. Keeping
 // these ranges in sparse slots avoids materializing two split points and a
-// segment for every keyspace. The bitset is used only to find range boundaries;
-// the rule remains owned by RegionLabeler's labelRules map.
+// segment for every keyspace. Presence bits live with their sparse chunks so
+// small keyspace counts don't allocate a bitset for the entire ID space. The
+// rule remains owned by RegionLabeler's labelRules map.
+type keyspaceRuleChunk struct {
+	rules [keyspaceChunkSize]*LabelRule
+	bits  [keyspaceChunkWords]uint64
+	count uint16
+}
+
 type keyspaceRuleSet struct {
-	chunks []*[keyspaceChunkSize]*LabelRule
-	bits   []uint64
+	chunks []*keyspaceRuleChunk
 }
 
 func (s *keyspaceRuleSet) get(id uint32) *LabelRule {
 	if len(s.chunks) == 0 || id > keyspaceMaxID {
 		return nil
 	}
-	chunk := s.chunks[int(id)>>keyspaceChunkBits]
+	chunkID := int(id) >> keyspaceChunkBits
+	if chunkID >= len(s.chunks) {
+		return nil
+	}
+	chunk := s.chunks[chunkID]
 	if chunk == nil {
 		return nil
 	}
-	return chunk[int(id)&keyspaceChunkMask]
+	return chunk.rules[int(id)&keyspaceChunkMask]
 }
 
 func (s *keyspaceRuleSet) set(id uint32, rule *LabelRule) {
-	if len(s.chunks) == 0 {
-		s.chunks = make([]*[keyspaceChunkSize]*LabelRule, keyspaceChunkCount)
-		s.bits = make([]uint64, keyspaceSlotWords)
-	}
+	// Add checks that the target slot is empty before calling set.
 	chunkID := int(id) >> keyspaceChunkBits
-	if s.chunks[chunkID] == nil {
-		s.chunks[chunkID] = new([keyspaceChunkSize]*LabelRule)
+	if chunkID >= len(s.chunks) {
+		s.chunks = append(s.chunks, make([]*keyspaceRuleChunk, chunkID+1-len(s.chunks))...)
 	}
-	s.chunks[chunkID][int(id)&keyspaceChunkMask] = rule
-	s.bits[int(id)>>6] |= uint64(1) << (id & 63)
+	if s.chunks[chunkID] == nil {
+		s.chunks[chunkID] = new(keyspaceRuleChunk)
+	}
+	chunk := s.chunks[chunkID]
+	slot := int(id) & keyspaceChunkMask
+	chunk.count++
+	chunk.rules[slot] = rule
+	chunk.bits[slot>>6] |= uint64(1) << (id & 63)
 }
 
 func (s *keyspaceRuleSet) clear(id uint32) {
+	// Remove checks that the target slot is owned before calling clear.
 	if len(s.chunks) == 0 || id > keyspaceMaxID {
 		return
 	}
-	chunk := s.chunks[int(id)>>keyspaceChunkBits]
+	chunkID := int(id) >> keyspaceChunkBits
+	if chunkID >= len(s.chunks) {
+		return
+	}
+	chunk := s.chunks[chunkID]
 	if chunk == nil {
 		return
 	}
-	chunk[int(id)&keyspaceChunkMask] = nil
-	s.bits[int(id)>>6] &^= uint64(1) << (id & 63)
+	slot := int(id) & keyspaceChunkMask
+	chunk.rules[slot] = nil
+	chunk.bits[slot>>6] &^= uint64(1) << (id & 63)
+	chunk.count--
+	if chunk.count == 0 {
+		s.chunks[chunkID] = nil
+		for len(s.chunks) > 0 && s.chunks[len(s.chunks)-1] == nil {
+			s.chunks = s.chunks[:len(s.chunks)-1]
+		}
+	}
+}
+
+func (s *keyspaceRuleSet) slotWord(word int) uint64 {
+	if word < 0 || word >= keyspaceSlotWords {
+		return 0
+	}
+	chunkID := word / keyspaceChunkWords
+	if chunkID >= len(s.chunks) || s.chunks[chunkID] == nil {
+		return 0
+	}
+	return s.chunks[chunkID].bits[word%keyspaceChunkWords]
 }
 
 // boundaryWord returns the boundaries contributed by the slots in word.
 // A slot at ID n contributes both boundary n and boundary n+1.
 func (s *keyspaceRuleSet) boundaryWord(word int) uint64 {
-	if len(s.bits) == 0 || word < 0 || word > len(s.bits) {
+	if len(s.chunks) == 0 || word < 0 || word > keyspaceSlotWords {
 		return 0
 	}
-	var current uint64
-	if word < len(s.bits) {
-		current = s.bits[word]
-	}
+	current := s.slotWord(word)
 	boundaries := current | current<<1
-	if word > 0 && s.bits[word-1]&(uint64(1)<<63) != 0 {
+	if word > 0 && s.slotWord(word-1)&(uint64(1)<<63) != 0 {
 		boundaries |= 1
 	}
 	return boundaries
 }
 
 func (s *keyspaceRuleSet) forEachBoundary(lo, hi int, fn func(id uint32) bool) {
-	if len(s.bits) == 0 || lo >= hi {
+	if len(s.chunks) == 0 || lo >= hi {
 		return
 	}
 	lo = max(lo, 0)
 	hi = min(hi, keyspaceBoundCount)
-	for word := lo >> 6; word <= (hi-1)>>6; word++ {
-		boundaries := s.boundaryWord(word)
-		if offset := lo & 63; word == lo>>6 && offset != 0 {
-			boundaries &= ^uint64(0) << offset
+	firstWord, lastWord := lo>>6, (hi-1)>>6
+	firstChunk := firstWord / keyspaceChunkWords
+	lastChunk := min(lastWord/keyspaceChunkWords, len(s.chunks))
+	for chunkID := firstChunk; chunkID <= lastChunk; chunkID++ {
+		chunkFirstWord := chunkID * keyspaceChunkWords
+		wordStart := max(firstWord, chunkFirstWord)
+		wordEnd := min(lastWord, chunkFirstWord+keyspaceChunkWords-1)
+		var chunk *keyspaceRuleChunk
+		if chunkID < len(s.chunks) {
+			chunk = s.chunks[chunkID]
 		}
-		for boundaries != 0 {
-			bit := bits.TrailingZeros64(boundaries)
-			id := word<<6 + bit
-			if id >= hi || !fn(uint32(id)) {
-				return
+		hasCarry := wordStart == chunkFirstWord && s.slotWord(wordStart-1)&(uint64(1)<<63) != 0
+		if chunk == nil && !hasCarry {
+			continue
+		}
+		for word := wordStart; word <= wordEnd; word++ {
+			boundaries := s.boundaryWord(word)
+			if offset := lo & 63; word == firstWord && offset != 0 {
+				boundaries &= ^uint64(0) << offset
 			}
-			boundaries &= boundaries - 1
+			for boundaries != 0 {
+				bit := bits.TrailingZeros64(boundaries)
+				id := word<<6 + bit
+				if id >= hi || !fn(uint32(id)) {
+					return
+				}
+				boundaries &= boundaries - 1
+			}
 		}
 	}
 }
@@ -222,7 +272,7 @@ func (i *keyspaceRuleIndex) GetRule(start, end []byte) *LabelRule {
 func (i *keyspaceRuleIndex) HasSplitKey(start, end []byte) bool {
 	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
 		set := i.ruleSet(mode)
-		if len(set.bits) == 0 {
+		if len(set.chunks) == 0 {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
@@ -243,7 +293,7 @@ func (i *keyspaceRuleIndex) GetSplitKeys(start, end []byte) [][]byte {
 	var keys [][]byte
 	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
 		set := i.ruleSet(mode)
-		if len(set.bits) == 0 {
+		if len(set.chunks) == 0 {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
