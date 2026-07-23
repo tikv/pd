@@ -63,6 +63,7 @@ func (sr *ServiceRegister) Register() error {
 		sr.cancel()
 		return fmt.Errorf("put the key with lease %s failed: %v", sr.key, err)
 	}
+	log.Info("register service", zap.String("key", sr.key))
 	kresp, err := sr.cli.KeepAlive(sr.ctx, id)
 	if err != nil {
 		sr.cancel()

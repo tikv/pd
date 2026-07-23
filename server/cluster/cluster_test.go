@@ -44,6 +44,8 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -62,6 +64,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -2357,6 +2361,158 @@ func newTestRaftCluster(
 	}
 	rc.schedulingController = newSchedulingController(rc.ctx, rc.BasicCluster, rc.opt, rc.ruleManager)
 	return rc
+}
+
+func TestRunEmbeddedTSORequestFencesProviderSwitch(t *testing.T) {
+	re := require.New(t)
+	c := &RaftCluster{}
+	entered := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	resultCh := make(chan struct {
+		handled bool
+		err     error
+	}, 1)
+	go func() {
+		handled, err := c.RunEmbeddedTSORequest(func() error {
+			close(entered)
+			<-releaseRequest
+			return nil
+		})
+		resultCh <- struct {
+			handled bool
+			err     error
+		}{handled: handled, err: err}
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("embedded TSO request did not start")
+	}
+
+	switchAcquired := make(chan struct{})
+	releaseSwitch := make(chan struct{})
+	go func() {
+		c.tsoSwitchMu.Lock()
+		defer c.tsoSwitchMu.Unlock()
+		close(switchAcquired)
+		<-releaseSwitch
+	}()
+
+	select {
+	case <-switchAcquired:
+		t.Fatal("provider switch acquired the lock while an embedded TSO request was running")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(releaseRequest)
+	select {
+	case result := <-resultCh:
+		re.True(result.handled)
+		re.NoError(result.err)
+	case <-time.After(time.Second):
+		t.Fatal("embedded TSO request did not finish")
+	}
+	select {
+	case <-switchAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("provider switch did not acquire the lock after the request finished")
+	}
+	close(releaseSwitch)
+}
+
+func TestRunEmbeddedTSORequestSkipsIndependentTSO(t *testing.T) {
+	re := require.New(t)
+	c := &RaftCluster{}
+	c.SetServiceIndependent(mcsconstant.TSOServiceName)
+	called := false
+	handled, err := c.RunEmbeddedTSORequest(func() error {
+		called = true
+		return nil
+	})
+	re.NoError(err)
+	re.False(handled)
+	re.False(called)
+}
+
+func TestRunEmbeddedTSORequestSkipsWhenDynamicSwitchingDisabled(t *testing.T) {
+	re := require.New(t)
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.GetMicroserviceConfig().EnableTSODynamicSwitching = false
+	c := &RaftCluster{
+		isKeyspaceGroupEnabled: true,
+		opt:                    opt,
+	}
+	called := false
+	handled, err := c.RunEmbeddedTSORequest(func() error {
+		called = true
+		return nil
+	})
+	re.NoError(err)
+	re.False(handled)
+	re.False(called)
+}
+
+func TestDefaultTSOPrimaryReadyRequiresExpectedPrimaryMatch(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	c := &RaftCluster{etcdClient: client}
+	msParam := &keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	}
+	primaryPath := keypath.ElectionPath(msParam)
+	expectedPrimaryPath := keypath.ExpectedPrimaryPath(msParam)
+
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err := client.Put(context.Background(), primaryPath, "primary-a")
+	re.NoError(err)
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err = client.Put(context.Background(), expectedPrimaryPath, "primary-b")
+	re.NoError(err)
+	re.False(c.isDefaultTSOPrimaryReady())
+	_, err = client.Put(context.Background(), expectedPrimaryPath, "primary-a")
+	re.NoError(err)
+	re.True(c.isDefaultTSOPrimaryReady())
+
+	called := 0
+	c.tsoServiceReadyFunc = func(context.Context) bool {
+		called++
+		return false
+	}
+	re.False(c.isDefaultTSOPrimaryReady())
+	re.Equal(1, called)
+	c.tsoServiceReadyFunc = func(context.Context) bool {
+		called++
+		return true
+	}
+	re.True(c.isDefaultTSOPrimaryReady())
+	re.Equal(2, called)
+}
+
+func TestSwitchTSOProviderToPDKeepsDiscoveredTSOService(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.GetMicroserviceConfig().EnableTSODynamicSwitching = true
+	c := &RaftCluster{
+		etcdClient:             client,
+		isKeyspaceGroupEnabled: true,
+		opt:                    opt,
+	}
+	c.SetServiceIndependent(mcsconstant.TSOServiceName)
+	_, err = client.Put(context.Background(),
+		keypath.RegistryPath(mcsconstant.TSOServiceName, "127.0.0.1:3379"), "127.0.0.1:3379")
+	re.NoError(err)
+
+	re.NoError(c.SwitchTSOProviderToPD())
+	re.True(c.IsServiceIndependent(mcsconstant.TSOServiceName))
+	c.checkTSOService()
+	re.True(c.IsServiceIndependent(mcsconstant.TSOServiceName))
 }
 
 // Create n stores (0..n).

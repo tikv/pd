@@ -21,10 +21,13 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -33,11 +36,15 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(groupID uint32) (time.Time, error)
-	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error
+	SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership, checkTSOPrimary bool) error
 	DeleteTimestamp(ctx context.Context, groupID uint32) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
+
+// ErrTSOServicePrimaryExists indicates that embedded PD TSO must stop updating
+// its timestamp window because a TSO service primary has been elected.
+var ErrTSOServicePrimaryExists = errors.New("tso microservice primary exists, pd must yield embedded tso")
 
 // LoadTimestamp retrieves the last saved TSO timestamp from etcd.
 // Before switching back from the TSO microservice to the PD leader,
@@ -68,12 +75,13 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 
 // SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
 // before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
-func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership) error {
+func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts time.Time, leadership *election.Leadership, checkTSOPrimary bool) error {
 	logFilds := []zap.Field{
 		zap.Uint32("group-id", groupID),
 		zap.Time("ts", ts),
 		zap.String("leader-key", leadership.GetLeaderKey()),
 		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+		zap.Bool("check-tso-primary", checkTSOPrimary),
 	}
 	log.Debug("saving timestamp to the storage", logFilds...)
 	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
@@ -81,7 +89,14 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 	if len(leadership.GetLeaderValue()) == 0 {
 		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
 	}
-	return se.RunInTxn(ctx, func(txn kv.Txn) error {
+	var tsoPrimaryPath string
+	if checkTSOPrimary {
+		tsoPrimaryPath = keypath.ElectionPath(&keypath.MsParam{
+			ServiceName: mcsconstant.TSOServiceName,
+			GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+		})
+	}
+	err := se.RunInTxn(ctx, func(txn kv.Txn) error {
 		// Ensure the current server is leader by reading and comparing the leader value.
 		leaderValue, err := txn.Load(leadership.GetLeaderKey())
 		if err != nil {
@@ -90,6 +105,16 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 		if expected := leadership.GetLeaderValue(); leaderValue != expected {
 			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
 			return errors.Errorf("%s due to leader value does not match, current: %s, expected: %s", errs.NotLeaderErr, leaderValue, expected)
+		}
+
+		if checkTSOPrimary {
+			tsoPrimary, err := txn.Load(tsoPrimaryPath)
+			if err != nil {
+				return err
+			}
+			if len(tsoPrimary) != 0 {
+				return ErrTSOServicePrimaryExists
+			}
 		}
 
 		value, err := txn.Load(keypath.TimestampPath(groupID))
@@ -108,9 +133,17 @@ func (se *StorageEndpoint) SaveTimestamp(ctx context.Context, groupID uint32, ts
 		if previousTS != typeutil.ZeroTime && typeutil.SubRealTimeByWallClock(ts, previousTS) <= 0 {
 			return errors.Errorf("saving timestamp %d is less than or equal to the previous one %d", ts.UnixNano(), previousTS.UnixNano())
 		}
+		failpoint.InjectCall("beforeSaveTimestampTxnCommit")
 		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
 		return txn.Save(keypath.TimestampPath(groupID), string(data))
 	})
+	if checkTSOPrimary && errors.ErrorEqual(err, errs.ErrEtcdTxnConflict) {
+		tsoPrimary, loadErr := se.Load(tsoPrimaryPath)
+		if loadErr == nil && len(tsoPrimary) != 0 {
+			return ErrTSOServicePrimaryExists
+		}
+	}
+	return err
 }
 
 // DeleteTimestamp deletes the timestamp from the storage.

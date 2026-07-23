@@ -70,7 +70,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -937,7 +937,7 @@ func (suite *multipleServerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 2)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
