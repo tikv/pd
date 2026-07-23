@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -232,7 +233,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 
 	// Authoritative scanner reports the real assignments.
 	actual := map[string]int{}
-	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
 		res := make(map[string]int, len(ids))
 		for id := range ids {
 			res[id] = actual[id]
@@ -366,7 +367,7 @@ func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndSc
 	})
 	re.NoError(err)
 	// The authoritative counter reports the real assignment count.
-	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
 		res := make(map[string]int, len(ids))
 		if _, ok := ids["etcd-group-0"]; ok {
 			res["etcd-group-0"] = 3
@@ -379,6 +380,71 @@ func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndSc
 	re.NoError(err)
 	re.True(statusMap["etcd-group-0"].Enabled)             // from storage
 	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount) // from the scan, not the stale 10
+}
+
+func (suite *metaServiceGroupTestSuite) TestRefreshPersistedStatusDoesNotScanAssignmentCounts() {
+	re := suite.Require()
+	called := false
+	suite.manager.SetKeyspaceAssignmentCounter(func(context.Context, map[string]struct{}) (map[string]int, error) {
+		called = true
+		return map[string]int{"etcd-group-0": 3}, nil
+	})
+
+	re.NoError(suite.manager.RefreshPersistedStatus())
+	re.False(called)
+	re.False(suite.manager.IsAssignmentCountReady())
+}
+
+func (suite *metaServiceGroupTestSuite) TestStartAssignmentCountRebuildMarksReadyAfterAsyncScan() {
+	re := suite.Require()
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if _, ok := ids["etcd-group-0"]; ok {
+			res["etcd-group-0"] = 3
+		}
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount)
+}
+
+func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildRetriesWhenEpochChanges() {
+	re := suite.Require()
+	suite.enableAllGroups()
+	suite.manager.statusMu.Lock()
+	suite.manager.cachedStatus["etcd-group-1"].AssignmentCount = 10
+	suite.manager.cachedStatus["etcd-group-2"].AssignmentCount = 10
+	suite.manager.statusMu.Unlock()
+	scanStarted := make(chan struct{})
+	resumeScan := make(chan struct{})
+	firstScan := true
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if firstScan {
+			firstScan = false
+			close(scanStarted)
+			<-resumeScan
+			res["etcd-group-0"] = 0
+			return res, nil
+		}
+		res["etcd-group-0"] = 1
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	<-scanStarted
+	_, err := suite.manager.PickGroup(suite.ctx)
+	re.NoError(err)
+	close(resumeScan)
+
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, statusMap["etcd-group-0"].AssignmentCount)
 }
 
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {

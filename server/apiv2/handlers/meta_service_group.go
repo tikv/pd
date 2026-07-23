@@ -55,6 +55,9 @@ type MetaServiceGroupStatus struct {
 	// AssignedKeyspaces is kept for backward compatibility with existing
 	// clients. It mirrors Status.AssignmentCount; prefer Status going forward.
 	AssignedKeyspaces int `json:"assigned_keyspaces"`
+	// AssignmentCountReady indicates whether assignment count has completed an
+	// authoritative keyspace metadata rebuild in this leader term.
+	AssignmentCountReady bool `json:"assignment_count_ready"`
 }
 
 // PatchMetaServiceGroups applies a JSON Merge Patch to the meta-service groups.
@@ -243,6 +246,7 @@ func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGr
 	if err != nil {
 		return nil, err
 	}
+	assignmentCountReady := manager.IsAssignmentCountReady()
 
 	status := make([]MetaServiceGroupStatus, 0, len(currentGroups))
 	for id, addresses := range currentGroups {
@@ -255,10 +259,11 @@ func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGr
 			s = &endpoint.MetaServiceGroupStatus{}
 		}
 		status = append(status, MetaServiceGroupStatus{
-			ID:                id,
-			Addresses:         addresses,
-			Status:            s,
-			AssignedKeyspaces: s.AssignmentCount,
+			ID:                   id,
+			Addresses:            addresses,
+			Status:               s,
+			AssignedKeyspaces:    s.AssignmentCount,
+			AssignmentCountReady: assignmentCountReady,
 		})
 	}
 	// sort for deterministic output

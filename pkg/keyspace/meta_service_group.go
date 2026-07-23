@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -29,16 +30,18 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
+const assignmentCountRebuildRetryInterval = time.Second
+
 // MetaServiceGroupManager manages external meta-service groups.
 //
 // Persistence model: only the administrative Enabled flag of each group is
 // persisted. AssignmentCount is a derived, best-effort load-balancing hint, not a
 // source of truth: it is rebuilt from the authoritative keyspace metadata
-// (keyspaceAssignmentCounter) on every leader term via RefreshCache, and
-// maintained purely in memory during the term as keyspaces are created, removed
-// or reassigned. Nothing writes the count to storage, so there is no async flush
-// to fence against leadership changes and no stale count to reconcile; a lost
-// in-memory delta self-heals on the next term's rebuild.
+// (keyspaceAssignmentCounter) asynchronously on every leader term, and maintained
+// purely in memory during the term as keyspaces are created, removed or
+// reassigned. Nothing writes the count to storage, so there is no async flush to
+// fence against leadership changes and no stale count to reconcile; a lost
+// in-memory delta self-heals on the next successful rebuild.
 //
 // Locking: the embedded RWMutex guards metaServiceGroups; statusMu is a leaf lock
 // guarding cachedStatus only. statusMu must be the innermost lock: never acquire
@@ -60,17 +63,20 @@ type MetaServiceGroupManager struct {
 	// each of the given groups by scanning keyspace metadata. It is the
 	// authoritative source for both the delete guard and the derived assignment
 	// counts rebuilt by RefreshCache.
-	keyspaceAssignmentCounter func(groupIDs map[string]struct{}) (map[string]int, error)
+	keyspaceAssignmentCounter func(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error)
 	// statusMu guards cachedStatus. See the type comment for the leaf-lock
 	// discipline it must follow.
-	statusMu     syncutil.Mutex
-	cachedStatus map[string]*endpoint.MetaServiceGroupStatus
+	statusMu         syncutil.Mutex
+	cachedStatus     map[string]*endpoint.MetaServiceGroupStatus
+	assignmentEpoch  uint64
+	countsReady      bool
+	countsRefreshing bool
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
 // counter. It must be called during initialization, before any concurrent group
 // update.
-func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(groupIDs map[string]struct{}) (map[string]int, error)) {
+func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error)) {
 	m.keyspaceAssignmentCounter = counter
 }
 
@@ -118,7 +124,7 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 			set[id] = struct{}{}
 		}
 		var err error
-		if counts, err = m.keyspaceAssignmentCounter(set); err != nil {
+		if counts, err = m.keyspaceAssignmentCounter(m.ctx, set); err != nil {
 			return err
 		}
 	}
@@ -132,9 +138,143 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 	}
 	m.statusMu.Lock()
 	m.cachedStatus = cache
+	m.assignmentEpoch++
+	m.countsReady = true
+	m.countsRefreshing = false
 	m.statusMu.Unlock()
 	log.Info("[keyspace] meta-service group status rebuilt", zap.Any("meta-service-group-status", cache))
 	return nil
+}
+
+// RefreshPersistedStatus reloads the persisted administrative status only. It is
+// intentionally lightweight for the leader-ready path; assignment counts are
+// rebuilt asynchronously by StartAssignmentCountRebuild.
+func (m *MetaServiceGroupManager) RefreshPersistedStatus() error {
+	m.Lock()
+	defer m.Unlock()
+	var stored map[string]*endpoint.MetaServiceGroupStatus
+	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		var err error
+		stored, err = m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
+		return err
+	}); err != nil {
+		log.Error("[keyspace] failed to load meta-service group status from storage", zap.Error(err))
+		return err
+	}
+
+	m.statusMu.Lock()
+	cache := make(map[string]*endpoint.MetaServiceGroupStatus, len(m.metaServiceGroups))
+	for id := range m.metaServiceGroups {
+		count := 0
+		if current := m.cachedStatus[id]; current != nil {
+			count = current.AssignmentCount
+		}
+		enabled := false
+		if s := stored[id]; s != nil {
+			enabled = s.Enabled
+		}
+		cache[id] = &endpoint.MetaServiceGroupStatus{AssignmentCount: count, Enabled: enabled}
+	}
+	m.cachedStatus = cache
+	m.assignmentEpoch++
+	m.countsReady = false
+	m.countsRefreshing = false
+	m.statusMu.Unlock()
+	log.Info("[keyspace] meta-service group persisted status loaded", zap.Any("meta-service-group-status", cache))
+	return nil
+}
+
+// IsAssignmentCountReady reports whether the current cached assignment counts
+// have completed an authoritative rebuild in this leader term.
+func (m *MetaServiceGroupManager) IsAssignmentCountReady() bool {
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	return m.countsReady
+}
+
+// StartAssignmentCountRebuild asynchronously rebuilds assignment counts from
+// authoritative keyspace metadata. If serving traffic changes counts during the
+// scan, the result is discarded and another rebuild is scheduled.
+func (m *MetaServiceGroupManager) StartAssignmentCountRebuild(ctx context.Context) {
+	m.RLock()
+	groupIDs := make(map[string]struct{}, len(m.metaServiceGroups))
+	for id := range m.metaServiceGroups {
+		groupIDs[id] = struct{}{}
+	}
+	m.statusMu.Lock()
+	if m.countsRefreshing {
+		m.statusMu.Unlock()
+		m.RUnlock()
+		return
+	}
+	m.countsRefreshing = true
+	m.countsReady = false
+	startEpoch := m.assignmentEpoch
+	m.statusMu.Unlock()
+	m.RUnlock()
+
+	go m.rebuildAssignmentCounts(ctx, groupIDs, startEpoch)
+}
+
+func (m *MetaServiceGroupManager) rebuildAssignmentCounts(ctx context.Context, groupIDs map[string]struct{}, startEpoch uint64) {
+	if m.keyspaceAssignmentCounter == nil {
+		m.statusMu.Lock()
+		m.countsReady = true
+		m.countsRefreshing = false
+		m.statusMu.Unlock()
+		return
+	}
+	select {
+	case <-ctx.Done():
+		m.statusMu.Lock()
+		m.countsRefreshing = false
+		m.countsReady = false
+		m.statusMu.Unlock()
+		return
+	default:
+	}
+	counts, err := m.keyspaceAssignmentCounter(ctx, groupIDs)
+	if err != nil {
+		log.Warn("[keyspace] failed to rebuild meta-service group assignment counts", zap.Error(err))
+		m.statusMu.Lock()
+		m.countsRefreshing = false
+		m.countsReady = false
+		m.statusMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(assignmentCountRebuildRetryInterval):
+			m.StartAssignmentCountRebuild(ctx)
+		}
+		return
+	}
+	select {
+	case <-ctx.Done():
+		m.statusMu.Lock()
+		m.countsRefreshing = false
+		m.countsReady = false
+		m.statusMu.Unlock()
+		return
+	default:
+	}
+
+	shouldRetry := false
+	m.statusMu.Lock()
+	if m.assignmentEpoch == startEpoch {
+		for id, status := range m.cachedStatus {
+			status.AssignmentCount = counts[id]
+		}
+		m.countsReady = true
+		m.countsRefreshing = false
+	} else {
+		m.countsReady = false
+		m.countsRefreshing = false
+		shouldRetry = true
+	}
+	m.statusMu.Unlock()
+	if shouldRetry {
+		m.StartAssignmentCountRebuild(ctx)
+	}
 }
 
 // GetStatus returns the status of each meta-service group.
@@ -278,6 +418,7 @@ func (m *MetaServiceGroupManager) AssignToGroup(_ context.Context, count int) (s
 		return "", err
 	}
 	m.cachedStatus[assignedGroup].AssignmentCount += count
+	m.assignmentEpoch++
 	return assignedGroup, nil
 }
 
@@ -321,9 +462,11 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(_ kv.Txn, oldGroupID, newG
 // applyAssignmentDeltaStatusLocked moves one assignment from oldGroupID to
 // newGroupID in the cached status. The caller must hold statusMu.
 func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID string) error {
+	changed := false
 	if oldGroupID != "" {
 		if status := m.cachedStatus[oldGroupID]; status != nil && status.AssignmentCount > 0 {
 			status.AssignmentCount--
+			changed = true
 		}
 	}
 	if newGroupID != "" {
@@ -332,6 +475,10 @@ func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, n
 			return ErrUnknownMetaServiceGroup
 		}
 		status.AssignmentCount++
+		changed = true
+	}
+	if changed {
+		m.assignmentEpoch++
 	}
 	return nil
 }
@@ -402,7 +549,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	m.Lock()
 	defer m.Unlock()
 	if len(deletedGroups) > 0 {
-		counts, err := m.assignedKeyspaceCounts(deletedGroups)
+		counts, err := m.assignedKeyspaceCounts(ctx, deletedGroups)
 		if err != nil {
 			return err
 		}
@@ -478,13 +625,13 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 // given groups. It prefers the authoritative keyspace scan (immune to counter
 // drift) and falls back to the cached counter when no scanner is configured,
 // e.g. in unit tests without a keyspace manager.
-func (m *MetaServiceGroupManager) assignedKeyspaceCounts(groupIDs []string) (map[string]int, error) {
+func (m *MetaServiceGroupManager) assignedKeyspaceCounts(ctx context.Context, groupIDs []string) (map[string]int, error) {
 	if m.keyspaceAssignmentCounter != nil {
 		set := make(map[string]struct{}, len(groupIDs))
 		for _, id := range groupIDs {
 			set[id] = struct{}{}
 		}
-		return m.keyspaceAssignmentCounter(set)
+		return m.keyspaceAssignmentCounter(ctx, set)
 	}
 	// Fallback path: derive counts from the cached status under statusMu.
 	counts := make(map[string]int, len(groupIDs))

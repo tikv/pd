@@ -1207,7 +1207,7 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 // authoritative source for the meta-service group delete guard: a stale
 // assignment counter must never permanently block removing a group that has no
 // keyspaces actually referencing it.
-func (manager *Manager) CountKeyspacesByMetaServiceGroup(groupIDs map[string]struct{}) (map[string]int, error) {
+func (manager *Manager) CountKeyspacesByMetaServiceGroup(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error) {
 	counts := make(map[string]int, len(groupIDs))
 	if len(groupIDs) == 0 {
 		return counts, nil
@@ -1218,7 +1218,7 @@ func (manager *Manager) CountKeyspacesByMetaServiceGroup(groupIDs map[string]str
 		// latter calls mgm.AttachEndpoints which takes the mgm read lock, and this
 		// is invoked while the mgm write lock is held, which would deadlock.
 		var keyspaces []*keyspacepb.KeyspaceMeta
-		if err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		if err := manager.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			var err error
 			keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
 			return err

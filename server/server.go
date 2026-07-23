@@ -538,13 +538,18 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.AddServiceReadyCallback(func(_ context.Context) error {
+	s.AddServiceReadyCallback(func(ctx context.Context) error {
 		if s.metaServiceGroupManager == nil {
 			return nil
 		}
-		// Rebuild the derived assignment counts from keyspace metadata at the start
-		// of every leadership term.
-		return s.metaServiceGroupManager.RefreshCache()
+		// Load persisted administrative status synchronously, then rebuild derived
+		// assignment counts in the background so leader readiness is not blocked by a
+		// full keyspace scan.
+		if err := s.metaServiceGroupManager.RefreshPersistedStatus(); err != nil {
+			return err
+		}
+		s.metaServiceGroupManager.StartAssignmentCountRebuild(ctx)
+		return nil
 	})
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
