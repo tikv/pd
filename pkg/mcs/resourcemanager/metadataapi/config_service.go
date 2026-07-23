@@ -43,6 +43,7 @@ type ConfigStore interface {
 	GetResourceGroupList(uint32, bool) ([]*rmserver.ResourceGroup, error)
 	DeleteResourceGroup(uint32, string) error
 	GetControllerConfig() *rmserver.ControllerConfig
+	UpdateControllerConfigItems(map[string]any) error
 	UpdateControllerConfigItem(string, any) error
 	SetKeyspaceServiceLimit(uint32, float64) error
 	LookupKeyspaceID(context.Context, string) (uint32, error)
@@ -92,6 +93,11 @@ func (s *ManagerStore) GetControllerConfig() *rmserver.ControllerConfig {
 // UpdateControllerConfigItem updates one controller config item.
 func (s *ManagerStore) UpdateControllerConfigItem(key string, value any) error {
 	return s.manager.UpdateControllerConfigItem(key, value)
+}
+
+// UpdateControllerConfigItems updates controller config items atomically.
+func (s *ManagerStore) UpdateControllerConfigItems(items map[string]any) error {
+	return s.manager.UpdateControllerConfigItems(items)
 }
 
 // SetKeyspaceServiceLimit sets keyspace service limit.
@@ -242,15 +248,17 @@ func (s *ConfigService) SetControllerConfig(c *gin.Context) {
 		}
 		resolvedConf[key] = v
 	}
-	for key, v := range resolvedConf {
-		if err := s.configStore.UpdateControllerConfigItem(key, v); err != nil {
-			if rmserver.IsMetadataWriteDisabledError(err) {
-				c.String(http.StatusForbidden, err.Error())
-				return
-			}
+	if err := s.configStore.UpdateControllerConfigItems(resolvedConf); err != nil {
+		if rmserver.IsMetadataWriteDisabledError(err) {
+			c.String(http.StatusForbidden, err.Error())
+			return
+		}
+		if rmserver.IsControllerConfigValidationError(err) {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
+		c.String(http.StatusInternalServerError, err.Error())
+		return
 	}
 	c.String(http.StatusOK, "Success!")
 }
