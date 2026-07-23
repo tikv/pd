@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -943,11 +944,11 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
 	})
 
-	// Resign the leader and verify TSO requests recover with monotonic timestamps.
+	// Transfer the leader twice and verify TSO requests recover with monotonic timestamps.
 	for range 2 {
 		oldLeaderName := pdCluster.WaitLeader()
 		re.NotEmpty(oldLeaderName)
-		newLeaderName := transferPDLeaderWithFailpoints(t, re, pdCluster, oldLeaderName)
+		newLeaderName := transferPDLeaderToNextServer(t, re, pdCluster, oldLeaderName)
 		re.NotEqual(oldLeaderName, newLeaderName)
 
 		// ServiceIndependent must remain set after leader resignation.
@@ -969,51 +970,46 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 	}
 }
 
-func transferPDLeaderWithFailpoints(
+func transferPDLeaderToNextServer(
 	t *testing.T, re *require.Assertions, pdCluster *tests.TestCluster, oldLeaderName string,
 ) string {
 	t.Helper()
 
 	oldLeader := pdCluster.GetServer(oldLeaderName)
-	var newLeaderName string
+	serverNames := make([]string, 0, len(pdCluster.GetServers()))
 	for name := range pdCluster.GetServers() {
-		if name != oldLeaderName {
-			newLeaderName = name
-			break
-		}
+		serverNames = append(serverNames, name)
 	}
-	re.NotEmpty(newLeaderName)
+	sort.Strings(serverNames)
+	re.Greater(len(serverNames), 1)
+	oldLeaderIndex := sort.SearchStrings(serverNames, oldLeaderName)
+	re.Less(oldLeaderIndex, len(serverNames))
+	re.Equal(oldLeaderName, serverNames[oldLeaderIndex])
+	newLeaderName := serverNames[(oldLeaderIndex+1)%len(serverNames)]
 	newLeader := pdCluster.GetServer(newLeaderName)
 
-	failpoints := []struct {
-		name string
-		expr string
-	}{
-		{
-			name: "github.com/tikv/pd/server/leaderLoopCheckAgain",
-			expr: fmt.Sprintf("return(\"%d\")", oldLeader.GetServerID()),
-		},
-		{
-			name: "github.com/tikv/pd/server/exitCampaignLeader",
-			expr: fmt.Sprintf("return(\"%d\")", oldLeader.GetServerID()),
-		},
-		{
-			name: "github.com/tikv/pd/server/timeoutWaitPDLeader",
-			expr: fmt.Sprintf("return(\"%d\")", newLeader.GetServerID()),
-		},
-	}
-	enabledFailpoints := make([]string, 0, len(failpoints))
-	defer func() {
-		for _, name := range enabledFailpoints {
-			re.NoError(failpoint.Disable(name))
+	oldLeaderID := oldLeader.GetServerID()
+	newLeaderID := newLeader.GetServerID()
+	testutil.Eventually(re, func() bool {
+		etcdLeaderID, err := oldLeader.GetEtcdLeaderID()
+		if err != nil {
+			return false
 		}
-	}()
-	for _, fp := range failpoints {
-		re.NoError(failpoint.Enable(fp.name, fp.expr))
-		enabledFailpoints = append(enabledFailpoints, fp.name)
-	}
+		if etcdLeaderID == newLeaderID {
+			return true
+		}
+		if etcdLeaderID != oldLeaderID {
+			return false
+		}
+		return oldLeader.MoveEtcdLeader(oldLeaderID, newLeaderID) == nil
+	})
 
 	testutil.Eventually(re, newLeader.IsLeader)
+	re.Equal(newLeaderName, pdCluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		etcdLeaderID, err := newLeader.GetEtcdLeaderID()
+		return err == nil && etcdLeaderID == newLeaderID
+	})
 	return newLeaderName
 }
 
