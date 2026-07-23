@@ -184,9 +184,6 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if patch.AssignmentCount != nil {
 		return ErrAssignmentCountPatchUnsupported
 	}
-	if patch.AssignmentCount != nil && *patch.AssignmentCount < 0 {
-		return ErrInvalidAssignmentCount
-	}
 	m.Lock()
 	defer m.Unlock()
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
