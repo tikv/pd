@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -913,16 +914,41 @@ func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
 	return hasAllLabels(store, labels) && ref.CompareLocation(store, labels) == -1
 }
 
+// eligibleHealthyLeaderTargets returns the stores that could actually receive leaders,
+// applying the same target-store checks as a leader transfer (StoreStateFilter with
+// TransferLeader set) so the domain counting matches what the operator layer will accept.
+// It additionally drops disk-slow stores, which the leader-target filter does not reject.
+func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.StoreInfo) []*core.StoreInfo {
+	candidates := filter.NewCandidates(stores).
+		FilterTarget(
+			cluster.GetSchedulerConfig(),
+			nil,
+			nil,
+			&filter.StoreStateFilter{
+				ActionScope:    types.EvictSlowStoreScheduler.String(),
+				TransferLeader: true,
+				OperatorLevel:  constant.Urgent,
+			},
+		).
+		PickAll()
+
+	healthy := candidates[:0]
+	for _, store := range candidates {
+		if store.IsSlow() {
+			continue
+		}
+		healthy = append(healthy, store)
+	}
+	return healthy
+}
+
 // hasEnoughHealthyDomains reports whether at least minRemainingHealthyDomains distinct
 // failure domains (by all configured labels) other than the drained store's domain still
 // have a store able to host leaders. Domains are deduplicated with CompareLocation so the
 // counting stays consistent with the grouping decision.
 func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, drained *core.StoreInfo) bool {
 	reps := make([]*core.StoreInfo, 0, minRemainingHealthyDomains)
-	for _, store := range cluster.GetStores() {
-		if !store.IsUp() || store.IsSlow() || store.EvictedAsSlowStore() || !store.AllowLeaderTransferIn() {
-			continue
-		}
+	for _, store := range eligibleHealthyLeaderTargets(cluster, cluster.GetStores()) {
 		if !hasAllLabels(store, labels) || drained.CompareLocation(store, labels) == -1 {
 			continue
 		}
