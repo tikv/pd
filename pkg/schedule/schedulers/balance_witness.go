@@ -332,9 +332,14 @@ func (s *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 func (s *balanceWitnessScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Step++
 	defer func() { solver.Step-- }()
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(s.GetName()), solver.targetStoreScore(s.GetName())
+	solver.calcSourceStoreScore(s.GetName())
+	solver.calcTargetStoreScore(s.GetName())
 	if !solver.shouldBalance(s.GetName()) {
 		schedulerCounter.WithLabelValues(s.GetName(), "skip").Inc()
+		if solver.isPotentialReverse() {
+			solver.recordPotentialReverse(s.GetName())
+			schedulerCounter.WithLabelValues(s.GetName(), "potential-reverse").Inc()
+		}
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}
