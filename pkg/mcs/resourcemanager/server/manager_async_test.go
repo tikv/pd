@@ -600,3 +600,65 @@ func TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad(t *testing.T)
 		return foundA
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }
+
+// TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm reproduces the
+// cross-term lazy load: the load captures the keyspace manager, then blocks in
+// its storage read while the leadership changes and Init replaces m.krgms and
+// syncLoadedGroups. On resume it must not publish into the detached old
+// manager while marking the group in the new term's map (which would make the
+// new bulk merge skip a group its cache doesn't contain); instead it retries
+// against the freshly captured state and publishes into the new term.
+func TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	re.NoError(store.SaveResourceGroupSetting(1, "cross-term", newAsyncTestGroup("cross-term")))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+
+	// The term-1 lazy load pauses inside its state read, holding the old
+	// term's keyspace manager.
+	store.pausePointState.Store(true)
+	var (
+		gotGroup *ResourceGroup
+		gotErr   error
+	)
+	getDone := make(chan struct{})
+	go func() {
+		defer close(getDone)
+		gotGroup, gotErr = m.GetResourceGroup(1, "cross-term", false)
+	}()
+	select {
+	case <-store.pointReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the lazy load to reach its state read")
+	}
+
+	// Leadership changes: reinitialize the manager for term 2 while the
+	// term-1 lazy load is still blocked. Term 2's bulk loader parks on the
+	// same settings-scan block until store.unblock().
+	cancelTerm1()
+	re.NoError(m.Init(context.Background()))
+
+	// Release the stale lazy load: it must detect the term change, retry, and
+	// publish into the new term's manager, so the request still succeeds.
+	close(store.pointRelease)
+	<-getDone
+	re.NoError(gotErr)
+	re.NotNil(gotGroup, "the cross-term lazy load must retry and succeed against the new term")
+	re.Equal("cross-term", gotGroup.Name)
+
+	// Finish loading; the group must remain present after the term-2 bulk
+	// merge (it was correctly marked in the same term it was published in).
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		g, err := m.GetResourceGroup(1, "cross-term", false)
+		return err == nil && g != nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+}

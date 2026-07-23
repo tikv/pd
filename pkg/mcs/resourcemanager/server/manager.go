@@ -660,15 +660,27 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return nil
 		}
 	}
-	krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
-	// deleteGen is shared by every group in the keyspace, so a concurrent
-	// Delete of any group invalidates the lock-free storage read below.
-	// Deletes are rare: retry the read a few times so an unrelated deletion
-	// doesn't make this request spuriously report the group as missing; if it
-	// keeps racing, give up without inserting and let a later request or the
-	// async bulk merge reload the group.
+	// The lock-free storage read below can be invalidated while it runs: a
+	// concurrent Delete of any group in the keyspace bumps deleteGen, and a
+	// leadership change replaces m.krgms and m.syncLoadedGroups (bumping
+	// loadEpoch). Both are rare: retry the read a few times against freshly
+	// captured state so neither makes this request spuriously fail or publish
+	// into a detached manager; if it keeps racing, give up without inserting
+	// and let a later request or the async bulk merge reload the group.
 	const maxLoadAttempts = 3
 	for attempt := 1; ; attempt++ {
+		// Capture the load epoch and the current keyspace manager atomically,
+		// and re-capture them on every retry: publishing into a previous
+		// term's detached manager while marking the new term's map would make
+		// the new bulk merge skip a group its cache doesn't contain.
+		m.Lock()
+		epoch := m.loadEpoch
+		krgm = m.krgms[keyspaceID]
+		if krgm == nil {
+			krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+			m.krgms[keyspaceID] = krgm
+		}
+		m.Unlock()
 		// Snapshot the delete generation before the lock-free storage read,
 		// so a Delete that lands after the read is detected under the insert
 		// lock and can't be undone by the now-stale result.
@@ -676,6 +688,15 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		group, err := m.loadResourceGroup(keyspaceID, name)
 		if err != nil {
 			if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
+				m.RLock()
+				stale := m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm
+				m.RUnlock()
+				if stale {
+					if attempt >= maxLoadAttempts {
+						return nil
+					}
+					continue
+				}
 				// No persisted default group settings exist yet (e.g. a brand-new
 				// keyspace), so it's safe to synthesize the reserved default group.
 				// This calls initDefaultResourceGroup directly instead of going
@@ -689,6 +710,15 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		inserted := false
 		markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
 		m.Lock()
+		if m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm {
+			// The manager was reinitialized for a new term while the storage
+			// read was in flight; retry against the new term's state.
+			m.Unlock()
+			if attempt >= maxLoadAttempts {
+				return nil
+			}
+			continue
+		}
 		krgm.Lock()
 		if krgm.deleteGen != deleteGen {
 			krgm.Unlock()
@@ -722,9 +752,18 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 	}
 }
 
-func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, name string) {
+// markResourceGroupSyncLoaded records that the group in krgm was written or
+// fully loaded synchronously. The caller passes the keyspace manager it
+// actually mutated: if that manager is no longer the live one (the manager was
+// reinitialized for a new term while the caller was blocked on storage I/O),
+// the marker is skipped, since marking the new term's map for a group its
+// cache doesn't contain would make the bulk merge skip loading it.
+func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceResourceGroupManager, name string) {
 	m.Lock()
 	defer m.Unlock()
+	if m.krgms[keyspaceID] != krgm {
+		return
+	}
 	if m.syncLoadedGroups != nil {
 		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
 	}
@@ -768,7 +807,7 @@ func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawV
 			zap.Error(err))
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, name)
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
 	return nil
 }
 
@@ -805,7 +844,7 @@ func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawVa
 			zap.Error(err))
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, name)
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
 	return nil
 }
 
@@ -905,7 +944,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if err := krgm.addResourceGroup(grouppb); err != nil {
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, grouppb.Name)
 	return nil
 }
 
@@ -931,7 +970,7 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	// it sync-loaded here would make the async bulk merge skip it forever,
 	// so the persisted running state would never get applied.
 	if !krgm.isReserved(grouppb.Name) {
-		m.markResourceGroupSyncLoaded(keyspaceID, grouppb.Name)
+		m.markResourceGroupSyncLoaded(keyspaceID, krgm, grouppb.Name)
 	}
 	return nil
 }
@@ -953,7 +992,7 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if err := krgm.deleteResourceGroup(name); err != nil {
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, name)
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
 	return nil
 }
 
