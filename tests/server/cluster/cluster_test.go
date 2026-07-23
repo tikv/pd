@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -2218,4 +2219,56 @@ func TestPutStoreInvalidEngineLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPutStoreValidateStoreAddress(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID := leaderServer.GetClusterID()
+
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	defer re.NoError(listener.Close())
+
+	resp, err := putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      101,
+		Address: listener.Addr().String(),
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+
+	unreachableListener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	unreachableAddr := unreachableListener.Addr().String()
+	re.NoError(unreachableListener.Close())
+
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      102,
+		Address: unreachableAddr,
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_INVALID_VALUE, resp.GetHeader().GetError().GetType())
+
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      103,
+		Address: "mock://tikv-103:103",
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
 }

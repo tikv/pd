@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"path"
 	"runtime"
 	"runtime/trace"
@@ -804,6 +806,47 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	return nil
 }
 
+func dialAddress(ctx context.Context, address string) error {
+	if strings.HasPrefix(address, "mock://") {
+		return nil
+	}
+
+	hostPort := address
+	if u, err := url.Parse(address); err == nil && u.Host != "" {
+		hostPort = u.Host
+	}
+	if _, _, err := net.SplitHostPort(hostPort); err != nil {
+		return errors.WithStack(err)
+	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", hostPort)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return conn.Close()
+}
+
+func validateStoreAddress(ctx context.Context, store *metapb.Store) error {
+	addresses := make(map[string]struct{}, 2)
+	if address := store.GetAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetStatusAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetPeerAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	for address := range addresses {
+		if err := dialAddress(ctx, address); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // PutStore implements gRPC PDServer.
 func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	done, err := s.rateLimitCheck()
@@ -846,6 +889,15 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		return &pdpb.PutStoreResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				"placement rules is disabled"),
+		}, nil
+	}
+
+	// TiKV puts the store before listening on its store address, so PD can only
+	// validate the configured address by checking whether it is dialable.
+	if err := validateStoreAddress(ctx, store); err != nil {
+		return &pdpb.PutStoreResponse{
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE,
+				fmt.Sprintf("invalid store address %s: %s", store.GetAddress(), err)),
 		}, nil
 	}
 
