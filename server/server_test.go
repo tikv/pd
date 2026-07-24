@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	stderrors "errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -24,12 +25,67 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	servercluster "github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 )
+
+func newTestServer(t *testing.T, keyspaceGroupEnabled, tsoDynamicSwitchingEnabled bool) *Server {
+	t.Helper()
+
+	cfg := config.NewConfig()
+	cfg.Microservice.EnableTSODynamicSwitching = tsoDynamicSwitchingEnabled
+	s := &Server{
+		ctx:                    context.Background(),
+		cfg:                    cfg,
+		persistOptions:         config.NewPersistOptions(cfg),
+		isKeyspaceGroupEnabled: keyspaceGroupEnabled,
+	}
+	atomic.StoreInt64(&s.isRunning, 1)
+	return s
+}
+
+func TestIsServiceIndependent(t *testing.T) {
+	re := require.New(t)
+
+	// Keyspace groups disabled: always false even if cluster says independent.
+	s := newTestServer(t, false, false)
+	s.cluster = &servercluster.RaftCluster{}
+	s.cluster.SetServiceIndependent(constant.TSOServiceName)
+	re.False(s.IsServiceIndependent(constant.TSOServiceName))
+
+	// Keyspace groups enabled, dynamic switching disabled: TSO always independent
+	// (microservice is expected to be running).
+	s2 := newTestServer(t, true, false)
+	s2.cluster = &servercluster.RaftCluster{}
+	re.True(s2.IsServiceIndependent(constant.TSOServiceName))
+	// The dynamic-switching override is TSO-specific. Other services still
+	// follow the cluster's independent-service state.
+	re.False(s2.IsServiceIndependent(constant.SchedulingServiceName))
+	s2.cluster.SetServiceIndependent(constant.SchedulingServiceName)
+	re.True(s2.IsServiceIndependent(constant.SchedulingServiceName))
+	// A closed server never reports a service as independent, even when TSO
+	// dynamic switching is disabled.
+	atomic.StoreInt64(&s2.isRunning, 0)
+	re.False(s2.IsServiceIndependent(constant.TSOServiceName))
+
+	// Keyspace groups enabled, dynamic switching enabled: depends on cluster state.
+	s3 := newTestServer(t, true, true)
+	s3.cluster = &servercluster.RaftCluster{}
+	re.False(s3.IsServiceIndependent(constant.TSOServiceName))
+
+	// Service set independent: true.
+	s3.cluster.SetServiceIndependent(constant.TSOServiceName)
+	re.True(s3.IsServiceIndependent(constant.TSOServiceName))
+
+	// Server closed: false when dynamic switching is enabled as well.
+	atomic.StoreInt64(&s3.isRunning, 0)
+	re.False(s3.IsServiceIndependent(constant.TSOServiceName))
+}
 
 var errTestFollowerRegionStorage = stderrors.New("test follower region storage error")
 
