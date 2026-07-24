@@ -609,11 +609,20 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 		m.syncLoadedGroups = nil
 		m.Unlock()
 
-		m.initReserved()
+		// Publish completion before backfilling reserved defaults. Unlike every
+		// other shared-state mutation here, initReserved re-resolves managers and
+		// persists synthetic defaults without an epoch guard, so a re-election
+		// landing in this window could make a stale loader clobber the new term's
+		// not-yet-loaded default. storeLoadingStateIfCurrent is epoch-guarded, so
+		// gating on it first makes a stale loader return without ever running
+		// initReserved. A keyspace whose default this loader would have backfilled
+		// is still covered: once loading is complete, getOrCreateKeyspaceResource-
+		// GroupManager synthesizes the default directly on demand.
 		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateCompleted) {
 			log.Info("async loading resource groups aborted: manager was reinitialized")
 			return
 		}
+		m.initReserved()
 		duration := time.Since(startTime)
 		asyncLoadGroupDuration.Observe(duration.Seconds())
 		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))
