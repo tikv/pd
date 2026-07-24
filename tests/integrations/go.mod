@@ -3,6 +3,8 @@ module github.com/tikv/pd/tests/integrations
 go 1.25.10
 
 replace (
+	// Temporary replacement for kvproto PR #1503. Remove it after the PR merges.
+	github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20260723025057-6a82baebdef0
 	github.com/tikv/pd => ../../
 	github.com/tikv/pd/client => ../../client
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
