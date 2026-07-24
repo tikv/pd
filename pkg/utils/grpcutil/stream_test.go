@@ -126,17 +126,17 @@ func TestMetricsStream(t *testing.T) {
 	})
 }
 
-func TestTargetIP(t *testing.T) {
+func TestClientIP(t *testing.T) {
 	re := require.New(t)
 
 	// nil stream returns "unknown".
-	re.Equal("unknown", targetIP(nil))
+	re.Equal("unknown", clientIP(nil))
 
 	// No peer info in context returns "unknown".
 	s := &fakeServerStream{ctx: context.Background()}
-	re.Equal("unknown", targetIP(s))
+	re.Equal("unknown", clientIP(s))
 
 	// With peer addr, returns IP only (without port).
 	s = newFakeStreamWithPeer()
-	re.Equal("10.0.1.5", targetIP(s))
+	re.Equal("10.0.1.5", clientIP(s))
 }
