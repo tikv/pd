@@ -24,6 +24,8 @@ import (
 	"net/url"
 	"testing"
 
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -77,9 +79,16 @@ func sendRequest(
 ) ([]byte, int) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		re.NoError(err)
-		bodyReader = bytes.NewBuffer(data)
+		if group, ok := body.(*rmpb.ResourceGroup); ok {
+			bodyBuffer := bytes.NewBuffer(nil)
+			err := (&jsonpb.Marshaler{OrigName: true}).Marshal(bodyBuffer, group)
+			re.NoError(err)
+			bodyReader = bodyBuffer
+		} else {
+			data, err := json.Marshal(body)
+			re.NoError(err)
+			bodyReader = bytes.NewBuffer(data)
+		}
 	}
 	path, err := url.JoinPath(leaderAddr, apis.APIPathPrefix, path)
 	re.NoError(err)
@@ -124,9 +133,8 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 		)
 		re.NoError(err)
-		keyspaceID := &rmpb.KeyspaceIDValue{
-			Value: meta.GetId(),
-		}
+		keyspaceID := &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: meta.GetId()}}
+
 		// Add a resource group.
 		groupToAdd := &rmpb.ResourceGroup{
 			Name:     "test_group",
@@ -254,9 +262,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
 						},
 					},
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			suite.mustUpdateResourceGroup(re, groupToUpdate)
 		},

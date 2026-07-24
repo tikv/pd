@@ -2342,7 +2342,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(1), ks1.Id)
+	re.Equal(uint32(1), ks1.GetId())
 
 	ks2, err := s.srv.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
@@ -2350,7 +2350,7 @@ func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(2), ks2.Id)
+	re.Equal(uint32(2), ks2.GetId())
 }
 
 func (s *clientStatefulTestSuite) TestAdvanceTxnSafePointBasic() {
@@ -2711,7 +2711,7 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
-	re.Equal(uint32(3), ks3.Id)
+	re.Equal(uint32(3), ks3.GetId())
 
 	// Modify some GC states and verify TestGetAllKeyspaceGCStates gets the correct result.
 	cli := s.client.GetGCStatesClient(constants.NullKeyspaceID)

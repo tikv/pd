@@ -49,6 +49,12 @@ const (
 	skipCampaignLeaderCheckFailpoint  = "github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"
 )
 
+func makeKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
+	return &pdpb.KeyspaceScope{
+		Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: keyspaceID},
+	}
+}
+
 func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.GetGCStateRequest, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,7 +75,7 @@ func newGCStateLeaderTransitionCluster(t *testing.T) (*tests.TestCluster, *pdpb.
 
 	req := &pdpb.GetGCStateRequest{
 		Header:        testutil.NewRequestHeader(leaderServer.GetClusterID()),
-		KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: constant.NullKeyspaceID},
+		KeyspaceScope: makeKeyspaceScope(constant.NullKeyspaceID),
 	}
 	cleanup := func() {
 		re.NoError(failpoint.Disable(skipCampaignLeaderCheckFailpoint))
@@ -165,7 +171,7 @@ func TestGCOperations(t *testing.T) {
 			// Successful advancement of txn safe point
 			req := &pdpb.AdvanceTxnSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        10,
 			}
 			resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -189,7 +195,7 @@ func TestGCOperations(t *testing.T) {
 			// Successful advancement of GC safe point
 			req := &pdpb.AdvanceGCSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        8,
 			}
 			resp, err := grpcPDClient.AdvanceGCSafePoint(ctx, req)
@@ -212,7 +218,7 @@ func TestGCOperations(t *testing.T) {
 			// Successfully sets a GC barrier
 			req := &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b1",
 				BarrierTs:     15,
 				TtlSeconds:    3600,
@@ -229,7 +235,7 @@ func TestGCOperations(t *testing.T) {
 			// Successfully sets a GC barrier with infinite ttl.
 			req = &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b2",
 				BarrierTs:     14,
 				TtlSeconds:    math.MaxInt64,
@@ -245,7 +251,7 @@ func TestGCOperations(t *testing.T) {
 			// Failed to set a GC barrier (below txn safe point)
 			req = &pdpb.SetGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b3",
 				BarrierTs:     9,
 				TtlSeconds:    3600,
@@ -261,7 +267,7 @@ func TestGCOperations(t *testing.T) {
 			// Delete a GC barrier
 			req := &pdpb.DeleteGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     "b2",
 			}
 			resp, err := grpcPDClient.DeleteGCBarrier(ctx, req)
@@ -277,7 +283,7 @@ func TestGCOperations(t *testing.T) {
 			// Advance txn safe point reports the reason of being blocked
 			req := &pdpb.AdvanceTxnSafePointRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				Target:        20,
 			}
 			resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -293,13 +299,13 @@ func TestGCOperations(t *testing.T) {
 			// Get GC states
 			req := &pdpb.GetGCStateRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			}
 			resp, err := grpcPDClient.GetGCState(ctx, req)
 			re.NoError(err)
 			re.NotNil(resp.Header)
 			re.Nil(resp.Header.Error)
-			re.Equal(keyspaceID, resp.GetGcState().KeyspaceScope.KeyspaceId)
+			re.Equal(keyspaceID, resp.GetGcState().GetKeyspaceScope().GetKeyspaceId())
 			re.Equal(keyspaceID != constant.NullKeyspaceID, resp.GetGcState().GetIsKeyspaceLevelGc())
 			re.Equal(uint64(15), resp.GetGcState().GetTxnSafePoint())
 			re.Equal(uint64(8), resp.GetGcState().GetGcSafePoint())
@@ -319,7 +325,7 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	testInKeyspace(constant.NullKeyspaceID)
-	testInKeyspace(ks1.Id)
+	testInKeyspace(ks1.GetId())
 
 	req := &pdpb.GetAllKeyspacesGCStatesRequest{
 		Header: header,
@@ -332,16 +338,16 @@ func TestGCOperations(t *testing.T) {
 	re.Len(resp.GetGcStates(), 3)
 	receivedKeyspaceIDs := make([]uint32, 0, 3)
 	for _, gcState := range resp.GetGcStates() {
-		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.KeyspaceScope.KeyspaceId)
+		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.GetKeyspaceScope().GetKeyspaceId())
 	}
 	slices.Sort(receivedKeyspaceIDs)
 
 	// Expected keyspace IDs differ between NextGen and Classic
 	var expectedKeyspaceIDs []uint32
 	if kerneltype.IsNextGen() {
-		expectedKeyspaceIDs = []uint32{ks1.Id, constant.SystemKeyspaceID, constant.NullKeyspaceID}
+		expectedKeyspaceIDs = []uint32{ks1.GetId(), constant.SystemKeyspaceID, constant.NullKeyspaceID}
 	} else {
-		expectedKeyspaceIDs = []uint32{0, ks1.Id, constant.NullKeyspaceID}
+		expectedKeyspaceIDs = []uint32{0, ks1.GetId(), constant.NullKeyspaceID}
 	}
 	re.Equal(expectedKeyspaceIDs, receivedKeyspaceIDs)
 
@@ -352,10 +358,10 @@ func TestGCOperations(t *testing.T) {
 		if kerneltype.IsNextGen() {
 			defaultKeyspaceID = constant.SystemKeyspaceID
 		}
-		if gcState.KeyspaceScope.KeyspaceId == defaultKeyspaceID {
+		if gcState.GetKeyspaceScope().GetKeyspaceId() == defaultKeyspaceID {
 			continue
 		}
-		re.Equal(gcState.KeyspaceScope.KeyspaceId != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
+		re.Equal(gcState.GetKeyspaceScope().GetKeyspaceId() != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
 		re.Equal(uint64(15), gcState.GetTxnSafePoint())
 		re.Equal(uint64(8), gcState.GetGcSafePoint())
 		re.Len(gcState.GetGcBarriers(), 1)
@@ -375,18 +381,18 @@ func TestGCOperations(t *testing.T) {
 	}
 
 	// Global GC Barrier API
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Cleanup before test
 		req1 := &pdpb.GetGCStateRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 		}
 		resp1, err := grpcPDClient.GetGCState(ctx, req1)
 		re.NoError(err)
 		for _, state := range resp1.GcState.GcBarriers {
 			req := &pdpb.DeleteGCBarrierRequest{
 				Header:        header,
-				KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+				KeyspaceScope: makeKeyspaceScope(keyspaceID),
 				BarrierId:     state.BarrierId,
 			}
 			_, err := grpcPDClient.DeleteGCBarrier(ctx, req)
@@ -456,11 +462,11 @@ func TestGCOperations(t *testing.T) {
 		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
 	}
 
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Advance txn safe point reports the reason of being blocked
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			Target:        30,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)
@@ -489,11 +495,11 @@ func TestGCOperations(t *testing.T) {
 		re.LessOrEqual(resp.GetDeletedBarrierInfo().GetTtlSeconds(), int64(3600))
 	}
 
-	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.Id} {
+	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, ks1.GetId()} {
 		// Advance txn safe point reports the reason of being blocked
 		req := &pdpb.AdvanceTxnSafePointRequest{
 			Header:        header,
-			KeyspaceScope: &pdpb.KeyspaceScope{KeyspaceId: keyspaceID},
+			KeyspaceScope: makeKeyspaceScope(keyspaceID),
 			Target:        30,
 		}
 		resp, err := grpcPDClient.AdvanceTxnSafePoint(ctx, req)

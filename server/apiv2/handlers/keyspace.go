@@ -297,7 +297,7 @@ func LoadAllKeyspaces(c *gin.Context) {
 			resultKeyspaces[i] = &KeyspaceMeta{scanned[i]}
 		}
 		// Also set next_page_token here.
-		resp.NextPageToken = strconv.Itoa(int(scanned[len(scanned)-1].Id))
+		resp.NextPageToken = strconv.Itoa(int(scanned[len(scanned)-1].GetId()))
 	}
 	resp.Keyspaces = resultKeyspaces
 	c.IndentedJSON(http.StatusOK, resp)
@@ -462,7 +462,7 @@ func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 		StateChangedAt int64             `json:"state_changed_at,omitempty"`
 		Config         map[string]string `json:"config,omitempty"`
 	}{
-		meta.Id,
+		meta.GetId(),
 		meta.Name,
 		meta.State.String(),
 		meta.CreatedAt,
@@ -486,7 +486,7 @@ func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	pbMeta := &keyspacepb.KeyspaceMeta{
-		Id:             aux.ID,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: aux.ID},
 		Name:           aux.Name,
 		State:          keyspacepb.KeyspaceState(keyspacepb.KeyspaceState_value[aux.State]),
 		CreatedAt:      aux.CreatedAt,
