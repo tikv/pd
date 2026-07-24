@@ -104,10 +104,10 @@ type server interface {
 	diagnosticspb.DiagnosticsServer
 	StartTimestamp() int64
 	Name() string
-	// GetLeaderLease returns the configured leader lease in seconds. It is
-	// reused as the service registry lease TTL. Services without a lease
-	// config should return 0, in which case discovery.DefaultLeaseInSeconds
-	// is used.
+	// GetLeaderLease returns the configured leader lease in seconds.
+	// The service registry lease TTL is set to half of this value,
+	// clamped to a minimum of discovery.DefaultLeaseInSeconds.
+	// Services without a lease config should return 0.
 	GetLeaderLease() int64
 }
 
@@ -300,10 +300,12 @@ func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *d
 	if err != nil {
 		return nil, nil, err
 	}
-	// Reuse the configured leader lease as the registry lease TTL, but never
-	// go below discovery.DefaultLeaseInSeconds to keep the registry entry
-	// stable.
-	lease := max(s.GetLeaderLease(), discovery.DefaultLeaseInSeconds)
+	// The registry lease TTL is set to half of the leader lease, clamped to a
+	// minimum of discovery.DefaultLeaseInSeconds. This ensures the registry
+	// entry expires before the primary election lease, so that when the
+	// allocator detects a missing primary and triggers re-allocation, the
+	// stale node is already cleaned out of existMembers.
+	lease := max(s.GetLeaderLease()/2, int64(discovery.DefaultLeaseInSeconds))
 	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(),
 		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, lease)
 	if err := serviceRegister.Register(); err != nil {
