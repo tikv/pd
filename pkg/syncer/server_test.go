@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -178,7 +179,7 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 func syncFullRegionsForTest(ctx context.Context, syncer *RegionSyncer, syncStream *regionSyncStream, syncStartIndex uint64) error {
 	syncStream.sendMu.Lock()
 	defer syncStream.sendMu.Unlock()
-	return syncer.syncFullRegionsLocked(ctx, "pd-follower", syncStream, syncStartIndex)
+	return syncer.syncFullRegionsLocked(ctx, "pd-follower", syncStream, syncStartIndex, fullSyncReasonInitial)
 }
 
 func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
@@ -259,6 +260,95 @@ func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	re.Len(fullResp.GetRegions(), 1)
 
 	re.Equal(codes.ResourceExhausted, status.Code(<-done))
+}
+
+func TestFullSyncMetrics(t *testing.T) {
+	re := require.New(t)
+	successCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(fullSyncResultSuccess, fullSyncReasonInitial)]
+	failureCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(fullSyncResultFailure, fullSyncReasonMaxHistoryExceeded)]
+	missCounter := regionSyncerHistoryBufferMissCounters[historyBufferMissFullSyncCatchUp]
+	successBefore := promtestutil.ToFloat64(successCounter)
+	failureBefore := promtestutil.ToFloat64(failureCounter)
+	missBefore := promtestutil.ToFloat64(missCounter)
+
+	successSyncer, _ := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
+	successSyncer.history.resetWithIndex(10)
+	successStream := &testServerStream{}
+	successSyncStream := newRegionSyncStream(successStream, 10)
+
+	re.NoError(syncFullRegionsForTest(context.Background(), successSyncer, successSyncStream, 10))
+	re.Equal(successBefore+1, promtestutil.ToFloat64(successCounter))
+	re.Greater(promtestutil.ToFloat64(regionSyncerFullSyncLastDurationGauges[fullSyncResultSuccess]), 0.0)
+
+	failureSyncer, bc := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
+	failureSyncer.history = newHistoryBufferWithConfig(1, 1, 1, storage.NewStorageWithMemoryBackend())
+	failureSyncer.history.resetWithIndex(100)
+	failureStream := newMockSyncRegionsServer()
+	failureSyncStream, startIndex := failureSyncer.bindStreamForSync("pd-follower", failureStream)
+	defer failureSyncer.unbindStream("pd-follower", failureSyncStream)
+	unblockSend := failureStream.blockSend()
+	done := make(chan error, 1)
+	go func() {
+		done <- syncFullRegionsForTest(context.Background(), failureSyncer, failureSyncStream, startIndex)
+	}()
+	testutil.Eventually(re, failureStream.isSendBlocked)
+
+	for _, region := range []*core.RegionInfo{
+		newTestSyncRegion(2, 12),
+		newTestSyncRegion(3, 13),
+	} {
+		bc.PutRegion(region)
+		failureSyncer.history.record(region)
+	}
+	close(unblockSend)
+	<-failureStream.sendCh
+
+	re.Equal(codes.ResourceExhausted, status.Code(<-done))
+	re.Equal(failureBefore+1, promtestutil.ToFloat64(failureCounter))
+	re.Equal(missBefore+1, promtestutil.ToFloat64(missCounter))
+	re.Greater(promtestutil.ToFloat64(regionSyncerFullSyncLastDurationGauges[fullSyncResultFailure]), 0.0)
+}
+
+func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
+	re := require.New(t)
+	const downstream = "pd-metrics-follower"
+	bindCounter := regionSyncerStreamEventCounters[streamEventBind]
+	unbindCounter := regionSyncerStreamEventCounters[streamEventUnbind]
+	timeoutCounter := regionSyncerStreamEventCounters[streamEventSendTimeout]
+	bindBefore := promtestutil.ToFloat64(bindCounter)
+	unbindBefore := promtestutil.ToFloat64(unbindCounter)
+	timeoutBefore := promtestutil.ToFloat64(timeoutCounter)
+
+	syncer, _ := newTestRegionSyncer(t)
+	syncer.history.resetWithIndex(10)
+	stream := &testServerStream{}
+	syncStream, _ := syncer.bindStreamForSync(downstream, stream)
+
+	re.Equal(bindBefore+1, promtestutil.ToFloat64(bindCounter))
+	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerDownstreamLagGauge.WithLabelValues(downstream)))
+
+	syncer.history.record(newTestRegion(1))
+	syncStream.observeDownstreamLagMetrics(syncer.history.getNextIndex())
+	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerDownstreamLagGauge.WithLabelValues(downstream)))
+
+	re.NoError(syncer.sendDownstream(context.Background(), downstream, syncStream, false))
+	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerDownstreamLagGauge.WithLabelValues(downstream)))
+
+	syncer.unbindStream(downstream, syncStream)
+	re.Equal(unbindBefore+1, promtestutil.ToFloat64(unbindCounter))
+	re.False(regionSyncerDownstreamLagGauge.DeleteLabelValues(downstream))
+
+	timeoutSyncer, _ := newTestRegionSyncer(t)
+	timeoutSyncer.sendTimeout = 10 * time.Millisecond
+	timeoutSyncer.history.resetWithIndex(10)
+	blockingStream := newBlockingSendStream(1)
+	timeoutSyncStream, _ := timeoutSyncer.bindStreamForSync("pd-timeout-follower", blockingStream)
+	defer timeoutSyncer.unbindStream("pd-timeout-follower", timeoutSyncStream)
+	timeoutSyncer.history.record(newTestRegion(2))
+
+	re.Error(timeoutSyncer.sendDownstream(context.Background(), "pd-timeout-follower", timeoutSyncStream, false))
+	re.Equal(timeoutBefore+1, promtestutil.ToFloat64(timeoutCounter))
+	blockingStream.unblockSend()
 }
 
 func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
@@ -1180,6 +1270,7 @@ func TestFullSyncDisconnectsWhenHistoryBufferOverflowsDuringCatchUp(t *testing.T
 
 func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	re := require.New(t)
+	setRegionSyncerClientReadyMetrics(false)
 	regionStorage := storage.NewStorageWithMemoryBackend()
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -1206,6 +1297,7 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	re.True(handled)
 	re.True(fullSyncing)
 	re.False(syncer.IsRunning())
+	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerClientReadyGauge))
 	re.Equal(uint64(0), syncer.history.getNextIndex())
 
 	handled, fullSyncing = syncer.handleRegionSyncResponse(context.Background(), &pdpb.SyncRegionResponse{
@@ -1215,6 +1307,7 @@ func TestClientWaitsForFullSyncCompletionBeforeRunning(t *testing.T) {
 	re.True(handled)
 	re.False(fullSyncing)
 	re.True(syncer.IsRunning())
+	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerClientReadyGauge))
 	re.Equal(uint64(1), syncer.history.getNextIndex())
 }
 

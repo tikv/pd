@@ -17,6 +17,7 @@ package syncer
 import (
 	"testing"
 
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -211,6 +212,36 @@ func TestHistoryBufferFullSyncRetainTakesPriorityOverRequiredWindow(t *testing.T
 	re.Equal(uint64(5), records[4].GetID())
 	re.Equal(uint64(10), h.getFirstIndex())
 	re.Equal(8, h.capacity())
+}
+
+func TestHistoryBufferMetrics(t *testing.T) {
+	re := require.New(t)
+	growCounter := regionSyncerHistoryBufferResizeCounters[historyBufferResizeGrow]
+	shrinkCounter := regionSyncerHistoryBufferResizeCounters[historyBufferResizeShrink]
+	growBefore := promtestutil.ToFloat64(growCounter)
+	shrinkBefore := promtestutil.ToFloat64(shrinkCounter)
+
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthGauge))
+	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferMaxCapacityGauge))
+
+	h.resetWithIndex(10)
+	h.record(newHistoryBufferTestRegion(1))
+	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthGauge))
+	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+
+	h.observeRequiredWindow(3)
+	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(growBefore+1, promtestutil.ToFloat64(growCounter))
+	h.maybeShrink()
+
+	for range historyBufferShrinkRounds {
+		h.observeRequiredWindow(1)
+		h.maybeShrink()
+	}
+	re.Equal(4.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(shrinkBefore+1, promtestutil.ToFloat64(shrinkCounter))
 }
 
 func TestHistoryBufferObserveRequiredWindowGrowsWithoutRetain(t *testing.T) {
