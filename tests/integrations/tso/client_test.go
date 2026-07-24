@@ -775,13 +775,11 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
 }
 
-// TestDynamicSwitchingPDToTSO tests that when dynamic switching is enabled and a TSO
-// microservice starts, PD stops serving TSO locally, sets ServiceIndependent,
-// and the TSO microservice serves timestamps successfully.
-//
-// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
-// so it only validates server-side dynamic switching behavior. Client-side service-mode
-// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+// The dynamic-switching tests below pin clients to PD_SVC_MODE to cover server-side
+// switching and forwarding. TestTSOServiceSwitch covers client-side mode discovery.
+
+// TestDynamicSwitchingPDToTSO verifies that starting a TSO microservice switches PD
+// from local TSO to forwarding without timestamp rollback.
 func TestDynamicSwitchingPDToTSO(t *testing.T) {
 	re := require.New(t)
 	enableDynamicSwitchingTestFailpoints(t, re)
@@ -827,13 +825,8 @@ func TestDynamicSwitchingPDToTSO(t *testing.T) {
 	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
-// TestDynamicSwitchingTSOToPD tests that when a TSO microservice stops, PD
-// resumes serving TSO locally and timestamps remain monotonically increasing
-// across the fallback.
-//
-// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
-// so it only validates server-side dynamic switching behavior. Client-side service-mode
-// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+// TestDynamicSwitchingTSOToPD verifies that PD resumes local TSO without timestamp
+// rollback after the TSO microservice stops.
 func TestDynamicSwitchingTSOToPD(t *testing.T) {
 	re := require.New(t)
 	enableDynamicSwitchingTestFailpoints(t, re)
@@ -880,13 +873,8 @@ func TestDynamicSwitchingTSOToPD(t *testing.T) {
 	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
-// TestDynamicSwitchingRoundTrip tests that PD can repeatedly switch between serving
-// TSO locally and forwarding to a TSO microservice while timestamps remain monotonically
-// increasing across every transition.
-//
-// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
-// so it only validates server-side dynamic switching behavior. Client-side service-mode
-// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+// TestDynamicSwitchingRoundTrip verifies repeated PD-to-TSO and TSO-to-PD switches
+// without timestamp rollback.
 func TestDynamicSwitchingRoundTrip(t *testing.T) {
 	re := require.New(t)
 	enableDynamicSwitchingTestFailpoints(t, re)
@@ -964,13 +952,8 @@ func TestDynamicSwitchingRoundTrip(t *testing.T) {
 	})
 }
 
-// TestDynamicSwitchingWithLeaderTransfer tests that TSO requests recover after
-// PD leader transfers when a TSO microservice is active, and timestamps remain
-// monotonically increasing across transfers.
-//
-// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
-// so it only validates server-side dynamic switching behavior. Client-side service-mode
-// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+// TestDynamicSwitchingWithLeaderTransfer verifies TSO forwarding and timestamp
+// monotonicity across deterministic PD leader transfers.
 func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 	re := require.New(t)
 	enableDynamicSwitchingTestFailpoints(t, re)
@@ -1037,13 +1020,8 @@ func TestDynamicSwitchingWithLeaderTransfer(t *testing.T) {
 	}
 }
 
-// TestDynamicSwitchingWithLeaderFailover tests that TSO requests recover after
-// the current PD leader stops while a TSO microservice is active, and timestamps
-// remain monotonically increasing across the failover.
-//
-// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
-// so it only validates server-side dynamic switching behavior. Client-side service-mode
-// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+// TestDynamicSwitchingWithLeaderFailover verifies TSO forwarding and timestamp
+// monotonicity after the current PD leader stops.
 func TestDynamicSwitchingWithLeaderFailover(t *testing.T) {
 	re := require.New(t)
 	enableDynamicSwitchingTestFailpoints(t, re)
