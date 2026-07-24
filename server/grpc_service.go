@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"path"
 	"runtime"
 	"runtime/trace"
@@ -27,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	probing "github.com/prometheus-community/pro-bing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -804,6 +807,70 @@ func checkStore(rc *cluster.RaftCluster, storeID uint64) *pdpb.Error {
 	return nil
 }
 
+func dialAddress(ctx context.Context, address string) error {
+	if strings.HasPrefix(address, "mock://") {
+		return nil
+	}
+
+	hostPort := address
+	if u, err := url.Parse(address); err == nil && u.Host != "" {
+		hostPort = u.Host
+	}
+	host, _, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	pinger, err := probing.NewPinger(host)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	pinger.Count = 1
+	pinger.Timeout = defaultGRPCDialTimeout
+	pinger.SetPrivileged(false)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- pinger.Run()
+	}()
+
+	select {
+	case <-ctx.Done():
+		pinger.Stop()
+		return errors.WithStack(ctx.Err())
+	case err := <-done:
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	}
+
+	stats := pinger.Statistics()
+	if stats.PacketsRecv == 0 {
+		return errors.Errorf("no ICMP reply from %s", host)
+	}
+
+	return nil
+}
+
+func validateStoreAddress(ctx context.Context, store *metapb.Store) error {
+	addresses := make(map[string]struct{}, 2)
+	if address := store.GetAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetStatusAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	if address := store.GetPeerAddress(); address != "" {
+		addresses[address] = struct{}{}
+	}
+	for address := range addresses {
+		if err := dialAddress(ctx, address); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // PutStore implements gRPC PDServer.
 func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest) (*pdpb.PutStoreResponse, error) {
 	done, err := s.rateLimitCheck()
@@ -846,6 +913,15 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		return &pdpb.PutStoreResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				"placement rules is disabled"),
+		}, nil
+	}
+
+	// TiKV puts the store before listening on its store address, so PD can only
+	// validate the configured address by checking whether it is dialable.
+	if err := validateStoreAddress(ctx, store); err != nil {
+		return &pdpb.PutStoreResponse{
+			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE,
+				fmt.Sprintf("invalid store address %s: %s", store.GetAddress(), err)),
 		}, nil
 	}
 
