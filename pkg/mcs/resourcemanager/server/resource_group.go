@@ -47,6 +47,10 @@ type ResourceGroup struct {
 	Background *rmpb.BackgroundSettings `json:"background_settings,omitempty"`
 	// total ru consumption
 	RUConsumption *rmpb.Consumption `json:"ru_consumption,omitempty"`
+	// metadataSnapshotGeneration records the latest full metadata snapshot that
+	// observed this group. Keeping it on the cached object avoids a second map
+	// with one entry per resource group.
+	metadataSnapshotGeneration uint64
 }
 
 // RequestUnitSettings is the definition of the RU settings.
@@ -202,17 +206,35 @@ func (rg *ResourceGroup) overrideFillRateAndBurstLimit(fillRate float64, burstLi
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
 func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
+	return rg.patchSettingsWithGeneration(metaGroup, true, 0)
+}
+
+func (rg *ResourceGroup) patchSettingsWithGeneration(
+	metaGroup *rmpb.ResourceGroup,
+	patchTokens bool,
+	metadataSnapshotGeneration uint64,
+) error {
 	rg.Lock()
 	defer rg.Unlock()
-	return rg.patchSettingsLocked(metaGroup, true)
+	if err := rg.patchSettingsLocked(metaGroup, patchTokens); err != nil {
+		return err
+	}
+	if metadataSnapshotGeneration != 0 {
+		rg.metadataSnapshotGeneration = metadataSnapshotGeneration
+	}
+	return nil
 }
 
 // ApplySettings applies the resource group settings only.
 // It does not patch token delta.
 func (rg *ResourceGroup) ApplySettings(metaGroup *rmpb.ResourceGroup) error {
-	rg.Lock()
-	defer rg.Unlock()
-	return rg.patchSettingsLocked(metaGroup, false)
+	return rg.patchSettingsWithGeneration(metaGroup, false, 0)
+}
+
+func (rg *ResourceGroup) getMetadataSnapshotGeneration() uint64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.metadataSnapshotGeneration
 }
 
 func (rg *ResourceGroup) patchSettingsLocked(metaGroup *rmpb.ResourceGroup, patchTokens bool) error {

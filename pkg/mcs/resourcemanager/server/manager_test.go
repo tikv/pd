@@ -103,6 +103,8 @@ func (*testBasicServer) AddServiceReadyCallback(...func(context.Context) error) 
 type fakeMetadataLoopWatcher struct {
 	startWatchLoopFn func()
 	waitLoadFn       func() error
+	preLoadFn        func()
+	postLoadFn       func(error) error
 }
 
 func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
@@ -112,10 +114,24 @@ func (w *fakeMetadataLoopWatcher) StartWatchLoop() {
 }
 
 func (w *fakeMetadataLoopWatcher) WaitLoad() error {
-	if w.waitLoadFn != nil {
-		return w.waitLoadFn()
+	if w.preLoadFn != nil {
+		w.preLoadFn()
 	}
-	return nil
+	var err error
+	if w.waitLoadFn != nil {
+		err = w.waitLoadFn()
+	}
+	if w.postLoadFn != nil {
+		if postLoadErr := w.postLoadFn(err); err == nil {
+			err = postLoadErr
+		}
+	}
+	return err
+}
+
+func (w *fakeMetadataLoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(error) error) {
+	w.preLoadFn = preLoadFn
+	w.postLoadFn = postLoadFn
 }
 
 type failingControllerConfigStorage struct {
@@ -162,6 +178,28 @@ func withMetadataLoopWatcherFactory(t *testing.T, factory testMetadataLoopWatche
 }
 
 func TestManagerMetadataWatcherLifecycle(t *testing.T) {
+	t.Run("waits_for_previous_lifecycle_before_reinitializing", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareManager()
+		oldCtx, cancelOld := context.WithCancel(context.Background())
+		m.cancel = cancelOld
+		oldExited := make(chan struct{})
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			<-oldCtx.Done()
+			close(oldExited)
+		}()
+
+		re.NoError(m.Init(context.Background()))
+		defer m.close()
+		select {
+		case <-oldExited:
+		default:
+			t.Fatal("previous lifecycle is still running")
+		}
+	})
+
 	t.Run("enables_metadata_watcher_for_rm_service_server", func(t *testing.T) {
 		re := require.New(t)
 		m := NewManager[*Server](&Server{

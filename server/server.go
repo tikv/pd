@@ -2391,7 +2391,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		return nil
 	}
 	name := fmt.Sprintf("%s-primary-watcher", serviceName)
-	return etcdutil.NewLoopWatcher(
+	w := etcdutil.NewLoopWatcher(
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
@@ -2403,6 +2403,8 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
+	w.SetReconcileDeletedKeys()
+	return w
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id

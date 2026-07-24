@@ -389,6 +389,7 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	m.tsoNodesWatcher.SetReconcileDeletedKeys()
 }
 
 // CreateKeyspaceGroups creates keyspace groups.

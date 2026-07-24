@@ -108,12 +108,14 @@ func NewWatcher(
 
 func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *keyutil.KeyRanges
+	var hasRuleConfigChanges bool
 
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
 		suspectKeyRanges = &keyutil.KeyRanges{}
+		hasRuleConfigChanges = false
 		return nil
 	}
 
@@ -130,6 +132,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				return err
 			}
 			rw.patch.SetRule(rule)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges in lock.
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			if oldRule := rw.ruleManager.GetRuleLocked(rule.GroupID, rule.ID); oldRule != nil {
@@ -144,6 +147,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			// Try to add the rule group change to the patch.
 			rw.patch.SetGroup(ruleGroup)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(ruleGroup.ID) {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
@@ -167,6 +171,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			// Try to add the rule change to the patch.
 			rw.patch.DeleteRule(rule.GroupID, rule.ID)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
@@ -175,6 +180,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(trimmedKey) {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
@@ -186,6 +192,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
+		if !hasRuleConfigChanges {
+			return nil
+		}
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
@@ -206,6 +215,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.ruleWatcher.SetReconcileDeletedKeys()
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }
@@ -273,6 +283,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.labelWatcher.SetReconcileDeletedKeys()
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
 }

@@ -55,6 +55,7 @@ type resourceGroupWatchTarget struct {
 type metadataLoopWatcher interface {
 	StartWatchLoop()
 	WaitLoad() error
+	SetLoadHooks(preLoadFn func(), postLoadFn func(error) error)
 }
 
 var newMetadataLoopWatcher = func(
@@ -155,10 +156,16 @@ func parseKeyspaceIDWatchPath(path string, entryType resourceGroupWatchEntryType
 func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	m.Lock()
 	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.metadataSnapshotInitialized = false
 	m.Unlock()
 
+	var metadataSnapshotGeneration uint64
 	putFn := func(kv *mvccpb.KeyValue) error {
-		return m.handleMetadataWatchPut(string(kv.Key), string(kv.Value))
+		return m.handleMetadataWatchPutWithGeneration(
+			string(kv.Key),
+			string(kv.Value),
+			metadataSnapshotGeneration,
+		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return m.handleMetadataWatchDelete(string(kv.Key))
@@ -175,6 +182,16 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	watcher.SetLoadHooks(
+		func() {
+			metadataSnapshotGeneration = m.beginMetadataSnapshot()
+		},
+		func(loadErr error) error {
+			generation := metadataSnapshotGeneration
+			metadataSnapshotGeneration = 0
+			return m.finishMetadataSnapshot(generation, loadErr)
+		},
+	)
 	watcher.StartWatchLoop()
 	if err := watcher.WaitLoad(); err != nil {
 		return err
@@ -185,19 +202,41 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 }
 
 func (m *Manager) handleMetadataWatchPut(key, rawValue string) error {
+	return m.handleMetadataWatchPutWithGeneration(key, rawValue, 0)
+}
+
+func (m *Manager) handleMetadataWatchPutWithGeneration(
+	key, rawValue string,
+	metadataSnapshotGeneration uint64,
+) error {
 	target, ok := parseResourceGroupWatchPath(key)
 	if !ok {
 		return nil
+	}
+	if metadataSnapshotGeneration != 0 {
+		m.metadataSnapshotMutationMu.Lock()
+		defer m.metadataSnapshotMutationMu.Unlock()
+		if _, mutated := m.metadataSnapshotMutations[key]; mutated {
+			return nil
+		}
 	}
 	switch target.entryType {
 	case resourceGroupWatchEntryController:
 		return m.applyControllerConfigFromRaw(rawValue)
 	case resourceGroupWatchEntrySettings:
-		return m.applyResourceGroupSettingFromRaw(target.keyspaceID, target.groupName, rawValue)
+		return m.applyResourceGroupSettingFromRawWithGeneration(
+			target.keyspaceID,
+			target.groupName,
+			rawValue,
+			metadataSnapshotGeneration,
+		)
 	case resourceGroupWatchEntryStates:
+		if metadataSnapshotGeneration != 0 && m.isMetadataSnapshotReload(metadataSnapshotGeneration) {
+			return nil
+		}
 		return m.applyResourceGroupStatesFromRaw(target.keyspaceID, target.groupName, rawValue)
 	case resourceGroupWatchEntryServiceLimit:
-		return m.applyServiceLimitFromRaw(target.keyspaceID, rawValue)
+		return m.applyServiceLimitFromRawWithGeneration(target.keyspaceID, rawValue, metadataSnapshotGeneration)
 	default:
 		return nil
 	}
