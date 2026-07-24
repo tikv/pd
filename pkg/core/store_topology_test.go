@@ -15,9 +15,12 @@
 package core
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 func TestTopologyWeight(t *testing.T) {
@@ -120,4 +123,133 @@ func TestTopologyWeight4(t *testing.T) {
 	re.Equal(1.0/3/2, GetStoreTopoWeight(store1, stores, labels, 3))
 	re.Equal(1.0/3, GetStoreTopoWeight(store3, stores, labels, 3))
 	re.Equal(1.0/3, GetStoreTopoWeight(store4, stores, labels, 3))
+}
+
+func TestTopologyWeightWithPartialValidLabels(t *testing.T) {
+	re := require.New(t)
+
+	labels := []string{"zone", "rack"}
+	store1 := NewStoreInfoWithLabel(1, map[string]string{"zone": "z1", "rack": "r1"})
+	store2 := NewStoreInfoWithLabel(2, map[string]string{"zone": "z1", "rack": "r2"})
+	store3 := NewStoreInfoWithLabel(3, map[string]string{"zone": "z2", "rack": "r3"})
+	store4 := NewStoreInfoWithLabel(4, map[string]string{"zone": "z2", "rack": "r4"})
+	stores := []*StoreInfo{store1, store2, store3, store4}
+
+	re.Equal(1.0/2/2, GetStoreTopoWeight(store1, stores, labels, 3))
+}
+
+func TestTopologyWeightWithEmptyStoreLabelValue(t *testing.T) {
+	re := require.New(t)
+
+	store := NewStoreInfoWithLabel(1, map[string]string{"zone": ""})
+
+	_ = GetStoreTopoWeight(store, []*StoreInfo{store}, []string{"zone"}, 3)
+
+	re.Equal("zone", store.GetLabels()[0].Key)
+	re.Empty(store.GetLabels()[0].Value)
+}
+
+func TestTopologyWeightWithNoEligibleStores(t *testing.T) {
+	re := require.New(t)
+
+	store := NewStoreInfoWithLabel(1, map[string]string{"zone": "z1"}).Clone(SetStoreState(metapb.StoreState_Tombstone))
+
+	var weight float64
+	re.NotPanics(func() {
+		weight = GetStoreTopoWeight(store, []*StoreInfo{store}, []string{"zone"}, 3)
+	})
+	re.Equal(1.0, weight)
+}
+
+func TestTopologyWeightWithManyLocationLabels(t *testing.T) {
+	re := require.New(t)
+
+	labels := make([]string, 17)
+	storeLabels := make(map[string]string, len(labels))
+	for i := range labels {
+		labels[i] = fmt.Sprintf("label-%d", i)
+		storeLabels[labels[i]] = fmt.Sprintf("value-%d", i)
+	}
+	store := NewStoreInfoWithLabel(1, storeLabels)
+
+	re.NotPanics(func() {
+		_ = GetStoreTopoWeight(store, []*StoreInfo{store}, labels, 3)
+	})
+}
+
+// generateTestStores creates n stores with different labels for testing.
+func generateTestStores(n int) []*StoreInfo {
+	stores := make([]*StoreInfo, 0, n)
+	for i := range n {
+		store := NewStoreInfoWithLabel(uint64(i), map[string]string{
+			"zone": "zone" + string(rune('a'+i%3)),
+			"rack": "rack" + string(rune('a'+i%5)),
+			"host": "host" + string(rune('a'+i%7)),
+		})
+		stores = append(stores, store)
+	}
+	return stores
+}
+
+func BenchmarkBuildTopology(b *testing.B) {
+	testCases := []struct {
+		name       string
+		storeCount int
+	}{
+		{"Small-10-Stores", 10},
+		{"Medium-100-Stores", 100},
+		{"Large-1000-Stores", 1000},
+	}
+
+	locationLabels := []string{"zone", "rack", "host"}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			stores := generateTestStores(tc.storeCount)
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for range b.N {
+				topology, _, _, _ := buildTopology(
+					stores[0],
+					stores,
+					locationLabels,
+					3,
+				)
+				putTopology(topology)
+			}
+		})
+	}
+}
+
+var benchmarkStoreTopoWeight float64
+
+func BenchmarkGetStoreTopoWeight(b *testing.B) {
+	testCases := []struct {
+		name       string
+		storeCount int
+	}{
+		{"Small-10-Stores", 10},
+		{"Medium-100-Stores", 100},
+		{"Large-1000-Stores", 1000},
+	}
+
+	locationLabels := []string{"zone", "rack", "host"}
+
+	for _, tc := range testCases {
+		b.Run(tc.name, func(b *testing.B) {
+			stores := generateTestStores(tc.storeCount)
+			b.ResetTimer()
+			b.ReportAllocs()
+
+			for range b.N {
+				benchmarkStoreTopoWeight = GetStoreTopoWeight(
+					stores[0],
+					stores,
+					locationLabels,
+					4,
+				)
+			}
+		})
+	}
 }

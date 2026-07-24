@@ -54,6 +54,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	expectedLabels := make(map[string]string, len(firstStore.Store.Labels)+len(storeLabels))
 	originalZoneKey, originalZone, hasOriginalZone := "", "", false
 	for _, label := range firstStore.Store.Labels {
+		re.NotNil(label)
 		expectedLabels[label.Key] = label.Value
 		if !hasOriginalZone && strings.EqualFold(label.Key, zoneLabelKey) {
 			originalZoneKey, originalZone, hasOriginalZone = label.Key, label.Value, true
@@ -89,6 +90,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 
 		labelsMap := make(map[string]string)
 		for _, label := range resp.Store.Labels {
+			re.NotNil(label)
 			labelsMap[label.Key] = label.Value
 		}
 
