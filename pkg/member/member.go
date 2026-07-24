@@ -66,6 +66,28 @@ type Member struct {
 	lastLeaderUpdatedTime atomic.Value
 }
 
+// MoveEtcdLeaderOption customizes embedded etcd leader transfer.
+type MoveEtcdLeaderOption func(*moveEtcdLeaderOptions)
+
+type moveEtcdLeaderOptions struct {
+	targetChecker func(context.Context, uint64) error
+}
+
+// WithTargetChecker checks whether the target member can become leader before transfer.
+func WithTargetChecker(checker func(context.Context, uint64) error) MoveEtcdLeaderOption {
+	return func(opts *moveEtcdLeaderOptions) {
+		opts.targetChecker = checker
+	}
+}
+
+func newMoveEtcdLeaderOptions(opts ...MoveEtcdLeaderOption) *moveEtcdLeaderOptions {
+	options := &moveEtcdLeaderOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	return options
+}
+
 // NewMember create a new Member.
 func NewMember(etcd *embed.Etcd, client *clientv3.Client, id uint64) *Member {
 	return &Member{
@@ -280,7 +302,7 @@ func (m *Member) Resign() {
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
-func (m *Member) CheckPriority(ctx context.Context) {
+func (m *Member) CheckPriority(ctx context.Context, opts ...MoveEtcdLeaderOption) {
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
 		log.Error("failed to load leader priority", errs.ZapError(err))
@@ -299,9 +321,19 @@ func (m *Member) CheckPriority(ctx context.Context) {
 		return
 	}
 	if myPriority > leaderPriority {
-		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID())
+		err := m.MoveEtcdLeader(ctx, etcdLeader, m.ID(), opts...)
 		if err != nil {
-			log.Error("failed to transfer etcd leader", errs.ZapError(err))
+			if errors.ErrorEqual(err, errs.ErrEtcdLeaderTransferTargetCheck) {
+				log.Warn("skip transferring etcd leader by priority because target check failed",
+					zap.Uint64("from", etcdLeader),
+					zap.Uint64("to", m.ID()),
+					errs.ZapError(err))
+			} else {
+				log.Error("failed to transfer etcd leader by priority",
+					zap.Uint64("from", etcdLeader),
+					zap.Uint64("to", m.ID()),
+					errs.ZapError(err))
+			}
 		} else {
 			log.Info("transfer etcd leader",
 				zap.Uint64("from", etcdLeader),
@@ -311,9 +343,15 @@ func (m *Member) CheckPriority(ctx context.Context) {
 }
 
 // MoveEtcdLeader tries to transfer etcd leader.
-func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
+func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64, opts ...MoveEtcdLeaderOption) error {
 	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
 	defer cancel()
+	options := newMoveEtcdLeaderOptions(opts...)
+	if options.targetChecker != nil {
+		if err := options.targetChecker(moveCtx, new); err != nil {
+			return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(err.Error())
+		}
+	}
 	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
 	if err != nil {
 		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()
@@ -353,7 +391,7 @@ func (m *Member) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name str
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
 // other pd-servers can campaign.
-func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string) error {
+func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLeader string, opts ...MoveEtcdLeaderOption) error {
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
@@ -374,6 +412,30 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	}
 	if len(etcdLeaderIDs) == 0 {
 		return errors.New("no valid pd to transfer etcd leader")
+	}
+	options := newMoveEtcdLeaderOptions(opts...)
+	if options.targetChecker != nil {
+		readyEtcdLeaderIDs := make([]uint64, 0, len(etcdLeaderIDs))
+		var lastErr error
+		for _, id := range etcdLeaderIDs {
+			checkCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+			err := options.targetChecker(checkCtx, id)
+			cancel()
+			if err != nil {
+				lastErr = err
+				log.Warn("skip unready pd when resigning etcd leader", zap.Uint64("target-member-id", id), errs.ZapError(err))
+				continue
+			}
+			readyEtcdLeaderIDs = append(readyEtcdLeaderIDs, id)
+		}
+		if len(readyEtcdLeaderIDs) == 0 {
+			errMsg := "no ready pd to transfer etcd leader"
+			if lastErr != nil {
+				errMsg += ": " + lastErr.Error()
+			}
+			return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(errMsg)
+		}
+		etcdLeaderIDs = readyEtcdLeaderIDs
 	}
 	nextEtcdLeaderID := etcdLeaderIDs[rand.IntN(len(etcdLeaderIDs))]
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)

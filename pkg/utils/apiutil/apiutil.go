@@ -438,6 +438,8 @@ func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.Read
 const (
 	// CorePath the core group, is at REST path `/pd/api/v1`.
 	CorePath = "/pd/api/v1"
+	// CoreV2Path is the core group REST path for API v2.
+	CoreV2Path = "/pd/api/v2"
 	// ExtensionsPath the named groups are REST at `/pd/apis/{GROUP_NAME}/{Version}`.
 	ExtensionsPath = "/pd/apis"
 )

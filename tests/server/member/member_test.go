@@ -32,8 +32,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -175,16 +178,83 @@ func TestLeaderPriority(t *testing.T) {
 	})
 }
 
+func TestLeaderPrioritySkipsUnreadyTarget(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.LeaderPriorityCheckInterval = typeutil.NewDuration(200 * time.Millisecond)
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	testutil.Eventually(re, func() bool {
+		etcdLeader, err := cluster.GetServer("pd1").GetEtcdLeader()
+		if err != nil {
+			return false
+		}
+		return cluster.GetLeader() == etcdLeader
+	})
+	leaderName = cluster.GetLeader()
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	followers := getFollowerNames(cluster, leaderName)
+	re.Len(followers, 2)
+	targetName := followers[0]
+	targetServer := cluster.GetServer(targetName)
+
+	etcdLeader, err := leaderServer.GetEtcdLeader()
+	re.NoError(err)
+	re.Equal(leaderName, etcdLeader)
+
+	failpointName := "github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"
+	re.NoError(failpoint.Enable(failpointName, `return("`+targetServer.GetAddr()+`")`))
+	failpointEnabled := true
+	defer func() {
+		if failpointEnabled {
+			re.NoError(failpoint.Disable(failpointName))
+		}
+	}()
+
+	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/members/name/"+targetName, `{"leader-priority": 1}`)
+	targetPDServer := targetServer.GetServer()
+	targetPDServer.GetMember().CheckPriority(ctx, member.WithTargetChecker(targetPDServer.CheckMemberReadyForLeaderTransfer))
+	etcdLeader, err = leaderServer.GetEtcdLeader()
+	re.NoError(err)
+	re.Equal(leaderName, etcdLeader)
+
+	re.NoError(failpoint.Disable(failpointName))
+	failpointEnabled = false
+	testutil.Eventually(re, func() bool {
+		etcdLeader, err = leaderServer.GetEtcdLeader()
+		if err != nil {
+			return false
+		}
+		return etcdLeader == targetName
+	})
+}
+
 func post(t *testing.T, re *require.Assertions, url string, body string) {
 	testutil.Eventually(re, func() bool {
-		res, err := tests.TestDialClient.Post(url, "", bytes.NewBufferString(body)) // #nosec
-		re.NoError(err)
-		b, err := io.ReadAll(res.Body)
-		res.Body.Close()
-		re.NoError(err)
-		t.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
-		return res.StatusCode == http.StatusOK
+		status, _ := postOnce(t, re, url, body)
+		return status == http.StatusOK
 	})
+}
+
+func postOnce(t *testing.T, re *require.Assertions, url string, body string) (int, string) {
+	res, err := tests.TestDialClient.Post(url, "", bytes.NewBufferString(body)) // #nosec
+	re.NoError(err)
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	re.NoError(err)
+	t.Logf("post %s, status: %v res: %s", url, res.StatusCode, string(b))
+	return res.StatusCode, string(b)
 }
 
 func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old string) string {
@@ -201,6 +271,9 @@ func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old 
 }
 
 func TestLeaderResign(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -224,7 +297,134 @@ func TestLeaderResign(t *testing.T) {
 	re.Equal(leader1, leader3)
 }
 
+func TestLeaderTransferChecksTargetReady(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	followerName := cluster.GetFollower()
+	followerServer := cluster.GetServer(followerName)
+
+	failpointName := "github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"
+	re.NoError(failpoint.Enable(failpointName, `return("`+followerServer.GetAddr()+`")`))
+	failpointEnabled := true
+	defer func() {
+		if failpointEnabled {
+			re.NoError(failpoint.Disable(failpointName))
+		}
+	}()
+
+	status, body := postOnce(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/leader/transfer/"+followerName, "")
+	re.Equal(http.StatusInternalServerError, status)
+	re.Contains(body, "not ready")
+	re.Equal(leaderName, cluster.GetLeader())
+
+	re.NoError(failpoint.Disable(failpointName))
+	failpointEnabled = false
+	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/leader/transfer/"+followerName, "")
+	leader2 := waitLeaderChange(re, cluster, leaderName)
+	re.Equal(followerName, leader2)
+}
+
+func TestResignEtcdLeaderReturnsTargetCheckError(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetLeaderServer()
+	err = leaderServer.GetServer().GetMember().ResignEtcdLeader(ctx, leaderName, "",
+		member.WithTargetChecker(func(context.Context, uint64) error {
+			return errors.New("not ready")
+		}))
+	re.Error(err)
+	re.True(errors.ErrorEqual(err, errs.ErrEtcdLeaderTransferTargetCheck))
+}
+
+func TestLeaderResignSkipsUnreadyCandidate(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	followers := getFollowerNames(cluster, leaderName)
+	re.Len(followers, 2)
+	unreadyName := followers[0]
+	readyName := followers[1]
+	unreadyServer := cluster.GetServer(unreadyName)
+
+	failpointName := "github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"
+	re.NoError(failpoint.Enable(failpointName, `return("`+unreadyServer.GetAddr()+`")`))
+	defer func() {
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/leader/resign", "")
+	leader2 := waitLeaderChange(re, cluster, leaderName)
+	re.Equal(readyName, leader2)
+}
+
+func TestLeaderResignFailsWhenAllCandidatesUnready(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	followerName := cluster.GetFollower()
+	followerServer := cluster.GetServer(followerName)
+
+	failpointName := "github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow"
+	re.NoError(failpoint.Enable(failpointName, `return("`+followerServer.GetAddr()+`")`))
+	defer func() {
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	status, body := postOnce(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/leader/resign", "")
+	re.Equal(http.StatusInternalServerError, status)
+	re.Contains(body, "no ready pd")
+	re.Equal(leaderName, cluster.GetLeader())
+}
+
 func TestLeaderResignWithBlock(t *testing.T) {
+	restorePDReleaseVersion := setPDReleaseVersionForTest()
+	defer restorePDReleaseVersion()
+
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -282,6 +482,24 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 		return true
 	})
 	return leader
+}
+
+func getFollowerNames(cluster *tests.TestCluster, leaderName string) []string {
+	followers := make([]string, 0)
+	for _, server := range cluster.GetConfig().InitialServers {
+		if server.Name != leaderName {
+			followers = append(followers, server.Name)
+		}
+	}
+	return followers
+}
+
+func setPDReleaseVersionForTest() func() {
+	oldVersion := versioninfo.PDReleaseVersion
+	versioninfo.PDReleaseVersion = "v8.5.2"
+	return func() {
+		versioninfo.PDReleaseVersion = oldVersion
+	}
 }
 
 func TestMoveLeader(t *testing.T) {

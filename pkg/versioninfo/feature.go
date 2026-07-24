@@ -49,6 +49,8 @@ const (
 	HotScheduleWithQuery
 	// SwitchWithess supports switch between witness and non-witness.
 	SwitchWitness
+	// ReadyAPI supports checking whether PD has finished initial region loading.
+	ReadyAPI
 )
 
 var featuresDict = map[Feature]string{
@@ -62,6 +64,7 @@ var featuresDict = map[Feature]string{
 	ConfChangeV2:         "5.0.0",
 	HotScheduleWithQuery: "5.2.0",
 	SwitchWitness:        "6.6.0",
+	ReadyAPI:             "8.5.2",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
@@ -72,4 +75,14 @@ func MinSupportedVersion(v Feature) *semver.Version {
 	}
 	version := MustParseVersion(target)
 	return version
+}
+
+// IsReadyAPISupported returns whether PD supports the ready API for initial region loading.
+func IsReadyAPISupported(pdVersion *semver.Version) bool {
+	if pdVersion == nil {
+		return false
+	}
+	// ReadyAPI was introduced in a patch release, so use strict semver comparison
+	// instead of IsFeatureSupported's same-minor compatibility semantics.
+	return !pdVersion.LessThan(*MinSupportedVersion(ReadyAPI))
 }

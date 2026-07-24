@@ -2110,7 +2110,7 @@ func (s *Server) etcdLeaderLoop() {
 	for {
 		select {
 		case <-ticker.C:
-			s.member.CheckPriority(ctx)
+			s.member.CheckPriority(ctx, member.WithTargetChecker(s.CheckMemberReadyForLeaderTransfer))
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(s.cfg.LeaderPriorityCheckInterval.Duration)
 		case <-ctx.Done():

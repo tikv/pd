@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -281,7 +282,8 @@ func (h *leaderHandler) GetLeader(w http.ResponseWriter, _ *http.Request) {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/leader/resign [post]
 func (h *leaderHandler) ResignLeader(w http.ResponseWriter, _ *http.Request) {
-	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), "")
+	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), "",
+		member.WithTargetChecker(h.svr.CheckMemberReadyForLeaderTransfer))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -300,7 +302,8 @@ func (h *leaderHandler) ResignLeader(w http.ResponseWriter, _ *http.Request) {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/leader/transfer/{nextLeader} [post]
 func (h *leaderHandler) TransferLeader(w http.ResponseWriter, r *http.Request) {
-	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"])
+	err := h.svr.GetMember().ResignEtcdLeader(h.svr.Context(), h.svr.Name(), mux.Vars(r)["next_leader"],
+		member.WithTargetChecker(h.svr.CheckMemberReadyForLeaderTransfer))
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
