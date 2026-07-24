@@ -40,6 +40,9 @@ func TestRangeList(t *testing.T) {
 	re.Nil(data)
 
 	re.Nil(rl.GetSplitKeys(nil, []byte("foo")))
+	data, ok := rl.GetDataByRange(nil, []byte("foo"))
+	re.True(ok)
+	re.Nil(data)
 
 	b := NewBuilder()
 	b.AddItem(nil, nil, 1)
@@ -56,6 +59,9 @@ func TestRangeList(t *testing.T) {
 	re.Equal(0, i)
 	re.Equal([]any{1}, data)
 	re.Nil(rl.GetSplitKeys(nil, []byte("foo")))
+	data, ok = rl.GetDataByRange(nil, []byte("foo"))
+	re.True(ok)
+	re.Equal([]any{1}, data)
 }
 
 func TestRangeList2(t *testing.T) {
@@ -136,5 +142,7 @@ func TestRangeList2(t *testing.T) {
 	}
 	for _, testCase := range getSplitKeysCases {
 		re.Equal(expectKeys[testCase.indexStart:testCase.indexEnd], rl.GetSplitKeys([]byte(testCase.start), []byte(testCase.end)))
+		_, ok := rl.GetDataByRange([]byte(testCase.start), []byte(testCase.end))
+		re.Equal(testCase.indexStart == testCase.indexEnd, ok)
 	}
 }
