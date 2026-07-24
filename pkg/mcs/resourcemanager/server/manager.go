@@ -103,6 +103,10 @@ type Manager struct {
 	// successful reconciliation cannot remove them.
 	metadataSnapshotGeneration       uint64
 	activeMetadataSnapshotGeneration uint64
+	// metadataSnapshotInitialized becomes true after the bootstrap snapshot.
+	// Later snapshots must not replay persisted runtime-state checkpoints.
+	metadataSnapshotInitialized    bool
+	activeMetadataSnapshotIsReload bool
 	// metadataSnapshotMu serializes snapshot generation changes with metadata
 	// API writes. Writers that overlap a snapshot inherit its generation.
 	metadataSnapshotMu syncutil.RWMutex
@@ -263,24 +267,26 @@ func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	m.Lock()
-	if m.controllerConfig.RUVersionPolicy == nil {
-		// DefaultRUVersion (v1) means no RU model change.
-		// There is currently no API to modify this global default; it is
-		// intentionally fixed so that only per-keyspace overrides drive version bumps.
-		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
-	}
-	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
-		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
-	}
-	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
-	if ruVersion == defaultVersion {
-		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
-	} else {
-		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
-	}
-	m.Unlock()
-	return m.storage.SaveControllerConfig(m.controllerConfig)
+	return m.withMetadataAPIWrite(keypath.ControllerConfigPath(), func(uint64) error {
+		m.Lock()
+		if m.controllerConfig.RUVersionPolicy == nil {
+			// DefaultRUVersion (v1) means no RU model change.
+			// There is currently no API to modify this global default; it is
+			// intentionally fixed so that only per-keyspace overrides drive version bumps.
+			m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
+		}
+		if m.controllerConfig.RUVersionPolicy.Overrides == nil {
+			m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
+		}
+		defaultVersion := m.controllerConfig.RUVersionPolicy.Default
+		if ruVersion == defaultVersion {
+			delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
+		} else {
+			m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
+		}
+		m.Unlock()
+		return m.storage.SaveControllerConfig(m.controllerConfig)
+	})
 }
 
 // GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
@@ -322,6 +328,7 @@ func (m *Manager) beginMetadataSnapshot() uint64 {
 		m.metadataSnapshotGeneration++
 	}
 	m.activeMetadataSnapshotGeneration = m.metadataSnapshotGeneration
+	m.activeMetadataSnapshotIsReload = m.metadataSnapshotInitialized
 	generation := m.activeMetadataSnapshotGeneration
 	m.Unlock()
 	return generation
@@ -363,8 +370,12 @@ func (m *Manager) finishMetadataSnapshot(generation uint64, loadErr error) error
 		m.RUnlock()
 	}
 	m.Lock()
+	if loadErr == nil {
+		m.metadataSnapshotInitialized = true
+	}
 	if m.activeMetadataSnapshotGeneration == generation {
 		m.activeMetadataSnapshotGeneration = 0
+		m.activeMetadataSnapshotIsReload = false
 	}
 	m.Unlock()
 	m.metadataSnapshotMutationMu.Lock()
@@ -381,6 +392,12 @@ func (m *Manager) getActiveMetadataSnapshotGeneration() uint64 {
 	m.RLock()
 	defer m.RUnlock()
 	return m.activeMetadataSnapshotGeneration
+}
+
+func (m *Manager) isMetadataSnapshotReload(generation uint64) bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.activeMetadataSnapshotGeneration == generation && m.activeMetadataSnapshotIsReload
 }
 
 func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupName string) (*keyspaceResourceGroupManager, error) {
@@ -604,48 +621,50 @@ func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
-	kp := strings.Split(key, ".")
-	if len(kp) == 0 {
-		return errors.Errorf("invalid key %s", key)
-	}
-	m.Lock()
-	controllerConfig := cloneControllerConfig(m.controllerConfig)
-	var config any
-	switch kp[0] {
-	case "request-unit":
-		config = &controllerConfig.RequestUnit
-	default:
-		config = controllerConfig
-	}
-	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
-	if err != nil {
-		m.Unlock()
-		return err
-	}
-
-	if !found {
-		m.Unlock()
-		return errors.Errorf("config item %s not found", key)
-	}
-	// Validate RUVersionPolicy after any update, regardless of the key path,
-	// since the default branch merges into the full ControllerConfig.
-	if err := controllerConfig.RUVersionPolicy.validate(); err != nil {
-		m.Unlock()
-		return err
-	}
-	if updated {
-		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+	return m.withMetadataAPIWrite(keypath.ControllerConfigPath(), func(uint64) error {
+		kp := strings.Split(key, ".")
+		if len(kp) == 0 {
+			return errors.Errorf("invalid key %s", key)
+		}
+		m.Lock()
+		controllerConfig := cloneControllerConfig(m.controllerConfig)
+		var config any
+		switch kp[0] {
+		case "request-unit":
+			config = &controllerConfig.RequestUnit
+		default:
+			config = controllerConfig
+		}
+		updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
+		if err != nil {
 			m.Unlock()
-			log.Error("save controller config failed", zap.Error(err))
 			return err
 		}
-		m.controllerConfig = controllerConfig
-	}
-	m.Unlock()
-	if updated {
-		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
-	}
-	return nil
+
+		if !found {
+			m.Unlock()
+			return errors.Errorf("config item %s not found", key)
+		}
+		// Validate RUVersionPolicy after any update, regardless of the key path,
+		// since the default branch merges into the full ControllerConfig.
+		if err := controllerConfig.RUVersionPolicy.validate(); err != nil {
+			m.Unlock()
+			return err
+		}
+		if updated {
+			if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+				m.Unlock()
+				log.Error("save controller config failed", zap.Error(err))
+				return err
+			}
+			m.controllerConfig = controllerConfig
+		}
+		m.Unlock()
+		if updated {
+			log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
+		}
+		return nil
+	})
 }
 
 // GetControllerConfig returns the controller config.

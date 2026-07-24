@@ -156,6 +156,7 @@ func parseKeyspaceIDWatchPath(path string, entryType resourceGroupWatchEntryType
 func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	m.Lock()
 	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.metadataSnapshotInitialized = false
 	m.Unlock()
 
 	var metadataSnapshotGeneration uint64
@@ -230,6 +231,9 @@ func (m *Manager) handleMetadataWatchPutWithGeneration(
 			metadataSnapshotGeneration,
 		)
 	case resourceGroupWatchEntryStates:
+		if metadataSnapshotGeneration != 0 && m.isMetadataSnapshotReload(metadataSnapshotGeneration) {
+			return nil
+		}
 		return m.applyResourceGroupStatesFromRaw(target.keyspaceID, target.groupName, rawValue)
 	case resourceGroupWatchEntryServiceLimit:
 		return m.applyServiceLimitFromRawWithGeneration(target.keyspaceID, rawValue, metadataSnapshotGeneration)

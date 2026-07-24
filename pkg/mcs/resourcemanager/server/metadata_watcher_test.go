@@ -476,6 +476,75 @@ func TestMetadataSnapshotReconciliation(t *testing.T) {
 		re.Nil(krgm.getResourceGroup("deleted_during_snapshot", false))
 		re.InDelta(200, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 	})
+
+	t.Run("does_not_reapply_runtime_state_during_reload", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("group", 5, 100, 200)
+		settingsKey := "resource_group/keyspace/settings/10/group"
+		statesKey := "resource_group/keyspace/states/10/group"
+		checkpointTime := time.Now().Add(-time.Minute)
+		checkpoint := &GroupStates{
+			RU:            &GroupTokenBucketState{Tokens: 321, LastUpdate: &checkpointTime},
+			RUConsumption: &rmpb.Consumption{RRU: 11},
+		}
+		rawCheckpoint, err := json.Marshal(checkpoint)
+		re.NoError(err)
+
+		initialGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			settingsKey, mustMarshalResourceGroup(t, group), initialGeneration))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			statesKey, string(rawCheckpoint), initialGeneration))
+		re.NoError(m.finishMetadataSnapshot(initialGeneration, nil))
+
+		currentTime := time.Now()
+		m.getKeyspaceResourceGroupManager(10).getMutableResourceGroup("group").
+			SetStatesIntoResourceGroup(&GroupStates{
+				RU: &GroupTokenBucketState{Tokens: 654, LastUpdate: &currentTime},
+			})
+		reloadGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			settingsKey, mustMarshalResourceGroup(t, group), reloadGeneration))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			statesKey, string(rawCheckpoint), reloadGeneration))
+		re.NoError(m.finishMetadataSnapshot(reloadGeneration, nil))
+
+		got := m.getKeyspaceResourceGroupManager(10).getResourceGroup("group", true)
+		re.InDelta(654, got.RUSettings.RU.Tokens, 0.001)
+		re.InDelta(11, got.RUConsumption.RRU, 0.001)
+	})
+
+	t.Run("does_not_overwrite_controller_config_api_write", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		m.controllerConfig.RequestUnit.ReadBaseCost = 1
+		staleSnapshot, err := json.Marshal(m.controllerConfig)
+		re.NoError(err)
+
+		generation := m.beginMetadataSnapshot()
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 2.0))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+
+		re.InDelta(2.0, m.GetControllerConfig().RequestUnit.ReadBaseCost, 0.00001)
+	})
+
+	t.Run("does_not_overwrite_ru_version_api_write", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		staleSnapshot, err := json.Marshal(m.controllerConfig)
+		re.NoError(err)
+
+		generation := m.beginMetadataSnapshot()
+		re.NoError(m.SetKeyspaceRUVersion(10, 2))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+
+		re.Equal(RUVersion(2), m.GetRUVersionPolicy().Overrides[10])
+	})
 }
 
 func BenchmarkMetadataSnapshotReconciliation1MKeyspaces(b *testing.B) {
