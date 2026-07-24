@@ -39,24 +39,15 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	})
 	re.NoError(err)
 
-	_, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID() + 1),
-		Id:     created.GetId(),
-	})
+	_, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID() + 1), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId()}})
 	re.Error(err)
 
-	resp, err := service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     created.GetId() + 1000,
-	})
+	resp, err := service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId() + 1000}})
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
 
-	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     created.GetId(),
-	})
+	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId()}})
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
@@ -67,10 +58,7 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	pdtests.MustPutRegion(re, suite.cluster, regionID+2, 1, regionBound.RawRightBound, regionBound.TxnLeftBound)
 	pdtests.MustPutRegion(re, suite.cluster, regionID+3, 1, regionBound.TxnLeftBound, regionBound.TxnRightBound)
 	pdtests.MustPutRegion(re, suite.cluster, regionID+4, 1, regionBound.TxnRightBound, []byte{})
-	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     created.GetId(),
-	})
+	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId()}})
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
 	re.Equal(created, resp.GetKeyspace())
@@ -81,10 +69,7 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	re.NoError(err)
-	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     skipRegionCheckKeyspace.GetId(),
-	})
+	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: skipRegionCheckKeyspace.GetId()}})
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
@@ -93,10 +78,7 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
 	}()
-	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     skipRegionCheckKeyspace.GetId(),
-	})
+	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: skipRegionCheckKeyspace.GetId()}})
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
 	re.Equal(skipRegionCheckKeyspace, resp.GetKeyspace())

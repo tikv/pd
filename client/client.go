@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/routerpb"
@@ -231,6 +232,20 @@ func NewClientWithKeyspace(
 		svrAddrs, security, opts...)
 }
 
+// NewClientWithKeyspaceIdentity creates a client with context and the specified API V3 keyspace identity.
+func NewClientWithKeyspaceIdentity(
+	ctx context.Context,
+	callerComponent caller.Component,
+	identity *apipb.KeyspaceIdentity, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	if err := validateKeyspaceIdentity(identity); err != nil {
+		return nil, err
+	}
+	return createClientWithKeyspaceIdentity(ctx, callerComponent, identity,
+		svrAddrs, security, opts...)
+}
+
 // createClientWithKeyspace creates a client with context and the specified keyspace id.
 func createClientWithKeyspace(
 	ctx context.Context,
@@ -272,6 +287,73 @@ func createClientWithKeyspace(
 	return c, c.inner.init(nil)
 }
 
+// createClientWithKeyspaceIdentity creates a client with context and the specified API V3 keyspace identity.
+func createClientWithKeyspaceIdentity(
+	ctx context.Context,
+	callerComponent caller.Component,
+	identity *apipb.KeyspaceIdentity, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (Client, error) {
+	tlsCfg, err := tlsutil.TLSConfig{
+		CAPath:   security.CAPath,
+		CertPath: security.CertPath,
+		KeyPath:  security.KeyPath,
+
+		SSLCABytes:   security.SSLCABytes,
+		SSLCertBytes: security.SSLCertBytes,
+		SSLKEYBytes:  security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	clientCtx, clientCancel := context.WithCancel(ctx)
+	c := &client{
+		callerComponent: adjustCallerComponent(callerComponent),
+		inner: &innerClient{
+			keyspaceID:              identity.GetKeyspaceId(),
+			keyspaceIdentity:        cloneKeyspaceIdentity(identity),
+			svrUrls:                 svrAddrs,
+			updateTokenConnectionCh: make(chan struct{}, 1),
+			ctx:                     clientCtx,
+			cancel:                  clientCancel,
+			tlsCfg:                  tlsCfg,
+			option:                  opt.NewOption(),
+		},
+	}
+
+	// Inject the client options.
+	for _, opt := range opts {
+		opt(c.inner.option)
+	}
+
+	return c, c.inner.init(nil)
+}
+
+func validateKeyspaceIdentity(identity *apipb.KeyspaceIdentity) error {
+	if identity == nil {
+		return errors.New("missing keyspace identity")
+	}
+	if identity.GetNamespaceId() == 0 {
+		return errors.New("keyspace identity namespace id must be non-zero")
+	}
+	keyspaceID := identity.GetKeyspaceId()
+	if keyspaceID == 0 || keyspaceID > constants.MaxKeyspaceID {
+		return errors.Errorf("invalid keyspace id %d. It must be in the range of [1, %d]",
+			keyspaceID, constants.MaxKeyspaceID)
+	}
+	return nil
+}
+
+func cloneKeyspaceIdentity(identity *apipb.KeyspaceIdentity) *apipb.KeyspaceIdentity {
+	if identity == nil {
+		return nil
+	}
+	return &apipb.KeyspaceIdentity{
+		NamespaceId: identity.GetNamespaceId(),
+		KeyspaceId:  identity.GetKeyspaceId(),
+	}
+}
+
 // APIVersion is the API version the server and the client is using.
 // See more details in https://github.com/tikv/rfcs/blob/master/text/0069-api-v2.md#kvproto
 type APIVersion int
@@ -282,12 +364,17 @@ const (
 	V1 APIVersion = iota
 	_
 	V2
+	V3
 )
 
 // APIContext is the context for API version.
 type APIContext interface {
 	GetAPIVersion() (apiVersion APIVersion)
 	GetKeyspaceName() (keyspaceName string)
+}
+
+type keyspaceIdentityAPIContext interface {
+	GetKeyspaceIdentity() *apipb.KeyspaceIdentity
 }
 
 type apiContextV1 struct{}
@@ -329,6 +416,34 @@ func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
 	return apiCtx.keyspaceName
 }
 
+type apiContextV3 struct {
+	keyspaceName     string
+	keyspaceIdentity *apipb.KeyspaceIdentity
+}
+
+// NewAPIContextV3 creates an API context with the specified keyspace identity for V3.
+func NewAPIContextV3(keyspaceName string, identity *apipb.KeyspaceIdentity) APIContext {
+	return &apiContextV3{
+		keyspaceName:     keyspaceName,
+		keyspaceIdentity: cloneKeyspaceIdentity(identity),
+	}
+}
+
+// GetAPIVersion returns the API version.
+func (*apiContextV3) GetAPIVersion() (version APIVersion) {
+	return V3
+}
+
+// GetKeyspaceName returns the keyspace name.
+func (apiCtx *apiContextV3) GetKeyspaceName() (keyspaceName string) {
+	return apiCtx.keyspaceName
+}
+
+// GetKeyspaceIdentity returns the keyspace identity.
+func (apiCtx *apiContextV3) GetKeyspaceIdentity() *apipb.KeyspaceIdentity {
+	return cloneKeyspaceIdentity(apiCtx.keyspaceIdentity)
+}
+
 // NewClientWithAPIContext creates a client according to the API context.
 func NewClientWithAPIContext(
 	ctx context.Context, apiCtx APIContext,
@@ -344,6 +459,13 @@ func NewClientWithAPIContext(
 	case V2:
 		return newClientWithKeyspaceName(ctx, callerComponent,
 			keyspaceName, svrAddrs, security, opts...)
+	case V3:
+		identityCtx, ok := apiCtx.(keyspaceIdentityAPIContext)
+		if !ok {
+			return nil, errors.New("[pd] API V3 context missing keyspace identity")
+		}
+		return NewClientWithKeyspaceIdentity(ctx, callerComponent,
+			identityCtx.GetKeyspaceIdentity(), svrAddrs, security, opts...)
 	default:
 		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
 	}

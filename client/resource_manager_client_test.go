@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -54,13 +55,15 @@ func newTestServiceDiscovery(servingURL string, conn *grpc.ClientConn) *testServ
 	return t
 }
 
-func (*testServiceDiscovery) Init() error                { return nil }
-func (*testServiceDiscovery) Close()                     {}
-func (*testServiceDiscovery) GetClusterID() uint64       { return 0 }
-func (t *testServiceDiscovery) GetKeyspaceID() uint32    { return t.keyspaceID }
-func (t *testServiceDiscovery) SetKeyspaceID(id uint32)  { t.keyspaceID = id }
-func (*testServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }
-func (t *testServiceDiscovery) GetServiceURLs() []string { return []string{t.servingURL} }
+func (*testServiceDiscovery) Init() error                                  { return nil }
+func (*testServiceDiscovery) Close()                                       {}
+func (*testServiceDiscovery) GetClusterID() uint64                         { return 0 }
+func (t *testServiceDiscovery) GetKeyspaceID() uint32                      { return t.keyspaceID }
+func (t *testServiceDiscovery) SetKeyspaceID(id uint32)                    { t.keyspaceID = id }
+func (*testServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity { return nil }
+func (*testServiceDiscovery) SetKeyspaceIdentity(*apipb.KeyspaceIdentity)  {}
+func (*testServiceDiscovery) GetKeyspaceGroupID() uint32                   { return 0 }
+func (t *testServiceDiscovery) GetServiceURLs() []string                   { return []string{t.servingURL} }
 func (t *testServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	conn, _ := t.clientConns.Load(t.servingURL)
 	if conn == nil {
@@ -188,9 +191,7 @@ func (s *testRMServer) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTo
 		for _, tokenReq := range req.GetRequests() {
 			resp.Responses = append(resp.Responses, &rmpb.TokenBucketResponse{
 				ResourceGroupName: tokenReq.GetResourceGroupName(),
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: constants.NullKeyspaceID,
-				},
+				KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: constants.NullKeyspaceID}},
 			})
 		}
 		if err := stream.Send(resp); err != nil {

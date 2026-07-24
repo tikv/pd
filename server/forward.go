@@ -128,8 +128,10 @@ func (f *tsoForwarder) forwardTSORequest(
 		Header: &tsopb.RequestHeader{
 			ClusterId:       request.GetHeader().GetClusterId(),
 			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 		},
 		Count: request.GetCount(),
 	}
@@ -482,8 +484,10 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 		},
 		Count: 1,
 	}

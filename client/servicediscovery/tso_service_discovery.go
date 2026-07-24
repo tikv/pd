@@ -32,6 +32,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -130,6 +131,7 @@ type tsoServiceDiscovery struct {
 	serviceDiscovery ServiceDiscovery
 	clusterID        uint64
 	keyspaceID       atomic.Uint32
+	keyspaceIdentity *apipb.KeyspaceIdentity
 	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
@@ -163,7 +165,7 @@ type tsoServiceDiscovery struct {
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
-	keyspaceID uint32, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
+	keyspaceID uint32, keyspaceIdentity *apipb.KeyspaceIdentity, keyspaceMeta *keyspacepb.KeyspaceMeta, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -172,6 +174,7 @@ func NewTSOServiceDiscovery(
 		metacli:           metacli,
 		serviceDiscovery:  serviceDiscovery,
 		clusterID:         serviceDiscovery.GetClusterID(),
+		keyspaceIdentity:  cloneKeyspaceIdentity(keyspaceIdentity),
 		keyspaceMeta:      keyspaceMeta,
 		tlsCfg:            tlsCfg,
 		option:            option,
@@ -272,6 +275,16 @@ func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 // SetKeyspaceID sets the ID of the keyspace
 func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 	c.keyspaceID.Store(keyspaceID)
+}
+
+// GetKeyspaceIdentity returns the API V3 identity of the keyspace, if any.
+func (c *tsoServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity {
+	return cloneKeyspaceIdentity(c.keyspaceIdentity)
+}
+
+// SetKeyspaceIdentity sets the API V3 identity of the keyspace.
+func (c *tsoServiceDiscovery) SetKeyspaceIdentity(identity *apipb.KeyspaceIdentity) {
+	c.keyspaceIdentity = cloneKeyspaceIdentity(identity)
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
@@ -663,43 +676,89 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 		return nil, 0, err
 	}
 
-	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
-		ctx, &tsopb.FindGroupByKeyspaceIDRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       c.clusterID,
-				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
-				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
-			},
-			KeyspaceId:  keyspaceID,
-			ModRevision: modRevision,
-		})
-	if err != nil {
+	header := &tsopb.RequestHeader{
+		ClusterId:       c.clusterID,
+		KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+		CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
+	}
+	if c.keyspaceIdentity != nil {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceIdentity{
+			KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
+		}
+	} else {
+		header.Keyspace = &tsopb.RequestHeader_KeyspaceId{
+			KeyspaceId: keyspaceID,
+		}
+	}
+	tsoClient := tsopb.NewTSOClient(cc)
+	var (
+		keyspaceGroup *tsopb.KeyspaceGroup
+		respHeader    *tsopb.ResponseHeader
+		respRevision  uint64
+		findErr       error
+	)
+	if c.keyspaceIdentity != nil {
+		resp, err := tsoClient.FindGroupByKeyspaceID(
+			ctx, &tsopb.FindGroupByKeyspaceIDRequest{
+				Header: header,
+				Keyspace: &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceIdentity{
+					KeyspaceIdentity: cloneKeyspaceIdentity(c.keyspaceIdentity),
+				},
+				ModRevision: modRevision,
+			})
+		findErr = err
+		if resp != nil {
+			keyspaceGroup = resp.GetKeyspaceGroup()
+			respHeader = resp.GetHeader()
+			respRevision = resp.GetModRevision()
+		}
+	} else {
+		resp, err := tsoClient.FindGroupByKeyspaceID(
+			ctx, &tsopb.FindGroupByKeyspaceIDRequest{
+				Header: header,
+				Keyspace: &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{
+					KeyspaceId: keyspaceID,
+				},
+				ModRevision: modRevision,
+			})
+		findErr = err
+		if resp != nil {
+			keyspaceGroup = resp.GetKeyspaceGroup()
+			respHeader = resp.GetHeader()
+			respRevision = resp.GetModRevision()
+		}
+	}
+	if findErr != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
-			err, cc.Target(), cc.GetState().String())
+			findErr, cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if err := resp.GetHeader().GetError(); err != nil {
+	if respHeader == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"empty find group response", cc.Target(), cc.GetState().String())
+		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if err := respHeader.GetError(); err != nil {
 		if strings.Contains(err.GetMessage(), errs.MismatchCalleeIDErr) {
 			// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
 			c.RemoveClientConn(tsoSrvURL)
 		}
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
-			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+			err.String(), cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.KeyspaceGroup == nil {
+	if keyspaceGroup == nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
 			"no keyspace group found", cc.Target(), cc.GetState().String())
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
-	if resp.ModRevision < modRevision {
+	if respRevision < modRevision {
 		attachErr := errors.Errorf("error:%s target:%s response mod revision:%d current mod revision:%d",
-			"response mod revision less than the given mod revision", cc.Target(), resp.ModRevision, modRevision)
+			"response mod revision less than the given mod revision", cc.Target(), respRevision, modRevision)
 		return nil, 0, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
 	}
 
-	return resp.KeyspaceGroup, resp.GetModRevision(), nil
+	return keyspaceGroup, respRevision, nil
 }
 
 func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
