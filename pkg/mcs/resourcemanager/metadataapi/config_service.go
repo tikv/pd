@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
 	"github.com/golang/protobuf/jsonpb"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"

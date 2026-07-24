@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"testing"
 
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
