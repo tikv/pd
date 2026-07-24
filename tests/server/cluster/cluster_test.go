@@ -2251,14 +2251,9 @@ func TestPutStoreValidateStoreAddress(t *testing.T) {
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
 
-	unreachableListener, err := net.Listen("tcp", "127.0.0.1:0")
-	re.NoError(err)
-	unreachableAddr := unreachableListener.Addr().String()
-	re.NoError(unreachableListener.Close())
-
 	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
 		Id:      102,
-		Address: unreachableAddr,
+		Address: "unreachable-host.test.invalid:12345",
 		Version: "2.0.1",
 	})
 	re.NoError(err)
