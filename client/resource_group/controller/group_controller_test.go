@@ -374,6 +374,40 @@ func TestPagingPrechargeDoesNotEnterReportedRequestConsumption(t *testing.T) {
 		"reported request consumption must keep metering aligned with master and exclude predicted-read reservation")
 }
 
+func TestWriteReservationEntersReportedConsumptionAtResponse(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+	resp := &TestResponseInfo{succeed: true}
+
+	requestDelta, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	re.Positive(requestDelta.WRU)
+	re.Positive(requestDelta.WriteBytes)
+
+	gc.updateRunState()
+	requestReport := gc.collectRequestAndConsumption(periodicReport)
+	re.NotNil(requestReport)
+	re.Zero(requestReport.GetConsumptionSinceLastRequest().GetWRU())
+	re.Zero(requestReport.GetConsumptionSinceLastRequest().GetWriteBytes())
+	re.Equal(float64(1), requestReport.GetConsumptionSinceLastRequest().GetKvWriteRpcCount())
+	gc.handleTokenBucketResponse(&rmpb.TokenBucketResponse{})
+
+	responseDelta, _, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	re.Zero(responseDelta.WRU)
+	gc.run.lastRequestTime = time.Now().Add(-extendedReportingPeriodFactor * defaultTargetPeriod)
+	gc.updateRunState()
+	responseReport := gc.collectRequestAndConsumption(periodicReport)
+	re.NotNil(responseReport)
+	re.InDelta(requestDelta.WRU, responseReport.GetConsumptionSinceLastRequest().GetWRU(), 1e-6)
+	re.Equal(requestDelta.WriteBytes, responseReport.GetConsumptionSinceLastRequest().GetWriteBytes())
+}
+
 func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)

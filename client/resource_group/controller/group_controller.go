@@ -631,7 +631,8 @@ func (gc *groupCostController) onRequestWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
-	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
+	var reported rmpb.Consumption
+	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta, &reported)
 
 	gc.mu.Lock()
 	add(gc.mu.consumption, reportedDelta)
@@ -685,7 +686,8 @@ func (gc *groupCostController) onResponseImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	var reported rmpb.Consumption
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta, &reported)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
@@ -722,7 +724,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.AfterKVRequest(delta, req, resp)
 	}
-	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
+	var reported rmpb.Consumption
+	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta, &reported)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
