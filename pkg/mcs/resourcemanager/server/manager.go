@@ -1021,34 +1021,30 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	}
 	failpoint.InjectCall("modifyResourceGroupBeforePublish")
 	m.publishResourceGroupMutation(keyspaceID, grouppb.Name, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
-		existing, ok := cur.groups[grouppb.Name]
-		if !ok {
-			// The patch ran against a manager that is no longer live (the
-			// manager was reinitialized while we were persisting); republish
-			// the patched group into the current term so the persisted
-			// settings aren't lost from the serving cache.
+		var synced *ResourceGroup
+		if existing := cur.groups[grouppb.Name]; existing != patched {
+			// A different object sits in the current term's cache: either the
+			// group is missing, a reserved default placeholder (with synthetic
+			// token/consumption state), or a pre-modification bulk-merge
+			// snapshot. Install `patched` wholesale rather than only patching
+			// settings onto it. `patched` was loaded/confirmed before it was
+			// modified, so it carries both the modified settings and the
+			// group's confirmed running state - patching the placeholder in
+			// place would keep its synthetic state, which the marker below
+			// would then freeze as confirmed and the persist loop would write
+			// back over the real state.
 			cur.groups[grouppb.Name] = patched
-			delete(cur.reservedGroups, grouppb.Name)
-			return true, patched
+			synced = patched
 		}
-		if existing != patched {
-			// A different object (e.g. installed by the new term's bulk
-			// merge from a pre-modification snapshot); re-apply the settings
-			// patch so the persisted settings win.
-			if err := existing.PatchSettings(grouppb); err != nil {
-				log.Warn("failed to re-apply resource group settings on republish",
-					zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
-			}
-		}
-		// The settings have now been persisted, so the entry is confirmed
-		// data even if it started as a reserved default placeholder (the only
-		// thing reservedGroups ever holds). Clear the marker and record it as
+		// The settings and state are now confirmed data, even if the entry
+		// started as a reserved default placeholder (the only thing
+		// reservedGroups ever holds). Clear the marker and record it as
 		// sync-loaded: otherwise the bulk merge could revert it to a
 		// pre-modification snapshot, or initReserved could re-synthesize a
 		// fresh default over it, silently dropping the just-modified settings
 		// from the serving cache while storage keeps the new value.
 		delete(cur.reservedGroups, grouppb.Name)
-		return true, nil
+		return true, synced
 	})
 	return nil
 }

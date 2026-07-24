@@ -832,6 +832,14 @@ func TestAsyncLoadResourceGroupsExhaustedRetriesReturnLoadingError(t *testing.T)
 func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.T) {
 	re := require.New(t)
 	store := newBlockingResourceGroupStorage()
+	// Seed a persisted default with a recognizable running state so the test
+	// can tell a confirmed republish (state preserved) from a synthetic
+	// placeholder (state reset).
+	seed := newAsyncTestGroup(DefaultResourceGroupName)
+	re.NoError(store.SaveResourceGroupSetting(constant.NullKeyspaceID, DefaultResourceGroupName, seed))
+	seedStates := FromProtoResourceGroup(seed).GetGroupStates()
+	seedStates.RUConsumption.RRU = 777
+	re.NoError(store.SaveResourceGroupStates(constant.NullKeyspaceID, DefaultResourceGroupName, seedStates))
 
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = store
@@ -906,4 +914,8 @@ func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.
 	re.NotNil(g)
 	re.Equal(float64(4242), g.RUSettings.RU.getFillRate(),
 		"the modified default settings must survive into the new term")
+	// The confirmed running state must survive too, not revert to the fresh
+	// synthetic placeholder state.
+	re.Equal(float64(777), krgm.getMutableResourceGroup(DefaultResourceGroupName).GetGroupStates().RUConsumption.RRU,
+		"the confirmed running state must be preserved, not reset to a synthetic placeholder")
 }
