@@ -239,7 +239,7 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
+	resp, err := etcdutil.EtcdKVGetWithContext(txn.ctx, txn.kv.client, key)
 	if err != nil {
 		return "", err
 	}
