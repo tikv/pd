@@ -99,6 +99,9 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	})
 	re.Len(cluster.GetStores(), 4)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	// Trigger burying explicitly so the test does not depend on the leader's
+	// background store check running in time under slow etcd or lease churn.
+	re.NoError(suite.getRaftCluster().BuryStore(2, false))
 	testutil.Eventually(re, func() bool {
 		return cluster.GetStore(2).GetState() == metapb.StoreState_Tombstone
 	})
