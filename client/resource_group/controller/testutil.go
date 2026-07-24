@@ -27,6 +27,7 @@ type TestRequestInfo struct {
 	numReplicas        int64
 	storeID            uint64
 	accessType         AccessLocationType
+	requestSource      string
 	predictedReadBytes uint64
 	isCop              bool
 }
@@ -70,6 +71,11 @@ func (tri *TestRequestInfo) RequestSize() uint64 {
 // AccessLocationType implements the AccessLocationType interface.
 func (tri *TestRequestInfo) AccessLocationType() AccessLocationType {
 	return tri.accessType
+}
+
+// RequestSource implements the optional request-source provider recognized by the controller.
+func (tri *TestRequestInfo) RequestSource() string {
+	return tri.requestSource
 }
 
 // PredictedReadBytes implements the optional predictedReadBytesProvider interface.

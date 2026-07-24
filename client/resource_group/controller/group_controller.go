@@ -105,6 +105,7 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 	runningKVRequestCounter           prometheus.Gauge
 	consumeTokenHistogram             prometheus.Observer
+	sourceState                       *requestSourceMetricsState
 
 	// Paging pre-charge observers, cached per-RG to avoid WithLabelValues
 	// on the hot path.
@@ -115,7 +116,53 @@ type groupMetricsCollection struct {
 	noPrechargeCounter      prometheus.Counter
 }
 
-func initMetrics(oldName, name string) *groupMetricsCollection {
+const (
+	requestSourceRUTypeRRU = "rru"
+	requestSourceRUTypeWRU = "wru"
+
+	requestSourceDirectionConsume = "consume"
+	requestSourceDirectionRefund  = "refund"
+)
+
+type requestSourceMetricKey struct {
+	requestSource string
+	ruType        string
+	direction     string
+}
+
+type requestSourceMetricsState struct {
+	resourceGroupName string
+	mu                sync.RWMutex
+	closed            bool
+	items             map[requestSourceMetricKey]prometheus.Counter
+}
+
+func newRequestSourceMetricsState(resourceGroupName string) *requestSourceMetricsState {
+	return &requestSourceMetricsState{
+		resourceGroupName: resourceGroupName,
+		items:             make(map[requestSourceMetricKey]prometheus.Counter),
+	}
+}
+
+func (s *requestSourceMetricsState) cleanup() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	for key := range s.items {
+		metrics.RequestSourceRUCounter.DeleteLabelValues(
+			s.resourceGroupName,
+			key.requestSource,
+			key.ruType,
+			key.direction,
+		)
+		delete(s.items, key)
+	}
+}
+
+func initMetrics(oldName, name string, sourceState *requestSourceMetricsState) *groupMetricsCollection {
 	const (
 		otherType     = "others"
 		throttledType = "throttled"
@@ -129,6 +176,7 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
 		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
 		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
+		sourceState:                       sourceState,
 
 		prechargeCounter:        metrics.CopReadPrechargeCounter.WithLabelValues(name),
 		prechargeBytesCounter:   metrics.PagingPrechargeBytesCounter.WithLabelValues(name),
@@ -136,6 +184,67 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		predictionResidualBytes: metrics.PagingPredictionResidualBytes.WithLabelValues(name),
 
 		noPrechargeCounter: metrics.CopReadNoPrechargeCounter.WithLabelValues(name),
+	}
+}
+
+func (mc *groupMetricsCollection) getOrCreateRequestSourceMetric(key requestSourceMetricKey) prometheus.Counter {
+	if mc.sourceState == nil {
+		return nil
+	}
+	mc.sourceState.mu.RLock()
+	metric, ok := mc.sourceState.items[key]
+	closed := mc.sourceState.closed
+	mc.sourceState.mu.RUnlock()
+	if ok {
+		return metric
+	}
+	if closed {
+		return nil
+	}
+
+	mc.sourceState.mu.Lock()
+	defer mc.sourceState.mu.Unlock()
+	if mc.sourceState.closed {
+		return nil
+	}
+	metric, ok = mc.sourceState.items[key]
+	if ok {
+		return metric
+	}
+	metric = metrics.RequestSourceRUCounter.WithLabelValues(
+		mc.sourceState.resourceGroupName,
+		key.requestSource,
+		key.ruType,
+		key.direction,
+	)
+	mc.sourceState.items[key] = metric
+	return metric
+}
+
+func (mc *groupMetricsCollection) addRequestSourceRUDelta(requestSource string, consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
+	mc.addRequestSourceRUValue(requestSource, requestSourceRUTypeRRU, consumption.RRU)
+	mc.addRequestSourceRUValue(requestSource, requestSourceRUTypeWRU, consumption.WRU)
+}
+
+func (mc *groupMetricsCollection) addRequestSourceRUValue(requestSource, ruType string, value float64) {
+	if value == 0 {
+		return
+	}
+	direction := requestSourceDirectionConsume
+	if value < 0 {
+		direction = requestSourceDirectionRefund
+		value = -value
+	}
+	metric := mc.getOrCreateRequestSourceMetric(requestSourceMetricKey{
+		requestSource: requestSource,
+		ruType:        ruType,
+		direction:     direction,
+	})
+	if metric != nil {
+		metric.Add(value)
 	}
 }
 
@@ -156,23 +265,23 @@ func (*groupMetricsCollection) deletePagingLabels(name string) {
 // Callers must gate the call on pagingReadEstimate(...).ok so the metric stays
 // scoped to coprocessor reads and excludes point gets, batch gets, scans, and
 // other bounded-size reads.
-func (gmc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
+func (mc *groupMetricsCollection) observePagingRequest(bytesForEst uint64) {
 	if bytesForEst == 0 {
-		gmc.noPrechargeCounter.Inc()
+		mc.noPrechargeCounter.Inc()
 		return
 	}
-	gmc.prechargeCounter.Inc()
-	gmc.prechargeBytesCounter.Add(float64(bytesForEst))
+	mc.prechargeCounter.Inc()
+	mc.prechargeBytesCounter.Add(float64(bytesForEst))
 }
 
 // observePagingResponse records response-boundary paging metrics for
 // precharged coprocessor RPCs.
-func (gmc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
+func (mc *groupMetricsCollection) observePagingResponse(bytesForEst, actual uint64) {
 	if bytesForEst == 0 {
 		return
 	}
-	gmc.actualBytesCounter.Add(float64(actual))
-	gmc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
+	mc.actualBytesCounter.Add(float64(actual))
+	mc.predictionResidualBytes.Observe(float64(actual) - float64(bytesForEst))
 }
 
 type tokenCounter struct {
@@ -208,6 +317,7 @@ func newGroupCostController(
 	mainCfg *RUConfig,
 	lowRUNotifyChan chan notifyMsg,
 	tokenBucketUpdateChan chan *groupCostController,
+	sourceState *requestSourceMetricsState,
 ) (*groupCostController, error) {
 	switch group.Mode {
 	case rmpb.GroupMode_RUMode:
@@ -217,7 +327,7 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-	ms := initMetrics(group.Name, group.Name)
+	ms := initMetrics(group.Name, group.Name, sourceState)
 	gc := &groupCostController{
 		meta:    group,
 		name:    group.Name,
@@ -674,6 +784,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 	// So here resets it directly as failure is rare.
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
+	gc.metrics.addRequestSourceRUDelta(requestSource(info), reportedDelta)
 
 	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
@@ -711,6 +822,8 @@ func (gc *groupCostController) onResponseImpl(
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
+
+	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
 
 	return delta, nil
 }
@@ -771,6 +884,8 @@ func (gc *groupCostController) onResponseWaitImpl(
 	add(gc.mu.storeCounter[req.StoreID()], count)
 	add(gc.mu.globalCounter, count)
 	gc.mu.Unlock()
+
+	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
 
 	return delta, waitDuration, nil
 }
