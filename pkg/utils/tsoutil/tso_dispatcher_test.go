@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"errors"
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -191,4 +192,28 @@ func (suite *tsoDispatcherTestSuite) TestGoroutineLeakOnStreamError() {
 	re.Equal(int64(11000*20), reqDispatchCount.Load(), "The number of dispatched requests should match the total requests sent")
 
 	suite.dispatcher.Stop()
+}
+
+func (suite *tsoDispatcherTestSuite) TestProcessRequestsCountOverflow() {
+	re := suite.Require()
+
+	mockStream := &mockStream{}
+	requests := []Request{
+		&mockRequest{
+			count:  math.MaxUint32,
+			doneCh: make(chan struct{}),
+		},
+		&mockRequest{
+			count:  1,
+			doneCh: make(chan struct{}),
+		},
+	}
+
+	err := suite.dispatcher.processRequests(mockStream, requests)
+	re.Error(err)
+	re.Contains(err.Error(), "merged tso request count overflow")
+
+	mockStream.Lock()
+	defer mockStream.Unlock()
+	re.Equal(0, mockStream.succCount)
 }
