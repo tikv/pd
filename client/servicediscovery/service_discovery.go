@@ -58,6 +58,10 @@ const (
 	// UpdateMemberTimeout is the timeout to update the member list.
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
+	// memberConnectionStateCheckInterval is used only after a complete member
+	// update retry batch confirms that every current endpoint has a transport
+	// failure. The check is local and does not issue an RPC.
+	memberConnectionStateCheckInterval = 100 * time.Millisecond
 
 	serviceModeUpdateInterval = 3 * time.Second
 )
@@ -453,6 +457,8 @@ type serviceDiscovery struct {
 	option *opt.Option
 
 	flight singleflight.Group
+
+	memberFailures memberFailureTracker
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -556,17 +562,167 @@ func (c *serviceDiscovery) updateMemberLoop() {
 	defer ticker.Stop()
 
 	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("[pd] exit member loop due to context canceled")
-			return
-		case <-ticker.C:
-		case <-c.checkMembershipCh:
+	controller := memberRefreshController{}
+	var (
+		connectionStateTicker *time.Ticker
+		connectionStateTick   <-chan time.Time
+		runRetryBatchNow      bool
+	)
+	stopConnectionStateTicker := func() {
+		if connectionStateTicker != nil {
+			connectionStateTicker.Stop()
+			connectionStateTicker = nil
+			connectionStateTick = nil
 		}
-		err := bo.Exec(ctx, c.updateMember)
+	}
+	defer stopConnectionStateTicker()
+	startConnectionStateTicker := func() {
+		if connectionStateTicker == nil {
+			connectionStateTicker = time.NewTicker(memberConnectionStateCheckInterval)
+			connectionStateTick = connectionStateTicker.C
+		}
+	}
+	drainScheduledCheck := func() {
+		select {
+		case <-c.checkMembershipCh:
+		default:
+		}
+	}
+	logBatchFailure := func(err error) {
 		if err != nil {
 			log.Warn("[pd] failed to update member", zap.Strings("sorted-urls", c.GetServiceURLs()), errs.ZapError(err))
+		}
+	}
+	runRetryBatch := func() (result memberUpdateResult, err error) {
+		err = bo.Exec(ctx, func() error {
+			result, err = c.updateMemberWithResult()
+			return err
+		})
+		return result, err
+	}
+	for {
+		var (
+			periodicCheck      bool
+			inspectConnections bool
+		)
+		if !runRetryBatchNow {
+			var scheduledCheck <-chan struct{} = c.checkMembershipCh
+			if controller.isDegraded() {
+				scheduledCheck = nil
+			}
+			select {
+			case <-ctx.Done():
+				log.Info("[pd] exit member loop due to context canceled")
+				return
+			case <-ticker.C:
+				periodicCheck = true
+			case <-scheduledCheck:
+			case <-connectionStateTick:
+				inspectConnections = true
+			}
+		}
+		runRetryBatchNow = false
+
+		if periodicCheck {
+			c.logMemberFailureSummary(time.Now())
+		}
+
+		if controller.isDegraded() {
+			switch {
+			case inspectConnections:
+				snapshot := c.snapshotMemberConnections()
+				decision := controller.inspect(snapshot.urls, snapshot.states)
+				if decision.action == memberRefreshWait {
+					connectIdleMemberConnections(snapshot)
+					continue
+				}
+				stopConnectionStateTicker()
+				drainScheduledCheck()
+				runRetryBatchNow = true
+				continue
+			case periodicCheck:
+				// The safety sweep covers the event that may have been coalesced
+				// while scheduled checks were disabled.
+				drainScheduledCheck()
+				result, err := c.updateMemberWithResult()
+				logBatchFailure(err)
+				if err == nil {
+					controller.leaveDegraded()
+					stopConnectionStateTicker()
+					continue
+				}
+				snapshot := c.snapshotMemberConnections()
+				if controller.enterDegraded(result, snapshot.urls, snapshot.states) {
+					decision := controller.inspect(snapshot.urls, snapshot.states)
+					if decision.action == memberRefreshWait {
+						connectIdleMemberConnections(snapshot)
+					}
+					continue
+				}
+				controller.leaveDegraded()
+				stopConnectionStateTicker()
+				runRetryBatchNow = true
+				continue
+			}
+		}
+
+		result, err := runRetryBatch()
+		logBatchFailure(err)
+		if err == nil {
+			continue
+		}
+		snapshot := c.snapshotMemberConnections()
+		if !controller.enterDegraded(result, snapshot.urls, snapshot.states) {
+			continue
+		}
+		startConnectionStateTicker()
+
+		// Inspect again after entering degraded mode so a connection that
+		// became ready as the failed batch completed is refreshed immediately.
+		snapshot = c.snapshotMemberConnections()
+		decision := controller.inspect(snapshot.urls, snapshot.states)
+		if decision.action == memberRefreshRetryBatch {
+			stopConnectionStateTicker()
+			drainScheduledCheck()
+			runRetryBatchNow = true
+		} else {
+			connectIdleMemberConnections(snapshot)
+		}
+	}
+}
+
+type memberConnectionSnapshot struct {
+	urls        []string
+	states      []memberConnectionState
+	connections []*grpc.ClientConn
+}
+
+func (c *serviceDiscovery) snapshotMemberConnections() memberConnectionSnapshot {
+	urls := c.GetServiceURLs()
+	snapshot := memberConnectionSnapshot{
+		urls:        urls,
+		states:      make([]memberConnectionState, len(urls)),
+		connections: make([]*grpc.ClientConn, len(urls)),
+	}
+	for i, url := range urls {
+		value, ok := c.clientConns.Load(url)
+		if !ok {
+			continue
+		}
+		conn, ok := value.(*grpc.ClientConn)
+		if !ok || conn == nil {
+			continue
+		}
+		snapshot.states[i] = memberConnectionState{observed: true, state: conn.GetState()}
+		snapshot.connections[i] = conn
+	}
+	return snapshot
+}
+
+func connectIdleMemberConnections(snapshot memberConnectionSnapshot) {
+	for i, state := range snapshot.states {
+		if state.observed && state.state == connectivity.Idle && snapshot.connections[i] != nil {
+			snapshot.connections[i].Connect()
 		}
 	}
 }
@@ -889,8 +1045,14 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *serviceDiscovery) updateMember() error {
+	_, err := c.updateMemberWithResult()
+	return err
+}
+
+func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) {
+	result := memberUpdateResult{}
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
+		members, failure, err := c.getMembersWithFailure(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -898,27 +1060,34 @@ func (c *serviceDiscovery) updateMember() error {
 				zap.Uint64("updated-cluster-id", updatedClusterID),
 				zap.Uint64("expected-cluster-id", c.clusterID))
 			err = errs.ErrClientUpdateMember.FastGenByArgs(fmt.Sprintf("cluster id does not match: %d != %d", updatedClusterID, c.clusterID))
+			failure = classifyMemberSemanticFailure(memberFailurePhaseClusterID)
 		}
 		if err == nil && (members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0) {
 			err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
+			failure = classifyMemberSemanticFailure(memberFailurePhaseLeader)
 		}
 		// Failed to get members
 		if err != nil {
-			log.Info("[pd] cannot update member from this url",
-				zap.String("url", url),
-				errs.ZapError(err))
+			result.recordFailure(url, failure)
+			if c.memberFailures.record(time.Now(), url, failure) {
+				log.Info("[pd] cannot update member from this url",
+					zap.String("url", url),
+					errs.ZapError(err))
+			}
 			select {
 			case <-c.ctx.Done():
-				return errors.WithStack(err)
+				return result, errors.WithStack(err)
 			default:
 				continue
 			}
 		}
+		c.logMemberFailureRecovery(time.Now(), url)
 		c.updateURLs(members.GetMembers())
+		c.memberFailures.cleanup(c.GetServiceURLs())
 
-		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
+		return result, c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
-	return errs.ErrClientGetMember.FastGenByArgs()
+	return result, errs.ErrClientGetMember.FastGenByArgs()
 }
 
 func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
@@ -958,11 +1127,20 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+	members, _, err := c.getMembersWithFailure(ctx, url, timeout)
+	return members, err
+}
+
+func (c *serviceDiscovery) getMembersWithFailure(
+	ctx context.Context,
+	url string,
+	timeout time.Duration,
+) (*pdpb.GetMembersResponse, memberUpdateFailure, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
-		return nil, err
+		return nil, classifyMemberDialFailure(err), err
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
@@ -974,23 +1152,50 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	case res := <-r:
 		err = res.Err
 		if err != nil {
+			failure := classifyMemberRPCFailure(err)
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, failure, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
 		val := res.Val
 		members := val.(*pdpb.GetMembersResponse)
 		if members.GetHeader().GetError() != nil {
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-			return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, classifyMemberResponseFailure(members.GetHeader().GetError().GetType()), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
-		return members, nil
+		return members, memberUpdateFailure{}, nil
 	case <-ctx.Done():
+		failure := classifyMemberRPCFailure(ctx.Err())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, failure, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
+}
+
+func (c *serviceDiscovery) logMemberFailureRecovery(now time.Time, url string) {
+	recovery, ok := c.memberFailures.recover(now, url)
+	if !ok {
+		return
+	}
+	log.Info("[pd] member update from this url recovered",
+		zap.String("url", recovery.url),
+		zap.Duration("failure-duration", recovery.failureDuration),
+		zap.Uint64("failed-attempts", recovery.failedAttempts),
+		zap.Uint64("suppressed-errors", recovery.suppressedErrors))
+}
+
+func (c *serviceDiscovery) logMemberFailureSummary(now time.Time) {
+	summary, ok := c.memberFailures.summary(now)
+	if !ok {
+		return
+	}
+	log.Info("[pd] member update failures are being suppressed",
+		zap.Strings("failed-urls", summary.failedURLs),
+		zap.Duration("failure-duration", summary.failureDuration),
+		zap.Uint64("failed-attempts", summary.failedAttempts),
+		zap.Uint64("suppressed-errors", summary.suppressedErrors),
+		zap.Strings("error-classes", summary.errorClasses))
 }
 
 func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
