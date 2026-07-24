@@ -819,3 +819,91 @@ func TestAsyncLoadResourceGroupsExhaustedRetriesReturnLoadingError(t *testing.T)
 		return err == nil && g != nil
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }
+
+// TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed guards the
+// Modify-of-default publish path across a leadership change. A Modify patches
+// and persists the default group in term 1, then stalls before publishing.
+// Term 2 reinitializes the manager, giving it a fresh reserved default
+// placeholder. When the Modify resumes, publishing must leave the group
+// confirmed (not reserved) in the live term with the modified settings -
+// otherwise it stays a reserved placeholder that the bulk merge or
+// initReserved can revert to a pre-modification/synthetic default while
+// storage keeps the new value.
+func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+	defer store.unblockStates()
+
+	// Let term 1 load fully so the default group is confirmed and persisted.
+	store.waitEntered(t)
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(constant.NullKeyspaceID, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	// Park the Modify after it patched and persisted, before it publishes.
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/modifyResourceGroupBeforePublish", func() {
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/modifyResourceGroupBeforePublish"))
+	}()
+	modified := newAsyncTestGroup(DefaultResourceGroupName)
+	modified.RUSettings.RU.Settings.FillRate = 4242
+	var modErr error
+	modDone := make(chan struct{})
+	go func() {
+		defer close(modDone)
+		modErr = m.ModifyResourceGroup(modified)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the modify to reach its publish phase")
+	}
+
+	// Leadership changes: term 2 gets a fresh reserved default placeholder,
+	// with its loader parked before merging.
+	cancelTerm1()
+	store.pauseNextStates.Store(true)
+	re.NoError(m.Init(context.Background()))
+	select {
+	case <-store.statesReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the term-2 loader to snapshot storage")
+	}
+
+	// Resume the Modify's publish into term 2.
+	close(release)
+	<-modDone
+	re.NoError(modErr)
+
+	// The default in term 2 must be confirmed (not a reserved placeholder),
+	// so neither the merge nor initReserved reverts the modified settings.
+	krgm := m.getKeyspaceResourceGroupManager(constant.NullKeyspaceID)
+	re.NotNil(krgm)
+	re.False(krgm.isReserved(DefaultResourceGroupName),
+		"a modified default must be published as confirmed data, not left reserved")
+
+	store.unblockStates()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(constant.NullKeyspaceID, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+	g, err := m.GetResourceGroup(constant.NullKeyspaceID, DefaultResourceGroupName, false)
+	re.NoError(err)
+	re.NotNil(g)
+	re.Equal(float64(4242), g.RUSettings.RU.getFillRate(),
+		"the modified default settings must survive into the new term")
+}

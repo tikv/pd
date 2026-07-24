@@ -1040,12 +1040,15 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 					zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
 			}
 		}
-		// Modifying only patches settings, it never establishes the group's
-		// state. If the state still hasn't been confirmed (reserved), marking
-		// it sync-loaded would make the async bulk merge skip it forever, so
-		// the persisted running state would never get applied.
-		_, reserved := cur.reservedGroups[grouppb.Name]
-		return !reserved, nil
+		// The settings have now been persisted, so the entry is confirmed
+		// data even if it started as a reserved default placeholder (the only
+		// thing reservedGroups ever holds). Clear the marker and record it as
+		// sync-loaded: otherwise the bulk merge could revert it to a
+		// pre-modification snapshot, or initReserved could re-synthesize a
+		// fresh default over it, silently dropping the just-modified settings
+		// from the serving cache while storage keeps the new value.
+		delete(cur.reservedGroups, grouppb.Name)
+		return true, nil
 	})
 	return nil
 }
