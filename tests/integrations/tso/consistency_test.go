@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 
+	"github.com/tikv/pd/pkg/keyspace/constant"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -180,16 +181,30 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 	wg.Wait()
 }
 
+func (suite *tsoConsistencyTestSuite) reinitializeTSOForFailpoint() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
+	}()
+	if suite.legacy {
+		allocator := suite.pdLeaderServer.GetServer().GetTSOAllocator()
+		allocator.Reset(false)
+		re.NoError(allocator.Initialize())
+		return
+	}
+	allocator, err := suite.tsoServer.GetTSOAllocator(constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+	allocator.Reset(false)
+	re.NoError(allocator.Initialize())
+}
+
 func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	re := suite.Require()
 
-	// Re-create the cluster to enable the failpoints.
-	suite.TearDownSuite()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackSync", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fallBackUpdate", `return(true)`))
-	suite.SetupSuite()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fallBackUpdate"))
+	// Reinitialize the allocator with the sync failpoint enabled so the startup
+	// sync path is exercised without rebuilding the whole cluster.
+	suite.reinitializeTSOForFailpoint()
 
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
