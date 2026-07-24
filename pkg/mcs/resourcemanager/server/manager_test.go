@@ -269,16 +269,20 @@ func TestManagerControllerConfigSnapshots(t *testing.T) {
 		re := require.New(t)
 
 		m := prepareManager()
+		remoteReadCost := 0.25
 		m.controllerConfig = &ControllerConfig{
 			RequestUnit: RequestUnitConfig{
-				ReadBaseCost: 0.5,
+				ReadBaseCost:          0.5,
+				ReadCostPerByteRemote: &remoteReadCost,
 			},
 		}
 
 		snapshot := m.GetControllerConfig()
 		snapshot.RequestUnit.ReadBaseCost = 1.5
+		*snapshot.RequestUnit.ReadCostPerByteRemote = 0.75
 
 		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+		re.InDelta(0.25, *m.controllerConfig.RequestUnit.ReadCostPerByteRemote, 0.00001)
 	})
 
 	t.Run("publishes_new_snapshot_after_successful_update", func(t *testing.T) {
@@ -307,17 +311,31 @@ func TestManagerControllerConfigSnapshots(t *testing.T) {
 			Storage: storage.NewStorageWithMemoryBackend(),
 			err:     expectedErr,
 		}
+		remoteReadCost := 0.25
 		m.controllerConfig = &ControllerConfig{
 			RequestUnit: RequestUnitConfig{
-				ReadBaseCost: 0.5,
+				ReadBaseCost:          0.5,
+				ReadCostPerByteRemote: &remoteReadCost,
 			},
 		}
 
 		previous := m.controllerConfig
-		err := m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+		err := m.UpdateControllerConfigItem("request-unit.read-cost-per-byte-remote", 0.75)
 		re.ErrorIs(err, expectedErr)
 		re.Same(previous, m.controllerConfig)
 		re.InDelta(0.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001)
+		re.InDelta(0.25, *m.controllerConfig.RequestUnit.ReadCostPerByteRemote, 0.00001)
+	})
+
+	t.Run("updates_optional_remote_read_cost", func(t *testing.T) {
+		re := require.New(t)
+
+		m := prepareManager()
+		m.controllerConfig = &ControllerConfig{}
+
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-cost-per-byte-remote", 0.25))
+		re.NotNil(m.controllerConfig.RequestUnit.ReadCostPerByteRemote)
+		re.InDelta(0.25, *m.controllerConfig.RequestUnit.ReadCostPerByteRemote, 0.00001)
 	})
 }
 
