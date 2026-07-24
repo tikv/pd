@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -60,118 +61,103 @@ func newFakeStreamWithPeerContext(ctx context.Context, ip string) *fakeServerStr
 func newTestStreamMetrics(t *testing.T) (*prometheus.Registry, *StreamSendDurationCollector) {
 	t.Helper()
 	reg := prometheus.NewRegistry()
-	h := NewGRPCStreamSendDuration("test", "stream")
-	require.NoError(t, reg.Register(h))
-	return reg, h
+	collector := NewGRPCStreamSendDuration("test", "stream")
+	require.NoError(t, reg.Register(collector))
+	return reg, collector
 }
 
 func newTestMetricsStream(
 	ctx context.Context,
-	hist *StreamSendDurationCollector,
+	collector *StreamSendDurationCollector,
 	request, target string,
 ) *MetricsStream[string, string] {
 	return NewMetricsStream[string, string](
 		newFakeStreamWithPeerContext(ctx, target),
 		func(string) error { return nil },
 		nil,
-		hist, request,
+		collector, request,
 	)
 }
 
-func streamMetricCount(reg prometheus.Gatherer) (int, error) {
+func gatherStreamMetrics(t *testing.T, reg prometheus.Gatherer) []*dto.Metric {
+	t.Helper()
 	mfs, err := reg.Gather()
-	if err != nil {
-		return 0, err
-	}
+	require.NoError(t, err)
 	if len(mfs) == 0 {
-		return 0, nil
+		return nil
 	}
-	return len(mfs[0].GetMetric()), nil
+	return mfs[0].GetMetric()
 }
 
-func streamMetricSampleCount(reg prometheus.Gatherer, request string) (uint64, bool, error) {
-	mfs, err := reg.Gather()
-	if err != nil {
-		return 0, false, err
-	}
-	for _, mf := range mfs {
-		for _, metric := range mf.GetMetric() {
-			var metricRequest, metricTarget string
-			for _, label := range metric.GetLabel() {
-				switch label.GetName() {
-				case "request":
-					metricRequest = label.GetValue()
-				case "target":
-					metricTarget = label.GetValue()
-				}
-			}
-			if metricRequest == request && metricTarget == testTarget {
-				return metric.GetHistogram().GetSampleCount(), true, nil
+func streamMetricCount(t *testing.T, reg prometheus.Gatherer) int {
+	t.Helper()
+	return len(gatherStreamMetrics(t, reg))
+}
+
+func streamMetricSampleCount(t *testing.T, reg prometheus.Gatherer, request string) (uint64, bool) {
+	t.Helper()
+	for _, metric := range gatherStreamMetrics(t, reg) {
+		var metricRequest, metricTarget string
+		for _, label := range metric.GetLabel() {
+			switch label.GetName() {
+			case "request":
+				metricRequest = label.GetValue()
+			case "target":
+				metricTarget = label.GetValue()
 			}
 		}
+		if metricRequest == request && metricTarget == testTarget {
+			return metric.GetHistogram().GetSampleCount(), true
+		}
 	}
-	return 0, false, nil
+	return 0, false
+}
+
+func childRefs(collector *StreamSendDurationCollector, request, target string) int {
+	collector.mu.Lock()
+	defer collector.mu.Unlock()
+	return collector.children[streamChildKey{request: request, target: target}]
+}
+
+func waitForStreamMetrics(t *testing.T, condition func() bool) {
+	t.Helper()
+	testutil.Eventually(
+		require.New(t),
+		condition,
+		testutil.WithWaitFor(time.Second),
+		testutil.WithTickInterval(time.Millisecond),
+	)
 }
 
 func waitForNoStreamMetrics(t *testing.T, reg prometheus.Gatherer) {
 	t.Helper()
-	var gatherErr error
-	testutil.Eventually(
-		require.New(t),
-		func() bool {
-			var count int
-			count, err := streamMetricCount(reg)
-			if err != nil {
-				gatherErr = err
-				return true
-			}
-			return count == 0
-		},
-		testutil.WithWaitFor(time.Second),
-		testutil.WithTickInterval(time.Millisecond),
-	)
-	require.NoError(t, gatherErr)
+	waitForStreamMetrics(t, func() bool {
+		return streamMetricCount(t, reg) == 0
+	})
 }
 
 func TestMetricsStreamLifecycle(t *testing.T) {
 	re := require.New(t)
-	reg, h := newTestStreamMetrics(t)
+	reg, collector := newTestStreamMetrics(t)
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	stream1 := newTestMetricsStream(ctx1, h, "my-rpc", testTarget)
-	stream2 := newTestMetricsStream(ctx2, h, "my-rpc", testTarget)
+	stream1 := newTestMetricsStream(ctx1, collector, "my-rpc", testTarget)
+	stream2 := newTestMetricsStream(ctx2, collector, "my-rpc", testTarget)
 	re.NoError(stream1.Send("first"))
 	re.NoError(stream2.Send("second"))
-	metricCount, err := streamMetricCount(reg)
-	re.NoError(err)
-	re.Equal(1, metricCount)
-
-	key := streamChildKey{request: "my-rpc", target: testTarget}
-	h.mu.Lock()
-	refs := h.children[key]
-	h.mu.Unlock()
-	re.Equal(2, refs)
+	re.Equal(1, streamMetricCount(t, reg))
+	re.Equal(2, childRefs(collector, "my-rpc", testTarget))
 
 	cancel1()
-	testutil.Eventually(
-		re,
-		func() bool {
-			h.mu.Lock()
-			defer h.mu.Unlock()
-			return h.children[key] == 1
-		},
-		testutil.WithWaitFor(time.Second),
-		testutil.WithTickInterval(time.Millisecond),
-	)
-	metricCount, err = streamMetricCount(reg)
-	re.NoError(err)
-	re.Equal(1, metricCount)
+	waitForStreamMetrics(t, func() bool {
+		return childRefs(collector, "my-rpc", testTarget) == 1
+	})
+	re.Equal(1, streamMetricCount(t, reg))
 	re.NoError(stream2.Send("still-active"))
-	count, ok, err := streamMetricSampleCount(reg, "my-rpc")
-	re.NoError(err)
+	count, ok := streamMetricSampleCount(t, reg, "my-rpc")
 	re.True(ok)
 	re.Equal(uint64(3), count)
 
@@ -181,14 +167,13 @@ func TestMetricsStreamLifecycle(t *testing.T) {
 
 func TestMetricsStreamReconnect(t *testing.T) {
 	re := require.New(t)
-	reg, h := newTestStreamMetrics(t)
+	reg, collector := newTestStreamMetrics(t)
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
-	stream1 := newTestMetricsStream(ctx1, h, "my-rpc", testTarget)
+	stream1 := newTestMetricsStream(ctx1, collector, "my-rpc", testTarget)
 	re.NoError(stream1.Send("first"))
 	re.NoError(stream1.Send("second"))
-	count, ok, err := streamMetricSampleCount(reg, "my-rpc")
-	re.NoError(err)
+	count, ok := streamMetricSampleCount(t, reg, "my-rpc")
 	re.True(ok)
 	re.Equal(uint64(2), count)
 
@@ -197,10 +182,9 @@ func TestMetricsStreamReconnect(t *testing.T) {
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	stream2 := newTestMetricsStream(ctx2, h, "my-rpc", testTarget)
+	stream2 := newTestMetricsStream(ctx2, collector, "my-rpc", testTarget)
 	re.NoError(stream2.Send("reconnected"))
-	count, ok, err = streamMetricSampleCount(reg, "my-rpc")
-	re.NoError(err)
+	count, ok = streamMetricSampleCount(t, reg, "my-rpc")
 	re.True(ok)
 	re.Equal(uint64(1), count)
 
@@ -210,58 +194,41 @@ func TestMetricsStreamReconnect(t *testing.T) {
 
 func TestMetricsStreamLabelIsolation(t *testing.T) {
 	re := require.New(t)
-	reg, h := newTestStreamMetrics(t)
+	reg, collector := newTestStreamMetrics(t)
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	defer cancel1()
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
-	stream1 := newTestMetricsStream(ctx1, h, "first-rpc", testTarget)
-	stream2 := newTestMetricsStream(ctx2, h, "second-rpc", testTarget)
+	stream1 := newTestMetricsStream(ctx1, collector, "first-rpc", testTarget)
+	stream2 := newTestMetricsStream(ctx2, collector, "second-rpc", testTarget)
 	re.NoError(stream1.Send("first"))
 	re.NoError(stream2.Send("second"))
-	metricCount, err := streamMetricCount(reg)
-	re.NoError(err)
-	re.Equal(2, metricCount)
+	re.Equal(2, streamMetricCount(t, reg))
 
 	cancel1()
-	var gatherErr error
-	testutil.Eventually(
-		re,
-		func() bool {
-			_, firstExists, err := streamMetricSampleCount(reg, "first-rpc")
-			if err != nil {
-				gatherErr = err
-				return true
-			}
-			secondCount, secondExists, err := streamMetricSampleCount(reg, "second-rpc")
-			if err != nil {
-				gatherErr = err
-				return true
-			}
-			return !firstExists && secondExists && secondCount == 1
-		},
-		testutil.WithWaitFor(time.Second),
-		testutil.WithTickInterval(time.Millisecond),
-	)
-	re.NoError(gatherErr)
+	waitForStreamMetrics(t, func() bool {
+		_, firstExists := streamMetricSampleCount(t, reg, "first-rpc")
+		secondCount, secondExists := streamMetricSampleCount(t, reg, "second-rpc")
+		return !firstExists && secondExists && secondCount == 1
+	})
 
 	cancel2()
 	waitForNoStreamMetrics(t, reg)
 }
 
 func TestMetricsStreamAlreadyCanceled(t *testing.T) {
-	reg, h := newTestStreamMetrics(t)
+	reg, collector := newTestStreamMetrics(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	newTestMetricsStream(ctx, h, "my-rpc", testTarget)
+	newTestMetricsStream(ctx, collector, "my-rpc", testTarget)
 
 	waitForNoStreamMetrics(t, reg)
 }
 
 func TestMetricsStreamConcurrentLifecycle(t *testing.T) {
-	reg, h := newTestStreamMetrics(t)
+	reg, collector := newTestStreamMetrics(t)
 
 	const streamCount = 128
 	var wg sync.WaitGroup
@@ -272,7 +239,7 @@ func TestMetricsStreamConcurrentLifecycle(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			newTestMetricsStream(
 				ctx,
-				h,
+				collector,
 				fmt.Sprintf("rpc-%d", i%4),
 				fmt.Sprintf("10.0.1.%d", i%8+1),
 			)
@@ -287,17 +254,14 @@ func TestMetricsStreamConcurrentLifecycle(t *testing.T) {
 func TestMetricsStream(t *testing.T) {
 	t.Run("SendAndRecv", func(t *testing.T) {
 		re := require.New(t)
-		reg := prometheus.NewRegistry()
-		h := NewGRPCStreamSendDuration("test", "stream")
-		re.NoError(reg.Register(h))
+		reg, collector := newTestStreamMetrics(t)
 
 		var sent []string
-		fake := newFakeStreamWithPeer()
 		s := NewMetricsStream[string, string](
-			fake,
+			newFakeStreamWithPeer(),
 			func(m string) error { sent = append(sent, m); return nil },
 			func() (string, error) { return "data", nil },
-			h, "my-rpc",
+			collector, "my-rpc",
 		)
 
 		re.NoError(s.Send("a"))
@@ -321,10 +285,9 @@ func TestMetricsStream(t *testing.T) {
 		re := require.New(t)
 		sendErr := errors.New("send failed")
 		recvErr := errors.New("recv failed")
-		fake := newFakeStreamWithPeer()
 
 		s := NewMetricsStream[string, string](
-			fake,
+			newFakeStreamWithPeer(),
 			func(string) error { return sendErr },
 			func() (string, error) { return "", recvErr },
 			nil, "",
@@ -364,17 +327,15 @@ func TestMetricsStream(t *testing.T) {
 
 	t.Run("NilStream", func(t *testing.T) {
 		re := require.New(t)
-		reg, h := newTestStreamMetrics(t)
+		reg, collector := newTestStreamMetrics(t)
 		s := NewMetricsStream[string, string](
 			nil,
 			func(string) error { return nil },
 			nil,
-			h, "my-rpc",
+			collector, "my-rpc",
 		)
 		re.NoError(s.Send("no-stream"))
-		metricCount, err := streamMetricCount(reg)
-		re.NoError(err)
-		re.Equal(0, metricCount)
+		re.Equal(0, streamMetricCount(t, reg))
 	})
 }
 

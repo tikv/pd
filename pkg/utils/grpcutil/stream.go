@@ -122,27 +122,26 @@ type MetricsStream[SendT any, RecvT any] struct {
 
 // NewMetricsStream creates a MetricsStream wrapping the given gRPC server stream.
 // It automatically extracts the target IP from the stream's peer info and combines
-// it with requestLabel to create the prometheus observer from hist.
-// If hist or stream is nil, no metrics are recorded.
+// it with requestLabel to create the prometheus observer from collector.
+// If collector or stream is nil, no metrics are recorded.
 func NewMetricsStream[SendT any, RecvT any](
 	stream grpc.ServerStream,
 	sendFn func(SendT) error,
 	recvFn func() (RecvT, error),
-	hist *StreamSendDurationCollector,
+	collector *StreamSendDurationCollector,
 	requestLabel string,
 ) *MetricsStream[SendT, RecvT] {
-	var obs prometheus.Observer
-	if hist != nil && stream != nil {
-		var release func()
-		obs, release = hist.acquire(requestLabel, targetIP(stream))
-		context.AfterFunc(stream.Context(), release)
-	}
-	return &MetricsStream[SendT, RecvT]{
+	ms := &MetricsStream[SendT, RecvT]{
 		ServerStream: stream,
 		sendFn:       sendFn,
 		recvFn:       recvFn,
-		sendObs:      obs,
 	}
+	if collector != nil && stream != nil {
+		var release func()
+		ms.sendObs, release = collector.acquire(requestLabel, targetIP(stream))
+		context.AfterFunc(stream.Context(), release)
+	}
+	return ms
 }
 
 // Send delegates to the underlying stream's Send and records the duration.
