@@ -391,6 +391,7 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
+	gc.burstable.Store(isBurstable)
 	avgRUPerSec, demandRUPerSec, avgOK, demandOK := gc.calcAvgAndDemand(counter, getRUValueFromConsumption(gc.run.consumption))
 	if demandOK {
 		gc.metrics.demandRUPerSecGauge.Set(demandRUPerSec)
@@ -398,7 +399,6 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if avgOK {
 		gc.metrics.avgRUPerSecGauge.Set(avgRUPerSec)
 		logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
-		gc.burstable.Store(isBurstable)
 	}
 }
 
@@ -467,6 +467,11 @@ func calcMovingAvgAt(now time.Time, avg *float64, lastRU *float64, lastTime *tim
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
 	})
+	// A freshly created controller might be published between the `updateRunState`
+	// and `updateAvgRequestResourcePerSec` passes of the same tick. In that case,
+	// `gc.run.now` still equals the `avgLastTime` set by `initRunState`, and the
+	// division below would be 0/0 = NaN, permanently poisoning `avgRUPerSec`.
+	// Skip the sample until the run state actually advances.
 	if deltaDuration <= 0 {
 		return false
 	}
