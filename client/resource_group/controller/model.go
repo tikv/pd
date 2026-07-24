@@ -246,14 +246,6 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
 }
 
-func cloneConsumption(consumption *rmpb.Consumption) *rmpb.Consumption {
-	if consumption == nil {
-		return &rmpb.Consumption{}
-	}
-	cloned := *consumption
-	return &cloned
-}
-
 func (kc *KVCalculator) pagingPrechargeRRU(req RequestInfo) float64 {
 	bytesForEst := estimatedReadBytes(req)
 	if bytesForEst == 0 {
@@ -275,11 +267,7 @@ func adjustPagingPrechargeRRU(calculators []ResourceCalculator, consumption *rmp
 	}
 }
 
-func writeReservationConsumption(calculators []ResourceCalculator, req RequestInfo) *rmpb.Consumption {
-	if !req.IsWrite() {
-		return nil
-	}
-	reservation := &rmpb.Consumption{}
+func fillWriteReservationConsumption(calculators []ResourceCalculator, req RequestInfo, reservation *rmpb.Consumption) {
 	for _, calc := range calculators {
 		kvCalc, ok := calc.(*KVCalculator)
 		if !ok {
@@ -287,26 +275,47 @@ func writeReservationConsumption(calculators []ResourceCalculator, req RequestIn
 		}
 		kvCalc.calculateWriteCost(reservation, req)
 	}
-	return reservation
 }
 
-func reportedRequestConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+func reportedRequestConsumption(
+	calculators []ResourceCalculator,
+	req RequestInfo,
+	tokenDelta, reported *rmpb.Consumption,
+) *rmpb.Consumption {
 	if !req.IsWrite() && estimatedReadBytes(req) == 0 {
 		return tokenDelta
 	}
-	reported := cloneConsumption(tokenDelta)
+	*reported = rmpb.Consumption{}
+	if tokenDelta != nil {
+		*reported = *tokenDelta
+	}
 	adjustPagingPrechargeRRU(calculators, reported, req, -1)
-	sub(reported, writeReservationConsumption(calculators, req))
+	if req.IsWrite() {
+		var reservation rmpb.Consumption
+		fillWriteReservationConsumption(calculators, req, &reservation)
+		sub(reported, &reservation)
+	}
 	return reported
 }
 
-func reportedResponseConsumption(calculators []ResourceCalculator, req RequestInfo, tokenDelta *rmpb.Consumption) *rmpb.Consumption {
+func reportedResponseConsumption(
+	calculators []ResourceCalculator,
+	req RequestInfo,
+	tokenDelta, reported *rmpb.Consumption,
+) *rmpb.Consumption {
 	if !req.IsWrite() && estimatedReadBytes(req) == 0 {
 		return tokenDelta
 	}
-	reported := cloneConsumption(tokenDelta)
+	*reported = rmpb.Consumption{}
+	if tokenDelta != nil {
+		*reported = *tokenDelta
+	}
 	adjustPagingPrechargeRRU(calculators, reported, req, 1)
-	add(reported, writeReservationConsumption(calculators, req))
+	if req.IsWrite() {
+		var reservation rmpb.Consumption
+		fillWriteReservationConsumption(calculators, req, &reservation)
+		add(reported, &reservation)
+	}
 	return reported
 }
 
