@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -123,12 +124,12 @@ func (s *blockingResourceGroupStorage) LoadResourceGroupStates(f func(keyspaceID
 	return s.Storage.LoadResourceGroupStates(f)
 }
 
-func (s *blockingResourceGroupStorage) waitEntered(t *testing.T) {
-	t.Helper()
+func (s *blockingResourceGroupStorage) waitEntered(tb testing.TB) {
+	tb.Helper()
 	select {
 	case <-s.entered:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for async resource group loading")
+	case <-time.After(5 * time.Second):
+		tb.Fatal("timed out waiting for async resource group loading")
 	}
 }
 
@@ -918,4 +919,75 @@ func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.
 	// synthetic placeholder state.
 	re.Equal(float64(777), krgm.getMutableResourceGroup(DefaultResourceGroupName).GetGroupStates().RUConsumption.RRU,
 		"the confirmed running state must be preserved, not reset to a synthetic placeholder")
+}
+
+// BenchmarkAsyncLoadMergeReaderStall measures the worst-case time a concurrent
+// reader is blocked while the async bulk merge installs a large number of
+// resource groups. The probe uses GetControllerConfig, whose only cost is the
+// manager read lock - the same lock the merge takes - so it isolates how long
+// the merge stalls readers. It guards against the merge holding that lock
+// across the whole O(total groups) work, which would stall every point and
+// token request until loading completes on a cluster with many groups.
+//
+// Run with:
+//
+//	go test -run '^$' -bench BenchmarkAsyncLoadMergeReaderStall ./pkg/mcs/resourcemanager/server/
+func BenchmarkAsyncLoadMergeReaderStall(b *testing.B) {
+	const groupCount = 500000
+	store := newBlockingResourceGroupStorage()
+	for i := range groupCount {
+		name := fmt.Sprintf("bench-group-%06d", i)
+		if err := store.SaveResourceGroupSetting(1, name, newAsyncTestGroup(name)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	if err := m.Init(context.Background()); err != nil {
+		b.Fatal(err)
+	}
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(b)
+
+	// Concurrent readers take only the manager read lock and record the
+	// longest single acquisition seen while the merge runs.
+	stop := make(chan struct{})
+	var maxStall atomic.Int64
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				start := time.Now()
+				_ = m.GetControllerConfig()
+				if d := time.Since(start).Nanoseconds(); d > maxStall.Load() {
+					maxStall.Store(d)
+				}
+			}
+		}()
+	}
+
+	b.ResetTimer()
+	store.unblock()
+	deadline := time.Now().Add(30 * time.Second)
+	for !m.isResourceGroupLoadingComplete() {
+		if time.Now().After(deadline) {
+			b.Fatal("timed out waiting for async loading to complete")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	b.StopTimer()
+
+	close(stop)
+	wg.Wait()
+	b.ReportMetric(float64(maxStall.Load())/1e6, "max-reader-stall-ms")
 }

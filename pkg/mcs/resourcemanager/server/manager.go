@@ -528,43 +528,83 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 			continue
 		}
 
-		loaded := 0
-		m.Lock()
-		if m.loadEpoch != epoch {
-			// The manager was reinitialized for a new term while this loader
-			// was scanning; its result is stale and must not be merged.
-			m.Unlock()
-			log.Info("async loading resource groups aborted: manager was reinitialized")
-			return
+		// Flatten the loaded groups so the merge below can run in bounded
+		// batches. Holding m.Lock across the whole O(total groups) merge would
+		// block every concurrent point/token request (they need the lock to
+		// resolve a keyspace manager) for the entire merge, causing a large
+		// latency spike right when async loading completes on a cluster with
+		// many resource groups.
+		type mergeItem struct {
+			keyspaceID uint32
+			name       string
+			group      *ResourceGroup
 		}
+		pending := make([]mergeItem, 0)
 		for keyspaceID, tempKrgm := range tempKrgms {
-			krgm := m.krgms[keyspaceID]
-			if krgm == nil {
-				krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
-				m.krgms[keyspaceID] = krgm
-			}
-			groupsToSync := make([]*ResourceGroup, 0)
 			tempKrgm.RLock()
-			krgm.Lock()
 			for name, group := range tempKrgm.groups {
-				key := trackerKey{keyspaceID: keyspaceID, groupName: name}
+				pending = append(pending, mergeItem{keyspaceID: keyspaceID, name: name, group: group})
+			}
+			tempKrgm.RUnlock()
+		}
+
+		const mergeBatchSize = 1024
+		loaded := 0
+		aborted := false
+		for start := 0; start < len(pending); start += mergeBatchSize {
+			end := min(start+mergeBatchSize, len(pending))
+			type syncItem struct {
+				krgm  *keyspaceResourceGroupManager
+				group *ResourceGroup
+			}
+			toSync := make([]syncItem, 0, end-start)
+			m.Lock()
+			if m.loadEpoch != epoch {
+				// The manager was reinitialized for a new term while this
+				// loader was scanning; its result is stale and must not be
+				// merged. Re-checked every batch since a term change can land
+				// between batches.
+				m.Unlock()
+				aborted = true
+				break
+			}
+			for _, it := range pending[start:end] {
+				key := trackerKey{keyspaceID: it.keyspaceID, groupName: it.name}
 				if m.syncLoadedGroups[key] {
 					continue
 				}
-				krgm.groups[name] = group
+				krgm := m.krgms[it.keyspaceID]
+				if krgm == nil {
+					krgm = newKeyspaceResourceGroupManager(it.keyspaceID, m.storage, m.writeRole)
+					m.krgms[it.keyspaceID] = krgm
+				}
+				krgm.Lock()
+				krgm.groups[it.name] = it.group
 				// This group is now confirmed, fully-loaded data (settings
-				// and state); it must no longer be treated as an
-				// unconfirmed placeholder by loadResourceGroupIfNeeded or
-				// skipped by the state persist loop.
-				delete(krgm.reservedGroups, name)
-				groupsToSync = append(groupsToSync, group)
+				// and state); it must no longer be treated as an unconfirmed
+				// placeholder by loadResourceGroupIfNeeded or skipped by the
+				// state persist loop.
+				delete(krgm.reservedGroups, it.name)
+				krgm.Unlock()
+				toSync = append(toSync, syncItem{krgm: krgm, group: it.group})
 				loaded++
 			}
-			krgm.Unlock()
-			tempKrgm.RUnlock()
-			for _, group := range groupsToSync {
-				krgm.syncBurstabilityWithServiceLimit(group)
+			m.Unlock()
+			// Sync burstability outside m.Lock; it only needs the keyspace and
+			// group locks.
+			for _, s := range toSync {
+				s.krgm.syncBurstabilityWithServiceLimit(s.group)
 			}
+		}
+		if aborted {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
+		m.Lock()
+		if m.loadEpoch != epoch {
+			m.Unlock()
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
 		}
 		m.syncLoadedGroups = nil
 		m.Unlock()
