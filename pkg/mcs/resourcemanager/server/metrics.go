@@ -216,6 +216,22 @@ var (
 			Help:      "The duration of pushing RU metrics to Prometheus.",
 			Buckets:   prometheus.DefBuckets,
 		})
+
+	syncLoadGroupCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "sync_load_groups_total",
+			Help:      "Total number of resource groups loaded synchronously.",
+		})
+
+	asyncLoadGroupDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "async_load_group_duration_seconds",
+			Help:      "Duration of asynchronous resource group loading in seconds.",
+		})
 )
 
 type metrics struct {
@@ -269,6 +285,8 @@ func init() {
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
 	prometheus.MustRegister(pushRUMetricsDuration)
+	prometheus.MustRegister(syncLoadGroupCounter)
+	prometheus.MustRegister(asyncLoadGroupDuration)
 }
 
 func newMetrics() *metrics {

@@ -538,6 +538,7 @@ var (
 	ErrResourceGroupNotExists  = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
 	ErrDeleteReservedGroup     = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
 	ErrInvalidGroup            = errors.Normalize("invalid group settings, please check %s", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+	ErrResourceGroupsLoading   = errors.Normalize("resource groups are still being loaded, please try again later", errors.RFCCodeText("PD:resourcemanager:ErrResourceGroupsLoading"))
 )
 
 // Microservice errors

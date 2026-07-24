@@ -69,9 +69,17 @@ type consumptionItem struct {
 
 type keyspaceResourceGroupManager struct {
 	syncutil.RWMutex
-	groups          map[string]*ResourceGroup
+	groups map[string]*ResourceGroup
+	// reservedGroups tracks names whose entry in groups is still a synthetic
+	// placeholder and not yet confirmed by a storage load or a real write.
+	reservedGroups  map[string]struct{}
 	groupRUTrackers map[string]*groupRUTracker
 	serviceLimiter  *serviceLimiter
+	// deleteGen is bumped under the write lock every time a group is removed
+	// from the cache. A lazy load snapshots it before its lock-free storage
+	// read and re-checks it under the lock before inserting, so a group
+	// deleted after the read is never resurrected by the now-stale result.
+	deleteGen uint64
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -89,6 +97,7 @@ func newKeyspaceResourceGroupManager(
 	}
 	return &keyspaceResourceGroupManager{
 		groups:          make(map[string]*ResourceGroup),
+		reservedGroups:  make(map[string]struct{}),
 		groupRUTrackers: make(map[string]*groupRUTracker),
 		keyspaceID:      keyspaceID,
 		storage:         storage,
@@ -159,6 +168,9 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
 			return err
 		}
+		krgm.Lock()
+		delete(krgm.reservedGroups, group.Name)
+		krgm.Unlock()
 		krgm.syncBurstabilityWithServiceLimit(existing)
 		return nil
 	}
@@ -166,6 +178,7 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 	resourceGroup := FromProtoResourceGroup(group)
 	krgm.Lock()
 	krgm.groups[group.Name] = resourceGroup
+	delete(krgm.reservedGroups, group.Name)
 	krgm.Unlock()
 	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
 	return nil
@@ -173,9 +186,26 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 
 func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name string) {
 	krgm.Lock()
+	krgm.removeResourceGroupLocked(name)
+	krgm.Unlock()
+}
+
+// removeResourceGroupLocked removes every cache trace of the group. The
+// caller must hold the write lock.
+func (krgm *keyspaceResourceGroupManager) removeResourceGroupLocked(name string) {
 	delete(krgm.groups, name)
 	delete(krgm.groupRUTrackers, name)
-	krgm.Unlock()
+	delete(krgm.reservedGroups, name)
+	// Signal any in-flight lazy load that a delete happened, so it won't
+	// reinsert a copy read from storage before this deletion.
+	krgm.deleteGen++
+}
+
+// loadDeleteGen returns the current delete generation counter.
+func (krgm *keyspaceResourceGroupManager) loadDeleteGen() uint64 {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	return krgm.deleteGen
 }
 
 func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name string, rawValue string) error {
@@ -196,8 +226,13 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	krgm.RLock()
 	_, ok := krgm.groups[DefaultResourceGroupName]
+	_, reserved := krgm.reservedGroups[DefaultResourceGroupName]
 	krgm.RUnlock()
-	if ok {
+	// A cached entry only makes initialization unnecessary if it's confirmed
+	// data. A reserved placeholder means nothing is persisted for the default
+	// group (e.g. a fresh store): it must still be created and persisted here,
+	// otherwise its settings are never stored and state persistence stays skipped.
+	if ok && !reserved {
 		return
 	}
 	defaultGroup := newDefaultResourceGroup()
@@ -218,6 +253,7 @@ func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
 	krgm.Lock()
 	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
 		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
 		inserted = true
 	}
 	krgm.Unlock()
@@ -245,53 +281,79 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 	defaultGroup := newDefaultResourceGroup()
 	krgm.Lock()
 	krgm.groups[DefaultResourceGroupName] = defaultGroup
+	krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
 	krgm.Unlock()
 	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+// persistResourceGroup validates grouppb, builds the in-memory group, and
+// persists its settings and states to storage. It's the storage-only phase of
+// an Add: the caller is responsible for publishing the returned group into
+// whichever keyspace manager is current at publish time.
+func (krgm *keyspaceResourceGroupManager) persistResourceGroup(grouppb *rmpb.ResourceGroup) (*ResourceGroup, error) {
 	if err := validateResourceGroupProto(grouppb); err != nil {
-		return err
+		return nil, err
 	}
 	group := FromProtoResourceGroup(grouppb)
 	if krgm.writeRole.AllowsMetadataWrite() {
 		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if krgm.writeRole.AllowsStateWrite() {
 		if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
-			return err
+			return nil, err
 		}
+	}
+	return group, nil
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	group, err := krgm.persistResourceGroup(grouppb)
+	if err != nil {
+		return err
 	}
 	krgm.Lock()
 	krgm.groups[group.Name] = group
+	delete(krgm.reservedGroups, group.Name)
 	krgm.Unlock()
 	krgm.syncBurstabilityWithServiceLimit(group)
 	return nil
 }
 
-func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) error {
+// modifyResourceGroup patches the cached group's settings and persists them,
+// returning the patched group so the caller can republish it if the cache it
+// came from is no longer the live one.
+func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) (*ResourceGroup, error) {
 	if group == nil || group.Name == "" {
-		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
+		return nil, errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	krgm.RLock()
 	curGroup, ok := krgm.groups[group.Name]
 	krgm.RUnlock()
 	if !ok {
-		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 	if !krgm.writeRole.AllowsMetadataWrite() {
-		return errMetadataWriteDisabled
+		return nil, errMetadataWriteDisabled
 	}
-	err := curGroup.PatchSettings(group)
-	if err != nil {
-		return err
+	if err := curGroup.PatchSettings(group); err != nil {
+		return nil, err
 	}
-	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
+	// Deliberately not clearing reservedGroups here: modifying only patches
+	// settings, it never establishes the group's state, so it must not make
+	// a state-unconfirmed entry look fully confirmed.
+	if err := curGroup.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
+		return nil, err
+	}
+	return curGroup, nil
 }
 
-func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
+// deleteResourceGroupFromStorage validates the request and removes the
+// group's settings and states from storage. It's the storage-only phase of a
+// Delete: the caller is responsible for removing the group from whichever
+// keyspace manager cache is current at publish time.
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromStorage(name string) error {
 	if name == DefaultResourceGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
@@ -326,8 +388,26 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 				zap.Error(err))
 		}
 	}
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
+	if err := krgm.deleteResourceGroupFromStorage(name); err != nil {
+		return err
+	}
 	krgm.deleteResourceGroupFromCache(name)
 	return nil
+}
+
+// isReserved reports whether name's cached entry is still just the synthetic
+// placeholder inserted by ensureReservedDefaultGroupInCache or
+// restoreDefaultResourceGroupFromReserved, not yet confirmed by a storage
+// load or a real write.
+func (krgm *keyspaceResourceGroupManager) isReserved(name string) bool {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	_, ok := krgm.reservedGroups[name]
+	return ok
 }
 
 func (krgm *keyspaceResourceGroupManager) getResourceGroup(name string, withStats bool) *ResourceGroup {
@@ -384,6 +464,14 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 	for idx := range keys {
 		krgm.RLock()
 		group, ok := krgm.groups[keys[idx]]
+		_, reserved := krgm.reservedGroups[keys[idx]]
+		if ok && reserved {
+			// The entry is still just an unconfirmed placeholder (e.g. the
+			// synthetic default installed before async loading completes);
+			// persisting its fresh state would permanently overwrite any
+			// real persisted state still waiting to be loaded.
+			ok = false
+		}
 		if ok {
 			if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
 				log.Error("persist keyspace resource group state failed",

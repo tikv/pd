@@ -408,7 +408,9 @@ func TestInitManager(t *testing.T) {
 	m.storage = storage
 	err = m.Init(ctx)
 	re.NoError(err)
-	re.Len(m.getKeyspaceResourceGroupManagers(), 2)
+	testutil.Eventually(re, func() bool {
+		return len(m.getKeyspaceResourceGroupManagers()) == 2
+	})
 	// Get the default resource group.
 	rg, err := m.GetResourceGroup(1, DefaultResourceGroupName, true)
 	re.NoError(err)
@@ -801,7 +803,8 @@ func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
 			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
 		},
 	}
-	re.ErrorIs(tokenOnlyKRGM.modifyResourceGroup(modifiedGroup), errMetadataWriteDisabled)
+	_, err := tokenOnlyKRGM.modifyResourceGroup(modifiedGroup)
+	re.ErrorIs(err, errMetadataWriteDisabled)
 	re.Equal(float64(100), tokenOnlyKRGM.getResourceGroup(group.GetName(), false).getFillRate())
 	re.ErrorIs(tokenOnlyKRGM.deleteResourceGroup(group.GetName()), errMetadataWriteDisabled)
 	re.NotNil(tokenOnlyKRGM.getResourceGroup(group.GetName(), false))
