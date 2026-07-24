@@ -16,6 +16,7 @@ package tests
 
 import (
 	"context"
+	stdErrors "errors"
 	"net/http"
 	"os"
 	"strings"
@@ -77,6 +78,13 @@ var (
 
 	// defaultMaxRetryTimes is the default maximum retry times for starting servers.
 	defaultMaxRetryTimes = 5
+	// runServersCleanupGracePeriod allows the remaining servers to finish startup
+	// naturally after a peer fails. Canceling etcd before it becomes ready can
+	// leave its embedded listeners blocked in shutdown.
+	runServersCleanupGracePeriod = 10 * time.Second
+	// errRunServersCleanupTimeout prevents retry cleanup from destroying a data
+	// directory while its startup goroutine may still be using it.
+	errRunServersCleanupTimeout = errors.New("timed out waiting for starting servers to stop")
 )
 
 type startServersRetryAction int
@@ -99,6 +107,9 @@ func classifyInitialServersError(err error) startServersRetryAction {
 	if err == nil {
 		return startServersNoRetry
 	}
+	if stdErrors.Is(err, errRunServersCleanupTimeout) {
+		return startServersNoRetry
+	}
 	errMsg := err.Error()
 	switch {
 	case strings.Contains(errMsg, "address already in use") || strings.Contains(errMsg, "Etcd cluster ID mismatch"):
@@ -116,6 +127,8 @@ type TestServer struct {
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
+	runCancel  context.CancelFunc
+	runDone    chan struct{}
 }
 
 var zapLogOnce sync.Once
@@ -171,16 +184,54 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
+	return s.runWithStartSignal(nil)
+}
+
+func (s *TestServer) runWithStartSignal(started chan<- struct{}) error {
 	s.Lock()
-	defer s.Unlock()
 	if s.state != Initial && s.state != Stop {
-		return errors.Errorf("server(state%d) cannot run", s.state)
+		state := s.state
+		s.Unlock()
+		if started != nil {
+			close(started)
+		}
+		return errors.Errorf("server(state%d) cannot run", state)
 	}
-	if err := s.server.Run(); err != nil {
+	prevState := s.state
+	runCtx, runCancel := context.WithCancel(s.server.Context())
+	runDone := make(chan struct{})
+	// Treat startup as running so retry cleanup can close a blocked server.Run.
+	s.state = Running
+	s.runCancel = runCancel
+	s.runDone = runDone
+	s.Unlock()
+	if started != nil {
+		close(started)
+	}
+
+	err := s.server.RunWithContext(runCtx)
+	close(runDone)
+	if err != nil {
+		s.Lock()
+		if s.state == Running {
+			s.state = prevState
+			runCancel()
+			s.runCancel = nil
+			s.runDone = nil
+		}
+		s.Unlock()
 		return err
 	}
-	s.state = Running
 	return nil
+}
+
+func (s *TestServer) cancelRun() {
+	s.RLock()
+	runCancel := s.runCancel
+	s.RUnlock()
+	if runCancel != nil {
+		runCancel()
+	}
 }
 
 // Stop is used to stop a TestServer.
@@ -190,7 +241,15 @@ func (s *TestServer) Stop() error {
 	if s.state != Running {
 		return errors.Errorf("server(state%d) cannot stop", s.state)
 	}
+	if s.runCancel != nil {
+		s.runCancel()
+	}
+	if s.runDone != nil {
+		<-s.runDone
+	}
 	s.server.Close()
+	s.runCancel = nil
+	s.runDone = nil
 	s.state = Stop
 	return nil
 }
@@ -200,7 +259,15 @@ func (s *TestServer) Destroy() error {
 	s.Lock()
 	defer s.Unlock()
 	if s.state == Running {
+		if s.runCancel != nil {
+			s.runCancel()
+		}
+		if s.runDone != nil {
+			<-s.runDone
+		}
 		s.server.Close()
+		s.runCancel = nil
+		s.runDone = nil
 	}
 	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
 		return err
@@ -678,21 +745,116 @@ func restartTestCluster(
 
 // RunServer starts to run TestServer.
 func RunServer(server *TestServer) <-chan error {
-	resC := make(chan error)
+	resC := make(chan error, 1)
 	go func() { resC <- server.Run() }()
 	return resC
 }
 
 // RunServers starts to run multiple TestServer.
 func RunServers(servers []*TestServer) error {
-	res := make([]<-chan error, len(servers))
-	for i, s := range servers {
-		res[i] = RunServer(s)
+	runners := make([]testServerRunner, 0, len(servers))
+	for _, server := range servers {
+		runners = append(runners, server)
 	}
-	for _, c := range res {
-		if err := <-c; err != nil {
-			return errors.WithStack(err)
+	return runTestServers(runners)
+}
+
+type testServerRunner interface {
+	runWithStartSignal(chan<- struct{}) error
+	cancelRun()
+	Stop() error
+	State() int32
+}
+
+func runTestServers(servers []testServerRunner) error {
+	type runResult struct {
+		index int
+		err   error
+	}
+	resC := make(chan runResult, len(servers))
+	for i, s := range servers {
+		index := i
+		server := s
+		started := make(chan struct{})
+		go func() {
+			resC <- runResult{index: index, err: server.runWithStartSignal(started)}
+		}()
+		// runWithStartSignal changes the state to Running before notifying started.
+		// Wait for that transition so an early failure cannot race with a server
+		// that has not entered run yet and therefore cannot be stopped.
+		<-started
+	}
+
+	var (
+		primaryErr      error
+		graceTimer      *time.Timer
+		graceC          <-chan time.Time
+		postCancelTimer *time.Timer
+		postCancelC     <-chan time.Time
+	)
+	remaining := len(servers)
+	completed := make([]bool, len(servers))
+	handleResult := func(result runResult) {
+		remaining--
+		completed[result.index] = true
+		if result.err != nil && primaryErr == nil {
+			primaryErr = result.err
+			graceTimer = time.NewTimer(runServersCleanupGracePeriod)
+			graceC = graceTimer.C
 		}
+	}
+	stopCompletedServers := func() {
+		for i, s := range servers {
+			if completed[i] && s.State() == Running {
+				_ = s.Stop()
+			}
+		}
+	}
+	for remaining > 0 {
+		select {
+		case result := <-resC:
+			handleResult(result)
+		case <-graceC:
+			graceC = nil
+			// Cancel without joining here: Stop waits for runDone and can block
+			// forever when startup does not observe its context.
+			for _, s := range servers {
+				if s.State() == Running {
+					s.cancelRun()
+				}
+			}
+			postCancelTimer = time.NewTimer(runServersCleanupGracePeriod)
+			postCancelC = postCancelTimer.C
+		case <-postCancelC:
+			postCancelC = nil
+			// Prefer results that became ready at the timeout boundary.
+		drainResults:
+			for remaining > 0 {
+				select {
+				case result := <-resC:
+					handleResult(result)
+				default:
+					break drainResults
+				}
+			}
+			if remaining > 0 {
+				stopCompletedServers()
+				return errors.Wrapf(errRunServersCleanupTimeout,
+					"server startup cleanup did not complete after cancellation; original error: %v", primaryErr)
+			}
+		}
+	}
+	if graceTimer != nil {
+		graceTimer.Stop()
+	}
+	if postCancelTimer != nil {
+		postCancelTimer.Stop()
+	}
+	if primaryErr != nil {
+		// Every Run call has returned, so closing these servers cannot race with
+		// partial startup. Do this before retry cleanup can remove their data dirs.
+		stopCompletedServers()
+		return errors.WithStack(primaryErr)
 	}
 	return nil
 }

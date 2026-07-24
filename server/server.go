@@ -671,26 +671,85 @@ func (s *Server) IsClosed() bool {
 
 // Run runs the pd server.
 func (s *Server) Run() error {
+	return s.RunWithContext(s.ctx)
+}
+
+// RunWithContext runs the PD server with a context that controls startup and
+// the server loops. The caller must keep the context alive while the server is
+// running and call Close after canceling it.
+func (s *Server) RunWithContext(ctx context.Context) (retErr error) {
 	go systimemon.StartMonitor(s.ctx, time.Now, func() {
 		log.Error("system time jumps backward", errs.ZapError(errs.ErrIncorrectSystemTime))
 		timeJumpBackCounter.Inc()
 	})
-	if err := s.startEtcd(s.ctx); err != nil {
+	if err := s.startEtcd(ctx); err != nil {
+		return err
+	}
+	defer func() {
+		if retErr != nil {
+			s.cleanupFailedStart()
+		}
+	}()
+	failpoint.Inject("failAfterStartEtcd", func() {
+		failpoint.Return(errors.New("injected error after etcd startup"))
+	})
+
+	if err := s.startServer(ctx); err != nil {
 		return err
 	}
 
-	if err := s.startServer(s.ctx); err != nil {
-		return err
-	}
-
-	s.cgMonitor.StartMonitor(s.ctx)
+	s.cgMonitor.StartMonitor(ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)
 	})
-	s.startServerLoop(s.ctx)
+	s.startServerLoop(ctx)
 
 	return nil
+}
+
+func (s *Server) cleanupFailedStart() {
+	if s.cluster != nil {
+		s.cluster.Stop()
+	}
+	if s.IsKeyspaceGroupEnabled() && s.keyspaceGroupManager != nil {
+		s.keyspaceGroupManager.Close()
+	}
+	if s.tsoAllocator != nil {
+		s.tsoAllocator.Close()
+	}
+	if s.meteringWriter != nil {
+		s.meteringWriter.Stop()
+	}
+	if s.client != nil {
+		if err := s.client.Close(); err != nil {
+			log.Warn("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.electionClient != nil {
+		if err := s.electionClient.Close(); err != nil {
+			log.Warn("close election client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
+		}
+	}
+	if s.httpClient != nil {
+		s.httpClient.CloseIdleConnections()
+	}
+	if s.member.Etcd() != nil {
+		s.member.Close()
+	}
+	if s.hbStreams != nil {
+		s.hbStreams.Close()
+	}
+	if s.storage != nil {
+		if err := s.storage.Close(); err != nil {
+			log.Warn("close storage meet error", errs.ZapError(err))
+		}
+	}
+	if s.hotRegionStorage != nil {
+		if err := s.hotRegionStorage.Close(); err != nil {
+			log.Warn("close hot region storage meet error", errs.ZapError(err))
+		}
+	}
 }
 
 // SetServiceAuditBackendForHTTP is used to register service audit config for HTTP.

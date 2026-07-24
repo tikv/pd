@@ -92,12 +92,14 @@ const (
 	minResolvedTSPathFormat        = "/pd/%d/raft/min_resolved_ts"            // "/pd/{cluster_id}/raft/min_resolved_ts"
 	externalTimestampPathFormat    = "/pd/%d/raft/external_timestamp"         // "/pd/{cluster_id}/raft/external_timestamp"
 
-	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
-	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
-	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
-	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
-	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
-	keyspaceGroupIDPattern      = `tso/keyspace_groups/membership/(\d{5})$`
+	keyspaceMetaPrefixFormat        = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
+	keyspaceMetaPathFormat          = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
+	keyspaceIDPathFormat            = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
+	keyspaceGroupPrefixFormat       = "/pd/%d/tso/keyspace_groups/"                // "/pd/{cluster_id}/tso/keyspace_groups/"
+	keyspaceGroupIDPrefixFormat     = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
+	keyspaceGroupIDPathFormat       = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
+	keyspaceGroupRevisionPathFormat = "/pd/%d/tso/keyspace_groups/revision"        // "/pd/{cluster_id}/tso/keyspace_groups/revision"
+	keyspaceGroupIDPattern          = `tso/keyspace_groups/membership/(\d{5})$`
 
 	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
@@ -231,6 +233,11 @@ func KeyspaceIDPath(name string) string {
 	return fmt.Sprintf(keyspaceIDPathFormat, ClusterID(), name)
 }
 
+// KeyspaceGroupPrefix returns the prefix of keyspace group metadata.
+func KeyspaceGroupPrefix() string {
+	return fmt.Sprintf(keyspaceGroupPrefixFormat, ClusterID())
+}
+
 // KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
 func KeyspaceGroupIDPrefix() string {
 	return fmt.Sprintf(keyspaceGroupIDPrefixFormat, ClusterID())
@@ -239,6 +246,11 @@ func KeyspaceGroupIDPrefix() string {
 // KeyspaceGroupIDPath returns the path to keyspace id from the given name.
 func KeyspaceGroupIDPath(id uint32) string {
 	return fmt.Sprintf(keyspaceGroupIDPathFormat, ClusterID(), id)
+}
+
+// KeyspaceGroupRevisionPath returns the path of the durable keyspace group revision marker.
+func KeyspaceGroupRevisionPath() string {
+	return fmt.Sprintf(keyspaceGroupRevisionPathFormat, ClusterID())
 }
 
 // GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.

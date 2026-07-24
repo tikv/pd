@@ -534,9 +534,25 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // membership/distribution metadata.
 // Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
 // Value: endpoint.KeyspaceGroup
+// Revision marker: /pd/{cluster_id}/tso/keyspace_groups/revision
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
+	maxLoadedModRevision := uint64(0)
+	preEventsFn := func([]*clientv3.Event) error {
+		maxLoadedModRevision = 0
+		return nil
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
+		if string(kv.Key) == keypath.KeyspaceGroupRevisionPath() {
+			failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+				addr, ok := val.(string)
+				if ok && addr == kgm.electionNamePrefix {
+					failpoint.Return(nil)
+				}
+			})
+			maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
+			return nil
+		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
@@ -547,6 +563,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
+		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -554,6 +571,9 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		if string(kv.Key) == keypath.KeyspaceGroupRevisionPath() {
+			return nil
+		}
 		groupID, err := ExtractKeyspaceGroupIDFromPath(kgm.compiledKGMembershipIDRegexp, string(kv.Key))
 		if err != nil {
 			return err
@@ -581,6 +601,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
 				)
 			}
+		} else if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
 		}
 		return nil
 	}
@@ -589,9 +611,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		&kgm.wg,
 		kgm.etcdClient,
 		"keyspace-watcher",
-		// To keep the consistency with the previous code, we should trim the suffix `/`.
-		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		func([]*clientv3.Event) error { return nil },
+		keypath.KeyspaceGroupPrefix(),
+		preEventsFn,
 		putFn,
 		deleteFn,
 		postEventsFn,
