@@ -57,6 +57,7 @@ import (
 // TestServer states.
 const (
 	Initial int32 = iota
+	Starting
 	Running
 	Stop
 	Destroy
@@ -113,6 +114,7 @@ func classifyInitialServersError(err error) startServersRetryAction {
 // TestServer is only for test.
 type TestServer struct {
 	syncutil.RWMutex
+	startMu    sync.Mutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
@@ -171,13 +173,35 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string, h
 
 // Run starts to run a TestServer.
 func (s *TestServer) Run() error {
+	s.startMu.Lock()
+	defer s.startMu.Unlock()
+
+	s.Lock()
+	if s.state != Initial && s.state != Stop {
+		state := s.state
+		s.Unlock()
+		return errors.Errorf("server(state%d) cannot run", state)
+	}
+	// Immediately set state to Starting and unlock
+	s.state = Starting
+	s.Unlock()
+
+	// Run the server which is a slow operation
+	err := s.server.Run()
+
 	s.Lock()
 	defer s.Unlock()
-	if s.state != Initial && s.state != Stop {
-		return errors.Errorf("server(state%d) cannot run", s.state)
-	}
-	if err := s.server.Run(); err != nil {
+
+	if err != nil {
+		if s.state == Destroy || s.state == Stop {
+			return errors.New("server stopped before reaching running state")
+		}
+		s.state = Stop
 		return err
+	}
+	if s.state == Destroy || s.state == Stop {
+		s.server.Close()
+		return errors.New("server stopped before reaching running state")
 	}
 	s.state = Running
 	return nil
@@ -187,26 +211,33 @@ func (s *TestServer) Run() error {
 func (s *TestServer) Stop() error {
 	s.Lock()
 	defer s.Unlock()
-	if s.state != Running {
-		return errors.Errorf("server(state%d) cannot stop", s.state)
+	if s.state == Starting {
+		s.state = Stop
+		s.server.Close()
+		return nil
 	}
-	s.server.Close()
-	s.state = Stop
-	return nil
+	if s.state == Running {
+		s.server.Close()
+		s.state = Stop
+		return nil
+	}
+	return errors.Errorf("server(state%d) cannot stop", s.state)
 }
 
 // Destroy is used to destroy a TestServer.
 func (s *TestServer) Destroy() error {
 	s.Lock()
-	defer s.Unlock()
-	if s.state == Running {
+	if s.state == Running || s.state == Starting {
 		s.server.Close()
 	}
-	if err := os.RemoveAll(s.server.GetConfig().DataDir); err != nil {
-		return err
-	}
 	s.state = Destroy
-	return nil
+	dataDir := s.server.GetConfig().DataDir
+	s.Unlock()
+
+	// Wait for any in-flight Run() to finish before deleting the data dir.
+	s.startMu.Lock()
+	s.startMu.Unlock()
+	return os.RemoveAll(dataDir)
 }
 
 // ResetPDLeader resigns the leader of the server.
