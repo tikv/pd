@@ -827,6 +827,59 @@ func TestDynamicSwitchingPDToTSO(t *testing.T) {
 	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
+// TestDynamicSwitchingTSOToPD tests that when a TSO microservice stops, PD
+// resumes serving TSO locally and timestamps remain monotonically increasing
+// across the fallback.
+//
+// NOTE: This test uses the usePDServiceMode failpoint to pin the client to PD_SVC_MODE,
+// so it only validates server-side dynamic switching behavior. Client-side service-mode
+// discovery is covered by TestTSOServiceSwitch in tests/integrations/mcs/tso/server_test.go.
+func TestDynamicSwitchingTSOToPD(t *testing.T) {
+	re := require.New(t)
+	enableDynamicSwitchingTestFailpoints(t, re)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create a PD cluster with dynamic switching enabled.
+	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableTSODynamicSwitching = true
+	})
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	re.NoError(pdCluster.RunInitialServers())
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+	backendEndpoints := pdLeader.GetAddr()
+
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+
+	// Start in independent TSO mode and establish the pre-fallback timestamp baseline.
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+	})
+	var globalLastTS uint64
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+
+	// Stop the TSO microservice. PD should resume serving locally, and the first
+	// successful timestamp after fallback must exceed the TSO service baseline.
+	tsoCluster.Destroy()
+	testutil.Eventually(re, func() bool {
+		return !pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+	})
+	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+}
+
 // TestDynamicSwitchingRoundTrip tests that PD can repeatedly switch between serving
 // TSO locally and forwarding to a TSO microservice while timestamps remain monotonically
 // increasing across every transition.
@@ -866,35 +919,49 @@ func TestDynamicSwitchingRoundTrip(t *testing.T) {
 	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 	re.False(pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName))
 
-	// Start the first TSO microservice and wait for transition.
-	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
-	re.NoError(err)
-	defer tsoCluster.Destroy()
-	tsoCluster.WaitForDefaultPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
-	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+	var tsoCluster *tests.TestTSOCluster
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
 
-	// Destroy TSO microservice.
-	tsoCluster.Destroy()
+	if !t.Run("PDToTSO", func(t *testing.T) {
+		re := require.New(t)
+		var err error
+		tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+		re.NoError(err)
+		tsoCluster.WaitForDefaultPrimaryServing(re)
+		testutil.Eventually(re, func() bool {
+			return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+		})
+		waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+	}) {
+		return
+	}
 
-	// PD should resume serving TSO locally with monotonically increasing timestamps.
-	testutil.Eventually(re, func() bool {
-		return !pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
-	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+	if !t.Run("TSOToPD", func(t *testing.T) {
+		re := require.New(t)
+		tsoCluster.Destroy()
+		testutil.Eventually(re, func() bool {
+			return !pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+		})
+		waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
+	}) {
+		return
+	}
 
-	// Start a fresh TSO microservice and verify that PD can switch away from its
-	// fallback allocator again without breaking timestamp monotonicity.
-	tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
-	re.NoError(err)
-	defer tsoCluster.Destroy()
-	tsoCluster.WaitForDefaultPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+	t.Run("PDToTSOAgain", func(t *testing.T) {
+		re := require.New(t)
+		var err error
+		tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+		re.NoError(err)
+		tsoCluster.WaitForDefaultPrimaryServing(re)
+		testutil.Eventually(re, func() bool {
+			return pdLeader.GetServer().IsServiceIndependent(mcsconst.TSOServiceName)
+		})
+		waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 	})
-	waitAndCheckTSOMonotonic(ctx, re, pdClient, &globalLastTS)
 }
 
 // TestDynamicSwitchingWithLeaderTransfer tests that TSO requests recover after
