@@ -116,6 +116,9 @@ func (mc *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider {
 	return mc.PersistOptions
 }
 
+// CancelAllOperators cancels all running and waiting operators.
+func (*Cluster) CancelAllOperators() {}
+
 // GetSharedConfig returns the shared config.
 func (mc *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 	return mc.PersistOptions

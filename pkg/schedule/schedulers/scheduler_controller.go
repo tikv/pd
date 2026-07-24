@@ -390,11 +390,12 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 		select {
 		case <-ticker.C:
 			diagnosable := s.IsDiagnosticAllowed()
+			generation := c.opController.GetOperatorGeneration()
 			if !s.AllowSchedule(diagnosable) {
 				continue
 			}
 			if op := s.Schedule(diagnosable); len(op) > 0 {
-				added := c.opController.AddWaitingOperator(op...)
+				added := c.opController.AddWaitingOperatorWithGeneration(generation, operator.SchedulingHalted, op...)
 				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
 			}
 			// Note: we reset the ticker here to support updating configuration dynamically.

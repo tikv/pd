@@ -162,6 +162,31 @@ func TestRemoveFailedStoresWithOptions(t *testing.T) {
 	re.WithinDuration(time.Now().Add(5*time.Minute), recoveryController.storePlanExpires[1], time.Second)
 }
 
+type trackingCancelCluster struct {
+	*mockcluster.Cluster
+	cancelAllOperatorsCalled int
+}
+
+func (c *trackingCancelCluster) CancelAllOperators() {
+	c.cancelAllOperatorsCalled++
+}
+
+func TestRemoveFailedStoresCancelsOperators(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := &trackingCancelCluster{Cluster: mockcluster.NewCluster(ctx, opts)}
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+	re.Equal(1, cluster.cancelAllOperatorsCalled)
+}
+
 func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
