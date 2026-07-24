@@ -21,8 +21,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 const (
@@ -49,8 +47,6 @@ const (
 )
 
 var (
-	grpcStreamSendDuration = grpcutil.NewGRPCStreamSendDuration(namespace, serverSubsystem)
-
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
@@ -251,7 +247,6 @@ type trackerKey struct {
 }
 
 func init() {
-	prometheus.MustRegister(grpcStreamSendDuration)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(activeRequestUnitCost)
@@ -620,8 +615,4 @@ func (t *maxPerSecCostTracker) flushMetrics() {
 		t.maxPerSecRRU = 0
 		t.maxPerSecWRU = 0
 	}
-}
-
-func newAcquireTokenBucketsMetricsStream(stream rmpb.ResourceManager_AcquireTokenBucketsServer) rmpb.ResourceManager_AcquireTokenBucketsServer {
-	return grpcutil.NewMetricsStream(stream, stream.Send, stream.Recv, grpcStreamSendDuration, "acquire-token-buckets")
 }
