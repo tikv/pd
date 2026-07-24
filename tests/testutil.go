@@ -104,6 +104,8 @@ func SetRangePort(start, end int) {
 
 var once sync.Once
 
+const mcsTestListenAddr = "http://127.0.0.1:0"
+
 // InitLogger initializes the logger for test.
 func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
@@ -123,7 +125,7 @@ func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapPrope
 func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*rm.Server, func()) {
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
+	cfg.ListenAddr = normalizeMCSTestListenAddr(listenAddrs)
 	cfg.Name = cfg.ListenAddr
 	cfg, err := rm.GenerateConfig(cfg)
 	re.NoError(err)
@@ -141,7 +143,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 func StartSingleRouterServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*router.Server, func(), error) {
 	cfg := rc.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
+	cfg.ListenAddr = normalizeMCSTestListenAddr(listenAddrs)
 	cfg.Name = cfg.ListenAddr
 	cfg, err := router.GenerateConfig(cfg)
 	re.NoError(err)
@@ -158,7 +160,7 @@ func StartSingleRouterServerWithoutCheck(ctx context.Context, re *require.Assert
 func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*tso.Server, func(), error) {
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
+	cfg.ListenAddr = normalizeMCSTestListenAddr(listenAddrs)
 	cfg.Name = cfg.ListenAddr
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
@@ -195,7 +197,7 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*scheduling.Server, func()) {
 	cfg := sc.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
+	cfg.ListenAddr = normalizeMCSTestListenAddr(listenAddrs)
 	cfg.Name = cfg.ListenAddr
 	cfg, err := scheduling.GenerateConfig(cfg)
 	re.NoError(err)
@@ -207,6 +209,13 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return s, cleanup
+}
+
+func normalizeMCSTestListenAddr(listenAddrs string) string {
+	if listenAddrs == "" {
+		return mcsTestListenAddr
+	}
+	return listenAddrs
 }
 
 // NewSchedulingTestServer creates a scheduling server with given config for testing.

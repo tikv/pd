@@ -154,6 +154,21 @@ func (s *Server) Run() (err error) {
 	if err = utils.InitClient(s); err != nil {
 		return err
 	}
+	if err = s.initListenerAndUpdateConfig(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil && s.serviceRegister != nil {
+			if deregisterErr := s.serviceRegister.Deregister(); deregisterErr != nil {
+				log.Warn("failed to deregister the service", errs.ZapError(deregisterErr))
+			}
+		}
+		if err != nil && s.GetListener() != nil {
+			if closeErr := s.GetListener().Close(); closeErr != nil {
+				log.Warn("failed to close listener", errs.ZapError(closeErr))
+			}
+		}
+	}()
 
 	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.SchedulingServiceName); err != nil {
 		return err
@@ -415,6 +430,23 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+func (s *Server) initListenerAndUpdateConfig() error {
+	oldListenAddr := s.cfg.ListenAddr
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
+		return err
+	}
+	actualListenAddr := s.GetActualListenAddr()
+	if actualListenAddr == "" {
+		return nil
+	}
+	s.cfg.ListenAddr = server.ResolveListenAddr(s.cfg.ListenAddr, actualListenAddr)
+	s.cfg.AdvertiseListenAddr = server.ResolveAdvertiseListenAddr(s.cfg.AdvertiseListenAddr, actualListenAddr)
+	if s.cfg.Name == "" || s.cfg.Name == oldListenAddr {
+		s.cfg.Name = s.cfg.AdvertiseListenAddr
+	}
+	return nil
+}
+
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
 	cluster := s.cluster.Load()
@@ -487,9 +519,6 @@ func (s *Server) startServer() (err error) {
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
 	s.AddServiceExitCallback(s.stopCluster)
-	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
-		return err
-	}
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)

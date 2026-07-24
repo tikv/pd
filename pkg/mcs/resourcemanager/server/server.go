@@ -133,6 +133,21 @@ func (s *Server) Run() (err error) {
 	if err = utils.InitClient(s); err != nil {
 		return err
 	}
+	if err = s.initListenerAndUpdateConfig(); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil && s.serviceRegister != nil {
+			if deregisterErr := s.serviceRegister.Deregister(); deregisterErr != nil {
+				log.Warn("failed to deregister the service", errs.ZapError(deregisterErr))
+			}
+		}
+		if err != nil && s.GetListener() != nil {
+			if closeErr := s.GetListener().Close(); closeErr != nil {
+				log.Warn("failed to close listener", errs.ZapError(closeErr))
+			}
+		}
+	}()
 
 	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.ResourceManagerServiceName); err != nil {
 		return err
@@ -395,6 +410,23 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 	return &s.cfg.Security.TLSConfig
 }
 
+func (s *Server) initListenerAndUpdateConfig() error {
+	oldListenAddr := s.cfg.ListenAddr
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
+		return err
+	}
+	actualListenAddr := s.GetActualListenAddr()
+	if actualListenAddr == "" {
+		return nil
+	}
+	s.cfg.ListenAddr = server.ResolveListenAddr(s.cfg.ListenAddr, actualListenAddr)
+	s.cfg.AdvertiseListenAddr = server.ResolveAdvertiseListenAddr(s.cfg.AdvertiseListenAddr, actualListenAddr)
+	if s.cfg.Name == "" || s.cfg.Name == oldListenAddr {
+		s.cfg.Name = s.cfg.AdvertiseListenAddr
+	}
+	return nil
+}
+
 // GetServingUrls gets service endpoints from the leader in election group.
 func (s *Server) GetServingUrls() []string {
 	return s.participant.GetServingUrls()
@@ -425,9 +457,6 @@ func (s *Server) startServer() (err error) {
 		rejectMetadataWritesViaGRPC: s.ShouldRejectMetadataWritesViaGRPC(),
 	}
 
-	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
-		return err
-	}
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.Context(), &s.cfg.Metering, fmt.Sprintf("pd%d", s.participant.ID()))
