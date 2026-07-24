@@ -413,6 +413,10 @@ func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupNam
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
+	if m.cancel != nil {
+		m.cancel()
+		m.wg.Wait()
+	}
 	if m.enableMetadataWatcher {
 		if err := m.initControllerConfig(); err != nil {
 			return err

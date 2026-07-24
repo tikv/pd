@@ -178,6 +178,28 @@ func withMetadataLoopWatcherFactory(t *testing.T, factory testMetadataLoopWatche
 }
 
 func TestManagerMetadataWatcherLifecycle(t *testing.T) {
+	t.Run("waits_for_previous_lifecycle_before_reinitializing", func(t *testing.T) {
+		re := require.New(t)
+		m := prepareManager()
+		oldCtx, cancelOld := context.WithCancel(context.Background())
+		m.cancel = cancelOld
+		oldExited := make(chan struct{})
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			<-oldCtx.Done()
+			close(oldExited)
+		}()
+
+		re.NoError(m.Init(context.Background()))
+		defer m.close()
+		select {
+		case <-oldExited:
+		default:
+			t.Fatal("previous lifecycle is still running")
+		}
+	})
+
 	t.Run("enables_metadata_watcher_for_rm_service_server", func(t *testing.T) {
 		re := require.New(t)
 		m := NewManager[*Server](&Server{
