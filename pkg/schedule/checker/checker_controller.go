@@ -83,7 +83,8 @@ type Controller struct {
 
 	// duration is the duration of the last patrol round.
 	// It's exported, so it should be protected by a mutex.
-	duration atomic.Value // Store as time.Duration
+	duration   atomic.Value // Store as time.Duration
+	operatorMu sync.Mutex
 
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
@@ -281,17 +282,26 @@ func (c *Controller) checkPriorityRegions() {
 			removes = append(removes, id)
 			continue
 		}
-		ops := c.CheckRegion(region)
-		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
-			continue
-		}
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-		}
+		c.addPriorityOperator(region)
 	}
 	for _, v := range removes {
 		c.RemovePriorityRegions(v)
+	}
+}
+
+func (c *Controller) addPriorityOperator(region *core.RegionInfo) {
+	c.operatorMu.Lock()
+	defer c.operatorMu.Unlock()
+	if c.cluster.IsSchedulingHalted() {
+		return
+	}
+	ops := c.CheckRegion(region)
+	// It should skip if region needs to merge.
+	if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
+		return
+	}
+	if !c.opController.ExceedStoreLimit(ops...) {
+		c.opController.AddWaitingOperator(ops...)
 	}
 }
 
@@ -368,9 +378,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[affinityChecker], func() []*operator.Operator {
-		if opController.OperatorCount(operator.OpAffinity) < c.conf.GetAffinityScheduleLimit() {
-			// It makes sure that two affinity merge operators can be added successfully altogether.
-			return c.affinityChecker.Check(region)
+		current := opController.OperatorCount(operator.OpAffinity)
+		limit := c.conf.GetAffinityScheduleLimit()
+		if current < limit {
+			ops := c.affinityChecker.Check(region)
+			if hasOperatorCapacity(current, limit, uint64(len(ops))) {
+				return ops
+			}
 		}
 		if c.affinityChecker.hasAffinityGroups() {
 			operator.IncOperatorLimitCounter(c.affinityChecker.GetType(), operator.OpAffinity)
@@ -381,9 +395,13 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	}
 
 	if ops := measureChecker(c.metrics.checkRegionHistograms[mergeChecker], func() []*operator.Operator {
-		if opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit() {
-			// It makes sure that two operators can be added successfully altogether.
-			return c.mergeChecker.Check(region)
+		current := opController.OperatorCount(operator.OpMerge)
+		limit := c.conf.GetMergeScheduleLimit()
+		if current < limit {
+			ops := c.mergeChecker.Check(region)
+			if hasOperatorCapacity(current, limit, uint64(len(ops))) {
+				return ops
+			}
 		}
 		operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
 		return nil
@@ -393,12 +411,25 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	return nil
 }
 
+func hasOperatorCapacity(current, limit, candidateCount uint64) bool {
+	return current < limit && candidateCount <= limit-current
+}
+
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 	if region == nil {
 		// the region could be recent split, continue to wait.
 		return
 	}
 	id := region.GetID()
+	if c.opController.GetOperator(id) != nil {
+		c.RemovePendingProcessedRegion(id)
+		return
+	}
+	c.operatorMu.Lock()
+	defer c.operatorMu.Unlock()
+	if c.cluster.IsSchedulingHalted() {
+		return
+	}
 	if c.opController.GetOperator(id) != nil {
 		c.RemovePendingProcessedRegion(id)
 		return

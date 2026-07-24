@@ -58,6 +58,61 @@ func TestMergeCheckerTestSuite(t *testing.T) {
 	suite.Run(t, new(mergeCheckerTestSuite))
 }
 
+func TestTryAddOperatorsRejectsMergePairPastLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	tc := mockcluster.NewCluster(ctx, opt)
+	tc.SetMergeScheduleLimit(3)
+	tc.SetSplitMergeInterval(0)
+	for storeID := uint64(1); storeID <= 3; storeID++ {
+		tc.AddRegionStore(storeID, 0)
+	}
+	tc.AddLeaderRegionWithRange(1, "", "a", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "a", "b", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "b", "c", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(4, "c", "d", 1, 2, 3)
+
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
+	defer stream.Close()
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+	controller := NewController(ctx, tc, tc.GetCheckerConfig(), oc)
+
+	controller.tryAddOperators(tc.GetRegion(1))
+	re.Equal(uint64(2), oc.OperatorCount(operator.OpMerge))
+
+	controller.tryAddOperators(tc.GetRegion(3))
+	re.LessOrEqual(oc.OperatorCount(operator.OpMerge), uint64(3))
+}
+
+func TestHasOperatorCapacity(t *testing.T) {
+	testCases := []struct {
+		name           string
+		current        uint64
+		limit          uint64
+		candidateCount uint64
+		expected       bool
+	}{
+		{name: "no capacity", current: 0, limit: 0, candidateCount: 1, expected: false},
+		{name: "single candidate fits", current: 2, limit: 3, candidateCount: 1, expected: true},
+		{name: "pair fits", current: 2, limit: 4, candidateCount: 2, expected: true},
+		{name: "pair exceeds remaining capacity", current: 2, limit: 3, candidateCount: 2, expected: false},
+		{name: "current exceeds limit", current: 4, limit: 3, candidateCount: 1, expected: false},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.expected, hasOperatorCapacity(
+				testCase.current,
+				testCase.limit,
+				testCase.candidateCount,
+			))
+		})
+	}
+}
+
 func (suite *mergeCheckerTestSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
 	gcInterval = 100 * time.Millisecond

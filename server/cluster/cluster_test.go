@@ -3195,6 +3195,51 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
 }
 
+func TestPatrolRegionConcurrencyRespectReplicaLimit(t *testing.T) {
+	re := require.New(t)
+
+	const (
+		regionNum            = 128
+		replicaScheduleLimit = 1
+	)
+
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+		cfg.PatrolRegionWorkerCount = 8
+		cfg.ReplicaScheduleLimit = replicaScheduleLimit
+	}, nil, nil, re)
+	oc := co.GetOperatorController()
+	checker := co.GetCheckerController()
+	done := make(chan struct{})
+	defer func() {
+		cleanup()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			re.Fail("patrol regions did not stop")
+		}
+	}()
+
+	for i := range 3 {
+		re.NoError(tc.addRegionStore(uint64(i+1), regionNum))
+	}
+	for i := range regionNum {
+		re.NoError(tc.addLeaderRegion(uint64(i+1), 1))
+	}
+
+	go func() {
+		checker.PatrolRegions()
+		close(done)
+	}()
+
+	testutil.Eventually(re, func() bool {
+		count := oc.OperatorCount(operator.OpReplica)
+		return count > uint64(replicaScheduleLimit) ||
+			(count == uint64(replicaScheduleLimit) && len(checker.GetPendingProcessedRegions()) > 0)
+	})
+	re.LessOrEqual(oc.OperatorCount(operator.OpReplica), uint64(replicaScheduleLimit))
+	re.Len(oc.GetOperators(), replicaScheduleLimit)
+}
+
 func checkOperatorDuplicate(re *require.Assertions, ops []*operator.Operator) {
 	regionMap := make(map[uint64]struct{})
 	for _, op := range ops {
