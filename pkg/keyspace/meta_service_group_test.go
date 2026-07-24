@@ -16,13 +16,25 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
+
+var errInjectedStatusCleanup = errors.New("injected status cleanup failure")
+
+type cleanupFailingMetaServiceGroupStorage struct {
+	*endpoint.StorageEndpoint
+}
+
+func (*cleanupFailingMetaServiceGroupStorage) RemoveMetaServiceGroupStatus(kv.Txn, string) error {
+	return errInjectedStatusCleanup
+}
 
 type metaServiceGroupTestSuite struct {
 	suite.Suite
@@ -46,7 +58,9 @@ func mockMetaServiceGroups() map[string]string {
 func (suite *metaServiceGroupTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.manager = NewMetaServiceGroupManager(store, mockMetaServiceGroups())
+	var err error
+	suite.manager, err = NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	suite.Require().NoError(err)
 }
 
 func (suite *metaServiceGroupTestSuite) TearDownTest() {
@@ -219,7 +233,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyUsesAuthoritativeC
 
 	// Authoritative scanner reports the real assignments.
 	actual := map[string]int{}
-	suite.manager.SetKeyspaceAssignmentCounter(func(ids map[string]struct{}) (map[string]int, error) {
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
 		res := make(map[string]int, len(ids))
 		for id := range ids {
 			res[id] = actual[id]
@@ -263,6 +277,63 @@ func (suite *metaServiceGroupTestSuite) TestAssignToGroupRejectsNegativeCount() 
 	re.ErrorIs(err, ErrInvalidAssignmentCount)
 }
 
+func (suite *metaServiceGroupTestSuite) TestPatchStatusRejectsAssignmentCount() {
+	re := suite.Require()
+	count := 7
+	err := suite.manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{AssignmentCount: &count})
+	re.ErrorIs(err, ErrAssignmentCountPatchUnsupported)
+}
+
+// TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that re-adding a
+// group whose Enabled flag still lingers in storage resets it, so RefreshCache
+// starts the group disabled instead of resurrecting the stale flag. The count is
+// derived from keyspace metadata, so it starts at zero.
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForReaddedGroup() {
+	re := suite.Require()
+	const groupID = "etcd-group-readded"
+	// Simulate a stale persisted status for a group the manager does not know yet.
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, groupID,
+			&endpoint.MetaServiceGroupStatus{AssignmentCount: 5, Enabled: true})
+	}))
+
+	groups := mockMetaServiceGroups()
+	groups[groupID] = "etcd-group-readded.tidb-serverless.cluster.svc.local"
+	re.NoError(suite.manager.UpdateGroupsSafely(suite.ctx, groups, nil,
+		func() error { return nil }, nil))
+
+	// Reloading must see a disabled group with a zero derived count, not the stale one.
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.NotNil(statusMap[groupID])
+	re.Equal(0, statusMap[groupID].AssignmentCount)
+	re.False(statusMap[groupID].Enabled)
+}
+
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyDoesNotCommitConfigWhenAddedStatusResetFails() {
+	re := suite.Require()
+	store := &cleanupFailingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+	}
+	manager, err := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	re.NoError(err)
+
+	groups := mockMetaServiceGroups()
+	groups["etcd-group-readded"] = "etcd-group-readded.tidb-serverless.cluster.svc.local"
+	configPersisted := false
+	err = manager.UpdateGroupsSafely(suite.ctx, groups, nil, func() error {
+		configPersisted = true
+		return nil
+	}, nil)
+	re.ErrorIs(err, errInjectedStatusCleanup)
+	re.False(configPersisted)
+	re.NotContains(manager.GetGroups(), "etcd-group-readded")
+	statusMap, err := manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.NotContains(statusMap, "etcd-group-readded")
+}
+
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re := suite.Require()
 	// Groups are disabled by default, so reassigning a keyspace into one must be
@@ -282,6 +353,98 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 		return suite.manager.reassignKeyspaceLocked(txn, "", "etcd-group-0")
 	})
 	re.NoError(err)
+}
+
+// TestRefreshCacheRebuildsFromStorageAndScan verifies that RefreshCache takes the
+// Enabled flag from storage (authoritative for that field) but rebuilds
+// AssignmentCount from the keyspace scan, ignoring any stale persisted count.
+func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndScan() {
+	re := suite.Require()
+	// Persist a stale status: the persisted count must be ignored, the flag kept.
+	err := suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.store.SaveMetaServiceGroupStatus(txn, "etcd-group-0",
+			&endpoint.MetaServiceGroupStatus{AssignmentCount: 10, Enabled: true})
+	})
+	re.NoError(err)
+	// The authoritative counter reports the real assignment count.
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if _, ok := ids["etcd-group-0"]; ok {
+			res["etcd-group-0"] = 3
+		}
+		return res, nil
+	})
+
+	re.NoError(suite.manager.RefreshCache())
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.True(statusMap["etcd-group-0"].Enabled)             // from storage
+	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount) // from the scan, not the stale 10
+}
+
+func (suite *metaServiceGroupTestSuite) TestRefreshPersistedStatusDoesNotScanAssignmentCounts() {
+	re := suite.Require()
+	called := false
+	suite.manager.SetKeyspaceAssignmentCounter(func(context.Context, map[string]struct{}) (map[string]int, error) {
+		called = true
+		return map[string]int{"etcd-group-0": 3}, nil
+	})
+
+	re.NoError(suite.manager.RefreshPersistedStatus())
+	re.False(called)
+	re.False(suite.manager.IsAssignmentCountReady())
+}
+
+func (suite *metaServiceGroupTestSuite) TestStartAssignmentCountRebuildMarksReadyAfterAsyncScan() {
+	re := suite.Require()
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if _, ok := ids["etcd-group-0"]; ok {
+			res["etcd-group-0"] = 3
+		}
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount)
+}
+
+func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildRetriesWhenEpochChanges() {
+	re := suite.Require()
+	suite.enableAllGroups()
+	suite.manager.statusMu.Lock()
+	suite.manager.cachedStatus["etcd-group-1"].AssignmentCount = 10
+	suite.manager.cachedStatus["etcd-group-2"].AssignmentCount = 10
+	suite.manager.statusMu.Unlock()
+	scanStarted := make(chan struct{})
+	resumeScan := make(chan struct{})
+	firstScan := true
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if firstScan {
+			firstScan = false
+			close(scanStarted)
+			<-resumeScan
+			res["etcd-group-0"] = 0
+			return res, nil
+		}
+		res["etcd-group-0"] = 1
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	<-scanStarted
+	_, err := suite.manager.PickGroup(suite.ctx)
+	re.NoError(err)
+	close(resumeScan)
+
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, statusMap["etcd-group-0"].AssignmentCount)
 }
 
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {

@@ -534,7 +534,23 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	s.metaServiceGroupManager, err = keyspace.NewMetaServiceGroupManager(s.ctx, s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
+	if err != nil {
+		return err
+	}
+	s.AddServiceReadyCallback(func(ctx context.Context) error {
+		if s.metaServiceGroupManager == nil {
+			return nil
+		}
+		// Load persisted administrative status synchronously, then rebuild derived
+		// assignment counts in the background so leader readiness is not blocked by a
+		// full keyspace scan.
+		if err := s.metaServiceGroupManager.RefreshPersistedStatus(); err != nil {
+			return err
+		}
+		s.metaServiceGroupManager.StartAssignmentCountRebuild(ctx)
+		return nil
+	})
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,

@@ -50,11 +50,14 @@ type MetaServiceGroupStatus struct {
 	ID string `json:"id"`
 	// Addresses is a comma-separated list of addresses for the meta-service group.
 	Addresses string `json:"addresses"`
-	// Status is the persisted status (assignment count and enabled state).
+	// Status contains the persisted enabled state and the derived assignment count.
 	Status *endpoint.MetaServiceGroupStatus `json:"status,omitempty"`
 	// AssignedKeyspaces is kept for backward compatibility with existing
 	// clients. It mirrors Status.AssignmentCount; prefer Status going forward.
 	AssignedKeyspaces int `json:"assigned_keyspaces"`
+	// AssignmentCountReady indicates whether assignment count has completed an
+	// authoritative keyspace metadata rebuild in this leader term.
+	AssignmentCountReady bool `json:"assignment_count_ready"`
 }
 
 // PatchMetaServiceGroups applies a JSON Merge Patch to the meta-service groups.
@@ -185,7 +188,7 @@ func GetMetaServiceGroups(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, status)
 }
 
-// PatchMetaServiceGroupStatus patches the status of a specific meta-service group.
+// PatchMetaServiceGroupStatus patches the persisted enabled status of a specific meta-service group.
 //
 // @Tags     meta-service-groups
 // @Summary  Patch meta-service groups status.
@@ -216,7 +219,7 @@ func PatchMetaServiceGroupStatus(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusNotFound, err.Error())
 			return
 		}
-		if errors.Is(err, keyspace.ErrInvalidAssignmentCount) {
+		if errors.Is(err, keyspace.ErrInvalidAssignmentCount) || errors.Is(err, keyspace.ErrAssignmentCountPatchUnsupported) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -243,6 +246,7 @@ func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGr
 	if err != nil {
 		return nil, err
 	}
+	assignmentCountReady := manager.IsAssignmentCountReady()
 
 	status := make([]MetaServiceGroupStatus, 0, len(currentGroups))
 	for id, addresses := range currentGroups {
@@ -255,10 +259,11 @@ func buildMetaServiceGroupStatus(c *gin.Context, manager *keyspace.MetaServiceGr
 			s = &endpoint.MetaServiceGroupStatus{}
 		}
 		status = append(status, MetaServiceGroupStatus{
-			ID:                id,
-			Addresses:         addresses,
-			Status:            s,
-			AssignedKeyspaces: s.AssignmentCount,
+			ID:                   id,
+			Addresses:            addresses,
+			Status:               s,
+			AssignedKeyspaces:    s.AssignmentCount,
+			AssignmentCountReady: assignmentCountReady,
 		})
 	}
 	// sort for deterministic output

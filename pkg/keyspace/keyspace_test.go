@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -41,6 +42,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
+
+var errInjectedTxnFailure = errors.New("injected txn failure")
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -1095,7 +1098,8 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 	kgm := NewKeyspaceGroupManager(ctx, store, nil)
 
 	// No groups available: assign=true (stale pre-check) must not fail creation.
-	emptyMgm := NewMetaServiceGroupManager(store, map[string]string{})
+	emptyMgm, err := NewMetaServiceGroupManager(ctx, store, map[string]string{})
+	re.NoError(err)
 	managerNoGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, emptyMgm)
 	cfg := map[string]string{}
 	ks := &keyspacepb.KeyspaceMeta{Id: 100, Name: "ks-stale-precheck", Config: cfg}
@@ -1107,7 +1111,8 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 
 	// A present, enabled group is still assigned. Groups are disabled by
 	// default, so it must be enabled before it is eligible for assignment.
-	mgm := NewMetaServiceGroupManager(store, map[string]string{"g1": "addr1"})
+	mgm, err := NewMetaServiceGroupManager(ctx, store, map[string]string{"g1": "addr1"})
+	re.NoError(err)
 	enabled := true
 	re.NoError(mgm.PatchStatus(ctx, "g1", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
 	managerWithGroup := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, mgm)
@@ -1118,12 +1123,54 @@ func TestAssignGroupAndSaveKeyspace(t *testing.T) {
 
 	// A group that exists but is disabled must not fail creation: the keyspace is
 	// created without a meta-service group assignment instead.
-	disabledMgm := NewMetaServiceGroupManager(store, map[string]string{"g2": "addr2"})
+	disabledMgm, err := NewMetaServiceGroupManager(ctx, store, map[string]string{"g2": "addr2"})
+	re.NoError(err)
 	managerDisabled := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, kgm, disabledMgm)
 	cfg3 := map[string]string{}
 	ks3 := &keyspacepb.KeyspaceMeta{Id: 102, Name: "ks-disabled-group", Config: cfg3}
 	re.NoError(managerDisabled.assignGroupAndSaveKeyspace(true, &cfg3, ks3))
 	re.NotContains(ks3.GetConfig(), MetaServiceGroupIDKey)
+}
+
+func TestRunTxnWithMetaGroupLockRollsBackBeforeUnlock(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	mgm, err := NewMetaServiceGroupManager(ctx, store, map[string]string{})
+	re.NoError(err)
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, mgm)
+
+	lockAttempted := make(chan struct{})
+	lockAcquired := make(chan struct{})
+	err = manager.runTxnWithMetaGroupLock(func(kv.Txn) error {
+		go func() {
+			close(lockAttempted)
+			manager.mgm.Lock()
+			defer manager.mgm.Unlock()
+			close(lockAcquired)
+		}()
+		<-lockAttempted
+		return errInjectedTxnFailure
+	}, func() {
+		re.Never(func() bool {
+			select {
+			case <-lockAcquired:
+				return true
+			default:
+				return false
+			}
+		}, 50*time.Millisecond, time.Millisecond)
+	})
+	re.ErrorIs(err, errInjectedTxnFailure)
+	re.Eventually(func() bool {
+		select {
+		case <-lockAcquired:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
 }
 
 func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup() {
@@ -1135,7 +1182,9 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.True(ok)
 	// Start without any group so creation never auto-assigns: meta-service groups
 	// are disabled by default, and this keeps the test independent of that.
-	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	mgm, err := NewMetaServiceGroupManager(suite.ctx, metaServiceGroupStore, map[string]string{})
+	re.NoError(err)
+	manager.mgm = mgm
 	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
 
 	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{

@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -158,7 +159,17 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupIDKey)
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupAddressesKey)
 	// Meta-service groups are disabled by default and must be enabled before assignment.
-	for _, group := range mustLoadMetaServiceGroups(re, suite.server) {
+	var groups []*handlers.MetaServiceGroupStatus
+	re.Eventually(func() bool {
+		groups = mustLoadMetaServiceGroups(re, suite.server)
+		for _, group := range groups {
+			if !group.AssignmentCountReady {
+				return false
+			}
+		}
+		return true
+	}, time.Second, time.Millisecond)
+	for _, group := range groups {
 		re.False(group.Status.Enabled)
 		mustEnableMetaServiceGroup(re, suite.server, group.ID)
 	}
@@ -166,7 +177,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20)
 	collectedGroups := collectStatus(re, keyspaces)
 	// Make sure result collected from keyspace config and load meta-service group api matches.
-	groups := mustLoadMetaServiceGroups(re, suite.server)
+	groups = mustLoadMetaServiceGroups(re, suite.server)
 	re.Len(groups, len(collectedGroups))
 	for _, group := range groups {
 		collectedStatus := collectedGroups[group.ID]
