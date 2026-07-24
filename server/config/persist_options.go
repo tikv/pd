@@ -1041,6 +1041,11 @@ func (o *PersistOptions) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
 }
 
+// GetUnifiedReadPoolMaxThreadCount returns TiKV unified read pool max thread count.
+func (o *PersistOptions) GetUnifiedReadPoolMaxThreadCount() uint64 {
+	return o.GetStoreConfig().GetUnifiedReadPoolMaxThreadCount()
+}
+
 // SetRegionBucketEnabled sets if the region bucket is enabled.
 // only used for test.
 func (o *PersistOptions) SetRegionBucketEnabled(enabled bool) {
