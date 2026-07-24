@@ -134,13 +134,12 @@ type pdTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, keyspaceIdentity *apipb.KeyspaceIdentity, count int64) error {
+func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, _ *apipb.KeyspaceIdentity, count int64) error {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
 		},
-		Count:            uint32(count),
-		KeyspaceIdentity: cloneKeyspaceIdentity(keyspaceIdentity),
+		Count: uint32(count),
 	}
 	return s.stream.Send(req)
 }
