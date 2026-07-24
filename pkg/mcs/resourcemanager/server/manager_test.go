@@ -386,6 +386,11 @@ func TestInitManager(t *testing.T) {
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
 		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{},
+			},
+		},
 	}
 	err = m.AddResourceGroup(group)
 	re.NoError(err)
@@ -721,6 +726,11 @@ func TestResourceGroupPersistence(t *testing.T) {
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
 		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{},
+			},
+		},
 	}
 	err := m.AddResourceGroup(group)
 	re.NoError(err)
