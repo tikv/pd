@@ -693,7 +693,10 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 				m.RUnlock()
 				if stale {
 					if attempt >= maxLoadAttempts {
-						return nil
+						// Exhausted retries without confirming absence; report
+						// a retryable loading error rather than a bogus
+						// success the caller would mistake for a load.
+						return errs.ErrResourceGroupsLoading
 					}
 					continue
 				}
@@ -715,7 +718,10 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			// read was in flight; retry against the new term's state.
 			m.Unlock()
 			if attempt >= maxLoadAttempts {
-				return nil
+				// Exhausted retries without publishing the group; report a
+				// retryable loading error rather than a bogus success that
+				// would surface an existing group as nonexistent.
+				return errs.ErrResourceGroupsLoading
 			}
 			continue
 		}
@@ -724,7 +730,10 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			krgm.Unlock()
 			m.Unlock()
 			if attempt >= maxLoadAttempts {
-				return nil
+				// Exhausted retries without publishing the group; report a
+				// retryable loading error rather than a bogus success that
+				// would surface an existing group as nonexistent.
+				return errs.ErrResourceGroupsLoading
 			}
 			continue
 		}
@@ -765,6 +774,42 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 		return
 	}
 	if m.syncLoadedGroups != nil {
+		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
+	}
+}
+
+// publishResourceGroupMutation applies a metadata mutation's cache effect and
+// its sync-loaded marker atomically with respect to the async bulk merge,
+// against whichever keyspace manager is current at publish time. The merge
+// holds the manager lock across its whole merge step, so the two can only be
+// fully ordered: publish first and the merge skips the marked group; merge
+// first and the publish overrides its stale snapshot. Because the current
+// manager is re-resolved inside this critical section, a mutation whose
+// storage phase straddled a leadership change still publishes into the live
+// term (and marks the same term's map) instead of a detached manager, so no
+// retry is needed.
+//
+// fn runs with the keyspace manager write lock held and must not do I/O; it
+// returns whether to record the sync-loaded marker and, when a group was
+// (re)installed, the group to sync burstability for.
+func (m *Manager) publishResourceGroupMutation(
+	keyspaceID uint32, name string,
+	fn func(krgm *keyspaceResourceGroupManager) (mark bool, synced *ResourceGroup),
+) {
+	m.Lock()
+	defer m.Unlock()
+	krgm, ok := m.krgms[keyspaceID]
+	if !ok {
+		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+		m.krgms[keyspaceID] = krgm
+	}
+	krgm.Lock()
+	mark, synced := fn(krgm)
+	krgm.Unlock()
+	if synced != nil {
+		krgm.syncBurstabilityWithServiceLimit(synced)
+	}
+	if mark && m.syncLoadedGroups != nil {
 		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
 	}
 }
@@ -941,10 +986,18 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		log.Warn("failed to load resource group before add", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
 		return err
 	}
-	if err := krgm.addResourceGroup(grouppb); err != nil {
+	// Storage phase: validate and persist. Publishing the cache effect is done
+	// separately below, against whichever keyspace manager is current then.
+	group, err := krgm.persistResourceGroup(grouppb)
+	if err != nil {
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, krgm, grouppb.Name)
+	failpoint.InjectCall("addResourceGroupBeforePublish")
+	m.publishResourceGroupMutation(keyspaceID, grouppb.Name, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.groups[group.Name] = group
+		delete(cur.reservedGroups, group.Name)
+		return true, group
+	})
 	return nil
 }
 
@@ -962,16 +1015,38 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	if err := krgm.modifyResourceGroup(grouppb); err != nil {
+	patched, err := krgm.modifyResourceGroup(grouppb)
+	if err != nil {
 		return err
 	}
-	// Modifying only patches settings, it never establishes the group's
-	// state. If the state still hasn't been confirmed (isReserved), marking
-	// it sync-loaded here would make the async bulk merge skip it forever,
-	// so the persisted running state would never get applied.
-	if !krgm.isReserved(grouppb.Name) {
-		m.markResourceGroupSyncLoaded(keyspaceID, krgm, grouppb.Name)
-	}
+	failpoint.InjectCall("modifyResourceGroupBeforePublish")
+	m.publishResourceGroupMutation(keyspaceID, grouppb.Name, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		existing, ok := cur.groups[grouppb.Name]
+		if !ok {
+			// The patch ran against a manager that is no longer live (the
+			// manager was reinitialized while we were persisting); republish
+			// the patched group into the current term so the persisted
+			// settings aren't lost from the serving cache.
+			cur.groups[grouppb.Name] = patched
+			delete(cur.reservedGroups, grouppb.Name)
+			return true, patched
+		}
+		if existing != patched {
+			// A different object (e.g. installed by the new term's bulk
+			// merge from a pre-modification snapshot); re-apply the settings
+			// patch so the persisted settings win.
+			if err := existing.PatchSettings(grouppb); err != nil {
+				log.Warn("failed to re-apply resource group settings on republish",
+					zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+			}
+		}
+		// Modifying only patches settings, it never establishes the group's
+		// state. If the state still hasn't been confirmed (reserved), marking
+		// it sync-loaded would make the async bulk merge skip it forever, so
+		// the persisted running state would never get applied.
+		_, reserved := cur.reservedGroups[grouppb.Name]
+		return !reserved, nil
+	})
 	return nil
 }
 
@@ -989,10 +1064,19 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	if err := krgm.deleteResourceGroup(name); err != nil {
+	failpoint.InjectCall("deleteResourceGroupBeforeStorage")
+	// Storage phase: validate and remove from storage. Publishing the cache
+	// effect is done separately below, against whichever keyspace manager is
+	// current then, so a delete straddling a leadership change still removes
+	// the group from the live cache and marks the live term's map (making the
+	// new bulk merge skip its pre-deletion snapshot of the group).
+	if err := krgm.deleteResourceGroupFromStorage(name); err != nil {
 		return err
 	}
-	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
+	m.publishResourceGroupMutation(keyspaceID, name, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.removeResourceGroupLocked(name)
+		return true, nil
+	})
 	return nil
 }
 

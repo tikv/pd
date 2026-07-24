@@ -45,12 +45,12 @@ type blockingResourceGroupStorage struct {
 	// call fail once, then resets itself.
 	failNextState atomic.Bool
 
-	// pausePointState, when true, makes the very next LoadResourceGroupState
-	// call signal pointReached and then block on pointRelease, so a test can
-	// hold a lazy load right after its storage read but before it inserts.
-	pausePointState atomic.Bool
-	pointReached    chan struct{}
-	pointRelease    chan struct{}
+	// statePause, when armed via armStatePause, makes the next
+	// LoadResourceGroupState call for the armed group name signal reached and
+	// then block on release, so a test can hold a lazy load right after its
+	// storage read but before it inserts. Re-armable, and filtered by name so
+	// unrelated groups' loads pass through undisturbed.
+	statePause atomic.Pointer[statePause]
 
 	// pauseNextStates, when true, makes the very next bulk
 	// LoadResourceGroupStates call signal statesReached and then block on
@@ -62,15 +62,37 @@ type blockingResourceGroupStorage struct {
 	statesReleaseOnce sync.Once
 }
 
+type statePause struct {
+	name    string
+	reached chan struct{}
+	release chan struct{}
+}
+
 func newBlockingResourceGroupStorage() *blockingResourceGroupStorage {
 	return &blockingResourceGroupStorage{
 		Storage:       storage.NewStorageWithMemoryBackend(),
 		entered:       make(chan struct{}),
 		release:       make(chan struct{}),
-		pointReached:  make(chan struct{}),
-		pointRelease:  make(chan struct{}),
 		statesReached: make(chan struct{}),
 		statesRelease: make(chan struct{}),
+	}
+}
+
+// armStatePause arms a one-shot pause on the next LoadResourceGroupState call
+// for the given group name and returns the pause handle. The test must wait
+// on reached and eventually close release.
+func (s *blockingResourceGroupStorage) armStatePause(name string) *statePause {
+	p := &statePause{name: name, reached: make(chan struct{}), release: make(chan struct{})}
+	s.statePause.Store(p)
+	return p
+}
+
+func waitStatePauseReached(t *testing.T, p *statePause) {
+	t.Helper()
+	select {
+	case <-p.reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the lazy load to reach its state read")
 	}
 }
 
@@ -86,9 +108,9 @@ func (s *blockingResourceGroupStorage) LoadResourceGroupState(keyspaceID uint32,
 	if s.failNextState.CompareAndSwap(true, false) {
 		return "", errors.New("injected resource group state load failure")
 	}
-	if s.pausePointState.CompareAndSwap(true, false) {
-		close(s.pointReached)
-		<-s.pointRelease
+	if p := s.statePause.Load(); p != nil && p.name == name && s.statePause.CompareAndSwap(p, nil) {
+		close(p.reached)
+		<-p.release
 	}
 	return s.Storage.LoadResourceGroupState(keyspaceID, name)
 }
@@ -311,7 +333,7 @@ func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
 
 	// Start a lazy Get that will pause inside its state read, i.e. after it has
 	// read the group from storage but before it inserts into the cache.
-	store.pausePointState.Store(true)
+	pause := store.armStatePause("race-group")
 	var (
 		gotGroup *ResourceGroup
 		gotErr   error
@@ -322,11 +344,7 @@ func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
 		gotGroup, gotErr = m.GetResourceGroup(1, "race-group", false)
 	}()
 
-	select {
-	case <-store.pointReached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the lazy load to reach its state read")
-	}
+	waitStatePauseReached(t, pause)
 
 	// While the lazy load is paused, delete the group. Delete does its own
 	// (unpaused) load-then-delete, removing it from storage and cache and
@@ -334,7 +352,7 @@ func TestAsyncLoadResourceGroupsDeleteRaceDoesNotResurrect(t *testing.T) {
 	re.NoError(m.DeleteResourceGroup(1, "race-group"))
 
 	// Release the paused lazy load; its now-stale insert must be rejected.
-	close(store.pointRelease)
+	close(pause.release)
 	<-getDone
 	// The generation mismatch makes the lazy load retry its storage read,
 	// which now correctly observes the group as deleted.
@@ -553,7 +571,7 @@ func TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad(t *testing.T)
 
 	// Start a lazy Get of group-a and pause it inside its state read, i.e.
 	// after it has read the group from storage but before it inserts.
-	store.pausePointState.Store(true)
+	pause := store.armStatePause("group-a")
 	var (
 		gotGroup *ResourceGroup
 		gotErr   error
@@ -563,11 +581,7 @@ func TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad(t *testing.T)
 		defer close(getDone)
 		gotGroup, gotErr = m.GetResourceGroup(1, "group-a", false)
 	}()
-	select {
-	case <-store.pointReached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the lazy load to reach its state read")
-	}
+	waitStatePauseReached(t, pause)
 
 	// Delete the unrelated group-b while group-a's lazy load is paused; this
 	// bumps the keyspace's delete generation.
@@ -575,7 +589,7 @@ func TestAsyncLoadResourceGroupsUnrelatedDeleteDoesNotFailLazyLoad(t *testing.T)
 
 	// Release group-a's lazy load: the generation mismatch must make it retry
 	// and succeed, not report group-a as missing.
-	close(store.pointRelease)
+	close(pause.release)
 	<-getDone
 	re.NoError(gotErr)
 	re.NotNil(gotGroup, "an unrelated delete must not fail the lazy load")
@@ -624,7 +638,7 @@ func TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm(t *testing.T) {
 
 	// The term-1 lazy load pauses inside its state read, holding the old
 	// term's keyspace manager.
-	store.pausePointState.Store(true)
+	pause := store.armStatePause("cross-term")
 	var (
 		gotGroup *ResourceGroup
 		gotErr   error
@@ -634,11 +648,7 @@ func TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm(t *testing.T) {
 		defer close(getDone)
 		gotGroup, gotErr = m.GetResourceGroup(1, "cross-term", false)
 	}()
-	select {
-	case <-store.pointReached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the lazy load to reach its state read")
-	}
+	waitStatePauseReached(t, pause)
 
 	// Leadership changes: reinitialize the manager for term 2 while the
 	// term-1 lazy load is still blocked. Term 2's bulk loader parks on the
@@ -648,7 +658,7 @@ func TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm(t *testing.T) {
 
 	// Release the stale lazy load: it must detect the term change, retry, and
 	// publish into the new term's manager, so the request still succeeds.
-	close(store.pointRelease)
+	close(pause.release)
 	<-getDone
 	re.NoError(gotErr)
 	re.NotNil(gotGroup, "the cross-term lazy load must retry and succeed against the new term")
@@ -659,6 +669,153 @@ func TestAsyncLoadResourceGroupsStaleLazyLoadRetriesNewTerm(t *testing.T) {
 	store.unblock()
 	testutil.Eventually(re, func() bool {
 		g, err := m.GetResourceGroup(1, "cross-term", false)
+		return err == nil && g != nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+}
+
+// TestAsyncLoadResourceGroupsCrossTermDeletePublishesToNewTerm reproduces the
+// cross-term delete race: a Delete resolves its keyspace manager, then stalls
+// before its storage phase while the leadership changes and the new term's
+// bulk loader snapshots storage (still containing the group). When the Delete
+// resumes, it removes the group from storage but its cache effect and
+// sync-loaded marker must land in the *current* term — otherwise the new
+// merge would reinstall its pre-deletion snapshot and the API would report
+// success while the group stays in the live cache.
+func TestAsyncLoadResourceGroupsCrossTermDeletePublishesToNewTerm(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	re.NoError(store.SaveResourceGroupSetting(1, "ct-del", newAsyncTestGroup("ct-del")))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+	defer store.unblockStates()
+
+	// Let term 1 load fully so the Delete starts against a settled term.
+	store.waitEntered(t)
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		groups, err := m.GetResourceGroupList(1, false)
+		return err == nil && len(groups) == 2
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	// Park the Delete between resolving its keyspace manager and its storage
+	// phase.
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/deleteResourceGroupBeforeStorage", func() {
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/deleteResourceGroupBeforeStorage"))
+	}()
+	var delErr error
+	delDone := make(chan struct{})
+	go func() {
+		defer close(delDone)
+		delErr = m.DeleteResourceGroup(1, "ct-del")
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the delete to reach its storage phase")
+	}
+
+	// Leadership changes: term 2's loader snapshots storage (the group is
+	// still there) and parks before merging.
+	cancelTerm1()
+	store.pauseNextStates.Store(true)
+	re.NoError(m.Init(context.Background()))
+	select {
+	case <-store.statesReached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the term-2 loader to snapshot storage")
+	}
+
+	// Resume the Delete: storage removal proceeds, and the cache effect and
+	// marker must be published into term 2, not the detached term-1 manager.
+	close(release)
+	<-delDone
+	re.NoError(delErr)
+
+	// Let term 2 merge its pre-deletion snapshot; the marker must make it
+	// skip the deleted group.
+	store.unblockStates()
+	testutil.Eventually(re, func() bool {
+		groups, err := m.GetResourceGroupList(1, false)
+		if err != nil {
+			return false
+		}
+		for _, g := range groups {
+			if g.Name == "ct-del" {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithTickInterval(20*time.Millisecond))
+	g, err := m.GetResourceGroup(1, "ct-del", false)
+	re.NoError(err)
+	re.Nil(g, "the deleted group must not be resurrected by the new term's merge")
+}
+
+// TestAsyncLoadResourceGroupsExhaustedRetriesReturnLoadingError guards the
+// exhausted-retry path of the lazy load: when every attempt loses the
+// delete-generation race, the load must fail with a retryable loading error
+// instead of reporting success without publishing the group, which callers
+// would misread as the group not existing.
+func TestAsyncLoadResourceGroupsExhaustedRetriesReturnLoadingError(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	re.NoError(store.SaveResourceGroupSetting(1, "keep-a", newAsyncTestGroup("keep-a")))
+	for _, name := range []string{"del-b1", "del-b2", "del-b3"} {
+		re.NoError(store.SaveResourceGroupSetting(1, name, newAsyncTestGroup(name)))
+	}
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	// Keep the bulk loader parked so lazy loading stays active.
+	store.waitEntered(t)
+
+	// Park keep-a's lazy load inside each of its three read attempts, and
+	// delete an unrelated group while it's parked so every attempt observes a
+	// delete-generation change.
+	pause := store.armStatePause("keep-a")
+	var (
+		gotGroup *ResourceGroup
+		gotErr   error
+	)
+	getDone := make(chan struct{})
+	go func() {
+		defer close(getDone)
+		gotGroup, gotErr = m.GetResourceGroup(1, "keep-a", false)
+	}()
+	for _, victim := range []string{"del-b1", "del-b2", "del-b3"} {
+		waitStatePauseReached(t, pause)
+		re.NoError(m.DeleteResourceGroup(1, victim))
+		next := store.armStatePause("keep-a")
+		close(pause.release)
+		pause = next
+	}
+	<-getDone
+	// The last arm is left unconsumed; drop it so later loads pass through.
+	store.statePause.Store(nil)
+
+	re.ErrorIs(gotErr, errs.ErrResourceGroupsLoading,
+		"exhausted retries must surface a retryable loading error, not a bogus success")
+	re.Nil(gotGroup)
+
+	// The group still exists; once loading completes it must be served again.
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		g, err := m.GetResourceGroup(1, "keep-a", false)
 		return err == nil && g != nil
 	}, testutil.WithTickInterval(20*time.Millisecond))
 }

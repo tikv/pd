@@ -803,7 +803,8 @@ func TestKeyspaceResourceGroupManagerWriteRoleGates(t *testing.T) {
 			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 200}},
 		},
 	}
-	re.ErrorIs(tokenOnlyKRGM.modifyResourceGroup(modifiedGroup), errMetadataWriteDisabled)
+	_, err := tokenOnlyKRGM.modifyResourceGroup(modifiedGroup)
+	re.ErrorIs(err, errMetadataWriteDisabled)
 	re.Equal(float64(100), tokenOnlyKRGM.getResourceGroup(group.GetName(), false).getFillRate())
 	re.ErrorIs(tokenOnlyKRGM.deleteResourceGroup(group.GetName()), errMetadataWriteDisabled)
 	re.NotNil(tokenOnlyKRGM.getResourceGroup(group.GetName(), false))

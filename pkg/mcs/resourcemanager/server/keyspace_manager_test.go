@@ -187,7 +187,7 @@ func TestModifyResourceGroup(t *testing.T) {
 			},
 		},
 	}
-	err = krgm.modifyResourceGroup(modifiedGroup)
+	_, err = krgm.modifyResourceGroup(modifiedGroup)
 	re.NoError(err)
 
 	// Verify the group was modified.
@@ -206,7 +206,7 @@ func TestModifyResourceGroup(t *testing.T) {
 		Name: "non_existent",
 		Mode: rmpb.GroupMode_RUMode,
 	}
-	err = krgm.modifyResourceGroup(nonExistentGroup)
+	_, err = krgm.modifyResourceGroup(nonExistentGroup)
 	re.Error(err)
 }
 

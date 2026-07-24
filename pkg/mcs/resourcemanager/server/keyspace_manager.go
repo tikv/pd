@@ -186,13 +186,19 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 
 func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromCache(name string) {
 	krgm.Lock()
+	krgm.removeResourceGroupLocked(name)
+	krgm.Unlock()
+}
+
+// removeResourceGroupLocked removes every cache trace of the group. The
+// caller must hold the write lock.
+func (krgm *keyspaceResourceGroupManager) removeResourceGroupLocked(name string) {
 	delete(krgm.groups, name)
 	delete(krgm.groupRUTrackers, name)
 	delete(krgm.reservedGroups, name)
 	// Signal any in-flight lazy load that a delete happened, so it won't
 	// reinsert a copy read from storage before this deletion.
 	krgm.deleteGen++
-	krgm.Unlock()
 }
 
 // loadDeleteGen returns the current delete generation counter.
@@ -280,20 +286,32 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
 }
 
-func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+// persistResourceGroup validates grouppb, builds the in-memory group, and
+// persists its settings and states to storage. It's the storage-only phase of
+// an Add: the caller is responsible for publishing the returned group into
+// whichever keyspace manager is current at publish time.
+func (krgm *keyspaceResourceGroupManager) persistResourceGroup(grouppb *rmpb.ResourceGroup) (*ResourceGroup, error) {
 	if err := validateResourceGroupProto(grouppb); err != nil {
-		return err
+		return nil, err
 	}
 	group := FromProtoResourceGroup(grouppb)
 	if krgm.writeRole.AllowsMetadataWrite() {
 		if err := group.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if krgm.writeRole.AllowsStateWrite() {
 		if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
-			return err
+			return nil, err
 		}
+	}
+	return group, nil
+}
+
+func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.ResourceGroup) error {
+	group, err := krgm.persistResourceGroup(grouppb)
+	if err != nil {
+		return err
 	}
 	krgm.Lock()
 	krgm.groups[group.Name] = group
@@ -303,30 +321,39 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 	return nil
 }
 
-func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) error {
+// modifyResourceGroup patches the cached group's settings and persists them,
+// returning the patched group so the caller can republish it if the cache it
+// came from is no longer the live one.
+func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.ResourceGroup) (*ResourceGroup, error) {
 	if group == nil || group.Name == "" {
-		return errs.ErrInvalidGroup.FastGenByArgs("the group name")
+		return nil, errs.ErrInvalidGroup.FastGenByArgs("the group name")
 	}
 	krgm.RLock()
 	curGroup, ok := krgm.groups[group.Name]
 	krgm.RUnlock()
 	if !ok {
-		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 	if !krgm.writeRole.AllowsMetadataWrite() {
-		return errMetadataWriteDisabled
+		return nil, errMetadataWriteDisabled
 	}
-	err := curGroup.PatchSettings(group)
-	if err != nil {
-		return err
+	if err := curGroup.PatchSettings(group); err != nil {
+		return nil, err
 	}
 	// Deliberately not clearing reservedGroups here: modifying only patches
 	// settings, it never establishes the group's state, so it must not make
 	// a state-unconfirmed entry look fully confirmed.
-	return curGroup.persistSettings(krgm.keyspaceID, krgm.storage)
+	if err := curGroup.persistSettings(krgm.keyspaceID, krgm.storage); err != nil {
+		return nil, err
+	}
+	return curGroup, nil
 }
 
-func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
+// deleteResourceGroupFromStorage validates the request and removes the
+// group's settings and states from storage. It's the storage-only phase of a
+// Delete: the caller is responsible for removing the group from whichever
+// keyspace manager cache is current at publish time.
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroupFromStorage(name string) error {
 	if name == DefaultResourceGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
@@ -360,6 +387,13 @@ func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error
 				zap.String("name", name),
 				zap.Error(err))
 		}
+	}
+	return nil
+}
+
+func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
+	if err := krgm.deleteResourceGroupFromStorage(name); err != nil {
+		return err
 	}
 	krgm.deleteResourceGroupFromCache(name)
 	return nil
