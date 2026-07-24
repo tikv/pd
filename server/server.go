@@ -2068,6 +2068,7 @@ func (s *Server) campaignLeader() {
 		zap.String("leader-name", s.Name()),
 		zap.Duration("total-cost", totalDuration),
 		zap.Duration("cost", enableLeaderDuration))
+	s.scheduleMicroserviceMetadataCleanup(ctx)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
