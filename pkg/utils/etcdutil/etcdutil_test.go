@@ -1050,26 +1050,6 @@ func (suite *loopWatcherTestSuite) TestWatcherReconcilesDeletedKeysAfterCompacti
 	checkCache(map[string]string{keepKey: "keep"})
 }
 
-func (suite *loopWatcherTestSuite) TestWatcherRejectsLoadConfigurationAfterStart() {
-	re := suite.Require()
-	watcher := NewLoopWatcher(
-		suite.ctx,
-		&suite.wg,
-		suite.client,
-		"test",
-		"TestWatcherRejectsLoadConfigurationAfterStart/",
-		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func(*mvccpb.KeyValue) error { return nil },
-		func([]*clientv3.Event) error { return nil },
-		true,
-	)
-	watcher.StartWatchLoop()
-	re.Panics(func() { watcher.SetLoadHooks(func() {}, func(error) error { return nil }) })
-	re.Panics(watcher.SetReconcileDeletedKeys)
-	re.NoError(watcher.WaitLoad())
-}
-
 func (suite *loopWatcherTestSuite) TestWatcherRetriesReconciliationAfterPostCallbackFailure() {
 	re := suite.Require()
 	const prefix = "TestWatcherRetriesReconciliationAfterPostCallbackFailure/"

@@ -356,10 +356,6 @@ type LoopWatcher struct {
 	wg     *sync.WaitGroup
 	name   string
 	client *clientv3.Client
-	// startMu protects the transition to started and configuration that must be
-	// installed before the watch goroutine begins.
-	startMu sync.Mutex
-	started bool
 
 	// key is the etcd key to watch.
 	key string
@@ -444,13 +440,6 @@ func NewLoopWatcher(
 
 // StartWatchLoop starts a loop to watch the key.
 func (lw *LoopWatcher) StartWatchLoop() {
-	lw.startMu.Lock()
-	if lw.started {
-		lw.startMu.Unlock()
-		panic("StartWatchLoop must only be called once")
-	}
-	lw.started = true
-	lw.startMu.Unlock()
 	lw.wg.Add(1)
 	go func() {
 		defer logutil.LogPanic()
@@ -944,11 +933,6 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 // the load result after postEventsFn has run. It must be called before
 // StartWatchLoop.
 func (lw *LoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(error) error) {
-	lw.startMu.Lock()
-	defer lw.startMu.Unlock()
-	if lw.started {
-		panic("SetLoadHooks must be called before StartWatchLoop")
-	}
 	lw.preLoadFn = preLoadFn
 	lw.postLoadFn = postLoadFn
 }
@@ -957,11 +941,6 @@ func (lw *LoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(error) err
 // It must be called before StartWatchLoop. Since this keeps one entry per
 // watched key, callers should only enable it for prefixes with bounded key cardinality.
 func (lw *LoopWatcher) SetReconcileDeletedKeys() {
-	lw.startMu.Lock()
-	defer lw.startMu.Unlock()
-	if lw.started {
-		panic("SetReconcileDeletedKeys must be called before StartWatchLoop")
-	}
 	lw.reconcileDeletedKeys = true
 	lw.loadedKeys = make(map[string]struct{})
 }

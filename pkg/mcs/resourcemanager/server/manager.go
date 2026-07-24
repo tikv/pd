@@ -114,7 +114,7 @@ type Manager struct {
 	// metadata snapshot. The map also acts as a tombstone for API deletes until
 	// that snapshot has finished.
 	metadataSnapshotMutationMu syncutil.Mutex
-	metadataSnapshotMutations  map[string]uint64
+	metadataSnapshotMutations  map[string]struct{}
 	storage                    interface {
 		// Used to store the resource group settings and states.
 		endpoint.ResourceGroupStorage
@@ -347,9 +347,9 @@ func (m *Manager) withMetadataAPIWrite(key string, fn func(uint64) error) error 
 		return err
 	}
 	if m.metadataSnapshotMutations == nil {
-		m.metadataSnapshotMutations = make(map[string]uint64)
+		m.metadataSnapshotMutations = make(map[string]struct{})
 	}
-	m.metadataSnapshotMutations[key] = generation
+	m.metadataSnapshotMutations[key] = struct{}{}
 	return nil
 }
 
@@ -379,11 +379,7 @@ func (m *Manager) finishMetadataSnapshot(generation uint64, loadErr error) error
 	}
 	m.Unlock()
 	m.metadataSnapshotMutationMu.Lock()
-	for key, mutationGeneration := range m.metadataSnapshotMutations {
-		if mutationGeneration == generation {
-			delete(m.metadataSnapshotMutations, key)
-		}
-	}
+	clear(m.metadataSnapshotMutations)
 	m.metadataSnapshotMutationMu.Unlock()
 	return nil
 }

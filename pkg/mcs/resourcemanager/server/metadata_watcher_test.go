@@ -515,7 +515,7 @@ func TestMetadataSnapshotReconciliation(t *testing.T) {
 		re.InDelta(11, got.RUConsumption.RRU, 0.001)
 	})
 
-	t.Run("does_not_overwrite_controller_config_api_write", func(t *testing.T) {
+	t.Run("does_not_overwrite_controller_config_api_writes", func(t *testing.T) {
 		re := require.New(t)
 		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
 		m.controllerConfig.RequestUnit.ReadBaseCost = 1
@@ -527,22 +527,15 @@ func TestMetadataSnapshotReconciliation(t *testing.T) {
 		re.NoError(m.handleMetadataWatchPutWithGeneration(
 			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
 		re.NoError(m.finishMetadataSnapshot(generation, nil))
-
 		re.InDelta(2.0, m.GetControllerConfig().RequestUnit.ReadBaseCost, 0.00001)
-	})
 
-	t.Run("does_not_overwrite_ru_version_api_write", func(t *testing.T) {
-		re := require.New(t)
-		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
-		staleSnapshot, err := json.Marshal(m.controllerConfig)
+		staleSnapshot, err = json.Marshal(m.controllerConfig)
 		re.NoError(err)
-
-		generation := m.beginMetadataSnapshot()
+		generation = m.beginMetadataSnapshot()
 		re.NoError(m.SetKeyspaceRUVersion(10, 2))
 		re.NoError(m.handleMetadataWatchPutWithGeneration(
 			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
 		re.NoError(m.finishMetadataSnapshot(generation, nil))
-
 		re.Equal(RUVersion(2), m.GetRUVersionPolicy().Overrides[10])
 	})
 }

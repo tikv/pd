@@ -216,7 +216,7 @@ func (m *Manager) handleMetadataWatchPutWithGeneration(
 	if metadataSnapshotGeneration != 0 {
 		m.metadataSnapshotMutationMu.Lock()
 		defer m.metadataSnapshotMutationMu.Unlock()
-		if m.metadataSnapshotMutations[key] == metadataSnapshotGeneration {
+		if _, mutated := m.metadataSnapshotMutations[key]; mutated {
 			return nil
 		}
 	}
