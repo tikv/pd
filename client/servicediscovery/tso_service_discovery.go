@@ -666,12 +666,12 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
 		ctx, &tsopb.FindGroupByKeyspaceIDRequest{
 			Header: &tsopb.RequestHeader{
-				ClusterId:       c.clusterID,
-				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
-				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
+				ClusterId: c.clusterID,
 				Keyspace: &tsopb.RequestHeader_KeyspaceId{
 					KeyspaceId: keyspaceID,
 				},
+				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
+				CalleeId:        grpcutil.GetCalleeID(tsoSrvURL),
 			},
 			Keyspace: &tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{
 				KeyspaceId: keyspaceID,
