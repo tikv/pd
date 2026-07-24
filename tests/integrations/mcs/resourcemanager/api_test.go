@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -77,9 +78,16 @@ func sendRequest(
 ) ([]byte, int) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		re.NoError(err)
-		bodyReader = bytes.NewBuffer(data)
+		if group, ok := body.(*rmpb.ResourceGroup); ok {
+			bodyBuffer := bytes.NewBuffer(nil)
+			err := (&jsonpb.Marshaler{OrigName: true}).Marshal(bodyBuffer, group)
+			re.NoError(err)
+			bodyReader = bodyBuffer
+		} else {
+			data, err := json.Marshal(body)
+			re.NoError(err)
+			bodyReader = bytes.NewBuffer(data)
+		}
 	}
 	path, err := url.JoinPath(leaderAddr, apis.APIPathPrefix, path)
 	re.NoError(err)

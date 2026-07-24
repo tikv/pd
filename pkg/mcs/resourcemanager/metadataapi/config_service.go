@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang/protobuf/jsonpb"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
@@ -145,7 +146,7 @@ func (s *ConfigService) Register(configEndpoint *gin.RouterGroup) {
 // PostResourceGroup handles POST /config/group.
 func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := c.ShouldBindJSON(&group); err != nil {
+	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -159,7 +160,7 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 // PutResourceGroup handles PUT /config/group.
 func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := c.ShouldBindJSON(&group); err != nil {
+	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
