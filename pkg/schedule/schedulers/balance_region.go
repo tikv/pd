@@ -148,7 +148,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
 		retryLimit := s.getLimit(solver.Source)
-		solver.sourceScore = solver.sourceStoreScore(s.GetName())
+		solver.calcSourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
@@ -234,7 +234,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	// candidates are sorted by region score desc, so we pick the last store as target store.
 	for i := range candidates.Stores {
 		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
-		solver.targetScore = solver.targetStoreScore(s.GetName())
+		solver.calcTargetStoreScore(s.GetName())
 		regionID := solver.Region.GetID()
 		sourceID := solver.Source.GetID()
 		targetID := solver.Target.GetID()
@@ -242,6 +242,9 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 		if !solver.shouldBalance(s.GetName()) {
 			balanceRegionSkipCounter.Inc()
+			if solver.isPotentialReverse() {
+				solver.recordPotentialReverse(s.GetName())
+			}
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 			}
