@@ -68,6 +68,8 @@ func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.Tes
 	}
 
 	leader := cluster.GetLeaderServer()
+	// Set prepared to allow schedulers to run and generate diagnostic results
+	leader.GetRaftCluster().GetCoordinator().GetPrepareChecker().SetPrepared()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	diagnosticPrefix := fmt.Sprintf("%s/schedulers/diagnostic", urlPrefix)

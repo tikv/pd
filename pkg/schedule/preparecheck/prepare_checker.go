@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package preparecheck
 
 import (
 	"time"
@@ -25,28 +25,33 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-type prepareChecker struct {
+// collectTimeout is the timeout for collecting regions.
+const collectTimeout = 5 * time.Minute
+
+// Checker is used to check if the coordinator has finished cluster information preparation.
+type Checker struct {
 	syncutil.RWMutex
 	start              time.Time
 	totalRegionCountFn func() (int, error)
 	prepared           bool
 }
 
-func newPrepareChecker(totalRegionCountFn func() (int, error)) *prepareChecker {
-	return &prepareChecker{
+// NewChecker creates a new Checker.
+func NewChecker(totalRegionCountFn func() (int, error)) *Checker {
+	return &Checker{
 		start:              time.Now(),
 		totalRegionCountFn: totalRegionCountFn,
 	}
 }
 
-// Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *core.BasicCluster) bool {
+// Check is used to check if the coordinator has finished cluster information preparation.
+func (checker *Checker) Check(c *core.BasicCluster) bool {
 	checker.Lock()
 	defer checker.Unlock()
 	if checker.prepared {
 		return true
 	}
-	if time.Since(checker.start) > CollectTimeout {
+	if time.Since(checker.start) > collectTimeout {
 		checker.prepared = true
 		return true
 	}
@@ -78,7 +83,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 }
 
 // IsPrepared returns whether the coordinator is prepared.
-func (checker *prepareChecker) IsPrepared() bool {
+func (checker *Checker) IsPrepared() bool {
 	if checker == nil {
 		return false
 	}
@@ -87,9 +92,42 @@ func (checker *prepareChecker) IsPrepared() bool {
 	return checker.prepared
 }
 
+// RunIfPrepared runs fn while the checker remains prepared.
+func (checker *Checker) RunIfPrepared(fn func()) bool {
+	if checker == nil {
+		return false
+	}
+	checker.RLock()
+	defer checker.RUnlock()
+	if !checker.prepared {
+		return false
+	}
+	fn()
+	return true
+}
+
 // SetPrepared is for test purpose
-func (checker *prepareChecker) SetPrepared() {
+func (checker *Checker) SetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = true
+}
+
+// ResetPrepared resets the checker so scheduling pauses until cluster
+// information is collected again after the region cache is reset.
+func (checker *Checker) ResetPrepared() {
+	checker.ResetPreparedAndRun(nil)
+}
+
+// ResetPreparedAndRun resets the checker and runs fn while scheduling is
+// fenced. It is used to keep the prepared state and the region cache reset
+// atomic with respect to prepare checks and scheduling.
+func (checker *Checker) ResetPreparedAndRun(fn func()) {
+	checker.Lock()
+	defer checker.Unlock()
+	checker.prepared = false
+	checker.start = time.Now()
+	if fn != nil {
+		fn()
+	}
 }
