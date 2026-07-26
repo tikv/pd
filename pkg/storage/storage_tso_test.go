@@ -25,7 +25,11 @@ import (
 
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
+	storageendpoint "github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 const (
@@ -55,7 +59,7 @@ func TestSaveTimestampWithTimeout(t *testing.T) {
 	defer clean()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership)
+	err := storage.SaveTimestamp(ctx, testGroupID, time.Now().Round(0), leadership, false)
 	re.ErrorIs(err, context.DeadlineExceeded)
 }
 
@@ -64,7 +68,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, expectedTS, leadership, false)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -76,11 +80,11 @@ func TestTimestampTxn(t *testing.T) {
 	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS1, leadership, false)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS2, leadership, false)
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp(testGroupID)
@@ -95,13 +99,13 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 
 	// testLeaderKey -> testLeaderValue
 	globalTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 
-	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{})
+	err = storage.SaveTimestamp(context.Background(), testGroupID, globalTS.Add(time.Second), &election.Leadership{}, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -110,7 +114,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> ""
 	err = storage.Save(leadership.GetLeaderKey(), "")
 	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -119,7 +123,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> non-existent
 	err = storage.Remove(leadership.GetLeaderKey())
 	re.NoError(err)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
 	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -129,9 +133,77 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	err = storage.Save(leadership.GetLeaderKey(), testLeaderValue)
 	re.NoError(err)
 	globalTS = globalTS.Add(time.Second)
-	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership)
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, false)
 	re.NoError(err)
 	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+}
+
+func TestSaveTimestampCheckTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	globalTS := time.Now().Round(0)
+	err := storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, true)
+	re.NoError(err)
+
+	tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	})
+	err = storage.Save(tsoPrimaryPath, "tso-primary")
+	re.NoError(err)
+
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, true)
+	re.ErrorIs(err, storageendpoint.ErrTSOServicePrimaryExists)
+
+	ts, err := storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	err = storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, false)
+	re.NoError(err)
+}
+
+func TestSaveTimestampFencedByConcurrentTSOPrimary(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	globalTS := time.Now().Round(0)
+	re.NoError(storage.SaveTimestamp(defaultContext, testGroupID, globalTS, leadership, true))
+
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/storage/endpoint/beforeSaveTimestampTxnCommit", func() {
+		close(entered)
+		<-resume
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/beforeSaveTimestampTxnCommit"))
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- storage.SaveTimestamp(defaultContext, testGroupID, globalTS.Add(time.Second), leadership, true)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("timestamp transaction did not reach the commit fence")
+	}
+
+	tsoPrimaryPath := keypath.ElectionPath(&keypath.MsParam{
+		ServiceName: mcsconstant.TSOServiceName,
+		GroupID:     keyspaceconstant.DefaultKeyspaceGroupID,
+	})
+	re.NoError(storage.Save(tsoPrimaryPath, "tso-primary"))
+	close(resume)
+	re.ErrorIs(<-errCh, storageendpoint.ErrTSOServicePrimaryExists)
+
+	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
 }

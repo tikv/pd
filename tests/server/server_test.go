@@ -79,7 +79,7 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 	for _, conf := range cluster.GetConfig().InitialServers {
 		serverConf, err := conf.Generate()
 		re.NoError(err)
-		s, err := tests.NewTestServer(ctx, serverConf, nil)
+		s, err := tests.NewTestServer(ctx, serverConf)
 		re.NoError(err)
 		cluster.GetServers()[conf.Name] = s
 	}

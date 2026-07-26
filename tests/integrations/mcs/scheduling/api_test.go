@@ -433,8 +433,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	addr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
 
-	// Test config forward
-	// Expect to get same config in scheduling server and PD
+	// Test config forward.
+	// Expect to get same config in scheduling server and PD.
 	testutil.Eventually(re, func() bool {
 		err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 		re.NoError(err)
@@ -443,8 +443,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
 	})
 
-	// Test to change config in PD
-	// Expect to get new config in scheduling server and PD
+	// Test to change config in PD.
+	// Expect to get new config in scheduling server and PD.
 	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})
@@ -458,8 +458,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 			opts.GetReplicationConfig().MaxReplicas == 4.
 	})
 
-	// Test to change config only in scheduling server
-	// Expect to get new config in scheduling server but not old config in PD
+	// Test to change config only in scheduling server.
+	// Expect to get new config in scheduling server but not old config in PD.
 	scheCfg := opts.GetScheduleConfig().Clone()
 	scheCfg.LeaderScheduleLimit = 100
 	opts.SetScheduleConfig(scheCfg)

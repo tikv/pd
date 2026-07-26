@@ -47,9 +47,11 @@ func TestMain(m *testing.M) {
 }
 
 const (
-	testConfig  = "test config"
-	testConfig1 = "config_entry_1"
-	testConfig2 = "config_entry_2"
+	testConfig   = "test config"
+	testConfig1  = "config_entry_1"
+	testConfig2  = "config_entry_2"
+	testGroupID  = "tso_keyspace_group_id"
+	testUserKind = "user_kind"
 )
 
 type keyspaceTestSuite struct {
@@ -128,8 +130,10 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 		requests[i] = &CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace_%d", i),
 			Config: map[string]string{
-				testConfig1: "100",
-				testConfig2: "200",
+				testConfig1:  "100",
+				testConfig2:  "200",
+				testGroupID:  "0",
+				testUserKind: "basic",
 			},
 			CreateTime: now,
 		}

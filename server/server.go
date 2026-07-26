@@ -522,9 +522,15 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	tsoStorage := storage.NewStorageWithEtcdBackend(s.electionClient)
-	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
+	checkTSOPrimary := func() bool {
+		return s.IsKeyspaceGroupEnabled() && s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled()
+	}
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s, checkTSOPrimary)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	s.cluster.SetTSOServiceReadyFunc(func(ctx context.Context) bool {
+		return (&GrpcServer{Server: s}).checkDefaultTSOServiceReady(ctx)
+	})
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,

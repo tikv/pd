@@ -74,6 +74,7 @@ func NewAllocator(
 	member member.Election,
 	storage endpoint.TSOStorage,
 	cfg Config,
+	checkTSOPrimary func() bool,
 ) *Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
@@ -91,6 +92,7 @@ func NewAllocator(
 			updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 			maxResetTSGap:          cfg.GetMaxResetTSGap,
 			tsoMux:                 &tsoObject{},
+			checkTSOPrimary:        checkTSOPrimary,
 			metrics:                newTSOMetrics(keyspaceGroupIDStr),
 		},
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(keyspaceGroupIDStr),
@@ -127,6 +129,11 @@ func (a *Allocator) allocatorUpdater() {
 				continue
 			}
 			if err := a.UpdateTSO(); err != nil {
+				if errors.Is(err, endpoint.ErrTSOServicePrimaryExists) {
+					log.Info("stop embedded TSO allocator because TSO service primary exists", a.logFields...)
+					a.Reset(false)
+					continue
+				}
 				log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
 					append(a.logFields, errs.ZapError(err))...)
 				a.Reset(true)
@@ -168,6 +175,9 @@ func (a *Allocator) UpdateTSO() (err error) {
 		overflowed, err = a.timestampOracle.updateTimestamp(intervalUpdate)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, endpoint.ErrTSOServicePrimaryExists) {
+			return err
 		}
 		log.Warn("try to update the tso but failed",
 			zap.Int("retry-count", i),
