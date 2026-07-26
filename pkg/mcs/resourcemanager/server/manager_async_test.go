@@ -18,12 +18,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
@@ -990,4 +992,94 @@ func BenchmarkAsyncLoadMergeReaderStall(b *testing.B) {
 	close(stop)
 	wg.Wait()
 	b.ReportMetric(float64(maxStall.Load())/1e6, "max-reader-stall-ms")
+}
+
+// fakeTokenBucketsStream feeds a fixed set of requests to AcquireTokenBuckets
+// and records what it sends back. grpc.ServerStream stays nil since
+// AcquireTokenBuckets only ever calls Send/Recv on it.
+type fakeTokenBucketsStream struct {
+	grpc.ServerStream
+
+	requests []*resource_manager.TokenBucketsRequest
+	recvCnt  int
+	sent     []*resource_manager.TokenBucketsResponse
+}
+
+// Context is needed by the metrics stream wrapper, which resolves the peer IP
+// for its labels.
+func (*fakeTokenBucketsStream) Context() context.Context { return context.Background() }
+
+func (s *fakeTokenBucketsStream) Recv() (*resource_manager.TokenBucketsRequest, error) {
+	if s.recvCnt >= len(s.requests) {
+		return nil, io.EOF
+	}
+	req := s.requests[s.recvCnt]
+	s.recvCnt++
+	return req, nil
+}
+
+func (s *fakeTokenBucketsStream) Send(resp *resource_manager.TokenBucketsResponse) error {
+	s.sent = append(s.sent, resp)
+	return nil
+}
+
+func newRUTokenBucketRequest(keyspaceID uint32, name string, ru float64) *resource_manager.TokenBucketRequest {
+	return &resource_manager.TokenBucketRequest{
+		ResourceGroupName: name,
+		KeyspaceId:        &resource_manager.KeyspaceIDValue{Value: keyspaceID},
+		Request: &resource_manager.TokenBucketRequest_RuItems{
+			RuItems: &resource_manager.TokenBucketRequest_RequestRU{
+				RequestRU: []*resource_manager.RequestUnitItem{
+					{Type: resource_manager.RequestUnitType_RU, Value: ru},
+				},
+			},
+		},
+		ConsumptionSinceLastRequest: &resource_manager.Consumption{},
+	}
+}
+
+// TestAcquireTokenBucketsSurvivesLazyLoadFailure guards against a transient
+// lazy-load failure tearing down the whole token bucket stream: the error
+// belongs to a single resource group, so the other groups multiplexed on the
+// same stream must still be served instead of every client being forced to
+// reconnect.
+func TestAcquireTokenBucketsSurvivesLazyLoadFailure(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+	for _, name := range []string{"bad-group", "good-group"} {
+		group := newAsyncTestGroup(name)
+		re.NoError(store.SaveResourceGroupSetting(1, name, group))
+		re.NoError(store.SaveResourceGroupStates(1, name, FromProtoResourceGroup(group).GetGroupStates()))
+	}
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	m.srv = &testBasicServer{}
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	// Keep the bulk loader parked so lazy loading stays active.
+	store.waitEntered(t)
+
+	// Make bad-group's lazy load fail on its state read. good-group is
+	// requested in the same batch and must still get its tokens.
+	store.failNextState.Store(true)
+	stream := &fakeTokenBucketsStream{
+		requests: []*resource_manager.TokenBucketsRequest{{
+			TargetRequestPeriodMs: 1000,
+			ClientUniqueId:        1,
+			Requests: []*resource_manager.TokenBucketRequest{
+				newRUTokenBucketRequest(1, "bad-group", 10),
+				newRUTokenBucketRequest(1, "good-group", 10),
+			},
+		}},
+	}
+	svc := &Service{ctx: context.Background(), manager: m}
+
+	re.NoError(svc.AcquireTokenBuckets(stream),
+		"a single group's lazy-load failure must not fail the stream")
+	re.Len(stream.sent, 1)
+	re.Len(stream.sent[0].Responses, 1, "only the loadable group should be answered")
+	re.Equal("good-group", stream.sent[0].Responses[0].ResourceGroupName)
 }

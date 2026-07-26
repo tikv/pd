@@ -410,6 +410,20 @@ func (krgm *keyspaceResourceGroupManager) isReserved(name string) bool {
 	return ok
 }
 
+// hasConfirmedResourceGroup reports whether name is cached as confirmed data,
+// i.e. present and not a reserved placeholder. It answers both questions under
+// a single read lock, since it sits on the lazy-loading fast path that every
+// point and token request takes while async loading is still in progress.
+func (krgm *keyspaceResourceGroupManager) hasConfirmedResourceGroup(name string) bool {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	if _, ok := krgm.groups[name]; !ok {
+		return false
+	}
+	_, reserved := krgm.reservedGroups[name]
+	return !reserved
+}
+
 func (krgm *keyspaceResourceGroupManager) getResourceGroup(name string, withStats bool) *ResourceGroup {
 	krgm.RLock()
 	defer krgm.RUnlock()

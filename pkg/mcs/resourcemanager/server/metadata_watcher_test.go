@@ -388,3 +388,52 @@ func TestInitializeMetadataWatcher(t *testing.T) {
 		re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 	})
 }
+
+// TestMetadataWatcherModeReleasesSyncLoadedGroups guards against the
+// sync-loaded markers accumulating for the process lifetime in metadata watcher
+// mode: no async loader runs there, so nothing ever consumes them, and every
+// watch event would otherwise add an entry that is never removed.
+func TestMetadataWatcherModeReleasesSyncLoadedGroups(t *testing.T) {
+	re := require.New(t)
+
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	m.storage = storage.NewStorageWithMemoryBackend()
+	m.srv = &testBasicServer{}
+	m.enableMetadataWatcher = true
+	re.NotNil(m.syncLoadedGroups)
+
+	originalFactory := newMetadataLoopWatcher
+	defer func() { newMetadataLoopWatcher = originalFactory }()
+	newMetadataLoopWatcher = func(
+		_ context.Context,
+		_ *sync.WaitGroup,
+		_ *clientv3.Client,
+		_, _ string,
+		_ func([]*clientv3.Event) error,
+		_, _ func(*mvccpb.KeyValue) error,
+		_ func([]*clientv3.Event) error,
+		_ bool,
+	) metadataLoopWatcher {
+		return &fakeMetadataLoopWatcher{waitLoadFn: func() error { return nil }}
+	}
+
+	re.NoError(m.Init(context.Background()))
+	defer m.close()
+
+	re.Equal(LoadingStateCompleted, m.getLoadingState())
+	m.RLock()
+	syncLoadedGroups := m.syncLoadedGroups
+	m.RUnlock()
+	re.Nil(syncLoadedGroups, "watcher mode must not retain sync-loaded markers")
+
+	// A watch event after initialization must stay a no-op for the markers.
+	group := newMetadataWatcherResourceGroup("watched", middlePriority, 100, 100)
+	rawValue, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(m.applyResourceGroupSettingFromRaw(10, "watched", string(rawValue)))
+	m.RLock()
+	syncLoadedGroups = m.syncLoadedGroups
+	m.RUnlock()
+	re.Nil(syncLoadedGroups)
+	re.NotNil(m.getKeyspaceResourceGroupManager(10).getResourceGroup("watched", false))
+}

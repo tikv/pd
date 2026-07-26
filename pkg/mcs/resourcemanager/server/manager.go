@@ -116,7 +116,7 @@ type Manager struct {
 	// ruCollector is used to collect the RU metering data.
 	ruCollector *ruCollector
 	// async loading state management
-	loadingState int32 // atomic access
+	loadingState atomic.Int32
 	// syncLoadedGroups records groups that were loaded synchronously (e.g., by lazy loading)
 	syncLoadedGroups map[trackerKey]bool
 	// loadEpoch is bumped (under the manager lock) every time initMetadata
@@ -161,7 +161,7 @@ type metadataWatcherProvider interface {
 }
 
 func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupWriteRole) *Manager {
-	return &Manager{
+	m := &Manager{
 		writeRole:             writeRole,
 		controllerConfig:      controllerConfig,
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
@@ -170,9 +170,21 @@ func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupW
 		keyspaceIDLookup:      make(map[string]uint32),
 		metrics:               newMetrics(),
 		ruCollector:           newRUCollector(),
-		loadingState:          LoadingStateNotStarted,
 		syncLoadedGroups:      make(map[trackerKey]bool),
 	}
+	m.setLoadingState(LoadingStateNotStarted)
+	return m
+}
+
+// setLoadingState publishes the loading state both to the atomic field the
+// serving paths read and to the gauge operators alert on.
+func (m *Manager) setLoadingState(state int32) {
+	m.loadingState.Store(state)
+	resourceGroupLoadingStateGauge.Set(float64(state))
+}
+
+func (m *Manager) getLoadingState() int32 {
+	return m.loadingState.Load()
 }
 
 // NewManager returns a new manager base on the given server,
@@ -317,7 +329,7 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 	}
 	m.Unlock()
 	if initDefault {
-		if atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted {
+		if m.getLoadingState() == LoadingStateCompleted {
 			// Async loading (if any) has already finished, so if the default
 			// group isn't cached yet it truly doesn't exist anywhere; it's
 			// safe to synthesize and persist it directly.
@@ -364,7 +376,13 @@ func (m *Manager) Init(ctx context.Context) error {
 			m.wg.Wait()
 			return err
 		}
-		atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
+		// No async loader runs in this mode, so nothing will ever consume the
+		// sync-loaded markers. Drop the map: otherwise every watcher event keeps
+		// adding entries that are never removed, including for deleted groups.
+		m.Lock()
+		m.syncLoadedGroups = nil
+		m.Unlock()
+		m.setLoadingState(LoadingStateCompleted)
 	} else {
 		// This context is derived from the leader/primary context, it will be canceled
 		// from the outside loop when the leader/primary step down.
@@ -430,7 +448,7 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 	m.syncLoadedGroups = make(map[trackerKey]bool)
 	m.loadEpoch++
 	epoch := m.loadEpoch
-	atomic.StoreInt32(&m.loadingState, LoadingStateNotStarted)
+	m.setLoadingState(LoadingStateNotStarted)
 	m.Unlock()
 
 	m.initReservedInCache()
@@ -457,7 +475,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.Lock()
 	m.krgms = tempKrgms
 	m.syncLoadedGroups = nil
-	atomic.StoreInt32(&m.loadingState, LoadingStateCompleted)
+	m.setLoadingState(LoadingStateCompleted)
 	m.Unlock()
 	m.initReserved()
 	return m.loadServiceLimits()
@@ -473,7 +491,7 @@ func (m *Manager) storeLoadingStateIfCurrent(epoch uint64, state int32) bool {
 	if m.loadEpoch != epoch {
 		return false
 	}
-	atomic.StoreInt32(&m.loadingState, state)
+	m.setLoadingState(state)
 	return true
 }
 
@@ -519,6 +537,9 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 		}
 		if err != nil {
 			// Use warn level since the loader retries indefinitely until it succeeds.
+			// The failure counter and the loading state gauge are what make a load
+			// that never succeeds alertable, since it no longer fails `Init` loudly.
+			asyncLoadGroupFailureCounter.Inc()
 			log.Warn("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
 			if !m.storeLoadingStateIfCurrent(epoch, LoadingStateNotStarted) {
 				log.Info("async loading resource groups aborted: manager was reinitialized")
@@ -539,7 +560,15 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 			name       string
 			group      *ResourceGroup
 		}
-		pending := make([]mergeItem, 0)
+		// Size the slice up front: it holds every loaded group, which is exactly
+		// the scale this loader exists to handle.
+		totalGroups := 0
+		for _, tempKrgm := range tempKrgms {
+			tempKrgm.RLock()
+			totalGroups += len(tempKrgm.groups)
+			tempKrgm.RUnlock()
+		}
+		pending := make([]mergeItem, 0, totalGroups)
 		for keyspaceID, tempKrgm := range tempKrgms {
 			tempKrgm.RLock()
 			for name, group := range tempKrgm.groups {
@@ -697,7 +726,7 @@ func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGr
 }
 
 func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
-	if atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted {
+	if m.getLoadingState() == LoadingStateCompleted {
 		return nil
 	}
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
@@ -705,7 +734,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		// A cached entry only satisfies this call if it's confirmed data, not
 		// just a synthetic placeholder (e.g. from ensureReservedDefaultGroupInCache)
 		// installed before async loading had a chance to run.
-		if group := krgm.getMutableResourceGroup(name); group != nil && !krgm.isReserved(name) {
+		if krgm.hasConfirmedResourceGroup(name) {
 			return nil
 		}
 	}
@@ -736,7 +765,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		deleteGen := krgm.loadDeleteGen()
 		group, err := m.loadResourceGroup(keyspaceID, name)
 		if err != nil {
-			if name == DefaultResourceGroupName && errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(name)) {
+			if name == DefaultResourceGroupName && errs.ErrResourceGroupNotExists.Equal(err) {
 				m.RLock()
 				stale := m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm
 				m.RUnlock()
@@ -864,7 +893,7 @@ func (m *Manager) publishResourceGroupMutation(
 }
 
 func (m *Manager) isResourceGroupLoadingComplete() bool {
-	return atomic.LoadInt32(&m.loadingState) == LoadingStateCompleted
+	return m.getLoadingState() == LoadingStateCompleted
 }
 
 func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
@@ -1031,7 +1060,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
 	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil &&
-		!errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(grouppb.Name)) {
+		!errs.ErrResourceGroupNotExists.Equal(err) {
 		log.Warn("failed to load resource group before add", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
 		return err
 	}

@@ -102,6 +102,16 @@ func (s *Service) checkServing() error {
 	return nil
 }
 
+// wrapLoadingError converts the retryable "resource groups are still loading"
+// error into codes.Unavailable, so generic client-side retry logic can act on
+// it instead of seeing an opaque codes.Unknown. Other errors pass through.
+func wrapLoadingError(err error) error {
+	if errs.ErrResourceGroupsLoading.Equal(err) {
+		return status.Error(codes.Unavailable, err.Error())
+	}
+	return err
+}
+
 // GetResourceGroup implements ResourceManagerServer.GetResourceGroup.
 func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
 	if err := s.checkServing(); err != nil {
@@ -110,7 +120,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if err != nil {
-		return nil, err
+		return nil, wrapLoadingError(err)
 	}
 	if rg == nil {
 		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
@@ -129,7 +139,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	groups, err := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	if err != nil {
-		return nil, err
+		return nil, wrapLoadingError(err)
 	}
 	resps := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
@@ -151,7 +161,7 @@ func (s *Service) AddResourceGroup(_ context.Context, req *rmpb.PutResourceGroup
 	}
 	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, err
+		return nil, wrapLoadingError(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -166,7 +176,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	}
 	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
-		return nil, err
+		return nil, wrapLoadingError(err)
 	}
 	return &rmpb.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -181,7 +191,7 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, err
+		return nil, wrapLoadingError(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -234,12 +244,14 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			// Get the resource group from manager to acquire token buckets. This also
 			// triggers lazy loading of the group if async loading hasn't completed yet,
 			// so it must happen before accessKeyspaceResourceGroupManager below.
+			// Lazy loading can fail transiently (a storage read error, or retries
+			// exhausted while async loading is still in progress). Skip just this
+			// request instead of returning: the error belongs to one resource group,
+			// while returning would tear down the whole stream and force every
+			// client multiplexed on it to reconnect.
 			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
-				if err != nil && !errors.ErrorEqual(err, errs.ErrResourceGroupNotExists.FastGenByArgs(resourceGroupName)) {
-					return err
-				}
-				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
+				log.Warn("resource group is unavailable", append(requestFields, zap.Error(err))...)
 				continue
 			}
 			// Get keyspace resource group manager to apply service limit later.
