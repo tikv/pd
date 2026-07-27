@@ -344,14 +344,17 @@ func (m *Member) CheckPriority(ctx context.Context, opts ...MoveEtcdLeaderOption
 
 // MoveEtcdLeader tries to transfer etcd leader.
 func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64, opts ...MoveEtcdLeaderOption) error {
-	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
-	defer cancel()
 	options := newMoveEtcdLeaderOptions(opts...)
 	if options.targetChecker != nil {
-		if err := options.targetChecker(moveCtx, new); err != nil {
+		checkCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+		err := options.targetChecker(checkCtx, new)
+		cancel()
+		if err != nil {
 			return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(err.Error())
 		}
 	}
+	moveCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+	defer cancel()
 	err := m.etcd.Server.MoveLeader(moveCtx, old, new)
 	if err != nil {
 		return errs.ErrEtcdMoveLeader.Wrap(err).GenWithStackByCause()

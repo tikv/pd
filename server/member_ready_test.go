@@ -134,3 +134,39 @@ func TestCheckMemberReadyURL(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckMemberReadyURLsContinuesAfterAttemptTimeout(t *testing.T) {
+	re := require.New(t)
+
+	slowServer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer slowServer.Close()
+
+	readyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != targetPDVersionPath {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"version":"v8.5.1"}`)
+	}))
+	defer readyServer.Close()
+
+	s := &Server{httpClient: slowServer.Client()}
+	clientURLs := []string{slowServer.URL, readyServer.URL}
+	triedURLs, ready, err := s.checkMemberReadyURLs(context.Background(), 1, clientURLs)
+	re.NoError(err)
+	re.True(ready)
+	re.Equal(clientURLs, triedURLs)
+}
+
+func TestExcludeClientURLs(t *testing.T) {
+	re := require.New(t)
+	re.Equal(
+		[]string{"http://127.0.0.1:2379", "http://127.0.0.1:2381"},
+		excludeClientURLs(
+			[]string{"http://127.0.0.1:2379", "http://127.0.0.1:2380", "http://127.0.0.1:2381", "http://127.0.0.1:2381"},
+			[]string{"http://127.0.0.1:2380"},
+		),
+	)
+}

@@ -23,13 +23,17 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-const memberReadyCheckTimeout = 5 * time.Second
+const (
+	memberReadyCheckTotalTimeout   = 5 * time.Second
+	memberReadyCheckAttemptTimeout = time.Second
+)
 
 type targetPDVersion struct {
 	Version string `json:"version"`
@@ -37,22 +41,25 @@ type targetPDVersion struct {
 
 // CheckMemberReadyForLeaderTransfer checks whether the target PD member can be promoted to leader.
 func (s *Server) CheckMemberReadyForLeaderTransfer(ctx context.Context, memberID uint64) error {
-	clientURLs, err := s.getMemberClientURLs(memberID)
+	checkCtx, cancel := context.WithTimeout(ctx, memberReadyCheckTotalTimeout)
+	defer cancel()
+
+	clientURLs, err := s.getMemberClientURLs(checkCtx, memberID)
 	if err != nil {
 		return err
 	}
 
-	triedURLs, ready, lastErr := s.checkMemberReadyURLs(ctx, memberID, clientURLs)
+	triedURLs, ready, lastErr := s.checkMemberReadyURLs(checkCtx, memberID, clientURLs)
 	if ready {
 		return nil
 	}
 
-	reloadedClientURLs, err := s.reloadMemberClientURLs(memberID)
+	reloadedClientURLs, err := s.getMemberClientURLs(checkCtx, memberID)
 	if err != nil {
 		lastErr = errors.Annotatef(err, "failed to reload target pd member %d client urls", memberID)
-	} else if !sameClientURLs(clientURLs, reloadedClientURLs) {
+	} else if untriedClientURLs := excludeClientURLs(reloadedClientURLs, triedURLs); len(untriedClientURLs) > 0 {
 		var reloadedTriedURLs []string
-		reloadedTriedURLs, ready, lastErr = s.checkMemberReadyURLs(ctx, memberID, reloadedClientURLs)
+		reloadedTriedURLs, ready, lastErr = s.checkMemberReadyURLs(checkCtx, memberID, untriedClientURLs)
 		triedURLs = append(triedURLs, reloadedTriedURLs...)
 		if ready {
 			return nil
@@ -75,58 +82,45 @@ func (s *Server) checkMemberReadyURLs(ctx context.Context, memberID uint64, clie
 	return triedURLs, false, lastErr
 }
 
-func sameClientURLs(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
+func excludeClientURLs(clientURLs, excludedURLs []string) []string {
+	excluded := make(map[string]struct{}, len(excludedURLs))
+	for _, clientURL := range excludedURLs {
+		excluded[clientURL] = struct{}{}
 	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+	untried := make([]string, 0, len(clientURLs))
+	for _, clientURL := range clientURLs {
+		if _, ok := excluded[clientURL]; !ok {
+			untried = append(untried, clientURL)
+			excluded[clientURL] = struct{}{}
 		}
 	}
-	return true
+	return untried
 }
 
-func (s *Server) getMemberClientURLs(memberID uint64) ([]string, error) {
-	members, err := s.GetMembers()
+func (s *Server) getMemberClientURLs(ctx context.Context, memberID uint64) ([]string, error) {
+	client := s.GetClient()
+	if client == nil {
+		return nil, errs.ErrEtcdNotStarted
+	}
+	// Bypass the member cache so discovery shares the readiness deadline and
+	// observes client URL updates immediately.
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	if err != nil {
 		return nil, err
 	}
-	if clientURLs, found := findMemberClientURLs(members, memberID); found {
-		if len(clientURLs) > 0 {
-			return clientURLs, nil
-		}
-		return s.reloadMemberClientURLs(memberID)
-	}
-	return s.reloadMemberClientURLs(memberID)
-}
-
-func (s *Server) reloadMemberClientURLs(memberID uint64) ([]string, error) {
-	members, err := s.ReloadMembers()
-	if err != nil {
-		return nil, err
-	}
-	clientURLs, found := findMemberClientURLs(members, memberID)
-	if !found {
-		return nil, errors.Errorf("target pd member %d not found", memberID)
-	}
-	if len(clientURLs) == 0 {
-		return nil, errors.Errorf("target pd member %d has no client url", memberID)
-	}
-	return clientURLs, nil
-}
-
-func findMemberClientURLs(members []*pdpb.Member, memberID uint64) ([]string, bool) {
-	for _, member := range members {
-		if member.GetMemberId() == memberID {
-			return member.GetClientUrls(), true
+	for _, member := range members.Members {
+		if member.GetID() == memberID {
+			if len(member.ClientURLs) == 0 {
+				return nil, errors.Errorf("target pd member %d has no client url", memberID)
+			}
+			return member.ClientURLs, nil
 		}
 	}
-	return nil, false
+	return nil, errors.Errorf("target pd member %d not found", memberID)
 }
 
 func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clientURL string) error {
-	checkCtx, cancel := context.WithTimeout(ctx, memberReadyCheckTimeout)
+	checkCtx, cancel := context.WithTimeout(ctx, memberReadyCheckAttemptTimeout)
 	defer cancel()
 
 	version, err := s.getTargetPDVersion(checkCtx, clientURL)
