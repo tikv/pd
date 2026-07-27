@@ -22,21 +22,22 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/tikv/pd/client"
+	"github.com/pingcap/errors"
+
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 type gcStateReader interface {
-	GetGCState(context.Context, uint32) (gc.GCState, error)
-	GetAllKeyspacesGCStates(context.Context) (gc.ClusterGCStates, error)
-	Close()
+	getGCState(context.Context, uint32) (gc.GCState, error)
+	getAllKeyspacesGCStates(context.Context) (gc.ClusterGCStates, error)
+	close()
 }
 
 type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
@@ -45,7 +46,7 @@ type pdGCStateReader struct {
 	client pd.Client
 }
 
-func (r *pdGCStateReader) GetGCState(
+func (r *pdGCStateReader) getGCState(
 	ctx context.Context,
 	keyspaceID uint32,
 ) (gc.GCState, error) {
@@ -55,7 +56,7 @@ func (r *pdGCStateReader) GetGCState(
 	)
 }
 
-func (r *pdGCStateReader) GetAllKeyspacesGCStates(
+func (r *pdGCStateReader) getAllKeyspacesGCStates(
 	ctx context.Context,
 ) (gc.ClusterGCStates, error) {
 	return r.client.GetGCStatesClient(
@@ -67,7 +68,7 @@ func (r *pdGCStateReader) GetAllKeyspacesGCStates(
 	)
 }
 
-func (r *pdGCStateReader) Close() {
+func (r *pdGCStateReader) close() {
 	r.client.Close()
 }
 
@@ -252,10 +253,10 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 
 // NewGCStateCommand returns the read-only GC state command.
 func NewGCStateCommand() *cobra.Command {
-	return newGCStateCommand(newPDGCStateReader)
+	return buildGCStateCommand(newPDGCStateReader)
 }
 
-func newGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
+func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "gc-state",
 		Short: "show keyspace GC state and barriers",
@@ -292,9 +293,9 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
 			}
-			defer reader.Close()
+			defer reader.close()
 
-			state, err := reader.GetGCState(cmd.Context(), keyspaceID)
+			state, err := reader.getGCState(cmd.Context(), keyspaceID)
 			if err != nil {
 				if status.Code(errors.Cause(err)) == codes.Unimplemented {
 					return errors.Annotate(err,
@@ -325,9 +326,9 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
 			}
-			defer reader.Close()
+			defer reader.close()
 
-			clusterState, err := reader.GetAllKeyspacesGCStates(cmd.Context())
+			clusterState, err := reader.getAllKeyspacesGCStates(cmd.Context())
 			if err != nil {
 				if status.Code(errors.Cause(err)) == codes.Unimplemented {
 					return errors.Annotate(err,
