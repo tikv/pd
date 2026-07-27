@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,7 +304,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyResetsStatusForRea
 		func() error { return nil }, nil))
 
 	// Reloading must see a disabled group with a zero derived count, not the stale one.
-	re.NoError(suite.manager.RefreshCache())
+	re.NoError(suite.manager.RefreshCache(suite.ctx))
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
 	re.NotNil(statusMap[groupID])
@@ -375,7 +376,7 @@ func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndSc
 		return res, nil
 	})
 
-	re.NoError(suite.manager.RefreshCache())
+	re.NoError(suite.manager.RefreshCache(suite.ctx))
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
 	re.True(statusMap["etcd-group-0"].Enabled)             // from storage
@@ -390,7 +391,7 @@ func (suite *metaServiceGroupTestSuite) TestRefreshPersistedStatusDoesNotScanAss
 		return map[string]int{"etcd-group-0": 3}, nil
 	})
 
-	re.NoError(suite.manager.RefreshPersistedStatus())
+	re.NoError(suite.manager.RefreshPersistedStatus(suite.ctx))
 	re.False(called)
 	re.False(suite.manager.IsAssignmentCountReady())
 }
@@ -412,7 +413,12 @@ func (suite *metaServiceGroupTestSuite) TestStartAssignmentCountRebuildMarksRead
 	re.Equal(3, statusMap["etcd-group-0"].AssignmentCount)
 }
 
-func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildRetriesWhenEpochChanges() {
+// TestAssignmentCountRebuildMergesInFlightDeltas verifies the termGen + delta
+// merge semantics: an assignment applied while a rebuild scan is in flight does
+// not discard the scan and is not clobbered by the scan result. The scan
+// completes in a single pass, then applies the in-flight delta on top of its
+// authoritative result.
+func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildMergesInFlightDeltas() {
 	re := suite.Require()
 	suite.enableAllGroups()
 	suite.manager.statusMu.Lock()
@@ -421,22 +427,20 @@ func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildRetriesWhenEpo
 	suite.manager.statusMu.Unlock()
 	scanStarted := make(chan struct{})
 	resumeScan := make(chan struct{})
-	firstScan := true
+	var scanCount int32
 	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
 		res := make(map[string]int, len(ids))
-		if firstScan {
-			firstScan = false
+		if atomic.AddInt32(&scanCount, 1) == 1 {
 			close(scanStarted)
 			<-resumeScan
-			res["etcd-group-0"] = 0
-			return res, nil
 		}
-		res["etcd-group-0"] = 1
+		res["etcd-group-0"] = 5
 		return res, nil
 	})
 
 	suite.manager.StartAssignmentCountRebuild(suite.ctx)
 	<-scanStarted
+	// Apply a delta (min group is etcd-group-0 at 0) while the scan is in flight.
 	_, err := suite.manager.PickGroup(suite.ctx)
 	re.NoError(err)
 	close(resumeScan)
@@ -444,7 +448,78 @@ func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildRetriesWhenEpo
 	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
 	statusMap, err := suite.manager.GetStatus(suite.ctx)
 	re.NoError(err)
-	re.Equal(1, statusMap["etcd-group-0"].AssignmentCount)
+	// The scan is merged with the in-flight increment, and only a single scan ran
+	// (no discard-and-retry).
+	re.Equal(6, statusMap["etcd-group-0"].AssignmentCount)
+	re.Equal(int32(1), atomic.LoadInt32(&scanCount))
+}
+
+func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildMergesInFlightMoveDeltas() {
+	re := suite.Require()
+	suite.enableAllGroups()
+	suite.manager.statusMu.Lock()
+	suite.manager.cachedStatus["etcd-group-0"].AssignmentCount = 0
+	suite.manager.cachedStatus["etcd-group-1"].AssignmentCount = 0
+	suite.manager.cachedStatus["etcd-group-2"].AssignmentCount = 0
+	suite.manager.statusMu.Unlock()
+	scanStarted := make(chan struct{})
+	resumeScan := make(chan struct{})
+	var scanCount int32
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		if atomic.AddInt32(&scanCount, 1) == 1 {
+			close(scanStarted)
+			<-resumeScan
+		}
+		res["etcd-group-0"] = 10
+		res["etcd-group-1"] = 10
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	<-scanStarted
+	suite.manager.Lock()
+	err := suite.manager.reassignKeyspaceLocked(nil, "etcd-group-0", "etcd-group-1")
+	suite.manager.Unlock()
+	re.NoError(err)
+	close(resumeScan)
+
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(9, statusMap["etcd-group-0"].AssignmentCount)
+	re.Equal(11, statusMap["etcd-group-1"].AssignmentCount)
+	re.Equal(int32(1), atomic.LoadInt32(&scanCount))
+}
+
+func (suite *metaServiceGroupTestSuite) TestAssignmentCountRebuildMergesInFlightAssignToGroupDelta() {
+	re := suite.Require()
+	suite.enableAllGroups()
+	suite.manager.statusMu.Lock()
+	suite.manager.cachedStatus["etcd-group-1"].AssignmentCount = 10
+	suite.manager.cachedStatus["etcd-group-2"].AssignmentCount = 10
+	suite.manager.statusMu.Unlock()
+	scanStarted := make(chan struct{})
+	resumeScan := make(chan struct{})
+	suite.manager.SetKeyspaceAssignmentCounter(func(_ context.Context, ids map[string]struct{}) (map[string]int, error) {
+		res := make(map[string]int, len(ids))
+		close(scanStarted)
+		<-resumeScan
+		res["etcd-group-0"] = 5
+		return res, nil
+	})
+
+	suite.manager.StartAssignmentCountRebuild(suite.ctx)
+	<-scanStarted
+	assigned, err := suite.manager.AssignToGroup(suite.ctx, 3)
+	re.NoError(err)
+	re.Equal("etcd-group-0", assigned)
+	close(resumeScan)
+
+	re.Eventually(suite.manager.IsAssignmentCountReady, time.Second, time.Millisecond)
+	statusMap, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.Equal(8, statusMap["etcd-group-0"].AssignmentCount)
 }
 
 func (suite *metaServiceGroupTestSuite) enableAllGroups() {

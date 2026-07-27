@@ -53,7 +53,6 @@ const assignmentCountRebuildRetryInterval = time.Second
 // RWMutex->statusMu and metaLock->statusMu; both are safe because statusMu wraps
 // nothing.
 type MetaServiceGroupManager struct {
-	ctx   context.Context
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
 	// metaServiceGroups is the available external meta-service groups.
@@ -66,11 +65,25 @@ type MetaServiceGroupManager struct {
 	keyspaceAssignmentCounter func(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error)
 	// statusMu guards cachedStatus. See the type comment for the leaf-lock
 	// discipline it must follow.
-	statusMu         syncutil.Mutex
-	cachedStatus     map[string]*endpoint.MetaServiceGroupStatus
-	assignmentEpoch  uint64
-	countsReady      bool
-	countsRefreshing bool
+	statusMu     syncutil.Mutex
+	cachedStatus map[string]*endpoint.MetaServiceGroupStatus
+	// termGen is the leader-term generation. It is bumped only at term boundaries
+	// (RefreshCache at construction, RefreshPersistedStatus on leadership change),
+	// never by assignment deltas. A rebuild worker snapshots it when scheduled and,
+	// on completion, only commits its scan while termGen is unchanged. A worker left
+	// over from a previous term finds termGen advanced and exits without touching
+	// cachedStatus, countsReady or rebuilding, which the current term's worker owns.
+	termGen uint64
+	// countsReady reports whether an authoritative scan has completed in the current
+	// term. It is exposed via the status API (assignment_count_ready).
+	countsReady bool
+	// rebuilding ensures at most one rebuild scan is in flight, so serving traffic
+	// cannot pile up concurrent keyspace scans against storage.
+	rebuilding bool
+	// rebuildDeltas records assignment deltas applied to cachedStatus while the
+	// current rebuild scan is in flight. When the scan completes, the committed
+	// count is scan result plus these deltas so writes during loading are not lost.
+	rebuildDeltas map[string]int
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
@@ -87,11 +100,10 @@ func NewMetaServiceGroupManager(
 	metaServiceGroups map[string]string,
 ) (*MetaServiceGroupManager, error) {
 	m := &MetaServiceGroupManager{
-		ctx:               ctx,
 		store:             store,
 		metaServiceGroups: metaServiceGroups,
 	}
-	if err := m.RefreshCache(); err != nil {
+	if err := m.RefreshCache(ctx); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -102,11 +114,11 @@ func NewMetaServiceGroupManager(
 // It is called at construction and on each leadership acquisition, so every leader
 // term starts from counts derived from actual keyspace metadata rather than a
 // persisted value that could have drifted or been lost.
-func (m *MetaServiceGroupManager) RefreshCache() error {
+func (m *MetaServiceGroupManager) RefreshCache(ctx context.Context) error {
 	m.Lock()
 	defer m.Unlock()
 	var stored map[string]*endpoint.MetaServiceGroupStatus
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		stored, err = m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
 		return err
@@ -124,7 +136,7 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 			set[id] = struct{}{}
 		}
 		var err error
-		if counts, err = m.keyspaceAssignmentCounter(m.ctx, set); err != nil {
+		if counts, err = m.keyspaceAssignmentCounter(ctx, set); err != nil {
 			return err
 		}
 	}
@@ -138,9 +150,10 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 	}
 	m.statusMu.Lock()
 	m.cachedStatus = cache
-	m.assignmentEpoch++
+	m.termGen++
 	m.countsReady = true
-	m.countsRefreshing = false
+	m.rebuilding = false
+	m.rebuildDeltas = nil
 	m.statusMu.Unlock()
 	log.Info("[keyspace] meta-service group status rebuilt", zap.Any("meta-service-group-status", cache))
 	return nil
@@ -149,11 +162,11 @@ func (m *MetaServiceGroupManager) RefreshCache() error {
 // RefreshPersistedStatus reloads the persisted administrative status only. It is
 // intentionally lightweight for the leader-ready path; assignment counts are
 // rebuilt asynchronously by StartAssignmentCountRebuild.
-func (m *MetaServiceGroupManager) RefreshPersistedStatus() error {
+func (m *MetaServiceGroupManager) RefreshPersistedStatus(ctx context.Context) error {
 	m.Lock()
 	defer m.Unlock()
 	var stored map[string]*endpoint.MetaServiceGroupStatus
-	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		var err error
 		stored, err = m.store.LoadMetaServiceGroupStatus(txn, m.metaServiceGroups)
 		return err
@@ -176,9 +189,10 @@ func (m *MetaServiceGroupManager) RefreshPersistedStatus() error {
 		cache[id] = &endpoint.MetaServiceGroupStatus{AssignmentCount: count, Enabled: enabled}
 	}
 	m.cachedStatus = cache
-	m.assignmentEpoch++
+	m.termGen++
 	m.countsReady = false
-	m.countsRefreshing = false
+	m.rebuilding = false
+	m.rebuildDeltas = nil
 	m.statusMu.Unlock()
 	log.Info("[keyspace] meta-service group persisted status loaded", zap.Any("meta-service-group-status", cache))
 	return nil
@@ -193,8 +207,11 @@ func (m *MetaServiceGroupManager) IsAssignmentCountReady() bool {
 }
 
 // StartAssignmentCountRebuild asynchronously rebuilds assignment counts from
-// authoritative keyspace metadata. If serving traffic changes counts during the
-// scan, the result is discarded and another rebuild is scheduled.
+// authoritative keyspace metadata. Assignment deltas applied during the scan
+// window are recorded separately and merged with the scan result, so writes made
+// while loading counts are preserved. The scan is discarded only when the leader
+// term changes (which bumps termGen), so under steady traffic a rebuild converges
+// in a single scan. At most one scan runs at a time.
 func (m *MetaServiceGroupManager) StartAssignmentCountRebuild(ctx context.Context) {
 	m.RLock()
 	groupIDs := make(map[string]struct{}, len(m.metaServiceGroups))
@@ -202,79 +219,71 @@ func (m *MetaServiceGroupManager) StartAssignmentCountRebuild(ctx context.Contex
 		groupIDs[id] = struct{}{}
 	}
 	m.statusMu.Lock()
-	if m.countsRefreshing {
+	if m.rebuilding {
 		m.statusMu.Unlock()
 		m.RUnlock()
 		return
 	}
-	m.countsRefreshing = true
+	m.rebuilding = true
 	m.countsReady = false
-	startEpoch := m.assignmentEpoch
+	m.rebuildDeltas = make(map[string]int, len(groupIDs))
+	startTerm := m.termGen
 	m.statusMu.Unlock()
 	m.RUnlock()
 
-	go m.rebuildAssignmentCounts(ctx, groupIDs, startEpoch)
+	go m.rebuildAssignmentCounts(ctx, groupIDs, startTerm)
 }
 
-func (m *MetaServiceGroupManager) rebuildAssignmentCounts(ctx context.Context, groupIDs map[string]struct{}, startEpoch uint64) {
+func (m *MetaServiceGroupManager) rebuildAssignmentCounts(ctx context.Context, groupIDs map[string]struct{}, startTerm uint64) {
+	// Without a counter (before the keyspace manager wires it, or in unit tests)
+	// there is no authoritative source, so mark ready without overwriting counts.
 	if m.keyspaceAssignmentCounter == nil {
 		m.statusMu.Lock()
-		m.countsReady = true
-		m.countsRefreshing = false
+		if m.termGen == startTerm {
+			m.countsReady = true
+			m.rebuilding = false
+			m.rebuildDeltas = nil
+		}
 		m.statusMu.Unlock()
 		return
-	}
-	select {
-	case <-ctx.Done():
-		m.statusMu.Lock()
-		m.countsRefreshing = false
-		m.countsReady = false
-		m.statusMu.Unlock()
-		return
-	default:
 	}
 	counts, err := m.keyspaceAssignmentCounter(ctx, groupIDs)
-	if err != nil {
-		log.Warn("[keyspace] failed to rebuild meta-service group assignment counts", zap.Error(err))
-		m.statusMu.Lock()
-		m.countsRefreshing = false
-		m.countsReady = false
-		m.statusMu.Unlock()
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(assignmentCountRebuildRetryInterval):
-			m.StartAssignmentCountRebuild(ctx)
-		}
+	if !m.finishRebuild(startTerm, counts, err) {
 		return
 	}
+	// The scan failed within the current term; back off and retry so a transient
+	// storage error does not leave counts underived for the rest of the term.
 	select {
 	case <-ctx.Done():
-		m.statusMu.Lock()
-		m.countsRefreshing = false
-		m.countsReady = false
-		m.statusMu.Unlock()
-		return
-	default:
-	}
-
-	shouldRetry := false
-	m.statusMu.Lock()
-	if m.assignmentEpoch == startEpoch {
-		for id, status := range m.cachedStatus {
-			status.AssignmentCount = counts[id]
-		}
-		m.countsReady = true
-		m.countsRefreshing = false
-	} else {
-		m.countsReady = false
-		m.countsRefreshing = false
-		shouldRetry = true
-	}
-	m.statusMu.Unlock()
-	if shouldRetry {
+	case <-time.After(assignmentCountRebuildRetryInterval):
 		m.StartAssignmentCountRebuild(ctx)
 	}
+}
+
+// finishRebuild applies a rebuild scan result under statusMu and reports whether
+// the caller should schedule a retry. A worker whose startTerm no longer matches
+// termGen is a leftover from a previous leader term: the current term owns the
+// rebuilding/countsReady/cachedStatus state, so the stale worker exits without
+// touching any of it and without retrying.
+func (m *MetaServiceGroupManager) finishRebuild(startTerm uint64, counts map[string]int, scanErr error) (retry bool) {
+	m.statusMu.Lock()
+	defer m.statusMu.Unlock()
+	if m.termGen != startTerm {
+		return false
+	}
+	if scanErr != nil {
+		log.Warn("[keyspace] failed to rebuild meta-service group assignment counts", zap.Error(scanErr))
+		m.rebuilding = false
+		m.rebuildDeltas = nil
+		return true
+	}
+	for id, status := range m.cachedStatus {
+		status.AssignmentCount = max(0, counts[id]+m.rebuildDeltas[id])
+	}
+	m.countsReady = true
+	m.rebuilding = false
+	m.rebuildDeltas = nil
+	return false
 }
 
 // GetStatus returns the status of each meta-service group.
@@ -418,7 +427,7 @@ func (m *MetaServiceGroupManager) AssignToGroup(_ context.Context, count int) (s
 		return "", err
 	}
 	m.cachedStatus[assignedGroup].AssignmentCount += count
-	m.assignmentEpoch++
+	m.recordRebuildDeltaLocked(assignedGroup, count)
 	return assignedGroup, nil
 }
 
@@ -462,11 +471,12 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(_ kv.Txn, oldGroupID, newG
 // applyAssignmentDeltaStatusLocked moves one assignment from oldGroupID to
 // newGroupID in the cached status. The caller must hold statusMu.
 func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID string) error {
-	changed := false
 	if oldGroupID != "" {
-		if status := m.cachedStatus[oldGroupID]; status != nil && status.AssignmentCount > 0 {
-			status.AssignmentCount--
-			changed = true
+		if status := m.cachedStatus[oldGroupID]; status != nil {
+			if status.AssignmentCount > 0 {
+				status.AssignmentCount--
+			}
+			m.recordRebuildDeltaLocked(oldGroupID, -1)
 		}
 	}
 	if newGroupID != "" {
@@ -475,12 +485,19 @@ func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, n
 			return ErrUnknownMetaServiceGroup
 		}
 		status.AssignmentCount++
-		changed = true
-	}
-	if changed {
-		m.assignmentEpoch++
+		m.recordRebuildDeltaLocked(newGroupID, 1)
 	}
 	return nil
+}
+
+func (m *MetaServiceGroupManager) recordRebuildDeltaLocked(groupID string, delta int) {
+	if !m.rebuilding || groupID == "" {
+		return
+	}
+	if m.rebuildDeltas == nil {
+		m.rebuildDeltas = make(map[string]int)
+	}
+	m.rebuildDeltas[groupID] += delta
 }
 
 // AttachEndpoints append potential meta-service group endpoint to the given keyspace config map.

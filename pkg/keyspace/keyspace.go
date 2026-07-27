@@ -571,18 +571,22 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 
 // assignGroupAndSaveKeyspace assigns a meta-service group to the keyspace (when
 // assign is true) and persists the keyspace metadata while holding the
-// meta-service group manager's lock across both steps. This keeps the
+// meta-service group manager's read lock across both steps. This keeps the
 // selection and the cached assignment atomic with respect to group deletion:
 // UpdateGroupsSafely takes the write lock, so a group cannot be removed in the
 // window between assignment and the keyspace being saved, which would otherwise
-// leave the keyspace referencing a non-existent group. config must point to
+// leave the keyspace referencing a non-existent group. The read lock is enough
+// because pickGroupLocked already serializes the select-and-reserve step under
+// statusMu; using it (rather than the write lock) lets concurrent keyspace
+// creations run their independent, possibly slow, saves in parallel instead of
+// queueing behind one another's storage latency. config must point to
 // request.Config so the assigned group ID is visible to later create steps.
 func (manager *Manager) assignGroupAndSaveKeyspace(assign bool, config *map[string]string, keyspace *keyspacepb.KeyspaceMeta) error {
 	if !assign {
 		return manager.saveNewKeyspace(keyspace)
 	}
-	manager.mgm.Lock()
-	defer manager.mgm.Unlock()
+	manager.mgm.RLock()
+	defer manager.mgm.RUnlock()
 	// Re-check under the lock: the pre-lock check may be stale if a concurrent
 	// PATCH deleted the last group in the meantime. In that case create the
 	// keyspace without a meta-service group instead of failing the creation.

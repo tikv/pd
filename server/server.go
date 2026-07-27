@@ -545,7 +545,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		// Load persisted administrative status synchronously, then rebuild derived
 		// assignment counts in the background so leader readiness is not blocked by a
 		// full keyspace scan.
-		if err := s.metaServiceGroupManager.RefreshPersistedStatus(); err != nil {
+		if err := s.metaServiceGroupManager.RefreshPersistedStatus(ctx); err != nil {
 			return err
 		}
 		s.metaServiceGroupManager.StartAssignmentCountRebuild(ctx)
