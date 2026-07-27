@@ -95,18 +95,6 @@ func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
-	failpoint.Inject("skipKeyspaceRegionCheck", func() {
-		failpoint.Return(&keyspacepb.LoadKeyspaceResponse{
-			Header:   grpcutil.WrapHeader(),
-			Keyspace: meta,
-		}, nil)
-	})
-	if !manager.CheckKeyspaceRegionBound(meta) {
-		// If the keyspace region is not split yet, we treat it as not found.
-		// To avoid clients using the keyspace before region split is done.
-		err = errs.ErrKeyspaceNotFound
-		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
-	}
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
