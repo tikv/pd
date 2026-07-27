@@ -36,6 +36,7 @@ import (
 
 type gcStateReader interface {
 	getGCState(context.Context, uint32) (gc.GCState, error)
+	getGlobalGCState(context.Context) (gc.ClusterGCStates, error)
 	getAllKeyspacesGCStates(context.Context) (gc.ClusterGCStates, error)
 	close()
 }
@@ -44,6 +45,13 @@ type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
 
 type pdGCStateReader struct {
 	client pd.Client
+}
+
+type clusterGCStatesClient interface {
+	GetAllKeyspacesGCStates(
+		context.Context,
+		...gc.GCStatesAPIOption,
+	) (gc.ClusterGCStates, error)
 }
 
 func (r *pdGCStateReader) getGCState(
@@ -59,11 +67,31 @@ func (r *pdGCStateReader) getGCState(
 func (r *pdGCStateReader) getAllKeyspacesGCStates(
 	ctx context.Context,
 ) (gc.ClusterGCStates, error) {
-	return r.client.GetGCStatesClient(
-		constant.NullKeyspaceID,
-	).GetAllKeyspacesGCStates(
+	return readClusterGCStates(
 		ctx,
-		gc.ExcludeGCBarriers(false),
+		r.client.GetGCStatesClient(constant.NullKeyspaceID),
+		false,
+	)
+}
+
+func (r *pdGCStateReader) getGlobalGCState(
+	ctx context.Context,
+) (gc.ClusterGCStates, error) {
+	return readClusterGCStates(
+		ctx,
+		r.client.GetGCStatesClient(constant.NullKeyspaceID),
+		true,
+	)
+}
+
+func readClusterGCStates(
+	ctx context.Context,
+	client clusterGCStatesClient,
+	excludeGCBarriers bool,
+) (gc.ClusterGCStates, error) {
+	return client.GetAllKeyspacesGCStates(
+		ctx,
+		gc.ExcludeGCBarriers(excludeGCBarriers),
 		gc.ExcludeGlobalGCBarriers(false),
 	)
 }
@@ -126,6 +154,10 @@ type keyspaceGCStateOutput struct {
 
 type allGCStatesOutput struct {
 	GCStates         []gcStateOutput   `json:"gc_states"`
+	GlobalGCBarriers []gcBarrierOutput `json:"global_gc_barriers"`
+}
+
+type globalGCStateOutput struct {
 	GlobalGCBarriers []gcBarrierOutput `json:"global_gc_barriers"`
 }
 
@@ -241,12 +273,22 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 		return states[i].KeyspaceID < states[j].KeyspaceID
 	})
 
-	globalBarriers, err := clusterState.GetGlobalGCBarriers()
+	globalOutput, err := newGlobalGCStateOutput(clusterState)
 	if err != nil {
-		return allGCStatesOutput{}, errors.Annotate(err, "failed to read global GC barriers")
+		return allGCStatesOutput{}, err
 	}
 	return allGCStatesOutput{
 		GCStates:         states,
+		GlobalGCBarriers: globalOutput.GlobalGCBarriers,
+	}, nil
+}
+
+func newGlobalGCStateOutput(clusterState gc.ClusterGCStates) (globalGCStateOutput, error) {
+	globalBarriers, err := clusterState.GetGlobalGCBarriers()
+	if err != nil {
+		return globalGCStateOutput{}, errors.Annotate(err, "failed to read global GC barriers")
+	}
+	return globalGCStateOutput{
 		GlobalGCBarriers: newGlobalGCBarrierOutputs(globalBarriers),
 	}, nil
 }
@@ -259,9 +301,10 @@ func NewGCStateCommand() *cobra.Command {
 func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "gc-state",
-		Short: "show keyspace GC state and barriers",
-		Long: "Show effective per-keyspace GC safe points and barriers. " +
-			"Use the all subcommand to include cluster-wide global barriers.",
+		Short: "show keyspace and cluster-wide GC state",
+		Long: "Show effective per-keyspace GC safe points and local barriers, " +
+			"and cluster-wide GC state. Use keyspace for one effective GC " +
+			"scope, global for cluster-wide state, or all for a combined view.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -269,6 +312,7 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 	}
 	command.AddCommand(
 		newGCStateKeyspaceCommand(factory),
+		newGCStateGlobalCommand(factory),
 		newGCStateAllCommand(factory),
 	)
 	return command
@@ -278,8 +322,9 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "keyspace <keyspace-id>",
 		Short: "show one keyspace's effective GC state",
-		Long: "Show one keyspace's effective GC safe points and local " +
-			"barriers. Use gc-state all to inspect global barriers. " +
+		Long: "Show one keyspace's effective GC safe points and local barriers. " +
+			"Use gc-state global to inspect only cluster-wide state, or " +
+			"gc-state all for a combined view. " +
 			"The decimal NullKeyspace ID is 4294967295.",
 		Example: "  pd-ctl gc-state keyspace 42\n" +
 			"  pd-ctl gc-state keyspace 4294967295",
@@ -313,12 +358,45 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 	}
 }
 
+func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:     "global",
+		Short:   "show cluster-wide GC state",
+		Long:    "Show cluster-wide GC state without per-keyspace states. The current output contains global GC barriers.",
+		Example: "  pd-ctl gc-state global",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			reader, err := factory(cmd)
+			if err != nil {
+				return errors.Annotate(err, "failed to create PD RPC client")
+			}
+			defer reader.close()
+
+			clusterState, err := reader.getGlobalGCState(cmd.Context())
+			if err != nil {
+				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+					return errors.Annotate(err,
+						"gc-state global requires a PD server that supports "+
+							"GetAllKeyspacesGCStates")
+				}
+				return errors.Annotate(err, "failed to get global GC state")
+			}
+			output, err := newGlobalGCStateOutput(clusterState)
+			if err != nil {
+				return err
+			}
+			return writeGCStateJSON(cmd, output)
+		},
+	}
+}
+
 func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "all",
-		Short: "show all keyspace GC states and global barriers",
-		Long: "Show all active keyspace GC states and local barriers. " +
-			"Cluster-wide global barriers appear once at the top level.",
+		Short: "show combined keyspace and cluster-wide GC state",
+		Long: "Show all active keyspace GC states and local barriers, with " +
+			"cluster-wide global barriers once at the top level. Use " +
+			"gc-state global to inspect only cluster-wide state.",
 		Example: "  pd-ctl gc-state all",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
