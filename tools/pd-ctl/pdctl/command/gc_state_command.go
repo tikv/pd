@@ -15,16 +15,90 @@
 package command
 
 import (
+	"context"
+	"encoding/json"
 	"math"
 	"sort"
 	"strconv"
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
+
+type gcStateReader interface {
+	GetGCState(context.Context, uint32) (gc.GCState, error)
+	GetAllKeyspacesGCStates(context.Context) (gc.ClusterGCStates, error)
+	Close()
+}
+
+type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
+
+type pdGCStateReader struct {
+	client pd.Client
+}
+
+func (r *pdGCStateReader) GetGCState(
+	ctx context.Context,
+	keyspaceID uint32,
+) (gc.GCState, error) {
+	return r.client.GetGCStatesClient(keyspaceID).GetGCState(
+		ctx,
+		gc.ExcludeGCBarriers(false),
+	)
+}
+
+func (r *pdGCStateReader) GetAllKeyspacesGCStates(
+	ctx context.Context,
+) (gc.ClusterGCStates, error) {
+	return r.client.GetGCStatesClient(
+		constant.NullKeyspaceID,
+	).GetAllKeyspacesGCStates(
+		ctx,
+		gc.ExcludeGCBarriers(false),
+		gc.ExcludeGlobalGCBarriers(false),
+	)
+}
+
+func (r *pdGCStateReader) Close() {
+	r.client.Close()
+}
+
+func newPDGCStateReader(cmd *cobra.Command) (gcStateReader, error) {
+	caPath, err := cmd.Flags().GetString("cacert")
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	certPath, err := cmd.Flags().GetString("cert")
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	keyPath, err := cmd.Flags().GetString("key")
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	client, err := pd.NewClientWithContext(
+		cmd.Context(),
+		caller.Component(PDControlCallerID),
+		getEndpoints(cmd),
+		pd.SecurityOption{
+			CAPath:   caPath,
+			CertPath: certPath,
+			KeyPath:  keyPath,
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &pdGCStateReader{client: client}, nil
+}
 
 type gcBarrierOutput struct {
 	BarrierID  string `json:"barrier_id"`
@@ -174,4 +248,111 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 		GCStates:         states,
 		GlobalGCBarriers: newGlobalGCBarrierOutputs(globalBarriers),
 	}, nil
+}
+
+// NewGCStateCommand returns the read-only GC state command.
+func NewGCStateCommand() *cobra.Command {
+	return newGCStateCommand(newPDGCStateReader)
+}
+
+func newGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
+	command := &cobra.Command{
+		Use:   "gc-state",
+		Short: "show keyspace GC state and barriers",
+		Long: "Show effective per-keyspace GC safe points and barriers. " +
+			"Use the all subcommand to include cluster-wide global barriers.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	command.AddCommand(
+		newGCStateKeyspaceCommand(factory),
+		newGCStateAllCommand(factory),
+	)
+	return command
+}
+
+func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "keyspace <keyspace-id>",
+		Short: "show one keyspace's effective GC state",
+		Long: "Show one keyspace's effective GC safe points and local " +
+			"barriers. Use gc-state all to inspect global barriers. " +
+			"The decimal NullKeyspace ID is 4294967295.",
+		Example: "  pd-ctl gc-state keyspace 42\n" +
+			"  pd-ctl gc-state keyspace 4294967295",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keyspaceID, err := parseGCStateKeyspaceID(args[0])
+			if err != nil {
+				return err
+			}
+			reader, err := factory(cmd)
+			if err != nil {
+				return errors.Annotate(err, "failed to create PD RPC client")
+			}
+			defer reader.Close()
+
+			state, err := reader.GetGCState(cmd.Context(), keyspaceID)
+			if err != nil {
+				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+					return errors.Annotate(err,
+						"gc-state requires a PD server that supports GetGCState")
+				}
+				return errors.Annotatef(err,
+					"failed to get GC state for keyspace %d", keyspaceID)
+			}
+			output, err := newKeyspaceGCStateOutput(keyspaceID, state)
+			if err != nil {
+				return err
+			}
+			return writeGCStateJSON(cmd, output)
+		},
+	}
+}
+
+func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
+	return &cobra.Command{
+		Use:   "all",
+		Short: "show all keyspace GC states and global barriers",
+		Long: "Show all active keyspace GC states and local barriers. " +
+			"Cluster-wide global barriers appear once at the top level.",
+		Example: "  pd-ctl gc-state all",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			reader, err := factory(cmd)
+			if err != nil {
+				return errors.Annotate(err, "failed to create PD RPC client")
+			}
+			defer reader.Close()
+
+			clusterState, err := reader.GetAllKeyspacesGCStates(cmd.Context())
+			if err != nil {
+				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+					return errors.Annotate(err,
+						"gc-state all requires a PD server that supports "+
+							"GetAllKeyspacesGCStates")
+				}
+				return errors.Annotate(err, "failed to get all keyspaces GC states")
+			}
+			output, err := newAllGCStatesOutput(clusterState)
+			if err != nil {
+				return err
+			}
+			return writeGCStateJSON(cmd, output)
+		},
+	}
+}
+
+func writeGCStateJSON(cmd *cobra.Command, value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return errors.Annotate(err, "failed to marshal GC state JSON")
+	}
+	data = append(data, '\n')
+	if _, err := cmd.OutOrStdout().Write(data); err != nil {
+		return errors.Annotate(err, "failed to write GC state JSON")
+	}
+	return nil
 }
