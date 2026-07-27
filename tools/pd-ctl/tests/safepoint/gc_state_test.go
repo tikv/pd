@@ -196,14 +196,14 @@ func TestGCState(t *testing.T) {
 	var singleProperties map[string]json.RawMessage
 	re.NoError(json.Unmarshal(output, &singleProperties), string(output))
 	re.NotContains(singleProperties, "global_gc_barriers")
-	var single gcStateCommandSingle
-	re.NoError(json.Unmarshal(output, &single), string(output))
-	re.Equal(keyspaceLevel.Id, single.RequestedKeyspaceID)
-	re.Equal(keyspaceLevel.Id, single.EffectiveKeyspaceID)
-	re.True(single.IsKeyspaceLevelGC)
-	re.Equal(uint64(200), single.TxnSafePoint)
-	re.Equal(uint64(190), single.GCSafePoint)
-	requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+	var keyspaceLevelResponse gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &keyspaceLevelResponse), string(output))
+	re.Equal(keyspaceLevel.Id, keyspaceLevelResponse.RequestedKeyspaceID)
+	re.Equal(keyspaceLevel.Id, keyspaceLevelResponse.EffectiveKeyspaceID)
+	re.True(keyspaceLevelResponse.IsKeyspaceLevelGC)
+	re.Equal(uint64(200), keyspaceLevelResponse.TxnSafePoint)
+	re.Equal(uint64(190), keyspaceLevelResponse.GCSafePoint)
+	requireGCStateCommandBarriers(re, keyspaceLevelResponse.GCBarriers, []expectedGCStateCommandBarrier{
 		{barrierID: "a-local", barrierTS: 210},
 		{barrierID: "z-local", barrierTS: 220, expires: true},
 	})
@@ -212,13 +212,14 @@ func TestGCState(t *testing.T) {
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "4294967295",
 	)
 	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &single), string(output))
-	re.Equal(constant.NullKeyspaceID, single.RequestedKeyspaceID)
-	re.Equal(constant.NullKeyspaceID, single.EffectiveKeyspaceID)
-	re.False(single.IsKeyspaceLevelGC)
-	re.Equal(uint64(100), single.TxnSafePoint)
-	re.Equal(uint64(90), single.GCSafePoint)
-	requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+	var nullKeyspaceResponse gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &nullKeyspaceResponse), string(output))
+	re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.RequestedKeyspaceID)
+	re.Equal(constant.NullKeyspaceID, nullKeyspaceResponse.EffectiveKeyspaceID)
+	re.False(nullKeyspaceResponse.IsKeyspaceLevelGC)
+	re.Equal(uint64(100), nullKeyspaceResponse.TxnSafePoint)
+	re.Equal(uint64(90), nullKeyspaceResponse.GCSafePoint)
+	requireGCStateCommandBarriers(re, nullKeyspaceResponse.GCBarriers, []expectedGCStateCommandBarrier{
 		{barrierID: "a-null", barrierTS: 110},
 		{barrierID: "z-null", barrierTS: 120, expires: true},
 	})
@@ -276,13 +277,14 @@ func TestGCState(t *testing.T) {
 			ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", unifiedKeyspaceIDString,
 		)
 		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &single), string(output))
-		re.Equal(unifiedKeyspaceID, single.RequestedKeyspaceID)
-		re.Equal(constant.NullKeyspaceID, single.EffectiveKeyspaceID)
-		re.False(single.IsKeyspaceLevelGC)
-		re.Equal(uint64(100), single.TxnSafePoint)
-		re.Equal(uint64(90), single.GCSafePoint)
-		requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+		var unifiedKeyspaceResponse gcStateCommandSingle
+		re.NoError(json.Unmarshal(output, &unifiedKeyspaceResponse), string(output))
+		re.Equal(unifiedKeyspaceID, unifiedKeyspaceResponse.RequestedKeyspaceID)
+		re.Equal(constant.NullKeyspaceID, unifiedKeyspaceResponse.EffectiveKeyspaceID)
+		re.False(unifiedKeyspaceResponse.IsKeyspaceLevelGC)
+		re.Equal(uint64(100), unifiedKeyspaceResponse.TxnSafePoint)
+		re.Equal(uint64(90), unifiedKeyspaceResponse.GCSafePoint)
+		requireGCStateCommandBarriers(re, unifiedKeyspaceResponse.GCBarriers, []expectedGCStateCommandBarrier{
 			{barrierID: "a-null", barrierTS: 110},
 			{barrierID: "z-null", barrierTS: 120, expires: true},
 		})
