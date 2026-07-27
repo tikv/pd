@@ -1,0 +1,302 @@
+// Copyright 2026 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package safepoint_test
+
+import (
+	"bytes"
+	"encoding/json"
+	"math"
+	"strconv"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
+	"github.com/tikv/pd/server/config"
+	pdTests "github.com/tikv/pd/tests"
+	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/tests"
+)
+
+type gcStateCommandBarrier struct {
+	BarrierID  string `json:"barrier_id"`
+	BarrierTS  uint64 `json:"barrier_ts"`
+	TTLSeconds int64  `json:"ttl_seconds"`
+}
+
+type gcStateCommandSingle struct {
+	RequestedKeyspaceID uint32                  `json:"requested_keyspace_id"`
+	EffectiveKeyspaceID uint32                  `json:"effective_keyspace_id"`
+	IsKeyspaceLevelGC   bool                    `json:"is_keyspace_level_gc"`
+	TxnSafePoint        uint64                  `json:"txn_safe_point"`
+	GCSafePoint         uint64                  `json:"gc_safe_point"`
+	GCBarriers          []gcStateCommandBarrier `json:"gc_barriers"`
+}
+
+type gcStateCommandState struct {
+	KeyspaceID        uint32                  `json:"keyspace_id"`
+	IsKeyspaceLevelGC bool                    `json:"is_keyspace_level_gc"`
+	TxnSafePoint      uint64                  `json:"txn_safe_point"`
+	GCSafePoint       uint64                  `json:"gc_safe_point"`
+	GCBarriers        []gcStateCommandBarrier `json:"gc_barriers"`
+}
+
+type gcStateCommandAll struct {
+	GCStates         []gcStateCommandState   `json:"gc_states"`
+	GlobalGCBarriers []gcStateCommandBarrier `json:"global_gc_barriers"`
+}
+
+type expectedGCStateCommandBarrier struct {
+	barrierID string
+	barrierTS uint64
+	expires   bool
+}
+
+func requireGCStateCommandBarriers(
+	re *require.Assertions,
+	actual []gcStateCommandBarrier,
+	expected []expectedGCStateCommandBarrier,
+) {
+	re.Len(actual, len(expected))
+	for i, want := range expected {
+		re.Equal(want.barrierID, actual[i].BarrierID)
+		re.Equal(want.barrierTS, actual[i].BarrierTS)
+		if want.expires {
+			re.GreaterOrEqual(actual[i].TTLSeconds, int64(3595))
+			re.LessOrEqual(actual[i].TTLSeconds, int64(3600))
+		} else {
+			re.Equal(int64(math.MaxInt64), actual[i].TTLSeconds)
+		}
+	}
+}
+
+func TestGCState(t *testing.T) {
+	re := require.New(t)
+	ctx := t.Context()
+	cluster, err := pdTests.NewTestCluster(ctx, 1,
+		func(conf *config.Config, _ string) {
+			conf.Keyspace.WaitRegionSplit = false
+		},
+	)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	keyspaceLevel, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+		&keyspace.CreateKeyspaceRequest{
+			Name: "gc_state_ks_level",
+			Config: map[string]string{
+				keyspace.GCManagementType: keyspace.KeyspaceLevelGC,
+			},
+			CreateTime: time.Now().Unix(),
+		},
+	)
+	re.NoError(err)
+
+	var unifiedKeyspaceID uint32
+	if !kerneltype.IsNextGen() {
+		unified, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+			&keyspace.CreateKeyspaceRequest{
+				Name: "gc_state_unified",
+				Config: map[string]string{
+					keyspace.GCManagementType: keyspace.UnifiedGC,
+				},
+				CreateTime: time.Now().Unix(),
+			},
+		)
+		re.NoError(err)
+		unifiedKeyspaceID = unified.Id
+	}
+
+	manager := leaderServer.GetServer().GetGCStateManager()
+	now := time.Now()
+	_, err = manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 100, now)
+	re.NoError(err)
+	_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, 90)
+	re.NoError(err)
+	_, err = manager.SetGCBarrier(
+		constant.NullKeyspaceID,
+		"z-null",
+		120,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+	_, err = manager.SetGCBarrier(
+		constant.NullKeyspaceID,
+		"a-null",
+		110,
+		time.Duration(math.MaxInt64),
+		now,
+	)
+	re.NoError(err)
+
+	_, err = manager.AdvanceTxnSafePoint(keyspaceLevel.Id, 200, now)
+	re.NoError(err)
+	_, _, err = manager.AdvanceGCSafePoint(keyspaceLevel.Id, 190)
+	re.NoError(err)
+	_, err = manager.SetGCBarrier(
+		keyspaceLevel.Id,
+		"z-local",
+		220,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+	_, err = manager.SetGCBarrier(
+		keyspaceLevel.Id,
+		"a-local",
+		210,
+		time.Duration(math.MaxInt64),
+		now,
+	)
+	re.NoError(err)
+
+	_, err = manager.SetGlobalGCBarrier(
+		ctx,
+		"z-global",
+		320,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+	_, err = manager.SetGlobalGCBarrier(
+		ctx,
+		"a-global",
+		310,
+		time.Duration(math.MaxInt64),
+		now,
+	)
+	re.NoError(err)
+
+	pdAddr := cluster.GetConfig().GetClientURL()
+	keyspaceLevelID := strconv.FormatUint(uint64(keyspaceLevel.Id), 10)
+	output, err := tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelID,
+	)
+	re.NoError(err)
+	var singleProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &singleProperties), string(output))
+	re.NotContains(singleProperties, "global_gc_barriers")
+	var single gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &single), string(output))
+	re.Equal(keyspaceLevel.Id, single.RequestedKeyspaceID)
+	re.Equal(keyspaceLevel.Id, single.EffectiveKeyspaceID)
+	re.True(single.IsKeyspaceLevelGC)
+	re.Equal(uint64(200), single.TxnSafePoint)
+	re.Equal(uint64(190), single.GCSafePoint)
+	requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-local", barrierTS: 210},
+		{barrierID: "z-local", barrierTS: 220, expires: true},
+	})
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "4294967295",
+	)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &single), string(output))
+	re.Equal(constant.NullKeyspaceID, single.RequestedKeyspaceID)
+	re.Equal(constant.NullKeyspaceID, single.EffectiveKeyspaceID)
+	re.False(single.IsKeyspaceLevelGC)
+	re.Equal(uint64(100), single.TxnSafePoint)
+	re.Equal(uint64(90), single.GCSafePoint)
+	requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-null", barrierTS: 110},
+		{barrierID: "z-null", barrierTS: 120, expires: true},
+	})
+
+	_, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "16770000",
+	)
+	re.ErrorContains(err, "failed to get GC state for keyspace 16770000")
+
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "all")
+	re.NoError(err)
+	re.Equal(1, bytes.Count(output, []byte(`"global_gc_barriers"`)), string(output))
+	var all gcStateCommandAll
+	re.NoError(json.Unmarshal(output, &all), string(output))
+	for i := 1; i < len(all.GCStates); i++ {
+		re.Less(all.GCStates[i-1].KeyspaceID, all.GCStates[i].KeyspaceID)
+	}
+	statesByID := make(map[uint32]gcStateCommandState, len(all.GCStates))
+	for _, state := range all.GCStates {
+		re.NotNil(state.GCBarriers)
+		statesByID[state.KeyspaceID] = state
+	}
+
+	nullState, ok := statesByID[constant.NullKeyspaceID]
+	re.True(ok)
+	re.False(nullState.IsKeyspaceLevelGC)
+	re.Equal(uint64(100), nullState.TxnSafePoint)
+	re.Equal(uint64(90), nullState.GCSafePoint)
+	requireGCStateCommandBarriers(re, nullState.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-null", barrierTS: 110},
+		{barrierID: "z-null", barrierTS: 120, expires: true},
+	})
+
+	keyspaceLevelState, ok := statesByID[keyspaceLevel.Id]
+	re.True(ok)
+	re.True(keyspaceLevelState.IsKeyspaceLevelGC)
+	re.Equal(uint64(200), keyspaceLevelState.TxnSafePoint)
+	re.Equal(uint64(190), keyspaceLevelState.GCSafePoint)
+	requireGCStateCommandBarriers(re, keyspaceLevelState.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-local", barrierTS: 210},
+		{barrierID: "z-local", barrierTS: 220, expires: true},
+	})
+	requireGCStateCommandBarriers(re, all.GlobalGCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-global", barrierTS: 310},
+		{barrierID: "z-global", barrierTS: 320, expires: true},
+	})
+
+	if kerneltype.IsNextGen() {
+		systemState, ok := statesByID[constant.SystemKeyspaceID]
+		re.True(ok)
+		re.True(systemState.IsKeyspaceLevelGC)
+	} else {
+		unifiedKeyspaceIDString := strconv.FormatUint(uint64(unifiedKeyspaceID), 10)
+		output, err = tests.ExecuteCommand(
+			ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", unifiedKeyspaceIDString,
+		)
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &single), string(output))
+		re.Equal(unifiedKeyspaceID, single.RequestedKeyspaceID)
+		re.Equal(constant.NullKeyspaceID, single.EffectiveKeyspaceID)
+		re.False(single.IsKeyspaceLevelGC)
+		re.Equal(uint64(100), single.TxnSafePoint)
+		re.Equal(uint64(90), single.GCSafePoint)
+		requireGCStateCommandBarriers(re, single.GCBarriers, []expectedGCStateCommandBarrier{
+			{barrierID: "a-null", barrierTS: 110},
+			{barrierID: "z-null", barrierTS: 120, expires: true},
+		})
+
+		unifiedState, ok := statesByID[unifiedKeyspaceID]
+		re.True(ok)
+		re.False(unifiedState.IsKeyspaceLevelGC)
+		re.Zero(unifiedState.TxnSafePoint)
+		re.Zero(unifiedState.GCSafePoint)
+		re.NotNil(unifiedState.GCBarriers)
+		re.Empty(unifiedState.GCBarriers)
+	}
+
+	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", pdAddr, "service-gc-safepoint")
+	re.NoError(err)
+	re.True(json.Valid(output), string(output))
+}
