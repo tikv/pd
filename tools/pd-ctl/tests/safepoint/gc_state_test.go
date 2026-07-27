@@ -61,6 +61,10 @@ type gcStateCommandAll struct {
 	GlobalGCBarriers []gcStateCommandBarrier `json:"global_gc_barriers"`
 }
 
+type gcStateCommandGlobal struct {
+	GlobalGCBarriers []gcStateCommandBarrier `json:"global_gc_barriers"`
+}
+
 type expectedGCStateCommandBarrier struct {
 	barrierID string
 	barrierTS uint64
@@ -174,7 +178,7 @@ func TestGCState(t *testing.T) {
 		ctx,
 		"z-global",
 		320,
-		time.Hour,
+		time.Duration(math.MaxInt64),
 		now,
 	)
 	re.NoError(err)
@@ -264,8 +268,29 @@ func TestGCState(t *testing.T) {
 	})
 	requireGCStateCommandBarriers(re, all.GlobalGCBarriers, []expectedGCStateCommandBarrier{
 		{barrierID: "a-global", barrierTS: 310},
-		{barrierID: "z-global", barrierTS: 320, expires: true},
+		{barrierID: "z-global", barrierTS: 320},
 	})
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(),
+		"-u",
+		pdAddr,
+		"gc-state",
+		"global",
+	)
+	re.NoError(err)
+	var globalProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &globalProperties), string(output))
+	re.Len(globalProperties, 1)
+	re.Contains(globalProperties, "global_gc_barriers")
+	re.NotContains(globalProperties, "gc_states")
+	re.NotContains(globalProperties, "txn_safe_point")
+	re.NotContains(globalProperties, "gc_safe_point")
+
+	var global gcStateCommandGlobal
+	re.NoError(json.Unmarshal(output, &global), string(output))
+	re.NotNil(global.GlobalGCBarriers)
+	re.Equal(all.GlobalGCBarriers, global.GlobalGCBarriers)
 
 	if kerneltype.IsNextGen() {
 		systemState, ok := statesByID[constant.SystemKeyspaceID]
