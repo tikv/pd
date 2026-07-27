@@ -388,7 +388,7 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 	})
 }
 
-// The startup/1000000 benchmark has a 5-second readiness target. It includes
+// The startup/1000000 benchmark has a 3-second readiness target. It includes
 // in-memory rule construction and index building, but excludes storage paging,
 // etcd latency, and rule delivery.
 func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
