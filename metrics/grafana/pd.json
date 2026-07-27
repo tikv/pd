@@ -14202,13 +14202,6 @@
               "intervalFactor": 2,
               "legendFormat": "capacity-{{instance}}",
               "refId": "B"
-            },
-            {
-              "expr": "pd_region_syncer_history_buffer_max_capacity_records{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "max-capacity-{{instance}}",
-              "refId": "C"
             }
           ],
           "thresholds": [],
@@ -14287,18 +14280,11 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(increase(pd_region_syncer_history_buffer_resize_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (direction)",
-              "format": "time_series",
-              "intervalFactor": 2,
-              "legendFormat": "resize-{{direction}}",
-              "refId": "A"
-            },
-            {
               "expr": "sum(increase(pd_region_syncer_history_buffer_miss_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (phase)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "miss-{{phase}}",
-              "refId": "B"
+              "refId": "A"
             }
           ],
           "thresholds": [],

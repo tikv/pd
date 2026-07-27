@@ -36,9 +36,6 @@ const (
 	fullSyncFailureStreamClosed       = "stream_closed"
 	fullSyncFailureUnknown            = "unknown"
 
-	historyBufferResizeGrow   = "grow"
-	historyBufferResizeShrink = "shrink"
-
 	historyBufferMissHistorySync     = "history_sync"
 	historyBufferMissLiveDrain       = "live_drain"
 	historyBufferMissFullSyncCatchUp = "full_sync_catch_up"
@@ -100,22 +97,6 @@ var (
 			Help:      "Current number of records retained in the region syncer history buffer.",
 		})
 
-	regionSyncerHistoryBufferMaxCapacityRecordsGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "region_syncer",
-			Name:      "history_buffer_max_capacity_records",
-			Help:      "Maximum capacity in records allowed for the region syncer history buffer.",
-		})
-
-	regionSyncerHistoryBufferResizeCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "region_syncer",
-			Name:      "history_buffer_resize_total",
-			Help:      "Counter of region syncer history buffer resize events.",
-		}, []string{"direction"})
-
 	regionSyncerHistoryBufferMissCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -142,11 +123,10 @@ var (
 )
 
 var (
-	regionSyncerFullSyncCounters            map[fullSyncMetricLabels]prometheus.Counter
-	regionSyncerFullSyncLastDurationGauges  map[string]prometheus.Gauge
-	regionSyncerHistoryBufferResizeCounters map[string]prometheus.Counter
-	regionSyncerHistoryBufferMissCounters   map[string]prometheus.Counter
-	regionSyncerStreamEventCounters         map[string]prometheus.Counter
+	regionSyncerFullSyncCounters           map[fullSyncMetricLabels]prometheus.Counter
+	regionSyncerFullSyncLastDurationGauges map[string]prometheus.Gauge
+	regionSyncerHistoryBufferMissCounters  map[string]prometheus.Counter
+	regionSyncerStreamEventCounters        map[string]prometheus.Counter
 )
 
 type fullSyncMetricLabels struct {
@@ -162,8 +142,6 @@ func init() {
 	prometheus.MustRegister(regionSyncerFullSyncLastDurationGauge)
 	prometheus.MustRegister(regionSyncerHistoryBufferCapacityRecordsGauge)
 	prometheus.MustRegister(regionSyncerHistoryBufferLengthRecordsGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferMaxCapacityRecordsGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferResizeCounter)
 	prometheus.MustRegister(regionSyncerHistoryBufferMissCounter)
 	prometheus.MustRegister(regionSyncerDownstreamLagRecordsGauge)
 	prometheus.MustRegister(regionSyncerStreamEventsCounter)
@@ -199,10 +177,6 @@ func initRegionSyncerMetrics() {
 	regionSyncerFullSyncLastDurationGauges = map[string]prometheus.Gauge{
 		fullSyncResultSuccess: regionSyncerFullSyncLastDurationGauge.WithLabelValues(fullSyncResultSuccess),
 		fullSyncResultFailure: regionSyncerFullSyncLastDurationGauge.WithLabelValues(fullSyncResultFailure),
-	}
-	regionSyncerHistoryBufferResizeCounters = map[string]prometheus.Counter{
-		historyBufferResizeGrow:   regionSyncerHistoryBufferResizeCounter.WithLabelValues(historyBufferResizeGrow),
-		historyBufferResizeShrink: regionSyncerHistoryBufferResizeCounter.WithLabelValues(historyBufferResizeShrink),
 	}
 	regionSyncerHistoryBufferMissCounters = map[string]prometheus.Counter{
 		historyBufferMissHistorySync:     regionSyncerHistoryBufferMissCounter.WithLabelValues(historyBufferMissHistorySync),
@@ -256,18 +230,13 @@ func observeFullSyncMetrics(result, trigger, failureReason string, duration time
 	regionSyncerFullSyncLastDurationGauges[result].Set(duration.Seconds())
 }
 
-func observeHistoryBufferMetrics(length, capacity, maxCapacity int) {
+func observeHistoryBufferMetrics(length, capacity int) {
 	observeHistoryBufferLengthMetrics(length)
 	regionSyncerHistoryBufferCapacityRecordsGauge.Set(float64(capacity))
-	regionSyncerHistoryBufferMaxCapacityRecordsGauge.Set(float64(maxCapacity))
 }
 
 func observeHistoryBufferLengthMetrics(length int) {
 	regionSyncerHistoryBufferLengthRecordsGauge.Set(float64(length))
-}
-
-func incHistoryBufferResizeMetrics(direction string) {
-	regionSyncerHistoryBufferResizeCounters[direction].Inc()
 }
 
 func incHistoryBufferMissMetrics(phase string) {

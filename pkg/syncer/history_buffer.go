@@ -379,7 +379,6 @@ func (h *historyBuffer) growForWindowLocked(window uint64) {
 }
 
 func (h *historyBuffer) resizeLocked(newCapacity int) {
-	oldCapacity := h.capacity()
 	newCapacity = normalizeHistoryBufferCapacity(newCapacity, h.capacityUnit)
 	if newCapacity < h.baseCapacity {
 		newCapacity = h.baseCapacity
@@ -403,11 +402,6 @@ func (h *historyBuffer) resizeLocked(newCapacity int) {
 	h.size = newCapacity + 1
 	h.head = 0
 	h.tail = keep % h.size
-	if newCapacity > oldCapacity {
-		incHistoryBufferResizeMetrics(historyBufferResizeGrow)
-	} else {
-		incHistoryBufferResizeMetrics(historyBufferResizeShrink)
-	}
 	h.observeMetricsLocked()
 }
 
@@ -420,5 +414,5 @@ func (h *historyBuffer) getLocked(index uint64) *core.RegionInfo {
 }
 
 func (h *historyBuffer) observeMetricsLocked() {
-	observeHistoryBufferMetrics(h.len(), h.capacity(), h.maxCapacity)
+	observeHistoryBufferMetrics(h.len(), h.capacity())
 }
