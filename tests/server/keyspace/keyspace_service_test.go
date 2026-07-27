@@ -31,9 +31,16 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 		GrpcServer: &server.GrpcServer{Server: suite.server.GetServer()},
 	}
 	ctx := context.Background()
+	const (
+		keyspaceName     = "grpc_load_by_id"
+		encryptionConfig = "test-encryption-config"
+	)
 
 	created, err := suite.manager.CreateKeyspace(&keyspacepkg.CreateKeyspaceRequest{
-		Name: "grpc_load_by_id",
+		Name: keyspaceName,
+		Config: map[string]string{
+			"encryption": encryptionConfig,
+		},
 	})
 	re.NoError(err)
 
@@ -51,12 +58,26 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
 
-	re.False(suite.manager.CheckKeyspaceRegionBound(created))
+	disabled, err := suite.manager.UpdateKeyspaceStateByID(
+		created.GetId(), keyspacepb.KeyspaceState_DISABLED, 1,
+	)
+	re.NoError(err)
+	re.False(suite.manager.CheckKeyspaceRegionBound(disabled))
 	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
 		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     created.GetId(),
+		Id:     disabled.GetId(),
 	})
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
-	re.Equal(created, resp.GetKeyspace())
+	re.Equal(disabled, resp.GetKeyspace())
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, resp.GetKeyspace().GetState())
+	re.Equal(encryptionConfig, resp.GetKeyspace().GetConfig()["encryption"])
+
+	resp, err = service.LoadKeyspace(ctx, &keyspacepb.LoadKeyspaceRequest{
+		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
+		Name:   keyspaceName,
+	})
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
+	re.Nil(resp.GetKeyspace())
 }
