@@ -466,15 +466,26 @@ func (s *memberTestPDServer) GetMembers(context.Context, *pdpb.GetMembersRequest
 	return s.getMembers()
 }
 
-func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
+func startMemberTestPDServer(t *testing.T, testServer *memberTestPDServer) *bufconn.Listener {
+	t.Helper()
+
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
-	testServer := &memberTestPDServer{}
 	pdpb.RegisterPDServer(server, testServer)
+	serveErr := make(chan error, 1)
 	go func() {
-		require.NoError(t, server.Serve(listener))
+		serveErr <- server.Serve(listener)
 	}()
-	t.Cleanup(server.Stop)
+	t.Cleanup(func() {
+		server.Stop()
+		require.NoError(t, <-serveErr)
+	})
+	return listener
+}
+
+func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
+	testServer := &memberTestPDServer{}
+	listener := startMemberTestPDServer(t, testServer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -548,14 +559,8 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 }
 
 func TestUpdateMemberClearsUnobservedFailureEpisodesAfterRecovery(t *testing.T) {
-	listener := bufconn.Listen(1024 * 1024)
-	server := grpc.NewServer()
 	testServer := &memberTestPDServer{}
-	pdpb.RegisterPDServer(server, testServer)
-	go func() {
-		require.NoError(t, server.Serve(listener))
-	}()
-	t.Cleanup(server.Stop)
+	listener := startMemberTestPDServer(t, testServer)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -676,7 +681,6 @@ func TestUpdateMemberLoopSuppressesScheduledRefreshDuringTransportFailure(t *tes
 
 	client.ScheduleCheckMemberChanged()
 	require.Eventually(t, func() bool { return getMembersCalls.Load() >= 12 }, 2*time.Second, 10*time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
 	callsAfterInitialBatch := getMembersCalls.Load()
 	require.GreaterOrEqual(t, callsAfterInitialBatch, int32(12))
 

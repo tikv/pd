@@ -104,6 +104,7 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 	testCases := []struct {
 		name        string
 		connections []memberConnection
+		currentURLs []string
 		wait        bool
 	}{
 		{
@@ -126,6 +127,7 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 		{
 			name:        "url replacement restores normal behavior",
 			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
+			currentURLs: []string{"url-0", "replacement-url"},
 		},
 	}
 
@@ -142,9 +144,9 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 				initialURLs,
 				observedMemberConnections(repeatedConnectivityState(connectivity.TransientFailure, len(testCase.connections))...),
 			))
-			currentURLs := initialURLs
-			if testCase.name == "url replacement restores normal behavior" {
-				currentURLs = []string{"url-0", "replacement-url"}
+			currentURLs := testCase.currentURLs
+			if currentURLs == nil {
+				currentURLs = initialURLs
 			}
 			wait := controller.shouldWait(currentURLs, testCase.connections)
 			require.Equal(t, testCase.wait, wait)
