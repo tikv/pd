@@ -776,9 +776,14 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	})
 
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Microservice.EnableTSODynamicSwitching = false
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -787,6 +792,11 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	pdServer := tc.GetServer(tc.WaitLeader())
 	re.NotNil(pdServer)
 	re.NoError(pdServer.BootstrapCluster())
+	const userKeyspaceName = "mode_switch_user_ks"
+	_, err = pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: userKeyspaceName,
+	})
+	re.NoError(err)
 
 	const switchRounds = 2
 	for range switchRounds {
@@ -795,11 +805,13 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 		re.NoError(err)
 		waitTSOServiceReady(re, tsoCluster)
 		checkMicroserviceTSOAvailable(ctx, re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
 		tsoCluster.Destroy()
 
 		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, nil)
 		checkPDTSOAvailable(ctx, re, pdServer)
-		waitMicroserviceMetadataCleaned(re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
+		waitDefaultKeyspaceGroupCleaned(re, pdServer)
 
 		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
 	}
@@ -810,6 +822,7 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	defer tsoCluster.Destroy()
 	waitTSOServiceReady(re, tsoCluster)
 	checkMicroserviceTSOAvailable(ctx, re, pdServer)
+	checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
 }
 
 func restartPDForServiceMode(
@@ -872,29 +885,30 @@ func checkMicroserviceTSOAvailable(ctx context.Context, re *require.Assertions, 
 	checkPDTSOAvailable(ctx, re, pdServer)
 }
 
-func waitMicroserviceMetadataCleaned(re *require.Assertions, pdServer *tests.TestServer) {
+func checkKeyspaceTSOAvailable(
+	ctx context.Context,
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	keyspaceName string,
+) {
+	cli := utils.SetupClientWithAPIContext(
+		ctx,
+		re,
+		pd.NewAPIContextV2(keyspaceName),
+		[]string{pdServer.GetAddr()},
+	)
+	defer cli.Close()
+	physical, logical, err := cli.GetTS(ctx)
+	re.NoError(err)
+	re.NotZero(tsoutil.ComposeTS(physical, logical))
+}
+
+func waitDefaultKeyspaceGroupCleaned(re *require.Assertions, pdServer *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
-		keyspaceGroupResp, err := etcdutil.EtcdKVGet(pdServer.GetEtcdClient(), keypath.KeyspaceGroupIDPrefix(), clientv3.WithPrefix())
-		if err != nil || len(keyspaceGroupResp.Kvs) != 0 {
-			return false
-		}
-		microserviceResp, err := etcdutil.EtcdKVGet(
+		resp, err := etcdutil.EtcdKVGet(
 			pdServer.GetEtcdClient(),
-			fmt.Sprintf("%s/%d/", mcs.MicroserviceRootPath, keypath.ClusterID()),
-			clientv3.WithPrefix())
-		if err != nil || len(microserviceResp.Kvs) != 0 {
-			return false
-		}
-		keyspaces, err := pdServer.GetKeyspaceManager().LoadRangeKeyspace(constant.StartKeyspaceID, 0)
-		if err != nil {
-			return false
-		}
-		for _, meta := range keyspaces {
-			if _, ok := meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey]; ok {
-				return false
-			}
-		}
-		return true
+			keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
+		return err == nil && len(resp.Kvs) == 0
 	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 

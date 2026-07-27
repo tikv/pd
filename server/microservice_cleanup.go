@@ -17,35 +17,20 @@ package server
 import (
 	"context"
 	goerrors "errors"
-	"fmt"
-	"strconv"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-const (
-	microserviceMetadataCleanupRetryInterval = 5 * time.Second
-	// Each loaded key adds one comparison and each updated key adds one write to
-	// the etcd transaction. Use half of the operation limit so a full batch stays
-	// within the transaction limit.
-	microserviceMetadataCleanupBatchSize = etcdutil.MaxEtcdTxnOps / 2
-)
+const microserviceMetadataCleanupRetryInterval = 5 * time.Second
 
 var errMicroserviceMetadataCleanupRejected = errors.New("microservice metadata cleanup rejected")
 
@@ -91,70 +76,31 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(ctx context.Context) error 
 	if s.IsKeyspaceGroupEnabled() {
 		return nil
 	}
-	start := time.Now()
 
-	needsCleanup, err := s.validateMicroserviceMetadataCleanup(ctx)
+	// The persisted keyspace group contains the stale TSO member addresses that
+	// block a later switch back to API service mode. Keyspace assignment markers
+	// and lease-owned microservice keys are intentionally left untouched.
+	needsCleanup, err := s.validateMicroserviceMetadataCleanup()
+	if err != nil || !needsCleanup {
+		return err
+	}
+	deleted, err := s.deleteDefaultTSOKeyspaceGroup(ctx)
 	if err != nil {
 		return err
 	}
-	if !needsCleanup {
-		return nil
-	}
-	cleanedKeyspaces, err := s.cleanupDefaultTSOKeyspaceGroupConfig(ctx)
-	if err != nil {
-		return err
-	}
-	deletedDefaultGroup, err := s.deleteDefaultTSOKeyspaceGroup(ctx)
-	if err != nil {
-		return err
-	}
-	failpoint.InjectCall("beforeDeleteMicroserviceEtcdKeys")
-	if _, err := s.checkMicroserviceEtcdKeysNotLeased(ctx); err != nil {
-		return err
-	}
-	deletedMicroserviceKeys, err := s.deleteMicroserviceEtcdKeys(ctx)
-	if err != nil {
-		return err
-	}
-
-	if deletedDefaultGroup || cleanedKeyspaces > 0 || deletedMicroserviceKeys > 0 {
+	if deleted {
 		log.Info("cleaned up microservice metadata in PD mode",
-			zap.Bool("deleted-default-keyspace-group", deletedDefaultGroup),
-			zap.Int("cleaned-keyspace-configs", cleanedKeyspaces),
-			zap.Int64("deleted-microservice-keys", deletedMicroserviceKeys),
-			zap.Duration("cost", time.Since(start)))
+			zap.Bool("deleted-default-keyspace-group", true))
 	}
 	return nil
 }
 
-func (s *Server) checkMicroserviceEtcdKeysNotLeased(ctx context.Context) (bool, error) {
-	if s.client == nil {
-		return false, nil
-	}
-	getCtx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
-	defer cancel()
-	resp, err := s.client.Get(getCtx, microserviceEtcdPrefix(), clientv3.WithPrefix(), clientv3.WithKeysOnly())
-	if err != nil {
-		return false, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
-	}
-	for _, item := range resp.Kvs {
-		if item.Lease != 0 {
-			return true, errors.Errorf("microservice key %q is still leased", string(item.Key))
-		}
-	}
-	return len(resp.Kvs) > 0, nil
-}
-
-func (s *Server) validateMicroserviceMetadataCleanup(ctx context.Context) (bool, error) {
-	microserviceKeysExist, err := s.checkMicroserviceEtcdKeysNotLeased(ctx)
-	if err != nil {
-		return false, err
-	}
+func (s *Server) validateMicroserviceMetadataCleanup() (bool, error) {
 	groups, err := s.storage.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
 		return false, err
 	}
-	needsCleanup := microserviceKeysExist
+	needsCleanup := false
 	for _, group := range groups {
 		if group == nil {
 			continue
@@ -170,94 +116,7 @@ func (s *Server) validateMicroserviceMetadataCleanup(ctx context.Context) (bool,
 			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
 		}
 	}
-	if !needsCleanup {
-		return false, nil
-	}
-	err = s.scanKeyspaceMetadata(ctx, etcdutil.MaxEtcdTxnOps, func(_ kv.Txn, metas []*keyspacepb.KeyspaceMeta) error {
-		for _, meta := range metas {
-			if meta == nil {
-				continue
-			}
-			if err := validateDefaultTSOKeyspaceGroupAssignment(meta.GetId(), meta.GetConfig()); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return true, err
-}
-
-func (s *Server) cleanupDefaultTSOKeyspaceGroupConfig(ctx context.Context) (int, error) {
-	cleaned := 0
-	err := s.scanKeyspaceMetadata(ctx, microserviceMetadataCleanupBatchSize, func(txn kv.Txn, metas []*keyspacepb.KeyspaceMeta) error {
-		for _, meta := range metas {
-			if meta == nil || meta.Config == nil {
-				continue
-			}
-			if _, ok := meta.Config[keyspace.TSOKeyspaceGroupIDKey]; !ok {
-				continue
-			}
-			if err := validateDefaultTSOKeyspaceGroupAssignment(meta.GetId(), meta.GetConfig()); err != nil {
-				return err
-			}
-			delete(meta.Config, keyspace.TSOKeyspaceGroupIDKey)
-			if err := s.storage.SaveKeyspaceMeta(txn, meta); err != nil {
-				return err
-			}
-			cleaned++
-		}
-		return nil
-	})
-	return cleaned, err
-}
-
-func (s *Server) scanKeyspaceMetadata(
-	ctx context.Context,
-	batchSize int,
-	process func(kv.Txn, []*keyspacepb.KeyspaceMeta) error,
-) error {
-	startID := constant.StartKeyspaceID
-	for {
-		var metas []*keyspacepb.KeyspaceMeta
-		err := s.storage.RunInTxn(ctx, func(txn kv.Txn) error {
-			var err error
-			metas, err = s.storage.LoadRangeKeyspace(txn, startID, batchSize)
-			if err != nil {
-				return err
-			}
-			return process(txn, metas)
-		})
-		if err != nil {
-			return err
-		}
-		if len(metas) < batchSize {
-			return nil
-		}
-		lastMeta := metas[len(metas)-1]
-		if lastMeta == nil {
-			return nil
-		}
-		lastID := lastMeta.GetId()
-		if lastID == ^uint32(0) {
-			return nil
-		}
-		startID = lastID + 1
-	}
-}
-
-func validateDefaultTSOKeyspaceGroupAssignment(keyspaceID uint32, config map[string]string) error {
-	groupIDText, ok := config[keyspace.TSOKeyspaceGroupIDKey]
-	if !ok {
-		return nil
-	}
-	groupID, err := strconv.ParseUint(groupIDText, 10, 32)
-	if err != nil {
-		return rejectMicroserviceMetadataCleanup("keyspace %d has invalid TSO keyspace group ID %q", keyspaceID, groupIDText)
-	}
-	if groupID != uint64(constant.DefaultKeyspaceGroupID) {
-		return rejectMicroserviceMetadataCleanup("keyspace %d is assigned to non-default TSO keyspace group %d", keyspaceID, groupID)
-	}
-	return nil
+	return needsCleanup, nil
 }
 
 func (s *Server) deleteDefaultTSOKeyspaceGroup(ctx context.Context) (bool, error) {
@@ -280,21 +139,4 @@ func (s *Server) deleteDefaultTSOKeyspaceGroup(ctx context.Context) (bool, error
 		return nil
 	})
 	return deleted, err
-}
-
-func (s *Server) deleteMicroserviceEtcdKeys(ctx context.Context) (int64, error) {
-	if s.client == nil {
-		return 0, nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
-	defer cancel()
-	resp, err := s.client.Delete(ctx, microserviceEtcdPrefix(), clientv3.WithPrefix())
-	if err != nil {
-		return 0, errs.ErrEtcdKVDelete.Wrap(err).GenWithStackByCause()
-	}
-	return resp.Deleted, nil
-}
-
-func microserviceEtcdPrefix() string {
-	return fmt.Sprintf("%s/%d/", mcs.MicroserviceRootPath, keypath.ClusterID())
 }
