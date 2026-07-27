@@ -88,6 +88,18 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 
 	resp = doRawRequest(handler, http.MethodPost, "/resource-manager/api/v1/config/group", []byte("{invalid"))
 	re.Equal(http.StatusBadRequest, resp.Code)
+
+	invalidKeyspaceIDs := [][]byte{
+		[]byte(`{"name":"test_group","keyspace_id":{"Keyspace":{"value":42}}}`),
+		[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+	}
+	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			resp = doRawRequest(handler, method, "/resource-manager/api/v1/config/group", invalidKeyspaceID)
+			re.Equal(http.StatusBadRequest, resp.Code)
+			re.Contains(resp.Body.String(), "keyspace_id must contain a legacy value")
+		}
+	}
 }
 
 func TestConfigServiceControllerAllOrNothing(t *testing.T) {

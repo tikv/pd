@@ -16,6 +16,7 @@ package metadataapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -151,6 +152,10 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateResourceGroupKeyspaceID(&group); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.configStore.AddResourceGroup(&group); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
@@ -165,11 +170,26 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateResourceGroupKeyspaceID(&group); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.configStore.ModifyResourceGroup(&group); err != nil {
 		s.respondStoreWriteError(c, err)
 		return
 	}
 	c.String(http.StatusOK, "Success!")
+}
+
+func validateResourceGroupKeyspaceID(group *rmpb.ResourceGroup) error {
+	keyspaceID := group.GetKeyspaceId()
+	if keyspaceID == nil {
+		return nil
+	}
+	if _, ok := keyspaceID.GetKeyspace().(*rmpb.KeyspaceIDValue_Value); !ok {
+		return errors.New("keyspace_id must contain a legacy value")
+	}
+	return nil
 }
 
 // GetResourceGroup handles GET /config/group/:name.
