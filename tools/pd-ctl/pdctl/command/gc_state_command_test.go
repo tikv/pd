@@ -15,16 +15,54 @@
 package command
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
+
+type fakeGCStateReader struct {
+	state         gc.GCState
+	clusterState  gc.ClusterGCStates
+	err           error
+	requestedID   uint32
+	getStateCalls int
+	getAllCalls   int
+	closed        bool
+}
+
+func (r *fakeGCStateReader) GetGCState(
+	_ context.Context,
+	keyspaceID uint32,
+) (gc.GCState, error) {
+	r.requestedID = keyspaceID
+	r.getStateCalls++
+	return r.state, r.err
+}
+
+func (r *fakeGCStateReader) GetAllKeyspacesGCStates(
+	_ context.Context,
+) (gc.ClusterGCStates, error) {
+	r.getAllCalls++
+	return r.clusterState, r.err
+}
+
+func (r *fakeGCStateReader) Close() {
+	r.closed = true
+}
 
 func TestParseGCStateKeyspaceID(t *testing.T) {
 	for _, testCase := range []struct {
@@ -151,4 +189,197 @@ func TestGCStateOutputRejectsExcludedBarriers(t *testing.T) {
 	clusterState := gc.NewClusterGCStatesWithoutGlobalGCBarriers(map[uint32]gc.GCState{})
 	_, err = newAllGCStatesOutput(clusterState)
 	require.ErrorContains(t, err, "failed to read global GC barriers")
+}
+
+func TestGCStateKeyspaceCommand(t *testing.T) {
+	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+	state.IsKeyspaceLevelGC = true
+	reader := &fakeGCStateReader{state: state}
+	factoryCalls := 0
+	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+		factoryCalls++
+		return reader, nil
+	})
+	output := new(bytes.Buffer)
+	cmd.SetOut(output)
+	cmd.SetErr(output)
+	cmd.SetArgs([]string{"keyspace", "42"})
+
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, 1, factoryCalls)
+	require.Equal(t, 1, reader.getStateCalls)
+	require.Equal(t, uint32(42), reader.requestedID)
+	require.True(t, reader.closed)
+
+	var decoded map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
+	require.Contains(t, decoded, "requested_keyspace_id")
+	require.Contains(t, decoded, "effective_keyspace_id")
+	require.Contains(t, decoded, "gc_barriers")
+	require.NotContains(t, decoded, "global_gc_barriers")
+}
+
+func TestGCStateAllCommand(t *testing.T) {
+	reader := &fakeGCStateReader{
+		clusterState: gc.NewClusterGCStatesWithGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+			nil,
+		),
+	}
+	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+		return reader, nil
+	})
+	output := new(bytes.Buffer)
+	cmd.SetOut(output)
+	cmd.SetErr(output)
+	cmd.SetArgs([]string{"all"})
+
+	require.NoError(t, cmd.Execute())
+	require.Equal(t, 1, reader.getAllCalls)
+	require.True(t, reader.closed)
+	require.Contains(t, output.String(), `"gc_states": []`)
+	require.Contains(t, output.String(), `"global_gc_barriers": []`)
+}
+
+func TestGCStateCommandValidatesBeforeCreatingClient(t *testing.T) {
+	for _, args := range [][]string{
+		{},
+		{"keyspace"},
+		{"keyspace", "42", "extra"},
+		{"keyspace", ""},
+		{"keyspace", "-1"},
+		{"keyspace", "tenant-a"},
+		{"keyspace", "0xffffff"},
+		{"keyspace", "16777216"},
+		{"keyspace", "4294967294"},
+		{"keyspace", "4294967296"},
+		{"all", "extra"},
+	} {
+		t.Run(strings.Join(args, "-"), func(t *testing.T) {
+			factoryCalled := false
+			cmd := newGCStateCommand(
+				func(*cobra.Command) (gcStateReader, error) {
+					factoryCalled = true
+					return nil, errors.New("factory must not run")
+				},
+			)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(args)
+			err := cmd.Execute()
+			if len(args) == 0 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+			require.False(t, factoryCalled)
+		})
+	}
+}
+
+func TestGCStateCommandErrors(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		args        []string
+		factory     gcStateReaderFactory
+		wantMessage string
+	}{
+		{
+			name: "client-creation",
+			args: []string{"keyspace", "42"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return nil, errors.New("dial rejected")
+			},
+			wantMessage: "failed to create PD RPC client",
+		},
+		{
+			name: "single-rpc-error",
+			args: []string{"keyspace", "42"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{err: errors.New("rpc rejected")}, nil
+			},
+			wantMessage: "failed to get GC state for keyspace 42",
+		},
+		{
+			name: "single-unimplemented",
+			args: []string{"keyspace", "42"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					err: status.Error(codes.Unimplemented, "method unavailable"),
+				}, nil
+			},
+			wantMessage: "gc-state requires a PD server that supports GetGCState",
+		},
+		{
+			name: "single-missing-barriers",
+			args: []string{"keyspace", "42"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					state: gc.NewGCStateWithoutGCBarriers(42, 100, 90),
+				}, nil
+			},
+			wantMessage: "failed to read GC barriers for keyspace 42",
+		},
+		{
+			name: "all-rpc-error",
+			args: []string{"all"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{err: errors.New("rpc rejected")}, nil
+			},
+			wantMessage: "failed to get all keyspaces GC states",
+		},
+		{
+			name: "all-unimplemented",
+			args: []string{"all"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					err: status.Error(codes.Unimplemented, "method unavailable"),
+				}, nil
+			},
+			wantMessage: "gc-state all requires a PD server that supports " +
+				"GetAllKeyspacesGCStates",
+		},
+		{
+			name: "all-missing-global-barriers",
+			args: []string{"all"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					clusterState: gc.NewClusterGCStatesWithoutGlobalGCBarriers(
+						map[uint32]gc.GCState{},
+					),
+				}, nil
+			},
+			wantMessage: "failed to read global GC barriers",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cmd := newGCStateCommand(testCase.factory)
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(testCase.args)
+			err := cmd.Execute()
+			require.ErrorContains(t, err, testCase.wantMessage)
+		})
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, errors.New("output rejected")
+}
+
+func TestGCStateCommandReturnsOutputError(t *testing.T) {
+	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+	reader := &fakeGCStateReader{state: state}
+	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+		return reader, nil
+	})
+	cmd.SetOut(failingWriter{})
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"keyspace", "42"})
+
+	err := cmd.Execute()
+	require.ErrorContains(t, err, "failed to write GC state JSON")
+	require.True(t, reader.closed)
 }
