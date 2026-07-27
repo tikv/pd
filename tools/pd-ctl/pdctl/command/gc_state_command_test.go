@@ -127,6 +127,22 @@ func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
 	require.Contains(t, string(encoded), `"global_gc_barriers":[`)
 }
 
+func TestNewAllGCStatesOutputKeepsEmptyGlobalBarrierArray(t *testing.T) {
+	clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
+		map[uint32]gc.GCState{},
+		nil,
+	)
+
+	got, err := newAllGCStatesOutput(clusterState)
+	require.NoError(t, err)
+	require.NotNil(t, got.GlobalGCBarriers)
+	require.Empty(t, got.GlobalGCBarriers)
+
+	encoded, err := json.Marshal(got)
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"global_gc_barriers":[]`)
+}
+
 func TestGCStateOutputRejectsExcludedBarriers(t *testing.T) {
 	state := gc.NewGCStateWithoutGCBarriers(42, 100, 90)
 	_, err := newKeyspaceGCStateOutput(42, state)
