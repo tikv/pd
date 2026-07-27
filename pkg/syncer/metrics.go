@@ -24,14 +24,17 @@ const (
 	fullSyncResultSuccess = "success"
 	fullSyncResultFailure = "failure"
 
-	fullSyncReasonInitial            = "initial"
-	fullSyncReasonHistoryGap         = "history_gap"
-	fullSyncReasonStartIndexAhead    = "start_index_ahead"
-	fullSyncReasonMaxHistoryExceeded = "max_history_exceeded"
-	fullSyncReasonSendError          = "send_error"
-	fullSyncReasonContextCanceled    = "context_canceled"
-	fullSyncReasonStreamClosed       = "stream_closed"
-	fullSyncReasonUnknown            = "unknown"
+	fullSyncTriggerInitial         = "initial"
+	fullSyncTriggerHistoryGap      = "history_gap"
+	fullSyncTriggerStartIndexAhead = "start_index_ahead"
+	fullSyncTriggerUnknown         = "unknown"
+
+	fullSyncFailureNone               = "none"
+	fullSyncFailureMaxHistoryExceeded = "max_history_exceeded"
+	fullSyncFailureSendError          = "send_error"
+	fullSyncFailureContextCanceled    = "context_canceled"
+	fullSyncFailureStreamClosed       = "stream_closed"
+	fullSyncFailureUnknown            = "unknown"
 
 	historyBufferResizeGrow   = "grow"
 	historyBufferResizeShrink = "shrink"
@@ -70,8 +73,8 @@ var (
 			Namespace: "pd",
 			Subsystem: "region_syncer",
 			Name:      "full_sync_total",
-			Help:      "Counter of region syncer full synchronization attempts by result and reason.",
-		}, []string{"result", "reason"})
+			Help:      "Counter of region syncer full synchronization attempts by result, trigger, and failure reason.",
+		}, []string{"result", "trigger", "failure_reason"})
 
 	regionSyncerFullSyncLastDurationGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -81,28 +84,28 @@ var (
 			Help:      "Duration in seconds of the latest region syncer full synchronization attempt by result.",
 		}, []string{"result"})
 
-	regionSyncerHistoryBufferCapacityGauge = prometheus.NewGauge(
+	regionSyncerHistoryBufferCapacityRecordsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "region_syncer",
-			Name:      "history_buffer_capacity",
-			Help:      "Current capacity of the region syncer history buffer.",
+			Name:      "history_buffer_capacity_records",
+			Help:      "Current capacity in records of the region syncer history buffer.",
 		})
 
-	regionSyncerHistoryBufferLengthGauge = prometheus.NewGauge(
+	regionSyncerHistoryBufferLengthRecordsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "region_syncer",
-			Name:      "history_buffer_length",
+			Name:      "history_buffer_length_records",
 			Help:      "Current number of records retained in the region syncer history buffer.",
 		})
 
-	regionSyncerHistoryBufferMaxCapacityGauge = prometheus.NewGauge(
+	regionSyncerHistoryBufferMaxCapacityRecordsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "region_syncer",
-			Name:      "history_buffer_max_capacity",
-			Help:      "Maximum capacity allowed for the region syncer history buffer.",
+			Name:      "history_buffer_max_capacity_records",
+			Help:      "Maximum capacity in records allowed for the region syncer history buffer.",
 		})
 
 	regionSyncerHistoryBufferResizeCounter = prometheus.NewCounterVec(
@@ -121,11 +124,11 @@ var (
 			Help:      "Counter of region syncer history buffer misses by phase.",
 		}, []string{"phase"})
 
-	regionSyncerDownstreamLagGauge = prometheus.NewGaugeVec(
+	regionSyncerDownstreamLagRecordsGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "region_syncer",
-			Name:      "downstream_lag",
+			Name:      "downstream_lag_records",
 			Help:      "Number of history records each downstream stream lags behind the leader-side region syncer history index.",
 		}, []string{"downstream"})
 
@@ -139,46 +142,58 @@ var (
 )
 
 var (
-	regionSyncerFullSyncCounters            map[string]prometheus.Counter
+	regionSyncerFullSyncCounters            map[fullSyncMetricLabels]prometheus.Counter
 	regionSyncerFullSyncLastDurationGauges  map[string]prometheus.Gauge
 	regionSyncerHistoryBufferResizeCounters map[string]prometheus.Counter
 	regionSyncerHistoryBufferMissCounters   map[string]prometheus.Counter
 	regionSyncerStreamEventCounters         map[string]prometheus.Counter
 )
 
+type fullSyncMetricLabels struct {
+	result        string
+	trigger       string
+	failureReason string
+}
+
 func init() {
 	prometheus.MustRegister(regionSyncerStatus)
 	prometheus.MustRegister(regionSyncerClientReadyGauge)
 	prometheus.MustRegister(regionSyncerFullSyncCounter)
 	prometheus.MustRegister(regionSyncerFullSyncLastDurationGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferCapacityGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferLengthGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferMaxCapacityGauge)
+	prometheus.MustRegister(regionSyncerHistoryBufferCapacityRecordsGauge)
+	prometheus.MustRegister(regionSyncerHistoryBufferLengthRecordsGauge)
+	prometheus.MustRegister(regionSyncerHistoryBufferMaxCapacityRecordsGauge)
 	prometheus.MustRegister(regionSyncerHistoryBufferResizeCounter)
 	prometheus.MustRegister(regionSyncerHistoryBufferMissCounter)
-	prometheus.MustRegister(regionSyncerDownstreamLagGauge)
+	prometheus.MustRegister(regionSyncerDownstreamLagRecordsGauge)
 	prometheus.MustRegister(regionSyncerStreamEventsCounter)
 
 	initRegionSyncerMetrics()
 }
 
 func initRegionSyncerMetrics() {
-	results := []string{fullSyncResultSuccess, fullSyncResultFailure}
-	reasons := []string{
-		fullSyncReasonInitial,
-		fullSyncReasonHistoryGap,
-		fullSyncReasonStartIndexAhead,
-		fullSyncReasonMaxHistoryExceeded,
-		fullSyncReasonSendError,
-		fullSyncReasonContextCanceled,
-		fullSyncReasonStreamClosed,
-		fullSyncReasonUnknown,
+	triggers := []string{
+		fullSyncTriggerInitial,
+		fullSyncTriggerHistoryGap,
+		fullSyncTriggerStartIndexAhead,
+		fullSyncTriggerUnknown,
 	}
-	regionSyncerFullSyncCounters = make(map[string]prometheus.Counter, len(results)*len(reasons))
-	for _, result := range results {
-		for _, reason := range reasons {
-			regionSyncerFullSyncCounters[fullSyncMetricKey(result, reason)] =
-				regionSyncerFullSyncCounter.WithLabelValues(result, reason)
+	failureReasons := []string{
+		fullSyncFailureMaxHistoryExceeded,
+		fullSyncFailureSendError,
+		fullSyncFailureContextCanceled,
+		fullSyncFailureStreamClosed,
+		fullSyncFailureUnknown,
+	}
+	regionSyncerFullSyncCounters = make(map[fullSyncMetricLabels]prometheus.Counter, len(triggers)*(len(failureReasons)+1))
+	for _, trigger := range triggers {
+		successKey := fullSyncMetricKey(fullSyncResultSuccess, trigger, fullSyncFailureNone)
+		regionSyncerFullSyncCounters[successKey] =
+			regionSyncerFullSyncCounter.WithLabelValues(fullSyncResultSuccess, trigger, fullSyncFailureNone)
+		for _, failureReason := range failureReasons {
+			failureKey := fullSyncMetricKey(fullSyncResultFailure, trigger, failureReason)
+			regionSyncerFullSyncCounters[failureKey] =
+				regionSyncerFullSyncCounter.WithLabelValues(fullSyncResultFailure, trigger, failureReason)
 		}
 	}
 	regionSyncerFullSyncLastDurationGauges = map[string]prometheus.Gauge{
@@ -204,8 +219,12 @@ func initRegionSyncerMetrics() {
 	}
 }
 
-func fullSyncMetricKey(result, reason string) string {
-	return result + "/" + reason
+func fullSyncMetricKey(result, trigger, failureReason string) fullSyncMetricLabels {
+	return fullSyncMetricLabels{
+		result:        result,
+		trigger:       trigger,
+		failureReason: failureReason,
+	}
 }
 
 func setRegionSyncerClientReadyMetrics(ready bool) {
@@ -216,19 +235,35 @@ func setRegionSyncerClientReadyMetrics(ready bool) {
 	regionSyncerClientReadyGauge.Set(0)
 }
 
-func observeFullSyncMetrics(result, reason string, duration time.Duration) {
-	counter, ok := regionSyncerFullSyncCounters[fullSyncMetricKey(result, reason)]
+func observeFullSyncMetrics(result, trigger, failureReason string, duration time.Duration) {
+	counter, ok := regionSyncerFullSyncCounters[fullSyncMetricKey(result, trigger, failureReason)]
 	if !ok {
-		counter = regionSyncerFullSyncCounters[fullSyncMetricKey(result, fullSyncReasonUnknown)]
+		if result == fullSyncResultSuccess {
+			counter = regionSyncerFullSyncCounters[fullSyncMetricKey(
+				fullSyncResultSuccess,
+				fullSyncTriggerUnknown,
+				fullSyncFailureNone,
+			)]
+		} else {
+			counter = regionSyncerFullSyncCounters[fullSyncMetricKey(
+				fullSyncResultFailure,
+				fullSyncTriggerUnknown,
+				fullSyncFailureUnknown,
+			)]
+		}
 	}
 	counter.Inc()
 	regionSyncerFullSyncLastDurationGauges[result].Set(duration.Seconds())
 }
 
 func observeHistoryBufferMetrics(length, capacity, maxCapacity int) {
-	regionSyncerHistoryBufferLengthGauge.Set(float64(length))
-	regionSyncerHistoryBufferCapacityGauge.Set(float64(capacity))
-	regionSyncerHistoryBufferMaxCapacityGauge.Set(float64(maxCapacity))
+	observeHistoryBufferLengthMetrics(length)
+	regionSyncerHistoryBufferCapacityRecordsGauge.Set(float64(capacity))
+	regionSyncerHistoryBufferMaxCapacityRecordsGauge.Set(float64(maxCapacity))
+}
+
+func observeHistoryBufferLengthMetrics(length int) {
+	regionSyncerHistoryBufferLengthRecordsGauge.Set(float64(length))
 }
 
 func incHistoryBufferResizeMetrics(direction string) {

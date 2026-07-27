@@ -222,17 +222,17 @@ func TestHistoryBufferMetrics(t *testing.T) {
 	shrinkBefore := promtestutil.ToFloat64(shrinkCounter)
 
 	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
-	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthGauge))
-	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
-	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferMaxCapacityGauge))
+	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthRecordsGauge))
+	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityRecordsGauge))
+	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferMaxCapacityRecordsGauge))
 
 	h.resetWithIndex(10)
 	h.record(newHistoryBufferTestRegion(1))
-	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthGauge))
-	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerHistoryBufferLengthRecordsGauge))
+	re.Equal(2.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityRecordsGauge))
 
 	h.observeRequiredWindow(3)
-	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(8.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityRecordsGauge))
 	re.Equal(growBefore+1, promtestutil.ToFloat64(growCounter))
 	h.maybeShrink()
 
@@ -240,7 +240,7 @@ func TestHistoryBufferMetrics(t *testing.T) {
 		h.observeRequiredWindow(1)
 		h.maybeShrink()
 	}
-	re.Equal(4.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityGauge))
+	re.Equal(4.0, promtestutil.ToFloat64(regionSyncerHistoryBufferCapacityRecordsGauge))
 	re.Equal(shrinkBefore+1, promtestutil.ToFloat64(shrinkCounter))
 }
 

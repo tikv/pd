@@ -128,6 +128,10 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	}
 	hasStats := len(stats) == len(regions)
 	hasBuckets := len(buckets) == len(regions)
+	var historyRecords []*core.RegionInfo
+	if !inFullSync {
+		historyRecords = make([]*core.RegionInfo, 0, len(regions))
+	}
 	for i, r := range regions {
 		var (
 			region       *core.RegionInfo
@@ -167,12 +171,13 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			err = regionStorage.SaveRegion(r)
 		}
 		if err == nil && !inFullSync {
-			s.history.record(region)
+			historyRecords = append(historyRecords, region)
 		}
 		for _, old := range overlaps {
 			_ = regionStorage.DeleteRegion(old.GetMeta())
 		}
 	}
+	s.history.record(historyRecords...)
 	nextFullSyncing = inFullSync && len(regions) > 0
 	if !nextFullSyncing {
 		// mark the client as running status when it finished the first history region sync.

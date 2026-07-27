@@ -14024,10 +14024,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(increase(pd_region_syncer_full_sync_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (result, reason)",
+              "expr": "sum(increase(pd_region_syncer_full_sync_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (result, trigger, failure_reason)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{result}}-{{reason}}",
+              "legendFormat": "{{result}}-{{trigger}}-{{failure_reason}}",
               "refId": "A"
             }
           ],
@@ -14190,21 +14190,21 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_history_buffer_length{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_region_syncer_history_buffer_length_records{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "length-{{instance}}",
               "refId": "A"
             },
             {
-              "expr": "pd_region_syncer_history_buffer_capacity{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_region_syncer_history_buffer_capacity_records{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "capacity-{{instance}}",
               "refId": "B"
             },
             {
-              "expr": "pd_region_syncer_history_buffer_max_capacity{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_region_syncer_history_buffer_max_capacity_records{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "max-capacity-{{instance}}",
@@ -14377,7 +14377,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_downstream_lag{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_region_syncer_downstream_lag_records{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}-{{downstream}}",

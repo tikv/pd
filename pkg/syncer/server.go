@@ -78,13 +78,18 @@ type regionSyncStream struct {
 	sendMu struct {
 		sync.Mutex
 	}
-	sendIndex atomic.Uint64
-	notifyCh  chan bool
-	done      chan struct{}
-	once      sync.Once
+	sendIndex           atomic.Uint64
+	downstreamSyncIndex atomic.Uint64
+	notifyCh            chan bool
+	done                chan struct{}
+	once                sync.Once
 
-	downstream         string
-	downstreamLagGauge prometheus.Gauge
+	metrics struct {
+		sync.RWMutex
+		initialized        bool
+		downstream         string
+		downstreamLagGauge prometheus.Gauge
+	}
 }
 
 func newRegionSyncStream(stream ServerStream, startIndex uint64) *regionSyncStream {
@@ -106,12 +111,12 @@ func (s *regionSyncStream) getSendIndex() uint64 {
 	return s.sendIndex.Load()
 }
 
-func (s *regionSyncStream) getSendIndexLocked() uint64 {
-	return s.sendIndex.Load()
-}
-
 func (s *regionSyncStream) advanceSendIndexLocked(count int) {
 	s.sendIndex.Add(uint64(count))
+}
+
+func (s *regionSyncStream) setDownstreamSyncIndex(index uint64) {
+	s.downstreamSyncIndex.Store(index)
 }
 
 func (s *regionSyncStream) notify(keepAlive bool) {
@@ -121,37 +126,46 @@ func (s *regionSyncStream) notify(keepAlive bool) {
 	}
 }
 
-func (s *regionSyncStream) setDownstreamMetrics(name string, leaderNextIndex uint64) {
-	s.downstream = name
-	s.downstreamLagGauge = regionSyncerDownstreamLagGauge.WithLabelValues(name)
+func (s *regionSyncStream) setDownstreamMetrics(name string, downstreamStartIndex, leaderNextIndex uint64) {
+	if downstreamStartIndex > leaderNextIndex {
+		downstreamStartIndex = leaderNextIndex
+	}
+	s.setDownstreamSyncIndex(downstreamStartIndex)
+	s.metrics.Lock()
+	if s.metrics.initialized && s.metrics.downstream != name {
+		regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(s.metrics.downstream)
+	}
+	s.metrics.initialized = true
+	s.metrics.downstream = name
+	s.metrics.downstreamLagGauge = regionSyncerDownstreamLagRecordsGauge.WithLabelValues(name)
+	s.metrics.Unlock()
 	s.observeDownstreamLagMetrics(leaderNextIndex)
 }
 
 func (s *regionSyncStream) observeDownstreamLagMetrics(leaderNextIndex uint64) {
-	s.sendMu.Lock()
-	defer s.sendMu.Unlock()
-	s.observeDownstreamLagMetricsLocked(leaderNextIndex)
-}
-
-func (s *regionSyncStream) observeDownstreamLagMetricsLocked(leaderNextIndex uint64) {
-	if s.downstreamLagGauge == nil {
+	s.metrics.RLock()
+	defer s.metrics.RUnlock()
+	if s.metrics.downstreamLagGauge == nil {
 		return
 	}
-	sendIndex := s.getSendIndexLocked()
-	if sendIndex >= leaderNextIndex {
-		s.downstreamLagGauge.Set(0)
+	downstreamSyncIndex := s.downstreamSyncIndex.Load()
+	if downstreamSyncIndex >= leaderNextIndex {
+		s.metrics.downstreamLagGauge.Set(0)
 		return
 	}
-	s.downstreamLagGauge.Set(float64(leaderNextIndex - sendIndex))
+	s.metrics.downstreamLagGauge.Set(float64(leaderNextIndex - downstreamSyncIndex))
 }
 
 func (s *regionSyncStream) deleteDownstreamMetrics() {
-	if s.downstream == "" {
+	s.metrics.Lock()
+	defer s.metrics.Unlock()
+	if !s.metrics.initialized {
 		return
 	}
-	regionSyncerDownstreamLagGauge.DeleteLabelValues(s.downstream)
-	s.downstream = ""
-	s.downstreamLagGauge = nil
+	regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(s.metrics.downstream)
+	s.metrics.initialized = false
+	s.metrics.downstream = ""
+	s.metrics.downstreamLagGauge = nil
 }
 
 func (s *regionSyncStream) close() {
@@ -173,9 +187,29 @@ func (s *regionSyncStream) sendStreamIfOpen(regions *pdpb.SyncRegionResponse) er
 	s.stream.Lock()
 	defer s.stream.Unlock()
 	if err := s.checkOpen(); err != nil {
+		incStreamEventMetrics(streamEventStreamClosed)
 		return err
 	}
-	return s.stream.Send(regions)
+	err := s.stream.Send(regions)
+	if err == nil {
+		return nil
+	}
+	if status.Code(err) == codes.Canceled {
+		incStreamEventMetrics(streamEventContextCanceled)
+	} else {
+		incStreamEventMetrics(streamEventSendError)
+	}
+	return err
+}
+
+func (s *regionSyncStream) fullSyncFailureReason(err error) string {
+	if status.Code(err) == codes.Canceled {
+		return fullSyncFailureContextCanceled
+	}
+	if s.checkOpen() != nil {
+		return fullSyncFailureStreamClosed
+	}
+	return fullSyncFailureSendError
 }
 
 func (s *regionSyncStream) sendStream(regions *pdpb.SyncRegionResponse) error {
@@ -387,7 +421,7 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 			zap.String("url", request.GetMember().GetClientUrls()[0]))
 
 		name := request.GetMember().GetName()
-		syncStream, syncStartIndex := s.bindStreamForSync(name, stream)
+		syncStream, syncStartIndex := s.bindStreamForSync(name, stream, request.GetStartIndex())
 		err = s.syncHistoryRegion(ctx, request, syncStream, syncStartIndex)
 		if err != nil {
 			s.unbindStream(name, syncStream)
@@ -453,11 +487,11 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 	startIndex := request.GetStartIndex()
 	name := request.GetMember().GetName()
 	if startIndex == 0 || startIndex > endIndex {
-		reason := fullSyncReasonInitial
+		trigger := fullSyncTriggerInitial
 		if startIndex > endIndex {
-			reason = fullSyncReasonStartIndexAhead
+			trigger = fullSyncTriggerStartIndexAhead
 		}
-		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, reason)
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, trigger)
 	}
 	if startIndex < endIndex {
 		s.history.observeRequiredWindow(endIndex - startIndex)
@@ -476,25 +510,35 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 				RegionLeaders: nil,
 				Buckets:       nil,
 			}
-			return syncStream.sendStreamIfOpen(resp)
+			if err := syncStream.sendStreamIfOpen(resp); err != nil {
+				return err
+			}
+			syncStream.setDownstreamSyncIndex(endIndex)
+			syncStream.observeDownstreamLagMetrics(s.history.getNextIndex())
+			return nil
 		}
 		if startIndex < endIndex {
 			incHistoryBufferMissMetrics(historyBufferMissHistorySync)
-			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, fullSyncReasonHistoryGap)
+			return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, fullSyncTriggerHistoryGap)
 		}
 		log.Warn("no history regions from index, the leader may be restarted", zap.Uint64("index", startIndex))
 		return nil
 	}
 	if len(records) != int(endIndex-startIndex) {
 		incHistoryBufferMissMetrics(historyBufferMissHistorySync)
-		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, fullSyncReasonHistoryGap)
+		return s.syncFullRegionsLocked(ctx, name, syncStream, endIndex, fullSyncTriggerHistoryGap)
 	}
 	log.Info("sync the history regions with server",
 		zap.String("server", name),
 		zap.Uint64("from-index", startIndex),
 		zap.Uint64("last-index", endIndex),
 		zap.Int("records-length", len(records)))
-	return s.syncHistoryRecordsLocked(startIndex, records, syncStream)
+	if err := s.syncHistoryRecordsLocked(startIndex, records, syncStream); err != nil {
+		return err
+	}
+	syncStream.setDownstreamSyncIndex(endIndex)
+	syncStream.observeDownstreamLagMetrics(s.history.getNextIndex())
+	return nil
 }
 
 func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdpb.SyncRegionResponse {
@@ -547,13 +591,13 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 	name string,
 	syncStream *regionSyncStream,
 	syncStartIndex uint64,
-	reason string,
+	trigger string,
 ) error {
 	start := time.Now()
 	result := fullSyncResultSuccess
-	metricReason := reason
+	failureReason := fullSyncFailureNone
 	defer func() {
-		observeFullSyncMetrics(result, metricReason, time.Since(start))
+		observeFullSyncMetrics(result, trigger, failureReason, time.Since(start))
 	}()
 	releaseRetain := s.history.retainFrom(syncStartIndex)
 	defer releaseRetain()
@@ -567,7 +611,8 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 		select {
 		case <-ctx.Done():
 			result = fullSyncResultFailure
-			metricReason = fullSyncReasonContextCanceled
+			failureReason = fullSyncFailureContextCanceled
+			incStreamEventMetrics(streamEventContextCanceled)
 			log.Info("discontinue sending sync region response")
 			failpoint.Inject("noFastExitSync", func() {
 				failpoint.Goto("doSync")
@@ -601,19 +646,21 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 		}
 		if err := syncStream.checkOpen(); err != nil {
 			result = fullSyncResultFailure
-			metricReason = fullSyncReasonStreamClosed
+			failureReason = fullSyncFailureStreamClosed
+			incStreamEventMetrics(streamEventStreamClosed)
 			return err
 		}
 		if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
 			result = fullSyncResultFailure
-			metricReason = fullSyncReasonContextCanceled
+			failureReason = fullSyncFailureContextCanceled
+			incStreamEventMetrics(streamEventContextCanceled)
 			log.Error("failed to wait rate limit", errs.ZapError(err))
 			return err
 		}
 		lastIndex += len(metas)
 		if err := syncStream.sendStreamIfOpen(resp); err != nil {
 			result = fullSyncResultFailure
-			metricReason = fullSyncReasonSendError
+			failureReason = syncStream.fullSyncFailureReason(err)
 			log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))
 			return err
 		}
@@ -627,7 +674,7 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 	records, nextIndex, ok := s.history.retainedRecordsFrom(syncStartIndex)
 	if !ok {
 		result = fullSyncResultFailure
-		metricReason = fullSyncReasonMaxHistoryExceeded
+		failureReason = fullSyncFailureMaxHistoryExceeded
 		incHistoryBufferMissMetrics(historyBufferMissFullSyncCatchUp)
 		return status.Errorf(codes.ResourceExhausted,
 			"history records from full sync start index %d to %d are no longer available",
@@ -640,11 +687,10 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 		}
 		if err := s.syncHistoryRecordsLocked(catchUpStartIndex, records, syncStream); err != nil {
 			result = fullSyncResultFailure
-			metricReason = fullSyncReasonSendError
+			failureReason = syncStream.fullSyncFailureReason(err)
 			return err
 		}
 		syncStream.advanceSendIndexLocked(len(records))
-		syncStream.observeDownstreamLagMetricsLocked(nextIndex)
 	}
 	resp := &pdpb.SyncRegionResponse{
 		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
@@ -652,29 +698,40 @@ func (s *RegionSyncer) syncFullRegionsLocked(
 	}
 	if err := syncStream.sendStreamIfOpen(resp); err != nil {
 		result = fullSyncResultFailure
-		metricReason = fullSyncReasonSendError
+		failureReason = syncStream.fullSyncFailureReason(err)
 		log.Warn("failed to send sync region completion response", errs.ZapError(errs.ErrGRPCSend, err))
 		return err
 	}
+	syncStream.setDownstreamSyncIndex(nextIndex)
+	syncStream.observeDownstreamLagMetrics(s.history.getNextIndex())
 	return nil
 }
 
-func (s *RegionSyncer) bindStreamForSync(name string, stream ServerStream) (*regionSyncStream, uint64) {
+func (s *RegionSyncer) bindStreamForSync(
+	name string,
+	stream ServerStream,
+	downstreamStartIndex uint64,
+) (*regionSyncStream, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	startIndex := s.history.getNextIndex()
 	syncStream := newRegionSyncStream(stream, startIndex)
-	s.bindStreamLocked(name, syncStream, startIndex)
+	s.bindStreamLocked(name, syncStream, downstreamStartIndex, startIndex)
 	return syncStream, startIndex
 }
 
-func (s *RegionSyncer) bindStreamLocked(name string, syncStream *regionSyncStream, leaderNextIndex uint64) {
+func (s *RegionSyncer) bindStreamLocked(
+	name string,
+	syncStream *regionSyncStream,
+	downstreamStartIndex,
+	leaderNextIndex uint64,
+) {
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 		oldStream.deleteDownstreamMetrics()
 		incStreamEventMetrics(streamEventUnbind)
 	}
-	syncStream.setDownstreamMetrics(name, leaderNextIndex)
+	syncStream.setDownstreamMetrics(name, downstreamStartIndex, leaderNextIndex)
 	s.mu.streams[name] = syncStream
 	incStreamEventMetrics(streamEventBind)
 }
@@ -750,7 +807,7 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 			return sentRecords, errors.Errorf("region syncer buffered records from index %d overflow, first available index is %d", sendIndex, firstIndex)
 		}
 		bufferNextIndex := s.history.getNextIndex()
-		stream.observeDownstreamLagMetricsLocked(bufferNextIndex)
+		stream.observeDownstreamLagMetrics(bufferNextIndex)
 		if sendIndex > bufferNextIndex {
 			return sentRecords, errors.Errorf("region syncer buffered records index %d exceeds next index %d", sendIndex, bufferNextIndex)
 		}
@@ -771,18 +828,21 @@ func (s *RegionSyncer) drainDownstreamLocked(ctx context.Context, name string, s
 			return sentRecords, errors.Errorf("send region sync response failed")
 		}
 		stream.advanceSendIndexLocked(len(records))
-		stream.observeDownstreamLagMetricsLocked(bufferNextIndex)
+		stream.setDownstreamSyncIndex(stream.getSendIndex())
+		stream.observeDownstreamLagMetrics(bufferNextIndex)
 		sentRecords = true
 	}
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, records []*core.RegionInfo, keepAlive bool) {
 	defer logutil.LogPanic()
+	leaderNextIndex := s.history.getNextIndex()
 	s.mu.RLock()
 	for _, sender := range s.mu.streams {
 		if ctx.Err() != nil {
 			break
 		}
+		sender.observeDownstreamLagMetrics(leaderNextIndex)
 		if len(records) != 0 || keepAlive {
 			sender.notify(keepAlive)
 		}

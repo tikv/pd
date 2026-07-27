@@ -129,9 +129,13 @@ func (h *historyBuffer) record(records ...*core.RegionInfo) {
 	}
 	h.Lock()
 	defer h.Unlock()
+	oldLength := h.len()
 	h.prepareRequiredWindowLocked(uint64(len(records)))
 	for _, r := range records {
 		h.recordLocked(r)
+	}
+	if h.len() != oldLength {
+		observeHistoryBufferLengthMetrics(h.len())
 	}
 }
 
@@ -143,7 +147,6 @@ func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 		h.head = (h.head + 1) % h.size
 	}
 	h.index++
-	h.observeMetricsLocked()
 	h.flushCount--
 	if h.flushCount <= 0 {
 		h.persist()
