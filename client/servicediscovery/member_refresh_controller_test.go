@@ -37,50 +37,50 @@ import (
 func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 	t.Parallel()
 
-	transportFailure := memberUpdateFailure{transport: true}
-	nonTransportFailure := memberUpdateFailure{}
+	transportFailure := true
+	nonTransportFailure := false
 
 	testCases := []struct {
-		name   string
-		result memberUpdateResult
-		states []memberConnectionState
-		enter  bool
+		name        string
+		result      memberUpdateResult
+		connections []memberConnection
+		enter       bool
 	}{
 		{
-			name:   "all current urls have transport failures and inactive connections",
-			result: newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure),
-			states: observedMemberConnectionStates(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure),
-			enter:  true,
+			name:        "all current urls have transport failures and inactive connections",
+			result:      newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure),
+			connections: observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure),
+			enter:       true,
 		},
 		{
-			name:   "empty url set",
-			result: memberUpdateResult{},
-			states: nil,
+			name:        "empty url set",
+			result:      memberUpdateResult{},
+			connections: nil,
 		},
 		{
-			name:   "not every url was attempted",
-			result: newFailedMemberUpdateResult(transportFailure),
-			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.TransientFailure),
+			name:        "not every url was attempted",
+			result:      newFailedMemberUpdateResult(transportFailure),
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
-			name:   "non-transport failure",
-			result: newFailedMemberUpdateResult(transportFailure, nonTransportFailure),
-			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.TransientFailure),
+			name:        "non-transport failure",
+			result:      newFailedMemberUpdateResult(transportFailure, nonTransportFailure),
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
-			name:   "missing connection",
-			result: newFailedMemberUpdateResult(transportFailure),
-			states: []memberConnectionState{{}},
+			name:        "missing connection",
+			result:      newFailedMemberUpdateResult(transportFailure),
+			connections: []memberConnection{{}},
 		},
 		{
-			name:   "ready connection",
-			result: newFailedMemberUpdateResult(transportFailure),
-			states: observedMemberConnectionStates(connectivity.Ready),
+			name:        "ready connection",
+			result:      newFailedMemberUpdateResult(transportFailure),
+			connections: observedMemberConnections(connectivity.Ready),
 		},
 		{
-			name:   "shutdown connection",
-			result: newFailedMemberUpdateResult(transportFailure),
-			states: observedMemberConnectionStates(connectivity.Shutdown),
+			name:        "shutdown connection",
+			result:      newFailedMemberUpdateResult(transportFailure),
+			connections: observedMemberConnections(connectivity.Shutdown),
 		},
 	}
 
@@ -89,88 +89,84 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 			controller := memberRefreshController{}
 			require.Equal(t, testCase.enter, controller.enterDegraded(
 				testCase.result,
-				memberTestURLs(len(testCase.states)),
-				testCase.states,
+				memberTestURLs(len(testCase.connections)),
+				testCase.connections,
 			))
 			require.Equal(t, testCase.enter, controller.isDegraded())
 		})
 	}
 }
 
-func TestMemberRefreshControllerInspectsConnectionStates(t *testing.T) {
+func TestMemberRefreshControllerShouldWait(t *testing.T) {
 	t.Parallel()
 
-	transportFailure := memberUpdateFailure{transport: true}
+	transportFailure := true
 	testCases := []struct {
-		name   string
-		states []memberConnectionState
-		action memberRefreshAction
+		name        string
+		connections []memberConnection
+		wait        bool
 	}{
 		{
-			name:   "idle connections wait without a member refresh",
-			states: observedMemberConnectionStates(connectivity.Idle, connectivity.Connecting, connectivity.Idle),
-			action: memberRefreshWait,
+			name:        "idle connections wait without a member refresh",
+			connections: observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.Idle),
+			wait:        true,
 		},
 		{
-			name:   "ready connection refreshes immediately",
-			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.Ready),
-			action: memberRefreshRetryBatch,
+			name:        "ready connection refreshes immediately",
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.Ready),
 		},
 		{
-			name:   "missing connection restores normal behavior",
-			states: []memberConnectionState{{observed: true, state: connectivity.TransientFailure}, {}},
-			action: memberRefreshRetryBatch,
+			name:        "missing connection restores normal behavior",
+			connections: []memberConnection{{observed: true, state: connectivity.TransientFailure}, {}},
 		},
 		{
-			name:   "shutdown connection restores normal behavior",
-			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.Shutdown),
-			action: memberRefreshRetryBatch,
+			name:        "shutdown connection restores normal behavior",
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.Shutdown),
 		},
 		{
-			name:   "url replacement restores normal behavior",
-			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.TransientFailure),
-			action: memberRefreshRetryBatch,
+			name:        "url replacement restores normal behavior",
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			controller := memberRefreshController{}
-			initialURLs := memberTestURLs(len(testCase.states))
-			failures := make([]memberUpdateFailure, len(testCase.states))
+			initialURLs := memberTestURLs(len(testCase.connections))
+			failures := make([]bool, len(testCase.connections))
 			for i := range failures {
 				failures[i] = transportFailure
 			}
 			require.True(t, controller.enterDegraded(
 				newFailedMemberUpdateResult(failures...),
 				initialURLs,
-				observedMemberConnectionStates(repeatedConnectivityState(connectivity.TransientFailure, len(testCase.states))...),
+				observedMemberConnections(repeatedConnectivityState(connectivity.TransientFailure, len(testCase.connections))...),
 			))
 			currentURLs := initialURLs
 			if testCase.name == "url replacement restores normal behavior" {
 				currentURLs = []string{"url-0", "replacement-url"}
 			}
-			decision := controller.inspect(currentURLs, testCase.states)
-			require.Equal(t, testCase.action, decision.action)
-			require.Equal(t, testCase.action == memberRefreshWait, controller.isDegraded())
+			wait := controller.shouldWait(currentURLs, testCase.connections)
+			require.Equal(t, testCase.wait, wait)
+			require.Equal(t, testCase.wait, controller.isDegraded())
 		})
 	}
 }
 
-func TestMemberRefreshControllerInspectDoesNotAllocate(t *testing.T) {
-	transportFailure := memberUpdateFailure{transport: true}
+func TestMemberRefreshControllerShouldWaitDoesNotAllocate(t *testing.T) {
+	transportFailure := true
 	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
 	urls := memberTestURLs(3)
-	states := observedMemberConnectionStates(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure)
+	connections := observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure)
 	controller := memberRefreshController{}
-	require.True(t, controller.enterDegraded(result, urls, states))
+	require.True(t, controller.enterDegraded(result, urls, connections))
 	allocations := testing.AllocsPerRun(1000, func() {
-		memberRefreshDecisionSink = controller.inspect(urls, states)
+		memberRefreshWaitSink = controller.shouldWait(urls, connections)
 	})
 	require.Zero(t, allocations)
 }
 
-var memberRefreshDecisionSink memberRefreshDecision
+var memberRefreshWaitSink bool
 
 func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	t.Parallel()
@@ -192,7 +188,6 @@ func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 
 	recovery, ok := tracker.recover(start.Add(5*time.Second), "http://pd-2:2379")
 	require.True(t, ok)
-	require.Equal(t, "http://pd-2:2379", recovery.url)
 	require.Equal(t, uint64(1), recovery.failedAttempts)
 	require.Zero(t, recovery.suppressedErrors)
 
@@ -201,64 +196,64 @@ func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []string{"http://pd-1:2379"}, summary.failedURLs)
 
-	tracker.cleanup([]string{"http://pd-3:2379"})
+	tracker.retain([]string{"http://pd-3:2379"}, []string{"http://pd-1:2379"})
 	_, ok = tracker.summary(start.Add(7 * time.Second))
 	require.False(t, ok)
 }
 
-func TestClassifyMemberTransportFailure(t *testing.T) {
+func TestIsMemberTransportFailure(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
 		name      string
-		failure   memberUpdateFailure
+		got       bool
 		transport bool
 	}{
 		{
 			name:      "connection refused rpc",
-			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
 			transport: true,
 		},
 		{
 			name:      "tls rpc",
-			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
 			transport: true,
 		},
 		{
 			name:      "dns rpc",
-			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
 			transport: true,
 		},
 		{
 			name:      "deadline rpc",
-			failure:   classifyMemberRPCFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
 			transport: true,
 		},
 		{
 			name:      "reset rpc",
-			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
 			transport: true,
 		},
 		{
 			name:      "non-network grpc status",
-			failure:   classifyMemberRPCFailure(status.Error(codes.PermissionDenied, "permission denied")),
+			got:       isMemberRPCTransportFailure(status.Error(codes.PermissionDenied, "permission denied")),
 			transport: false,
 		},
 		{
 			name:      "blocking dial timeout",
-			failure:   classifyMemberDialFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
+			got:       isMemberDialTransportFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
 			transport: true,
 		},
 		{
 			name:      "uncertain dial error",
-			failure:   classifyMemberDialFailure(errors.New("invalid client configuration")),
+			got:       isMemberDialTransportFailure(errors.New("invalid client configuration")),
 			transport: false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.transport, testCase.failure.transport)
+			require.Equal(t, testCase.transport, testCase.got)
 		})
 	}
 }
@@ -305,7 +300,7 @@ func TestMemberTransportFailureTrackerConcurrentAccess(_ *testing.T) {
 				tracker.record(now, url)
 				tracker.summary(now.Add(time.Second))
 				tracker.recover(now.Add(2*time.Second), url)
-				tracker.cleanup([]string{url})
+				tracker.retain([]string{url}, []string{url})
 			}
 		}(i)
 	}
@@ -321,16 +316,16 @@ func TestMemberTransportFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.
 	require.Zero(t, allocations)
 }
 
-func BenchmarkMemberRefreshControllerInspect(b *testing.B) {
-	transportFailure := memberUpdateFailure{transport: true}
+func BenchmarkMemberRefreshControllerShouldWait(b *testing.B) {
+	transportFailure := true
 	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
 	urls := memberTestURLs(3)
-	states := observedMemberConnectionStates(connectivity.TransientFailure, connectivity.Connecting, connectivity.Idle)
+	connections := observedMemberConnections(connectivity.TransientFailure, connectivity.Connecting, connectivity.Idle)
 	controller := memberRefreshController{}
-	controller.enterDegraded(result, urls, states)
+	controller.enterDegraded(result, urls, connections)
 	b.ReportAllocs()
 	for b.Loop() {
-		controller.inspect(urls, states)
+		controller.shouldWait(urls, connections)
 	}
 }
 
@@ -344,7 +339,7 @@ func BenchmarkMemberTransportFailureTrackerSuppression(b *testing.B) {
 	}
 }
 
-func newFailedMemberUpdateResult(failures ...memberUpdateFailure) memberUpdateResult {
+func newFailedMemberUpdateResult(failures ...bool) memberUpdateResult {
 	result := memberUpdateResult{}
 	for i, failure := range failures {
 		result.recordFailure(fmt.Sprintf("url-%d", i), failure)
@@ -368,10 +363,10 @@ func repeatedConnectivityState(state connectivity.State, count int) []connectivi
 	return states
 }
 
-func observedMemberConnectionStates(states ...connectivity.State) []memberConnectionState {
-	observed := make([]memberConnectionState, 0, len(states))
+func observedMemberConnections(states ...connectivity.State) []memberConnection {
+	observed := make([]memberConnection, 0, len(states))
 	for _, state := range states {
-		observed = append(observed, memberConnectionState{observed: true, state: state})
+		observed = append(observed, memberConnection{observed: true, state: state})
 	}
 	return observed
 }

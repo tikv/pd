@@ -17,10 +17,12 @@ package servicediscovery
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
@@ -28,120 +30,84 @@ import (
 	clienterrs "github.com/tikv/pd/client/errs"
 )
 
-type memberUpdateFailure struct {
-	transport bool
+func isMemberDialTransportFailure(err error) bool {
+	return errors.Is(err, clienterrs.ErrGRPCDial)
 }
 
-func classifyMemberDialFailure(err error) memberUpdateFailure {
-	return memberUpdateFailure{
-		transport: errors.Is(err, clienterrs.ErrGRPCDial),
-	}
-}
-
-func classifyMemberRPCFailure(err error) memberUpdateFailure {
+func isMemberRPCTransportFailure(err error) bool {
 	code := status.Code(err)
 	if errors.Is(err, context.DeadlineExceeded) {
 		code = codes.DeadlineExceeded
 	}
-	return memberUpdateFailure{
-		transport: clienterrs.IsNetworkError(code),
-	}
+	return clienterrs.IsNetworkError(code)
 }
 
 type memberUpdateResult struct {
-	attemptedURLs     []string
+	failedURLs        []string
 	transportFailures int
 }
 
-func (r *memberUpdateResult) recordFailure(url string, failure memberUpdateFailure) {
-	r.attemptedURLs = append(r.attemptedURLs, url)
-	if failure.transport {
+func (r *memberUpdateResult) recordFailure(url string, transportFailure bool) {
+	r.failedURLs = append(r.failedURLs, url)
+	if transportFailure {
 		r.transportFailures++
 	}
 }
 
 func (r *memberUpdateResult) allFailedByTransport(urls []string) bool {
-	if len(urls) == 0 || len(r.attemptedURLs) != len(urls) || r.transportFailures != len(urls) {
+	if len(urls) == 0 || len(r.failedURLs) != len(urls) || r.transportFailures != len(urls) {
 		return false
 	}
-	return equalMemberURLs(r.attemptedURLs, urls)
+	return slices.Equal(r.failedURLs, urls)
 }
 
-type memberConnectionState struct {
+type memberConnection struct {
 	observed bool
 	state    connectivity.State
-}
-
-type memberRefreshAction uint8
-
-const (
-	memberRefreshWait memberRefreshAction = iota
-	memberRefreshRetryBatch
-)
-
-type memberRefreshDecision struct {
-	action memberRefreshAction
+	conn     *grpc.ClientConn
 }
 
 type memberRefreshController struct {
-	degraded     bool
 	degradedURLs []string
 }
 
 func (c *memberRefreshController) isDegraded() bool {
-	return c.degraded
+	return len(c.degradedURLs) > 0
 }
 
 func (c *memberRefreshController) enterDegraded(
 	result memberUpdateResult,
 	urls []string,
-	states []memberConnectionState,
+	connections []memberConnection,
 ) bool {
-	if len(urls) != len(states) || !result.allFailedByTransport(urls) {
+	if len(urls) != len(connections) || !result.allFailedByTransport(urls) {
 		return false
 	}
-	for _, state := range states {
-		if !state.observed || !isInactiveMemberConnectionState(state.state) {
+	for _, connection := range connections {
+		if !connection.observed || !isInactiveMemberConnectionState(connection.state) {
 			return false
 		}
 	}
-	c.degraded = true
 	c.degradedURLs = append(c.degradedURLs[:0], urls...)
 	return true
 }
 
-func (c *memberRefreshController) inspect(urls []string, states []memberConnectionState) memberRefreshDecision {
-	if !c.degraded {
-		return memberRefreshDecision{action: memberRefreshRetryBatch}
-	}
-	if len(urls) != len(states) || !equalMemberURLs(c.degradedURLs, urls) {
+func (c *memberRefreshController) shouldWait(urls []string, connections []memberConnection) bool {
+	if !c.isDegraded() || len(urls) != len(connections) || !slices.Equal(c.degradedURLs, urls) {
 		c.leaveDegraded()
-		return memberRefreshDecision{action: memberRefreshRetryBatch}
-	}
-	for _, state := range states {
-		if !state.observed || !isInactiveMemberConnectionState(state.state) {
-			c.leaveDegraded()
-			return memberRefreshDecision{action: memberRefreshRetryBatch}
-		}
-	}
-	return memberRefreshDecision{action: memberRefreshWait}
-}
-
-func (c *memberRefreshController) leaveDegraded() {
-	c.degraded = false
-	c.degradedURLs = nil
-}
-
-func equalMemberURLs(left, right []string) bool {
-	if len(left) != len(right) {
 		return false
 	}
-	for i := range left {
-		if left[i] != right[i] {
+	for _, connection := range connections {
+		if !connection.observed || !isInactiveMemberConnectionState(connection.state) {
+			c.leaveDegraded()
 			return false
 		}
 	}
 	return true
+}
+
+func (c *memberRefreshController) leaveDegraded() {
+	c.degradedURLs = nil
 }
 
 func isInactiveMemberConnectionState(state connectivity.State) bool {
@@ -151,13 +117,11 @@ func isInactiveMemberConnectionState(state connectivity.State) bool {
 }
 
 type memberTransportFailureEpisode struct {
-	firstFailure     time.Time
-	failedAttempts   uint64
-	suppressedErrors uint64
+	firstFailure   time.Time
+	failedAttempts uint64
 }
 
 type memberTransportFailureRecovery struct {
-	url              string
 	failureDuration  time.Duration
 	failedAttempts   uint64
 	suppressedErrors uint64
@@ -193,7 +157,6 @@ func (t *memberTransportFailureTracker) record(now time.Time, url string) bool {
 	}
 
 	episode.failedAttempts++
-	episode.suppressedErrors++
 	return false
 }
 
@@ -207,10 +170,9 @@ func (t *memberTransportFailureTracker) recover(now time.Time, url string) (memb
 	}
 	delete(t.episodes, url)
 	return memberTransportFailureRecovery{
-		url:              url,
 		failureDuration:  now.Sub(episode.firstFailure),
 		failedAttempts:   episode.failedAttempts,
-		suppressedErrors: episode.suppressedErrors,
+		suppressedErrors: episode.failedAttempts - 1,
 	}, true
 }
 
@@ -220,19 +182,12 @@ func (t *memberTransportFailureTracker) discard(url string) {
 	delete(t.episodes, url)
 }
 
-func (t *memberTransportFailureTracker) cleanup(urls []string) {
+func (t *memberTransportFailureTracker) retain(currentURLs, failedURLs []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if len(t.episodes) == 0 {
-		return
-	}
-	current := make(map[string]struct{}, len(urls))
-	for _, url := range urls {
-		current[url] = struct{}{}
-	}
 	for url := range t.episodes {
-		if _, ok := current[url]; !ok {
+		if !slices.Contains(currentURLs, url) || !slices.Contains(failedURLs, url) {
 			delete(t.episodes, url)
 		}
 	}
@@ -261,7 +216,7 @@ func (t *memberTransportFailureTracker) summary(now time.Time) (memberTransportF
 			earliest = episode.firstFailure
 		}
 		summary.failedAttempts += episode.failedAttempts
-		summary.suppressedErrors += episode.suppressedErrors
+		summary.suppressedErrors += episode.failedAttempts - 1
 	}
 	summary.failureDuration = now.Sub(earliest)
 	return summary, true

@@ -534,7 +534,7 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 
 			require.Error(t, structuredErr)
 			require.Equal(t, structuredErr.Error(), compatibilityErr.Error())
-			require.Equal(t, []string{memberURL}, result.attemptedURLs)
+			require.Equal(t, []string{memberURL}, result.failedURLs)
 			require.Equal(t, testCase.transport, result.transportFailures == 1)
 
 			_, ok := client.memberTransportFailures.summary(time.Now())
@@ -603,7 +603,7 @@ func TestUpdateMemberClearsUnobservedFailureEpisodesAfterRecovery(t *testing.T) 
 	result, err := client.updateMemberWithResult()
 	require.NoError(t, err)
 	require.Equal(t, int32(2), calls.Load())
-	require.Equal(t, []string{"http://pd-1.test:2379"}, result.attemptedURLs)
+	require.Equal(t, []string{"http://pd-1.test:2379"}, result.failedURLs)
 
 	summary, ok := client.memberTransportFailures.summary(time.Now())
 	require.True(t, ok)
@@ -690,4 +690,43 @@ func TestUpdateMemberLoopSuppressesScheduledRefreshDuringTransportFailure(t *tes
 	// A synchronous check is an explicit request and must bypass background suppression.
 	require.Error(t, client.CheckMemberChanged())
 	require.Equal(t, callsAfterInitialBatch+1, getMembersCalls.Load())
+}
+
+var memberConnectionSnapshotSink memberConnectionSnapshot
+
+func TestMemberConnectionSnapshotReuseDoesNotAllocate(t *testing.T) {
+	conn, err := grpc.NewClient(
+		"passthrough:///pd.test:2379",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	urls := []string{
+		"http://pd-1.test:2379",
+		"http://pd-2.test:2379",
+		"http://pd-3.test:2379",
+	}
+	client := &serviceDiscovery{}
+	client.urls.Store(urls)
+	for _, url := range urls {
+		client.clientConns.Store(url, conn)
+	}
+
+	snapshot := client.snapshotMemberConnections(memberConnectionSnapshot{})
+	require.Len(t, snapshot.connections, len(urls))
+	require.True(t, snapshot.connections[1].observed)
+	require.Same(t, conn, snapshot.connections[1].conn)
+
+	client.clientConns.Delete(urls[1])
+	snapshot = client.snapshotMemberConnections(snapshot)
+	require.False(t, snapshot.connections[1].observed)
+	require.Nil(t, snapshot.connections[1].conn)
+	client.clientConns.Store(urls[1], conn)
+	memberConnectionSnapshotSink = snapshot
+
+	allocations := testing.AllocsPerRun(1000, func() {
+		memberConnectionSnapshotSink = client.snapshotMemberConnections(memberConnectionSnapshotSink)
+	})
+	require.Zero(t, allocations)
 }

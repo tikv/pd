@@ -563,23 +563,17 @@ func (c *serviceDiscovery) updateMemberLoop() {
 
 	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
 	controller := memberRefreshController{}
-	var (
-		connectionStateTicker *time.Ticker
-		connectionStateTick   <-chan time.Time
-		runRetryBatchNow      bool
-	)
+	var connectionStateTicker *time.Ticker
 	stopConnectionStateTicker := func() {
 		if connectionStateTicker != nil {
 			connectionStateTicker.Stop()
 			connectionStateTicker = nil
-			connectionStateTick = nil
 		}
 	}
 	defer stopConnectionStateTicker()
 	startConnectionStateTicker := func() {
 		if connectionStateTicker == nil {
 			connectionStateTicker = time.NewTicker(memberConnectionStateCheckInterval)
-			connectionStateTick = connectionStateTicker.C
 		}
 	}
 	drainScheduledCheck := func() {
@@ -600,47 +594,15 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		})
 		return result, err
 	}
+	var snapshot memberConnectionSnapshot
 	for {
-		var (
-			periodicCheck      bool
-			inspectConnections bool
-		)
-		if !runRetryBatchNow {
-			var scheduledCheck <-chan struct{} = c.checkMembershipCh
-			if controller.isDegraded() {
-				scheduledCheck = nil
-			}
+		if controller.isDegraded() {
 			select {
 			case <-ctx.Done():
 				log.Info("[pd] exit member loop due to context canceled")
 				return
 			case <-ticker.C:
-				periodicCheck = true
-			case <-scheduledCheck:
-			case <-connectionStateTick:
-				inspectConnections = true
-			}
-		}
-		runRetryBatchNow = false
-
-		if periodicCheck {
-			c.logMemberTransportFailureSummary(time.Now())
-		}
-
-		if controller.isDegraded() {
-			switch {
-			case inspectConnections:
-				snapshot := c.snapshotMemberConnections()
-				decision := controller.inspect(snapshot.urls, snapshot.states)
-				if decision.action == memberRefreshWait {
-					connectIdleMemberConnections(snapshot)
-					continue
-				}
-				stopConnectionStateTicker()
-				drainScheduledCheck()
-				runRetryBatchNow = true
-				continue
-			case periodicCheck:
+				c.logMemberTransportFailureSummary(time.Now())
 				// The safety sweep covers the event that may have been coalesced
 				// while scheduled checks were disabled.
 				drainScheduledCheck()
@@ -651,58 +613,74 @@ func (c *serviceDiscovery) updateMemberLoop() {
 					stopConnectionStateTicker()
 					continue
 				}
-				snapshot := c.snapshotMemberConnections()
-				if controller.enterDegraded(result, snapshot.urls, snapshot.states) {
-					decision := controller.inspect(snapshot.urls, snapshot.states)
-					if decision.action == memberRefreshWait {
-						connectIdleMemberConnections(snapshot)
-					}
+				snapshot = c.snapshotMemberConnections(snapshot)
+				if controller.enterDegraded(result, snapshot.urls, snapshot.connections) {
+					connectIdleMemberConnections(snapshot)
 					continue
 				}
 				controller.leaveDegraded()
 				stopConnectionStateTicker()
-				runRetryBatchNow = true
-				continue
+			case <-connectionStateTicker.C:
+				snapshot = c.snapshotMemberConnections(snapshot)
+				if controller.shouldWait(snapshot.urls, snapshot.connections) {
+					connectIdleMemberConnections(snapshot)
+					continue
+				}
+				stopConnectionStateTicker()
+				drainScheduledCheck()
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				log.Info("[pd] exit member loop due to context canceled")
+				return
+			case <-ticker.C:
+				c.logMemberTransportFailureSummary(time.Now())
+			case <-c.checkMembershipCh:
 			}
 		}
 
-		result, err := runRetryBatch()
-		logBatchFailure(err)
-		if err == nil {
-			continue
-		}
-		snapshot := c.snapshotMemberConnections()
-		if !controller.enterDegraded(result, snapshot.urls, snapshot.states) {
-			continue
-		}
-		startConnectionStateTicker()
+		// Run immediately again if a connection changes while degraded mode is
+		// being entered. Otherwise return to the outer normal/degraded wait.
+		for {
+			result, err := runRetryBatch()
+			logBatchFailure(err)
+			if err == nil {
+				break
+			}
+			snapshot = c.snapshotMemberConnections(snapshot)
+			if !controller.enterDegraded(result, snapshot.urls, snapshot.connections) {
+				break
+			}
+			startConnectionStateTicker()
 
-		// Inspect again after entering degraded mode so a connection that
-		// became ready as the failed batch completed is refreshed immediately.
-		snapshot = c.snapshotMemberConnections()
-		decision := controller.inspect(snapshot.urls, snapshot.states)
-		if decision.action == memberRefreshRetryBatch {
+			// Inspect again after entering degraded mode so a connection that
+			// became ready as the failed batch completed is refreshed immediately.
+			snapshot = c.snapshotMemberConnections(snapshot)
+			if controller.shouldWait(snapshot.urls, snapshot.connections) {
+				connectIdleMemberConnections(snapshot)
+				break
+			}
 			stopConnectionStateTicker()
 			drainScheduledCheck()
-			runRetryBatchNow = true
-		} else {
-			connectIdleMemberConnections(snapshot)
 		}
 	}
 }
 
 type memberConnectionSnapshot struct {
 	urls        []string
-	states      []memberConnectionState
-	connections []*grpc.ClientConn
+	connections []memberConnection
 }
 
-func (c *serviceDiscovery) snapshotMemberConnections() memberConnectionSnapshot {
+func (c *serviceDiscovery) snapshotMemberConnections(snapshot memberConnectionSnapshot) memberConnectionSnapshot {
 	urls := c.GetServiceURLs()
-	snapshot := memberConnectionSnapshot{
-		urls:        urls,
-		states:      make([]memberConnectionState, len(urls)),
-		connections: make([]*grpc.ClientConn, len(urls)),
+	snapshot.urls = urls
+	if cap(snapshot.connections) < len(urls) {
+		snapshot.connections = make([]memberConnection, len(urls))
+	} else {
+		snapshot.connections = snapshot.connections[:cap(snapshot.connections)]
+		clear(snapshot.connections)
+		snapshot.connections = snapshot.connections[:len(urls)]
 	}
 	for i, url := range urls {
 		value, ok := c.clientConns.Load(url)
@@ -713,16 +691,15 @@ func (c *serviceDiscovery) snapshotMemberConnections() memberConnectionSnapshot 
 		if !ok || conn == nil {
 			continue
 		}
-		snapshot.states[i] = memberConnectionState{observed: true, state: conn.GetState()}
-		snapshot.connections[i] = conn
+		snapshot.connections[i] = memberConnection{observed: true, state: conn.GetState(), conn: conn}
 	}
 	return snapshot
 }
 
 func connectIdleMemberConnections(snapshot memberConnectionSnapshot) {
-	for i, state := range snapshot.states {
-		if state.observed && state.state == connectivity.Idle && snapshot.connections[i] != nil {
-			snapshot.connections[i].Connect()
+	for _, connection := range snapshot.connections {
+		if connection.observed && connection.state == connectivity.Idle && connection.conn != nil {
+			connection.conn.Connect()
 		}
 	}
 }
@@ -1052,7 +1029,7 @@ func (c *serviceDiscovery) updateMember() error {
 func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) {
 	result := memberUpdateResult{}
 	for _, url := range c.GetServiceURLs() {
-		members, failure, err := c.getMembersWithFailure(c.ctx, url, UpdateMemberTimeout)
+		members, transportFailure, err := c.getMembersWithTransportFailure(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -1066,10 +1043,10 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 		}
 		// Failed to get members
 		if err != nil {
-			result.recordFailure(url, failure)
+			result.recordFailure(url, transportFailure)
 			failureTime := time.Now()
 			shouldLog := true
-			if failure.transport {
+			if transportFailure {
 				shouldLog = c.memberTransportFailures.record(failureTime, url)
 			} else {
 				// Only transport failures are suppressed. A different failure
@@ -1090,9 +1067,7 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 		}
 		c.logMemberTransportFailureRecovery(time.Now(), url)
 		c.updateURLs(members.GetMembers())
-		c.memberTransportFailures.cleanup(c.GetServiceURLs())
-		// URLs after the successful one were not observed failing in this refresh.
-		c.memberTransportFailures.cleanup(result.attemptedURLs)
+		c.memberTransportFailures.retain(c.GetServiceURLs(), result.failedURLs)
 
 		return result, c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
@@ -1136,20 +1111,20 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
-	members, _, err := c.getMembersWithFailure(ctx, url, timeout)
+	members, _, err := c.getMembersWithTransportFailure(ctx, url, timeout)
 	return members, err
 }
 
-func (c *serviceDiscovery) getMembersWithFailure(
+func (c *serviceDiscovery) getMembersWithTransportFailure(
 	ctx context.Context,
 	url string,
 	timeout time.Duration,
-) (*pdpb.GetMembersResponse, memberUpdateFailure, error) {
+) (*pdpb.GetMembersResponse, bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
-		return nil, classifyMemberDialFailure(err), err
+		return nil, isMemberDialTransportFailure(err), err
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
@@ -1161,24 +1136,22 @@ func (c *serviceDiscovery) getMembersWithFailure(
 	case res := <-r:
 		err = res.Err
 		if err != nil {
-			failure := classifyMemberRPCFailure(err)
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-			return nil, failure, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, isMemberRPCTransportFailure(err), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
 		val := res.Val
 		members := val.(*pdpb.GetMembersResponse)
 		if members.GetHeader().GetError() != nil {
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-			return nil, memberUpdateFailure{}, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, false, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
-		return members, memberUpdateFailure{}, nil
+		return members, false, nil
 	case <-ctx.Done():
-		failure := classifyMemberRPCFailure(ctx.Err())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		return nil, failure, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, isMemberRPCTransportFailure(ctx.Err()), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 }
 
@@ -1188,7 +1161,7 @@ func (c *serviceDiscovery) logMemberTransportFailureRecovery(now time.Time, url 
 		return
 	}
 	log.Info("[pd] member transport failure recovered",
-		zap.String("url", recovery.url),
+		zap.String("url", url),
 		zap.Duration("failure-duration", recovery.failureDuration),
 		zap.Uint64("failed-attempts", recovery.failedAttempts),
 		zap.Uint64("suppressed-errors", recovery.suppressedErrors))
