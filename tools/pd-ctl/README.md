@@ -38,7 +38,24 @@ The response contains both `requested_keyspace_id` and
 uses unified GC returns `4294967295`, the NullKeyspace ID, as its effective
 scope. The response contains local `gc_barriers` only.
 
-Inspect all active GC scopes and cluster-wide barriers:
+Inspect cluster-wide state when the local barriers do not explain the
+effective safe point:
+
+```bash
+pd-ctl gc-state global
+```
+
+```json
+{
+  "global_gc_barriers": []
+}
+```
+
+The global response does not contain per-keyspace safe points or local
+barriers. Its current field is `global_gc_barriers`; other cluster-wide GC
+state can be added to the same object in the future.
+
+Inspect every active GC scope together with cluster-wide state:
 
 ```bash
 pd-ctl gc-state all
@@ -59,7 +76,7 @@ pd-ctl gc-state all
 }
 ```
 
-The response sorts `gc_states` by `keyspace_id`. It reports cluster-wide
-barriers once in the top-level `global_gc_barriers` array. Barrier TTLs use
-remaining seconds, and `9223372036854775807` means that a barrier never
-expires.
+The combined response sorts `gc_states` by `keyspace_id` and reports
+cluster-wide barriers once in the top-level `global_gc_barriers` array.
+Barrier TTLs use remaining seconds, and `9223372036854775807` means that a
+barrier never expires.
