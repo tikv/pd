@@ -138,7 +138,11 @@ func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clien
 	if versionErr == nil && !versioninfo.IsReadyAPISupported(pdVersion) {
 		return nil
 	}
-	statusCode, err := s.checkTargetPDReady(checkCtx, clientURL)
+	readyPath := apiutil.CoreV2Path + "/ready"
+	if versionErr == nil && versioninfo.IsFeatureSupported(pdVersion, versioninfo.ReadyZAPI) {
+		readyPath = apiutil.CoreV2Path + "/readyz/leader-promotion"
+	}
+	statusCode, err := s.checkTargetPDReady(checkCtx, clientURL, readyPath)
 	// An unparsable version may come from an old custom build that does not
 	// expose /ready. A locally handled 404 is therefore compatible, while any
 	// other failure still means that the target cannot be confirmed ready.
@@ -163,8 +167,8 @@ func (s *Server) getTargetPDVersion(ctx context.Context, clientURL string) (stri
 	return version.Version, nil
 }
 
-func (s *Server) checkTargetPDReady(ctx context.Context, clientURL string) (int, error) {
-	_, statusCode, err := s.getTargetPD(ctx, clientURL, apiutil.CoreV2Path+"/ready")
+func (s *Server) checkTargetPDReady(ctx context.Context, clientURL, path string) (int, error) {
+	_, statusCode, err := s.getTargetPD(ctx, clientURL, path)
 	return statusCode, err
 }
 

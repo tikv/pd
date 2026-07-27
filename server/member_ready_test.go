@@ -30,6 +30,7 @@ import (
 const (
 	targetPDVersionPath = apiutil.CorePath + "/version"
 	targetPDReadyPath   = apiutil.CoreV2Path + "/ready"
+	targetPDReadyZPath  = apiutil.CoreV2Path + "/readyz/leader-promotion"
 )
 
 func TestCheckMemberReadyURL(t *testing.T) {
@@ -54,6 +55,20 @@ func TestCheckMemberReadyURL(t *testing.T) {
 			versionCode: http.StatusOK,
 			readyCode:   http.StatusOK,
 			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
+		},
+		{
+			name:        "latest v8.5 version still checks ready",
+			version:     "v8.5.7",
+			versionCode: http.StatusOK,
+			readyCode:   http.StatusOK,
+			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
+		},
+		{
+			name:        "readyz version checks readyz",
+			version:     "v8.6.0",
+			versionCode: http.StatusOK,
+			readyCode:   http.StatusOK,
+			expectPaths: []string{targetPDVersionPath, targetPDReadyZPath},
 		},
 		{
 			name:        "version request failure",
@@ -107,6 +122,14 @@ func TestCheckMemberReadyURL(t *testing.T) {
 			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
 			expectError: "target pd member 1 is not ready",
 		},
+		{
+			name:        "readyz request failure",
+			version:     "v8.6.0",
+			versionCode: http.StatusOK,
+			readyCode:   http.StatusNotFound,
+			expectPaths: []string{targetPDVersionPath, targetPDReadyZPath},
+			expectError: "target pd member 1 is not ready",
+		},
 	}
 
 	for _, test := range tests {
@@ -128,7 +151,7 @@ func TestCheckMemberReadyURL(t *testing.T) {
 					if test.versionCode == http.StatusOK {
 						_, _ = fmt.Fprintf(w, `{"version":%q}`, test.version)
 					}
-				case targetPDReadyPath:
+				case targetPDReadyPath, targetPDReadyZPath:
 					w.WriteHeader(test.readyCode)
 				default:
 					w.WriteHeader(http.StatusNotFound)

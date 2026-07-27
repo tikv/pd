@@ -66,3 +66,22 @@ func TestIsReadyAPISupported(t *testing.T) {
 		re.Equal(test.expect, IsReadyAPISupported(MustParseVersion(test.version)), test.version)
 	}
 }
+
+func TestReadyZAPISupported(t *testing.T) {
+	re := require.New(t)
+
+	tests := []struct {
+		version string
+		expect  bool
+	}{
+		{"8.5.7", false},
+		{"8.6.0-alpha", true},
+		{"8.6.0", true},
+		{"v8.6.0", true},
+		{"8.6.1", true},
+		{"9.0.0", true},
+	}
+	for _, test := range tests {
+		re.Equal(test.expect, IsFeatureSupported(MustParseVersion(test.version), ReadyZAPI), test.version)
+	}
+}

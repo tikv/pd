@@ -51,6 +51,8 @@ const (
 	SwitchWitness
 	// ReadyAPI supports checking whether PD has finished initial region loading.
 	ReadyAPI
+	// ReadyZAPI supports the readyz API and its individual readiness checks.
+	ReadyZAPI
 )
 
 var featuresDict = map[Feature]string{
@@ -65,6 +67,7 @@ var featuresDict = map[Feature]string{
 	HotScheduleWithQuery: "5.2.0",
 	SwitchWitness:        "6.6.0",
 	ReadyAPI:             "8.5.2",
+	ReadyZAPI:            "8.6.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.
