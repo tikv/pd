@@ -388,9 +388,9 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 	})
 }
 
-// The startup/1000000 benchmark should finish within 5 seconds on darwin/amd64
-// (VirtualApple @ 2.50GHz). It includes in-memory rule construction and index
-// building, but excludes storage paging, etcd latency, and rule delivery.
+// The startup/1000000 benchmark has a 5-second readiness target. It includes
+// in-memory rule construction and index building, but excludes storage paging,
+// etcd latency, and rule delivery.
 func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 	for _, count := range []int{100_000, 1_000_000} {
 		b.Run(fmt.Sprintf("startup/%d", count), func(b *testing.B) {
