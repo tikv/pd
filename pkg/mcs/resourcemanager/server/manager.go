@@ -476,8 +476,9 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.krgms = tempKrgms
 	m.syncLoadedGroups = nil
 	m.setLoadingState(LoadingStateCompleted)
+	epoch := m.loadEpoch
 	m.Unlock()
-	m.initReserved()
+	m.initReserved(epoch)
 	return m.loadServiceLimits()
 }
 
@@ -651,7 +652,12 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 			log.Info("async loading resource groups aborted: manager was reinitialized")
 			return
 		}
-		m.initReserved()
+		// storeLoadingStateIfCurrent releases m.Lock as soon as it verifies the
+		// epoch, so that check alone does not cover initReserved below: a
+		// re-election could still land in the gap between the check returning
+		// and initReserved running. Re-verify the epoch immediately before
+		// initReserved touches krgms, closing that window.
+		m.initReserved(epoch)
 		duration := time.Since(startTime)
 		asyncLoadGroupDuration.Observe(duration.Seconds())
 		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))
@@ -726,7 +732,13 @@ func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGr
 }
 
 func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
-	if m.getLoadingState() == LoadingStateCompleted {
+	// In metadata-watcher mode the cache is only eventually consistent with
+	// storage: PD writes metadata directly and the watcher applies it
+	// asynchronously, so LoadingStateCompleted here only means the initial
+	// watcher bootstrap finished, not that every subsequent write has been
+	// observed yet. Always fall through to a point load in that mode so a
+	// write that outraces its own watcher event is still visible.
+	if !m.enableMetadataWatcher && m.getLoadingState() == LoadingStateCompleted {
 		return nil
 	}
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
@@ -971,7 +983,19 @@ func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawVa
 	return nil
 }
 
-func (m *Manager) initReserved() {
+// initReserved backfills the default resource group for every keyspace whose
+// default wasn't confirmed by loading. The caller must have just verified
+// epoch via storeLoadingStateIfCurrent; re-verify it here under the manager
+// lock immediately before touching krgms, since that earlier check alone
+// does not cover this call once its lock is released.
+func (m *Manager) initReserved(epoch uint64) {
+	m.Lock()
+	if m.loadEpoch != epoch {
+		m.Unlock()
+		log.Info("skip initReserved: manager was reinitialized")
+		return
+	}
+	m.Unlock()
 	// Initialize the null keyspace resource group manager if it doesn't exist.
 	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, true)
 	// Initialize the default resource group respectively for each keyspace if it doesn't exist.

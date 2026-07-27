@@ -180,7 +180,10 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 		return err
 	}
 	// Ensure reserved default groups exist even if settings were missing in storage.
-	m.initReserved()
+	m.RLock()
+	epoch := m.loadEpoch
+	m.RUnlock()
+	m.initReserved(epoch)
 	return nil
 }
 
