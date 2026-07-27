@@ -334,15 +334,18 @@ func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time, excludeGCBarriers boo
 	if pb.KeyspaceScope != nil {
 		keyspaceID = pb.KeyspaceScope.GetKeyspaceId()
 	}
+	var state gc.GCState
 	if excludeGCBarriers {
-		return gc.NewGCStateWithoutGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint())
+		state = gc.NewGCStateWithoutGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint())
+	} else {
+		gcBarriers := make([]*gc.GCBarrierInfo, 0, len(pb.GetGcBarriers()))
+		for _, b := range pb.GetGcBarriers() {
+			gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, reqStartTime))
+		}
+		state = gc.NewGCStateWithGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint(), gcBarriers)
 	}
-
-	gcBarriers := make([]*gc.GCBarrierInfo, 0, len(pb.GetGcBarriers()))
-	for _, b := range pb.GetGcBarriers() {
-		gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, reqStartTime))
-	}
-	return gc.NewGCStateWithGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint(), gcBarriers)
+	state.IsKeyspaceLevelGC = pb.GetIsKeyspaceLevelGc()
+	return state
 }
 
 // SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
