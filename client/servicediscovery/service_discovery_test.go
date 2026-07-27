@@ -488,18 +488,16 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 
 	const memberURL = "http://pd.test:2379"
 	testCases := []struct {
-		name        string
-		response    func() (*pdpb.GetMembersResponse, error)
-		fingerprint string
-		transport   bool
+		name      string
+		response  func() (*pdpb.GetMembersResponse, error)
+		transport bool
 	}{
 		{
 			name: "rpc unavailable",
 			response: func() (*pdpb.GetMembersResponse, error) {
 				return nil, status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connection refused")
 			},
-			fingerprint: "rpc/Unavailable",
-			transport:   true,
+			transport: true,
 		},
 		{
 			name: "response header error",
@@ -508,14 +506,12 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 					Header: &pdpb.ResponseHeader{ClusterId: 1, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: "not ready"}},
 				}, nil
 			},
-			fingerprint: "response/UNKNOWN",
 		},
 		{
 			name: "cluster id mismatch",
 			response: func() (*pdpb.GetMembersResponse, error) {
 				return validMemberTestResponse(memberURL, 2), nil
 			},
-			fingerprint: "cluster-id",
 		},
 		{
 			name: "missing leader",
@@ -524,7 +520,6 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 				response.Leader = nil
 				return response, nil
 			},
-			fingerprint: "leader",
 		},
 	}
 
@@ -532,6 +527,7 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			testServer.getMembers = testCase.response
 			client := newMemberTestServiceDiscovery(ctx, cancel, memberURL, conn)
+			require.True(t, client.memberTransportFailures.record(time.Now(), memberURL))
 
 			result, structuredErr := client.updateMemberWithResult()
 			compatibilityErr := client.updateMember()
@@ -541,11 +537,77 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 			require.Equal(t, []string{memberURL}, result.attemptedURLs)
 			require.Equal(t, testCase.transport, result.transportFailures == 1)
 
-			summary, ok := client.memberFailures.summary(time.Now())
-			require.True(t, ok)
-			require.Equal(t, []string{testCase.fingerprint}, summary.errorClasses)
+			_, ok := client.memberTransportFailures.summary(time.Now())
+			if testCase.transport {
+				require.True(t, ok)
+			} else {
+				require.False(t, ok)
+			}
 		})
 	}
+}
+
+func TestUpdateMemberClearsUnobservedFailureEpisodesAfterRecovery(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer()
+	testServer := &memberTestPDServer{}
+	pdpb.RegisterPDServer(server, testServer)
+	go func() {
+		require.NoError(t, server.Serve(listener))
+	}()
+	t.Cleanup(server.Stop)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+
+	memberURLs := []string{
+		"http://pd-1.test:2379",
+		"http://pd-2.test:2379",
+		"http://pd-3.test:2379",
+	}
+	members := make([]*pdpb.Member, 0, len(memberURLs))
+	for i, memberURL := range memberURLs {
+		members = append(members, &pdpb.Member{MemberId: uint64(i + 1), ClientUrls: []string{memberURL}})
+	}
+	var calls atomic.Int32
+	testServer.getMembers = func() (*pdpb.GetMembersResponse, error) {
+		if calls.Add(1) == 1 {
+			return nil, status.Error(codes.Unavailable, "transport unavailable")
+		}
+		return &pdpb.GetMembersResponse{
+			Header:  &pdpb.ResponseHeader{ClusterId: 1},
+			Members: members,
+			Leader:  members[1],
+		}, nil
+	}
+
+	client := newMemberTestServiceDiscovery(ctx, cancel, memberURLs[0], conn)
+	client.urls.Store(memberURLs)
+	client.leader.Store(newPDServiceClient(memberURLs[0], memberURLs[0], conn, true))
+	client.apiCandidateNodes = [apiKindCount]*serviceBalancer{
+		newServiceBalancer(emptyErrorFn),
+		newServiceBalancer(regionAPIErrorFn),
+	}
+	for _, memberURL := range memberURLs {
+		client.clientConns.Store(memberURL, conn)
+		require.True(t, client.memberTransportFailures.record(time.Now(), memberURL))
+	}
+
+	result, err := client.updateMemberWithResult()
+	require.NoError(t, err)
+	require.Equal(t, int32(2), calls.Load())
+	require.Equal(t, []string{"http://pd-1.test:2379"}, result.attemptedURLs)
+
+	summary, ok := client.memberTransportFailures.summary(time.Now())
+	require.True(t, ok)
+	require.Equal(t, []string{"http://pd-1.test:2379"}, summary.failedURLs)
 }
 
 func validMemberTestResponse(memberURL string, clusterID uint64) *pdpb.GetMembersResponse {

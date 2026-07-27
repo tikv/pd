@@ -25,47 +25,16 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-
 	clienterrs "github.com/tikv/pd/client/errs"
 )
 
-type memberFailurePhase string
-
-const (
-	memberFailurePhaseDial      memberFailurePhase = "dial"
-	memberFailurePhaseRPC       memberFailurePhase = "rpc"
-	memberFailurePhaseResponse  memberFailurePhase = "response"
-	memberFailurePhaseClusterID memberFailurePhase = "cluster-id"
-	memberFailurePhaseLeader    memberFailurePhase = "leader"
-)
-
-type memberFailureFingerprint struct {
-	phase       memberFailurePhase
-	grpcCode    codes.Code
-	pdErrorType pdpb.ErrorType
-}
-
-func (f memberFailureFingerprint) String() string {
-	switch f.phase {
-	case memberFailurePhaseRPC:
-		return string(f.phase) + "/" + f.grpcCode.String()
-	case memberFailurePhaseResponse:
-		return string(f.phase) + "/" + f.pdErrorType.String()
-	default:
-		return string(f.phase)
-	}
-}
-
 type memberUpdateFailure struct {
-	fingerprint memberFailureFingerprint
-	transport   bool
+	transport bool
 }
 
 func classifyMemberDialFailure(err error) memberUpdateFailure {
 	return memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseDial},
-		transport:   errors.Is(err, clienterrs.ErrGRPCDial),
+		transport: errors.Is(err, clienterrs.ErrGRPCDial),
 	}
 }
 
@@ -75,20 +44,7 @@ func classifyMemberRPCFailure(err error) memberUpdateFailure {
 		code = codes.DeadlineExceeded
 	}
 	return memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: code},
-		transport:   clienterrs.IsNetworkError(code),
-	}
-}
-
-func classifyMemberResponseFailure(errorType pdpb.ErrorType) memberUpdateFailure {
-	return memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseResponse, pdErrorType: errorType},
-	}
-}
-
-func classifyMemberSemanticFailure(phase memberFailurePhase) memberUpdateFailure {
-	return memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: phase},
+		transport: clienterrs.IsNetworkError(code),
 	}
 }
 
@@ -194,70 +150,63 @@ func isInactiveMemberConnectionState(state connectivity.State) bool {
 		state == connectivity.TransientFailure
 }
 
-type memberFailureEpisode struct {
+type memberTransportFailureEpisode struct {
 	firstFailure     time.Time
-	fingerprint      memberFailureFingerprint
 	failedAttempts   uint64
 	suppressedErrors uint64
 }
 
-type memberFailureRecovery struct {
+type memberTransportFailureRecovery struct {
 	url              string
 	failureDuration  time.Duration
 	failedAttempts   uint64
 	suppressedErrors uint64
 }
 
-type memberFailureSummary struct {
+type memberTransportFailureSummary struct {
 	failedURLs       []string
-	errorClasses     []string
 	failureDuration  time.Duration
 	failedAttempts   uint64
 	suppressedErrors uint64
 }
 
-type memberFailureTracker struct {
+type memberTransportFailureTracker struct {
 	mu       sync.Mutex
-	episodes map[string]*memberFailureEpisode
+	episodes map[string]*memberTransportFailureEpisode
 }
 
 // record returns true when the caller should emit the detailed failure log.
-func (t *memberFailureTracker) record(now time.Time, url string, failure memberUpdateFailure) bool {
+func (t *memberTransportFailureTracker) record(now time.Time, url string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.episodes == nil {
-		t.episodes = make(map[string]*memberFailureEpisode)
+		t.episodes = make(map[string]*memberTransportFailureEpisode)
 	}
 	episode, ok := t.episodes[url]
 	if !ok {
-		t.episodes[url] = &memberFailureEpisode{
+		t.episodes[url] = &memberTransportFailureEpisode{
 			firstFailure:   now,
-			fingerprint:    failure.fingerprint,
 			failedAttempts: 1,
 		}
 		return true
 	}
 
 	episode.failedAttempts++
-	if episode.fingerprint != failure.fingerprint {
-		episode.fingerprint = failure.fingerprint
-		return true
-	}
 	episode.suppressedErrors++
 	return false
 }
 
-func (t *memberFailureTracker) recover(now time.Time, url string) (memberFailureRecovery, bool) {
+func (t *memberTransportFailureTracker) recover(now time.Time, url string) (memberTransportFailureRecovery, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	episode, ok := t.episodes[url]
 	if !ok {
-		return memberFailureRecovery{}, false
+		return memberTransportFailureRecovery{}, false
 	}
 	delete(t.episodes, url)
-	return memberFailureRecovery{
+	return memberTransportFailureRecovery{
 		url:              url,
 		failureDuration:  now.Sub(episode.firstFailure),
 		failedAttempts:   episode.failedAttempts,
@@ -265,7 +214,13 @@ func (t *memberFailureTracker) recover(now time.Time, url string) (memberFailure
 	}, true
 }
 
-func (t *memberFailureTracker) cleanup(urls []string) {
+func (t *memberTransportFailureTracker) discard(url string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.episodes, url)
+}
+
+func (t *memberTransportFailureTracker) cleanup(urls []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -283,12 +238,12 @@ func (t *memberFailureTracker) cleanup(urls []string) {
 	}
 }
 
-func (t *memberFailureTracker) summary(now time.Time) (memberFailureSummary, bool) {
+func (t *memberTransportFailureTracker) summary(now time.Time) (memberTransportFailureSummary, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if len(t.episodes) == 0 {
-		return memberFailureSummary{}, false
+		return memberTransportFailureSummary{}, false
 	}
 	urls := make([]string, 0, len(t.episodes))
 	for url := range t.episodes {
@@ -296,9 +251,8 @@ func (t *memberFailureTracker) summary(now time.Time) (memberFailureSummary, boo
 	}
 	sort.Strings(urls)
 
-	summary := memberFailureSummary{
-		failedURLs:   urls,
-		errorClasses: make([]string, 0, len(urls)),
+	summary := memberTransportFailureSummary{
+		failedURLs: urls,
 	}
 	earliest := now
 	for _, url := range urls {
@@ -306,7 +260,6 @@ func (t *memberFailureTracker) summary(now time.Time) (memberFailureSummary, boo
 		if episode.firstFailure.Before(earliest) {
 			earliest = episode.firstFailure
 		}
-		summary.errorClasses = append(summary.errorClasses, episode.fingerprint.String())
 		summary.failedAttempts += episode.failedAttempts
 		summary.suppressedErrors += episode.suppressedErrors
 	}

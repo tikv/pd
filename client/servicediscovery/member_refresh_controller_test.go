@@ -29,7 +29,6 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/status"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	pingcaplog "github.com/pingcap/log"
 
 	clienterrs "github.com/tikv/pd/client/errs"
@@ -38,13 +37,8 @@ import (
 func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 	t.Parallel()
 
-	transportFailure := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.Unavailable},
-		transport:   true,
-	}
-	semanticFailure := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseResponse, pdErrorType: pdpb.ErrorType_UNKNOWN},
-	}
+	transportFailure := memberUpdateFailure{transport: true}
+	nonTransportFailure := memberUpdateFailure{}
 
 	testCases := []struct {
 		name   string
@@ -69,8 +63,8 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
-			name:   "semantic failure",
-			result: newFailedMemberUpdateResult(transportFailure, semanticFailure),
+			name:   "non-transport failure",
+			result: newFailedMemberUpdateResult(transportFailure, nonTransportFailure),
 			states: observedMemberConnectionStates(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
@@ -178,31 +172,22 @@ func TestMemberRefreshControllerInspectDoesNotAllocate(t *testing.T) {
 
 var memberRefreshDecisionSink memberRefreshDecision
 
-func TestMemberFailureTrackerEpisodes(t *testing.T) {
+func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	t.Parallel()
 
-	tracker := memberFailureTracker{}
+	tracker := memberTransportFailureTracker{}
 	start := time.Unix(100, 0)
-	refused := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.Unavailable},
-		transport:   true,
-	}
-	timeout := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.DeadlineExceeded},
-		transport:   true,
-	}
 
-	require.True(t, tracker.record(start, "http://pd-1:2379", refused))
-	require.False(t, tracker.record(start.Add(time.Second), "http://pd-1:2379", refused))
-	require.True(t, tracker.record(start.Add(2*time.Second), "http://pd-1:2379", timeout))
-	require.True(t, tracker.record(start.Add(3*time.Second), "http://pd-2:2379", refused))
+	require.True(t, tracker.record(start, "http://pd-1:2379"))
+	require.False(t, tracker.record(start.Add(time.Second), "http://pd-1:2379"))
+	require.False(t, tracker.record(start.Add(2*time.Second), "http://pd-1:2379"))
+	require.True(t, tracker.record(start.Add(3*time.Second), "http://pd-2:2379"))
 
 	summary, ok := tracker.summary(start.Add(4 * time.Second))
 	require.True(t, ok)
 	require.Equal(t, []string{"http://pd-1:2379", "http://pd-2:2379"}, summary.failedURLs)
-	require.Equal(t, []string{"rpc/DeadlineExceeded", "rpc/Unavailable"}, summary.errorClasses)
 	require.Equal(t, uint64(4), summary.failedAttempts)
-	require.Equal(t, uint64(1), summary.suppressedErrors)
+	require.Equal(t, uint64(2), summary.suppressedErrors)
 	require.Equal(t, 4*time.Second, summary.failureDuration)
 
 	recovery, ok := tracker.recover(start.Add(5*time.Second), "http://pd-2:2379")
@@ -221,115 +206,84 @@ func TestMemberFailureTrackerEpisodes(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestClassifyMemberFailure(t *testing.T) {
+func TestClassifyMemberTransportFailure(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name        string
-		failure     memberUpdateFailure
-		fingerprint string
-		transport   bool
+		name      string
+		failure   memberUpdateFailure
+		transport bool
 	}{
 		{
-			name:        "connection refused rpc",
-			failure:     classifyMemberRPCFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
-			fingerprint: "rpc/Unavailable",
-			transport:   true,
+			name:      "connection refused rpc",
+			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
+			transport: true,
 		},
 		{
-			name:        "tls rpc",
-			failure:     classifyMemberRPCFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
-			fingerprint: "rpc/Unavailable",
-			transport:   true,
+			name:      "tls rpc",
+			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
+			transport: true,
 		},
 		{
-			name:        "dns rpc",
-			failure:     classifyMemberRPCFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
-			fingerprint: "rpc/Unavailable",
-			transport:   true,
+			name:      "dns rpc",
+			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
+			transport: true,
 		},
 		{
-			name:        "deadline rpc",
-			failure:     classifyMemberRPCFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
-			fingerprint: "rpc/DeadlineExceeded",
-			transport:   true,
+			name:      "deadline rpc",
+			failure:   classifyMemberRPCFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
+			transport: true,
 		},
 		{
-			name:        "reset rpc",
-			failure:     classifyMemberRPCFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
-			fingerprint: "rpc/Unavailable",
-			transport:   true,
+			name:      "reset rpc",
+			failure:   classifyMemberRPCFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
+			transport: true,
 		},
 		{
-			name:        "non-network grpc status",
-			failure:     classifyMemberRPCFailure(status.Error(codes.PermissionDenied, "permission denied")),
-			fingerprint: "rpc/PermissionDenied",
-			transport:   false,
+			name:      "non-network grpc status",
+			failure:   classifyMemberRPCFailure(status.Error(codes.PermissionDenied, "permission denied")),
+			transport: false,
 		},
 		{
-			name:        "blocking dial timeout",
-			failure:     classifyMemberDialFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
-			fingerprint: "dial",
-			transport:   true,
+			name:      "blocking dial timeout",
+			failure:   classifyMemberDialFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
+			transport: true,
 		},
 		{
-			name:        "uncertain dial error",
-			failure:     classifyMemberDialFailure(errors.New("invalid client configuration")),
-			fingerprint: "dial",
-			transport:   false,
-		},
-		{
-			name:        "pd response error",
-			failure:     classifyMemberResponseFailure(pdpb.ErrorType_NOT_BOOTSTRAPPED),
-			fingerprint: "response/NOT_BOOTSTRAPPED",
-			transport:   false,
-		},
-		{
-			name:        "cluster id mismatch",
-			failure:     classifyMemberSemanticFailure(memberFailurePhaseClusterID),
-			fingerprint: "cluster-id",
-			transport:   false,
+			name:      "uncertain dial error",
+			failure:   classifyMemberDialFailure(errors.New("invalid client configuration")),
+			transport: false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.fingerprint, testCase.failure.fingerprint.String())
 			require.Equal(t, testCase.transport, testCase.failure.transport)
 		})
 	}
-
-	// Dynamic targets must not create a new fingerprint for the same failure class.
-	first := classifyMemberRPCFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connection refused"))
-	second := classifyMemberRPCFailure(status.Error(codes.Unavailable, "dial tcp 198.51.100.8:1234: connection refused"))
-	require.Equal(t, first.fingerprint, second.fingerprint)
 }
 
-func TestMemberFailureSummaryAndRecoveryLogs(t *testing.T) {
+func TestMemberTransportFailureSummaryAndRecoveryLogs(t *testing.T) {
 	core, observedLogs := observer.New(zap.InfoLevel)
 	restoreLogger := pingcaplog.ReplaceGlobals(zap.New(core), nil)
 	t.Cleanup(restoreLogger)
 
 	client := &serviceDiscovery{}
 	start := time.Unix(100, 0)
-	failure := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.Unavailable},
-		transport:   true,
-	}
-	require.True(t, client.memberFailures.record(start, "http://pd-1:2379", failure))
-	require.False(t, client.memberFailures.record(start.Add(time.Second), "http://pd-1:2379", failure))
+	require.True(t, client.memberTransportFailures.record(start, "http://pd-1:2379"))
+	require.False(t, client.memberTransportFailures.record(start.Add(time.Second), "http://pd-1:2379"))
 
-	client.logMemberFailureSummary(start.Add(2 * time.Second))
-	summaryLogs := observedLogs.FilterMessage("[pd] member update failures are being suppressed").All()
+	client.logMemberTransportFailureSummary(start.Add(2 * time.Second))
+	summaryLogs := observedLogs.FilterMessage("[pd] member transport failures are being suppressed").All()
 	require.Len(t, summaryLogs, 1)
 	summaryFields := summaryLogs[0].ContextMap()
 	require.Contains(t, summaryFields, "failed-urls")
 	require.Equal(t, uint64(2), summaryFields["failed-attempts"])
 	require.Equal(t, uint64(1), summaryFields["suppressed-errors"])
-	require.Contains(t, summaryFields, "error-classes")
+	require.NotContains(t, summaryFields, "error-classes")
 
-	client.logMemberFailureRecovery(start.Add(3*time.Second), "http://pd-1:2379")
-	recoveryLogs := observedLogs.FilterMessage("[pd] member update from this url recovered").All()
+	client.logMemberTransportFailureRecovery(start.Add(3*time.Second), "http://pd-1:2379")
+	recoveryLogs := observedLogs.FilterMessage("[pd] member transport failure recovered").All()
 	require.Len(t, recoveryLogs, 1)
 	recoveryFields := recoveryLogs[0].ContextMap()
 	require.Equal(t, "http://pd-1:2379", recoveryFields["url"])
@@ -337,12 +291,8 @@ func TestMemberFailureSummaryAndRecoveryLogs(t *testing.T) {
 	require.Equal(t, uint64(1), recoveryFields["suppressed-errors"])
 }
 
-func TestMemberFailureTrackerConcurrentAccess(_ *testing.T) {
-	tracker := memberFailureTracker{}
-	failure := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.Unavailable},
-		transport:   true,
-	}
+func TestMemberTransportFailureTrackerConcurrentAccess(_ *testing.T) {
+	tracker := memberTransportFailureTracker{}
 	now := time.Unix(100, 0)
 
 	var wg sync.WaitGroup
@@ -352,7 +302,7 @@ func TestMemberFailureTrackerConcurrentAccess(_ *testing.T) {
 			defer wg.Done()
 			url := fmt.Sprintf("http://pd-%d:2379", index%3)
 			for range 100 {
-				tracker.record(now, url, failure)
+				tracker.record(now, url)
 				tracker.summary(now.Add(time.Second))
 				tracker.recover(now.Add(2*time.Second), url)
 				tracker.cleanup([]string{url})
@@ -362,8 +312,8 @@ func TestMemberFailureTrackerConcurrentAccess(_ *testing.T) {
 	wg.Wait()
 }
 
-func TestMemberFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.T) {
-	tracker := memberFailureTracker{}
+func TestMemberTransportFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.T) {
+	tracker := memberTransportFailureTracker{}
 	now := time.Unix(100, 0)
 	allocations := testing.AllocsPerRun(1000, func() {
 		_, _ = tracker.recover(now, "http://pd-1:2379")
@@ -384,17 +334,13 @@ func BenchmarkMemberRefreshControllerInspect(b *testing.B) {
 	}
 }
 
-func BenchmarkMemberFailureTrackerSuppression(b *testing.B) {
-	tracker := memberFailureTracker{}
-	failure := memberUpdateFailure{
-		fingerprint: memberFailureFingerprint{phase: memberFailurePhaseRPC, grpcCode: codes.Unavailable},
-		transport:   true,
-	}
+func BenchmarkMemberTransportFailureTrackerSuppression(b *testing.B) {
+	tracker := memberTransportFailureTracker{}
 	now := time.Unix(100, 0)
-	tracker.record(now, "http://pd-1:2379", failure)
+	tracker.record(now, "http://pd-1:2379")
 	b.ReportAllocs()
 	for b.Loop() {
-		tracker.record(now, "http://pd-1:2379", failure)
+		tracker.record(now, "http://pd-1:2379")
 	}
 }
 

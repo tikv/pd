@@ -458,7 +458,7 @@ type serviceDiscovery struct {
 
 	flight singleflight.Group
 
-	memberFailures memberFailureTracker
+	memberTransportFailures memberTransportFailureTracker
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -624,7 +624,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 		runRetryBatchNow = false
 
 		if periodicCheck {
-			c.logMemberFailureSummary(time.Now())
+			c.logMemberTransportFailureSummary(time.Now())
 		}
 
 		if controller.isDegraded() {
@@ -1060,16 +1060,23 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 				zap.Uint64("updated-cluster-id", updatedClusterID),
 				zap.Uint64("expected-cluster-id", c.clusterID))
 			err = errs.ErrClientUpdateMember.FastGenByArgs(fmt.Sprintf("cluster id does not match: %d != %d", updatedClusterID, c.clusterID))
-			failure = classifyMemberSemanticFailure(memberFailurePhaseClusterID)
 		}
 		if err == nil && (members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0) {
 			err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
-			failure = classifyMemberSemanticFailure(memberFailurePhaseLeader)
 		}
 		// Failed to get members
 		if err != nil {
 			result.recordFailure(url, failure)
-			if c.memberFailures.record(time.Now(), url, failure) {
+			failureTime := time.Now()
+			shouldLog := true
+			if failure.transport {
+				shouldLog = c.memberTransportFailures.record(failureTime, url)
+			} else {
+				// Only transport failures are suppressed. A different failure
+				// ends any transport-failure episode for this URL.
+				c.memberTransportFailures.discard(url)
+			}
+			if shouldLog {
 				log.Info("[pd] cannot update member from this url",
 					zap.String("url", url),
 					errs.ZapError(err))
@@ -1081,9 +1088,11 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 				continue
 			}
 		}
-		c.logMemberFailureRecovery(time.Now(), url)
+		c.logMemberTransportFailureRecovery(time.Now(), url)
 		c.updateURLs(members.GetMembers())
-		c.memberFailures.cleanup(c.GetServiceURLs())
+		c.memberTransportFailures.cleanup(c.GetServiceURLs())
+		// URLs after the successful one were not observed failing in this refresh.
+		c.memberTransportFailures.cleanup(result.attemptedURLs)
 
 		return result, c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
@@ -1162,7 +1171,7 @@ func (c *serviceDiscovery) getMembersWithFailure(
 		if members.GetHeader().GetError() != nil {
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
-			return nil, classifyMemberResponseFailure(members.GetHeader().GetError().GetType()), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, memberUpdateFailure{}, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
 		return members, memberUpdateFailure{}, nil
 	case <-ctx.Done():
@@ -1173,29 +1182,28 @@ func (c *serviceDiscovery) getMembersWithFailure(
 	}
 }
 
-func (c *serviceDiscovery) logMemberFailureRecovery(now time.Time, url string) {
-	recovery, ok := c.memberFailures.recover(now, url)
+func (c *serviceDiscovery) logMemberTransportFailureRecovery(now time.Time, url string) {
+	recovery, ok := c.memberTransportFailures.recover(now, url)
 	if !ok {
 		return
 	}
-	log.Info("[pd] member update from this url recovered",
+	log.Info("[pd] member transport failure recovered",
 		zap.String("url", recovery.url),
 		zap.Duration("failure-duration", recovery.failureDuration),
 		zap.Uint64("failed-attempts", recovery.failedAttempts),
 		zap.Uint64("suppressed-errors", recovery.suppressedErrors))
 }
 
-func (c *serviceDiscovery) logMemberFailureSummary(now time.Time) {
-	summary, ok := c.memberFailures.summary(now)
+func (c *serviceDiscovery) logMemberTransportFailureSummary(now time.Time) {
+	summary, ok := c.memberTransportFailures.summary(now)
 	if !ok {
 		return
 	}
-	log.Info("[pd] member update failures are being suppressed",
+	log.Info("[pd] member transport failures are being suppressed",
 		zap.Strings("failed-urls", summary.failedURLs),
 		zap.Duration("failure-duration", summary.failureDuration),
 		zap.Uint64("failed-attempts", summary.failedAttempts),
-		zap.Uint64("suppressed-errors", summary.suppressedErrors),
-		zap.Strings("error-classes", summary.errorClasses))
+		zap.Uint64("suppressed-errors", summary.suppressedErrors))
 }
 
 func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
