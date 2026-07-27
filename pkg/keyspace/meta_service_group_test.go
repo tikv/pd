@@ -335,6 +335,38 @@ func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyDoesNotCommitConfi
 	re.NotContains(statusMap, "etcd-group-readded")
 }
 
+// TestUpdateGroupsSafelyCommitsConfigEvenWhenDeletedStatusCleanupFails documents
+// a deliberate asymmetry with the added-group case above: cleaning up a deleted
+// group's now-orphan persisted status runs after persist() and is best-effort,
+// not rolled back on failure. This is safe because the deleted group is removed
+// from metaServiceGroups (hence unreachable for new assignment) in the same call
+// regardless of cleanup outcome, and a future re-add resets any leftover status
+// (see TestUpdateGroupsSafelyResetsStatusForReaddedGroup). Making this atomic
+// would instead make an unrelated group deletion hostage to cleaning up a status
+// key nothing will ever read again.
+func (suite *metaServiceGroupTestSuite) TestUpdateGroupsSafelyCommitsConfigEvenWhenDeletedStatusCleanupFails() {
+	re := suite.Require()
+	store := &cleanupFailingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+	}
+	manager, err := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	re.NoError(err)
+
+	groups := mockMetaServiceGroups()
+	delete(groups, "etcd-group-0")
+	configPersisted := false
+	err = manager.UpdateGroupsSafely(suite.ctx, groups, []string{"etcd-group-0"}, func() error {
+		configPersisted = true
+		return nil
+	}, nil)
+	re.NoError(err)
+	re.True(configPersisted)
+	re.NotContains(manager.GetGroups(), "etcd-group-0")
+	statusMap, err := manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.NotContains(statusMap, "etcd-group-0")
+}
+
 func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 	re := suite.Require()
 	// Groups are disabled by default, so reassigning a keyspace into one must be
