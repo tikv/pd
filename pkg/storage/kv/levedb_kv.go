@@ -52,8 +52,9 @@ func (kv *LevelDBKV) Load(key string) (string, error) {
 	return string(v), err
 }
 
-// LoadRange gets a range of value for a given key range.
-func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int) (keys, values []string, err error) {
+// LoadRange gets a range of value for a given key range. LevelDB has no MVCC
+// revision concept, so any RangeOption (e.g. WithRevision) is ignored.
+func (kv *LevelDBKV) LoadRange(startKey, endKey string, limit int, _ ...RangeOption) (keys, values []string, err error) {
 	iter := kv.NewIterator(&util.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
 	keys = make([]string, 0, limit)
 	values = make([]string, 0, limit)
@@ -129,8 +130,13 @@ func (txn *levelDBTxn) Load(key string) (string, error) {
 }
 
 // LoadRange executes base's load range.
-func (txn *levelDBTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
-	return txn.kv.LoadRange(key, endKey, limit)
+func (txn *levelDBTxn) LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys []string, values []string, err error) {
+	return txn.kv.LoadRange(key, endKey, limit, opts...)
+}
+
+// CurrentRevision returns 0: LevelDB has no MVCC revision concept.
+func (*LevelDBKV) CurrentRevision(_ context.Context) (int64, error) {
+	return 0, nil
 }
 
 // commit writes the batch constructed into levelDB.

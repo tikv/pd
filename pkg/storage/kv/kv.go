@@ -102,12 +102,38 @@ type RawTxnCapable interface {
 	CreateRawTxn() RawTxn
 }
 
+// RangeOptions carries optional, backend-specific behavior for LoadRange.
+type RangeOptions struct {
+	// Revision, if non-zero, pins the read to a specific historical MVCC
+	// revision instead of the latest value. Backends without MVCC (LevelDB,
+	// the in-memory KV) have no notion of revision and ignore it.
+	Revision int64
+}
+
+// RangeOption configures a RangeOptions.
+type RangeOption func(*RangeOptions)
+
+// WithRevision pins a LoadRange call to a specific historical MVCC revision,
+// so a caller issuing multiple LoadRange calls (e.g. to page through a large
+// range) sees one consistent point in time across all of them instead of a
+// mix of before/after states for keys mutated while paging.
+//
+// Avoid using it on a Txn obtained from RunInTxn: on the etcd backend, LoadRange
+// inside a transaction also adds a condition comparing each returned key's
+// current value against the value just read (see RunInTxn's doc), which is
+// checked at commit time against the latest value, not the pinned revision. A
+// revision pinned to the past will then spuriously fail that condition as soon
+// as any returned key changes before commit. Call it on Base directly instead.
+func WithRevision(revision int64) RangeOption {
+	return func(o *RangeOptions) { o.Revision = revision }
+}
+
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
 type BaseReadWrite interface {
 	Save(key, value string) error
 	Remove(key string) error
 	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
+	LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys []string, values []string, err error)
 }
 
 // Txn bundles multiple operations into a single executable unit.
@@ -147,4 +173,8 @@ type Base interface {
 	// 2. Only when storage is etcd, does RunInTxn checks that
 	// values loaded during transaction has not been modified before commit.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
+	// CurrentRevision returns the backend's current MVCC revision, for use
+	// with WithRevision. Backends without MVCC (LevelDB, the in-memory KV)
+	// return 0, which WithRevision treats as "unpinned".
+	CurrentRevision(ctx context.Context) (int64, error)
 }

@@ -128,8 +128,10 @@ func (m *MetaServiceGroupManager) RefreshCache(ctx context.Context) error {
 	}
 	// Rebuild counts from keyspace metadata. The counter is nil before the keyspace
 	// manager wires it (e.g. at construction) and in unit tests without one; counts
-	// then start at zero and are corrected on the next RefreshCache.
+	// then start at zero and countsReady stays false until the counter is wired and
+	// a real rebuild (StartAssignmentCountRebuild) completes.
 	counts := map[string]int{}
+	scanned := false
 	if m.keyspaceAssignmentCounter != nil {
 		set := make(map[string]struct{}, len(m.metaServiceGroups))
 		for id := range m.metaServiceGroups {
@@ -139,6 +141,7 @@ func (m *MetaServiceGroupManager) RefreshCache(ctx context.Context) error {
 		if counts, err = m.keyspaceAssignmentCounter(ctx, set); err != nil {
 			return err
 		}
+		scanned = true
 	}
 	cache := make(map[string]*endpoint.MetaServiceGroupStatus, len(m.metaServiceGroups))
 	for id := range m.metaServiceGroups {
@@ -151,7 +154,7 @@ func (m *MetaServiceGroupManager) RefreshCache(ctx context.Context) error {
 	m.statusMu.Lock()
 	m.cachedStatus = cache
 	m.termGen++
-	m.countsReady = true
+	m.countsReady = scanned
 	m.rebuilding = false
 	m.rebuildDeltas = nil
 	m.statusMu.Unlock()
@@ -333,16 +336,25 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if patch.AssignmentCount != nil {
 		return ErrAssignmentCountPatchUnsupported
 	}
-	m.Lock()
-	defer m.Unlock()
+	m.RLock()
+	defer m.RUnlock()
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
 		return ErrUnknownMetaServiceGroup
 	}
 	// Persist the Enabled flag (the only persisted field) synchronously when it
-	// changes. The mgm write lock serializes this with persistGroupsLocked, so the
-	// group cannot be deleted between the existence check and the write.
+	// changes. persistGroupsLocked (group deletion) takes the write lock, so
+	// holding the read lock here is enough to keep the group from being deleted
+	// between the existence check and the write.
 	if patch.Enabled != nil {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+			// Load before saving so the txn carries an implicit compare on the
+			// status key's current value. Without it this is a blind put: a
+			// write from a leader that has since lost its term can still commit
+			// after a newer leader's write, silently reverting it. The loaded
+			// value itself is unused; only the CAS side effect matters here.
+			if _, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{groupID: ""}); err != nil {
+				return err
+			}
 			return m.store.SaveMetaServiceGroupStatus(txn, groupID, &endpoint.MetaServiceGroupStatus{Enabled: *patch.Enabled})
 		}); err != nil {
 			return err
@@ -469,8 +481,16 @@ func (m *MetaServiceGroupManager) updateAssignmentTxn(_ kv.Txn, oldGroupID, newG
 }
 
 // applyAssignmentDeltaStatusLocked moves one assignment from oldGroupID to
-// newGroupID in the cached status. The caller must hold statusMu.
+// newGroupID in the cached status. The caller must hold statusMu. newGroupID's
+// existence is checked before either side is mutated, so a missing target
+// leaves the decrement side untouched instead of losing a count with no
+// matching increment.
 func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, newGroupID string) error {
+	if newGroupID != "" {
+		if _, ok := m.cachedStatus[newGroupID]; !ok {
+			return ErrUnknownMetaServiceGroup
+		}
+	}
 	if oldGroupID != "" {
 		if status := m.cachedStatus[oldGroupID]; status != nil {
 			if status.AssignmentCount > 0 {
@@ -480,11 +500,7 @@ func (m *MetaServiceGroupManager) applyAssignmentDeltaStatusLocked(oldGroupID, n
 		}
 	}
 	if newGroupID != "" {
-		status := m.cachedStatus[newGroupID]
-		if status == nil {
-			return ErrUnknownMetaServiceGroup
-		}
-		status.AssignmentCount++
+		m.cachedStatus[newGroupID].AssignmentCount++
 		m.recordRebuildDeltaLocked(newGroupID, 1)
 	}
 	return nil

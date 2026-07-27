@@ -867,14 +867,18 @@ func applyKeyspaceConfigMutations(config map[string]string, mutations []*Mutatio
 }
 
 // runTxnWithMetaGroupLock runs f inside a storage transaction while holding the
-// meta-service group manager's lock for the whole transaction. This keeps
+// meta-service group manager's read lock for the whole transaction. This keeps
 // keyspace assignment validation and the cached assignment count update
 // atomic with respect to MetaServiceGroupManager.UpdateGroupsSafely, which takes
-// the write lock before deleting a group.
+// the write lock before deleting a group. The read lock is enough because the
+// actual cache mutation is further serialized by reassignKeyspaceLocked/
+// updateAssignmentTxn under the leaf statusMu lock, so concurrent config-update
+// transactions (and concurrent keyspace creations, which also only take the read
+// lock) are not needlessly queued behind one another's storage latency.
 func (manager *Manager) runTxnWithMetaGroupLock(f func(txn kv.Txn) error, rollback func()) error {
 	if manager.mgm != nil {
-		manager.mgm.Lock()
-		defer manager.mgm.Unlock()
+		manager.mgm.RLock()
+		defer manager.mgm.RUnlock()
 	}
 	err := manager.store.RunInTxn(manager.ctx, f)
 	if err != nil && rollback != nil {
@@ -939,8 +943,8 @@ func (manager *Manager) updateKeyspaceConfigTxn(name string, update func(meta *k
 		oldMetaServiceGroup = oldConfig[MetaServiceGroupIDKey]
 		newMetaServiceGroup = newConfig[MetaServiceGroupIDKey]
 		if manager.mgm != nil && oldMetaServiceGroup != newMetaServiceGroup {
-			// The lock held by runTxnWithMetaGroupLock keeps this validation and
-			// the assignment update atomic with respect to UpdateGroupsSafely.
+			// The read lock held by runTxnWithMetaGroupLock keeps this validation
+			// and the assignment update atomic with respect to UpdateGroupsSafely.
 			if err := manager.mgm.reassignKeyspaceLocked(txn, oldMetaServiceGroup, newMetaServiceGroup); err != nil {
 				return err
 			}
@@ -1211,22 +1215,34 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 // authoritative source for the meta-service group delete guard: a stale
 // assignment counter must never permanently block removing a group that has no
 // keyspaces actually referencing it.
+//
+// The scan pages through keyspaces in a series of separate batches, so without
+// pinning it to a single revision, a keyspace reassigned mid-scan could be
+// observed under its new group by a batch that hasn't reached it yet, on top of
+// the concurrent in-memory delta the reassignment records for that same move
+// (see MetaServiceGroupManager.recordRebuildDeltaLocked), double-counting it.
+// Pinning every batch to the revision observed before the scan starts removes
+// that inconsistency: any reassignment whose commit is ordered after this call
+// is guaranteed a revision past the pin and is therefore covered only by the
+// delta, never by the scan itself.
 func (manager *Manager) CountKeyspacesByMetaServiceGroup(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error) {
 	counts := make(map[string]int, len(groupIDs))
 	if len(groupIDs) == 0 {
 		return counts, nil
+	}
+	revision, err := manager.store.CurrentRevision(ctx)
+	if err != nil {
+		return nil, err
 	}
 	startID := constant.StartKeyspaceID
 	for {
 		// Load directly from the store rather than via LoadRangeKeyspace: the
 		// latter calls mgm.AttachEndpoints which takes the mgm read lock, and this
 		// is invoked while the mgm write lock is held, which would deadlock.
-		var keyspaces []*keyspacepb.KeyspaceMeta
-		if err := manager.store.RunInTxn(ctx, func(txn kv.Txn) error {
-			var err error
-			keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
-			return err
-		}); err != nil {
+		// LoadRangeKeyspaceAtRevision also intentionally bypasses RunInTxn: see its
+		// doc for why a pinned-revision read must not go through a Txn.
+		keyspaces, err := manager.store.LoadRangeKeyspaceAtRevision(startID, etcdutil.MaxEtcdTxnOps, revision)
+		if err != nil {
 			return nil, err
 		}
 		for _, ks := range keyspaces {

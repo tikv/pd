@@ -67,7 +67,11 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 }
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys, values []string, err error) {
+	var options RangeOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
 	// If the key is empty and endKey is "\x00", it means to scan all keys.
@@ -78,6 +82,9 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 	}
 
 	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
+	if options.Revision != 0 {
+		OpOption = append(OpOption, clientv3.WithRev(options.Revision))
+	}
 	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
 	if err != nil {
 		return nil, nil, err
@@ -89,6 +96,17 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 		values = append(values, string(item.Value))
 	}
 	return keys, values, nil
+}
+
+// CurrentRevision returns etcd's current MVCC revision, observed via a
+// linearizable read. Any write that etcd starts processing after this call
+// returns is guaranteed a revision greater than the one returned here.
+func (kv *etcdKVBase) CurrentRevision(_ context.Context) (int64, error) {
+	resp, err := etcdutil.EtcdKVGet(kv.client, "\x00", clientv3.WithLimit(1))
+	if err != nil {
+		return 0, err
+	}
+	return resp.Header.GetRevision(), nil
 }
 
 // Save puts a key-value pair to etcd.
@@ -266,8 +284,8 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 
 // LoadRange loads the target range from etcd,
 // Then for each value loaded, it puts a comparator into conditions.
-func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
-	keys, values, err = txn.kv.LoadRange(key, endKey, limit)
+func (txn *etcdTxn) LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys []string, values []string, err error) {
+	keys, values, err = txn.kv.LoadRange(key, endKey, limit, opts...)
 	// If LoadRange failed, preserve the failure behavior of base LoadRange.
 	if err != nil {
 		return keys, values, err

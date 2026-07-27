@@ -357,6 +357,16 @@ func (suite *metaServiceGroupTestSuite) TestReassignRejectsDisabledGroup() {
 }
 
 // TestRefreshCacheRebuildsFromStorageAndScan verifies that RefreshCache takes the
+// TestNewManagerCountsNotReadyUntilCounterWired verifies that RefreshCache at
+// construction time (before SetKeyspaceAssignmentCounter has been called by the
+// keyspace manager) does not mark assignment counts ready: a zero count derived
+// from a nil counter is not an authoritative scan result, so callers relying on
+// assignment_count_ready must keep waiting for the real rebuild.
+func (suite *metaServiceGroupTestSuite) TestNewManagerCountsNotReadyUntilCounterWired() {
+	re := suite.Require()
+	re.False(suite.manager.IsAssignmentCountReady())
+}
+
 // Enabled flag from storage (authoritative for that field) but rebuilds
 // AssignmentCount from the keyspace scan, ignoring any stale persisted count.
 func (suite *metaServiceGroupTestSuite) TestRefreshCacheRebuildsFromStorageAndScan() {

@@ -43,6 +43,7 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
+	testCurrentRevision(re, kv)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -54,6 +55,7 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testCurrentRevision(re, kv)
 	re.NoError(kv.Close())
 }
 
@@ -63,6 +65,7 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testCurrentRevision(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -169,6 +172,32 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	}
 	// When other writer exists, loader must error.
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
+}
+
+// testCurrentRevision checks that on etcd, a LoadRange pinned via WithRevision
+// to a revision captured before a write does not observe that write, while an
+// unpinned LoadRange always sees the latest value. LevelDB and the in-memory KV
+// have no MVCC revision concept, so CurrentRevision is always 0 and
+// WithRevision is a no-op: every read there sees the latest value regardless.
+func testCurrentRevision(re *require.Assertions, kv Base) {
+	re.NoError(kv.Save("rev-key", "before"))
+	rev, err := kv.CurrentRevision(context.Background())
+	re.NoError(err)
+	re.NoError(kv.Save("rev-key", "after"))
+
+	prefix, end := "rev-key", clientv3.GetPrefixRangeEnd("rev-key")
+	_, values, err := kv.LoadRange(prefix, end, 0, WithRevision(rev))
+	re.NoError(err)
+	if _, isEtcd := kv.(*etcdKVBase); isEtcd {
+		re.Equal([]string{"before"}, values)
+	} else {
+		re.Equal(int64(0), rev)
+		re.Equal([]string{"after"}, values)
+	}
+
+	_, values, err = kv.LoadRange(prefix, end, 0)
+	re.NoError(err)
+	re.Equal([]string{"after"}, values)
 }
 
 // nolint:unparam
