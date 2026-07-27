@@ -95,6 +95,9 @@ func (s *KeyspaceServer) LoadKeyspaceByID(_ context.Context, request *keyspacepb
 	if err != nil {
 		return &keyspacepb.LoadKeyspaceResponse{Header: getErrorHeader(err)}, nil
 	}
+	// TiKV needs keyspace metadata, including encryption settings, before it can
+	// split the keyspace regions. Checking the region bounds here would create a
+	// circular dependency between loading the metadata and splitting the regions.
 	return &keyspacepb.LoadKeyspaceResponse{
 		Header:   grpcutil.WrapHeader(),
 		Keyspace: meta,
