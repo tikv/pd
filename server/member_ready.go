@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -41,6 +42,8 @@ type targetPDVersion struct {
 
 // CheckMemberReadyForLeaderTransfer checks whether the target PD member can be promoted to leader.
 func (s *Server) CheckMemberReadyForLeaderTransfer(ctx context.Context, memberID uint64) error {
+	failpoint.InjectCall("checkMemberReadyForLeaderTransfer", memberID)
+
 	checkCtx, cancel := context.WithTimeout(ctx, memberReadyCheckTotalTimeout)
 	defer cancel()
 
@@ -127,22 +130,29 @@ func (s *Server) checkMemberReadyURL(ctx context.Context, memberID uint64, clien
 	if err != nil {
 		return errors.Annotatef(err, "failed to get target pd member %d version from %s", memberID, clientURL)
 	}
-	pdVersion, err := versioninfo.ParseVersion(version)
-	// A successful /version response with an unparsable version, such as "None"
-	// from local or dev builds, is treated as a dev/current build, so /ready
-	// decides readiness. Only a parseable release version older than ReadyAPI
-	// skips /ready for compatibility.
-	if err == nil && !versioninfo.IsReadyAPISupported(pdVersion) {
+	pdVersion, versionErr := versioninfo.ParseVersion(version)
+	// An unparsable version, such as "None", does not prove whether /ready is
+	// supported. Probe /ready so local and dev builds are still gated on their
+	// actual readiness. Only a parseable release older than ReadyAPI skips the
+	// probe based on its version.
+	if versionErr == nil && !versioninfo.IsReadyAPISupported(pdVersion) {
 		return nil
 	}
-	if err := s.checkTargetPDReady(checkCtx, clientURL); err != nil {
+	statusCode, err := s.checkTargetPDReady(checkCtx, clientURL)
+	// An unparsable version may come from an old custom build that does not
+	// expose /ready. A locally handled 404 is therefore compatible, while any
+	// other failure still means that the target cannot be confirmed ready.
+	if versionErr != nil && statusCode == http.StatusNotFound {
+		return nil
+	}
+	if err != nil {
 		return errors.Annotatef(err, "target pd member %d is not ready at %s", memberID, clientURL)
 	}
 	return nil
 }
 
 func (s *Server) getTargetPDVersion(ctx context.Context, clientURL string) (string, error) {
-	body, err := s.getTargetPD(ctx, clientURL, apiutil.CorePath+"/version")
+	body, _, err := s.getTargetPD(ctx, clientURL, apiutil.CorePath+"/version")
 	if err != nil {
 		return "", err
 	}
@@ -153,32 +163,33 @@ func (s *Server) getTargetPDVersion(ctx context.Context, clientURL string) (stri
 	return version.Version, nil
 }
 
-func (s *Server) checkTargetPDReady(ctx context.Context, clientURL string) error {
-	_, err := s.getTargetPD(ctx, clientURL, apiutil.CoreV2Path+"/ready")
-	return err
+func (s *Server) checkTargetPDReady(ctx context.Context, clientURL string) (int, error) {
+	_, statusCode, err := s.getTargetPD(ctx, clientURL, apiutil.CoreV2Path+"/ready")
+	return statusCode, err
 }
 
-func (s *Server) getTargetPD(ctx context.Context, clientURL, path string) ([]byte, error) {
+func (s *Server) getTargetPD(ctx context.Context, clientURL, path string) ([]byte, int, error) {
 	httpClient := s.GetHTTPClient()
 	if httpClient == nil {
-		return nil, errors.New("pd http client is nil")
+		return nil, 0, errors.New("pd http client is nil")
 	}
 	url := strings.TrimRight(clientURL, "/") + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, 0, errors.WithStack(err)
 	}
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, 0, errors.WithStack(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, errors.WithStack(err)
+		return nil, resp.StatusCode, errors.WithStack(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.Errorf("unexpected status %d from %s: %s", resp.StatusCode, url, string(body))
+		return nil, resp.StatusCode, errors.Errorf("unexpected status %d from %s: %s", resp.StatusCode, url, string(body))
 	}
-	return body, nil
+	return body, resp.StatusCode, nil
 }

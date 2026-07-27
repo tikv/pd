@@ -80,7 +80,22 @@ func TestCheckMemberReadyURL(t *testing.T) {
 			name:        "invalid version ready request failure",
 			version:     "invalid-version",
 			versionCode: http.StatusOK,
-			readyCode:   http.StatusServiceUnavailable,
+			readyCode:   http.StatusInternalServerError,
+			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
+			expectError: "target pd member 1 is not ready",
+		},
+		{
+			name:        "invalid version without ready api",
+			version:     "invalid-version",
+			versionCode: http.StatusOK,
+			readyCode:   http.StatusNotFound,
+			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
+		},
+		{
+			name:        "supported version without ready api",
+			version:     "v8.5.2",
+			versionCode: http.StatusOK,
+			readyCode:   http.StatusNotFound,
 			expectPaths: []string{targetPDVersionPath, targetPDReadyPath},
 			expectError: "target pd member 1 is not ready",
 		},
@@ -100,9 +115,11 @@ func TestCheckMemberReadyURL(t *testing.T) {
 
 			var mu sync.Mutex
 			paths := make([]string, 0, len(test.expectPaths))
+			allowFollowerHeaders := make([]string, 0, len(test.expectPaths))
 			testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				paths = append(paths, r.URL.Path)
+				allowFollowerHeaders = append(allowFollowerHeaders, r.Header.Get(apiutil.PDAllowFollowerHandleHeader))
 				mu.Unlock()
 
 				switch r.URL.Path {
@@ -129,8 +146,13 @@ func TestCheckMemberReadyURL(t *testing.T) {
 
 			mu.Lock()
 			gotPaths := append([]string(nil), paths...)
+			gotAllowFollowerHeaders := append([]string(nil), allowFollowerHeaders...)
 			mu.Unlock()
 			re.Equal(test.expectPaths, gotPaths)
+			re.Len(gotAllowFollowerHeaders, len(test.expectPaths))
+			for _, header := range gotAllowFollowerHeaders {
+				re.Equal("true", header)
+			}
 		})
 	}
 }

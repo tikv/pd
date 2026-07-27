@@ -22,6 +22,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -222,9 +223,23 @@ func TestLeaderPrioritySkipsUnreadyTarget(t *testing.T) {
 		}
 	}()
 
+	var readyCheckCount atomic.Int32
+	readyCheckFailpointName := "github.com/tikv/pd/server/checkMemberReadyForLeaderTransfer"
+	re.NoError(failpoint.EnableCall(readyCheckFailpointName, func(memberID uint64) {
+		if memberID == targetServer.GetServerID() {
+			readyCheckCount.Add(1)
+		}
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(readyCheckFailpointName))
+	}()
+
 	post(t, re, leaderServer.GetConfig().ClientUrls+"/pd/api/v1/members/name/"+targetName, `{"leader-priority": 1}`)
-	targetPDServer := targetServer.GetServer()
-	targetPDServer.GetMember().CheckPriority(ctx, member.WithTargetChecker(targetPDServer.CheckMemberReadyForLeaderTransfer))
+	// A second loop iteration proves that the first readiness check completed
+	// without transferring the etcd leader to the unready target.
+	testutil.Eventually(re, func() bool {
+		return readyCheckCount.Load() >= 2
+	})
 	etcdLeader, err = leaderServer.GetEtcdLeader()
 	re.NoError(err)
 	re.Equal(leaderName, etcdLeader)

@@ -416,32 +416,30 @@ func (m *Member) ResignEtcdLeader(ctx context.Context, from string, nextEtcdLead
 	if len(etcdLeaderIDs) == 0 {
 		return errors.New("no valid pd to transfer etcd leader")
 	}
+	rand.Shuffle(len(etcdLeaderIDs), func(i, j int) {
+		etcdLeaderIDs[i], etcdLeaderIDs[j] = etcdLeaderIDs[j], etcdLeaderIDs[i]
+	})
 	options := newMoveEtcdLeaderOptions(opts...)
-	if options.targetChecker != nil {
-		readyEtcdLeaderIDs := make([]uint64, 0, len(etcdLeaderIDs))
-		var lastErr error
-		for _, id := range etcdLeaderIDs {
-			checkCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
-			err := options.targetChecker(checkCtx, id)
-			cancel()
-			if err != nil {
-				lastErr = err
-				log.Warn("skip unready pd when resigning etcd leader", zap.Uint64("target-member-id", id), errs.ZapError(err))
-				continue
-			}
-			readyEtcdLeaderIDs = append(readyEtcdLeaderIDs, id)
-		}
-		if len(readyEtcdLeaderIDs) == 0 {
-			errMsg := "no ready pd to transfer etcd leader"
-			if lastErr != nil {
-				errMsg += ": " + lastErr.Error()
-			}
-			return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(errMsg)
-		}
-		etcdLeaderIDs = readyEtcdLeaderIDs
+	if options.targetChecker == nil {
+		return m.MoveEtcdLeader(ctx, m.ID(), etcdLeaderIDs[0])
 	}
-	nextEtcdLeaderID := etcdLeaderIDs[rand.IntN(len(etcdLeaderIDs))]
-	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
+	var lastErr error
+	for _, id := range etcdLeaderIDs {
+		checkCtx, cancel := context.WithTimeout(ctx, moveLeaderTimeout)
+		err := options.targetChecker(checkCtx, id)
+		cancel()
+		if err != nil {
+			lastErr = err
+			log.Warn("skip unready pd when resigning etcd leader", zap.Uint64("target-member-id", id), errs.ZapError(err))
+			continue
+		}
+		return m.MoveEtcdLeader(ctx, m.ID(), id)
+	}
+	errMsg := "no ready pd to transfer etcd leader"
+	if lastErr != nil {
+		errMsg += ": " + lastErr.Error()
+	}
+	return errs.ErrEtcdLeaderTransferTargetCheck.GenWithStackByArgs(errMsg)
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
