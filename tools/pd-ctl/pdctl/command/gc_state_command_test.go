@@ -44,7 +44,7 @@ type fakeGCStateReader struct {
 	closed        bool
 }
 
-func (r *fakeGCStateReader) GetGCState(
+func (r *fakeGCStateReader) getGCState(
 	_ context.Context,
 	keyspaceID uint32,
 ) (gc.GCState, error) {
@@ -53,14 +53,14 @@ func (r *fakeGCStateReader) GetGCState(
 	return r.state, r.err
 }
 
-func (r *fakeGCStateReader) GetAllKeyspacesGCStates(
+func (r *fakeGCStateReader) getAllKeyspacesGCStates(
 	_ context.Context,
 ) (gc.ClusterGCStates, error) {
 	r.getAllCalls++
 	return r.clusterState, r.err
 }
 
-func (r *fakeGCStateReader) Close() {
+func (r *fakeGCStateReader) close() {
 	r.closed = true
 }
 
@@ -196,7 +196,7 @@ func TestGCStateKeyspaceCommand(t *testing.T) {
 	state.IsKeyspaceLevelGC = true
 	reader := &fakeGCStateReader{state: state}
 	factoryCalls := 0
-	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
 		factoryCalls++
 		return reader, nil
 	})
@@ -226,7 +226,7 @@ func TestGCStateAllCommand(t *testing.T) {
 			nil,
 		),
 	}
-	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
 		return reader, nil
 	})
 	output := new(bytes.Buffer)
@@ -257,7 +257,7 @@ func TestGCStateCommandValidatesBeforeCreatingClient(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, "-"), func(t *testing.T) {
 			factoryCalled := false
-			cmd := newGCStateCommand(
+			cmd := buildGCStateCommand(
 				func(*cobra.Command) (gcStateReader, error) {
 					factoryCalled = true
 					return nil, errors.New("factory must not run")
@@ -353,7 +353,7 @@ func TestGCStateCommandErrors(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			cmd := newGCStateCommand(testCase.factory)
+			cmd := buildGCStateCommand(testCase.factory)
 			cmd.SetOut(io.Discard)
 			cmd.SetErr(io.Discard)
 			cmd.SetArgs(testCase.args)
@@ -372,7 +372,7 @@ func (failingWriter) Write([]byte) (int, error) {
 func TestGCStateCommandReturnsOutputError(t *testing.T) {
 	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
 	reader := &fakeGCStateReader{state: state}
-	cmd := newGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
 		return reader, nil
 	})
 	cmd.SetOut(failingWriter{})
