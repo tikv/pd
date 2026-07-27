@@ -82,11 +82,26 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/group/test_group", nil)
 	re.Equal(http.StatusNotFound, resp.Code)
 
+	legacyDefaultKeyspaceIDs := []struct {
+		name string
+		body []byte
+	}{
+		{"legacy_default_group", []byte(`{"name":"legacy_default_group","keyspace_id":{}}`)},
+		{"legacy_camel_default_group", []byte(`{"name":"legacy_camel_default_group","keyspaceId":{}}`)},
+	}
+	for _, legacyDefaultKeyspaceID := range legacyDefaultKeyspaceIDs {
+		resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyDefaultKeyspaceID.body)
+		re.Equal(http.StatusOK, resp.Code)
+		re.Contains(store.groups, groupKey(0, legacyDefaultKeyspaceID.name))
+		resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyDefaultKeyspaceID.body)
+		re.Equal(http.StatusOK, resp.Code)
+	}
+
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusInternalServerError, resp.Code)
 
-	resp = doRawRequest(handler, http.MethodPost, "/resource-manager/api/v1/config/group", []byte("{invalid"))
+	resp = doRawResourceGroupRequest(handler, http.MethodPost, []byte("{invalid"))
 	re.Equal(http.StatusBadRequest, resp.Code)
 
 	invalidKeyspaceIDs := [][]byte{
@@ -95,7 +110,7 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	}
 	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
-			resp = doRawRequest(handler, method, "/resource-manager/api/v1/config/group", invalidKeyspaceID)
+			resp = doRawResourceGroupRequest(handler, method, invalidKeyspaceID)
 			re.Equal(http.StatusBadRequest, resp.Code)
 			re.Contains(resp.Body.String(), "keyspace_id must contain a legacy value")
 		}
@@ -357,8 +372,8 @@ func doJSONRequest(re *require.Assertions, handler http.Handler, method, path st
 	return resp
 }
 
-func doRawRequest(handler http.Handler, method, path string, body []byte) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+func doRawResourceGroupRequest(handler http.Handler, method string, body []byte) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/resource-manager/api/v1/config/group", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)

@@ -15,9 +15,12 @@
 package metadataapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"strings"
@@ -148,11 +151,7 @@ func (s *ConfigService) Register(configEndpoint *gin.RouterGroup) {
 // PostResourceGroup handles POST /config/group.
 func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(c.Request.Body, &group); err != nil {
-		c.String(http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := validateResourceGroupKeyspaceID(&group); err != nil {
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -166,11 +165,7 @@ func (s *ConfigService) PostResourceGroup(c *gin.Context) {
 // PutResourceGroup handles PUT /config/group.
 func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
-	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(c.Request.Body, &group); err != nil {
-		c.String(http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := validateResourceGroupKeyspaceID(&group); err != nil {
+	if err := decodeResourceGroup(c.Request.Body, &group); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
@@ -181,15 +176,40 @@ func (s *ConfigService) PutResourceGroup(c *gin.Context) {
 	c.String(http.StatusOK, "Success!")
 }
 
-func validateResourceGroupKeyspaceID(group *rmpb.ResourceGroup) error {
+func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(data), group); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	rawKeyspaceID := fields["keyspace_id"]
+	if rawKeyspaceID == nil {
+		rawKeyspaceID = fields["keyspaceId"]
+	}
+	return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
+}
+
+func validateResourceGroupKeyspaceID(group *rmpb.ResourceGroup, rawKeyspaceID json.RawMessage) error {
 	keyspaceID := group.GetKeyspaceId()
 	if keyspaceID == nil {
 		return nil
 	}
-	if _, ok := keyspaceID.GetKeyspace().(*rmpb.KeyspaceIDValue_Value); !ok {
-		return errors.New("keyspace_id must contain a legacy value")
+	if _, ok := keyspaceID.GetKeyspace().(*rmpb.KeyspaceIDValue_Value); ok {
+		return nil
 	}
-	return nil
+	// Legacy KeyspaceIDValue encoded value 0 as an empty JSON object.
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(rawKeyspaceID, &fields) == nil && fields != nil && len(fields) == 0 {
+		keyspaceID.Keyspace = &rmpb.KeyspaceIDValue_Value{Value: 0}
+		return nil
+	}
+	return errors.New("keyspace_id must contain a legacy value")
 }
 
 // GetResourceGroup handles GET /config/group/:name.
