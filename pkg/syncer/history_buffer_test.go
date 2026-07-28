@@ -162,6 +162,27 @@ func TestHistoryBufferRetainKeepsCatchUpRecords(t *testing.T) {
 	re.Equal(8, h.capacity())
 }
 
+func TestHistoryBufferSkipsStatsOnlyUpdatesDuringFullSync(t *testing.T) {
+	re := require.New(t)
+	h := newHistoryBufferWithConfig(2, 8, 1, storage.NewStorageWithMemoryBackend())
+	h.resetWithIndex(10)
+	release := h.retainFrom(10)
+
+	statsOnly := newHistoryBufferTestRegion(1)
+	critical := newHistoryBufferTestRegion(2)
+	re.Equal(1, h.recordUpdates(
+		RegionUpdate{Region: statsOnly, StatsOnly: true},
+		RegionUpdate{Region: critical},
+	))
+	re.Equal(uint64(11), h.nextIndex())
+	re.Equal([]*core.RegionInfo{critical}, h.recordsFrom(10))
+
+	release()
+	re.Equal(1, h.recordUpdates(RegionUpdate{Region: statsOnly, StatsOnly: true}))
+	re.Equal(uint64(12), h.nextIndex())
+	re.Equal([]*core.RegionInfo{critical, statsOnly}, h.recordsFrom(10))
+}
+
 func TestHistoryBufferObservedRequiredWindowKeepsSlowDownstreamRecords(t *testing.T) {
 	re := require.New(t)
 	h := newTestHistoryBuffer(8)

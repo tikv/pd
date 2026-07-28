@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -1173,6 +1174,69 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(err)
 		re.Equal(overlapRegion.GetMeta(), region)
 	}
+}
+
+func TestPrepareRegionUpdateForSyncClassifiesCriticalChanges(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	cluster := &RaftCluster{}
+
+	check := func(region *core.RegionInfo, expectStatsOnly, expectSync bool) {
+		saveKV, _, needSync, _ := regionGuide(core.ContextTODO(), region, origin)
+		update, ok := cluster.prepareRegionUpdateForSync(region, origin, saveKV, needSync)
+		re.Equal(expectSync, ok)
+		if ok {
+			re.Same(region, update.Region)
+			re.Equal(expectStatsOnly, update.StatsOnly)
+		}
+	}
+
+	flowOnly := origin.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	check(flowOnly, true, true)
+	check(flowOnly.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2)), false, true)
+	check(flowOnly.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: meta.Peers[1], DownSeconds: 1}}), core.WithFlowRoundByDigit(2)), false, true)
+	check(flowOnly.Clone(core.WithPendingPeers([]*metapb.Peer{meta.Peers[1]}), core.WithFlowRoundByDigit(2)), false, true)
+	check(origin.Clone(core.WithIncVersion()), false, true)
+
+	// Unknown future synchronization reasons must default to critical.
+	unknownReason := origin.Clone(core.SetApproximateSize(10), core.WithFlowRoundByDigit(2))
+	update, ok := cluster.prepareRegionUpdateForSync(unknownReason, origin, false, true)
+	re.True(ok)
+	re.False(update.StatsOnly)
+}
+
+func TestPrepareRegionUpdateForSyncSkipsStatsInMicroserviceMode(t *testing.T) {
+	re := require.New(t)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	flowOnly := origin.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	cluster := &RaftCluster{}
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+
+	saveKV, _, needSync, _ := regionGuide(core.ContextTODO(), flowOnly, origin)
+	_, ok := cluster.prepareRegionUpdateForSync(flowOnly, origin, saveKV, needSync)
+	re.False(ok)
+
+	withLeaderChange := flowOnly.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2))
+	saveKV, _, needSync, _ = regionGuide(core.ContextTODO(), withLeaderChange, origin)
+	update, ok := cluster.prepareRegionUpdateForSync(withLeaderChange, origin, saveKV, needSync)
+	re.True(ok)
+	re.False(update.StatsOnly)
 }
 
 func TestRegionFlowChanged(t *testing.T) {
