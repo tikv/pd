@@ -33,6 +33,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -51,6 +52,11 @@ type balanceSolver struct {
 	resourceTy       resourceType
 
 	cur *solution
+	// curFit is the placement-rule fit for the current region.
+	curFit *placement.RegionFit
+	// skipLoadExpectation indicates whether the current region should skip the
+	// expectation and variance calculated from all stores.
+	skipLoadExpectation bool
 
 	best *solution
 	ops  []*operator.Operator
@@ -205,6 +211,10 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		srcStoreID := srcStore.GetID()
 		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
+				continue
+			}
+			bs.prepareForRegion()
+			if bs.GetSchedulerConfig().IsPlacementRulesEnabled() && !bs.skipLoadExpectation && !bs.isSourceStoreWithinExpectation(srcStore) {
 				continue
 			}
 			if bs.opTy == movePeer && !snapshotFilter.Select(bs.cur.region).IsOK() {
@@ -378,10 +388,8 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail)
-	confSrcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
-		srcToleranceRatio := confSrcToleranceRatio
 		if !detail.IsTiKV() {
 			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
@@ -389,18 +397,14 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
 				continue
 			}
-			srcToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if len(detail.HotPeers) == 0 {
 			continue
 		}
 
-		if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-			continue
-		}
-		if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
-			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		// With placement rules enabled, source expectation depends on the rule
+		// matched by each hot peer and is checked after selecting the region.
+		if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() && !bs.isSourceStoreWithinExpectation(detail) {
 			continue
 		}
 
@@ -408,6 +412,23 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		hotSchedulerResultCounter.WithLabelValues("src-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 	}
 	return ret
+}
+
+func (bs *balanceSolver) isSourceStoreWithinExpectation(detail *statistics.StoreLoadDetail) bool {
+	id := detail.GetID()
+	srcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
+	if !detail.IsTiKV() {
+		srcToleranceRatio += tiflashToleranceRatioCorrection
+	}
+	if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
+		hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		return false
+	}
+	if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+		hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+		return false
+	}
+	return true
 }
 
 func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
@@ -566,7 +587,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			filter.NewHotRegionEvictedTargetFilter(bs.sche.GetName()),
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, bs.curFit),
 		}
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
@@ -640,11 +661,11 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
-			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
+			if !bs.skipLoadExpectation && !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
+			if !bs.skipLoadExpectation && !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
@@ -718,7 +739,29 @@ func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ stat
 }
 
 func (bs *balanceSolver) enableExpectation() bool {
-	return bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
+	return !bs.skipLoadExpectation && bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
+}
+
+// prepareForRegion determines whether the current region should use the global
+// load expectation. A rule with label constraints limits its peer to a subset
+// of stores, so valid source-target pairs are compared directly, like
+// balance-region scheduling.
+func (bs *balanceSolver) prepareForRegion() {
+	bs.curFit = nil
+	bs.skipLoadExpectation = false
+	if !bs.GetSchedulerConfig().IsPlacementRulesEnabled() {
+		return
+	}
+
+	bs.curFit = bs.GetRuleManager().FitRegion(bs.GetBasicCluster(), bs.cur.region)
+	sourcePeer := bs.cur.region.GetStorePeer(bs.cur.srcStore.GetID())
+	if sourcePeer == nil {
+		return
+	}
+	ruleFit := bs.curFit.GetRuleFit(sourcePeer.GetId())
+	if ruleFit != nil && len(ruleFit.Rule.LabelConstraints) > 0 {
+		bs.skipLoadExpectation = true
+	}
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {

@@ -410,6 +410,125 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
 }
 
+func TestHotWriteRegionScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+	testCases := []struct {
+		name       string
+		storeLoads map[uint64]float64
+		peerLoad   float64
+	}{
+		{
+			name: "source below global expectation",
+			storeLoads: map[uint64]float64{
+				1: 20,
+				2: 0,
+				3: 0,
+				4: 0,
+				5: 100,
+				6: 100,
+			},
+			peerLoad: 5,
+		},
+		{
+			name: "target above global expectation",
+			storeLoads: map[uint64]float64{
+				1: 100,
+				2: 80,
+				3: 80,
+				4: 60,
+				5: 0,
+				6: 0,
+			},
+			peerLoad: 20,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			tc.SetHotRegionCacheHitsThreshold(0)
+
+			hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+			re.NoError(err)
+			hb.(*hotScheduler).types = []resourceType{writePeer}
+			hb.(*hotScheduler).conf.setHistorySampleDuration(0)
+
+			for id := uint64(1); id <= 6; id++ {
+				pool := "other"
+				if id <= 4 {
+					pool = "target"
+				}
+				tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+				tc.UpdateStorageWrittenBytes(id, uint64(testCase.storeLoads[id]*units.MiB*utils.StoreHeartBeatReportInterval))
+			}
+			err = tc.SetRule(&placement.Rule{
+				GroupID: placement.DefaultGroupID,
+				ID:      placement.DefaultRuleID,
+				Role:    placement.Voter,
+				Count:   3,
+				LabelConstraints: []placement.LabelConstraint{
+					{Key: "pool", Op: placement.In, Values: []string{"target"}},
+				},
+			})
+			re.NoError(err)
+
+			addRegionInfo(tc, utils.Write, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, testCase.peerLoad * units.MiB, 0, 0},
+			})
+
+			ops, _ := hb.Schedule(tc, false)
+			re.Len(ops, 1)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 4)
+		})
+	}
+}
+
+func TestHotReadLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	tc.SetHotRegionCacheHitsThreshold(0)
+
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{readLeader}
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
+
+	for id := uint64(1); id <= 6; id++ {
+		pool := "other"
+		load := 100 * units.MiB * utils.StoreHeartBeatReportInterval
+		if id <= 3 {
+			pool = "target"
+			load = 0
+		}
+		tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+		tc.UpdateStorageReadStats(id, uint64(load), 0)
+	}
+	tc.UpdateStorageReadStats(1, 20*units.MiB*utils.StoreHeartBeatReportInterval, 0)
+	err = tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "pool", Op: placement.In, Values: []string{"target"}},
+		},
+	})
+	re.NoError(err)
+
+	addRegionLeaderReadInfo(tc, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 5 * units.MiB, 0, 0},
+	})
+
+	ops, _ := hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
+}
+
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
