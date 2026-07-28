@@ -34,10 +34,23 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const maxPendingListLen = 100000
+
+// RegionPlacementState describes the current placement-rule scheduling state.
+type RegionPlacementState int
+
+const (
+	// RegionPlacementStateReplicated means no placement work remains.
+	RegionPlacementStateReplicated RegionPlacementState = iota
+	// RegionPlacementStateInProgress means placement is incomplete but can progress or retry.
+	RegionPlacementStateInProgress
+	// RegionPlacementStatePending means the current topology cannot satisfy the placement rules.
+	RegionPlacementStatePending
+)
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
@@ -65,6 +78,111 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 // Name returns RuleChecker's name.
 func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
+}
+
+// GetRegionPlacementState revalidates the placement state without creating an
+// Operator. It is intended for Regions already recorded in RuleChecker's
+// pending list.
+func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPlacementState {
+	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
+		return RegionPlacementStateInProgress
+	}
+	fit := c.ruleManager.FitRegionWithoutCache(c.cluster, region)
+	if len(fit.RuleFits) == 0 || len(fit.OrphanPeers) > 0 {
+		return RegionPlacementStateInProgress
+	}
+
+	hasUnfixablePlacement := false
+	for _, rf := range fit.RuleFits {
+		if len(rf.Peers) < rf.Rule.Count {
+			isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
+			storeID, filteredByTemporaryState := c.strategy(region, rf.Rule, isWitness).
+				SelectStoreToAdd(getRuleFitStores(c.cluster, rf))
+			if storeID != 0 || filteredByTemporaryState || c.hasStoreToSwapForMissingRule(region, fit, rf) {
+				return RegionPlacementStateInProgress
+			}
+			hasUnfixablePlacement = true
+			continue
+		}
+
+		ruleUnfixable := false
+		for _, peer := range rf.Peers {
+			store := c.cluster.GetStore(peer.GetStoreId())
+			if store == nil {
+				return RegionPlacementStateInProgress
+			}
+
+			var fastFailover bool
+			switch {
+			case c.isDownPeer(region, peer):
+				if !c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
+					return RegionPlacementStateInProgress
+				}
+				fastFailover = isWitnessEnabled(c.cluster) && store.IsTiKV()
+			case c.isOfflinePeer(peer):
+				fastFailover = isWitnessEnabled(c.cluster) && store.IsTiKV() && rf.Rule.IsWitness
+			default:
+				continue
+			}
+
+			storeID, filteredByTemporaryState := c.strategy(region, rf.Rule, fastFailover).
+				SelectStoreToFix(getRuleFitStores(c.cluster, rf), peer.GetStoreId())
+			if storeID != 0 || filteredByTemporaryState {
+				return RegionPlacementStateInProgress
+			}
+			hasUnfixablePlacement = true
+			ruleUnfixable = true
+			break
+		}
+		if ruleUnfixable {
+			continue
+		}
+		if len(rf.PeersWithDifferentRole) > 0 {
+			return RegionPlacementStateInProgress
+		}
+		if len(rf.Rule.LocationLabels) == 0 {
+			continue
+		}
+
+		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
+		_, newStoreID, filteredByTemporaryState := c.strategy(region, rf.Rule, isWitness).
+			getBetterLocation(c.cluster, region, fit, rf)
+		if newStoreID != 0 || filteredByTemporaryState {
+			return RegionPlacementStateInProgress
+		}
+		if !statistics.IsRegionLabelIsolationSatisfied(
+			getRuleFitStores(c.cluster, rf),
+			rf.Rule.LocationLabels,
+			rf.Rule.IsolationLevel,
+		) {
+			hasUnfixablePlacement = true
+		}
+	}
+	if hasUnfixablePlacement {
+		return RegionPlacementStatePending
+	}
+	return RegionPlacementStateReplicated
+}
+
+func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit *placement.RegionFit, missingRuleFit *placement.RuleFit) bool {
+	for _, peer := range region.GetPeers() {
+		store := c.cluster.GetStore(peer.GetStoreId())
+		if store == nil || !placement.MatchLabelConstraints(store, missingRuleFit.Rule.LabelConstraints) {
+			continue
+		}
+		oldRuleFit := fit.GetRuleFit(peer.GetId())
+		if oldRuleFit == nil || oldRuleFit == missingRuleFit || !oldRuleFit.IsSatisfied() {
+			continue
+		}
+
+		fastFailover := isWitnessEnabled(c.cluster) && store.IsTiKV() && oldRuleFit.Rule.IsWitness
+		storeID, filteredByTemporaryState := c.strategy(region, oldRuleFit.Rule, fastFailover).
+			SelectStoreToFix(getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
+		if storeID != 0 || filteredByTemporaryState {
+			return true
+		}
+	}
+	return false
 }
 
 // GetType returns RuleChecker's type.

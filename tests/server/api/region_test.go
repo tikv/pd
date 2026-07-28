@@ -205,8 +205,57 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
-	re.Equal("PENDING", status)
+	re.Equal("REPLICATED", status)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
+
+	// A rule can have enough peers but still be pending because an offline
+	// peer has no replacement target.
+	offlineStore := &metapb.Store{
+		Id:        1,
+		State:     metapb.StoreState_Offline,
+		NodeState: metapb.NodeState_Removing,
+	}
+	tests.MustPutStore(re, cluster, offlineStore)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
+	re.NoError(err)
+	re.Equal("PENDING", status)
+	targetStore := &metapb.Store{
+		Id:        2,
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
+	}
+	tests.MustPutStore(re, cluster, targetStore)
+	availableTarget := leader.GetRaftCluster().GetStore(2).Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  uint64(10 * units.GiB),
+		Available: uint64(10 * units.GiB),
+	}))
+	leader.GetRaftCluster().GetBasicCluster().PutStore(availableTarget)
+	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+		schedulingServer.GetCluster().PutStore(availableTarget)
+	}
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
+	targetStore.State = metapb.StoreState_Offline
+	targetStore.NodeState = metapb.NodeState_Removing
+	tests.MustPutStore(re, cluster, targetStore)
+	tests.MustPutStore(re, cluster, s1)
+
+	// Missing Region metadata must never be reported as complete.
+	noRegionURL := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix,
+		hex.EncodeToString(r1.GetEndKey()), hex.EncodeToString([]byte("c")))
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, noRegionURL, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+
+	gapURL := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix,
+		hex.EncodeToString([]byte("0")), hex.EncodeToString(r1.GetEndKey()))
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, gapURL, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+
 	// test multiple rules
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})

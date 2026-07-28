@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -1290,23 +1291,59 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
+	if !regionsCoverRange(regions, startKey, endKey) {
+		return "INPROGRESS", nil
+	}
 	state := "REPLICATED"
+	placementRulesEnabled := c.GetSharedConfig().IsPlacementRulesEnabled()
 	for _, region := range regions {
-		if !filter.IsRegionReplicated(c, region) {
+		if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
 			state = "INPROGRESS"
-			if co.IsPendingRegion(region.GetID()) {
-				state = "PENDING"
-				break
+			continue
+		}
+		if placementRulesEnabled {
+			pending := co.IsPendingRegion(region.GetID())
+			failpoint.Inject("mockPending", func(val failpoint.Value) {
+				if mockPending, ok := val.(bool); ok {
+					pending = mockPending
+				}
+			})
+			if pending {
+				switch co.GetRuleChecker().GetRegionPlacementState(region) {
+				case checker.RegionPlacementStatePending:
+					return "PENDING", nil
+				case checker.RegionPlacementStateInProgress:
+					state = "INPROGRESS"
+				}
+				continue
 			}
 		}
-	}
-	failpoint.Inject("mockPending", func(val failpoint.Value) {
-		aok, ok := val.(bool)
-		if ok && aok {
-			state = "PENDING"
+		if !filter.IsRegionReplicated(c, region) {
+			state = "INPROGRESS"
 		}
-	})
+	}
 	return state, nil
+}
+
+func regionsCoverRange(regions []*core.RegionInfo, startKey, endKey []byte) bool {
+	if len(regions) == 0 {
+		return false
+	}
+	first := regions[0]
+	if bytes.Compare(first.GetStartKey(), startKey) > 0 ||
+		(len(first.GetEndKey()) > 0 && bytes.Compare(startKey, first.GetEndKey()) >= 0) {
+		return false
+	}
+	for i := 1; i < len(regions); i++ {
+		if !bytes.Equal(regions[i-1].GetEndKey(), regions[i].GetStartKey()) {
+			return false
+		}
+	}
+	lastEndKey := regions[len(regions)-1].GetEndKey()
+	if len(endKey) == 0 {
+		return len(lastEndKey) == 0
+	}
+	return len(lastEndKey) == 0 || bytes.Compare(lastEndKey, endKey) >= 0
 }
 
 // GetRuleManager returns the rule manager.

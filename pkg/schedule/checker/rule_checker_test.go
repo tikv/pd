@@ -2217,9 +2217,11 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.Nil(op)
 	_, exist := suite.rc.pendingList.Get(1)
 	re.True(exist)
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(suite.cluster.GetRegion(1)))
 
 	// add more stores
 	suite.cluster.AddLeaderStore(3, 1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(suite.cluster.GetRegion(1)))
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
 	re.Equal("add-rule-peer", op.Desc())
@@ -2227,6 +2229,61 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	_, exist = suite.rc.pendingList.Get(1)
 	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingOfflinePeer() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	suite.cluster.SetStoreOffline(3)
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+
+	suite.cluster.AddLeaderStore(4, 1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingDownPeer() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	suite.cluster.SetStoreDown(3)
+
+	region := suite.cluster.GetRegion(1)
+	region = region.Clone(core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3)}}))
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+
+	suite.cluster.AddLeaderStore(4, 1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingUnmetIsolation() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+		IsolationLevel: "zone",
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
 }
 
 func (suite *ruleCheckerTestSuite) TestLocationLabels() {
