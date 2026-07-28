@@ -319,15 +319,16 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 }
 
 func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
+	nullKeyspaceID := strconv.FormatUint(uint64(constant.NullKeyspaceID), 10)
 	return &cobra.Command{
 		Use:   "keyspace <keyspace-id>",
 		Short: "show one keyspace's effective GC state",
 		Long: "Show one keyspace's effective GC safe points and local barriers. " +
 			"Use gc-state global to inspect only cluster-wide state, or " +
 			"gc-state all for a combined view. " +
-			"The decimal NullKeyspace ID is 4294967295.",
+			"The decimal NullKeyspace ID is " + nullKeyspaceID + ".",
 		Example: "  pd-ctl gc-state keyspace 42\n" +
-			"  pd-ctl gc-state keyspace 4294967295",
+			"  pd-ctl gc-state keyspace " + nullKeyspaceID,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keyspaceID, err := parseGCStateKeyspaceID(args[0])
