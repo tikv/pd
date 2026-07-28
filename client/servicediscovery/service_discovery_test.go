@@ -21,7 +21,6 @@ import (
 	"log"
 	"net"
 	"net/url"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	grpcbackoff "google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -642,13 +642,35 @@ func newMemberTestServiceDiscovery(
 	return client
 }
 
-func TestUpdateMemberLoopSuppressesScheduledRefreshDuringTransportFailure(t *testing.T) {
+func TestUpdateMemberLoopDegradedModeSafetySweepAndConnectionRecovery(t *testing.T) {
+	const memberURL = "http://recovering-pd.test:2379"
+	testServer := &memberTestPDServer{
+		getMembers: func() (*pdpb.GetMembersResponse, error) {
+			return validMemberTestResponse(memberURL, 1), nil
+		},
+	}
+	listener := startMemberTestPDServer(t, testServer)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	var getMembersCalls atomic.Int32
+	var connectionAvailable atomic.Bool
+	var syntheticMemberResponse atomic.Bool
 	conn, err := grpc.NewClient(
-		"passthrough:///unreachable.test:2379",
+		"passthrough:///recovering-pd.test:2379",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
-			return nil, errors.New("transport unavailable")
+			if !connectionAvailable.Load() {
+				return nil, errors.New("transport unavailable")
+			}
+			return listener.Dial()
+		}),
+		grpc.WithConnectParams(grpc.ConnectParams{
+			Backoff: grpcbackoff.Config{
+				BaseDelay:  10 * time.Millisecond,
+				Multiplier: 1,
+				Jitter:     0,
+				MaxDelay:   10 * time.Millisecond,
+			},
+			MinConnectTimeout: 10 * time.Millisecond,
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithUnaryInterceptor(func(
@@ -661,21 +683,33 @@ func TestUpdateMemberLoopSuppressesScheduledRefreshDuringTransportFailure(t *tes
 		) error {
 			if method == "/pdpb.PD/GetMembers" {
 				getMembersCalls.Add(1)
+				if syntheticMemberResponse.Load() {
+					response := validMemberTestResponse(memberURL, 1)
+					*reply.(*pdpb.GetMembersResponse) = *response
+					return nil
+				}
 			}
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}),
 	)
 	require.NoError(t, err)
 
-	var wg sync.WaitGroup
-	client := newMemberTestServiceDiscovery(ctx, cancel, "http://unreachable.test:2379", conn)
-	client.wg = &wg
+	client := newMemberTestServiceDiscovery(ctx, cancel, memberURL, conn)
+	client.leader.Store(newPDServiceClient(memberURL, memberURL, conn, true))
+	client.apiCandidateNodes = [apiKindCount]*serviceBalancer{
+		newServiceBalancer(emptyErrorFn),
+		newServiceBalancer(regionAPIErrorFn),
+	}
 	client.checkMembershipCh = make(chan struct{}, 1)
-	wg.Add(1)
-	go client.updateMemberLoop()
+	memberUpdateCh := make(chan time.Time, 1)
+	loopDone := make(chan struct{})
+	go func() {
+		client.runMemberRefreshLoop(memberUpdateCh)
+		close(loopDone)
+	}()
 	t.Cleanup(func() {
 		cancel()
-		wg.Wait()
+		<-loopDone
 		require.NoError(t, conn.Close())
 	})
 
@@ -693,7 +727,68 @@ func TestUpdateMemberLoopSuppressesScheduledRefreshDuringTransportFailure(t *tes
 
 	// A synchronous check is an explicit request and must bypass background suppression.
 	require.Error(t, client.CheckMemberChanged())
-	require.Equal(t, callsAfterInitialBatch+1, getMembersCalls.Load())
+	callsAfterSynchronousCheck := getMembersCalls.Load()
+	require.Equal(t, callsAfterInitialBatch+1, callsAfterSynchronousCheck)
+
+	// The periodic safety sweep must still issue one real membership request
+	// while asynchronous refreshes are suppressed.
+	memberUpdateCh <- time.Now()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() == callsAfterSynchronousCheck+1
+	}, time.Second, 10*time.Millisecond)
+	callsAfterSafetySweep := getMembersCalls.Load()
+
+	for range 100 {
+		client.ScheduleCheckMemberChanged()
+	}
+	require.Never(t, func() bool {
+		return getMembersCalls.Load() != callsAfterSafetySweep
+	}, 300*time.Millisecond, 10*time.Millisecond)
+
+	// A successful safety sweep must leave degraded mode even if the local
+	// connection-state observation has not changed yet.
+	syntheticMemberResponse.Store(true)
+	memberUpdateCh <- time.Now()
+	require.Eventually(t, func() bool {
+		_, failed := client.memberTransportFailures.summary(time.Now())
+		return !failed && getMembersCalls.Load() == callsAfterSafetySweep+1
+	}, time.Second, 10*time.Millisecond)
+	callsAfterSafetyRecovery := getMembersCalls.Load()
+
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() > callsAfterSafetyRecovery
+	}, time.Second, 10*time.Millisecond)
+
+	// Re-enter degraded mode so the connection-state recovery path is tested
+	// independently from the successful safety sweep above.
+	syntheticMemberResponse.Store(false)
+	callsBeforeSecondFailureBatch := getMembersCalls.Load()
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() >= callsBeforeSecondFailureBatch+12
+	}, 2*time.Second, 10*time.Millisecond)
+	callsAfterSecondFailureBatch := getMembersCalls.Load()
+	for range 100 {
+		client.ScheduleCheckMemberChanged()
+	}
+	require.Never(t, func() bool {
+		return getMembersCalls.Load() != callsAfterSecondFailureBatch
+	}, 300*time.Millisecond, 10*time.Millisecond)
+
+	// Once the underlying connection becomes usable, connection-state polling
+	// must resume the normal refresh loop without waiting for the periodic sweep.
+	connectionAvailable.Store(true)
+	require.Eventually(t, func() bool {
+		_, failed := client.memberTransportFailures.summary(time.Now())
+		return !failed && getMembersCalls.Load() > callsAfterSecondFailureBatch
+	}, 2*time.Second, 10*time.Millisecond)
+	callsAfterRecovery := getMembersCalls.Load()
+
+	client.ScheduleCheckMemberChanged()
+	require.Eventually(t, func() bool {
+		return getMembersCalls.Load() > callsAfterRecovery
+	}, time.Second, 10*time.Millisecond)
 }
 
 var memberConnectionSnapshotSink memberConnectionSnapshot

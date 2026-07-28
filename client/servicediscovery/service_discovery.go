@@ -556,10 +556,14 @@ func (c *serviceDiscovery) initRetry(f func() error) error {
 func (c *serviceDiscovery) updateMemberLoop() {
 	defer c.wg.Done()
 
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
 	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
+	c.runMemberRefreshLoop(ticker.C)
+}
+
+func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time) {
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
 
 	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
 	controller := memberRefreshController{}
@@ -601,7 +605,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 			case <-ctx.Done():
 				log.Info("[pd] exit member loop due to context canceled")
 				return
-			case <-ticker.C:
+			case <-memberUpdateCh:
 				c.logMemberTransportFailureSummary(time.Now())
 				// The safety sweep covers the event that may have been coalesced
 				// while scheduled checks were disabled.
@@ -634,7 +638,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 			case <-ctx.Done():
 				log.Info("[pd] exit member loop due to context canceled")
 				return
-			case <-ticker.C:
+			case <-memberUpdateCh:
 				c.logMemberTransportFailureSummary(time.Now())
 			case <-c.checkMembershipCh:
 			}
