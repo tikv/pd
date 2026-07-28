@@ -111,18 +111,20 @@ func (ctx *placementStateContext) getStrategy(c *RuleChecker, region *core.Regio
 	return strategy
 }
 
-// GetRegionPlacementState revalidates the placement state without creating an
-// Operator. It is intended for Regions already recorded in RuleChecker's
-// pending list.
+// GetRegionPlacementState evaluates the placement state without creating an
+// Operator or updating RuleChecker's caches and metrics.
 func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPlacementState {
-	return c.getRegionPlacementState(region, &placementStateContext{})
+	return c.evaluateRegionPlacementState(region, &placementStateContext{})
 }
 
-func (c *RuleChecker) getRegionPlacementState(region *core.RegionInfo, context *placementStateContext) RegionPlacementState {
-	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
+func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, context *placementStateContext) RegionPlacementState {
+	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 || c.pendingProcessedRegions.Exists(region.GetID()) {
 		return RegionPlacementStateInProgress
 	}
 	fit := c.ruleManager.FitRegionWithoutCache(c.cluster, region)
+	if isRegionPlacementSatisfied(region, fit) {
+		return RegionPlacementStateReplicated
+	}
 	if len(fit.RuleFits) == 0 || len(fit.OrphanPeers) > 0 {
 		return RegionPlacementStateInProgress
 	}
@@ -199,12 +201,40 @@ func (c *RuleChecker) getRegionPlacementState(region *core.RegionInfo, context *
 	return RegionPlacementStateReplicated
 }
 
+func isRegionPlacementSatisfied(region *core.RegionInfo, fit *placement.RegionFit) bool {
+	if len(fit.RuleFits) == 0 || len(fit.OrphanPeers) > 0 {
+		return false
+	}
+	for _, rf := range fit.RuleFits {
+		if !rf.IsSatisfied() {
+			return false
+		}
+		if len(rf.Stores) != len(rf.Peers) {
+			return false
+		}
+		for _, peer := range rf.Peers {
+			if region.GetDownPeer(peer.GetId()) != nil {
+				return false
+			}
+		}
+		for _, store := range rf.Stores {
+			if !store.IsPreparing() && !store.IsServing() {
+				return false
+			}
+		}
+		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
+			return false
+		}
+	}
+	return true
+}
+
 // GetRegionsPlacementState returns the aggregate placement state of Regions.
 func (c *RuleChecker) GetRegionsPlacementState(regions []*core.RegionInfo) RegionPlacementState {
 	state := RegionPlacementStateReplicated
 	context := &placementStateContext{}
 	for _, region := range regions {
-		switch c.getRegionPlacementState(region, context) {
+		switch c.evaluateRegionPlacementState(region, context) {
 		case RegionPlacementStatePending:
 			return RegionPlacementStatePending
 		case RegionPlacementStateInProgress:

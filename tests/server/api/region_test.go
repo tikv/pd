@@ -202,12 +202,6 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		return status == "REPLICATED"
 	})
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
-	re.NoError(err)
-	re.Equal("REPLICATED", status)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
-
 	// A rule can have enough peers but still be pending because an offline
 	// peer has no replacement target.
 	offlineStore := &metapb.Store{
@@ -216,7 +210,6 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		NodeState: metapb.NodeState_Removing,
 	}
 	tests.MustPutStore(re, cluster, offlineStore)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.Equal("PENDING", status)
@@ -237,7 +230,6 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.Equal("INPROGRESS", status)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
 	targetStore.State = metapb.StoreState_Offline
 	targetStore.NodeState = metapb.NodeState_Removing
 	tests.MustPutStore(re, cluster, targetStore)
@@ -311,10 +303,11 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		return s1 || s2
 	})
 
+	// The new rule requires more peers, but there is no available target store.
 	testutil.Eventually(re, func() bool {
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 		re.NoError(err)
-		return status == "INPROGRESS"
+		return status == "PENDING"
 	})
 
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))

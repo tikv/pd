@@ -1294,39 +1294,52 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 	if !regionsCoverRange(regions, startKey, endKey) {
 		return "INPROGRESS", nil
 	}
+	if c.GetSharedConfig().IsPlacementRulesEnabled() {
+		switch co.GetRuleChecker().GetRegionsPlacementState(regions) {
+		case checker.RegionPlacementStatePending:
+			return "PENDING", nil
+		case checker.RegionPlacementStateInProgress:
+			return "INPROGRESS", nil
+		}
+		if hasReplicaOperator(co.GetOperatorController(), regions) {
+			return "INPROGRESS", nil
+		}
+		return "REPLICATED", nil
+	}
+
 	state := "REPLICATED"
-	placementRulesEnabled := c.GetSharedConfig().IsPlacementRulesEnabled()
-	var pendingRegions []*core.RegionInfo
 	for _, region := range regions {
 		if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
 			state = "INPROGRESS"
 			continue
 		}
-		if placementRulesEnabled {
-			pending := co.IsPendingRegion(region.GetID())
-			failpoint.Inject("mockPending", func(val failpoint.Value) {
-				if mockPending, ok := val.(bool); ok {
-					pending = mockPending
-				}
-			})
-			if pending {
-				pendingRegions = append(pendingRegions, region)
-				continue
-			}
-		}
 		if !filter.IsRegionReplicated(c, region) {
 			state = "INPROGRESS"
 		}
 	}
-	if len(pendingRegions) > 0 {
-		switch co.GetRuleChecker().GetRegionsPlacementState(pendingRegions) {
-		case checker.RegionPlacementStatePending:
-			return "PENDING", nil
-		case checker.RegionPlacementStateInProgress:
-			state = "INPROGRESS"
+	return state, nil
+}
+
+func hasReplicaOperator(controller *operator.Controller, regions []*core.RegionInfo) bool {
+	operators := controller.GetOperatorsOfKind(operator.OpReplica)
+	for _, op := range controller.GetWaitingOperators() {
+		if op.Kind()&operator.OpReplica != 0 {
+			operators = append(operators, op)
 		}
 	}
-	return state, nil
+	if len(operators) == 0 {
+		return false
+	}
+	operatorRegions := make(map[uint64]struct{}, len(operators))
+	for _, op := range operators {
+		operatorRegions[op.RegionID()] = struct{}{}
+	}
+	for _, region := range regions {
+		if _, ok := operatorRegions[region.GetID()]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func regionsCoverRange(regions []*core.RegionInfo, startKey, endKey []byte) bool {

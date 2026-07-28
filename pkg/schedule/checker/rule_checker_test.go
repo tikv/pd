@@ -2241,22 +2241,6 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.False(exist)
 }
 
-func (suite *ruleCheckerTestSuite) TestPendingListLookupDoesNotRefreshLRU() {
-	re := suite.Require()
-	suite.rc.pendingList = cache.NewDefaultCache(2)
-	suite.rc.pendingList.Put(1, nil)
-	suite.rc.pendingList.Put(2, nil)
-	controller := &Controller{ruleChecker: suite.rc}
-
-	re.True(controller.IsPendingRegion(1))
-	suite.rc.pendingList.Put(3, nil)
-
-	_, exists := suite.rc.pendingList.Peek(1)
-	re.False(exists)
-	_, exists = suite.rc.pendingList.Peek(2)
-	re.True(exists)
-}
-
 func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {
 	re := suite.Require()
 	suite.cluster.AddLeaderStore(1, 1)
@@ -2278,6 +2262,50 @@ func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {
 
 	re.Equal(RegionPlacementStateInProgress, checker.GetRegionsPlacementState(regions))
 	re.Equal(1, cluster.getStoresCount)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateSkipsStoresForCompletedRegions() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z3"})
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone"},
+		IsolationLevel: "zone",
+	}))
+	regions := make([]*core.RegionInfo, 0, 10)
+	for i := uint64(1); i <= 10; i++ {
+		suite.cluster.AddLeaderRegion(i, 1, 2, 3)
+		regions = append(regions, suite.cluster.GetRegion(i))
+	}
+
+	cluster := &getStoresCountingCluster{Cluster: suite.cluster}
+	checker := NewRuleChecker(
+		suite.ctx,
+		cluster,
+		suite.ruleManager,
+		cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute),
+	)
+
+	re.Equal(RegionPlacementStateReplicated, checker.GetRegionsPlacementState(regions))
+	re.Zero(cluster.getStoresCount)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedIsInProgress() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	pendingProcessed := cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute)
+	pendingProcessed.Put(1, nil)
+	checker := NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, pendingProcessed)
+
+	re.Equal(RegionPlacementStateInProgress, checker.GetRegionPlacementState(suite.cluster.GetRegion(1)))
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingOfflinePeer() {
