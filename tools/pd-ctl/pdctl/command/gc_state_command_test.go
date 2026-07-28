@@ -173,6 +173,61 @@ func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
 	require.Contains(t, string(encoded), `"global_gc_barriers":[`)
 }
 
+func TestNewAllGCStatesOutputFiltersUnifiedGCPlaceholders(t *testing.T) {
+	keyspaceLevelState := gc.NewGCStateWithGCBarriers(7, 70, 60, nil)
+	keyspaceLevelState.IsKeyspaceLevelGC = true
+	unifiedGCPlaceholder := gc.NewGCStateWithGCBarriers(
+		8,
+		800,
+		700,
+		[]*gc.GCBarrierInfo{
+			gc.NewGCBarrierInfo("placeholder", 900, time.Hour, time.Time{}),
+		},
+	)
+	// A non-Null state without keyspace-level GC only identifies a unified-GC keyspace.
+	// Its safe points and barriers are not an effective GC scope.
+	unifiedGCPlaceholder.IsKeyspaceLevelGC = false
+	nullKeyspaceState := gc.NewGCStateWithGCBarriers(
+		constant.NullKeyspaceID,
+		100,
+		90,
+		[]*gc.GCBarrierInfo{
+			gc.NewGCBarrierInfo("null", 110, gc.TTLNeverExpire, time.Time{}),
+		},
+	)
+	nullKeyspaceState.IsKeyspaceLevelGC = false
+
+	clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
+		map[uint32]gc.GCState{
+			7:                       keyspaceLevelState,
+			8:                       unifiedGCPlaceholder,
+			constant.NullKeyspaceID: nullKeyspaceState,
+		},
+		nil,
+	)
+
+	got, err := newAllGCStatesOutput(clusterState)
+	require.NoError(t, err)
+	require.Equal(t, []gcStateOutput{
+		{
+			KeyspaceID:        7,
+			IsKeyspaceLevelGC: true,
+			TxnSafePoint:      70,
+			GCSafePoint:       60,
+			GCBarriers:        []gcBarrierOutput{},
+		},
+		{
+			KeyspaceID:        constant.NullKeyspaceID,
+			IsKeyspaceLevelGC: false,
+			TxnSafePoint:      100,
+			GCSafePoint:       90,
+			GCBarriers: []gcBarrierOutput{
+				{BarrierID: "null", BarrierTS: 110, TTLSeconds: math.MaxInt64},
+			},
+		},
+	}, got.GCStates)
+}
+
 func TestNewAllGCStatesOutputKeepsEmptyGlobalBarrierArray(t *testing.T) {
 	clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
 		map[uint32]gc.GCState{},
@@ -529,8 +584,8 @@ func TestGCStateCommandHelpContract(t *testing.T) {
 	all, _, err := cmd.Find([]string{"all"})
 	require.NoError(t, err)
 	require.Equal(t, "all", all.Use)
-	require.Equal(t, "show combined keyspace and cluster-wide GC state", all.Short)
-	require.Equal(t, "Show all active keyspace GC states and local barriers, with cluster-wide global barriers once at the top level. Use gc-state global to inspect only cluster-wide state.", all.Long)
+	require.Equal(t, "show effective GC scopes and cluster-wide GC state", all.Short)
+	require.Equal(t, "Show all effective GC scopes and local barriers, with cluster-wide global barriers once at the top level. Use gc-state global to inspect only cluster-wide state.", all.Long)
 	require.Equal(t, "  pd-ctl gc-state all", all.Example)
 }
 
