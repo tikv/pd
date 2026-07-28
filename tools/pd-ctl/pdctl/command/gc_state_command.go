@@ -263,6 +263,11 @@ func newGCStateOutput(state gc.GCState) (gcStateOutput, error) {
 func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, error) {
 	states := make([]gcStateOutput, 0, len(clusterState.GCStates))
 	for _, state := range clusterState.GCStates {
+		// Unified-GC keyspaces have marker entries, but their GC state is owned by
+		// the NullKeyspace scope and must not be presented as a separate scope.
+		if !state.IsKeyspaceLevelGC && state.KeyspaceID != constant.NullKeyspaceID {
+			continue
+		}
 		converted, err := newGCStateOutput(state)
 		if err != nil {
 			return allGCStatesOutput{}, err
@@ -394,8 +399,8 @@ func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
 func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "all",
-		Short: "show combined keyspace and cluster-wide GC state",
-		Long: "Show all active keyspace GC states and local barriers, with " +
+		Short: "show effective GC scopes and cluster-wide GC state",
+		Long: "Show all effective GC scopes and local barriers, with " +
 			"cluster-wide global barriers once at the top level. Use " +
 			"gc-state global to inspect only cluster-wide state.",
 		Example: "  pd-ctl gc-state all",

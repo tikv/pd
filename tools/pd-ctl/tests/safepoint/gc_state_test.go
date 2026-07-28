@@ -314,13 +314,7 @@ func TestGCState(t *testing.T) {
 			{barrierID: "z-null", barrierTS: 120, expires: true},
 		})
 
-		unifiedState, ok := statesByID[unifiedKeyspaceID]
-		re.True(ok)
-		re.False(unifiedState.IsKeyspaceLevelGC)
-		re.Zero(unifiedState.TxnSafePoint)
-		re.Zero(unifiedState.GCSafePoint)
-		re.NotNil(unifiedState.GCBarriers)
-		re.Empty(unifiedState.GCBarriers)
+		re.NotContains(statesByID, unifiedKeyspaceID)
 	}
 
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", pdAddr, "service-gc-safepoint")

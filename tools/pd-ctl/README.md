@@ -55,7 +55,7 @@ The global response does not contain per-keyspace safe points or local
 barriers. Its current field is `global_gc_barriers`; other cluster-wide GC
 state can be added to the same object in the future.
 
-Inspect every active GC scope together with cluster-wide state:
+Inspect every effective GC scope together with cluster-wide state:
 
 ```bash
 pd-ctl gc-state all
@@ -76,7 +76,9 @@ pd-ctl gc-state all
 }
 ```
 
-The combined response sorts `gc_states` by `keyspace_id` and reports
-cluster-wide barriers once in the top-level `global_gc_barriers` array.
+The combined response sorts effective `gc_states` by `keyspace_id` and reports
+cluster-wide barriers once in the top-level `global_gc_barriers` array. Unified
+GC keyspaces share the NullKeyspace scope, so their marker records are not
+reported as separate states.
 Barrier TTLs use remaining seconds, and `9223372036854775807` means that a
 barrier never expires.
