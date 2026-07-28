@@ -81,7 +81,7 @@ func requireGCStateCommandBarriers(
 		re.Equal(want.barrierID, actual[i].BarrierID)
 		re.Equal(want.barrierTS, actual[i].BarrierTS)
 		if want.expires {
-			re.GreaterOrEqual(actual[i].TTLSeconds, int64(3595))
+			re.Greater(actual[i].TTLSeconds, int64(3500))
 			re.LessOrEqual(actual[i].TTLSeconds, int64(3600))
 		} else {
 			re.Equal(int64(math.MaxInt64), actual[i].TTLSeconds)

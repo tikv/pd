@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"strings"
@@ -127,6 +128,28 @@ func TestNewKeyspaceGCStateOutput(t *testing.T) {
 		{BarrierID: "a-backup", BarrierTS: 110, TTLSeconds: 30},
 		{BarrierID: "z-backup", BarrierTS: 110, TTLSeconds: 3600},
 	}, got.GCBarriers)
+}
+
+func TestNewLocalGCBarrierOutputsSkipNilEntries(t *testing.T) {
+	got := newLocalGCBarrierOutputs([]*gc.GCBarrierInfo{
+		nil,
+		gc.NewGCBarrierInfo("valid-local", 42, 30*time.Second, time.Time{}),
+	})
+
+	require.Equal(t, []gcBarrierOutput{
+		{BarrierID: "valid-local", BarrierTS: 42, TTLSeconds: 30},
+	}, got)
+}
+
+func TestNewGlobalGCBarrierOutputsSkipNilEntries(t *testing.T) {
+	got := newGlobalGCBarrierOutputs([]*gc.GlobalGCBarrierInfo{
+		nil,
+		gc.NewGlobalGCBarrierInfo("valid-global", 84, time.Minute, time.Time{}),
+	})
+
+	require.Equal(t, []gcBarrierOutput{
+		{BarrierID: "valid-global", BarrierTS: 84, TTLSeconds: 60},
+	}, got)
 }
 
 func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
@@ -474,11 +497,12 @@ func TestGCStateCommandErrors(t *testing.T) {
 			wantMessage: "failed to get GC state for keyspace 42",
 		},
 		{
-			name: "single-unimplemented",
+			name: "single-wrapped-unimplemented",
 			args: []string{"keyspace", "42"},
 			factory: func(*cobra.Command) (gcStateReader, error) {
 				return &fakeGCStateReader{
-					err: status.Error(codes.Unimplemented, "method unavailable"),
+					err: fmt.Errorf("wrapped: %w",
+						status.Error(codes.Unimplemented, "method unavailable")),
 				}, nil
 			},
 			wantMessage: "gc-state requires a PD server that supports GetGCState",
@@ -502,11 +526,12 @@ func TestGCStateCommandErrors(t *testing.T) {
 			wantMessage: "failed to get all keyspaces GC states",
 		},
 		{
-			name: "all-unimplemented",
+			name: "all-wrapped-unimplemented",
 			args: []string{"all"},
 			factory: func(*cobra.Command) (gcStateReader, error) {
 				return &fakeGCStateReader{
-					err: status.Error(codes.Unimplemented, "method unavailable"),
+					err: fmt.Errorf("wrapped: %w",
+						status.Error(codes.Unimplemented, "method unavailable")),
 				}, nil
 			},
 			wantMessage: "gc-state all requires a PD server that supports " +
@@ -533,10 +558,11 @@ func TestGCStateCommandErrors(t *testing.T) {
 			wantMessage: "failed to get global GC state",
 		},
 		{
-			name: "global-unimplemented",
+			name: "global-wrapped-unimplemented",
 			args: []string{"global"},
 			factory: func(*cobra.Command) (gcStateReader, error) {
-				return &fakeGCStateReader{err: status.Error(codes.Unimplemented, "method unavailable")}, nil
+				return &fakeGCStateReader{err: fmt.Errorf("wrapped: %w",
+					status.Error(codes.Unimplemented, "method unavailable"))}, nil
 			},
 			wantMessage: "gc-state global requires a PD server that supports GetAllKeyspacesGCStates",
 		},

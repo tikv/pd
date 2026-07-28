@@ -197,6 +197,9 @@ func sortGCBarrierOutputs(barriers []gcBarrierOutput) {
 func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo) []gcBarrierOutput {
 	result := make([]gcBarrierOutput, 0, len(barriers))
 	for _, barrier := range barriers {
+		if barrier == nil {
+			continue
+		}
 		result = append(result, gcBarrierOutput{
 			BarrierID:  barrier.BarrierID,
 			BarrierTS:  barrier.BarrierTS,
@@ -210,6 +213,9 @@ func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo) []gcBarrierOutput {
 func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo) []gcBarrierOutput {
 	result := make([]gcBarrierOutput, 0, len(barriers))
 	for _, barrier := range barriers {
+		if barrier == nil {
+			continue
+		}
 		result = append(result, gcBarrierOutput{
 			BarrierID:  barrier.BarrierID,
 			BarrierTS:  barrier.BarrierTS,
@@ -348,7 +354,7 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 
 			state, err := reader.getGCState(cmd.Context(), keyspaceID)
 			if err != nil {
-				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+				if status.Code(err) == codes.Unimplemented {
 					return errors.Annotate(err,
 						"gc-state requires a PD server that supports GetGCState")
 				}
@@ -380,7 +386,7 @@ func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
 
 			clusterState, err := reader.getGlobalGCState(cmd.Context())
 			if err != nil {
-				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+				if status.Code(err) == codes.Unimplemented {
 					return errors.Annotate(err,
 						"gc-state global requires a PD server that supports "+
 							"GetAllKeyspacesGCStates")
@@ -414,7 +420,7 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 
 			clusterState, err := reader.getAllKeyspacesGCStates(cmd.Context())
 			if err != nil {
-				if status.Code(errors.Cause(err)) == codes.Unimplemented {
+				if status.Code(err) == codes.Unimplemented {
 					return errors.Annotate(err,
 						"gc-state all requires a PD server that supports "+
 							"GetAllKeyspacesGCStates")
