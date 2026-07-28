@@ -224,7 +224,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				engine = 1
 			}
 			if !placementChecked[engine] {
-				placementCanRestrict[engine] = bs.mayUsePlacementScope(srcStore)
+				placementCanRestrict[engine] = bs.mayUsePlacementScope(srcStore.IsTiKV())
 				placementChecked[engine] = true
 			}
 			if !placementCanRestrict[engine] {
@@ -790,10 +790,21 @@ func (bs *balanceSolver) prepareForRegion() {
 	}
 }
 
-func (bs *balanceSolver) mayUsePlacementScope(source *statistics.StoreLoadDetail) bool {
+func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
 	for _, rule := range bs.GetRuleManager().GetAllRules() {
-		if bs.ruleRestrictsStoreLoad(rule, source) {
-			return true
+		var matched, unmatched bool
+		for _, detail := range bs.stLoadDetail {
+			if detail.IsTiKV() != isTiKV {
+				continue
+			}
+			if placement.MatchLabelConstraints(detail.StoreInfo, rule.LabelConstraints) {
+				matched = true
+			} else {
+				unmatched = true
+			}
+			if matched && unmatched {
+				return true
+			}
 		}
 	}
 	return false

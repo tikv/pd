@@ -437,6 +437,23 @@ func setPoolPlacementRule(t *testing.T, tc *mockcluster.Cluster) {
 	}))
 }
 
+func TestMayUsePlacementScopeIsSourceIndependent(t *testing.T) {
+	cancel, _, tc, _ := prepareSchedulersTest()
+	defer cancel()
+
+	details := make(map[uint64]*statistics.StoreLoadDetail, 2)
+	for id, pool := range map[uint64]string{1: "target", 2: "other"} {
+		tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(id)},
+		}
+	}
+	setPoolPlacementRule(t, tc)
+
+	bs := &balanceSolver{SchedulerCluster: tc, stLoadDetail: details}
+	require.True(t, bs.mayUsePlacementScope(true))
+}
+
 func TestHotWriteRegionScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
 	testCases := []struct {
 		name       string
