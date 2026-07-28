@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	schedulerpkg "github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -198,12 +197,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				re.NoError(err)
 				// update invalidate batch
 				dataMap = map[string]any{}
-				dataMap["batch"] = schedulerpkg.MaxBalanceLeaderBatchSize + 1
+				dataMap["batch"] = 100
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
 				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
-					tu.StringEqual(re, fmt.Sprintf("\"invalid batch size which should be an integer between 1 and %d\"\n", schedulerpkg.MaxBalanceLeaderBatchSize)))
+					tu.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
 				re.NoError(err)
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {

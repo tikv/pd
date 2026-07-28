@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"fmt"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -41,18 +40,9 @@ import (
 const (
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
-	EvictLeaderBatchSize    = 3
-	maxEvictLeaderBatchSize = 100
-	lastStoreDeleteInfo     = "The last store has been deleted"
+	EvictLeaderBatchSize = 3
+	lastStoreDeleteInfo  = "The last store has been deleted"
 )
-
-var invalidEvictLeaderBatchSizeMsg = "batch must be an integer in [1, " + strconv.Itoa(maxEvictLeaderBatchSize) + "]"
-
-func isValidEvictLeaderBatchSize(batchFloat float64) bool {
-	return batchFloat >= 1 &&
-		batchFloat <= maxEvictLeaderBatchSize &&
-		batchFloat == float64(int(batchFloat))
-}
 
 type evictLeaderSchedulerConfig struct {
 	syncutil.RWMutex
@@ -186,15 +176,13 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 		if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
 			return exist, err
 		}
-		return false, nil
 	}
 	return true, nil
 }
 
-func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfPaused(id uint64, paused bool) {
-	if !paused {
-		return
-	}
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
+	conf.RLock()
+	defer conf.RUnlock()
 	conf.cluster.ResumeLeaderTransfer(id)
 }
 
@@ -412,11 +400,10 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	var (
-		exist                bool
-		err                  error
-		id                   uint64
-		leaderTransferPaused bool
-		newRanges            []keyutil.KeyRange
+		exist     bool
+		err       error
+		id        uint64
+		newRanges []keyutil.KeyRange
 	)
 	idFloat, inputHasStoreID := input["store_id"].(float64)
 	if inputHasStoreID {
@@ -426,20 +413,14 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		leaderTransferPaused = !exist
 	}
 
 	batch := handler.config.getBatch()
-	batchFloat, inputBatch := input["batch"].(float64)
-	if input["batch"] != nil && !inputBatch {
-		handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("invalid argument for 'batch': expected a number, got %T", input["batch"]))
-		return
-	}
-	if inputBatch {
-		if !isValidEvictLeaderBatchSize(batchFloat) {
-			handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-			handler.rd.JSON(w, http.StatusBadRequest, invalidEvictLeaderBatchSizeMsg)
+	batchFloat, ok := input["batch"].(float64)
+	if ok {
+		if batchFloat < 1 || batchFloat > 10 {
+			handler.config.resumeLeaderTransferIfExist(id)
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
 		batch = (int)(batchFloat)
@@ -448,8 +429,8 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		if !inputHasStoreID {
-			handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig.FastGenByArgs("id"))
+			handler.config.resumeLeaderTransferIfExist(id)
+			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
 	} else if exist {
@@ -458,8 +439,8 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
-		handler.config.resumeLeaderTransferIfPaused(id, leaderTransferPaused)
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.config.resumeLeaderTransferIfExist(id)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
