@@ -102,10 +102,13 @@ func (s *Service) checkServing() error {
 	return nil
 }
 
-// wrapLoadingError converts the retryable "resource groups are still loading"
+// WrapLoadingError converts the retryable "resource groups are still loading"
 // error into codes.Unavailable, so generic client-side retry logic can act on
 // it instead of seeing an opaque codes.Unknown. Other errors pass through.
-func wrapLoadingError(err error) error {
+// Exported because the standalone-mode metadata proxy (server.resourceGroup-
+// ProxyServer) calls the local Manager directly instead of going through
+// this gRPC service, and must apply the same mapping itself.
+func WrapLoadingError(err error) error {
 	if errs.ErrResourceGroupsLoading.Equal(err) {
 		return status.Error(codes.Unavailable, err.Error())
 	}
@@ -120,7 +123,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if err != nil {
-		return nil, wrapLoadingError(err)
+		return nil, WrapLoadingError(err)
 	}
 	if rg == nil {
 		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
@@ -139,7 +142,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	groups, err := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	if err != nil {
-		return nil, wrapLoadingError(err)
+		return nil, WrapLoadingError(err)
 	}
 	resps := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
@@ -161,7 +164,7 @@ func (s *Service) AddResourceGroup(_ context.Context, req *rmpb.PutResourceGroup
 	}
 	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, wrapLoadingError(err)
+		return nil, WrapLoadingError(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -176,7 +179,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	}
 	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
-		return nil, wrapLoadingError(err)
+		return nil, WrapLoadingError(err)
 	}
 	return &rmpb.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -191,7 +194,7 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, wrapLoadingError(err)
+		return nil, WrapLoadingError(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }

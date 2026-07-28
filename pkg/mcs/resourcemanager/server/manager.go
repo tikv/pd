@@ -478,6 +478,10 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.setLoadingState(LoadingStateCompleted)
 	epoch := m.loadEpoch
 	m.Unlock()
+	// This runs to completion before the manager is exposed to any request
+	// (NewMetadataOnlyManager's caller has not returned yet), so there is no
+	// live writer to race against; eagerly confirming every loaded keyspace's
+	// default here is safe, unlike the same backfill from the async loader.
 	m.initReserved(epoch)
 	return m.loadServiceLimits()
 }
@@ -639,25 +643,23 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 		m.syncLoadedGroups = nil
 		m.Unlock()
 
-		// Publish completion before backfilling reserved defaults. Unlike every
-		// other shared-state mutation here, initReserved re-resolves managers and
-		// persists synthetic defaults without an epoch guard, so a re-election
-		// landing in this window could make a stale loader clobber the new term's
-		// not-yet-loaded default. storeLoadingStateIfCurrent is epoch-guarded, so
-		// gating on it first makes a stale loader return without ever running
-		// initReserved. A keyspace whose default this loader would have backfilled
-		// is still covered: once loading is complete, getOrCreateKeyspaceResource-
-		// GroupManager synthesizes the default directly on demand.
+		// No eager reserved-default backfill runs here. An eager pass would
+		// re-resolve every keyspace manager and persist a synthetic default
+		// concurrently with live requests: once completion is published below,
+		// a request for a keyspace whose default was never customized can
+		// synthesize and publish it (via getOrCreateKeyspaceResourceGroupManager
+		// or loadResourceGroupIfNeeded's confirmed-not-found path) in the same
+		// goroutine as its own subsequent write, with no independent writer
+		// racing it. An out-of-band backfill loop has no such ordering guarantee
+		// against those on-demand writers, so it can persist a synthetic default
+		// after a concurrent customized write and silently discard it. A
+		// keyspace nobody ever queries needs no persisted default: the persist
+		// loop already skips unconfirmed reserved placeholders, so leaving one
+		// reserved indefinitely is a normal, accepted state, not a leak.
 		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateCompleted) {
 			log.Info("async loading resource groups aborted: manager was reinitialized")
 			return
 		}
-		// storeLoadingStateIfCurrent releases m.Lock as soon as it verifies the
-		// epoch, so that check alone does not cover initReserved below: a
-		// re-election could still land in the gap between the check returning
-		// and initReserved running. Re-verify the epoch immediately before
-		// initReserved touches krgms, closing that window.
-		m.initReserved(epoch)
 		duration := time.Since(startTime)
 		asyncLoadGroupDuration.Observe(duration.Seconds())
 		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))
@@ -988,6 +990,17 @@ func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawVa
 // epoch via storeLoadingStateIfCurrent; re-verify it here under the manager
 // lock immediately before touching krgms, since that earlier check alone
 // does not cover this call once its lock is released.
+//
+// Only call this from a path that runs before the manager serves any
+// request (construction-time full loads), not from the async loader: once
+// requests are flowing, a concurrent Add/ModifyResourceGroup can confirm a
+// keyspace's default between this function's existence check and its
+// unconditional persist, and this backfill's synthetic write would then
+// silently clobber that write in both storage and the live cache. Live
+// requests already synthesize a missing default on demand (via
+// getOrCreateKeyspaceResourceGroupManager or loadResourceGroupIfNeeded's
+// confirmed-not-found path) sequenced with their own subsequent write, so no
+// out-of-band backfill is needed once serving has started.
 func (m *Manager) initReserved(epoch uint64) {
 	m.Lock()
 	if m.loadEpoch != epoch {
