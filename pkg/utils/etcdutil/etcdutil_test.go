@@ -467,6 +467,26 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	cancel()
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestInitialLoadFailsWhenContextCanceled",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	re.Error(watcher.WaitLoad())
+}
+
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))

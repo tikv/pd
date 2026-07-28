@@ -488,7 +488,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 			}
 		})
 		watchStartRevision, err = lw.load(ctx)
-		if err == nil {
+		if err == nil && ctx.Err() == nil {
 			break
 		}
 		select {
