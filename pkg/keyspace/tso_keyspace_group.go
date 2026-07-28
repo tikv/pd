@@ -158,12 +158,8 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	} else {
 		termCtx, term, reconcileCh := m.beginKeyspaceGroupReconcileTerm(ctx)
 		if err := m.initKeyspaceGroupsWatcher(termCtx, term, reconcileCh); err != nil {
-			// Keep the previous bootstrap behavior as a fallback if the watcher's initial load fails.
-			log.Warn("failed to initialize keyspace group watcher, fall back to loading from storage", zap.Error(err))
-			if err := m.reloadKeyspaceGroups(); err != nil {
-				m.cancelKeyspaceGroupReconcileTerm(term)
-				return err
-			}
+			m.cancelKeyspaceGroupReconcileTerm(term)
+			return err
 		}
 
 		// It will only alloc node when the group manager is on API leader.

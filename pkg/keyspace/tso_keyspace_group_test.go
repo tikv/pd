@@ -28,6 +28,8 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -379,6 +381,26 @@ func TestKeyspaceGroupWatcherRetriesInitialFullLoad(t *testing.T) {
 	manager.RUnlock()
 	re.Equal(group, loaded)
 	re.Nil(stale)
+}
+
+func TestKeyspaceGroupWatcherInitialLoadFailureFailsBootstrap(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	manager.client = client
+	defer manager.Close()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail", "return(100)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/loadTemporaryFail"))
+	}()
+
+	re.Error(manager.Bootstrap(ctx))
 }
 
 func TestAllocNodesToAllKeyspaceGroupsRetriesTransientFailure(t *testing.T) {
