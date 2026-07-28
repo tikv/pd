@@ -54,6 +54,16 @@ type ruleCheckerTestSuite struct {
 	cancel      context.CancelFunc
 }
 
+type getStoresCountingCluster struct {
+	*mockcluster.Cluster
+	getStoresCount int
+}
+
+func (c *getStoresCountingCluster) GetStores() []*core.StoreInfo {
+	c.getStoresCount++
+	return c.Cluster.GetStores()
+}
+
 func (suite *ruleCheckerTestSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -2229,6 +2239,45 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	_, exist = suite.rc.pendingList.Get(1)
 	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestPendingListLookupDoesNotRefreshLRU() {
+	re := suite.Require()
+	suite.rc.pendingList = cache.NewDefaultCache(2)
+	suite.rc.pendingList.Put(1, nil)
+	suite.rc.pendingList.Put(2, nil)
+	controller := &Controller{ruleChecker: suite.rc}
+
+	re.True(controller.IsPendingRegion(1))
+	suite.rc.pendingList.Put(3, nil)
+
+	_, exists := suite.rc.pendingList.Peek(1)
+	re.False(exists)
+	_, exists = suite.rc.pendingList.Peek(2)
+	re.True(exists)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	regions := make([]*core.RegionInfo, 0, 10)
+	for i := uint64(1); i <= 10; i++ {
+		suite.cluster.AddLeaderRegion(i, 1, 2)
+		regions = append(regions, suite.cluster.GetRegion(i))
+	}
+
+	cluster := &getStoresCountingCluster{Cluster: suite.cluster}
+	checker := NewRuleChecker(
+		suite.ctx,
+		cluster,
+		suite.ruleManager,
+		cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute),
+	)
+
+	re.Equal(RegionPlacementStateInProgress, checker.GetRegionsPlacementState(regions))
+	re.Equal(1, cluster.getStoresCount)
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingOfflinePeer() {

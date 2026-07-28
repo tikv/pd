@@ -30,13 +30,15 @@ import (
 // ReplicaStrategy collects some utilities to manipulate region peers. It
 // exists to allow replica_checker and rule_checker to reuse common logics.
 type ReplicaStrategy struct {
-	checkerName    string // replica-checker / rule-checker
-	cluster        sche.CheckerCluster
-	locationLabels []string
-	isolationLevel string
-	region         *core.RegionInfo
-	extraFilters   []filter.Filter
-	fastFailover   bool
+	checkerName             string // replica-checker / rule-checker
+	cluster                 sche.CheckerCluster
+	locationLabels          []string
+	isolationLevel          string
+	region                  *core.RegionInfo
+	extraFilters            []filter.Filter
+	fastFailover            bool
+	storeCandidates         []*core.StoreInfo
+	storeCandidatesPrepared bool
 }
 
 // SelectStoreToAdd returns the store to add a replica to a region.
@@ -62,11 +64,15 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	if s.fastFailover {
 		level = constant.Urgent
 	}
-	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
-		filter.NewStorageThresholdFilter(s.checkerName),
-		filter.NewSpecialUseFilter(s.checkerName),
-		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
+	stores := s.storeCandidates
+	filters := []filter.Filter{filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs())}
+	if !s.storeCandidatesPrepared {
+		stores = s.cluster.GetStores()
+		filters = append(filters,
+			filter.NewStorageThresholdFilter(s.checkerName),
+			filter.NewSpecialUseFilter(s.checkerName),
+			&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
+		)
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
 		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
@@ -74,13 +80,13 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
 	}
-	if len(s.extraFilters) > 0 {
+	if !s.storeCandidatesPrepared && len(s.extraFilters) > 0 {
 		filters = append(filters, s.extraFilters...)
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
-	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
+	targetCandidate := filter.NewCandidates(stores).
 		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
@@ -92,6 +98,24 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		return 0, true // filter by temporary states
 	}
 	return target.GetID(), false
+}
+
+// prepareStoreCandidates applies the Region-independent target filters so the
+// result can be reused by placement-state checks using the same Rule.
+func (s *ReplicaStrategy) prepareStoreCandidates(stores []*core.StoreInfo) {
+	level := constant.High
+	if s.fastFailover {
+		level = constant.Urgent
+	}
+	filters := []filter.Filter{
+		filter.NewStorageThresholdFilter(s.checkerName),
+		filter.NewSpecialUseFilter(s.checkerName),
+		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
+	}
+	filters = append(filters, s.extraFilters...)
+	s.storeCandidates = filter.NewCandidates(stores).
+		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).Stores
+	s.storeCandidatesPrepared = true
 }
 
 // SelectStoreToFix returns a store to replace down/offline old peer. The location

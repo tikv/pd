@@ -80,10 +80,45 @@ func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
 }
 
+type placementStateCandidateKey struct {
+	rule         *placement.Rule
+	fastFailover bool
+}
+
+type placementStateContext struct {
+	storesLoaded bool
+	stores       []*core.StoreInfo
+	candidates   map[placementStateCandidateKey][]*core.StoreInfo
+}
+
+func (ctx *placementStateContext) getStrategy(c *RuleChecker, region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+	strategy := c.strategy(region, rule, fastFailover)
+	key := placementStateCandidateKey{rule: rule, fastFailover: fastFailover}
+	if candidates, ok := ctx.candidates[key]; ok {
+		strategy.storeCandidates = candidates
+		strategy.storeCandidatesPrepared = true
+		return strategy
+	}
+	if !ctx.storesLoaded {
+		ctx.stores = c.cluster.GetStores()
+		ctx.storesLoaded = true
+	}
+	if ctx.candidates == nil {
+		ctx.candidates = make(map[placementStateCandidateKey][]*core.StoreInfo)
+	}
+	strategy.prepareStoreCandidates(ctx.stores)
+	ctx.candidates[key] = strategy.storeCandidates
+	return strategy
+}
+
 // GetRegionPlacementState revalidates the placement state without creating an
 // Operator. It is intended for Regions already recorded in RuleChecker's
 // pending list.
 func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPlacementState {
+	return c.getRegionPlacementState(region, &placementStateContext{})
+}
+
+func (c *RuleChecker) getRegionPlacementState(region *core.RegionInfo, context *placementStateContext) RegionPlacementState {
 	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
 		return RegionPlacementStateInProgress
 	}
@@ -96,9 +131,10 @@ func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPla
 	for _, rf := range fit.RuleFits {
 		if len(rf.Peers) < rf.Rule.Count {
 			isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
-			storeID, filteredByTemporaryState := c.strategy(region, rf.Rule, isWitness).
-				SelectStoreToAdd(getRuleFitStores(c.cluster, rf))
-			if storeID != 0 || filteredByTemporaryState || c.hasStoreToSwapForMissingRule(region, fit, rf) {
+			strategy := context.getStrategy(c, region, rf.Rule, isWitness)
+			storeID, filteredByTemporaryState := strategy.SelectStoreToAdd(getRuleFitStores(c.cluster, rf))
+			if storeID != 0 || filteredByTemporaryState ||
+				c.hasStoreToSwapForMissingRule(region, fit, rf, context) {
 				return RegionPlacementStateInProgress
 			}
 			hasUnfixablePlacement = true
@@ -125,8 +161,8 @@ func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPla
 				continue
 			}
 
-			storeID, filteredByTemporaryState := c.strategy(region, rf.Rule, fastFailover).
-				SelectStoreToFix(getRuleFitStores(c.cluster, rf), peer.GetStoreId())
+			strategy := context.getStrategy(c, region, rf.Rule, fastFailover)
+			storeID, filteredByTemporaryState := strategy.SelectStoreToFix(getRuleFitStores(c.cluster, rf), peer.GetStoreId())
 			if storeID != 0 || filteredByTemporaryState {
 				return RegionPlacementStateInProgress
 			}
@@ -143,10 +179,9 @@ func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPla
 		if len(rf.Rule.LocationLabels) == 0 {
 			continue
 		}
-
 		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
-		_, newStoreID, filteredByTemporaryState := c.strategy(region, rf.Rule, isWitness).
-			getBetterLocation(c.cluster, region, fit, rf)
+		strategy := context.getStrategy(c, region, rf.Rule, isWitness)
+		_, newStoreID, filteredByTemporaryState := strategy.getBetterLocation(c.cluster, region, fit, rf)
 		if newStoreID != 0 || filteredByTemporaryState {
 			return RegionPlacementStateInProgress
 		}
@@ -164,7 +199,22 @@ func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPla
 	return RegionPlacementStateReplicated
 }
 
-func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit *placement.RegionFit, missingRuleFit *placement.RuleFit) bool {
+// GetRegionsPlacementState returns the aggregate placement state of Regions.
+func (c *RuleChecker) GetRegionsPlacementState(regions []*core.RegionInfo) RegionPlacementState {
+	state := RegionPlacementStateReplicated
+	context := &placementStateContext{}
+	for _, region := range regions {
+		switch c.getRegionPlacementState(region, context) {
+		case RegionPlacementStatePending:
+			return RegionPlacementStatePending
+		case RegionPlacementStateInProgress:
+			state = RegionPlacementStateInProgress
+		}
+	}
+	return state
+}
+
+func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit *placement.RegionFit, missingRuleFit *placement.RuleFit, context *placementStateContext) bool {
 	for _, peer := range region.GetPeers() {
 		store := c.cluster.GetStore(peer.GetStoreId())
 		if store == nil || !placement.MatchLabelConstraints(store, missingRuleFit.Rule.LabelConstraints) {
@@ -176,8 +226,8 @@ func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit 
 		}
 
 		fastFailover := isWitnessEnabled(c.cluster) && store.IsTiKV() && oldRuleFit.Rule.IsWitness
-		storeID, filteredByTemporaryState := c.strategy(region, oldRuleFit.Rule, fastFailover).
-			SelectStoreToFix(getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
+		strategy := context.getStrategy(c, region, oldRuleFit.Rule, fastFailover)
+		storeID, filteredByTemporaryState := strategy.SelectStoreToFix(getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
 		if storeID != 0 || filteredByTemporaryState {
 			return true
 		}

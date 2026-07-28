@@ -1296,6 +1296,7 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 	}
 	state := "REPLICATED"
 	placementRulesEnabled := c.GetSharedConfig().IsPlacementRulesEnabled()
+	var pendingRegions []*core.RegionInfo
 	for _, region := range regions {
 		if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
 			state = "INPROGRESS"
@@ -1309,16 +1310,19 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 				}
 			})
 			if pending {
-				switch co.GetRuleChecker().GetRegionPlacementState(region) {
-				case checker.RegionPlacementStatePending:
-					return "PENDING", nil
-				case checker.RegionPlacementStateInProgress:
-					state = "INPROGRESS"
-				}
+				pendingRegions = append(pendingRegions, region)
 				continue
 			}
 		}
 		if !filter.IsRegionReplicated(c, region) {
+			state = "INPROGRESS"
+		}
+	}
+	if len(pendingRegions) > 0 {
+		switch co.GetRuleChecker().GetRegionsPlacementState(pendingRegions) {
+		case checker.RegionPlacementStatePending:
+			return "PENDING", nil
+		case checker.RegionPlacementStateInProgress:
 			state = "INPROGRESS"
 		}
 	}

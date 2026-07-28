@@ -535,7 +535,7 @@ func (c *Controller) ClearSuspectKeyRanges() {
 
 // IsPendingRegion returns true if the given region is in the pending list.
 func (c *Controller) IsPendingRegion(regionID uint64) bool {
-	_, exist := c.ruleChecker.pendingList.Get(regionID)
+	_, exist := c.ruleChecker.pendingList.Peek(regionID)
 	return exist
 }
 
