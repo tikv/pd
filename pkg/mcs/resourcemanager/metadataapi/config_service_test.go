@@ -100,19 +100,37 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusInternalServerError, resp.Code)
+	store.addErr = nil
 
 	resp = doRawResourceGroupRequest(handler, http.MethodPost, []byte("{invalid"))
 	re.Equal(http.StatusBadRequest, resp.Code)
 
-	invalidKeyspaceIDs := [][]byte{
-		[]byte(`{"name":"test_group","keyspace_id":{"Keyspace":{"value":42}}}`),
-		[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+	invalidKeyspaceIDs := []struct {
+		body    []byte
+		message string
+	}{
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"Keyspace":{"value":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{},"keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+			"keyspace_id and keyspaceId cannot both be set",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}},"keyspace_id":{}}`),
+			"keyspace_id and keyspaceId cannot both be set",
+		},
 	}
 	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
-			resp = doRawResourceGroupRequest(handler, method, invalidKeyspaceID)
+			resp = doRawResourceGroupRequest(handler, method, invalidKeyspaceID.body)
 			re.Equal(http.StatusBadRequest, resp.Code)
-			re.Contains(resp.Body.String(), "keyspace_id must contain a legacy value")
+			re.Contains(resp.Body.String(), invalidKeyspaceID.message)
 		}
 	}
 }

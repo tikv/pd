@@ -188,9 +188,13 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	rawKeyspaceID := fields["keyspace_id"]
-	if rawKeyspaceID == nil {
-		rawKeyspaceID = fields["keyspaceId"]
+	rawKeyspaceID, hasSnakeCaseKeyspaceID := fields["keyspace_id"]
+	camelCaseKeyspaceID, hasCamelCaseKeyspaceID := fields["keyspaceId"]
+	if hasSnakeCaseKeyspaceID && hasCamelCaseKeyspaceID {
+		return errors.New("keyspace_id and keyspaceId cannot both be set")
+	}
+	if hasCamelCaseKeyspaceID {
+		rawKeyspaceID = camelCaseKeyspaceID
 	}
 	return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
 }
