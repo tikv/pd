@@ -396,6 +396,12 @@ type LoopWatcher struct {
 	updateClientCh chan *clientv3.Client
 	// watchChTimeoutDuration is the timeout duration for a watchChan.
 	watchChTimeoutDuration time.Duration
+
+	// reconcileDeletedKeys indicates whether a full load should delete keys that
+	// existed in the previous successfully applied state but not in the snapshot.
+	reconcileDeletedKeys bool
+	// loadedKeys tracks successfully applied keys only when reconcileDeletedKeys is enabled.
+	loadedKeys map[string]struct{}
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -556,11 +562,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		case <-ctx.Done():
 			return revision, nil
 		case <-lw.forceLoadCh:
-			revision, err = lw.load(ctx)
-			if err != nil {
+			loadedRevision, loadErr := lw.load(ctx)
+			if loadErr != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(err))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(loadErr))
 			} else {
+				revision = loadedRevision
 				log.Info("force load key successfully in watch loop",
 					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
 			}
@@ -590,10 +597,21 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			})
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
-				log.Warn("required revision has been compacted, use the compact revision in watch loop",
+				if !lw.reconcileDeletedKeys {
+					log.Warn("required revision has been compacted, use the compact revision in watch loop",
+						zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
+						zap.String("name", lw.name), zap.String("key", lw.key))
+					revision = wresp.CompactRevision
+					continue
+				}
+				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				revision = wresp.CompactRevision
+				loadedRevision, loadErr := lw.load(ctx)
+				if loadErr != nil {
+					return revision, loadErr
+				}
+				revision = loadedRevision
 				continue
 			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
 				log.Error("watcher is canceled in watch loop", errs.ZapError(errs.ErrEtcdWatcherCancel, err),
@@ -616,6 +634,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
+						if lw.reconcileDeletedKeys {
+							lw.loadedKeys[string(event.Kv.Key)] = struct{}{}
+						}
 						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
@@ -626,6 +647,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
+						if lw.reconcileDeletedKeys {
+							delete(lw.loadedKeys, string(event.Kv.Key))
+						}
 						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
@@ -642,9 +666,17 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	startKey := lw.key
-	limit := lw.loadBatchSize
-	opts := lw.buildLoadingOpts(limit)
+	var (
+		startKey         = lw.key
+		limit            = lw.loadBatchSize
+		snapshotRevision int64
+		callbackErr      error
+		snapshotKeys     map[string]struct{}
+	)
+	if lw.reconcileDeletedKeys {
+		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
+	}
+	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
@@ -681,10 +713,14 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				} else {
 					return 0, err
 				}
-				opts = lw.buildLoadingOpts(limit)
+				opts = lw.buildLoadingOpts(limit, snapshotRevision)
 				continue
 			}
 			return 0, err
+		}
+		if snapshotRevision == 0 {
+			snapshotRevision = resp.Header.Revision
+			opts = lw.buildLoadingOpts(limit, snapshotRevision)
 		}
 		for i, item := range resp.Kvs {
 			if i == len(resp.Kvs)-1 && resp.More {
@@ -695,23 +731,60 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				// we need to skip the last key for the current batch.
 				continue
 			}
-			err = lw.putFn(item)
-			if err != nil {
+			if lw.reconcileDeletedKeys {
+				snapshotKeys[string(item.Key)] = struct{}{}
+			}
+			putErr := lw.putFn(item)
+			if putErr != nil {
+				if callbackErr == nil {
+					callbackErr = putErr
+				}
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 			} else {
+				if lw.reconcileDeletedKeys {
+					lw.loadedKeys[string(item.Key)] = struct{}{}
+				}
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			return resp.Header.Revision + 1, err
+			if callbackErr == nil {
+				callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+			}
+			if callbackErr == nil && lw.reconcileDeletedKeys {
+				lw.loadedKeys = snapshotKeys
+			}
+			return snapshotRevision + 1, callbackErr
 		}
 	}
 }
 
-func (lw *LoopWatcher) buildLoadingOpts(limit int64) []clientv3.OpOption {
+func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) error {
+	if !lw.reconcileDeletedKeys {
+		return nil
+	}
+	var firstErr error
+	for key := range lw.loadedKeys {
+		if _, ok := snapshotKeys[key]; ok {
+			continue
+		}
+		kv := &mvccpb.KeyValue{Key: []byte(key)}
+		if err := lw.deleteFn(kv); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.Error("delete failed in watch loop when reconciling loaded keys",
+				zap.String("name", lw.name), zap.String("watch-key", lw.key),
+				zap.String("key", key), zap.Error(err))
+		}
+	}
+	return firstErr
+}
+
+func (lw *LoopWatcher) buildLoadingOpts(limit, revision int64) []clientv3.OpOption {
 	// Sort by key to get the next key and we don't need to worry about the performance,
 	// Because the default sort is just SortByKey and SortAscend
 	opts := []clientv3.OpOption{
@@ -723,6 +796,9 @@ func (lw *LoopWatcher) buildLoadingOpts(limit int64) []clientv3.OpOption {
 	// So, we use 'WithRange()' to avoid this problem.
 	if lw.isWithPrefix {
 		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(lw.key)))
+	}
+	if revision > 0 {
+		opts = append(opts, clientv3.WithRev(revision))
 	}
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
@@ -772,4 +848,12 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// SetReconcileDeletedKeys enables full-state reconciliation after compaction.
+// It must be called before StartWatchLoop. Since this keeps one entry per
+// watched key, callers should only enable it for prefixes with bounded key cardinality.
+func (lw *LoopWatcher) SetReconcileDeletedKeys() {
+	lw.reconcileDeletedKeys = true
+	lw.loadedKeys = make(map[string]struct{})
 }

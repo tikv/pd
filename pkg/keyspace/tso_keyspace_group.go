@@ -595,6 +595,7 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	watcher.SetReconcileDeletedKeys()
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	close(initialLoadDone)
