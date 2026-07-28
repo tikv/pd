@@ -45,13 +45,11 @@ const (
 	// If you want to increase balance speed more, please increase above-mentioned param.
 	BalanceLeaderBatchSize = 4
 	// MaxBalanceLeaderBatchSize is maximum of balance leader batch size
-	MaxBalanceLeaderBatchSize = 100
+	MaxBalanceLeaderBatchSize = 10
 
 	transferIn  = "transfer-in"
 	transferOut = "transfer-out"
 )
-
-var invalidBalanceLeaderBatchSizeMsg = "invalid batch size which should be an integer between 1 and " + strconv.Itoa(MaxBalanceLeaderBatchSize)
 
 type balanceLeaderSchedulerParam struct {
 	Ranges []keyutil.KeyRange `json:"ranges"`
@@ -80,7 +78,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			if err := json.Unmarshal(oldConfig, param); err != nil {
 				return http.StatusInternalServerError, err.Error()
 			}
-			return http.StatusBadRequest, invalidBalanceLeaderBatchSizeMsg
+			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.balanceLeaderSchedulerParam = *param
 		if err := conf.save(); err != nil {
@@ -101,7 +99,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 }
 
 func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
-	return conf.Batch >= 1 && conf.Batch <= MaxBalanceLeaderBatchSize
+	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
 func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
