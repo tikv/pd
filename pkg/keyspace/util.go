@@ -67,6 +67,13 @@ var (
 	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
 	// map it to a 400 Bad Request via errors.Is.
 	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
+	// ErrMetaServiceGroupStatusConflict is returned when PatchStatus's
+	// modification-revision compare-and-swap fails: the persisted status
+	// changed between the read and the write, most likely because a leader
+	// whose term has since ended raced this request. Retrying against the
+	// current leader picks up the fresh revision and does not repeat the
+	// conflict.
+	ErrMetaServiceGroupStatusConflict = errors.New("meta-service group status changed concurrently")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.

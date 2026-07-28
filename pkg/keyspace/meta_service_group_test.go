@@ -21,10 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 var errInjectedStatusCleanup = errors.New("injected status cleanup failure")
@@ -283,6 +285,75 @@ func (suite *metaServiceGroupTestSuite) TestPatchStatusRejectsAssignmentCount() 
 	count := 7
 	err := suite.manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{AssignmentCount: &count})
 	re.ErrorIs(err, ErrAssignmentCountPatchUnsupported)
+}
+
+// postCommitBlockingMetaServiceGroupStorage pauses RunInTxn after the
+// underlying transaction has committed, once, the next time blockNextTxn is
+// armed. It lets a test hold a PatchStatus call open between "storage write
+// committed" and "PatchStatus returns", to probe what a concurrent
+// PatchStatus observes during that window.
+type postCommitBlockingMetaServiceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	blockNextTxn atomic.Bool
+	txnCommitted chan struct{}
+	resumeTxn    chan struct{}
+}
+
+func (s *postCommitBlockingMetaServiceGroupStorage) CASMetaServiceGroupStatus(
+	id string, expectedModRevision int64, status *endpoint.MetaServiceGroupStatus,
+) (bool, error) {
+	committed, err := s.StorageEndpoint.CASMetaServiceGroupStatus(id, expectedModRevision, status)
+	if err == nil && s.blockNextTxn.CompareAndSwap(true, false) {
+		close(s.txnCommitted)
+		<-s.resumeTxn
+	}
+	return committed, err
+}
+
+// TestConcurrentPatchStatusKeepsCacheAtLastPersistedValue guards against
+// PatchStatus publishing an out-of-order value to cachedStatus: without
+// patchMu serializing the persist-then-publish sequence, a PatchStatus call
+// paused between its storage commit and its cache update can resume after a
+// later, already-published PatchStatus call and overwrite cachedStatus with
+// its own, now-stale value, so storage and cache disagree indefinitely.
+func (suite *metaServiceGroupTestSuite) TestConcurrentPatchStatusKeepsCacheAtLastPersistedValue() {
+	re := suite.Require()
+	store := &postCommitBlockingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		txnCommitted:    make(chan struct{}),
+		resumeTxn:       make(chan struct{}),
+	}
+	manager, err := NewMetaServiceGroupManager(suite.ctx, store, mockMetaServiceGroups())
+	re.NoError(err)
+
+	enabled, disabled := true, false
+	store.blockNextTxn.Store(true)
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{Enabled: &enabled})
+	}()
+	<-store.txnCommitted
+
+	// patchMu should keep this call blocked until the first one fully
+	// releases it below, so run it in its own goroutine rather than inline.
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{Enabled: &disabled})
+	}()
+	close(store.resumeTxn)
+	re.NoError(<-firstDone)
+	re.NoError(<-secondDone)
+
+	var persisted map[string]*endpoint.MetaServiceGroupStatus
+	re.NoError(store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var err error
+		persisted, err = store.LoadMetaServiceGroupStatus(txn, map[string]string{"etcd-group-0": ""})
+		return err
+	}))
+	cached, err := manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.False(persisted["etcd-group-0"].Enabled)
+	re.False(cached["etcd-group-0"].Enabled)
 }
 
 // TestUpdateGroupsSafelyResetsStatusForReaddedGroup verifies that re-adding a
@@ -572,4 +643,80 @@ func (suite *metaServiceGroupTestSuite) enableAllGroups() {
 			Enabled: &enabled,
 		}))
 	}
+}
+
+// preCommitBlockingMetaServiceGroupStorage pauses CASMetaServiceGroupStatus,
+// once, the next time blockNextCAS is armed, right before it delegates to the
+// real implementation. That lets a test hold a PatchStatus call open between
+// "read the status key's modification revision" and "commit the CAS against
+// it", to simulate a leader whose term ends while a patch request is already
+// in flight against it.
+type preCommitBlockingMetaServiceGroupStorage struct {
+	*endpoint.StorageEndpoint
+	blockNextCAS atomic.Bool
+	casPrepared  chan struct{}
+	resumeCAS    chan struct{}
+}
+
+func (s *preCommitBlockingMetaServiceGroupStorage) CASMetaServiceGroupStatus(
+	id string, expectedModRevision int64, status *endpoint.MetaServiceGroupStatus,
+) (bool, error) {
+	if s.blockNextCAS.CompareAndSwap(true, false) {
+		close(s.casPrepared)
+		<-s.resumeCAS
+	}
+	return s.StorageEndpoint.CASMetaServiceGroupStatus(id, expectedModRevision, status)
+}
+
+// TestPatchStatusModRevisionCASRejectsFormerLeaderAfterABA guards against the
+// ABA hole a value-only CAS has: a former leader reads Enabled=false, a
+// current leader writes true and then back to false, and the former leader's
+// write then sees "the value is still what I read" and would wrongly commit.
+// Comparing the modification revision instead of the value closes it, since
+// the revision keeps advancing across the intervening writes even though the
+// value returns to what the former leader saw.
+func TestPatchStatusModRevisionCASRejectsFormerLeaderAfterABA(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	base := kv.NewEtcdKVBase(client)
+	currentStore := endpoint.NewStorageEndpoint(base, nil)
+	groups := map[string]string{"group": "addr"}
+	disabled, enabled := false, true
+	re.NoError(currentStore.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		return currentStore.SaveMetaServiceGroupStatus(txn, "group", &endpoint.MetaServiceGroupStatus{Enabled: false})
+	}))
+
+	formerStore := &preCommitBlockingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(base, nil),
+		casPrepared:     make(chan struct{}),
+		resumeCAS:       make(chan struct{}),
+	}
+	former, err := NewMetaServiceGroupManager(context.Background(), formerStore, groups)
+	re.NoError(err)
+	current, err := NewMetaServiceGroupManager(context.Background(), currentStore, groups)
+	re.NoError(err)
+
+	formerStore.blockNextCAS.Store(true)
+	done := make(chan error, 1)
+	go func() {
+		done <- former.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled})
+	}()
+	<-formerStore.casPrepared
+
+	// The current leader writes true, then back to false: an ABA on the
+	// value, but the modification revision has advanced twice.
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &disabled}))
+	close(formerStore.resumeCAS)
+
+	// The former leader's stale-revision CAS must be rejected, not silently
+	// committed just because the value happens to match again.
+	re.ErrorIs(<-done, ErrMetaServiceGroupStatusConflict)
+
+	re.NoError(current.RefreshCache(context.Background()))
+	status, err := current.GetStatus(context.Background())
+	re.NoError(err)
+	re.False(status["group"].Enabled)
 }

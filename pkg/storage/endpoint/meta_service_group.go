@@ -28,6 +28,15 @@ type MetaServiceGroupStorage interface {
 	LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]string) (map[string]*MetaServiceGroupStatus, error)
 	RemoveMetaServiceGroupStatus(txn kv.Txn, id string) error
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
+	// LoadMetaServiceGroupStatusModRevision loads a single meta-service
+	// group's status along with its modification revision, for use with
+	// CASMetaServiceGroupStatus.
+	LoadMetaServiceGroupStatusModRevision(id string) (status *MetaServiceGroupStatus, modRevision int64, err error)
+	// CASMetaServiceGroupStatus persists status for id, guarded by a
+	// modification-revision compare-and-swap against expectedModRevision.
+	// See the StorageEndpoint implementation's doc for why this is needed
+	// instead of a value-based compare.
+	CASMetaServiceGroupStatus(id string, expectedModRevision int64, status *MetaServiceGroupStatus) (committed bool, err error)
 }
 
 // MetaServiceGroupStatus represents the status of a meta-service group.
@@ -68,17 +77,91 @@ func (*StorageEndpoint) RemoveMetaServiceGroupStatus(txn kv.Txn, id string) erro
 }
 
 func loadMetaServiceGroupStatus(txn kv.Txn, id string) (*MetaServiceGroupStatus, error) {
-	statusPath := keypath.MetaServiceGroupStatusPath(id)
-	statusVal, err := txn.Load(statusPath)
+	statusVal, err := txn.Load(keypath.MetaServiceGroupStatusPath(id))
 	if err != nil {
 		return nil, err
 	}
+	return unmarshalMetaServiceGroupStatus(statusVal)
+}
+
+func unmarshalMetaServiceGroupStatus(statusVal string) (*MetaServiceGroupStatus, error) {
 	status := &MetaServiceGroupStatus{}
 	if statusVal == "" {
 		return status, nil
 	}
-	if err = json.Unmarshal([]byte(statusVal), status); err != nil {
+	if err := json.Unmarshal([]byte(statusVal), status); err != nil {
 		return nil, err
 	}
 	return status, nil
+}
+
+// LoadMetaServiceGroupStatusModRevision loads a single meta-service group's
+// status along with its modification revision, for use with
+// CASMetaServiceGroupStatus. The revision is 0 on backends without MVCC
+// (LevelDB, the in-memory KV) and for a group with no persisted status yet.
+func (se *StorageEndpoint) LoadMetaServiceGroupStatusModRevision(id string) (*MetaServiceGroupStatus, int64, error) {
+	statusPath := keypath.MetaServiceGroupStatusPath(id)
+	reader, ok := se.Base.(kv.ModRevisionReader)
+	if !ok {
+		status, err := se.loadMetaServiceGroupStatusNoTxn(statusPath)
+		return status, 0, err
+	}
+	statusVal, modRevision, err := reader.LoadModRevision(statusPath)
+	if err != nil {
+		return nil, 0, err
+	}
+	status, err := unmarshalMetaServiceGroupStatus(statusVal)
+	return status, modRevision, err
+}
+
+func (se *StorageEndpoint) loadMetaServiceGroupStatusNoTxn(statusPath string) (*MetaServiceGroupStatus, error) {
+	statusVal, err := se.Load(statusPath)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalMetaServiceGroupStatus(statusVal)
+}
+
+// CASMetaServiceGroupStatus persists status for id, guarded by a
+// modification-revision compare-and-swap against expectedModRevision when the
+// backend supports raw transactions (etcd). This fences a write from a leader
+// whose term has already ended: a value-only compare can't tell a key that
+// was never touched apart from one that changed and changed back to the same
+// value (ABA), but the modification revision advances on every write
+// regardless of the value, so a stale expectedModRevision reliably fails the
+// compare. Returns committed=false with a nil error when the compare fails;
+// the caller should reload and decide whether to retry or surface a
+// conflict.
+//
+// Backends without raw-transaction support (LevelDB, the in-memory KV used in
+// unit tests) can't be fenced this way and always commit: they're
+// single-process, so there is no concurrent stale-term writer to guard
+// against there.
+func (se *StorageEndpoint) CASMetaServiceGroupStatus(id string, expectedModRevision int64, status *MetaServiceGroupStatus) (committed bool, err error) {
+	statusPath := keypath.MetaServiceGroupStatusPath(id)
+	statusVal, err := json.Marshal(status)
+	if err != nil {
+		return false, err
+	}
+	rawTxn, err := se.createRawTxn()
+	if err != nil {
+		if err := se.Save(statusPath, string(statusVal)); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	resp, err := rawTxn.If(kv.RawTxnCondition{
+		Key:      statusPath,
+		CmpType:  kv.RawTxnCmpEqual,
+		Target:   kv.RawTxnCmpTargetModRevision,
+		Revision: expectedModRevision,
+	}).Then(kv.RawTxnOp{
+		Key:    statusPath,
+		OpType: kv.RawTxnOpPut,
+		Value:  string(statusVal),
+	}).Commit()
+	if err != nil {
+		return false, err
+	}
+	return resp.Succeeded, nil
 }

@@ -66,6 +66,23 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
+// LoadModRevision loads the value and modification revision of the key from
+// etcd. A missing key returns an empty value and a modification revision of
+// 0, matching how a RawTxnCmpTargetModRevision condition compares a key that
+// doesn't exist.
+func (kv *etcdKVBase) LoadModRevision(key string) (string, int64, error) {
+	resp, err := etcdutil.EtcdKVGet(kv.client, key)
+	if err != nil {
+		return "", 0, err
+	}
+	if n := len(resp.Kvs); n == 0 {
+		return "", 0, nil
+	} else if n > 1 {
+		return "", 0, errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+	}
+	return string(resp.Kvs[0].Value), resp.Kvs[0].ModRevision, nil
+}
+
 // LoadRange loads a range of keys [key, endKey) from etcd.
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys, values []string, err error) {
 	var options RangeOptions
@@ -344,7 +361,12 @@ func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 			default:
 				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
 			}
-			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(c.Key), cmpOp, c.Value))
+			switch c.Target {
+			case RawTxnCmpTargetModRevision:
+				cmpList = append(cmpList, clientv3.Compare(clientv3.ModRevision(c.Key), cmpOp, c.Revision))
+			default:
+				cmpList = append(cmpList, clientv3.Compare(clientv3.Value(c.Key), cmpOp, c.Value))
+			}
 		}
 	}
 	l.inner = l.inner.If(cmpList...)

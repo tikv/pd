@@ -1236,6 +1236,14 @@ func (manager *Manager) CountKeyspacesByMetaServiceGroup(ctx context.Context, gr
 	}
 	startID := constant.StartKeyspaceID
 	for {
+		// The etcd backend's LoadRangeKeyspaceAtRevision/CurrentRevision don't
+		// honor ctx themselves, so check it explicitly between pages: without
+		// this, a rebuild whose leader-term context is canceled mid-scan (e.g.
+		// on leadership loss) would keep paging through the rest of a
+		// multi-million-keyspace scan even though the result is discarded.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Load directly from the store rather than via LoadRangeKeyspace: the
 		// latter calls mgm.AttachEndpoints which takes the mgm read lock, and this
 		// is invoked while the mgm write lock is held, which would deadlock.

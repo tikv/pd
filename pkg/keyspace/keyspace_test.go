@@ -1259,3 +1259,48 @@ func (suite *keyspaceTestSuite) TestTombstoneKeyspaceUnassignsMetaServiceGroup()
 	re.NoError(err)
 	re.Equal(0, counts[groupID])
 }
+
+// cancelAfterFirstRevisionPageStorage cancels ctx as soon as its first page of
+// results is produced, to check that CountKeyspacesByMetaServiceGroup notices
+// the cancellation before requesting the next page instead of paging through
+// to the end regardless.
+type cancelAfterFirstRevisionPageStorage struct {
+	endpoint.KeyspaceStorage
+	cancel     context.CancelFunc
+	rangeCalls int
+}
+
+func (s *cancelAfterFirstRevisionPageStorage) LoadRangeKeyspaceAtRevision(
+	_ uint32, limit int, _ int64,
+) ([]*keyspacepb.KeyspaceMeta, error) {
+	s.rangeCalls++
+	if s.rangeCalls > 1 {
+		return nil, nil
+	}
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, limit)
+	for i := range keyspaces {
+		keyspaces[i] = &keyspacepb.KeyspaceMeta{Id: uint32(i + 1)}
+	}
+	s.cancel()
+	return keyspaces, nil
+}
+
+// TestCountKeyspacesByMetaServiceGroupStopsPagingWhenContextIsCanceled guards
+// against a former leader's abandoned rebuild continuing to page through a
+// full keyspace scan after its leader-term context is canceled: the scan
+// result is discarded either way (termGen no longer matches), so paging on
+// is pure wasted storage load.
+func (suite *keyspaceTestSuite) TestCountKeyspacesByMetaServiceGroupStopsPagingWhenContextIsCanceled() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	store := &cancelAfterFirstRevisionPageStorage{
+		KeyspaceStorage: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+		cancel:          cancel,
+	}
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{}, nil, nil)
+
+	_, err := manager.CountKeyspacesByMetaServiceGroup(ctx, map[string]struct{}{"group": {}})
+	re.Equal(1, store.rangeCalls)
+	re.ErrorIs(err, context.Canceled)
+}

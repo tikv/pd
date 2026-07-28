@@ -51,7 +51,9 @@ const assignmentCountRebuildRetryInterval = time.Second
 // taking the RWMutex, which would otherwise invert the RWMutex->metaLock order
 // used by the create/config paths and deadlock. Allowed orders are
 // RWMutex->statusMu and metaLock->statusMu; both are safe because statusMu wraps
-// nothing.
+// nothing. patchMu sits between the two: RWMutex(RLock)->patchMu->statusMu. It
+// is held only by PatchStatus, across storage I/O, so it must never be taken
+// while already holding statusMu.
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
@@ -67,6 +69,13 @@ type MetaServiceGroupManager struct {
 	// discipline it must follow.
 	statusMu     syncutil.Mutex
 	cachedStatus map[string]*endpoint.MetaServiceGroupStatus
+	// patchMu serializes PatchStatus's persist-then-publish sequence (storage
+	// write followed by the cachedStatus update) end to end, across concurrent
+	// PatchStatus calls on this instance. Without it, two concurrent calls can
+	// commit to storage in one order but publish to cachedStatus in the
+	// other, leaving the cache holding an already-superseded value. It is
+	// acquired around, and therefore outermost relative to, statusMu.
+	patchMu syncutil.Mutex
 	// termGen is the leader-term generation. It is bumped only at term boundaries
 	// (RefreshCache at construction, RefreshPersistedStatus on leadership change),
 	// never by assignment deltas. A rebuild worker snapshots it when scheduled and,
@@ -215,6 +224,20 @@ func (m *MetaServiceGroupManager) IsAssignmentCountReady() bool {
 // while loading counts are preserved. The scan is discarded only when the leader
 // term changes (which bumps termGen), so under steady traffic a rebuild converges
 // in a single scan. At most one scan runs at a time.
+//
+// AssignmentCount is a best-effort load-balancing hint, not a strictly
+// consistent counter: rebuildDeltas starts recording here (rebuilding=true),
+// but the scan's revision anchor isn't captured until later, inside
+// CountKeyspacesByMetaServiceGroup. An assignment mutation that lands in that
+// gap can be counted by both the scan and the delta, over-counting by one.
+// This is a narrow, self-limiting window (it does not compound across
+// mutations) and it self-heals on the next successful rebuild in a later
+// term, so it is accepted rather than fixed here.
+// TODO: close it by tagging each recorded delta with its own commit
+// revision (would need RunInTxn to expose the committed revision, which it
+// currently discards) and, in finishRebuild, only applying deltas whose
+// revision is greater than the scan's pinned revision instead of applying
+// every delta recorded while rebuilding was true.
 func (m *MetaServiceGroupManager) StartAssignmentCountRebuild(ctx context.Context) {
 	m.RLock()
 	groupIDs := make(map[string]struct{}, len(m.metaServiceGroups))
@@ -280,6 +303,9 @@ func (m *MetaServiceGroupManager) finishRebuild(startTerm uint64, counts map[str
 		m.rebuildDeltas = nil
 		return true
 	}
+	// See the rebuilding-window note on StartAssignmentCountRebuild: a delta
+	// recorded here may already be reflected in counts[id] too, over-counting
+	// by one. Accepted best-effort tradeoff, not fixed here.
 	for id, status := range m.cachedStatus {
 		status.AssignmentCount = max(0, counts[id]+m.rebuildDeltas[id])
 	}
@@ -332,7 +358,7 @@ type MetaServiceGroupStatusPatch struct {
 // PatchStatus applies a patch to the status of a meta-service group. Only the
 // Enabled flag can be patched and persisted; AssignmentCount is derived from
 // authoritative keyspace metadata and cannot be patched.
-func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
+func (m *MetaServiceGroupManager) PatchStatus(_ context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
 	if patch.AssignmentCount != nil {
 		return ErrAssignmentCountPatchUnsupported
 	}
@@ -341,23 +367,39 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	if _, ok := m.metaServiceGroups[groupID]; !ok {
 		return ErrUnknownMetaServiceGroup
 	}
+	// patchMu holds the persist-then-publish sequence below together as one
+	// unit across concurrent PatchStatus calls: without it, two concurrent
+	// calls can commit to storage in one order but publish to cachedStatus in
+	// the other, leaving the cache stuck on an already-superseded value.
+	m.patchMu.Lock()
+	defer m.patchMu.Unlock()
 	// Persist the Enabled flag (the only persisted field) synchronously when it
 	// changes. persistGroupsLocked (group deletion) takes the write lock, so
 	// holding the read lock here is enough to keep the group from being deleted
 	// between the existence check and the write.
 	if patch.Enabled != nil {
-		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-			// Load before saving so the txn carries an implicit compare on the
-			// status key's current value. Without it this is a blind put: a
-			// write from a leader that has since lost its term can still commit
-			// after a newer leader's write, silently reverting it. The loaded
-			// value itself is unused; only the CAS side effect matters here.
-			if _, err := m.store.LoadMetaServiceGroupStatus(txn, map[string]string{groupID: ""}); err != nil {
-				return err
-			}
-			return m.store.SaveMetaServiceGroupStatus(txn, groupID, &endpoint.MetaServiceGroupStatus{Enabled: *patch.Enabled})
-		}); err != nil {
+		// CAS on the status key's modification revision, not its value: a
+		// value-only compare cannot fence a leader whose term has already
+		// ended, because it can't distinguish a key that was never touched
+		// from one that changed and changed back to the same value (ABA) in
+		// between this read and this write. The modification revision
+		// advances on every write regardless of value, so a stale revision
+		// here reliably fails the compare instead of silently reverting a
+		// newer write.
+		current, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(groupID)
+		if err != nil {
 			return err
+		}
+		if current == nil {
+			current = &endpoint.MetaServiceGroupStatus{}
+		}
+		current.Enabled = *patch.Enabled
+		committed, err := m.store.CASMetaServiceGroupStatus(groupID, modRevision, current)
+		if err != nil {
+			return err
+		}
+		if !committed {
+			return ErrMetaServiceGroupStatusConflict
 		}
 	}
 	m.statusMu.Lock()
