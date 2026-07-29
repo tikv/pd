@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -215,4 +216,19 @@ func (suite *clusterSuite) TestGetRegionByPreKey() {
 			}
 		})
 	}
+}
+
+func (suite *clusterSuite) TestGetStoreDoesNotReportSchedulingState() {
+	re := suite.Require()
+	suite.rc.PutStore(core.NewStoreInfo(
+		&metapb.Store{Id: 1, Address: "tikv-1"},
+		core.SlowStoreEvicted(),
+	))
+
+	resp, err := GetStore(suite.rc, &pdpb.GetStoreRequest{StoreId: 1})
+	re.NoError(err)
+	re.NotNil(resp.GetStore())
+	// BasicCluster is used by the router and does not retain dynamic PD leader
+	// scheduling decisions. Returning nil preserves the unknown state.
+	re.Nil(resp.GetSchedulingState())
 }

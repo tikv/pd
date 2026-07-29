@@ -117,6 +117,14 @@ type RPCClient interface {
 	ResourceManagerClient
 }
 
+// RPCClientExt is an optional extension for callers that need fields carried
+// by complete RPC responses in addition to the existing RPCClient methods. It
+// is deliberately separate from RPCClient so new optional response APIs do not
+// break existing pd.Client implementations and mocks.
+type RPCClientExt interface {
+	GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error)
+}
+
 // Client is a PD (Placement Driver) RPC client.
 // It should not be used after calling Close().
 type Client interface {
@@ -1033,6 +1041,15 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
 
 // GetStore implements the RPCClient interface.
 func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*metapb.Store, error) {
+	resp, err := c.GetStoreResponse(ctx, storeID, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return handleStoreResponse(resp)
+}
+
+// GetStoreResponse implements the RPCClientExt interface.
+func (c *client) GetStoreResponse(ctx context.Context, storeID uint64, opts ...opt.GetStoreOption) (*pdpb.GetStoreResponse, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1077,7 +1094,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64, opts ...opt.GetSt
 	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleStoreResponse(resp)
+	return resp, nil
 }
 
 func handleStoreResponse(resp *pdpb.GetStoreResponse) (*metapb.Store, error) {

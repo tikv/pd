@@ -1276,6 +1276,18 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
+	// GetStoreResponse retains PD's dynamic scheduling state, which is not part
+	// of the store metadata returned by GetStore.
+	err = cluster.SlowStoreEvicted(store.GetId())
+	re.NoError(err)
+	storeResp, err := suite.client.GetStoreResponse(context.Background(), store.GetId())
+	re.NoError(err)
+	re.True(storeResp.GetSchedulingState().GetEvictedAsSlowStore())
+	cluster.SlowStoreRecovered(store.GetId())
+	storeResp, err = suite.client.GetStoreResponse(context.Background(), store.GetId())
+	re.NoError(err)
+	re.False(storeResp.GetSchedulingState().GetEvictedAsSlowStore())
+
 	actualStores, err := suite.client.GetAllStores(context.Background())
 	re.NoError(err)
 	re.Len(actualStores, len(stores))
