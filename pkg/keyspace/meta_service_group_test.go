@@ -35,7 +35,7 @@ type cleanupFailingMetaServiceGroupStorage struct {
 	*endpoint.StorageEndpoint
 }
 
-func (*cleanupFailingMetaServiceGroupStorage) RemoveMetaServiceGroupStatus(kv.Txn, string) error {
+func (*cleanupFailingMetaServiceGroupStorage) SaveMetaServiceGroupStatus(kv.Txn, string, *endpoint.MetaServiceGroupStatus) error {
 	return errInjectedStatusCleanup
 }
 
@@ -285,6 +285,25 @@ func (suite *metaServiceGroupTestSuite) TestPatchStatusRejectsAssignmentCount() 
 	count := 7
 	err := suite.manager.PatchStatus(suite.ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{AssignmentCount: &count})
 	re.ErrorIs(err, ErrAssignmentCountPatchUnsupported)
+}
+
+// TestPatchStatusHonorsCanceledContext guards against PatchStatus silently
+// persisting and publishing a patch whose request context was already
+// canceled: the CAS helpers it calls don't take a context themselves, so
+// without an explicit check a canceled request would still land.
+func (suite *metaServiceGroupTestSuite) TestPatchStatusHonorsCanceledContext() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	cancel()
+
+	enabled := true
+	err := suite.manager.PatchStatus(ctx, "etcd-group-0", &MetaServiceGroupStatusPatch{Enabled: &enabled})
+	re.ErrorIs(err, context.Canceled)
+
+	re.NoError(suite.manager.RefreshCache(suite.ctx))
+	status, err := suite.manager.GetStatus(suite.ctx)
+	re.NoError(err)
+	re.False(status["etcd-group-0"].Enabled, "a canceled patch must not be persisted or published")
 }
 
 // postCommitBlockingMetaServiceGroupStorage pauses RunInTxn after the
@@ -719,4 +738,59 @@ func TestPatchStatusModRevisionCASRejectsFormerLeaderAfterABA(t *testing.T) {
 	status, err := current.GetStatus(context.Background())
 	re.NoError(err)
 	re.False(status["group"].Enabled)
+}
+
+// TestPatchStatusModRevisionCASRejectsFormerLeaderAcrossDeleteRecreateCycle
+// guards against a second-order ABA the modification-revision CAS alone
+// doesn't close: etcd compares a missing key's modification revision as a
+// constant 0 no matter how many times it has been created and removed, so a
+// former leader that observed a missing key can still commit after the key
+// went missing again through an intervening delete-and-recreate cycle.
+// persistGroupsLocked closes this by overwriting the status key on both the
+// added-group reset and the deleted-group cleanup instead of removing it, so
+// the revision keeps climbing across the group's whole lifetime and a
+// deleted-then-recreated key never compares as "still absent" again.
+func TestPatchStatusModRevisionCASRejectsFormerLeaderAcrossDeleteRecreateCycle(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	base := kv.NewEtcdKVBase(client)
+	currentStore := endpoint.NewStorageEndpoint(base, nil)
+	groups := map[string]string{"group": "addr"}
+
+	formerStore := &preCommitBlockingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(base, nil),
+		casPrepared:     make(chan struct{}),
+		resumeCAS:       make(chan struct{}),
+	}
+	former, err := NewMetaServiceGroupManager(context.Background(), formerStore, groups)
+	re.NoError(err)
+	current, err := NewMetaServiceGroupManager(context.Background(), currentStore, groups)
+	re.NoError(err)
+
+	enabled := true
+	formerStore.blockNextCAS.Store(true)
+	done := make(chan error, 1)
+	go func() {
+		done <- former.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled})
+	}()
+	<-formerStore.casPrepared
+
+	// The former leader observed a missing key (modification revision 0).
+	// Leave it missing again after an intervening create, delete, and
+	// group re-add.
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+	re.NoError(current.UpdateGroupsSafely(context.Background(), map[string]string{}, []string{"group"}, func() error { return nil }, nil))
+	re.NoError(current.UpdateGroupsSafely(context.Background(), groups, nil, func() error { return nil }, nil))
+	close(formerStore.resumeCAS)
+
+	// The former leader's stale CAS must still be rejected, not silently
+	// accepted because the key is absent again.
+	re.ErrorIs(<-done, ErrMetaServiceGroupStatusConflict)
+
+	re.NoError(current.RefreshCache(context.Background()))
+	status, err := current.GetStatus(context.Background())
+	re.NoError(err)
+	re.False(status["group"].Enabled, "a former leader must not enable a re-added group")
 }

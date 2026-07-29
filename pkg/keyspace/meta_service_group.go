@@ -358,7 +358,7 @@ type MetaServiceGroupStatusPatch struct {
 // PatchStatus applies a patch to the status of a meta-service group. Only the
 // Enabled flag can be patched and persisted; AssignmentCount is derived from
 // authoritative keyspace metadata and cannot be patched.
-func (m *MetaServiceGroupManager) PatchStatus(_ context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
+func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID string, patch *MetaServiceGroupStatusPatch) error {
 	if patch.AssignmentCount != nil {
 		return ErrAssignmentCountPatchUnsupported
 	}
@@ -373,6 +373,12 @@ func (m *MetaServiceGroupManager) PatchStatus(_ context.Context, groupID string,
 	// the other, leaving the cache stuck on an already-superseded value.
 	m.patchMu.Lock()
 	defer m.patchMu.Unlock()
+	// Re-check after acquiring patchMu: the storage calls below don't take a
+	// context themselves (see their docs), so a request canceled while queued
+	// behind patchMu would otherwise persist and publish anyway.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Persist the Enabled flag (the only persisted field) synchronously when it
 	// changes. persistGroupsLocked (group deletion) takes the write lock, so
 	// holding the read lock here is enough to keep the group from being deleted
@@ -639,6 +645,16 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	// flag left in storage. Failing hard here keeps the reset invariant without
 	// leaving the config and the in-memory view diverged: nothing below has changed
 	// yet, so the operation is a clean, retryable no-op on error.
+	//
+	// This overwrites the status key rather than removing it, unlike a plain
+	// reset would: PatchStatus's modification-revision CAS relies on the key's
+	// modification revision never repeating a value it held before. A removed
+	// key's absence compares as modification revision 0 regardless of how
+	// many times it has been created and removed, so a delete here would let
+	// a stale-term PatchStatus that observed a still-earlier absence commit
+	// again after this reset, the same ABA hole by another name. Overwriting
+	// instead of removing keeps the revision strictly increasing across the
+	// group's entire lifetime.
 	m.statusMu.Lock()
 	var addedGroups []string
 	for id := range metaServiceGroups {
@@ -650,7 +666,7 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	if len(addedGroups) > 0 {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range addedGroups {
-				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
+				if err := m.store.SaveMetaServiceGroupStatus(txn, id, &endpoint.MetaServiceGroupStatus{}); err != nil {
 					return err
 				}
 			}
@@ -680,10 +696,13 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	// Best-effort cleanup of the deleted groups' now-orphan persisted status. It is
 	// safe if this fails: RefreshCache only loads status for current groups, so an
 	// orphan key is never read, and a future re-add clears it via the reset above.
+	// Overwritten rather than removed, for the same modification-revision reason
+	// as the reset above: removing it would let the key's absence repeat, which
+	// breaks the ABA guarantee PatchStatus's CAS depends on.
 	if len(deletedGroups) > 0 {
 		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 			for _, id := range deletedGroups {
-				if err := m.store.RemoveMetaServiceGroupStatus(txn, id); err != nil {
+				if err := m.store.SaveMetaServiceGroupStatus(txn, id, &endpoint.MetaServiceGroupStatus{}); err != nil {
 					return err
 				}
 			}
