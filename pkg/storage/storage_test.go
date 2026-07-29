@@ -243,6 +243,27 @@ func TestLoadRegionsToCache(t *testing.T) {
 	re.Equal(n, cache.GetTotalRegionCount())
 }
 
+func TestLoadRegionsFromLocalStorageOnce(t *testing.T) {
+	re := require.New(t)
+	defaultStorage := NewStorageWithMemoryBackend()
+	localStorage := NewStorageWithMemoryBackend()
+	defaultRegion := newTestRegionMeta(1)
+	localRegion := newTestRegionMeta(2)
+	re.NoError(defaultStorage.SaveRegion(defaultRegion))
+	re.NoError(localStorage.SaveRegion(localRegion))
+	coreStorage := NewCoreStorage(defaultStorage, localStorage)
+	cache := core.NewBasicCluster()
+
+	re.NoError(TryLoadRegionsFromLocalStorageOnce(
+		context.Background(),
+		coreStorage,
+		cache.CheckAndPutRegion,
+	))
+	re.Nil(cache.GetRegion(defaultRegion.GetId()))
+	re.NotNil(cache.GetRegion(localRegion.GetId()))
+	re.True(AreRegionsLoaded(coreStorage))
+}
+
 func TestLoadRegionsExceedRangeLimit(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/kv/withRangeLimit", "return(500)"))
@@ -289,6 +310,25 @@ func TestTrySwitchRegionStorage(t *testing.T) {
 	for _, region := range localCache.GetMetaRegions() {
 		re.Equal(regions20[region.GetId()], region)
 	}
+}
+
+func TestClearRegionStoragePreservesOtherKeys(t *testing.T) {
+	re := require.New(t)
+	s := NewStorageWithMemoryBackend()
+	re.NoError(s.Save("keep", "value"))
+	re.NoError(s.SaveRegion(&metapb.Region{Id: 1}))
+	re.NoError(s.SaveRegion(&metapb.Region{Id: 2}))
+
+	re.NoError(ClearRegionStorage(context.Background(), s))
+	for _, regionID := range []uint64{1, 2} {
+		region := &metapb.Region{}
+		ok, err := s.LoadRegion(regionID, region)
+		re.NoError(err)
+		re.False(ok)
+	}
+	value, err := s.Load("keep")
+	re.NoError(err)
+	re.Equal("value", value)
 }
 
 const (

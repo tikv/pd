@@ -29,6 +29,7 @@ import (
 
 const (
 	historyKey                = "historyIndex"
+	historySyncedKey          = "historySynced"
 	defaultFlushCount         = 100
 	historyBufferCapacityUnit = 10000
 	historyBufferShrinkRounds = 3
@@ -144,7 +145,10 @@ func (h *historyBuffer) recordLocked(r *core.RegionInfo) {
 	h.index++
 	h.flushCount--
 	if h.flushCount <= 0 {
-		h.persist()
+		if err := h.persist(); err != nil {
+			log.Warn("persist history index failed",
+				zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
+		}
 		h.flushCount = defaultFlushCount
 	}
 }
@@ -314,11 +318,11 @@ func (h *historyBuffer) resetWithIndexLocked(index uint64) {
 	}
 }
 
-func (h *historyBuffer) resetWithIndexAndPersist(index uint64) {
+func (h *historyBuffer) resetWithIndexAndPersist(index uint64) error {
 	h.Lock()
 	defer h.Unlock()
 	h.resetWithIndexLocked(index)
-	h.persist()
+	return h.persist()
 }
 
 func (h *historyBuffer) getNextIndex() uint64 {
@@ -353,13 +357,26 @@ func (h *historyBuffer) reload() {
 	log.Info("start from history index", zap.Uint64("start-index", h.firstIndex()))
 }
 
-func (h *historyBuffer) persist() {
+func (h *historyBuffer) persist() error {
 	firstIndexGauge.Set(float64(h.firstIndex()))
 	lastIndexGauge.Set(float64(h.nextIndex()))
-	err := h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
+	return h.kv.Save(historyKey, strconv.FormatUint(h.nextIndex(), 10))
+}
+
+func (h *historyBuffer) loadSynced() (synced, exists bool, err error) {
+	value, err := h.kv.Load(historySyncedKey)
 	if err != nil {
-		log.Warn("persist history index failed", zap.Uint64("persist-index", h.nextIndex()), errs.ZapError(err))
+		return false, false, err
 	}
+	if value == "" {
+		return false, false, nil
+	}
+	synced, err = strconv.ParseBool(value)
+	return synced, true, err
+}
+
+func (h *historyBuffer) saveSynced(synced bool) error {
+	return h.kv.Save(historySyncedKey, strconv.FormatBool(synced))
 }
 
 func (h *historyBuffer) growForWindowLocked(window uint64) {

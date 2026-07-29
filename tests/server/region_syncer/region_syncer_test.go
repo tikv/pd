@@ -285,6 +285,59 @@ func TestRegionSyncerReconnectsAfterLeaderSendFailure(t *testing.T) {
 	waitRegionSynced(re, followerServer, nextRegion)
 }
 
+func TestFollowerRestartRestoresVolatileRegionState(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
+	}()
+
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.UseRegionStorage = true
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName)
+	re.NoError(leaderServer.BootstrapCluster())
+	re.True(cluster.WaitRegionSyncerClientsReady(2))
+
+	regions := tests.InitRegions(110)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	for i, region := range regions {
+		regions[i] = region.Clone(
+			core.SetWrittenBytes(uint64(i+1)),
+			core.SetWrittenKeys(uint64(i+2)),
+			core.SetReadBytes(uint64(i+3)),
+			core.SetReadKeys(uint64(i+4)),
+		)
+		re.NoError(rc.HandleRegionHeartbeat(regions[i]))
+	}
+
+	followerName := cluster.GetFollower()
+	re.NotEmpty(followerName)
+	followerServer := cluster.GetServer(followerName)
+	waitRegionSynced(re, followerServer, regions[0])
+	waitRegionSynced(re, followerServer, regions[len(regions)-1])
+
+	re.NoError(followerServer.Stop())
+	re.Equal(leaderName, cluster.WaitLeader())
+	re.NoError(followerServer.Run())
+	re.Equal(leaderName, cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		syncer := followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer()
+		return syncer != nil && syncer.IsRunning()
+	})
+
+	waitRegionSynced(re, followerServer, regions[0])
+	waitRegionSynced(re, followerServer, regions[len(regions)-1])
+}
+
 func waitRegionSynced(re *require.Assertions, followerServer *tests.TestServer, region *core.RegionInfo) {
 	testutil.Eventually(re, func() bool {
 		r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())

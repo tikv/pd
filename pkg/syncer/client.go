@@ -43,31 +43,83 @@ import (
 )
 
 const (
-	keepaliveTime    = 10 * time.Second
-	keepaliveTimeout = 3 * time.Second
-	msgSize          = 8 * units.MiB
-	retryInterval    = time.Second
+	keepaliveTime           = 10 * time.Second
+	keepaliveTimeout        = 3 * time.Second
+	fullSyncProgressTimeout = 30 * time.Second
+	msgSize                 = 8 * units.MiB
+	retryInterval           = time.Second
 )
 
-// StopSyncWithLeader stop to sync the region with leader.
+// StopSyncWithLeader stops Region synchronization with the leader.
 func (s *RegionSyncer) StopSyncWithLeader() {
-	s.reset()
-	s.wg.Wait()
-}
-
-func (s *RegionSyncer) reset() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.mu.clientCancel != nil {
 		s.mu.clientCancel()
 	}
 	s.mu.clientCancel, s.mu.clientCtx = nil, nil
+	s.mu.Unlock()
+	s.wg.Wait()
 }
 
-// ResetHistoryIndex resets and persists the next region sync history index.
-func (s *RegionSyncer) ResetHistoryIndex(index uint64) {
-	s.history.resetWithIndexAndPersist(index)
+// MarkHistoryIncomplete resets the durable Region sync state before a full
+// synchronization starts.
+func (s *RegionSyncer) MarkHistoryIncomplete() error {
+	if err := s.history.saveSynced(false); err != nil {
+		return errors.Wrap(err, "clear region sync completion marker")
+	}
+	s.historySynced.Store(false)
+	s.streamingRunning.Store(false)
+	s.initialFollowerSyncCompleted.Store(false)
+	return s.history.resetWithIndexAndPersist(0)
+}
+
+// IsHistorySynced reports whether this member has durably completed at least
+// one region history synchronization.
+func (s *RegionSyncer) IsHistorySynced() bool {
+	return s.historySynced.Load()
+}
+
+// MarkHistorySynced flushes the local region data before durably recording
+// that this member has completed Region synchronization.
+func (s *RegionSyncer) MarkHistorySynced() error {
+	if err := s.server.GetStorage().Flush(); err != nil {
+		return errors.Wrap(err, "flush region storage before marking sync complete")
+	}
+	if err := s.history.persist(); err != nil {
+		return errors.Wrap(err, "persist completed region sync index")
+	}
+	if err := s.history.saveSynced(true); err != nil {
+		return errors.Wrap(err, "persist region sync completion marker")
+	}
+	s.historySynced.Store(true)
+	return nil
+}
+
+func (s *RegionSyncer) syncRegionStartIndex() uint64 {
+	if !s.initialFollowerSyncCompleted.Load() || !s.IsHistorySynced() {
+		return 0
+	}
+	return s.history.getNextIndex()
+}
+
+func (s *RegionSyncer) loadRegions(ctx context.Context) error {
+	s.regionLoadMu.Lock()
+	defer s.regionLoadMu.Unlock()
+	if s.initialRegionLoadCompleted.Load() {
+		return nil
+	}
+	log.Info("region syncer start load region")
+	start := time.Now()
+	if err := storage.TryLoadRegionsFromLocalStorageOnce(
+		ctx,
+		s.server.GetStorage(),
+		s.server.GetBasicCluster().CheckAndPutRegion,
+	); err != nil {
+		return err
+	}
+	s.initialRegionLoadCompleted.Store(true)
+	log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
+	return nil
 }
 
 func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (ClientStream, error) {
@@ -76,10 +128,11 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 	if err != nil {
 		return nil, err
 	}
+	startIndex := s.syncRegionStartIndex()
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Member:     s.server.GetMemberInfo(),
-		StartIndex: s.history.getNextIndex(),
+		StartIndex: startIndex,
 	})
 	if err != nil {
 		return nil, err
@@ -110,8 +163,33 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	regions := resp.GetRegions()
 	buckets := resp.GetBuckets()
 	regionLeaders := resp.GetRegionLeaders()
-	startFullSync := !fullSyncing && !s.IsRunning() && resp.GetStartIndex() == 0 && len(regions) > 0
-	inFullSync := fullSyncing || startFullSync
+	startFullSync, startEmptyFullSync := s.isFullSyncStartResponse(resp, fullSyncing)
+	if startFullSync || startEmptyFullSync {
+		s.streamingRunning.Store(false)
+		if err := s.MarkHistoryIncomplete(); err != nil {
+			log.Warn("region syncer failed to reset history before full synchronization",
+				zap.String("server", s.server.Name()), errs.ZapError(err))
+			return false, false
+		}
+		// RegionStorage buffers SaveRegion calls in memory. Flush before
+		// scanning the underlying store so a destructive clear cannot
+		// resurrect an older batch on the next flush.
+		if err := regionStorage.Flush(); err != nil {
+			log.Warn("region syncer failed to flush pending Region writes before full synchronization",
+				zap.String("server", s.server.Name()), errs.ZapError(err))
+			return false, false
+		}
+		if err := storage.ClearRegionStorage(ctx, regionStorage); err != nil {
+			log.Warn("region syncer failed to clear Region storage before full synchronization",
+				zap.String("server", s.server.Name()), errs.ZapError(err))
+			return false, false
+		}
+		if err := ctx.Err(); err != nil {
+			return false, false
+		}
+		bc.ResetRegionCache()
+	}
+	inFullSync := fullSyncing || startFullSync || startEmptyFullSync
 	// During a full sync, intermediate data frames carry a positional
 	// offset, not a reusable history index.
 	isPositionalBatch := inFullSync && !startFullSync && len(regions) > 0
@@ -127,6 +205,9 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 	hasStats := len(stats) == len(regions)
 	hasBuckets := len(buckets) == len(regions)
 	for i, r := range regions {
+		if err := ctx.Err(); err != nil {
+			return false, false
+		}
 		var (
 			region       *core.RegionInfo
 			regionLeader *metapb.Peer
@@ -147,7 +228,7 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 		}
 		region = core.NewRegionInfo(r, regionLeader, opts...)
 
-		origin, _, err := bc.PreCheckPutRegion(region)
+		origin, overlaps, err := bc.PreCheckPutRegion(region)
 		if err != nil {
 			log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 			continue
@@ -159,29 +240,65 @@ func (s *RegionSyncer) handleRegionSyncResponse(
 			// no limit for followers.
 		}
 		saveKV, _, _, _ := regionGuide(cctx, region, origin)
-		overlaps := bc.PutRegion(region)
-
 		if saveKV {
-			err = regionStorage.SaveRegion(r)
-		}
-		if err == nil && !inFullSync {
-			s.history.record(region)
+			if err = regionStorage.SaveRegion(r); err != nil {
+				s.streamingRunning.Store(false)
+				log.Warn("region syncer failed to save Region",
+					zap.String("server", s.server.Name()),
+					zap.Uint64("region-id", region.GetID()),
+					errs.ZapError(err))
+				return false, false
+			}
 		}
 		for _, old := range overlaps {
-			_ = regionStorage.DeleteRegion(old.GetMeta())
+			if err = regionStorage.DeleteRegion(old.GetMeta()); err != nil {
+				s.streamingRunning.Store(false)
+				log.Warn("region syncer failed to delete overlapping Region",
+					zap.String("server", s.server.Name()),
+					zap.Uint64("region-id", old.GetID()),
+					errs.ZapError(err))
+				return false, false
+			}
+		}
+		bc.PutRegion(region)
+		if !inFullSync {
+			s.history.record(region)
 		}
 	}
-	nextFullSyncing = inFullSync && len(regions) > 0
-	if !nextFullSyncing {
-		// mark the client as running status when it finished the first history region sync.
+	nextFullSyncing = startEmptyFullSync || (inFullSync && len(regions) > 0)
+	if !nextFullSyncing && len(regions) == 0 {
+		if err := s.MarkHistorySynced(); err != nil {
+			s.streamingRunning.Store(false)
+			log.Warn("region syncer failed to persist completed synchronization",
+				zap.String("server", s.server.Name()), errs.ZapError(err))
+			return false, nextFullSyncing
+		}
+		s.initialFollowerSyncCompleted.Store(true)
+		// Mark the client as running only after the initial history phase is
+		// complete and the received regions are durable.
 		s.streamingRunning.Store(true)
 	}
 	return true, nextFullSyncing
 }
 
+func (s *RegionSyncer) isFullSyncStartResponse(
+	resp *pdpb.SyncRegionResponse,
+	fullSyncing bool,
+) (startFullSync, startEmptyFullSync bool) {
+	if fullSyncing || resp.GetStartIndex() != 0 {
+		return false, false
+	}
+	regions := resp.GetRegions()
+	startFullSync = !s.IsRunning() && len(regions) > 0
+	startEmptyFullSync = len(regions) == 0 &&
+		(!s.IsRunning() || !s.initialFollowerSyncCompleted.Load() ||
+			!s.IsHistorySynced() || s.history.getNextIndex() != 0)
+	return startFullSync, startEmptyFullSync
+}
+
 // IsRunning returns whether the region syncer client is running.
 func (s *RegionSyncer) IsRunning() bool {
-	return s.streamingRunning.Load()
+	return s.streamingRunning.Load() && s.IsHistorySynced()
 }
 
 // StartSyncWithLeader starts to sync with leader.
@@ -197,16 +314,36 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		defer logutil.LogPanic()
 		defer s.wg.Done()
 		defer s.streamingRunning.Store(false)
+		// Fail closed before receiving historical records. This prevents a
+		// partial catch-up from being mistaken for legacy completed state after
+		// a process restart.
+		for !s.historySynced.Load() {
+			err := s.history.saveSynced(false)
+			if err == nil {
+				break
+			}
+			log.Warn("persist incomplete region sync marker failed",
+				zap.String("server", s.server.Name()), errs.ZapError(err))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(retryInterval):
+			}
+		}
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
-		log.Info("region syncer start load region")
-		start := time.Now()
-		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
-		if err != nil {
-			log.Warn("region syncer failed to load regions", errs.ZapError(err), zap.Duration("time-cost", time.Since(start)))
-		} else {
-			log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
+		for {
+			start := time.Now()
+			err := s.loadRegions(ctx)
+			if err == nil {
+				break
+			}
+			log.Warn("region syncer failed to load regions; synchronization remains blocked",
+				errs.ZapError(err), zap.Duration("time-cost", time.Since(start)))
+			if !s.waitRegionSyncRetryInterval(ctx) {
+				return
+			}
 		}
 		// establish client.
 		conn := grpcutil.CreateClientConn(ctx, addr, s.tlsConfig,
@@ -233,7 +370,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			return
 		}
 		defer conn.Close()
-
 		// Start syncing data.
 		for {
 			select {
@@ -242,11 +378,13 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			default:
 			}
 
-			stream, err := s.syncRegion(ctx, conn)
+			streamCtx, streamCancel := context.WithCancel(ctx)
+			stream, err := s.syncRegion(streamCtx, conn)
 			failpoint.Inject("disableClientStreaming", func() {
 				err = errors.Errorf("no stream")
 			})
 			if err != nil {
+				streamCancel()
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {
 						return
@@ -261,39 +399,116 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				}
 				continue
 			}
-			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
+			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.syncRegionStartIndex()))
 			fullSyncing := false
+			var (
+				fullSyncProgress     chan<- struct{}
+				fullSyncTimedOut     <-chan struct{}
+				stopFullSyncWatchdog context.CancelFunc
+			)
+			finishStream := func() bool {
+				timedOut := false
+				if fullSyncTimedOut != nil {
+					select {
+					case <-fullSyncTimedOut:
+						timedOut = true
+					default:
+					}
+				}
+				if stopFullSyncWatchdog != nil {
+					stopFullSyncWatchdog()
+				}
+				streamCancel()
+				s.streamingRunning.Store(false)
+				if err := stream.CloseSend(); err != nil {
+					log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+				}
+				if timedOut {
+					log.Warn("Region full synchronization made no progress; reconnecting",
+						zap.String("server", s.server.Name()),
+						zap.Duration("timeout", s.fullSyncProgressTimeout))
+				}
+				return s.waitRegionSyncRetryInterval(ctx)
+			}
 			for {
 				resp, err := stream.Recv()
-				if err == io.EOF {
-					log.Info("server region sync with leader meets EOF, stop syncing", zap.String("server", s.server.Name()))
-					return
-				}
 				if err != nil {
-					s.streamingRunning.Store(false)
-					log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
-					if err = stream.CloseSend(); err != nil {
-						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
+					if err == io.EOF {
+						log.Info("server region sync with leader reached EOF; reconnecting",
+							zap.String("server", s.server.Name()))
+					} else {
+						log.Warn("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					}
-					if !s.waitRegionSyncRetryInterval(ctx) {
+					if !finishStream() {
 						return
 					}
 					break
 				}
-				handled, nextFullSyncing := s.handleRegionSyncResponse(ctx, resp, bc, regionStorage, fullSyncing)
+				if fullSyncProgress == nil {
+					startFullSync, startEmptyFullSync := s.isFullSyncStartResponse(resp, fullSyncing)
+					if startFullSync || startEmptyFullSync {
+						fullSyncProgress, fullSyncTimedOut, stopFullSyncWatchdog =
+							watchFullSyncProgress(streamCtx, s.fullSyncProgressTimeout, streamCancel)
+					}
+				}
+				handled, nextFullSyncing := s.handleRegionSyncResponse(
+					streamCtx, resp, bc, regionStorage, fullSyncing,
+				)
 				fullSyncing = nextFullSyncing
 				if !handled {
-					if err = stream.CloseSend(); err != nil {
-						log.Warn("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
-					}
-					if !s.waitRegionSyncRetryInterval(ctx) {
+					if !finishStream() {
 						return
 					}
 					break
+				}
+				if fullSyncing {
+					select {
+					case fullSyncProgress <- struct{}{}:
+					default:
+					}
+				} else if stopFullSyncWatchdog != nil {
+					stopFullSyncWatchdog()
+					stopFullSyncWatchdog = nil
+					fullSyncProgress = nil
+					fullSyncTimedOut = nil
 				}
 			}
 		}
 	}()
+}
+
+func watchFullSyncProgress(
+	ctx context.Context,
+	timeout time.Duration,
+	cancelStream context.CancelFunc,
+) (chan<- struct{}, <-chan struct{}, context.CancelFunc) {
+	watchdogCtx, stopWatchdog := context.WithCancel(ctx)
+	progress := make(chan struct{}, 1)
+	timedOut := make(chan struct{})
+	go func() {
+		defer logutil.LogPanic()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-watchdogCtx.Done():
+				return
+			case <-progress:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(timeout)
+			case <-timer.C:
+				close(timedOut)
+				cancelStream()
+				return
+			}
+		}
+	}()
+	return progress, timedOut, stopWatchdog
 }
 
 func (s *RegionSyncer) waitRegionSyncRetryInterval(ctx context.Context) bool {
