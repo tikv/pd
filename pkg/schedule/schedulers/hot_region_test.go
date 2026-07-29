@@ -437,24 +437,30 @@ func setPoolPlacementRule(t *testing.T, tc *mockcluster.Cluster) {
 	}))
 }
 
-func TestMayUsePlacementScopeIsSourceIndependent(t *testing.T) {
+func TestMayUsePlacementScopeIgnoresEngineSeparation(t *testing.T) {
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
-
-	details := make(map[uint64]*statistics.StoreLoadDetail, 2)
-	for id, pool := range map[uint64]string{1: "target", 2: "other"} {
-		tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	addStore := func(id uint64, labels map[string]string) {
+		tc.AddLabelsStore(id, 1, labels)
 		details[id] = &statistics.StoreLoadDetail{
 			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(id)},
 		}
 	}
-	setPoolPlacementRule(t, tc)
 
+	addStore(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	addStore(2, nil)
 	bs := &balanceSolver{SchedulerCluster: tc, stLoadDetail: details}
+	require.False(t, bs.mayUsePlacementScope(false))
+	require.False(t, bs.mayUsePlacementScope(true))
+
+	addStore(3, map[string]string{core.EngineKey: core.EngineTiKV})
 	require.True(t, bs.mayUsePlacementScope(true))
+	addStore(4, map[string]string{core.EngineKey: core.EngineTiFlash, "$group": "other"})
+	require.True(t, bs.mayUsePlacementScope(false))
 }
 
-func TestHotWriteRegionScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 	testCases := []struct {
 		name       string
 		storeLoads map[uint64]float64
@@ -533,7 +539,7 @@ func TestHotWriteRegionScheduleWithPlacementConstraintsIgnoresGlobalExpectation(
 	}
 }
 
-func TestHotReadLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+func TestHotReadLeaderScheduleWithPlacementScope(t *testing.T) {
 	re := require.New(t)
 	tc, hb := preparePlacementHotScheduler(t, readType, readLeader)
 	hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
@@ -560,7 +566,7 @@ func TestHotReadLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t
 	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
 }
 
-func TestHotWriteLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+func TestHotWriteLeaderScheduleWithPlacementScope(t *testing.T) {
 	re := require.New(t)
 	tc, hb := preparePlacementHotScheduler(t, writeType, writeLeader)
 	hb.conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
@@ -578,8 +584,8 @@ func TestHotWriteLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2.5 * units.MiB, 0, 0},
 		{2, []uint64{1, 2, 3}, 17.5 * units.MiB, 0, 0},
-		{3, []uint64{2, 1, 3}, 10 * units.MiB, 0, 0},
-		{4, []uint64{3, 1, 2}, 10 * units.MiB, 0, 0},
+		{3, []uint64{2, 1, 3}, 0, 0, 0},
+		{4, []uint64{3, 1, 2}, 0, 0, 0},
 	})
 
 	ops, _ := hb.Schedule(tc, false)
@@ -588,7 +594,49 @@ func TestHotWriteLeaderScheduleWithPlacementConstraintsIgnoresGlobalExpectation(
 	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
 }
 
-func TestHotReadPeerScheduleWithPlacementConstraintsIgnoresGlobalExpectation(t *testing.T) {
+func TestHotWriteLeaderScheduleAcrossSameRoleRules(t *testing.T) {
+	re := require.New(t)
+	tc, hb := preparePlacementHotScheduler(t, writeType, writeLeader)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.HotScheduleWithQuery))
+	hb.conf.WriteLeaderPriorities = []string{utils.QueryPriority, utils.BytePriority}
+
+	for id := uint64(1); id <= 6; id++ {
+		pool := "B"
+		if id == 1 || id == 4 {
+			pool = "A"
+		}
+		tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+		query := uint64(0)
+		switch id {
+		case 1:
+			query = 30 * utils.StoreHeartBeatReportInterval
+		case 4:
+			query = 100 * utils.StoreHeartBeatReportInterval
+		}
+		tc.UpdateStorageWriteQuery(id, query)
+	}
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+		Role: placement.Voter, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "pool", Op: placement.In, Values: []string{"A"}}},
+	}))
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "voter-b",
+		Role: placement.Voter, Count: 2,
+		LabelConstraints: []placement.LabelConstraint{{Key: "pool", Op: placement.In, Values: []string{"B"}}},
+	}))
+
+	addRegionInfo(tc, utils.Write, []testRegionInfo{
+		{1, []uint64{1, 2, 3}, 12 * units.MiB, 0, 12},
+		{2, []uint64{1, 2, 3}, 18 * units.MiB, 0, 18},
+	})
+	ops, _ := hb.Schedule(tc, false)
+	re.Len(ops, 1)
+	re.Equal(uint64(1), ops[0].RegionID())
+	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
+}
+
+func TestHotReadPeerScheduleWithPlacementScope(t *testing.T) {
 	re := require.New(t)
 	tc, hb := preparePlacementHotScheduler(t, readType, readPeer)
 	hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}

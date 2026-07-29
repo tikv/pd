@@ -368,6 +368,17 @@ func (m *RuleManager) GetRulesCount() int {
 	return len(m.ruleConfig.rules)
 }
 
+// MayRestrictStoreLoad returns whether placement rules may restrict the load
+// statistics population for the given store engine.
+func (m *RuleManager) MayRestrictStoreLoad(isTiKV bool) bool {
+	m.RLock()
+	defer m.RUnlock()
+	if isTiKV {
+		return m.ruleConfig.mayRestrictStoreLoad[0]
+	}
+	return m.ruleConfig.mayRestrictStoreLoad[1]
+}
+
 // GetGroupsCount returns the number of rule groups.
 func (m *RuleManager) GetGroupsCount() int {
 	m.RLock()

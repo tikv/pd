@@ -54,9 +54,11 @@ type balanceSolver struct {
 	cur *solution
 	// curFit is the placement-rule fit for the current region.
 	curFit *placement.RegionFit
-	// skipLoadExpectation indicates whether the current region should skip the
-	// expectation and variance calculated from all stores.
-	skipLoadExpectation bool
+	// curScope and revertScope contain placement-scoped load statistics. A nil
+	// scope uses the existing engine-wide statistics.
+	curScope            *placementLoadScope
+	revertScope         *placementLoadScope
+	placementScopeCache map[placementScopeKey]*placementLoadScope
 
 	best *solution
 	ops  []*operator.Operator
@@ -77,6 +79,16 @@ type balanceSolver struct {
 	minHotDegree  int
 
 	rank
+}
+
+type placementScopeKey struct {
+	rule   *placement.Rule
+	isTiKV bool
+}
+
+type placementLoadScope struct {
+	expect statistics.StoreLoad
+	stddev statistics.StoreLoad
 }
 
 func (bs *balanceSolver) init() {
@@ -208,37 +220,50 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	splitThresholds := bs.sche.conf.getSplitThresholds()
 	placementEnabled := bs.GetSchedulerConfig().IsPlacementRulesEnabled()
 	var placementChecked, placementCanRestrict [2]bool
+	mayUsePlacementScope := func(store *statistics.StoreLoadDetail) bool {
+		if !placementEnabled {
+			return false
+		}
+		engine := 0
+		if !store.IsTiKV() {
+			engine = 1
+		}
+		if !placementChecked[engine] {
+			placementCanRestrict[engine] = bs.mayUsePlacementScope(store.IsTiKV())
+			placementChecked[engine] = true
+		}
+		return placementCanRestrict[engine]
+	}
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		sourceFailure := bs.sourceStoreFailure(srcStore)
-		sourceResultRecorded := sourceFailure == ""
-		if sourceResultRecorded {
-			bs.recordSourceStoreResult("src-store-succ", srcStoreID)
-		} else if !placementEnabled {
-			bs.recordSourceStoreResult(sourceFailure, srcStoreID)
-			continue
-		} else {
-			engine := 0
-			if !srcStore.IsTiKV() {
-				engine = 1
-			}
-			if !placementChecked[engine] {
-				placementCanRestrict[engine] = bs.mayUsePlacementScope(srcStore.IsTiKV())
-				placementChecked[engine] = true
-			}
-			if !placementCanRestrict[engine] {
-				bs.recordSourceStoreResult(sourceFailure, srcStoreID)
+		usePlacementScope := mayUsePlacementScope(srcStore)
+		globalSourceFailure := bs.sourceStoreFailure(srcStore, nil)
+		sourceFailure := globalSourceFailure
+		sourceResultRecorded := false
+		if !usePlacementScope {
+			bs.recordSourceStoreResult(sourceFailureOrSuccess(sourceFailure), srcStoreID)
+			sourceResultRecorded = true
+			if sourceFailure != "" {
 				continue
 			}
 		}
+		checkedRegion := false
 		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			}
-			bs.prepareForRegion()
-			if !bs.skipLoadExpectation && sourceFailure != "" {
-				continue
+			checkedRegion = true
+			bs.curScope = nil
+			if usePlacementScope {
+				bs.curScope = bs.prepareForRegion(bs.cur.region, bs.curFit, srcStore)
+				sourceFailure = globalSourceFailure
+				if bs.curScope != nil {
+					sourceFailure = bs.sourceStoreFailure(srcStore, bs.curScope)
+				}
+				if sourceFailure != "" {
+					continue
+				}
 			}
 			if !sourceResultRecorded {
 				bs.recordSourceStoreResult("src-store-succ", srcStoreID)
@@ -271,10 +296,22 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				if bs.needSearchRevertRegions() {
 					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
+					mainFit := bs.curFit
 					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
+						revertFit := bs.curFit
+						bs.curFit = mainFit
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
-							!allowRevertRegion(revertRegion, srcStoreID) {
+							!allowRevertRegion(revertRegion, srcStoreID) ||
+							placementEnabled && !bs.isRevertRegionValid(revertRegion, revertFit) {
+							continue
+						}
+						bs.revertScope = nil
+						if mayUsePlacementScope(dstStore) {
+							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
+						}
+						if bs.revertScope != nil && (bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
+							bs.destinationStoreFailure(srcStore, bs.revertScope, bs.dstToleranceRatio(srcStore)) != "") {
 							continue
 						}
 						bs.cur.revertPeerStat = revertPeerStat
@@ -282,13 +319,18 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						bs.calcProgressiveRank()
 						tryUpdateBestSolution()
 					}
+					bs.curFit = mainFit
 					bs.cur.revertPeerStat = nil
 					bs.cur.revertRegion = nil
+					bs.revertScope = nil
 				}
 			}
 		}
 		if !sourceResultRecorded {
-			bs.recordSourceStoreResult(sourceFailure, srcStoreID)
+			if !checkedRegion {
+				sourceFailure = globalSourceFailure
+			}
+			bs.recordSourceStoreResult(sourceFailureOrSuccess(sourceFailure), srcStoreID)
 		}
 	}
 
@@ -435,18 +477,33 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 	return ret
 }
 
-func (bs *balanceSolver) sourceStoreFailure(detail *statistics.StoreLoadDetail) string {
+func (bs *balanceSolver) sourceStoreFailure(detail *statistics.StoreLoadDetail, scope *placementLoadScope) string {
 	srcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
 	if !detail.IsTiKV() {
 		srcToleranceRatio += tiflashToleranceRatioCorrection
 	}
-	if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), &detail.LoadPred.Expect, srcToleranceRatio) {
+	expect := bs.expectLoad(detail, scope)
+	if !bs.checkSrcByPriorityAndTolerance(detail.LoadPred.Min(), expect, srcToleranceRatio) {
 		return "src-store-failed"
 	}
-	if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+	if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, expect, srcToleranceRatio) {
 		return "src-store-history-loads-failed"
 	}
 	return ""
+}
+
+func sourceFailureOrSuccess(failure string) string {
+	if failure == "" {
+		return "src-store-succ"
+	}
+	return failure
+}
+
+func (*balanceSolver) expectLoad(detail *statistics.StoreLoadDetail, scope *placementLoadScope) *statistics.StoreLoad {
+	if scope != nil {
+		return &scope.expect
+	}
+	return &detail.LoadPred.Expect
 }
 
 func (bs *balanceSolver) recordSourceStoreResult(result string, storeID uint64) {
@@ -673,13 +730,25 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	return bs.pickDstStores(filters, candidates)
 }
 
+func (bs *balanceSolver) isRevertRegionValid(region *core.RegionInfo, fit *placement.RegionFit) bool {
+	source, target := bs.cur.dstStore.StoreInfo, bs.cur.srcStore.StoreInfo
+	var safeguard filter.Filter
+	switch bs.opTy {
+	case movePeer:
+		safeguard = filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(),
+			bs.GetRuleManager(), region, source, fit)
+	case transferLeader:
+		safeguard = filter.NewPlacementLeaderSafeguardWithFit(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(),
+			bs.GetRuleManager(), region, source, fit, bs.rwTy == utils.Read)
+	}
+	return safeguard == nil || safeguard.Target(bs.GetSchedulerConfig(), target).IsOK()
+}
+
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
-	confDstToleranceRatio := bs.sche.conf.getDstToleranceRatio()
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for _, detail := range candidates {
 		store := detail.StoreInfo
-		dstToleranceRatio := confDstToleranceRatio
 		if !detail.IsTiKV() {
 			if !confEnableForTiFlash || detail.IsTiFlashCompute() {
 				continue
@@ -687,16 +756,11 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			if bs.rwTy != utils.Write || bs.opTy != movePeer {
 				continue
 			}
-			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
 		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
-			if !bs.skipLoadExpectation && !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-				continue
-			}
-			if !bs.skipLoadExpectation && !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			if failure := bs.destinationStoreFailure(detail, bs.curScope, bs.dstToleranceRatio(detail)); failure != "" {
+				hotSchedulerResultCounter.WithLabelValues(failure+"-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
 
@@ -705,6 +769,25 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 		}
 	}
 	return ret
+}
+
+func (bs *balanceSolver) dstToleranceRatio(detail *statistics.StoreLoadDetail) float64 {
+	ratio := bs.sche.conf.getDstToleranceRatio()
+	if !detail.IsTiKV() {
+		ratio += tiflashToleranceRatioCorrection
+	}
+	return ratio
+}
+
+func (bs *balanceSolver) destinationStoreFailure(detail *statistics.StoreLoadDetail, scope *placementLoadScope, toleranceRatio float64) string {
+	expect := bs.expectLoad(detail, scope)
+	if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), expect, toleranceRatio) {
+		return "dst-store-failed"
+	}
+	if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, expect, toleranceRatio) {
+		return "dst-store-history-loads-failed"
+	}
+	return ""
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
@@ -769,66 +852,113 @@ func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ stat
 }
 
 func (bs *balanceSolver) enableExpectation() bool {
-	return !bs.skipLoadExpectation && bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
+	return bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
 }
 
-// prepareForRegion determines whether the current region should use the global
-// load expectation. MatchLabelConstraints also covers implicit exclusive labels.
-func (bs *balanceSolver) prepareForRegion() {
-	bs.skipLoadExpectation = false
-	if bs.curFit == nil {
-		return
+// prepareForRegion derives the stores that can legally carry the current load.
+// Leaders can move between different RuleFits with the same placement role.
+func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placement.RegionFit, source *statistics.StoreLoadDetail) *placementLoadScope {
+	if fit == nil {
+		return nil
 	}
-
-	sourcePeer := bs.cur.region.GetStorePeer(bs.cur.srcStore.GetID())
+	sourcePeer := region.GetStorePeer(source.GetID())
 	if sourcePeer == nil {
-		return
+		return nil
 	}
-	ruleFit := bs.curFit.GetRuleFit(sourcePeer.GetId())
-	if ruleFit != nil {
-		bs.skipLoadExpectation = bs.ruleRestrictsStoreLoad(ruleFit.Rule, bs.cur.srcStore)
+	sourceFit := fit.GetRuleFit(sourcePeer.GetId())
+	if sourceFit == nil {
+		return nil
 	}
-}
 
-func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
-	for _, rule := range bs.GetRuleManager().GetAllRules() {
-		var matched, unmatched bool
-		for _, detail := range bs.stLoadDetail {
-			if detail.IsTiKV() != isTiKV {
-				continue
-			}
-			if placement.MatchLabelConstraints(detail.StoreInfo, rule.LabelConstraints) {
-				matched = true
-			} else {
-				unmatched = true
-			}
-			if matched && unmatched {
-				return true
+	rules := []*placement.Rule{sourceFit.Rule}
+	if bs.opTy == transferLeader {
+		rules = rules[:0]
+		for _, ruleFit := range fit.RuleFits {
+			if ruleFit.Rule.Role == sourceFit.Rule.Role {
+				rules = append(rules, ruleFit.Rule)
 			}
 		}
 	}
-	return false
+	return bs.getPlacementLoadScope(rules, source.IsTiKV())
 }
 
-func (bs *balanceSolver) ruleRestrictsStoreLoad(rule *placement.Rule, source *statistics.StoreLoadDetail) bool {
-	if !placement.MatchLabelConstraints(source.StoreInfo, rule.LabelConstraints) {
-		return false
+func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
+	if bs.GetRuleManager().MayRestrictStoreLoad(isTiKV) {
+		return true
+	}
+	var constraints []placement.LabelConstraint
+	if !isTiKV {
+		constraints = []placement.LabelConstraint{
+			{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
+		}
 	}
 	for _, detail := range bs.stLoadDetail {
-		if detail.IsTiKV() == source.IsTiKV() && !placement.MatchLabelConstraints(detail.StoreInfo, rule.LabelConstraints) {
+		if detail.IsTiKV() == isTiKV && !placement.MatchLabelConstraints(detail.StoreInfo, constraints) {
 			return true
 		}
 	}
 	return false
 }
 
+// getPlacementLoadScope calculates local safeguards only when the placement
+// population is narrower than the existing engine-wide population.
+func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV bool) *placementLoadScope {
+	var key placementScopeKey
+	cacheable := len(rules) == 1
+	if cacheable {
+		key = placementScopeKey{rule: rules[0], isTiKV: isTiKV}
+		if scope, ok := bs.placementScopeCache[key]; ok {
+			return scope
+		}
+	}
+
+	allCount := 0
+	var summary statistics.StoreLoadSummary
+	details := make([]*statistics.StoreLoadDetail, 0, len(bs.stLoadDetail))
+	for _, detail := range bs.stLoadDetail {
+		if detail.IsTiKV() != isTiKV {
+			continue
+		}
+		allCount++
+		if !slice.AnyOf(rules, func(i int) bool {
+			return placement.MatchLabelConstraints(detail.StoreInfo, rules[i].LabelConstraints)
+		}) {
+			continue
+		}
+		details = append(details, detail)
+		summary.Add(&detail.LoadPred.Current)
+	}
+	var scope *placementLoadScope
+	if len(details) < allCount {
+		expect, stddev := summary.Result(details)
+		scope = &placementLoadScope{expect: expect, stddev: stddev}
+	}
+	if cacheable {
+		if bs.placementScopeCache == nil {
+			bs.placementScopeCache = make(map[placementScopeKey]*placementLoadScope)
+		}
+		bs.placementScopeCache[key] = scope
+	}
+	return scope
+}
+
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
 	// first priority should be more uniform than second priority
-	return store.IsUniform(bs.firstPriority, stddevThreshold*0.5)
+	return bs.isUniform(store, bs.firstPriority, stddevThreshold*0.5)
 }
 
 func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDetail) bool {
-	return store.IsUniform(bs.secondPriority, stddevThreshold)
+	return bs.isUniform(store, bs.secondPriority, stddevThreshold)
+}
+
+func (bs *balanceSolver) isUniform(store *statistics.StoreLoadDetail, dim int, threshold float64) bool {
+	uniform := func(scope *placementLoadScope) bool {
+		if scope != nil {
+			return scope.stddev.Loads[dim] < threshold
+		}
+		return store.IsUniform(dim, threshold)
+	}
+	return uniform(bs.curScope) || bs.cur.revertRegion != nil && uniform(bs.revertScope)
 }
 
 // isTolerance checks source store and target store by checking the difference value with pendingAmpFactor * pendingPeer.

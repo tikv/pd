@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -654,6 +656,84 @@ func TestExpect(t *testing.T) {
 		re.Equal(testCase.allow, bs.checkSrcHistoryLoadsByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstHistoryLoadsByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
+}
+
+func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
+	re := require.New(t)
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	for id, load := range map[uint64]float64{1: 10.5, 2: 9.5, 3: 10, 4: 10, 5: 100, 6: 100} {
+		pool := "other"
+		if id <= 4 {
+			pool = "target"
+		}
+		current := statistics.StoreLoad{
+			Loads:        statistics.Loads{load, 10},
+			HotPeerCount: 1,
+			HistoryLoads: statistics.HistoryLoads{{10}, {10}},
+		}
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{"pool": pool})},
+			LoadPred:         current.ToLoadPred(utils.Write, nil),
+		}
+	}
+	bs := &balanceSolver{
+		stLoadDetail: details, firstPriority: utils.ByteDim, secondPriority: utils.KeyDim,
+		resourceTy: writePeer,
+	}
+	bs.rank = initRankV2(bs)
+	rule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	scope := bs.getPlacementLoadScope([]*placement.Rule{rule}, true)
+	re.NotNil(scope)
+	re.Equal(float64(10), scope.expect.Loads[utils.ByteDim])
+	re.Equal([]float64{10}, scope.expect.HistoryLoads[utils.ByteDim])
+	re.InDelta(math.Sqrt(0.125)/10, scope.stddev.Loads[utils.ByteDim], 1e-9)
+	re.False(bs.checkSrcByPriorityAndTolerance(details[1].LoadPred.Min(), &scope.expect, 1.05))
+	re.False(bs.checkSrcHistoryLoadsByPriorityAndTolerance(&details[1].LoadPred.Current, &scope.expect, 1.05))
+
+	bs.cur = &solution{}
+	bs.curScope = scope
+	re.True(bs.isUniformFirstPriority(details[1]))
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{{}}, true))
+}
+
+func TestRevertRegionPlacementSafeguard(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	for id, labels := range map[uint64]map[string]string{
+		1: {"a": "yes"},
+		2: {"a": "yes", "b": "yes"},
+		3: {"a": "yes"},
+		4: {"a": "yes"},
+	} {
+		tc.AddLabelsStore(id, 1, labels)
+	}
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+		Role: placement.Voter, Count: 2,
+		LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+	}))
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "voter-b",
+		Role: placement.Voter, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
+	}))
+
+	peers := []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}, {Id: 4, StoreId: 4}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1])
+	fit := tc.GetRuleManager().FitRegion(tc.GetBasicCluster(), region)
+	re.True(fit.IsSatisfied())
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, movePeer)
+	bs.cur = &solution{
+		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
+		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
+	}
+	re.False(bs.isRevertRegionValid(region, fit))
 }
 
 func TestBucketFirstStat(t *testing.T) {
