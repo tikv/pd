@@ -13941,7 +13941,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_region_syncer_client_ready{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_region_syncer_client_ready{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} unless on(instance) (service_member_role{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", service=\"PD\"} == 1)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}",
@@ -14024,18 +14024,25 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(increase(pd_region_syncer_full_sync_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (result, trigger, failure_reason)",
+              "expr": "sum(increase(pd_region_syncer_full_sync_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (instance, trigger, outcome)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{result}}-{{trigger}}-{{failure_reason}}",
+              "legendFormat": "{{instance}}-{{trigger}}-{{outcome}}",
               "refId": "A"
+            },
+            {
+              "expr": "pd_region_syncer_full_sync_in_progress{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{instance}}-in-progress",
+              "refId": "B"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Region syncer full sync count",
+          "title": "Region syncer full sync activity",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -14280,10 +14287,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(increase(pd_region_syncer_history_buffer_miss_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (phase)",
+              "expr": "sum(increase(pd_region_syncer_history_buffer_live_drain_miss_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (instance)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "miss-{{phase}}",
+              "legendFormat": "{{instance}}-live-drain-miss",
               "refId": "A"
             }
           ],
@@ -14291,7 +14298,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Region syncer history buffer events",
+          "title": "Region syncer history buffer live-drain misses",
           "tooltip": {
             "shared": true,
             "sort": 0,
@@ -14446,10 +14453,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(increase(pd_region_syncer_stream_events_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (event)",
+              "expr": "sum(increase(pd_region_syncer_stream_events_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (instance, event)",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{event}}",
+              "legendFormat": "{{instance}}-{{event}}",
               "refId": "A"
             }
           ],

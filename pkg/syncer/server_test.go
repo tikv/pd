@@ -38,6 +38,16 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
+const testDownstreamMemberID = 2
+
+func newTestDownstreamMember() *pdpb.Member {
+	return &pdpb.Member{
+		MemberId:   testDownstreamMemberID,
+		Name:       "pd-follower",
+		ClientUrls: []string{"http://127.0.0.1:2379"},
+	}
+}
+
 func TestHistoryBufferMaxSizeFromMemory(t *testing.T) {
 	testCases := []struct {
 		name        string
@@ -208,9 +218,8 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	closedStream := &testServerStream{}
 	closedSyncStream := newRegionSyncStream(closedStream, 10)
 	fullSyncStreamClosedCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(
-		fullSyncResultFailure,
 		fullSyncTriggerInitial,
-		fullSyncFailureStreamClosed,
+		fullSyncOutcomeStreamClosed,
 	)]
 	fullSyncStreamClosedBefore := promtestutil.ToFloat64(fullSyncStreamClosedCounter)
 	closedStream.onSend = func(*pdpb.SyncRegionResponse) {
@@ -317,19 +326,16 @@ func TestFullSyncMetrics(t *testing.T) {
 	testCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	successCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(
-		fullSyncResultSuccess,
 		fullSyncTriggerInitial,
-		fullSyncFailureNone,
+		fullSyncOutcomeSuccess,
 	)]
 	failureCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(
-		fullSyncResultFailure,
 		fullSyncTriggerInitial,
-		fullSyncFailureMaxHistoryExceeded,
+		fullSyncOutcomeMaxHistoryExceeded,
 	)]
-	missCounter := regionSyncerHistoryBufferMissCounters[historyBufferMissFullSyncCatchUp]
 	successBefore := promtestutil.ToFloat64(successCounter)
 	failureBefore := promtestutil.ToFloat64(failureCounter)
-	missBefore := promtestutil.ToFloat64(missCounter)
+	inProgressBefore := promtestutil.ToFloat64(regionSyncerFullSyncInProgressGauge)
 
 	successSyncer, _ := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
 	successSyncer.history.resetWithIndex(10)
@@ -352,6 +358,7 @@ func TestFullSyncMetrics(t *testing.T) {
 		done <- syncFullRegionsForTest(testCtx, failureSyncer, failureSyncStream, startIndex)
 	}()
 	testutil.Eventually(re, failureStream.isSendBlocked)
+	re.Equal(inProgressBefore+1, promtestutil.ToFloat64(regionSyncerFullSyncInProgressGauge))
 
 	for _, region := range []*core.RegionInfo{
 		newTestSyncRegion(2, 12),
@@ -365,7 +372,7 @@ func TestFullSyncMetrics(t *testing.T) {
 
 	re.Equal(codes.ResourceExhausted, status.Code(<-done))
 	re.Equal(failureBefore+1, promtestutil.ToFloat64(failureCounter))
-	re.Equal(missBefore+1, promtestutil.ToFloat64(missCounter))
+	re.Equal(inProgressBefore, promtestutil.ToFloat64(regionSyncerFullSyncInProgressGauge))
 	re.Greater(promtestutil.ToFloat64(regionSyncerFullSyncLastDurationGauges[fullSyncResultFailure]), 0.0)
 }
 
@@ -543,6 +550,7 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		core.NewBasicCluster(),
 	)
+	server.SetMembers([]*pdpb.Member{newTestDownstreamMember()})
 	syncer := NewRegionSyncer(server)
 	ctx, cancel := context.WithCancel(context.Background())
 	stream := newMockSyncRegionsServer()
@@ -553,10 +561,7 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 
 	stream.recvCh <- &pdpb.SyncRegionRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Member: &pdpb.Member{
-			Name:       "pd-follower",
-			ClientUrls: []string{"http://127.0.0.1:2379"},
-		},
+		Member: newTestDownstreamMember(),
 	}
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
@@ -580,6 +585,48 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 	re.Empty(syncer.GetAllDownstreamNames())
 }
 
+func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
+	testCases := []struct {
+		name   string
+		member *pdpb.Member
+	}{
+		{
+			name: "unknown-member-id",
+			member: &pdpb.Member{
+				MemberId: 999,
+				Name:     "untrusted-downstream-id",
+			},
+		},
+		{
+			name: "mismatched-member-name",
+			member: &pdpb.Member{
+				MemberId: testDownstreamMemberID,
+				Name:     "untrusted-downstream-name",
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			syncer, _ := newTestRegionSyncer(t)
+			stream := newMockSyncRegionsServer()
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			done := startTestRegionSync(ctx, syncer, stream)
+			re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.member.GetName()))
+
+			stream.recvCh <- &pdpb.SyncRegionRequest{
+				Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+				Member: testCase.member,
+			}
+
+			re.Equal(codes.PermissionDenied, status.Code(<-done))
+			re.Empty(syncer.GetAllDownstreamNames())
+			re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.member.GetName()))
+		})
+	}
+}
+
 func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
@@ -596,6 +643,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		core.NewBasicCluster(),
 	)
+	server.SetMembers([]*pdpb.Member{newTestDownstreamMember()})
 	syncer := NewRegionSyncer(server)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -607,10 +655,7 @@ func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
 
 	stream.recvCh <- &pdpb.SyncRegionRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Member: &pdpb.Member{
-			Name:       "pd-follower",
-			ClientUrls: []string{"http://127.0.0.1:2379"},
-		},
+		Member: newTestDownstreamMember(),
 	}
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
@@ -652,6 +697,7 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		core.NewBasicCluster(),
 	)
+	server.SetMembers([]*pdpb.Member{newTestDownstreamMember()})
 	syncer := NewRegionSyncer(server)
 	syncer.sendTimeout = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -664,10 +710,7 @@ func TestCloseAllClientTimesOutBlockedSend(t *testing.T) {
 
 	stream.recvCh <- &pdpb.SyncRegionRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Member: &pdpb.Member{
-			Name:       "pd-follower",
-			ClientUrls: []string{"http://127.0.0.1:2379"},
-		},
+		Member: newTestDownstreamMember(),
 	}
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
@@ -725,6 +768,7 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		core.NewBasicCluster(),
 	)
+	server.SetMembers([]*pdpb.Member{newTestDownstreamMember()})
 	syncer := NewRegionSyncer(server)
 	syncer.sendTimeout = 10 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -737,10 +781,7 @@ func TestBroadcastClosesStreamWhenSendBlocks(t *testing.T) {
 
 	stream.recvCh <- &pdpb.SyncRegionRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Member: &pdpb.Member{
-			Name:       "pd-follower",
-			ClientUrls: []string{"http://127.0.0.1:2379"},
-		},
+		Member: newTestDownstreamMember(),
 	}
 	re.NotNil(<-stream.sendCh)
 	testutil.Eventually(re, func() bool {
@@ -1556,6 +1597,7 @@ func newTestRegionSyncerWithBasicCluster(t *testing.T, bc *core.BasicCluster) *R
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), regionStorage),
 		bc,
 	)
+	server.SetMembers([]*pdpb.Member{newTestDownstreamMember()})
 	return NewRegionSyncer(server)
 }
 
@@ -1585,10 +1627,7 @@ func sendTestSyncRegionRequest(stream *mockSyncRegionsServer, startIndex uint64)
 	stream.recvCh <- &pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		StartIndex: startIndex,
-		Member: &pdpb.Member{
-			Name:       "pd-follower",
-			ClientUrls: []string{"http://127.0.0.1:2379"},
-		},
+		Member:     newTestDownstreamMember(),
 	}
 }
 
