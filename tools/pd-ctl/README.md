@@ -29,7 +29,13 @@ pd-ctl gc-state keyspace 42
   "is_keyspace_level_gc": false,
   "txn_safe_point": 465000000000000000,
   "gc_safe_point": 464900000000000000,
-  "gc_barriers": []
+  "gc_barriers": [
+    {
+      "barrier_id": "br",
+      "barrier_ts": 464950000000000000,
+      "ttl_seconds": 3600
+    }
+  ]
 }
 ```
 
@@ -47,7 +53,13 @@ pd-ctl gc-state global
 
 ```json
 {
-  "global_gc_barriers": []
+  "global_gc_barriers": [
+    {
+      "barrier_id": "native_br",
+      "barrier_ts": 464940000000000000,
+      "ttl_seconds": 9223372036854775807
+    }
+  ]
 }
 ```
 
@@ -65,20 +77,33 @@ pd-ctl gc-state all
 {
   "gc_states": [
     {
-      "keyspace_id": 42,
-      "is_keyspace_level_gc": true,
+      "keyspace_id": 4294967295,
+      "is_keyspace_level_gc": false,
       "txn_safe_point": 465000000000000000,
       "gc_safe_point": 464900000000000000,
-      "gc_barriers": []
+      "gc_barriers": [
+        {
+          "barrier_id": "br",
+          "barrier_ts": 464950000000000000,
+          "ttl_seconds": 3600
+        }
+      ]
     }
   ],
-  "global_gc_barriers": []
+  "global_gc_barriers": [
+    {
+      "barrier_id": "native_br",
+      "barrier_ts": 464940000000000000,
+      "ttl_seconds": 9223372036854775807
+    }
+  ]
 }
 ```
 
 The combined response sorts effective `gc_states` by `keyspace_id` and reports
 cluster-wide barriers once in the top-level `global_gc_barriers` array. Unified
 GC keyspaces share the NullKeyspace scope, so their marker records are not
-reported as separate states.
-Barrier TTLs use remaining seconds, and `9223372036854775807` means that a
-barrier never expires.
+reported as separate states. The real NullKeyspace state appears once with its
+safe points and local barriers. When no local or global barriers exist, the
+corresponding arrays are encoded as `[]`. Barrier TTLs use remaining seconds,
+and `9223372036854775807` means that a barrier never expires.
