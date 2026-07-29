@@ -120,21 +120,30 @@ func TestAddResourceGroup(t *testing.T) {
 	}
 	err = krgm.addResourceGroup(group)
 	re.Error(err)
-
-	// Test adding a valid resource group.
-	group = &rmpb.ResourceGroup{
-		Name:     "test_group",
-		Mode:     rmpb.GroupMode_RUMode,
-		Priority: 5,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
-				},
+	for _, group = range []*rmpb.ResourceGroup{
+		{
+			Name: "missing_ru_settings",
+			Mode: rmpb.GroupMode_RUMode,
+		},
+		{
+			Name:       "missing_token_bucket",
+			Mode:       rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{},
+		},
+		{
+			Name: "missing_token_settings",
+			Mode: rmpb.GroupMode_RUMode,
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{},
 			},
 		},
+	} {
+		err = krgm.addResourceGroup(group)
+		re.Error(err)
 	}
+
+	// Test adding a valid resource group.
+	group = newTestResourceGroup("test_group", 5, 100, 200)
 	err = krgm.addResourceGroup(group)
 	re.NoError(err)
 
@@ -157,19 +166,7 @@ func TestModifyResourceGroup(t *testing.T) {
 	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add a resource group first.
-	group := &rmpb.ResourceGroup{
-		Name:     "test_group",
-		Mode:     rmpb.GroupMode_RUMode,
-		Priority: 5,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
-				},
-			},
-		},
-	}
+	group := newTestResourceGroup("test_group", 5, 100, 200)
 	err := krgm.addResourceGroup(group)
 	re.NoError(err)
 
@@ -343,11 +340,7 @@ func TestGetResourceGroupList(t *testing.T) {
 	// Add some resource groups.
 	for i := 1; i <= 3; i++ {
 		name := "group" + string(rune('0'+i))
-		group := &rmpb.ResourceGroup{
-			Name:     name,
-			Mode:     rmpb.GroupMode_RUMode,
-			Priority: uint32(i),
-		}
+		group := newTestResourceGroup(name, uint32(i), 100, 200)
 		err := krgm.addResourceGroup(group)
 		re.NoError(err)
 	}
@@ -726,21 +719,9 @@ func TestGetPriorityQueues(t *testing.T) {
 
 	// Add some resource groups with different priorities.
 	groups := map[uint32]*rmpb.ResourceGroup{
-		1: {
-			Name:     "group_with_priority_1",
-			Mode:     rmpb.GroupMode_RUMode,
-			Priority: 1,
-		},
-		2: {
-			Name:     "group_with_priority_2",
-			Mode:     rmpb.GroupMode_RUMode,
-			Priority: 2,
-		},
-		3: {
-			Name:     "group_with_priority_3",
-			Mode:     rmpb.GroupMode_RUMode,
-			Priority: 3,
-		},
+		1: newTestResourceGroup("group_with_priority_1", 1, 100, 200),
+		2: newTestResourceGroup("group_with_priority_2", 2, 100, 200),
+		3: newTestResourceGroup("group_with_priority_3", 3, 100, 200),
 	}
 	for _, group := range groups {
 		err := krgm.addResourceGroup(group)
@@ -841,10 +822,7 @@ func TestOverrideFillRate(t *testing.T) {
 	}
 	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 	groupName := "test_group"
-	group := &rmpb.ResourceGroup{
-		Name: groupName,
-		Mode: rmpb.GroupMode_RUMode,
-	}
+	group := newTestResourceGroup(groupName, 0, 100, 200)
 	err := krgm.addResourceGroup(group)
 	re.NoError(err)
 	for idx, tc := range testCases {
