@@ -77,6 +77,33 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+type coalescingTaskKey struct {
+	id   uint64
+	name string
+}
+
+type coalescingTaskRunner struct {
+	tasks map[coalescingTaskKey]func(context.Context)
+}
+
+func newCoalescingTaskRunner() *coalescingTaskRunner {
+	return &coalescingTaskRunner{tasks: make(map[coalescingTaskKey]func(context.Context))}
+}
+
+func (r *coalescingTaskRunner) RunTask(
+	id uint64,
+	name string,
+	f func(context.Context),
+	_ ...ratelimit.TaskOption,
+) error {
+	r.tasks[coalescingTaskKey{id: id, name: name}] = f
+	return nil
+}
+
+func (*coalescingTaskRunner) Start(context.Context) {}
+
+func (*coalescingTaskRunner) Stop() {}
+
 func TestStoreHeartbeat(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1237,6 +1264,55 @@ func TestPrepareRegionUpdateForSyncSkipsStatsInMicroserviceMode(t *testing.T) {
 	update, ok := cluster.prepareRegionUpdateForSync(withLeaderChange, origin, saveKV, needSync)
 	re.True(ok)
 	re.False(update.StatsOnly)
+}
+
+func TestSyncRegionCriticalUpdateSurvivesTaskCoalescing(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	meta := &metapb.Region{
+		Id:          1,
+		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 2, StoreId: 2},
+		},
+	}
+	origin := core.NewRegionInfo(meta, meta.Peers[0], core.WithFlowRoundByDigit(2))
+	cluster.PutRegion(origin)
+
+	runner := newCoalescingTaskRunner()
+	processCtx := core.ContextTODO()
+	processCtx.SyncRegionRunner = runner
+	critical := origin.Clone(core.WithLeader(meta.Peers[1]), core.WithFlowRoundByDigit(2))
+	re.NoError(cluster.processRegionHeartbeat(processCtx, critical))
+	flowOnly := critical.Clone(core.SetWrittenBytes(200), core.WithFlowRoundByDigit(2))
+	re.NoError(cluster.processRegionHeartbeat(processCtx, flowOnly))
+
+	// ConcurrentRunner coalesces tasks with an equal region ID and task name.
+	// Critical and stats-only changes need separate keys so the latter cannot
+	// replace the former while full sync retention is active.
+	re.Len(runner.tasks, 2)
+	criticalKey := coalescingTaskKey{id: meta.Id, name: ratelimit.SyncRegionToFollower}
+	statsKey := coalescingTaskKey{id: meta.Id, name: ratelimit.SyncRegionStatsToFollower}
+	criticalTask, ok := runner.tasks[criticalKey]
+	re.True(ok)
+	statsTask, ok := runner.tasks[statsKey]
+	re.True(ok)
+	criticalTask(context.Background())
+	statsTask(context.Background())
+
+	criticalUpdate := <-cluster.changedRegions
+	re.Same(critical, criticalUpdate.Region)
+	re.False(criticalUpdate.StatsOnly)
+	statsUpdate := <-cluster.changedRegions
+	re.Same(flowOnly, statsUpdate.Region)
+	re.True(statsUpdate.StatsOnly)
 }
 
 func TestRegionFlowChanged(t *testing.T) {

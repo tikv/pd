@@ -1438,16 +1438,30 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	if update, ok := c.prepareRegionUpdateForSync(region, origin, saveKV, needSync); ok {
-		ctx.SyncRegionRunner.RunTask(
-			regionID,
-			ratelimit.SyncRegionToFollower,
-			func(context.Context) {
-				c.changedRegions <- update
-			},
-			ratelimit.WithRetained(true),
-		)
+		c.runRegionUpdateSyncTask(ctx, regionID, update)
 	}
 	return nil
+}
+
+func (c *RaftCluster) runRegionUpdateSyncTask(
+	ctx *core.MetaProcessContext,
+	regionID uint64,
+	update syncer.RegionUpdate,
+) {
+	taskName := ratelimit.SyncRegionToFollower
+	if update.StatsOnly {
+		// Keep stats-only updates in a separate coalescing class so they
+		// cannot replace a pending correctness-critical update.
+		taskName = ratelimit.SyncRegionStatsToFollower
+	}
+	ctx.SyncRegionRunner.RunTask(
+		regionID,
+		taskName,
+		func(context.Context) {
+			c.changedRegions <- update
+		},
+		ratelimit.WithRetained(true),
+	)
 }
 
 func (c *RaftCluster) prepareRegionUpdateForSync(

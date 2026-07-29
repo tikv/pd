@@ -168,11 +168,11 @@ func TestHistoryBufferSkipsStatsOnlyUpdatesDuringFullSync(t *testing.T) {
 	h.resetWithIndex(10)
 	release := h.retainFrom(10)
 
-	statsOnly := newHistoryBufferTestRegion(1)
-	critical := newHistoryBufferTestRegion(2)
+	critical := newHistoryBufferTestRegion(1)
+	statsOnly := critical.Clone(core.SetWrittenBytes(100))
 	re.Equal(1, h.recordUpdates(
-		RegionUpdate{Region: statsOnly, StatsOnly: true},
 		RegionUpdate{Region: critical},
+		RegionUpdate{Region: statsOnly, StatsOnly: true},
 	))
 	re.Equal(uint64(11), h.nextIndex())
 	re.Equal([]*core.RegionInfo{critical}, h.recordsFrom(10))
