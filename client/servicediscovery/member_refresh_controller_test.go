@@ -44,10 +44,11 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 		name        string
 		result      memberUpdateResult
 		connections []memberConnection
+		currentURLs []string
 		enter       bool
 	}{
 		{
-			name:        "all current urls have transport failures and inactive connections",
+			name:        "all current urls have transport failures and degraded-mode connections",
 			result:      newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure),
 			connections: observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure),
 			enter:       true,
@@ -61,6 +62,12 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 			name:        "not every url was attempted",
 			result:      newFailedMemberUpdateResult(transportFailure),
 			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
+		},
+		{
+			name:        "url set changed while failures were collected",
+			result:      newFailedMemberUpdateResult(transportFailure, transportFailure),
+			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
+			currentURLs: []string{"url-0", "replacement-url"},
 		},
 		{
 			name:        "non-transport failure",
@@ -87,9 +94,13 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			controller := memberRefreshController{}
-			require.Equal(t, testCase.enter, controller.enterDegraded(
+			currentURLs := testCase.currentURLs
+			if currentURLs == nil {
+				currentURLs = memberTestURLs(len(testCase.connections))
+			}
+			require.Equal(t, testCase.enter, controller.tryEnterDegraded(
 				testCase.result,
-				memberTestURLs(len(testCase.connections)),
+				currentURLs,
 				testCase.connections,
 			))
 			require.Equal(t, testCase.enter, controller.isDegraded())
@@ -97,7 +108,7 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 	}
 }
 
-func TestMemberRefreshControllerShouldWait(t *testing.T) {
+func TestMemberRefreshControllerCanRemainDegraded(t *testing.T) {
 	t.Parallel()
 
 	transportFailure := true
@@ -105,12 +116,12 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 		name        string
 		connections []memberConnection
 		currentURLs []string
-		wait        bool
+		remain      bool
 	}{
 		{
 			name:        "idle connections wait without a member refresh",
 			connections: observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.Idle),
-			wait:        true,
+			remain:      true,
 		},
 		{
 			name:        "ready connection refreshes immediately",
@@ -139,7 +150,7 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 			for i := range failures {
 				failures[i] = transportFailure
 			}
-			require.True(t, controller.enterDegraded(
+			require.True(t, controller.tryEnterDegraded(
 				newFailedMemberUpdateResult(failures...),
 				initialURLs,
 				observedMemberConnections(repeatedConnectivityState(connectivity.TransientFailure, len(testCase.connections))...),
@@ -148,27 +159,27 @@ func TestMemberRefreshControllerShouldWait(t *testing.T) {
 			if currentURLs == nil {
 				currentURLs = initialURLs
 			}
-			wait := controller.shouldWait(currentURLs, testCase.connections)
-			require.Equal(t, testCase.wait, wait)
-			require.Equal(t, testCase.wait, controller.isDegraded())
+			remain := controller.canRemainDegraded(currentURLs, testCase.connections)
+			require.Equal(t, testCase.remain, remain)
+			require.True(t, controller.isDegraded())
 		})
 	}
 }
 
-func TestMemberRefreshControllerShouldWaitDoesNotAllocate(t *testing.T) {
+func TestMemberRefreshControllerCanRemainDegradedDoesNotAllocate(t *testing.T) {
 	transportFailure := true
 	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
 	urls := memberTestURLs(3)
 	connections := observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure)
 	controller := memberRefreshController{}
-	require.True(t, controller.enterDegraded(result, urls, connections))
+	require.True(t, controller.tryEnterDegraded(result, urls, connections))
 	allocations := testing.AllocsPerRun(1000, func() {
-		memberRefreshWaitSink = controller.shouldWait(urls, connections)
+		memberRefreshRemainDegradedSink = controller.canRemainDegraded(urls, connections)
 	})
 	require.Zero(t, allocations)
 }
 
-var memberRefreshWaitSink bool
+var memberRefreshRemainDegradedSink bool
 
 func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	t.Parallel()
@@ -186,7 +197,7 @@ func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	require.Equal(t, []string{"http://pd-1:2379", "http://pd-2:2379"}, summary.failedURLs)
 	require.Equal(t, uint64(4), summary.failedAttempts)
 	require.Equal(t, uint64(2), summary.suppressedErrors)
-	require.Equal(t, 4*time.Second, summary.failureDuration)
+	require.Equal(t, 4*time.Second, summary.longestFailureDuration)
 
 	recovery, ok := tracker.recover(start.Add(5*time.Second), "http://pd-2:2379")
 	require.True(t, ok)
@@ -198,7 +209,7 @@ func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, []string{"http://pd-1:2379"}, summary.failedURLs)
 
-	tracker.retain([]string{"http://pd-3:2379"}, []string{"http://pd-1:2379"})
+	tracker.retainCurrentFailures([]string{"http://pd-3:2379"}, []string{"http://pd-1:2379"})
 	_, ok = tracker.summary(start.Add(7 * time.Second))
 	require.False(t, ok)
 }
@@ -230,6 +241,15 @@ func TestIsMemberTransportFailure(t *testing.T) {
 			name:      "deadline rpc",
 			got:       isMemberRPCTransportFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
 			transport: true,
+		},
+		{
+			name:      "local deadline",
+			got:       isMemberRPCTransportFailure(context.DeadlineExceeded),
+			transport: true,
+		},
+		{
+			name: "local cancellation",
+			got:  isMemberRPCTransportFailure(context.Canceled),
 		},
 		{
 			name:      "reset rpc",
@@ -275,6 +295,7 @@ func TestMemberTransportFailureSummaryAndRecoveryLogs(t *testing.T) {
 	require.Len(t, summaryLogs, 1)
 	summaryFields := summaryLogs[0].ContextMap()
 	require.Contains(t, summaryFields, "failed-urls")
+	require.Contains(t, summaryFields, "longest-failure-duration")
 	require.Equal(t, uint64(2), summaryFields["failed-attempts"])
 	require.Equal(t, uint64(1), summaryFields["suppressed-errors"])
 	require.NotContains(t, summaryFields, "error-classes")
@@ -302,7 +323,7 @@ func TestMemberTransportFailureTrackerConcurrentAccess(_ *testing.T) {
 				tracker.record(now, url)
 				tracker.summary(now.Add(time.Second))
 				tracker.recover(now.Add(2*time.Second), url)
-				tracker.retain([]string{url}, []string{url})
+				tracker.retainCurrentFailures([]string{url}, []string{url})
 			}
 		}(i)
 	}
@@ -318,16 +339,16 @@ func TestMemberTransportFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.
 	require.Zero(t, allocations)
 }
 
-func BenchmarkMemberRefreshControllerShouldWait(b *testing.B) {
+func BenchmarkMemberRefreshControllerCanRemainDegraded(b *testing.B) {
 	transportFailure := true
 	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
 	urls := memberTestURLs(3)
 	connections := observedMemberConnections(connectivity.TransientFailure, connectivity.Connecting, connectivity.Idle)
 	controller := memberRefreshController{}
-	controller.enterDegraded(result, urls, connections)
+	controller.tryEnterDegraded(result, urls, connections)
 	b.ReportAllocs()
 	for b.Loop() {
-		controller.shouldWait(urls, connections)
+		controller.canRemainDegraded(urls, connections)
 	}
 }
 

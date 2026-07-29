@@ -568,16 +568,19 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
 	controller := memberRefreshController{}
 	var connectionStateTicker *time.Ticker
+	var connectionStateCh <-chan time.Time
 	stopConnectionStateTicker := func() {
 		if connectionStateTicker != nil {
 			connectionStateTicker.Stop()
 			connectionStateTicker = nil
 		}
+		connectionStateCh = nil
 	}
 	defer stopConnectionStateTicker()
 	startConnectionStateTicker := func() {
 		if connectionStateTicker == nil {
 			connectionStateTicker = time.NewTicker(memberConnectionStateCheckInterval)
+			connectionStateCh = connectionStateTicker.C
 		}
 	}
 	drainScheduledCheck := func() {
@@ -618,18 +621,19 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 					continue
 				}
 				snapshot = c.snapshotMemberConnections(snapshot)
-				if controller.enterDegraded(result, snapshot.urls, snapshot.connections) {
+				if controller.tryEnterDegraded(result, snapshot.urls, snapshot.connections) {
 					connectIdleMemberConnections(snapshot)
 					continue
 				}
 				controller.leaveDegraded()
 				stopConnectionStateTicker()
-			case <-connectionStateTicker.C:
+			case <-connectionStateCh:
 				snapshot = c.snapshotMemberConnections(snapshot)
-				if controller.shouldWait(snapshot.urls, snapshot.connections) {
+				if controller.canRemainDegraded(snapshot.urls, snapshot.connections) {
 					connectIdleMemberConnections(snapshot)
 					continue
 				}
+				controller.leaveDegraded()
 				stopConnectionStateTicker()
 				drainScheduledCheck()
 			}
@@ -653,7 +657,7 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 				break
 			}
 			snapshot = c.snapshotMemberConnections(snapshot)
-			if !controller.enterDegraded(result, snapshot.urls, snapshot.connections) {
+			if !controller.tryEnterDegraded(result, snapshot.urls, snapshot.connections) {
 				break
 			}
 			startConnectionStateTicker()
@@ -661,10 +665,11 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 			// Inspect again after entering degraded mode so a connection that
 			// became ready as the failed batch completed is refreshed immediately.
 			snapshot = c.snapshotMemberConnections(snapshot)
-			if controller.shouldWait(snapshot.urls, snapshot.connections) {
+			if controller.canRemainDegraded(snapshot.urls, snapshot.connections) {
 				connectIdleMemberConnections(snapshot)
 				break
 			}
+			controller.leaveDegraded()
 			stopConnectionStateTicker()
 			drainScheduledCheck()
 		}
@@ -1033,7 +1038,7 @@ func (c *serviceDiscovery) updateMember() error {
 func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) {
 	result := memberUpdateResult{}
 	for _, url := range c.GetServiceURLs() {
-		members, transportFailure, err := c.getMembersWithTransportFailure(c.ctx, url, UpdateMemberTimeout)
+		members, isTransportFailure, err := c.getMembersWithTransportFailure(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -1047,10 +1052,10 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 		}
 		// Failed to get members
 		if err != nil {
-			result.recordFailure(url, transportFailure)
+			result.recordFailure(url, isTransportFailure)
 			failureTime := time.Now()
 			shouldLog := true
-			if transportFailure {
+			if isTransportFailure {
 				shouldLog = c.memberTransportFailures.record(failureTime, url)
 			} else {
 				// Only transport failures are suppressed. A different failure
@@ -1071,7 +1076,7 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 		}
 		c.logMemberTransportFailureRecovery(time.Now(), url)
 		c.updateURLs(members.GetMembers())
-		c.memberTransportFailures.retain(c.GetServiceURLs(), result.failedURLs)
+		c.memberTransportFailures.retainCurrentFailures(c.GetServiceURLs(), result.failedURLs)
 
 		return result, c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
@@ -1119,6 +1124,9 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	return members, err
 }
 
+// getMembersWithTransportFailure reports whether a failed request is eligible
+// for transport-outage suppression. It preserves getMembers' response and
+// error contract.
 func (c *serviceDiscovery) getMembersWithTransportFailure(
 	ctx context.Context,
 	url string,
@@ -1178,7 +1186,7 @@ func (c *serviceDiscovery) logMemberTransportFailureSummary(now time.Time) {
 	}
 	log.Info("[pd] member transport failures are being suppressed",
 		zap.Strings("failed-urls", summary.failedURLs),
-		zap.Duration("failure-duration", summary.failureDuration),
+		zap.Duration("longest-failure-duration", summary.longestFailureDuration),
 		zap.Uint64("failed-attempts", summary.failedAttempts),
 		zap.Uint64("suppressed-errors", summary.suppressedErrors))
 }

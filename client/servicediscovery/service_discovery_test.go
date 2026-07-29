@@ -546,7 +546,7 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 			require.Error(t, structuredErr)
 			require.Equal(t, structuredErr.Error(), compatibilityErr.Error())
 			require.Equal(t, []string{memberURL}, result.failedURLs)
-			require.Equal(t, testCase.transport, result.transportFailures == 1)
+			require.Equal(t, testCase.transport, result.transportFailureCount == 1)
 
 			_, ok := client.memberTransportFailures.summary(time.Now())
 			if testCase.transport {
@@ -558,7 +558,7 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 	}
 }
 
-func TestUpdateMemberClearsUnobservedFailureEpisodesAfterRecovery(t *testing.T) {
+func TestUpdateMemberRetainsOnlyFailuresObservedBeforeSuccess(t *testing.T) {
 	testServer := &memberTestPDServer{}
 	listener := startMemberTestPDServer(t, testServer)
 

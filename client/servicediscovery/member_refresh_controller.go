@@ -30,10 +30,15 @@ import (
 	clienterrs "github.com/tikv/pd/client/errs"
 )
 
+// isMemberDialTransportFailure recognizes the explicit gRPC dial sentinel.
 func isMemberDialTransportFailure(err error) bool {
 	return errors.Is(err, clienterrs.ErrGRPCDial)
 }
 
+// isMemberRPCTransportFailure recognizes Unavailable and DeadlineExceeded,
+// including a local context deadline. These classifications only make an
+// error eligible for transport-outage suppression; entering degraded mode also
+// requires every corresponding gRPC connection to be in a degraded-mode state.
 func isMemberRPCTransportFailure(err error) bool {
 	code := status.Code(err)
 	if errors.Is(err, context.DeadlineExceeded) {
@@ -43,19 +48,20 @@ func isMemberRPCTransportFailure(err error) bool {
 }
 
 type memberUpdateResult struct {
-	failedURLs        []string
-	transportFailures int
+	// failedURLs is the ordered prefix attempted before the first success.
+	failedURLs            []string
+	transportFailureCount int
 }
 
-func (r *memberUpdateResult) recordFailure(url string, transportFailure bool) {
+func (r *memberUpdateResult) recordFailure(url string, isTransportFailure bool) {
 	r.failedURLs = append(r.failedURLs, url)
-	if transportFailure {
-		r.transportFailures++
+	if isTransportFailure {
+		r.transportFailureCount++
 	}
 }
 
-func (r *memberUpdateResult) allFailedByTransport(urls []string) bool {
-	if len(urls) == 0 || len(r.failedURLs) != len(urls) || r.transportFailures != len(urls) {
+func (r *memberUpdateResult) allCurrentURLsFailedByTransport(urls []string) bool {
+	if len(urls) == 0 || len(r.failedURLs) != len(urls) || r.transportFailureCount != len(urls) {
 		return false
 	}
 	return slices.Equal(r.failedURLs, urls)
@@ -75,16 +81,16 @@ func (c *memberRefreshController) isDegraded() bool {
 	return len(c.degradedURLs) > 0
 }
 
-func (c *memberRefreshController) enterDegraded(
+func (c *memberRefreshController) tryEnterDegraded(
 	result memberUpdateResult,
 	urls []string,
 	connections []memberConnection,
 ) bool {
-	if len(urls) != len(connections) || !result.allFailedByTransport(urls) {
+	if len(urls) != len(connections) || !result.allCurrentURLsFailedByTransport(urls) {
 		return false
 	}
 	for _, connection := range connections {
-		if !connection.observed || !isInactiveMemberConnectionState(connection.state) {
+		if !connection.observed || !isDegradedModeConnectionState(connection.state) {
 			return false
 		}
 	}
@@ -92,14 +98,12 @@ func (c *memberRefreshController) enterDegraded(
 	return true
 }
 
-func (c *memberRefreshController) shouldWait(urls []string, connections []memberConnection) bool {
+func (c *memberRefreshController) canRemainDegraded(urls []string, connections []memberConnection) bool {
 	if !c.isDegraded() || len(urls) != len(connections) || !slices.Equal(c.degradedURLs, urls) {
-		c.leaveDegraded()
 		return false
 	}
 	for _, connection := range connections {
-		if !connection.observed || !isInactiveMemberConnectionState(connection.state) {
-			c.leaveDegraded()
+		if !connection.observed || !isDegradedModeConnectionState(connection.state) {
 			return false
 		}
 	}
@@ -110,12 +114,19 @@ func (c *memberRefreshController) leaveDegraded() {
 	c.degradedURLs = nil
 }
 
-func isInactiveMemberConnectionState(state connectivity.State) bool {
+// isDegradedModeConnectionState accepts only non-ready states that can recover
+// on the existing connection. Missing and shut-down connections require an
+// immediate member refresh instead.
+func isDegradedModeConnectionState(state connectivity.State) bool {
 	return state == connectivity.Idle ||
 		state == connectivity.Connecting ||
 		state == connectivity.TransientFailure
 }
 
+// A transport-failure episode starts with the first classified transport
+// failure for a URL. It ends when that URL succeeds, returns a non-transport
+// failure, leaves the current member set, or is not reached because an earlier
+// URL completed the refresh. Only a direct success emits a recovery log.
 type memberTransportFailureEpisode struct {
 	firstFailure   time.Time
 	failedAttempts uint64
@@ -128,10 +139,10 @@ type memberTransportFailureRecovery struct {
 }
 
 type memberTransportFailureSummary struct {
-	failedURLs       []string
-	failureDuration  time.Duration
-	failedAttempts   uint64
-	suppressedErrors uint64
+	failedURLs             []string
+	longestFailureDuration time.Duration
+	failedAttempts         uint64
+	suppressedErrors       uint64
 }
 
 type memberTransportFailureTracker struct {
@@ -182,7 +193,8 @@ func (t *memberTransportFailureTracker) discard(url string) {
 	delete(t.episodes, url)
 }
 
-func (t *memberTransportFailureTracker) retain(currentURLs, failedURLs []string) {
+// retainCurrentFailures drops stale episodes after a successful refresh.
+func (t *memberTransportFailureTracker) retainCurrentFailures(currentURLs, failedURLs []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -218,6 +230,6 @@ func (t *memberTransportFailureTracker) summary(now time.Time) (memberTransportF
 		summary.failedAttempts += episode.failedAttempts
 		summary.suppressedErrors += episode.failedAttempts - 1
 	}
-	summary.failureDuration = now.Sub(earliest)
+	summary.longestFailureDuration = now.Sub(earliest)
 	return summary, true
 }
