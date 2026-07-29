@@ -82,18 +82,20 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/group/test_group", nil)
 	re.Equal(http.StatusNotFound, resp.Code)
 
-	legacyDefaultKeyspaceIDs := []struct {
-		name string
-		body []byte
+	legacyKeyspaceIDs := []struct {
+		name       string
+		keyspaceID uint32
+		body       []byte
 	}{
-		{"legacy_default_group", []byte(`{"name":"legacy_default_group","keyspace_id":{}}`)},
-		{"legacy_camel_default_group", []byte(`{"name":"legacy_camel_default_group","keyspaceId":{}}`)},
+		{"legacy_default_group", 0, []byte(`{"name":"legacy_default_group","keyspace_id":{}}`)},
+		{"legacy_camel_default_group", 0, []byte(`{"name":"legacy_camel_default_group","keyspaceId":{}}`)},
+		{"legacy_uppercase_group", 42, []byte(`{"name":"legacy_uppercase_group","KEYSPACE_ID":{"VALUE":42}}`)},
 	}
-	for _, legacyDefaultKeyspaceID := range legacyDefaultKeyspaceIDs {
-		resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyDefaultKeyspaceID.body)
+	for _, legacyKeyspaceID := range legacyKeyspaceIDs {
+		resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyKeyspaceID.body)
 		re.Equal(http.StatusOK, resp.Code)
-		re.Contains(store.groups, groupKey(0, legacyDefaultKeyspaceID.name))
-		resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyDefaultKeyspaceID.body)
+		re.Contains(store.groups, groupKey(legacyKeyspaceID.keyspaceID, legacyKeyspaceID.name))
+		resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyKeyspaceID.body)
 		re.Equal(http.StatusOK, resp.Code)
 	}
 
@@ -119,11 +121,19 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 		},
 		{
 			[]byte(`{"name":"test_group","keyspace_id":{},"keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
-			"keyspace_id and keyspaceId cannot both be set",
+			"keyspace_id must be set only once",
 		},
 		{
 			[]byte(`{"name":"test_group","keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}},"keyspace_id":{}}`),
-			"keyspace_id and keyspaceId cannot both be set",
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}},"keyspace_id":{}}`),
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","KEYSPACE_ID":{},"keyspaceId":{"value":42}}`),
+			"keyspace_id must be set only once",
 		},
 	}
 	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
