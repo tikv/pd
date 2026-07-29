@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -419,6 +420,17 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	re.NotNil(op)
 	re.Equal("fix-follower-role", op.Desc())
 	re.Equal(uint64(3), op.Step(0).(operator.TransferLeader).ToStore)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+
+	// A temporary Store state can recover, so PD can retry the leader transfer.
+	suite.cluster.SetStoreBusy(3, true)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+	suite.cluster.SetStoreBusy(3, false)
+
+	// A reject-leader target cannot satisfy the role with the current topology.
+	suite.cluster.SetLabelProperty(config.RejectLeader, "role", "voter")
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+	re.Nil(suite.rc.Check(suite.cluster.GetRegion(1)))
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {

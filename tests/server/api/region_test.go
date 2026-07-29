@@ -204,12 +204,18 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	// A rule can have enough peers but still be pending because an offline
 	// peer has no replacement target.
-	offlineStore := &metapb.Store{
-		Id:        1,
-		State:     metapb.StoreState_Offline,
-		NodeState: metapb.NodeState_Removing,
+	putStore := func(store *core.StoreInfo) {
+		leader.GetRaftCluster().GetBasicCluster().PutStore(store)
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			schedulingServer.GetCluster().PutStore(store)
+		}
 	}
-	tests.MustPutStore(re, cluster, offlineStore)
+	servingStore := leader.GetRaftCluster().GetStore(1)
+	offlineStore := servingStore.Clone(
+		core.SetStoreState(metapb.StoreState_Offline, false),
+		core.SetNodeState(metapb.NodeState_Removing),
+	)
+	putStore(offlineStore)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.Equal("PENDING", status)
@@ -223,17 +229,15 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		Capacity:  uint64(10 * units.GiB),
 		Available: uint64(10 * units.GiB),
 	}))
-	leader.GetRaftCluster().GetBasicCluster().PutStore(availableTarget)
-	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
-		schedulingServer.GetCluster().PutStore(availableTarget)
-	}
+	putStore(availableTarget)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.Equal("INPROGRESS", status)
-	targetStore.State = metapb.StoreState_Offline
-	targetStore.NodeState = metapb.NodeState_Removing
-	tests.MustPutStore(re, cluster, targetStore)
-	tests.MustPutStore(re, cluster, s1)
+	putStore(availableTarget.Clone(
+		core.SetStoreState(metapb.StoreState_Offline, false),
+		core.SetNodeState(metapb.NodeState_Removing),
+	))
+	putStore(servingStore)
 
 	// Missing Region metadata must never be reported as complete.
 	noRegionURL := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix,

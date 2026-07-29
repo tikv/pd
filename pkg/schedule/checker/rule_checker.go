@@ -175,8 +175,16 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 		if ruleUnfixable {
 			continue
 		}
-		if len(rf.PeersWithDifferentRole) > 0 {
-			return RegionPlacementStateInProgress
+		for _, peer := range rf.PeersWithDifferentRole {
+			if c.getPeerRolePlacementState(region, fit, rf, peer) == RegionPlacementStateInProgress {
+				return RegionPlacementStateInProgress
+			}
+			hasUnfixablePlacement = true
+			ruleUnfixable = true
+			break
+		}
+		if ruleUnfixable {
+			continue
 		}
 		if len(rf.Rule.LocationLabels) == 0 {
 			continue
@@ -242,6 +250,43 @@ func (c *RuleChecker) GetRegionsPlacementState(regions []*core.RegionInfo) Regio
 		}
 	}
 	return state
+}
+
+func (c *RuleChecker) getPeerRolePlacementState(
+	region *core.RegionInfo,
+	fit *placement.RegionFit,
+	rf *placement.RuleFit,
+	peer *metapb.Peer,
+) RegionPlacementState {
+	if core.IsLearner(peer) && rf.Rule.Role != placement.Learner {
+		return RegionPlacementStateInProgress
+	}
+	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
+		if c.allowLeaderWithTemporaryStates(fit, peer, true) {
+			return RegionPlacementStateInProgress
+		}
+		return RegionPlacementStatePending
+	}
+	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
+		for _, candidate := range region.GetPeers() {
+			if c.cluster.GetStore(candidate.GetStoreId()) == nil ||
+				c.allowLeaderWithTemporaryStates(fit, candidate, true) {
+				return RegionPlacementStateInProgress
+			}
+		}
+		return RegionPlacementStatePending
+	}
+	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
+		return RegionPlacementStateInProgress
+	}
+	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
+		return RegionPlacementStatePending
+	}
+	if (!core.IsWitness(peer) && rf.Rule.IsWitness && isWitnessEnabled(c.cluster)) ||
+		(core.IsWitness(peer) && (!rf.Rule.IsWitness || !isWitnessEnabled(c.cluster))) {
+		return RegionPlacementStateInProgress
+	}
+	return RegionPlacementStatePending
 }
 
 func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit *placement.RegionFit, missingRuleFit *placement.RuleFit, context *placementStateContext) bool {
@@ -598,6 +643,10 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 }
 
 func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) bool {
+	return c.allowLeaderWithTemporaryStates(fit, peer, false)
+}
+
+func (c *RuleChecker) allowLeaderWithTemporaryStates(fit *placement.RegionFit, peer *metapb.Peer, allowTemporaryStates bool) bool {
 	if core.IsLearner(peer) || core.IsWitness(peer) {
 		return false
 	}
@@ -605,7 +654,11 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{
+		ActionScope:          "rule-checker",
+		TransferLeader:       true,
+		AllowTemporaryStates: allowTemporaryStates,
+	}
 	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}
