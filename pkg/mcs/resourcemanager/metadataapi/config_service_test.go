@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -130,6 +132,36 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	re.Equal(uint64(321), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.FillRate)
 	re.Equal(int64(654), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.BurstLimit)
 
+	protobufJSONGroup := &rmpb.ResourceGroup{
+		Name:       "protobuf_json_group",
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   11,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   789,
+					BurstLimit: 987,
+				},
+			},
+		},
+	}
+	var protobufJSON bytes.Buffer
+	re.NoError((&jsonpb.Marshaler{}).Marshal(&protobufJSON, protobufJSONGroup))
+	re.Contains(protobufJSON.String(), `"mode":"RUMode"`)
+	re.Contains(protobufJSON.String(), `"fillRate":"789"`)
+	re.Contains(protobufJSON.String(), `"burstLimit":"987"`)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, protobufJSON.Bytes())
+		re.Equal(http.StatusOK, resp.Code, resp.Body.String())
+		storedGroup := store.groups[groupKey(42, protobufJSONGroup.Name)]
+		re.NotNil(storedGroup)
+		re.Equal(rmpb.GroupMode_RUMode, storedGroup.Mode)
+		re.Equal(uint32(11), storedGroup.Priority)
+		re.Equal(uint64(789), storedGroup.RUSettings.RU.Settings.FillRate)
+		re.Equal(int64(987), storedGroup.RUSettings.RU.Settings.BurstLimit)
+	}
+
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusInternalServerError, resp.Code)
@@ -166,6 +198,10 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 			[]byte(`{"name":"test_group","KEYSPACE_ID":{},"keyspaceId":{"value":42}}`),
 			"keyspace_id must be set only once",
 		},
+		{
+			[]byte(`{"name":"test_group","mode":"RUMode","keyspaceId":{"keyspaceIdentity":{"namespaceId":1,"keyspaceId":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
 	}
 	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
 		for _, method := range []string{http.MethodPost, http.MethodPut} {
@@ -173,6 +209,13 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 			re.Equal(http.StatusBadRequest, resp.Code)
 			re.Contains(resp.Body.String(), invalidKeyspaceID.message)
 		}
+	}
+
+	mixedJSONDialects := []byte(`{"name":"mixed_json_group","mode":"RUMode","PRIORITY":7}`)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, mixedJSONDialects)
+		re.Equal(http.StatusBadRequest, resp.Code)
+		re.NotContains(store.groups, groupKey(constant.NullKeyspaceID, "mixed_json_group"))
 	}
 }
 

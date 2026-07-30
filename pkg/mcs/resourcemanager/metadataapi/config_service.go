@@ -188,7 +188,15 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	// Keep the legacy encoding/json behavior for all existing ResourceGroup
 	// fields. In particular, it matches JSON field names case-insensitively.
 	if err := json.Unmarshal(legacyJSON, group); err != nil {
-		return err
+		// The updated ResourceGroup contains a protobuf oneof, so clients may
+		// serialize the whole message as protobuf JSON. Retry strictly to
+		// accept enum names and quoted 64-bit integers without silently
+		// dropping fields that belong to neither JSON dialect.
+		*group = rmpb.ResourceGroup{}
+		if protoErr := (&jsonpb.Unmarshaler{}).Unmarshal(bytes.NewReader(data), group); protoErr != nil {
+			return fmt.Errorf("invalid resource group JSON: legacy JSON: %v; protobuf JSON: %w", err, protoErr)
+		}
+		return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
 	}
 	if rawKeyspaceID != nil {
 		keyspaceID, err := decodeKeyspaceIDJSON(rawKeyspaceID)
