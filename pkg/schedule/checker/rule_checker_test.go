@@ -2483,7 +2483,7 @@ func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateSkipsStoresForComple
 	re.Zero(cluster.getStoresCount)
 }
 
-func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedIsInProgress() {
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedDoesNotHideReplicated() {
 	re := suite.Require()
 	suite.cluster.AddLeaderStore(1, 1)
 	suite.cluster.AddLeaderStore(2, 1)
@@ -2493,7 +2493,7 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedIsInProgre
 	pendingProcessed.Put(1, nil)
 	checker := NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, pendingProcessed)
 
-	re.Equal(RegionPlacementStateInProgress, checker.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+	re.Equal(RegionPlacementStateReplicated, checker.GetRegionPlacementState(suite.cluster.GetRegion(1)))
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedDoesNotHidePending() {
