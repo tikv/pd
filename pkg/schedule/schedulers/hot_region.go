@@ -204,6 +204,9 @@ type hotScheduler struct {
 	// config of hot scheduler
 	conf                *hotRegionSchedulerConfig
 	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
+	placementLabels     placementLoadState
+	placementLabelsVer  uint64
+	placementLabelsInit bool
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -347,15 +350,38 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
-func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
-	// The read-peer population contains every TiKV store considered by the
-	// read-leader solver, so both solvers can share the placement precheck.
-	peerSolver = newBalanceSolver(s, cluster, utils.Read, movePeer)
-	placementState := &placementLoadState{
-		enabled:     peerSolver.placementV2Enabled,
-		canRestrict: peerSolver.placementCanRestrict,
+func (s *hotScheduler) getPlacementLoadState(cluster sche.SchedulerCluster, rankFormulaVersion string) placementLoadState {
+	if !cluster.GetSchedulerConfig().IsPlacementRulesEnabled() || rankFormulaVersion != "v2" {
+		return placementLoadState{}
 	}
-	leaderSolver = newBalanceSolverWithPlacementState(s, cluster, utils.Read, transferLeader, placementState)
+
+	state := placementLoadState{canRestrict: [2]bool{
+		cluster.GetRuleManager().MayRestrictStoreLoad(true),
+		cluster.GetRuleManager().MayRestrictStoreLoad(false),
+	}}
+	labelsVersion := cluster.GetBasicCluster().GetStoresLabelsVersion()
+	if !s.placementLabelsInit || s.placementLabelsVer != labelsVersion {
+		s.placementLabels = placementLoadState{}
+		for _, store := range cluster.GetStores() {
+			recordStorePlacementRestriction(&s.placementLabels.canRestrict, store)
+		}
+		s.placementLabelsVer = labelsVersion
+		s.placementLabelsInit = true
+	}
+	for i := range state.canRestrict {
+		state.canRestrict[i] = state.canRestrict[i] || s.placementLabels.canRestrict[i]
+		state.enabled = state.enabled || state.canRestrict[i]
+	}
+	return state
+}
+
+func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
+	leaderSolver = newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	placementState := &placementLoadState{
+		enabled:     leaderSolver.placementV2Enabled,
+		canRestrict: leaderSolver.placementCanRestrict,
+	}
+	peerSolver = newBalanceSolverWithPlacementState(s, cluster, utils.Read, movePeer, placementState)
 	return leaderSolver, peerSolver
 }
 

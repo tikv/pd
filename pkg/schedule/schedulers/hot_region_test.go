@@ -462,6 +462,42 @@ func TestMayUsePlacementScopeIgnoresEngineSeparation(t *testing.T) {
 	require.True(t, bs.mayUsePlacementScope(false))
 }
 
+func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+	require.NoError(t, err)
+	hot := scheduler.(*hotScheduler)
+
+	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	state := hot.getPlacementLoadState(tc, "v2")
+	require.False(t, state.enabled)
+
+	tc.AddLabelsStore(2, 1, map[string]string{"$group": "other"})
+	state = hot.getPlacementLoadState(tc, "v2")
+	require.True(t, state.enabled)
+	require.True(t, state.canRestrict[0])
+
+	tc.SetStoreLabel(2, map[string]string{"zone": "z1"})
+	state = hot.getPlacementLoadState(tc, "v2")
+	require.False(t, state.enabled)
+
+	require.NoError(t, tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "zone", Op: placement.In, Values: []string{"z1"}},
+		},
+	}))
+	state = hot.getPlacementLoadState(tc, "v2")
+	require.True(t, state.enabled)
+	require.True(t, state.canRestrict[0])
+	require.False(t, hot.getPlacementLoadState(tc, "v1").enabled)
+}
+
 func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 	testCases := []struct {
 		name       string

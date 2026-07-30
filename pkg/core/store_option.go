@@ -45,6 +45,7 @@ func SetStoreLabels(labels []*metapb.StoreLabel) StoreCreateOption {
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
 		meta.Labels = labels
 		store.meta = meta
+		store.labelsVersion = storeLabelsVersion.Add(1)
 	}
 }
 
@@ -334,5 +335,6 @@ func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 		meta.NodeState = newMeta.GetNodeState()
 		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
 		store.meta = meta
+		store.labelsVersion = storeLabelsVersion.Add(1)
 	}
 }
