@@ -80,6 +80,15 @@ type keyspaceResourceGroupManager struct {
 	// read and re-checks it under the lock before inserting, so a group
 	// deleted after the read is never resurrected by the now-stale result.
 	deleteGen uint64
+	// defaultGroupMu serializes every path that can create or persist the
+	// default group: on-demand synthesis (initDefaultResourceGroup) and a
+	// real Add/ModifyResourceGroup targeting "default" both hold it across
+	// their persist step. Without this, a synthetic write and a concurrent
+	// customized write race independently of krgm's RWMutex (which is only
+	// held for the cache mutation, not the storage I/O before it), so
+	// whichever one's storage/cache write lands last wins even if it
+	// started first - silently discarding a successful customized write.
+	defaultGroupMu syncutil.Mutex
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
@@ -223,22 +232,36 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 	return nil
 }
 
-func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
-	krgm.RLock()
-	_, ok := krgm.groups[DefaultResourceGroupName]
-	_, reserved := krgm.reservedGroups[DefaultResourceGroupName]
-	krgm.RUnlock()
-	// A cached entry only makes initialization unnecessary if it's confirmed
-	// data. A reserved placeholder means nothing is persisted for the default
-	// group (e.g. a fresh store): it must still be created and persisted here,
-	// otherwise its settings are never stored and state persistence stays skipped.
-	if ok && !reserved {
-		return
+// initDefaultResourceGroup synthesizes and persists the built-in default
+// group if nothing confirmed exists yet. It reports whether it actually
+// performed a synthesis, so callers that participate in the async bulk-load
+// merge (loadResourceGroupIfNeeded) know when they must publish a
+// sync-loaded marker for what this call just wrote.
+func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() bool {
+	// A confirmed cached entry means initialization is unnecessary; a missing
+	// or reserved-placeholder entry means nothing is persisted for the
+	// default group (e.g. a fresh store), so it must still be created and
+	// persisted, otherwise its settings are never stored and state
+	// persistence stays skipped.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false
+	}
+	// Serialize against every other synthesis or real Add/ModifyResourceGroup
+	// targeting "default": see the defaultGroupMu doc comment on the struct.
+	krgm.defaultGroupMu.Lock()
+	defer krgm.defaultGroupMu.Unlock()
+	// Re-check under defaultGroupMu: while this goroutine waited for the
+	// lock, a real write may have already confirmed the default group, in
+	// which case synthesizing here would silently clobber it.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false
 	}
 	defaultGroup := newDefaultResourceGroup()
 	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
 		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
+		return false
 	}
+	return true
 }
 
 func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {

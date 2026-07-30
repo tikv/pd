@@ -797,7 +797,19 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 				// This calls initDefaultResourceGroup directly instead of going
 				// through getOrCreateKeyspaceResourceGroupManager(id, true), which
 				// now routes back into this same function and would recurse.
-				krgm.initDefaultResourceGroup()
+				if krgm.initDefaultResourceGroup() {
+					// This synthesis bypassed publishResourceGroupMutation, so the
+					// sync-loaded marker was never set. Set it now: otherwise a
+					// bulk merge still in progress for this term doesn't know this
+					// group is already confirmed, and can replace it - including
+					// any live consumption update applied after this point - with
+					// a possibly-stale snapshot taken by the storage scan.
+					m.Lock()
+					if m.loadEpoch == epoch && m.krgms[keyspaceID] == krgm && m.syncLoadedGroups != nil {
+						m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: DefaultResourceGroupName}] = true
+					}
+					m.Unlock()
+				}
 				return nil
 			}
 			return err
@@ -1101,6 +1113,16 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		log.Warn("failed to load resource group before add", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
 		return err
 	}
+	if grouppb.Name == DefaultResourceGroupName {
+		// Serialize against a concurrent on-demand synthesis of the same
+		// default group (initDefaultResourceGroup, e.g. from another
+		// request's getOrCreateKeyspaceResourceGroupManager/
+		// loadResourceGroupIfNeeded call): without this, the synthetic
+		// write's storage/cache commit can land after this real write's,
+		// silently discarding these customized settings.
+		krgm.defaultGroupMu.Lock()
+		defer krgm.defaultGroupMu.Unlock()
+	}
 	// Storage phase: validate and persist. Publishing the cache effect is done
 	// separately below, against whichever keyspace manager is current then.
 	group, err := krgm.persistResourceGroup(grouppb)
@@ -1129,6 +1151,12 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
 	if err != nil {
 		return err
+	}
+	if grouppb.Name == DefaultResourceGroupName {
+		// Serialize against a concurrent on-demand synthesis of the same
+		// default group; see the matching guard in AddResourceGroup.
+		krgm.defaultGroupMu.Lock()
+		defer krgm.defaultGroupMu.Unlock()
 	}
 	patched, err := krgm.modifyResourceGroup(grouppb)
 	if err != nil {
