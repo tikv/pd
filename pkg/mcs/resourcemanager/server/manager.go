@@ -67,6 +67,8 @@ type Manager struct {
 	}
 	// record update time of each resource group
 	consumptionRecord map[consumptionRecordKey]time.Time
+	// groupRUTrackers tracks per-client RU demand for each resource group.
+	groupRUTrackers map[string]*groupRUTracker
 }
 
 type consumptionRecordKey struct {
@@ -93,6 +95,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			isTiFlash    bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[consumptionRecordKey]time.Time),
+		groupRUTrackers:   make(map[string]*groupRUTracker),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -319,6 +322,23 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 		return res[i].Name < res[j].Name
 	})
 	return res
+}
+
+func (m *Manager) getOrCreateGroupRUTracker(name string) *groupRUTracker {
+	m.RLock()
+	grt := m.groupRUTrackers[name]
+	m.RUnlock()
+	if grt == nil {
+		m.Lock()
+		// Double check the tracker is not created by another goroutine.
+		grt = m.groupRUTrackers[name]
+		if grt == nil {
+			grt = newGroupRUTracker()
+			m.groupRUTrackers[name] = grt
+		}
+		m.Unlock()
+	}
+	return grt
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {
