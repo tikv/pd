@@ -116,7 +116,7 @@ func TestNewKeyspaceGCStateOutput(t *testing.T) {
 	)
 	state.IsKeyspaceLevelGC = false
 
-	got, err := newKeyspaceGCStateOutput(42, state)
+	got, err := newKeyspaceGCStateOutput(42, state, false)
 	require.NoError(t, err)
 	require.Equal(t, uint32(42), got.RequestedKeyspaceID)
 	require.Equal(t, constant.NullKeyspaceID, got.EffectiveKeyspaceID)
@@ -134,7 +134,7 @@ func TestNewLocalGCBarrierOutputsSkipNilEntries(t *testing.T) {
 	got := newLocalGCBarrierOutputs([]*gc.GCBarrierInfo{
 		nil,
 		gc.NewGCBarrierInfo("valid-local", 42, 30*time.Second, time.Time{}),
-	})
+	}, false)
 
 	require.Equal(t, []gcBarrierOutput{
 		{BarrierID: "valid-local", BarrierTS: 42, TTLSeconds: 30},
@@ -145,7 +145,7 @@ func TestNewGlobalGCBarrierOutputsSkipNilEntries(t *testing.T) {
 	got := newGlobalGCBarrierOutputs([]*gc.GlobalGCBarrierInfo{
 		nil,
 		gc.NewGlobalGCBarrierInfo("valid-global", 84, time.Minute, time.Time{}),
-	})
+	}, false)
 
 	require.Equal(t, []gcBarrierOutput{
 		{BarrierID: "valid-global", BarrierTS: 84, TTLSeconds: 60},
@@ -176,7 +176,7 @@ func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
 		},
 	)
 
-	got, err := newAllGCStatesOutput(clusterState)
+	got, err := newAllGCStatesOutput(clusterState, false)
 	require.NoError(t, err)
 	require.Equal(t, []uint32{1, constant.NullKeyspaceID}, []uint32{
 		got.GCStates[0].KeyspaceID,
@@ -229,7 +229,7 @@ func TestNewAllGCStatesOutputFiltersUnifiedGCPlaceholders(t *testing.T) {
 		nil,
 	)
 
-	got, err := newAllGCStatesOutput(clusterState)
+	got, err := newAllGCStatesOutput(clusterState, false)
 	require.NoError(t, err)
 	require.Equal(t, []gcStateOutput{
 		{
@@ -257,7 +257,7 @@ func TestNewAllGCStatesOutputKeepsEmptyGlobalBarrierArray(t *testing.T) {
 		nil,
 	)
 
-	got, err := newAllGCStatesOutput(clusterState)
+	got, err := newAllGCStatesOutput(clusterState, false)
 	require.NoError(t, err)
 	require.NotNil(t, got.GlobalGCBarriers)
 	require.Empty(t, got.GlobalGCBarriers)
@@ -278,7 +278,7 @@ func TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray(t *testing.T) {
 			},
 		)
 
-		got, err := newGlobalGCStateOutput(clusterState)
+		got, err := newGlobalGCStateOutput(clusterState, false)
 		require.NoError(t, err)
 		require.Equal(t, []gcBarrierOutput{
 			{BarrierID: "first-global", BarrierTS: 50, TTLSeconds: 1},
@@ -299,7 +299,7 @@ func TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray(t *testing.T) {
 
 	t.Run("empty", func(t *testing.T) {
 		clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(map[uint32]gc.GCState{}, nil)
-		got, err := newGlobalGCStateOutput(clusterState)
+		got, err := newGlobalGCStateOutput(clusterState, false)
 		require.NoError(t, err)
 		require.NotNil(t, got.GlobalGCBarriers)
 		require.Empty(t, got.GlobalGCBarriers)
@@ -312,14 +312,14 @@ func TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray(t *testing.T) {
 
 func TestGCStateOutputRejectsExcludedBarriers(t *testing.T) {
 	state := gc.NewGCStateWithoutGCBarriers(42, 100, 90)
-	_, err := newKeyspaceGCStateOutput(42, state)
+	_, err := newKeyspaceGCStateOutput(42, state, false)
 	require.ErrorContains(t, err, "failed to read GC barriers for keyspace 42")
 
 	clusterState := gc.NewClusterGCStatesWithoutGlobalGCBarriers(map[uint32]gc.GCState{})
-	_, err = newAllGCStatesOutput(clusterState)
+	_, err = newAllGCStatesOutput(clusterState, false)
 	require.ErrorContains(t, err, "failed to read global GC barriers")
 
-	_, err = newGlobalGCStateOutput(clusterState)
+	_, err = newGlobalGCStateOutput(clusterState, false)
 	require.ErrorContains(t, err, "failed to read global GC barriers")
 }
 
@@ -434,6 +434,117 @@ func TestGCStateGlobalCommand(t *testing.T) {
 	require.NotContains(t, decoded, "txn_safe_point")
 	require.NotContains(t, decoded, "gc_safe_point")
 	require.JSONEq(t, `{"global_gc_barriers":[]}`, output.String())
+}
+
+func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
+	state := gc.NewGCStateWithGCBarriers(
+		42,
+		100,
+		90,
+		[]*gc.GCBarrierInfo{
+			gc.NewGCBarrierInfo("active-local", 50, gc.TTLNeverExpire, time.Time{}),
+			gc.NewGCBarrierInfo("expired-local", 40, 0, time.Time{}),
+		},
+	)
+	state.IsKeyspaceLevelGC = true
+	clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
+		map[uint32]gc.GCState{42: state},
+		[]*gc.GlobalGCBarrierInfo{
+			gc.NewGlobalGCBarrierInfo("active-global", 70, gc.TTLNeverExpire, time.Time{}),
+			gc.NewGlobalGCBarrierInfo("expired-global", 60, 0, time.Time{}),
+		},
+	)
+
+	for _, testCase := range []struct {
+		name       string
+		args       []string
+		wantLocal  []gcBarrierOutput
+		wantGlobal []gcBarrierOutput
+	}{
+		{
+			name: "keyspace-default",
+			args: []string{"keyspace", "42"},
+			wantLocal: []gcBarrierOutput{
+				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
+			},
+		},
+		{
+			name: "keyspace-include-expired",
+			args: []string{"keyspace", "42", "--include-expired"},
+			wantLocal: []gcBarrierOutput{
+				{BarrierID: "expired-local", BarrierTS: 40, TTLSeconds: 0},
+				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
+			},
+		},
+		{
+			name: "all-default",
+			args: []string{"all"},
+			wantLocal: []gcBarrierOutput{
+				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
+			},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
+			},
+		},
+		{
+			name: "all-include-expired",
+			args: []string{"all", "--include-expired"},
+			wantLocal: []gcBarrierOutput{
+				{BarrierID: "expired-local", BarrierTS: 40, TTLSeconds: 0},
+				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
+			},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "expired-global", BarrierTS: 60, TTLSeconds: 0},
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
+			},
+		},
+		{
+			name: "global-default",
+			args: []string{"global"},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
+			},
+		},
+		{
+			name: "global-include-expired",
+			args: []string{"global", "--include-expired"},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "expired-global", BarrierTS: 60, TTLSeconds: 0},
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			reader := &fakeGCStateReader{state: state, clusterState: clusterState}
+			cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+				return reader, nil
+			})
+			output := new(bytes.Buffer)
+			cmd.SetOut(output)
+			cmd.SetErr(output)
+			cmd.SetArgs(testCase.args)
+
+			require.NoError(t, cmd.Execute())
+			switch testCase.args[0] {
+			case "keyspace":
+				var decoded keyspaceGCStateOutput
+				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
+				require.Equal(t, testCase.wantLocal, decoded.GCBarriers)
+			case "all":
+				var decoded allGCStatesOutput
+				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
+				require.Len(t, decoded.GCStates, 1)
+				require.Equal(t, testCase.wantLocal, decoded.GCStates[0].GCBarriers)
+				require.Equal(t, testCase.wantGlobal, decoded.GlobalGCBarriers)
+			case "global":
+				var decoded globalGCStateOutput
+				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
+				require.Equal(t, testCase.wantGlobal, decoded.GlobalGCBarriers)
+			default:
+				require.Fail(t, "unexpected subcommand", testCase.args[0])
+			}
+		})
+	}
 }
 
 func TestGCStateCommandValidatesBeforeCreatingClient(t *testing.T) {
@@ -591,7 +702,11 @@ func TestGCStateCommandHelpContract(t *testing.T) {
 		return nil, errors.New("help must not create a reader")
 	})
 	require.Equal(t, "show keyspace and cluster-wide GC state", cmd.Short)
-	require.Equal(t, "Show effective per-keyspace GC safe points and local barriers, and cluster-wide GC state. Use keyspace for one effective GC scope, global for cluster-wide state, or all for a combined view.", cmd.Long)
+	require.Equal(t, "Show effective per-keyspace GC safe points and local barriers, and cluster-wide GC state. Expired barriers awaiting lazy deletion are hidden by default; use --include-expired to include zero-TTL barriers returned by PD. Use keyspace for one effective GC scope, global for cluster-wide state, or all for a combined view.", cmd.Long)
+	includeExpired := cmd.PersistentFlags().Lookup("include-expired")
+	require.NotNil(t, includeExpired)
+	require.Equal(t, "false", includeExpired.DefValue)
+	require.Equal(t, "include zero-TTL barriers returned by PD, which normally represent expired barriers awaiting lazy deletion", includeExpired.Usage)
 
 	keyspace, _, err := cmd.Find([]string{"keyspace"})
 	require.NoError(t, err)

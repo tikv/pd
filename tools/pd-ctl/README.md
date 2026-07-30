@@ -16,6 +16,17 @@ The details about how to use `pd-ctl` can be found in [PD Control User Guide](ht
 Use `gc-state` to inspect the safe points and barriers that can block GC. The
 command is read-only and emits deterministic JSON for scripts and diffs.
 
+By default, it omits barriers that PD returns with a zero TTL because they
+normally represent expired barriers awaiting lazy deletion. Add
+`--include-expired` to any subcommand to include those barriers in the existing
+`gc_barriers` or `global_gc_barriers` array with `ttl_seconds` set to `0`.
+
+For example, inspect one keyspace and include zero-TTL barriers:
+
+```bash
+pd-ctl gc-state keyspace 42 --include-expired
+```
+
 Inspect one keyspace by its decimal ID:
 
 ```bash
@@ -106,4 +117,6 @@ GC keyspaces share the NullKeyspace scope, so their marker records are not
 reported as separate states. The real NullKeyspace state appears once with its
 safe points and local barriers. When no local or global barriers exist, the
 corresponding arrays are encoded as `[]`. Barrier TTLs use remaining seconds,
-and `9223372036854775807` means that a barrier never expires.
+and `9223372036854775807` means that a barrier never expires. Because PD rounds
+remaining TTLs down to whole seconds, a zero TTL can also represent a barrier
+with less than one second remaining.
