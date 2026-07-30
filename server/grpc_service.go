@@ -231,7 +231,7 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 	})
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
+		client, err := s.getPDForwardedDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +565,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
-			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
+			clientConn, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
 			if err != nil {
 				return errors.WithStack(err)
 			}
@@ -1114,7 +1114,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
 				if err != nil {
 					return err
 				}
@@ -1292,7 +1292,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
 				if err != nil {
 					return err
 				}

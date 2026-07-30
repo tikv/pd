@@ -17,12 +17,15 @@ package tso_test
 import (
 	"context"
 	"io"
+	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -136,6 +139,42 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
 	re.GreaterOrEqual(uint32(timestamp.GetLogical()), s.defaultReq.GetCount())
+}
+
+func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
+	re := s.Require()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	accepted := make(chan bool, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			accepted <- false
+			return
+		}
+		conn.Close()
+		accepted <- true
+	}()
+	defer func() {
+		re.NoError(listener.Close())
+		re.False(<-accepted)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, "http://"+listener.Addr().String())
+
+	_, err = s.pdClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	client, err := s.pdClient.Tso(ctx)
+	re.NoError(err)
+	defer client.CloseSend()
+	re.NoError(client.Send(s.defaultReq))
+	_, err = client.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (s *tsoProxyTestSuite) assertReceiveError(re *require.Assertions, errStr string) {

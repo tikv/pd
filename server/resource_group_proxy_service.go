@@ -72,7 +72,7 @@ func (s *resourceGroupProxyServer) getPDMetadataWriteDelegateClient(ctx context.
 	if s.isLocalRequest(forwardedHost) {
 		return nil, "", nil
 	}
-	client, err := s.getDelegateClient(ctx, forwardedHost)
+	client, err := s.getPDForwardedDelegateClient(ctx, forwardedHost)
 	if err != nil {
 		return nil, "", err
 	}
