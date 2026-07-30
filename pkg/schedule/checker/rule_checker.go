@@ -213,13 +213,10 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 }
 
 func isRegionPlacementSatisfied(region *core.RegionInfo, fit *placement.RegionFit) bool {
-	if len(fit.RuleFits) == 0 || len(fit.OrphanPeers) > 0 {
+	if !fit.IsSatisfied() {
 		return false
 	}
 	for _, rf := range fit.RuleFits {
-		if !rf.IsSatisfied() {
-			return false
-		}
 		if len(rf.Stores) != len(rf.Peers) {
 			return false
 		}
@@ -339,6 +336,16 @@ func (a orphanPeerAction) canProgress() bool {
 	return a.retryable || (a.kind != orphanPeerActionNone && a.schedulable)
 }
 
+func (a orphanPeerAction) withAction(kind orphanPeerActionKind, desc string, peer, peerToRemove *metapb.Peer, schedulable, replacement bool) orphanPeerAction {
+	a.kind = kind
+	a.desc = desc
+	a.peer = peer
+	a.peerToRemove = peerToRemove
+	a.schedulable = schedulable
+	a.replacement = replacement
+	return a
+}
+
 func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placement.RegionFit) orphanPeerAction {
 	if len(fit.OrphanPeers) == 0 {
 		return orphanPeerAction{}
@@ -393,11 +400,7 @@ func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placeme
 	}
 	if !hasUnhealthyFit {
 		peer := fit.OrphanPeers[0]
-		action.kind = orphanPeerActionRemove
-		action.desc = "remove-orphan-peer"
-		action.peer = peer
-		action.schedulable = canRemovePeer(peer)
-		return action
+		return action.withAction(orphanPeerActionRemove, "remove-orphan-peer", peer, nil, canRemovePeer(peer), false)
 	}
 
 	if pinDownPeer != nil {
@@ -420,28 +423,11 @@ func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placeme
 			orphanRole := orphanPeer.GetRole()
 			switch {
 			case orphanRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
-				action.kind = orphanPeerActionPromoteAndRemove
-				action.desc = "replace-down-peer-with-orphan-peer"
-				action.peer = orphanPeer
-				action.peerToRemove = pinDownPeer
-				action.schedulable = true
-				action.replacement = true
-				return action
+				return action.withAction(orphanPeerActionPromoteAndRemove, "replace-down-peer-with-orphan-peer", orphanPeer, pinDownPeer, true, true)
 			case orphanRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
-				action.kind = orphanPeerActionDemoteAndRemove
-				action.desc = "replace-down-peer-with-orphan-peer"
-				action.peer = orphanPeer
-				action.peerToRemove = pinDownPeer
-				action.schedulable = c.cluster.GetSharedConfig().IsUseJointConsensus()
-				action.replacement = true
-				return action
+				return action.withAction(orphanPeerActionDemoteAndRemove, "replace-down-peer-with-orphan-peer", orphanPeer, pinDownPeer, c.cluster.GetSharedConfig().IsUseJointConsensus(), true)
 			case orphanRole == destRole && !dstStore.IsDisconnected():
-				action.kind = orphanPeerActionRemove
-				action.desc = "remove-replaced-orphan-peer"
-				action.peer = pinDownPeer
-				action.schedulable = canRemovePeer(pinDownPeer)
-				action.replacement = true
-				return action
+				return action.withAction(orphanPeerActionRemove, "remove-replaced-orphan-peer", pinDownPeer, nil, canRemovePeer(pinDownPeer), true)
 			}
 		}
 	}
@@ -459,21 +445,13 @@ func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placeme
 	hasHealthyPeer := false
 	for _, orphanPeer := range fit.OrphanPeers {
 		if isPendingPeer(orphanPeer) || isDownPeer(orphanPeer) {
-			action.kind = orphanPeerActionRemove
-			action.desc = "remove-unhealthy-orphan-peer"
-			action.peer = orphanPeer
-			action.schedulable = canRemovePeer(orphanPeer)
-			return action
+			return action.withAction(orphanPeerActionRemove, "remove-unhealthy-orphan-peer", orphanPeer, nil, canRemovePeer(orphanPeer), false)
 		}
 		if hasHealthyPeer && fit.ExtraCount() > 0 {
 			if disconnectedPeer != nil {
 				orphanPeer = disconnectedPeer
 			}
-			action.kind = orphanPeerActionRemove
-			action.desc = "remove-orphan-peer"
-			action.peer = orphanPeer
-			action.schedulable = canRemovePeer(orphanPeer)
-			return action
+			return action.withAction(orphanPeerActionRemove, "remove-orphan-peer", orphanPeer, nil, canRemovePeer(orphanPeer), false)
 		}
 		hasHealthyPeer = true
 	}
