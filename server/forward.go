@@ -452,37 +452,20 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return conn.(*grpc.ClientConn), nil
 }
 
-// getPDForwardedDelegateClient returns a delegate client for a PD address received
-// from the forwarding metadata. Unlike addresses discovered by PD itself, the
-// metadata is controlled by the caller, so it must be restricted to the advertised
-// client URLs of the current PD members before dialing.
+// getPDForwardedDelegateClient returns a delegate client for the PD leader address
+// received from the forwarding metadata. The metadata is controlled by the caller,
+// so it must match an advertised client URL of the current PD leader before dialing.
 func (s *GrpcServer) getPDForwardedDelegateClient(ctx context.Context, forwardedHost string) (*grpc.ClientConn, error) {
-	if memberHasClientURL(s.GetLeader(), forwardedHost) {
-		return s.getDelegateClient(ctx, forwardedHost)
+	leader := s.GetLeader()
+	if leader == nil || len(leader.GetClientUrls()) == 0 {
+		return nil, status.Error(codes.Unavailable, "PD leader is not available")
 	}
-
-	members, err := s.Server.GetMembers()
-	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "failed to get PD members: %v", err)
-	}
-	for _, member := range members {
-		if memberHasClientURL(member, forwardedHost) {
+	for _, clientURL := range leader.GetClientUrls() {
+		if clientURL == forwardedHost {
 			return s.getDelegateClient(ctx, forwardedHost)
 		}
 	}
-	return nil, status.Errorf(codes.InvalidArgument, "forwarded host %q is not a client URL of any PD member", forwardedHost)
-}
-
-func memberHasClientURL(member *pdpb.Member, addr string) bool {
-	if member == nil {
-		return false
-	}
-	for _, clientURL := range member.GetClientUrls() {
-		if clientURL == addr {
-			return true
-		}
-	}
-	return false
+	return nil, status.Errorf(codes.InvalidArgument, "forwarded host %q is not a client URL of the PD leader", forwardedHost)
 }
 
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
