@@ -77,7 +77,7 @@ func TestSyncHistoryRegionStartIndexZeroDoesNotGrowHistoryWindow(t *testing.T) {
 
 	stream := newMockSyncRegionsServer()
 	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
-	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream, 0)
+	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream, 0, true)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	err := syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
@@ -169,7 +169,7 @@ func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 
 	stream := newMockSyncRegionsServer()
-	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0)
+	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0, true)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	lagGauge := regionSyncerDownstreamLagRecordsGauge.WithLabelValues("pd-follower")
 	re.Equal(10.0, promtestutil.ToFloat64(lagGauge))
@@ -250,7 +250,7 @@ func TestSyncFullRegionsKeepsLiveRecordsAppendedDuringCatchUp(t *testing.T) {
 	syncer.history.resetWithIndex(10)
 
 	stream := newBlockingSendStream(2)
-	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0)
+	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0, true)
 	defer syncer.unbindStream("pd-follower", syncStream)
 
 	catchUpRecords := []*core.RegionInfo{
@@ -296,7 +296,7 @@ func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 	syncer.history.resetWithIndex(100)
 
 	stream := newMockSyncRegionsServer()
-	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0)
+	syncStream, startIndex := syncer.bindStreamForSync("pd-follower", stream, 0, true)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	unblockSend := stream.blockSend()
 	done := make(chan error, 1)
@@ -350,7 +350,7 @@ func TestFullSyncMetrics(t *testing.T) {
 	failureSyncer.history = newHistoryBufferWithConfig(1, 1, 1, storage.NewStorageWithMemoryBackend())
 	failureSyncer.history.resetWithIndex(100)
 	failureStream := newMockSyncRegionsServer()
-	failureSyncStream, startIndex := failureSyncer.bindStreamForSync("pd-follower", failureStream, 0)
+	failureSyncStream, startIndex := failureSyncer.bindStreamForSync("pd-follower", failureStream, 0, true)
 	defer failureSyncer.unbindStream("pd-follower", failureSyncStream)
 	unblockSend := failureStream.blockSend()
 	done := make(chan error, 1)
@@ -391,7 +391,7 @@ func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	syncer, _ := newTestRegionSyncer(t)
 	syncer.history.resetWithIndex(10)
 	stream := &testServerStream{}
-	syncStream, _ := syncer.bindStreamForSync(downstream, stream, 10)
+	syncStream, _ := syncer.bindStreamForSync(downstream, stream, 10, true)
 
 	re.Equal(bindBefore+1, promtestutil.ToFloat64(bindCounter))
 	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerDownstreamLagRecordsGauge.WithLabelValues(downstream)))
@@ -411,7 +411,7 @@ func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	timeoutSyncer.sendTimeout = 10 * time.Millisecond
 	timeoutSyncer.history.resetWithIndex(10)
 	blockingStream := newBlockingSendStream(1)
-	timeoutSyncStream, _ := timeoutSyncer.bindStreamForSync("pd-timeout-follower", blockingStream, 10)
+	timeoutSyncStream, _ := timeoutSyncer.bindStreamForSync("pd-timeout-follower", blockingStream, 10, true)
 	defer timeoutSyncer.unbindStream("pd-timeout-follower", timeoutSyncStream)
 	timeoutSyncer.history.record(newTestRegion(2))
 
@@ -485,7 +485,7 @@ func TestIncrementalHistoryReplayOverflowDisconnectsStream(t *testing.T) {
 	syncer.history.record(newHistoryBufferTestRegion(10))
 
 	stream := newMockSyncRegionsServer()
-	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream, 10)
+	syncStream, syncStartIndex := syncer.bindStreamForSync("pd-follower", stream, 10, true)
 	defer syncer.unbindStream("pd-follower", syncStream)
 	unblockSend := stream.blockSend()
 	replayDone := make(chan error, 1)
@@ -583,6 +583,40 @@ func TestSyncExitsWhenRegionSyncerStops(t *testing.T) {
 		return ok && st.Code() == codes.Unavailable
 	})
 	re.Empty(syncer.GetAllDownstreamNames())
+}
+
+func TestSyncAllowsNonPDDownstreamWithoutCreatingMetrics(t *testing.T) {
+	re := require.New(t)
+	const downstream = "router-service"
+	syncer, _ := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
+	stream := newMockSyncRegionsServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startTestRegionSync(ctx, syncer, stream)
+	re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(downstream))
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: &pdpb.Member{
+			Name:       downstream,
+			ClientUrls: []string{"http://127.0.0.1:3379"},
+		},
+	}
+
+	select {
+	case response := <-stream.sendCh:
+		re.NotNil(response)
+	case err := <-done:
+		re.NoError(err)
+	}
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == downstream
+	})
+	re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(downstream))
+
+	cancel()
+	waitTestRegionSyncerUnavailable(re, done)
 }
 
 func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
@@ -1057,7 +1091,7 @@ func TestBindStreamWaitsForAppendHistoryRecordsBoundary(t *testing.T) {
 	bindDoneCh := make(chan struct{})
 	go func() {
 		defer close(bindDoneCh)
-		syncStream, syncStartIndex := syncer.bindStreamForSync("pd2", stream, 13)
+		syncStream, syncStartIndex := syncer.bindStreamForSync("pd2", stream, 13, true)
 		defer syncer.unbindStream("pd2", syncStream)
 		bindResultCh <- syncStartIndex
 	}()

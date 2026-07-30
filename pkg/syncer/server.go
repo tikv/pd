@@ -417,7 +417,7 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 		if clusterID != keypath.ClusterID() {
 			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
-		member, err := s.validateDownstreamMember(request.GetMember())
+		member, collectMetrics, err := s.validateDownstreamMember(request.GetMember())
 		if err != nil {
 			return err
 		}
@@ -426,7 +426,9 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 			zap.Strings("urls", member.GetClientUrls()))
 
 		name := member.GetName()
-		syncStream, syncStartIndex := s.bindStreamForSync(name, stream, request.GetStartIndex())
+		syncStream, syncStartIndex := s.bindStreamForSync(
+			name, stream, request.GetStartIndex(), collectMetrics,
+		)
 		err = s.syncHistoryRegion(ctx, request, syncStream, syncStartIndex)
 		if err != nil {
 			s.unbindStream(name, syncStream)
@@ -447,24 +449,29 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 	}
 }
 
-func (s *RegionSyncer) validateDownstreamMember(requested *pdpb.Member) (*pdpb.Member, error) {
-	if requested == nil || requested.GetMemberId() == 0 || requested.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "region syncer downstream member is incomplete")
+func (s *RegionSyncer) validateDownstreamMember(requested *pdpb.Member) (*pdpb.Member, bool, error) {
+	if requested == nil || requested.GetName() == "" {
+		return nil, false, status.Error(codes.InvalidArgument, "region syncer downstream member is incomplete")
+	}
+	// Router microservices also consume RegionSync without being PD members.
+	// Keep serving them, but do not create a caller-controlled metric label.
+	if requested.GetMemberId() == 0 {
+		return requested, false, nil
 	}
 	members, err := s.server.GetMembers()
 	if err != nil {
-		return nil, status.Error(codes.Unavailable, "failed to load PD members")
+		return nil, false, status.Error(codes.Unavailable, "failed to load PD members")
 	}
 	for _, member := range members {
 		if member.GetMemberId() != requested.GetMemberId() {
 			continue
 		}
 		if member.GetName() != requested.GetName() {
-			return nil, status.Error(codes.PermissionDenied, "region syncer downstream member does not match PD membership")
+			return nil, false, status.Error(codes.PermissionDenied, "region syncer downstream member does not match PD membership")
 		}
-		return member, nil
+		return member, true, nil
 	}
-	return nil, status.Error(codes.PermissionDenied, "region syncer downstream member is not in PD membership")
+	return nil, false, status.Error(codes.PermissionDenied, "region syncer downstream member is not in PD membership")
 }
 
 type syncRegionRequestResult struct {
@@ -727,12 +734,13 @@ func (s *RegionSyncer) bindStreamForSync(
 	name string,
 	stream ServerStream,
 	downstreamStartIndex uint64,
+	collectMetrics bool,
 ) (*regionSyncStream, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	startIndex := s.history.getNextIndex()
 	syncStream := newRegionSyncStream(stream, startIndex)
-	s.bindStreamLocked(name, syncStream, downstreamStartIndex, startIndex)
+	s.bindStreamLocked(name, syncStream, downstreamStartIndex, startIndex, collectMetrics)
 	return syncStream, startIndex
 }
 
@@ -741,13 +749,16 @@ func (s *RegionSyncer) bindStreamLocked(
 	syncStream *regionSyncStream,
 	downstreamStartIndex,
 	leaderNextIndex uint64,
+	collectMetrics bool,
 ) {
 	if oldStream := s.mu.streams[name]; oldStream != nil {
 		oldStream.close()
 		oldStream.deleteDownstreamMetrics()
 		incStreamEventMetrics(streamEventUnbind)
 	}
-	syncStream.setDownstreamMetrics(name, downstreamStartIndex, leaderNextIndex)
+	if collectMetrics {
+		syncStream.setDownstreamMetrics(name, downstreamStartIndex, leaderNextIndex)
+	}
 	s.mu.streams[name] = syncStream
 	incStreamEventMetrics(streamEventBind)
 }
