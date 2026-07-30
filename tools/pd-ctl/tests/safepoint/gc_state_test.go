@@ -69,6 +69,7 @@ type expectedGCStateCommandBarrier struct {
 	barrierID string
 	barrierTS uint64
 	expires   bool
+	expired   bool
 }
 
 func requireGCStateCommandBarriers(
@@ -80,7 +81,9 @@ func requireGCStateCommandBarriers(
 	for i, want := range expected {
 		re.Equal(want.barrierID, actual[i].BarrierID)
 		re.Equal(want.barrierTS, actual[i].BarrierTS)
-		if want.expires {
+		if want.expired {
+			re.Zero(actual[i].TTLSeconds)
+		} else if want.expires {
 			re.Greater(actual[i].TTLSeconds, int64(3500))
 			re.LessOrEqual(actual[i].TTLSeconds, int64(3600))
 		} else {
@@ -173,6 +176,16 @@ func TestGCState(t *testing.T) {
 		now,
 	)
 	re.NoError(err)
+	// Backdate the creation time so the barrier stays persisted until the next
+	// safe-point advancement but is already inactive when the RPC reads it.
+	_, err = manager.SetGCBarrier(
+		keyspaceLevel.Id,
+		"expired-local",
+		230,
+		time.Hour,
+		now.Add(-2*time.Hour),
+	)
+	re.NoError(err)
 
 	_, err = manager.SetGlobalGCBarrier(
 		ctx,
@@ -188,6 +201,14 @@ func TestGCState(t *testing.T) {
 		310,
 		time.Duration(math.MaxInt64),
 		now,
+	)
+	re.NoError(err)
+	_, err = manager.SetGlobalGCBarrier(
+		ctx,
+		"expired-global",
+		330,
+		time.Hour,
+		now.Add(-2*time.Hour),
 	)
 	re.NoError(err)
 
@@ -210,6 +231,19 @@ func TestGCState(t *testing.T) {
 	requireGCStateCommandBarriers(re, keyspaceLevelResponse.GCBarriers, []expectedGCStateCommandBarrier{
 		{barrierID: "a-local", barrierTS: 210},
 		{barrierID: "z-local", barrierTS: 220, expires: true},
+	})
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelID,
+		"--include-expired",
+	)
+	re.NoError(err)
+	var keyspaceLevelWithExpired gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &keyspaceLevelWithExpired), string(output))
+	requireGCStateCommandBarriers(re, keyspaceLevelWithExpired.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-local", barrierTS: 210},
+		{barrierID: "z-local", barrierTS: 220, expires: true},
+		{barrierID: "expired-local", barrierTS: 230, expired: true},
 	})
 
 	output, err = tests.ExecuteCommand(
@@ -272,6 +306,29 @@ func TestGCState(t *testing.T) {
 	})
 
 	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "all", "--include-expired",
+	)
+	re.NoError(err)
+	var allWithExpired gcStateCommandAll
+	re.NoError(json.Unmarshal(output, &allWithExpired), string(output))
+	statesByIDWithExpired := make(map[uint32]gcStateCommandState, len(allWithExpired.GCStates))
+	for _, state := range allWithExpired.GCStates {
+		statesByIDWithExpired[state.KeyspaceID] = state
+	}
+	keyspaceLevelStateWithExpired, ok := statesByIDWithExpired[keyspaceLevel.Id]
+	re.True(ok)
+	requireGCStateCommandBarriers(re, keyspaceLevelStateWithExpired.GCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-local", barrierTS: 210},
+		{barrierID: "z-local", barrierTS: 220, expires: true},
+		{barrierID: "expired-local", barrierTS: 230, expired: true},
+	})
+	requireGCStateCommandBarriers(re, allWithExpired.GlobalGCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-global", barrierTS: 310},
+		{barrierID: "z-global", barrierTS: 320},
+		{barrierID: "expired-global", barrierTS: 330, expired: true},
+	})
+
+	output, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(),
 		"-u",
 		pdAddr,
@@ -291,6 +348,18 @@ func TestGCState(t *testing.T) {
 	re.NoError(json.Unmarshal(output, &global), string(output))
 	re.NotNil(global.GlobalGCBarriers)
 	re.Equal(all.GlobalGCBarriers, global.GlobalGCBarriers)
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "global", "--include-expired",
+	)
+	re.NoError(err)
+	var globalWithExpired gcStateCommandGlobal
+	re.NoError(json.Unmarshal(output, &globalWithExpired), string(output))
+	requireGCStateCommandBarriers(re, globalWithExpired.GlobalGCBarriers, []expectedGCStateCommandBarrier{
+		{barrierID: "a-global", barrierTS: 310},
+		{barrierID: "z-global", barrierTS: 320},
+		{barrierID: "expired-global", barrierTS: 330, expired: true},
+	})
 
 	if kerneltype.IsNextGen() {
 		systemState, ok := statesByID[constant.SystemKeyspaceID]

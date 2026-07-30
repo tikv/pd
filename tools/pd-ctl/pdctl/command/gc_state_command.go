@@ -43,6 +43,8 @@ type gcStateReader interface {
 
 type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
 
+const gcStateIncludeExpiredFlag = "include-expired"
+
 type pdGCStateReader struct {
 	client pd.Client
 }
@@ -194,10 +196,17 @@ func sortGCBarrierOutputs(barriers []gcBarrierOutput) {
 	})
 }
 
-func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo) []gcBarrierOutput {
+func shouldIncludeGCBarrier(ttl time.Duration, includeExpired bool) bool {
+	// Expired barriers are lazily deleted and may still be returned by PD with
+	// a zero TTL. They no longer block GC, so omit them from the effective view
+	// unless the caller explicitly requests the persisted entries.
+	return includeExpired || ttl > 0
+}
+
+func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo, includeExpired bool) []gcBarrierOutput {
 	result := make([]gcBarrierOutput, 0, len(barriers))
 	for _, barrier := range barriers {
-		if barrier == nil {
+		if barrier == nil || !shouldIncludeGCBarrier(barrier.TTL, includeExpired) {
 			continue
 		}
 		result = append(result, gcBarrierOutput{
@@ -210,10 +219,10 @@ func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo) []gcBarrierOutput {
 	return result
 }
 
-func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo) []gcBarrierOutput {
+func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo, includeExpired bool) []gcBarrierOutput {
 	result := make([]gcBarrierOutput, 0, len(barriers))
 	for _, barrier := range barriers {
-		if barrier == nil {
+		if barrier == nil || !shouldIncludeGCBarrier(barrier.TTL, includeExpired) {
 			continue
 		}
 		result = append(result, gcBarrierOutput{
@@ -229,6 +238,7 @@ func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo) []gcBarrierOu
 func newKeyspaceGCStateOutput(
 	requestedKeyspaceID uint32,
 	state gc.GCState,
+	includeExpired bool,
 ) (keyspaceGCStateOutput, error) {
 	barriers, err := state.GetGCBarriers()
 	if err != nil {
@@ -244,11 +254,11 @@ func newKeyspaceGCStateOutput(
 		IsKeyspaceLevelGC:   state.IsKeyspaceLevelGC,
 		TxnSafePoint:        state.TxnSafePoint,
 		GCSafePoint:         state.GCSafePoint,
-		GCBarriers:          newLocalGCBarrierOutputs(barriers),
+		GCBarriers:          newLocalGCBarrierOutputs(barriers, includeExpired),
 	}, nil
 }
 
-func newGCStateOutput(state gc.GCState) (gcStateOutput, error) {
+func newGCStateOutput(state gc.GCState, includeExpired bool) (gcStateOutput, error) {
 	barriers, err := state.GetGCBarriers()
 	if err != nil {
 		return gcStateOutput{}, errors.Annotatef(
@@ -262,11 +272,11 @@ func newGCStateOutput(state gc.GCState) (gcStateOutput, error) {
 		IsKeyspaceLevelGC: state.IsKeyspaceLevelGC,
 		TxnSafePoint:      state.TxnSafePoint,
 		GCSafePoint:       state.GCSafePoint,
-		GCBarriers:        newLocalGCBarrierOutputs(barriers),
+		GCBarriers:        newLocalGCBarrierOutputs(barriers, includeExpired),
 	}, nil
 }
 
-func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, error) {
+func newAllGCStatesOutput(clusterState gc.ClusterGCStates, includeExpired bool) (allGCStatesOutput, error) {
 	states := make([]gcStateOutput, 0, len(clusterState.GCStates))
 	for _, state := range clusterState.GCStates {
 		// Unified-GC keyspaces have marker entries, but their GC state is owned by
@@ -274,7 +284,7 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 		if !state.IsKeyspaceLevelGC && state.KeyspaceID != constant.NullKeyspaceID {
 			continue
 		}
-		converted, err := newGCStateOutput(state)
+		converted, err := newGCStateOutput(state, includeExpired)
 		if err != nil {
 			return allGCStatesOutput{}, err
 		}
@@ -284,7 +294,7 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 		return states[i].KeyspaceID < states[j].KeyspaceID
 	})
 
-	globalOutput, err := newGlobalGCStateOutput(clusterState)
+	globalOutput, err := newGlobalGCStateOutput(clusterState, includeExpired)
 	if err != nil {
 		return allGCStatesOutput{}, err
 	}
@@ -294,14 +304,22 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates) (allGCStatesOutput, e
 	}, nil
 }
 
-func newGlobalGCStateOutput(clusterState gc.ClusterGCStates) (globalGCStateOutput, error) {
+func newGlobalGCStateOutput(clusterState gc.ClusterGCStates, includeExpired bool) (globalGCStateOutput, error) {
 	globalBarriers, err := clusterState.GetGlobalGCBarriers()
 	if err != nil {
 		return globalGCStateOutput{}, errors.Annotate(err, "failed to read global GC barriers")
 	}
 	return globalGCStateOutput{
-		GlobalGCBarriers: newGlobalGCBarrierOutputs(globalBarriers),
+		GlobalGCBarriers: newGlobalGCBarrierOutputs(globalBarriers, includeExpired),
 	}, nil
+}
+
+func getGCStateIncludeExpired(cmd *cobra.Command) (bool, error) {
+	includeExpired, err := cmd.Flags().GetBool(gcStateIncludeExpiredFlag)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return includeExpired, nil
 }
 
 // NewGCStateCommand returns the read-only GC state command.
@@ -314,13 +332,20 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 		Use:   "gc-state",
 		Short: "show keyspace and cluster-wide GC state",
 		Long: "Show effective per-keyspace GC safe points and local barriers, " +
-			"and cluster-wide GC state. Use keyspace for one effective GC " +
+			"and cluster-wide GC state. Expired barriers awaiting lazy deletion " +
+			"are hidden by default; use --include-expired to include zero-TTL " +
+			"barriers returned by PD. Use keyspace for one effective GC " +
 			"scope, global for cluster-wide state, or all for a combined view.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
+	command.PersistentFlags().Bool(
+		gcStateIncludeExpiredFlag,
+		false,
+		"include zero-TTL barriers returned by PD, which normally represent expired barriers awaiting lazy deletion",
+	)
 	command.AddCommand(
 		newGCStateKeyspaceCommand(factory),
 		newGCStateGlobalCommand(factory),
@@ -346,6 +371,10 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			includeExpired, err := getGCStateIncludeExpired(cmd)
+			if err != nil {
+				return err
+			}
 			reader, err := factory(cmd)
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
@@ -361,7 +390,7 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 				return errors.Annotatef(err,
 					"failed to get GC state for keyspace %d", keyspaceID)
 			}
-			output, err := newKeyspaceGCStateOutput(keyspaceID, state)
+			output, err := newKeyspaceGCStateOutput(keyspaceID, state, includeExpired)
 			if err != nil {
 				return err
 			}
@@ -378,6 +407,10 @@ func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
 		Example: "  pd-ctl gc-state global",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			includeExpired, err := getGCStateIncludeExpired(cmd)
+			if err != nil {
+				return err
+			}
 			reader, err := factory(cmd)
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
@@ -393,7 +426,7 @@ func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
 				}
 				return errors.Annotate(err, "failed to get global GC state")
 			}
-			output, err := newGlobalGCStateOutput(clusterState)
+			output, err := newGlobalGCStateOutput(clusterState, includeExpired)
 			if err != nil {
 				return err
 			}
@@ -412,6 +445,10 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 		Example: "  pd-ctl gc-state all",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			includeExpired, err := getGCStateIncludeExpired(cmd)
+			if err != nil {
+				return err
+			}
 			reader, err := factory(cmd)
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
@@ -427,7 +464,7 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 				}
 				return errors.Annotate(err, "failed to get all keyspaces GC states")
 			}
-			output, err := newAllGCStatesOutput(clusterState)
+			output, err := newAllGCStatesOutput(clusterState, includeExpired)
 			if err != nil {
 				return err
 			}
