@@ -466,6 +466,8 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 		storeLoads map[uint64]float64
 		peerLoad   float64
 		exclusive  bool
+		rankV1     bool
+		schedule   bool
 	}{
 		{
 			name: "source below global expectation",
@@ -478,6 +480,7 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 				6: 100,
 			},
 			peerLoad: 5,
+			schedule: true,
 		},
 		{
 			name: "target above global expectation",
@@ -490,6 +493,7 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 				6: 0,
 			},
 			peerLoad: 20,
+			schedule: true,
 		},
 		{
 			name: "implicit exclusive labels",
@@ -503,6 +507,20 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 			},
 			peerLoad:  5,
 			exclusive: true,
+			schedule:  true,
+		},
+		{
+			name: "rank v1 keeps global expectation",
+			storeLoads: map[uint64]float64{
+				1: 20,
+				2: 0,
+				3: 0,
+				4: 0,
+				5: 100,
+				6: 100,
+			},
+			peerLoad: 5,
+			rankV1:   true,
 		},
 	}
 
@@ -510,16 +528,21 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
 			tc, hb := preparePlacementHotScheduler(t, writeType, writePeer)
+			if testCase.rankV1 {
+				hb.conf.setRankFormulaVersion("v1")
+			}
 
 			for id := uint64(1); id <= 6; id++ {
-				labels := map[string]string{"pool": "other"}
-				if id <= 4 {
-					labels["pool"] = "target"
-				} else if testCase.exclusive {
-					labels = map[string]string{"$group": "other"}
-				}
-				if testCase.exclusive && id <= 4 {
-					labels = nil
+				var labels map[string]string
+				if testCase.exclusive {
+					if id > 4 {
+						labels = map[string]string{"$group": "other"}
+					}
+				} else {
+					labels = map[string]string{"pool": "other"}
+					if id <= 4 {
+						labels["pool"] = "target"
+					}
 				}
 				tc.AddLabelsStore(id, 1, labels)
 				tc.UpdateStorageWrittenBytes(id, uint64(testCase.storeLoads[id]*units.MiB*utils.StoreHeartBeatReportInterval))
@@ -533,6 +556,10 @@ func TestHotWriteRegionScheduleWithPlacementScope(t *testing.T) {
 			})
 
 			ops, _ := hb.Schedule(tc, false)
+			if !testCase.schedule {
+				re.Empty(ops)
+				return
+			}
 			re.Len(ops, 1)
 			operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 4)
 		})

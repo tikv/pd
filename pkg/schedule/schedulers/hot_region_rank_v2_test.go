@@ -20,8 +20,10 @@ import (
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -139,6 +141,87 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 	re.True(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
+}
+
+func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T) {
+	for _, testCase := range []struct {
+		name                  string
+		revertTargetMatchesB  bool
+		expectedOperatorCount int
+	}{
+		{name: "valid revert", revertTargetMatchesB: true, expectedOperatorCount: 2},
+		{name: "invalid revert", expectedOperatorCount: 1},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cancel, _, tc, oc := prepareSchedulersTest()
+			defer cancel()
+			tc.SetEnablePlacementRules(true)
+			sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+			re.NoError(err)
+			hb := sche.(*hotScheduler)
+			hb.types = []resourceType{writePeer}
+			hb.conf.setDstToleranceRatio(0.0)
+			hb.conf.setSrcToleranceRatio(0.0)
+			hb.conf.setRankFormulaVersion("v2")
+			hb.conf.setHistorySampleDuration(0)
+			hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+
+			for id, labels := range map[uint64]map[string]string{
+				1: {"b": "yes"},
+				2: {"a": "yes"},
+				3: {"b": "yes"},
+				4: {"a": "yes"},
+				5: {"a": "yes", "b": "yes"},
+			} {
+				if id == 2 && testCase.revertTargetMatchesB {
+					labels["b"] = "yes"
+				}
+				tc.AddLabelsStore(id, 20, labels)
+			}
+			tc.SetStoreBusy(4, true)
+			re.NoError(tc.SetRule(&placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+				Role: placement.Voter, Count: 1,
+				LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+			}))
+			re.NoError(tc.SetRule(&placement.Rule{
+				GroupID: placement.DefaultGroupID, ID: "voter-b",
+				Role: placement.Voter, Count: 2,
+				LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
+			}))
+
+			tc.UpdateStorageWrittenStats(1, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageWrittenStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageWrittenStats(3, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
+			tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+			addRegionInfo(tc, utils.Write, []testRegionInfo{
+				{6, []uint64{3, 2, 1}, 3 * units.MiB, 1.8 * units.MiB, 0},
+				{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+			})
+			mainRegion := tc.GetRegion(6)
+			sourcePeers := append(mainRegion.GetPeers()[:0:0], mainRegion.GetStorePeer(2))
+			for _, item := range tc.ExpiredWriteItems(mainRegion.Clone(core.SetPeers(sourcePeers))) {
+				tc.Update(item, utils.Write)
+			}
+
+			ops, _ := hb.Schedule(tc, false)
+			re.Len(ops, 1)
+			re.True(hb.searchRevertRegions[writePeer])
+			clearPendingInfluence(hb)
+
+			ops, _ = hb.Schedule(tc, false)
+			re.Len(ops, testCase.expectedOperatorCount)
+			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
+			if testCase.revertTargetMatchesB {
+				operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
+			}
+			re.True(hb.searchRevertRegions[writePeer])
+			clearPendingInfluence(hb)
+		})
+	}
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {

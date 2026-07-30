@@ -26,7 +26,7 @@ import (
 type ruleConfig struct {
 	rules                map[[2]string]*Rule   // {group, id} => Rule
 	groups               map[string]*RuleGroup // id => RuleGroup
-	mayRestrictStoreLoad [2]bool
+	mayRestrictStoreLoad [2]bool               // TiKV at index 0, TiFlash at index 1.
 }
 
 func newRuleConfig() *ruleConfig {
@@ -62,6 +62,8 @@ func (c *ruleConfig) adjust() {
 	}
 }
 
+// ruleMayRestrictEngine treats an empty value as a store without an engine label.
+// It reports restriction for non-engine constraints or a partial engine match.
 func ruleMayRestrictEngine(rule *Rule, values ...string) bool {
 	hasOtherConstraint := false
 	for i := range rule.LabelConstraints {

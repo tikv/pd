@@ -98,6 +98,9 @@ func TestMayRestrictStoreLoad(t *testing.T) {
 	setConstraints(LabelConstraint{Key: core.EngineKey, Op: In, Values: []string{core.EngineTiFlash}})
 	re.False(manager.MayRestrictStoreLoad(true))
 	re.False(manager.MayRestrictStoreLoad(false))
+	setConstraints(LabelConstraint{Key: core.EngineKey, Op: NotIn, Values: []string{core.EngineTiFlash}})
+	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
 
 	setConstraints(
 		LabelConstraint{Key: core.EngineKey, Op: In, Values: []string{core.EngineTiFlash}},
@@ -108,6 +111,13 @@ func TestMayRestrictStoreLoad(t *testing.T) {
 
 	setConstraints()
 	re.False(manager.MayRestrictStoreLoad(true))
+	re.False(manager.MayRestrictStoreLoad(false))
+
+	re.NoError(manager.SetRule(&Rule{
+		GroupID: "group", ID: "restricted", Role: Voter, Count: 1,
+		LabelConstraints: []LabelConstraint{{Key: "zone", Op: In, Values: []string{"z1"}}},
+	}))
+	re.True(manager.MayRestrictStoreLoad(true))
 	re.False(manager.MayRestrictStoreLoad(false))
 }
 

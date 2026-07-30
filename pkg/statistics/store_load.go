@@ -107,7 +107,8 @@ func (s *StoreLoadSummary) Add(load *StoreLoad) {
 	}
 }
 
-// Result returns the expectation and normalized standard deviation.
+// Result returns the expectation and normalized standard deviation. Details
+// must be the same store population whose current loads were passed to Add.
 func (s *StoreLoadSummary) Result(details []*StoreLoadDetail) (expect, stddev StoreLoad) {
 	if s.count == 0 {
 		return

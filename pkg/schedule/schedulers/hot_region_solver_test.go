@@ -661,10 +661,14 @@ func TestExpect(t *testing.T) {
 func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	re := require.New(t)
 	details := make(map[uint64]*statistics.StoreLoadDetail)
-	for id, load := range map[uint64]float64{1: 10.5, 2: 9.5, 3: 10, 4: 10, 5: 100, 6: 100} {
+	for id, load := range map[uint64]float64{1: 10.5, 2: 9.5, 3: 10, 4: 10, 5: 100, 6: 100, 7: 200, 8: 300} {
 		pool := "other"
-		if id <= 4 {
+		if id <= 4 || id == 7 {
 			pool = "target"
+		}
+		labels := map[string]string{"pool": pool}
+		if id >= 7 {
+			labels[core.EngineKey] = core.EngineTiFlash
 		}
 		current := statistics.StoreLoad{
 			Loads:        statistics.Loads{load, 10},
@@ -672,7 +676,7 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 			HistoryLoads: statistics.HistoryLoads{{10}, {10}},
 		}
 		details[id] = &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{"pool": pool})},
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, labels)},
 			LoadPred:         current.ToLoadPred(utils.Write, nil),
 		}
 	}
@@ -689,13 +693,54 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	re.Equal(float64(10), scope.expect.Loads[utils.ByteDim])
 	re.Equal([]float64{10}, scope.expect.HistoryLoads[utils.ByteDim])
 	re.InDelta(math.Sqrt(0.125)/10, scope.stddev.Loads[utils.ByteDim], 1e-9)
+	crossEngineRule := &placement.Rule{LabelConstraints: append(rule.LabelConstraints,
+		placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: []string{"other"}})}
+	re.Equal(float64(10), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, true).expect.Loads[utils.ByteDim])
+	re.Equal(float64(200), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, false).expect.Loads[utils.ByteDim])
 	re.False(bs.checkSrcByPriorityAndTolerance(details[1].LoadPred.Min(), &scope.expect, 1.05))
 	re.False(bs.checkSrcHistoryLoadsByPriorityAndTolerance(&details[1].LoadPred.Current, &scope.expect, 1.05))
 
 	bs.cur = &solution{}
 	bs.curScope = scope
 	re.True(bs.isUniformFirstPriority(details[1]))
-	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{{}}, true))
+	unconstrainedRule := &placement.Rule{}
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	cacheSize := len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	equivalentRule := &placement.Rule{GroupID: "other", ID: "same-scope", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{equivalentRule}, true))
+
+	otherRule := &placement.Rule{GroupID: "pd", ID: "other", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"other"}},
+	}}
+	updatedRule := &placement.Rule{GroupID: "pd", ID: "updated", Version: 1, LabelConstraints: rule.LabelConstraints}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true))
+	updatedRule.LabelConstraints = otherRule.LabelConstraints
+	updatedRule.Version++
+	re.Equal(float64(100), bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true).expect.Loads[utils.ByteDim])
+
+	rules := []*placement.Rule{rule, otherRule}
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	cacheSize = len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	targetRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: rule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: rule.LabelConstraints},
+	}
+	otherRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: otherRule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: otherRule.LabelConstraints},
+	}
+	targetScope := bs.getPlacementLoadScope(targetRules, true)
+	otherScope := bs.getPlacementLoadScope(otherRules, true)
+	re.Equal(float64(10), targetScope.expect.Loads[utils.ByteDim])
+	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
 }
 
 func TestRevertRegionPlacementSafeguard(t *testing.T) {
