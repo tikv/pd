@@ -210,21 +210,14 @@ func TestInitialFollowerSyncRequestsFullSnapshotWithoutClearingCompletedState(t 
 	}
 	leaderURL := startTestPDServer(t, pdServer)
 
-	serverCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	regionStorage := storage.NewStorageWithMemoryBackend()
-	cluster := core.NewBasicCluster()
+	syncer, cluster := newFollowerTestSyncer(t, regionStorage)
 	staleRegion := newTestSyncRegion(9, 19)
 	cluster.PutRegion(staleRegion)
 	re.NoError(regionStorage.SaveRegion(staleRegion.GetMeta()))
-	syncer := newFollowerTestSyncer(serverCtx, regionStorage, cluster)
-	syncer.history.resetWithIndex(42)
-	re.NoError(syncer.MarkHistorySynced())
+	markHistorySynced(t, syncer)
 
 	syncer.StartSyncWithLeader(leaderURL)
-	t.Cleanup(func() {
-		syncer.StopSyncWithLeader()
-	})
 	request := mustRecvWithin(
 		t, pdServer.requestCh, 3*time.Second, "initial follower sync request was not received",
 	)
@@ -249,8 +242,6 @@ func TestInitialRegionLoadFailureBlocksSynchronizationUntilRetrySucceeds(t *test
 	}
 	leaderURL := startTestPDServer(t, pdServer)
 
-	serverCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	defaultStorage := storage.NewStorageWithMemoryBackend()
 	localStorage := &loadRegionsFailOnceStorage{
 		Storage: storage.NewStorageWithMemoryBackend(),
@@ -258,15 +249,10 @@ func TestInitialRegionLoadFailureBlocksSynchronizationUntilRetrySucceeds(t *test
 	persisted := newTestSyncRegion(9, 19)
 	re.NoError(localStorage.SaveRegion(persisted.GetMeta()))
 	coreStorage := storage.NewCoreStorage(defaultStorage, localStorage)
-	cluster := core.NewBasicCluster()
-	syncer := newFollowerTestSyncer(serverCtx, coreStorage, cluster)
-	syncer.history.resetWithIndex(42)
-	re.NoError(syncer.MarkHistorySynced())
+	syncer, cluster := newFollowerTestSyncer(t, coreStorage)
+	markHistorySynced(t, syncer)
 
 	syncer.StartSyncWithLeader(leaderURL)
-	t.Cleanup(func() {
-		syncer.StopSyncWithLeader()
-	})
 	select {
 	case <-pdServer.requestCh:
 		re.FailNow("synchronization started before persisted Regions were loaded")
@@ -284,15 +270,12 @@ func TestInitialRegionLoadFailureBlocksSynchronizationUntilRetrySucceeds(t *test
 
 func TestFullSyncWatchdogCoversFirstDestructiveResponse(t *testing.T) {
 	re := require.New(t)
-	pdServer := &firstSnapshotThenBlockPDServer{
-		requestCh:    make(chan int, 2),
-		startIndexCh: make(chan uint64, 2),
-		response:     newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
+	pdServer := &scriptedSyncPDServer{
+		requestCh: make(chan syncRequestEvent, 2),
+		response:  newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
 	}
 	leaderURL := startTestPDServer(t, pdServer)
 
-	serverCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	defaultStorage := storage.NewStorageWithMemoryBackend()
 	localStorage := &blockFirstTxnUntilCanceledStorage{
 		Storage: storage.NewStorageWithMemoryBackend(),
@@ -301,16 +284,11 @@ func TestFullSyncWatchdogCoversFirstDestructiveResponse(t *testing.T) {
 	persisted := newTestSyncRegion(7, 17)
 	re.NoError(localStorage.SaveRegion(persisted.GetMeta()))
 	coreStorage := storage.NewCoreStorage(defaultStorage, localStorage)
-	cluster := core.NewBasicCluster()
-	syncer := newFollowerTestSyncer(serverCtx, coreStorage, cluster)
-	syncer.history.resetWithIndex(42)
-	re.NoError(syncer.MarkHistorySynced())
+	syncer, _ := newFollowerTestSyncer(t, coreStorage)
+	markHistorySynced(t, syncer)
 	syncer.fullSyncProgressTimeout = 50 * time.Millisecond
 
 	syncer.StartSyncWithLeader(leaderURL)
-	t.Cleanup(func() {
-		syncer.StopSyncWithLeader()
-	})
 	mustRecvWithin(
 		t,
 		localStorage.entered,
@@ -324,13 +302,8 @@ func TestFullSyncWatchdogCoversFirstDestructiveResponse(t *testing.T) {
 			3*time.Second,
 			"full sync did not reconnect after first-frame timeout",
 		)
-		re.Equal(expectedRequest, request)
-		re.Zero(mustRecvWithin(
-			t,
-			pdServer.startIndexCh,
-			3*time.Second,
-			"full sync retry did not request a full snapshot",
-		))
+		re.Equal(expectedRequest, request.attempt)
+		re.Zero(request.startIndex)
 	}
 	re.Eventually(func() bool {
 		synced, exists, err := syncer.history.loadSynced()
@@ -343,34 +316,26 @@ func TestFullSyncWatchdogCoversFirstDestructiveResponse(t *testing.T) {
 
 func TestStopDuringFullSyncKeepsFollowerIncomplete(t *testing.T) {
 	re := require.New(t)
-	pdServer := &firstSnapshotThenBlockPDServer{
-		requestCh:    make(chan int, 1),
-		startIndexCh: make(chan uint64, 1),
-		response:     newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
+	pdServer := &scriptedSyncPDServer{
+		requestCh: make(chan syncRequestEvent, 1),
+		response:  newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
 	}
 	leaderURL := startTestPDServer(t, pdServer)
 
-	serverCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	defaultStorage := storage.NewStorageWithMemoryBackend()
 	localStorage := storage.NewStorageWithMemoryBackend()
 	coreStorage := storage.NewCoreStorage(defaultStorage, localStorage)
-	cluster := core.NewBasicCluster()
+	syncer, cluster := newFollowerTestSyncer(t, coreStorage)
 	persisted := newTestSyncRegion(7, 17)
 	cluster.PutRegion(persisted)
 	re.NoError(localStorage.SaveRegion(persisted.GetMeta()))
-	syncer := newFollowerTestSyncer(serverCtx, coreStorage, cluster)
-	syncer.history.resetWithIndex(42)
-	re.NoError(syncer.MarkHistorySynced())
+	markHistorySynced(t, syncer)
 
 	syncer.StartSyncWithLeader(leaderURL)
-	mustRecvWithin(t, pdServer.requestCh, 3*time.Second, "full sync request was not received")
-	re.Zero(mustRecvWithin(
-		t,
-		pdServer.startIndexCh,
-		3*time.Second,
-		"full sync did not start from zero",
-	))
+	request := mustRecvWithin(
+		t, pdServer.requestCh, 3*time.Second, "full sync request was not received",
+	)
+	re.Zero(request.startIndex)
 	re.Eventually(func() bool {
 		return !syncer.IsHistorySynced() &&
 			syncer.history.getNextIndex() == 0 &&
@@ -407,36 +372,24 @@ func TestStopDuringFullSyncKeepsFollowerIncomplete(t *testing.T) {
 
 func TestFullSyncEOFReconnectsInsteadOfStopping(t *testing.T) {
 	re := require.New(t)
-	pdServer := &firstSnapshotThenBlockPDServer{
-		requestCh:    make(chan int, 2),
-		startIndexCh: make(chan uint64, 2),
-		response:     newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
-		closeFirst:   true,
+	pdServer := &scriptedSyncPDServer{
+		requestCh:  make(chan syncRequestEvent, 2),
+		response:   newTestSyncRegionResponse(0, newTestSyncRegion(9, 19).GetMeta()),
+		closeFirst: true,
 	}
 	leaderURL := startTestPDServer(t, pdServer)
 
-	serverCtx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	defaultStorage := storage.NewStorageWithMemoryBackend()
 	localStorage := storage.NewStorageWithMemoryBackend()
 	coreStorage := storage.NewCoreStorage(defaultStorage, localStorage)
-	cluster := core.NewBasicCluster()
-	syncer := newFollowerTestSyncer(serverCtx, coreStorage, cluster)
+	syncer, _ := newFollowerTestSyncer(t, coreStorage)
 	syncer.StartSyncWithLeader(leaderURL)
-	t.Cleanup(func() {
-		syncer.StopSyncWithLeader()
-	})
 	for expectedRequest := 1; expectedRequest <= 2; expectedRequest++ {
 		request := mustRecvWithin(
 			t, pdServer.requestCh, 3*time.Second, "full sync did not reconnect after EOF",
 		)
-		re.Equal(expectedRequest, request)
-		re.Zero(mustRecvWithin(
-			t,
-			pdServer.startIndexCh,
-			3*time.Second,
-			"full sync retry after EOF did not start from zero",
-		))
+		re.Equal(expectedRequest, request.attempt)
+		re.Zero(request.startIndex)
 	}
 	re.False(syncer.IsHistorySynced())
 	re.False(syncer.IsRunning())
@@ -445,72 +398,56 @@ func TestFullSyncEOFReconnectsInsteadOfStopping(t *testing.T) {
 
 func TestFullSyncStorageFailureRetriesFromIncomplete(t *testing.T) {
 	tests := []struct {
-		name                 string
-		failSave             bool
-		failDelete           bool
-		failFlushCall        int
-		failCompletionMarker bool
-		regions              []*metapb.Region
+		name    string
+		failure regionWriteFailure
+		regions []*metapb.Region
 	}{
 		{
-			name:     "save",
-			failSave: true,
-			regions:  []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
+			name:    "save",
+			failure: failRegionSave,
+			regions: []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
 		},
 		{
-			name:          "flush-before-clear",
-			failFlushCall: 1,
-			regions:       []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
+			name:    "flush-before-clear",
+			failure: failFirstFlush,
+			regions: []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
 		},
 		{
-			name:          "flush-before-complete",
-			failFlushCall: 2,
-			regions:       []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
+			name:    "flush-before-complete",
+			failure: failSecondFlush,
+			regions: []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
 		},
 		{
-			name:                 "completion-marker",
-			failCompletionMarker: true,
-			regions:              []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
+			name:    "completion-marker",
+			failure: failCompletionMarker,
+			regions: []*metapb.Region{newTestSyncRegion(9, 19).GetMeta()},
 		},
 		{
-			name:       "delete",
-			failDelete: true,
+			name:    "delete",
+			failure: failRegionDelete,
 			regions: []*metapb.Region{
-				{
-					Id:       9,
-					StartKey: []byte{1},
-					EndKey:   []byte{3},
-					RegionEpoch: &metapb.RegionEpoch{
-						ConfVer: 1,
-						Version: 1,
-					},
-					Peers: []*metapb.Peer{{Id: 19, StoreId: 1}},
-				},
-				{
-					Id:       10,
-					StartKey: []byte{1},
-					EndKey:   []byte{3},
-					RegionEpoch: &metapb.RegionEpoch{
-						ConfVer: 1,
-						Version: 2,
-					},
-					Peers: []*metapb.Peer{{Id: 20, StoreId: 1}},
-				},
+				core.NewTestRegionInfo(
+					9, 1, []byte{1}, []byte{3}, core.WithNewPeerIDs(19),
+				).GetMeta(),
+				core.NewTestRegionInfo(
+					10, 1, []byte{1}, []byte{3},
+					core.WithNewPeerIDs(20), core.SetRegionVersion(2),
+				).GetMeta(),
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			re := require.New(t)
-			pdServer := &retryFullSyncPDServer{
-				requestCh:     make(chan *pdpb.SyncRegionRequest, 2),
-				response:      newTestSyncRegionResponse(0, test.regions...),
-				completeFirst: test.failFlushCall == 2 || test.failCompletionMarker,
+			pdServer := &scriptedSyncPDServer{
+				requestCh:            make(chan syncRequestEvent, 2),
+				response:             newTestSyncRegionResponse(0, test.regions...),
+				snapshotEveryAttempt: true,
+				completeFirst: test.failure == failSecondFlush ||
+					test.failure == failCompletionMarker,
 			}
 			leaderURL := startTestPDServer(t, pdServer)
 
-			serverCtx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
 			defaultStorage := storage.NewStorageWithMemoryBackend()
 			localStorage := &regionWriteFailOnceStorage{
 				Storage: storage.NewStorageWithMemoryBackend(),
@@ -519,27 +456,18 @@ func TestFullSyncStorageFailureRetriesFromIncomplete(t *testing.T) {
 			persisted := newTestSyncRegion(7, 17)
 			re.NoError(localStorage.SaveRegion(persisted.GetMeta()))
 			coreStorage := storage.NewCoreStorage(defaultStorage, localStorage)
-			cluster := core.NewBasicCluster()
-			syncer := newFollowerTestSyncer(serverCtx, coreStorage, cluster)
-			syncer.history.resetWithIndex(42)
-			re.NoError(syncer.MarkHistorySynced())
-			localStorage.flushCalls = 0
-			localStorage.failSave = test.failSave
-			localStorage.failDelete = test.failDelete
-			localStorage.failFlushCall = test.failFlushCall
-			localStorage.failCompletionMarker = test.failCompletionMarker
+			syncer, cluster := newFollowerTestSyncer(t, coreStorage)
+			markHistorySynced(t, syncer)
+			localStorage.setFailure(test.failure)
 
 			syncer.StartSyncWithLeader(leaderURL)
-			t.Cleanup(func() {
-				syncer.StopSyncWithLeader()
-			})
 			request := mustRecvWithin(
 				t,
 				pdServer.requestCh,
 				3*time.Second,
 				"initial full sync request was not received",
 			)
-			re.Zero(request.GetStartIndex())
+			re.Zero(request.startIndex)
 			mustRecvWithin(
 				t,
 				localStorage.failed,
@@ -559,7 +487,7 @@ func TestFullSyncStorageFailureRetriesFromIncomplete(t *testing.T) {
 				3*time.Second,
 				"full sync did not retry after Region write failure",
 			)
-			re.Zero(request.GetStartIndex())
+			re.Zero(request.startIndex)
 			re.Eventually(func() bool {
 				return syncer.IsHistorySynced() &&
 					syncer.IsRunning() &&
@@ -593,8 +521,7 @@ func TestFullSyncClearDoesNotResurrectPendingLevelDBBatch(t *testing.T) {
 	defaultStorage := storage.NewStorageWithMemoryBackend()
 	coreStorage := storage.NewCoreStorage(defaultStorage, regionStorage)
 	re.NotNil(storage.TrySwitchRegionStorage(coreStorage, true))
-	cluster := core.NewBasicCluster()
-	syncer := newFollowerTestSyncer(context.Background(), coreStorage, cluster)
+	syncer, cluster := newFollowerTestSyncer(t, coreStorage)
 	re.NoError(syncer.history.resetWithIndexAndPersist(42))
 	re.NoError(syncer.history.saveSynced(true))
 	syncer.historySynced.Store(true)
@@ -638,18 +565,27 @@ func TestFullSyncClearDoesNotResurrectPendingLevelDBBatch(t *testing.T) {
 }
 
 func newFollowerTestSyncer(
-	ctx context.Context,
+	t *testing.T,
 	clientStorage storage.Storage,
-	cluster *core.BasicCluster,
-) *RegionSyncer {
+) (*RegionSyncer, *core.BasicCluster) {
+	t.Helper()
+	cluster := core.NewBasicCluster()
 	server := mockserver.NewMockServer(
-		ctx,
+		t.Context(),
 		&pdpb.Member{Name: "pd-follower", MemberId: 2},
 		&pdpb.Member{Name: "pd-leader", MemberId: 1},
 		clientStorage,
 		cluster,
 	)
-	return NewRegionSyncer(server)
+	syncer := NewRegionSyncer(server)
+	t.Cleanup(syncer.StopSyncWithLeader)
+	return syncer, cluster
+}
+
+func markHistorySynced(t *testing.T, syncer *RegionSyncer) {
+	t.Helper()
+	syncer.history.resetWithIndex(42)
+	require.NoError(t, syncer.MarkHistorySynced())
 }
 
 func startTestPDServer(t *testing.T, pdServer pdpb.PDServer) string {
@@ -726,59 +662,74 @@ type blockFirstTxnUntilCanceledStorage struct {
 	once    sync.Once
 }
 
+type regionWriteFailure uint8
+
+const (
+	noRegionWriteFailure regionWriteFailure = iota
+	failRegionSave
+	failRegionDelete
+	failFirstFlush
+	failSecondFlush
+	failCompletionMarker
+)
+
 type regionWriteFailOnceStorage struct {
 	storage.Storage
-	mu                   sync.Mutex
-	failSave             bool
-	failDelete           bool
-	failFlushCall        int
-	flushCalls           int
-	failCompletionMarker bool
-	failed               chan struct{}
+	failure    regionWriteFailure
+	flushCalls int
+	failed     chan struct{}
 }
 
 func (s *regionWriteFailOnceStorage) SaveRegion(region *metapb.Region) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failSave {
-		s.failSave = false
-		s.failed <- struct{}{}
-		return errors.New("injected Region save failure")
+	if err := s.failOnce(failRegionSave); err != nil {
+		return err
 	}
 	return s.Storage.SaveRegion(region)
 }
 
 func (s *regionWriteFailOnceStorage) DeleteRegion(region *metapb.Region) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failDelete {
-		s.failDelete = false
-		s.failed <- struct{}{}
-		return errors.New("injected Region delete failure")
+	if err := s.failOnce(failRegionDelete); err != nil {
+		return err
 	}
 	return s.Storage.DeleteRegion(region)
 }
 
 func (s *regionWriteFailOnceStorage) Flush() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.flushCalls++
-	if s.failFlushCall == s.flushCalls {
-		s.failed <- struct{}{}
-		return errors.New("injected Region flush failure")
+	failure := noRegionWriteFailure
+	switch s.flushCalls {
+	case 1:
+		failure = failFirstFlush
+	case 2:
+		failure = failSecondFlush
+	}
+	if err := s.failOnce(failure); err != nil {
+		return err
 	}
 	return s.Storage.Flush()
 }
 
 func (s *regionWriteFailOnceStorage) Save(key, value string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.failCompletionMarker && key == historySyncedKey && value == "true" {
-		s.failCompletionMarker = false
-		s.failed <- struct{}{}
-		return errors.New("injected completion marker failure")
+	if key == historySyncedKey && value == "true" {
+		if err := s.failOnce(failCompletionMarker); err != nil {
+			return err
+		}
 	}
 	return s.Storage.Save(key, value)
+}
+
+func (s *regionWriteFailOnceStorage) setFailure(failure regionWriteFailure) {
+	s.failure = failure
+	s.flushCalls = 0
+}
+
+func (s *regionWriteFailOnceStorage) failOnce(failure regionWriteFailure) error {
+	if failure == noRegionWriteFailure || s.failure != failure {
+		return nil
+	}
+	s.failure = noRegionWriteFailure
+	s.failed <- struct{}{}
+	return errors.New("injected Region storage failure")
 }
 
 func (s *blockFirstTxnUntilCanceledStorage) RunInTxn(
@@ -802,51 +753,23 @@ type captureSyncRequestServer struct {
 	requestCh chan *pdpb.SyncRegionRequest
 }
 
-type firstSnapshotThenBlockPDServer struct {
+type syncRequestEvent struct {
+	attempt    int
+	startIndex uint64
+}
+
+type scriptedSyncPDServer struct {
 	pdpb.UnimplementedPDServer
-	mu           sync.Mutex
-	requests     int
-	requestCh    chan int
-	startIndexCh chan uint64
-	response     *pdpb.SyncRegionResponse
-	closeFirst   bool
+	mu                   sync.Mutex
+	requests             int
+	requestCh            chan syncRequestEvent
+	response             *pdpb.SyncRegionResponse
+	snapshotEveryAttempt bool
+	completeFirst        bool
+	closeFirst           bool
 }
 
-type retryFullSyncPDServer struct {
-	pdpb.UnimplementedPDServer
-	mu            sync.Mutex
-	requests      int
-	requestCh     chan *pdpb.SyncRegionRequest
-	response      *pdpb.SyncRegionResponse
-	completeFirst bool
-}
-
-func (s *firstSnapshotThenBlockPDServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	requestMessage, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.requests++
-	request := s.requests
-	s.mu.Unlock()
-	s.requestCh <- request
-	if s.startIndexCh != nil {
-		s.startIndexCh <- requestMessage.GetStartIndex()
-	}
-	if request == 1 {
-		if err := stream.Send(s.response); err != nil {
-			return err
-		}
-		if s.closeFirst {
-			return nil
-		}
-	}
-	<-stream.Context().Done()
-	return stream.Context().Err()
-}
-
-func (s *retryFullSyncPDServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
+func (s *scriptedSyncPDServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	request, err := stream.Recv()
 	if err != nil {
 		return err
@@ -855,16 +778,22 @@ func (s *retryFullSyncPDServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) er
 	s.requests++
 	attempt := s.requests
 	s.mu.Unlock()
-	s.requestCh <- request
-	if err := stream.Send(s.response); err != nil {
-		return err
+	select {
+	case s.requestCh <- syncRequestEvent{attempt: attempt, startIndex: request.GetStartIndex()}:
+	default:
 	}
-	if attempt == 1 && !s.completeFirst {
-		<-stream.Context().Done()
-		return stream.Context().Err()
+	if attempt == 1 || s.snapshotEveryAttempt {
+		if err := stream.Send(s.response); err != nil {
+			return err
+		}
 	}
-	if err := stream.Send(newTestSyncRegionResponse(uint64(len(s.response.GetRegions())))); err != nil {
-		return err
+	if attempt == 1 && s.closeFirst {
+		return nil
+	}
+	if s.snapshotEveryAttempt && (attempt > 1 || s.completeFirst) {
+		if err := stream.Send(newTestSyncRegionResponse(uint64(len(s.response.GetRegions())))); err != nil {
+			return err
+		}
 	}
 	<-stream.Context().Done()
 	return stream.Context().Err()
@@ -905,9 +834,9 @@ func TestLegacyHistoryMarkerSaveFailureKeepsFollowerNotReady(t *testing.T) {
 	baseStorage := storage.NewStorageWithMemoryBackend()
 	re.NoError(baseStorage.Save(historyKey, "42"))
 	regionStorage := &regionWriteFailOnceStorage{
-		Storage:              baseStorage,
-		failCompletionMarker: true,
-		failed:               make(chan struct{}, 1),
+		Storage: baseStorage,
+		failure: failCompletionMarker,
+		failed:  make(chan struct{}, 1),
 	}
 	server := mockserver.NewMockServer(
 		context.Background(),
@@ -942,21 +871,17 @@ func (s *saveFailKV) Save(key, value string) error {
 func TestFullSyncReplacesNewerCacheAndOlderStorage(t *testing.T) {
 	re := require.New(t)
 	regionStorage := storage.NewStorageWithMemoryBackend()
-	stored := newTestSyncRegion(1, 11).GetMeta()
-	stored.RegionEpoch.Version = 1
+	stored := newTestSyncRegion(1, 11).Clone(core.SetRegionVersion(1)).GetMeta()
 	re.NoError(regionStorage.SaveRegion(stored))
 
-	cached := newTestSyncRegion(1, 11)
-	cached.GetMeta().RegionEpoch.Version = 3
+	cached := newTestSyncRegion(1, 11).Clone(core.SetRegionVersion(3))
 	bc := core.NewBasicCluster()
 	bc.PutRegion(cached)
 	server := mockserver.NewMockServer(context.Background(), nil, nil, regionStorage, bc)
 	syncer := NewRegionSyncer(server)
-	syncer.history.resetWithIndex(42)
-	re.NoError(syncer.MarkHistorySynced())
+	markHistorySynced(t, syncer)
 
-	leader := newTestSyncRegion(1, 11).GetMeta()
-	leader.RegionEpoch.Version = 2
+	leader := newTestSyncRegion(1, 11).Clone(core.SetRegionVersion(2)).GetMeta()
 	handled, fullSyncing := syncer.handleRegionSyncResponse(
 		context.Background(),
 		newTestSyncRegionResponse(0, leader),

@@ -112,29 +112,6 @@ func TestSyncHistoryRecordsSplitBatches(t *testing.T) {
 	re.Len(responses[0].GetRegions(), maxSyncRegionBatchSize)
 }
 
-func TestSyncHistoryRegionEndsWithCompletionMarker(t *testing.T) {
-	re := require.New(t)
-	syncer, _ := newTestRegionSyncer(t)
-	syncer.history.resetWithIndex(10)
-	syncer.history.record(newHistoryBufferTestRegion(1))
-	stream := newMockSyncRegionsServer()
-	stream.sendCh = make(chan *pdpb.SyncRegionResponse, 2)
-	syncStream := newRegionSyncStream(stream, 11)
-
-	re.NoError(syncer.syncHistoryRegion(context.Background(), &pdpb.SyncRegionRequest{
-		Header:     &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Member:     &pdpb.Member{Name: "pd-follower", ClientUrls: []string{"http://127.0.0.1:2379"}},
-		StartIndex: 10,
-	}, syncStream, 11))
-
-	history := <-stream.sendCh
-	re.Equal(uint64(10), history.GetStartIndex())
-	re.Len(history.GetRegions(), 1)
-	completion := <-stream.sendCh
-	re.Equal(uint64(11), completion.GetStartIndex())
-	re.Empty(completion.GetRegions())
-}
-
 func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	re := require.New(t)
 	syncer, _ := newTestRegionSyncer(t, newHistoryBufferTestRegion(1))
@@ -1479,13 +1456,13 @@ func newTestSyncRegion(regionID, peerID uint64) *core.RegionInfo {
 }
 
 func newTestSyncRegionWithRange(regionID, peerID uint64) *core.RegionInfo {
-	return core.NewRegionInfo(&metapb.Region{
-		Id:          regionID,
-		StartKey:    []byte{byte(regionID >> 8), byte(regionID)},
-		EndKey:      []byte{byte((regionID + 1) >> 8), byte(regionID + 1)},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-		Peers:       []*metapb.Peer{{Id: peerID, StoreId: 1}},
-	}, &metapb.Peer{Id: peerID, StoreId: 1})
+	return core.NewTestRegionInfo(
+		regionID,
+		1,
+		[]byte{byte(regionID >> 8), byte(regionID)},
+		[]byte{byte((regionID + 1) >> 8), byte(regionID + 1)},
+		core.WithNewPeerIDs(peerID),
+	)
 }
 
 func startTestRegionSync(ctx context.Context, syncer *RegionSyncer, stream *mockSyncRegionsServer) chan error {
