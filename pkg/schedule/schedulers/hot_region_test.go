@@ -441,16 +441,18 @@ func TestMayUsePlacementScopeIgnoresEngineSeparation(t *testing.T) {
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
 	details := make(map[uint64]*statistics.StoreLoadDetail)
+	bs := &balanceSolver{SchedulerCluster: tc, stLoadDetail: details, placementV2Enabled: true}
 	addStore := func(id uint64, labels map[string]string) {
 		tc.AddLabelsStore(id, 1, labels)
-		details[id] = &statistics.StoreLoadDetail{
+		detail := &statistics.StoreLoadDetail{
 			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(id)},
 		}
+		details[id] = detail
+		bs.recordPlacementRestriction(detail)
 	}
 
 	addStore(1, map[string]string{core.EngineKey: core.EngineTiFlash})
 	addStore(2, nil)
-	bs := &balanceSolver{SchedulerCluster: tc, stLoadDetail: details}
 	require.False(t, bs.mayUsePlacementScope(false))
 	require.False(t, bs.mayUsePlacementScope(true))
 

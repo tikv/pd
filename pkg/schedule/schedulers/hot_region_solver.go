@@ -57,9 +57,11 @@ type balanceSolver struct {
 	curFit *placement.RegionFit
 	// curScope and revertScope contain placement-scoped load statistics. A nil
 	// scope uses the existing engine-wide statistics.
-	curScope            *placementLoadScope
-	revertScope         *placementLoadScope
-	placementScopeCache map[placementScopeKey]*placementLoadScope
+	curScope             *placementLoadScope
+	revertScope          *placementLoadScope
+	placementScopeCache  map[placementScopeKey]*placementLoadScope
+	placementV2Enabled   bool
+	placementCanRestrict [2]bool
 
 	best *solution
 	ops  []*operator.Operator
@@ -101,7 +103,8 @@ func (bs *balanceSolver) init() {
 	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
 	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.getGreatDecRatio(), bs.sche.conf.getMinorDecRatio()
-	switch bs.sche.conf.getRankFormulaVersion() {
+	rankFormulaVersion := bs.sche.conf.getRankFormulaVersion()
+	switch rankFormulaVersion {
 	case "v1":
 		bs.rank = initRankV1(bs)
 	default:
@@ -110,6 +113,11 @@ func (bs *balanceSolver) init() {
 
 	// Init store load detail according to the type.
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
+	bs.placementV2Enabled = bs.GetSchedulerConfig().IsPlacementRulesEnabled() && rankFormulaVersion == "v2"
+	if bs.placementV2Enabled {
+		bs.placementCanRestrict[0] = bs.GetRuleManager().MayRestrictStoreLoad(true)
+		bs.placementCanRestrict[1] = bs.GetRuleManager().MayRestrictStoreLoad(false)
+	}
 
 	bs.maxSrc = &statistics.StoreLoad{}
 	bs.minDst = &statistics.StoreLoad{HotPeerCount: math.MaxFloat64}
@@ -121,6 +129,9 @@ func (bs *balanceSolver) init() {
 	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
 	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
 	for _, detail := range bs.stLoadDetail {
+		if bs.placementV2Enabled {
+			bs.recordPlacementRestriction(detail)
+		}
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
 		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
 		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
@@ -221,36 +232,15 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	snapshotFilter := filter.NewSnapshotSendFilter(bs.GetStores(), constant.Medium)
 	affinityFilter := filter.NewAffinityFilter(bs.SchedulerCluster)
 	splitThresholds := bs.sche.conf.getSplitThresholds()
-	// Placement-scoped ranking is a rank-v2 feature; rank v1 keeps its existing global behavior.
-	placementV2Enabled := bs.GetSchedulerConfig().IsPlacementRulesEnabled() && bs.sche.conf.getRankFormulaVersion() == "v2"
-	var placementChecked, placementCanRestrict [2]bool
-	mayUsePlacementScope := func(store *statistics.StoreLoadDetail) bool {
-		if !placementV2Enabled {
-			return false
-		}
-		engine := 0
-		if !store.IsTiKV() {
-			engine = 1
-		}
-		if !placementChecked[engine] {
-			placementCanRestrict[engine] = bs.mayUsePlacementScope(store.IsTiKV())
-			placementChecked[engine] = true
-		}
-		return placementCanRestrict[engine]
-	}
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		usePlacementScope := mayUsePlacementScope(srcStore)
-		globalSourceFailure := bs.sourceStoreFailure(srcStore, nil)
-		sourceFailure := globalSourceFailure
-		sourceResultRecorded := false
-		if !usePlacementScope {
-			bs.recordSourceStoreResult(sourceFailureOrSuccess(sourceFailure), srcStoreID)
-			sourceResultRecorded = true
-			if sourceFailure != "" {
-				continue
-			}
+		usePlacementScope := bs.mayUsePlacementScope(srcStore.IsTiKV())
+		sourceResultRecorded := !usePlacementScope
+		var globalSourceFailure, sourceFailure string
+		if usePlacementScope {
+			globalSourceFailure = bs.sourceStoreFailure(srcStore, nil)
+			sourceFailure = globalSourceFailure
 		}
 		checkedRegion := false
 		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
@@ -306,11 +296,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						revertRegion, revertFit := bs.getRegion(revertPeerStat, dstStoreID)
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) ||
-							placementV2Enabled && !bs.isRevertRegionValid(revertRegion, revertFit) {
+							bs.placementV2Enabled && !bs.isRevertRegionValid(revertRegion, revertFit) {
 							continue
 						}
 						bs.revertScope = nil
-						if mayUsePlacementScope(dstStore) {
+						if bs.mayUsePlacementScope(dstStore.IsTiKV()) {
 							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
 						}
 						if bs.revertScope != nil && (bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
@@ -459,6 +449,8 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 }
 
 // filterSrcStores selects stores with hot peers that support the resource type.
+// The global load safeguards are deferred only when placement may narrow the
+// store population for the engine.
 func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail)
 	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
@@ -473,6 +465,13 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 		}
 		if len(detail.HotPeers) == 0 {
 			continue
+		}
+		if !bs.mayUsePlacementScope(detail.IsTiKV()) {
+			failure := bs.sourceStoreFailure(detail, nil)
+			bs.recordSourceStoreResult(sourceFailureOrSuccess(failure), id)
+			if failure != "" {
+				continue
+			}
 		}
 		ret[id] = detail
 	}
@@ -886,22 +885,32 @@ func (bs *balanceSolver) prepareForRegion(region *core.RegionInfo, fit *placemen
 	return bs.getPlacementLoadScope(rules, source.IsTiKV())
 }
 
-func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
-	if bs.GetRuleManager().MayRestrictStoreLoad(isTiKV) {
-		return true
+func (bs *balanceSolver) recordPlacementRestriction(detail *statistics.StoreLoadDetail) {
+	isTiKV := detail.IsTiKV()
+	engine := 0
+	if !isTiKV {
+		engine = 1
+	}
+	if bs.placementCanRestrict[engine] {
+		return
 	}
 	var constraints []placement.LabelConstraint
 	if !isTiKV {
-		constraints = []placement.LabelConstraint{
-			{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}},
-		}
+		constraints = []placement.LabelConstraint{{Key: core.EngineKey, Op: placement.In, Values: []string{core.EngineTiFlash}}}
 	}
-	for _, detail := range bs.stLoadDetail {
-		if detail.IsTiKV() == isTiKV && !placement.MatchLabelConstraints(detail.StoreInfo, constraints) {
-			return true
-		}
+	if !placement.MatchLabelConstraints(detail.StoreInfo, constraints) {
+		bs.placementCanRestrict[engine] = true
 	}
-	return false
+}
+
+func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
+	if !bs.placementV2Enabled {
+		return false
+	}
+	if isTiKV {
+		return bs.placementCanRestrict[0]
+	}
+	return bs.placementCanRestrict[1]
 }
 
 // getPlacementLoadScope calculates local safeguards only when the placement
