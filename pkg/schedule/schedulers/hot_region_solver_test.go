@@ -36,6 +36,39 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
+var benchmarkBalanceSolvers [2]*balanceSolver
+
+func BenchmarkNewBalanceReadSolvers(b *testing.B) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	b.Cleanup(cancel)
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+	if err != nil {
+		b.Fatal(err)
+	}
+	hot := scheduler.(*hotScheduler)
+	for id := uint64(1); id <= 1000; id++ {
+		detail := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{
+					"zone": "z1",
+					"rack": "r1",
+					"host": "h1",
+				}),
+			},
+			LoadPred: (statistics.StoreLoad{}).ToLoadPred(utils.Read, nil),
+		}
+		hot.stLoadInfos[readLeader][id] = detail
+		hot.stLoadInfos[readPeer][id] = detail
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkBalanceSolvers[0], benchmarkBalanceSolvers[1] = newBalanceReadSolvers(hot, tc)
+	}
+}
+
 func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

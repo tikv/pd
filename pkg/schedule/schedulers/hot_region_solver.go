@@ -96,7 +96,12 @@ type placementLoadScope struct {
 	stddev statistics.StoreLoad
 }
 
-func (bs *balanceSolver) init() {
+type placementLoadState struct {
+	enabled     bool
+	canRestrict [2]bool
+}
+
+func (bs *balanceSolver) init(placementState *placementLoadState) {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
 	bs.maxPeerNum = bs.sche.conf.getMaxPeerNumber()
@@ -113,10 +118,15 @@ func (bs *balanceSolver) init() {
 
 	// Init store load detail according to the type.
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
-	bs.placementV2Enabled = bs.GetSchedulerConfig().IsPlacementRulesEnabled() && rankFormulaVersion == "v2"
-	if bs.placementV2Enabled {
-		bs.placementCanRestrict[0] = bs.GetRuleManager().MayRestrictStoreLoad(true)
-		bs.placementCanRestrict[1] = bs.GetRuleManager().MayRestrictStoreLoad(false)
+	if placementState == nil {
+		bs.placementV2Enabled = bs.GetSchedulerConfig().IsPlacementRulesEnabled() && rankFormulaVersion == "v2"
+		if bs.placementV2Enabled {
+			bs.placementCanRestrict[0] = bs.GetRuleManager().MayRestrictStoreLoad(true)
+			bs.placementCanRestrict[1] = bs.GetRuleManager().MayRestrictStoreLoad(false)
+		}
+	} else {
+		bs.placementV2Enabled = placementState.enabled
+		bs.placementCanRestrict = placementState.canRestrict
 	}
 
 	bs.maxSrc = &statistics.StoreLoad{}
@@ -128,8 +138,9 @@ func (bs *balanceSolver) init() {
 
 	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
 	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
+	checkPlacementRestriction := placementState == nil && bs.placementV2Enabled
 	for _, detail := range bs.stLoadDetail {
-		if bs.placementV2Enabled {
+		if checkPlacementRestriction {
 			bs.recordPlacementRestriction(detail)
 		}
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
@@ -177,13 +188,23 @@ func (bs *balanceSolver) getPriorities() []string {
 }
 
 func newBalanceSolver(sche *hotScheduler, cluster sche.SchedulerCluster, rwTy utils.RWType, opTy opType) *balanceSolver {
+	return newBalanceSolverWithPlacementState(sche, cluster, rwTy, opTy, nil)
+}
+
+func newBalanceSolverWithPlacementState(
+	sche *hotScheduler,
+	cluster sche.SchedulerCluster,
+	rwTy utils.RWType,
+	opTy opType,
+	placementState *placementLoadState,
+) *balanceSolver {
 	bs := &balanceSolver{
 		SchedulerCluster: cluster,
 		sche:             sche,
 		rwTy:             rwTy,
 		opTy:             opTy,
 	}
-	bs.init()
+	bs.init(placementState)
 	return bs
 }
 

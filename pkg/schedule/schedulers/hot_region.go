@@ -347,10 +347,21 @@ func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	return true
 }
 
+func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
+	// The read-peer population contains every TiKV store considered by the
+	// read-leader solver, so both solvers can share the placement precheck.
+	peerSolver = newBalanceSolver(s, cluster, utils.Read, movePeer)
+	placementState := &placementLoadState{
+		enabled:     peerSolver.placementV2Enabled,
+		canRestrict: peerSolver.placementCanRestrict,
+	}
+	leaderSolver = newBalanceSolverWithPlacementState(s, cluster, utils.Read, transferLeader, placementState)
+	return leaderSolver, peerSolver
+}
+
 func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(s, cluster, utils.Read, transferLeader)
+	leaderSolver, peerSolver := newBalanceReadSolvers(s, cluster)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		return nil
