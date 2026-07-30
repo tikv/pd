@@ -418,6 +418,7 @@ var ttlConfig = map[string]any{
 	"schedule.hot-region-schedule-limit":      999,
 	"schedule.replica-schedule-limit":         999,
 	"schedule.merge-schedule-limit":           999,
+	"schedule.split-scatter-schedule-limit":   999,
 	"schedule.enable-tikv-split-region":       false,
 }
 
@@ -436,6 +437,7 @@ type ttlConfigInterface interface {
 	GetHotRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
+	GetSplitScatterScheduleLimit() uint64
 	IsTikvRegionSplitEnabled() bool
 }
 
@@ -459,6 +461,7 @@ func assertTTLConfig(
 		equality(uint64(999), options.GetHotRegionScheduleLimit())
 		equality(uint64(999), options.GetReplicaScheduleLimit())
 		equality(uint64(999), options.GetMergeScheduleLimit())
+		equality(uint64(999), options.GetSplitScatterScheduleLimit())
 		equality(false, options.IsTikvRegionSplitEnabled())
 	}
 	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())

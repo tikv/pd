@@ -340,6 +340,11 @@ func (o *PersistConfig) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistConfig) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLUintOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
+}
+
 // GetLowSpaceRatio returns the low space ratio.
 func (o *PersistConfig) GetLowSpaceRatio() float64 {
 	return o.GetScheduleConfig().LowSpaceRatio

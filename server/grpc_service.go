@@ -1861,6 +1861,8 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		}
 		cli := forwardCli.getClient()
 		if cli != nil {
+			// TODO(split-scatter): propagate split reason and support load-based split-scatter
+			// after scheduling-service/NEXT_GEN path is explicitly in scope.
 			req := &schedulingpb.AskBatchSplitRequest{
 				Header: &schedulingpb.RequestHeader{
 					ClusterId: request.GetHeader().GetClusterId(),

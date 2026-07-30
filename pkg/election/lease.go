@@ -38,23 +38,45 @@ const (
 // The way to gain and maintain leadership is to update and keep the lease alive continuously.
 type Lease struct {
 	// purpose is used to show what this election for
-	Purpose string
+	purpose string
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
-	ID     atomic.Value // store as clientv3.LeaseID
+	id     atomic.Value // store as clientv3.LeaseID
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
+	metrics      leaseMetrics
 }
 
 // NewLease creates a new Lease instance.
 func NewLease(client *clientv3.Client, purpose string) *Lease {
 	return &Lease{
-		Purpose: purpose,
+		purpose: purpose,
 		client:  client,
 		lease:   clientv3.NewLease(client),
+		metrics: newLeaseMetrics(purpose),
 	}
+}
+
+func (l *Lease) setID(id clientv3.LeaseID) {
+	if l == nil {
+		return
+	}
+	l.id.Store(id)
+}
+
+// GetID returns the underlying etcd lease ID. It returns 0 if the lease has not
+// been granted yet.
+func (l *Lease) GetID() clientv3.LeaseID {
+	if l == nil {
+		return 0
+	}
+	loaded := l.id.Load()
+	if loaded == nil {
+		return 0
+	}
+	return loaded.(clientv3.LeaseID)
 }
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
@@ -70,12 +92,18 @@ func (l *Lease) Grant(leaseTimeout int64) error {
 		return errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
 	}
 	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
+		log.Warn("lease grants too slow",
+			zap.Duration("cost", cost),
+			zap.String("purpose", l.purpose))
 	}
-	log.Info("lease granted", zap.Int64("lease-id", int64(leaseResp.ID)), zap.Int64("lease-timeout", leaseTimeout), zap.String("purpose", l.Purpose))
-	l.ID.Store(leaseResp.ID)
+	log.Info("lease granted",
+		zap.Int64("lease-id", int64(leaseResp.ID)),
+		zap.Int64("lease-timeout", leaseTimeout),
+		zap.String("purpose", l.purpose))
+	l.setID(leaseResp.ID)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
+	localTTLRemaining.register(l)
 	return nil
 }
 
@@ -84,17 +112,18 @@ func (l *Lease) Close() error {
 	if l == nil {
 		return nil
 	}
+	localTTLRemaining.unregister(l)
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()
-	var leaseID clientv3.LeaseID
-	if l.ID.Load() != nil {
-		leaseID = l.ID.Load().(clientv3.LeaseID)
-	}
+	leaseID := l.GetID()
 	if _, err := l.lease.Revoke(ctx, leaseID); err != nil {
-		log.Error("revoke lease failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
+		log.Error("revoke lease failed",
+			zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", int64(leaseID)),
+			errs.ZapError(err))
 	}
 	return l.lease.Close()
 }
@@ -102,10 +131,18 @@ func (l *Lease) Close() error {
 // IsExpired checks if the lease is expired. If it returns true,
 // current leader should step down and try to re-elect again.
 func (l *Lease) IsExpired() bool {
-	if l == nil || l.expireTime.Load() == nil {
-		return true
+	return time.Now().After(l.loadExpireTime())
+}
+
+func (l *Lease) loadExpireTime() time.Time {
+	if l == nil {
+		return typeutil.ZeroTime
 	}
-	return time.Now().After(l.expireTime.Load().(time.Time))
+	expireTime, ok := l.expireTime.Load().(time.Time)
+	if !ok {
+		return typeutil.ZeroTime
+	}
+	return expireTime
 }
 
 // KeepAlive auto renews the lease and update expireTime.
@@ -118,19 +155,33 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
-	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
+	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
-	var maxExpire time.Time
+	var (
+		maxExpire        time.Time
+		lastResponseTime time.Time
+	)
 	timer := time.NewTimer(l.leaseTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case t := <-timeCh:
+			now := time.Now()
+			if !lastResponseTime.IsZero() {
+				l.metrics.responseInterval.Observe(now.Sub(lastResponseTime).Seconds())
+			}
+			lastResponseTime = now
 			if t.After(maxExpire) {
 				maxExpire = t
 				// Check again to make sure the `expireTime` still needs to be updated.
 				select {
 				case <-ctx.Done():
+					log.Info("lease keep alive canceled while applying keepalive response",
+						zap.String("purpose", l.purpose),
+						zap.Time("last-response-time", lastResponseTime),
+						zap.Time("max-expire", maxExpire),
+						zap.Error(ctx.Err()))
+					l.metrics.contextCanceled.Inc()
 					return
 				default:
 					l.expireTime.Store(t)
@@ -147,9 +198,30 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			// https://pkg.go.dev/time@master#Timer.Reset
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
+			actualExpire := l.loadExpireTime()
+			// The keepalive timeout can fire concurrently with a caller-initiated
+			// cancellation. Treat that race as a clean shutdown so we don't
+			// over-count `lease_expired`.
+			if ctx.Err() != nil {
+				log.Info("lease keep alive timed out during caller cancellation",
+					zap.Duration("timeout-duration", l.leaseTimeout),
+					zap.Time("actual-expire", actualExpire),
+					zap.String("purpose", l.purpose),
+					zap.Error(ctx.Err()))
+				l.metrics.contextCanceled.Inc()
+				return
+			}
+			l.metrics.leaseExpired.Inc()
+			log.Info("keep alive lease too slow",
+				zap.Duration("timeout-duration", l.leaseTimeout),
+				zap.Time("actual-expire", actualExpire),
+				zap.String("purpose", l.purpose))
 			return
 		case <-ctx.Done():
+			log.Info("lease keep alive canceled by caller",
+				zap.String("purpose", l.purpose),
+				zap.Error(ctx.Err()))
+			l.metrics.contextCanceled.Inc()
 			return
 		}
 	}
@@ -164,44 +236,80 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
-		log.Info("start lease keep alive worker", zap.Duration("interval", interval), zap.String("purpose", l.Purpose))
-		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
-		lastTime := time.Now()
+		logger := log.With(zap.String("purpose", l.purpose),
+			zap.Int64("lease-id", int64(l.GetID())),
+			zap.Duration("interval", interval))
+		logger.Info("start lease keep alive worker")
+		defer logger.Info("stop lease keep alive worker")
+
+		// Although it's very unlikely, under extreme conditions (such as multiple `KeepAliveOnce`
+		// goroutines triggered in a short period of time) there may be race condition updates,
+		// so atomic.Value is used here.
+		var lastTime atomic.Value
+		lastTime.Store(time.Now())
 		for {
+			// Record the start time outside the later `KeepAliveOnce` goroutine
+			// to avoid being affected by the potential runtime schedule delay.
 			start := time.Now()
-			if start.Sub(lastTime) > interval*2 {
-				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
-			}
-			go func(start time.Time) {
+			go func() {
 				defer logutil.LogPanic()
+
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
-				var leaseID clientv3.LeaseID
-				if l.ID.Load() != nil {
-					leaseID = l.ID.Load().(clientv3.LeaseID)
+				// Record the start time of the `KeepAliveOnce` request to track the request duration
+				// and calculate the tick interval between consecutive `KeepAliveOnce` requests later.
+				requestStart := time.Now()
+				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
+				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
+
+				// Record the duration of the `KeepAliveOnce` request.
+				l.metrics.observeKeepAliveRequestDurationMetrics(time.Since(requestStart), err)
+				// Record the interval between the consecutive `KeepAliveOnce` requests.
+				tickInterval := requestStart.Sub(lastRequestStart)
+				l.metrics.tickInterval.Observe(tickInterval.Seconds())
+				// If the interval is too long, log a warning to indicate the potential runtime schedule delay.
+				if tickInterval > interval*2 {
+					logger.Warn("the interval between keeping alive lease is too long",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Time("last-time", lastRequestStart),
+						zap.Duration("tick-interval", tickInterval))
 				}
-				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
+
 				if err != nil {
-					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
+					logger.Warn("lease keep alive failed",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						errs.ZapError(err))
 					return
 				}
-				if res.TTL > 0 {
-					expire := start.Add(time.Duration(res.TTL) * time.Second)
-					select {
-					case ch <- expire:
-					// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
-					case <-ctx.Done():
-					}
-				} else {
-					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
+				// KeepAliveOnce currently returns ErrLeaseNotFound for a non-positive
+				// TTL. Keep this as a defensive guard for mocked or custom lease
+				// implementations that may return a successful response with an invalid TTL.
+				if res.TTL <= 0 {
+					logger.Error("lease keep alive failed with an invalid ttl value received",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Int64("ttl", res.TTL))
+					l.metrics.invalidTTL.Inc()
+					return
 				}
-			}(start)
+				expire := start.Add(time.Duration(res.TTL) * time.Second)
+				select {
+				case ch <- expire:
+				// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
+				case <-ctx.Done():
+					logger.Info("lease keep alive once exit",
+						zap.Time("start", start),
+						zap.Time("current-time", requestStart),
+						zap.Time("expire", expire))
+				}
+			}()
 
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				lastTime = start
 			}
 		}
 	}()

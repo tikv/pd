@@ -193,6 +193,18 @@ func (o *PersistOptions) IsPlacementRulesEnabled() bool {
 	return o.GetReplicationConfig().EnablePlacementRules
 }
 
+// GetSplitScatterScheduleLimit returns the limit for split-scatter schedule.
+func (o *PersistOptions) GetSplitScatterScheduleLimit() uint64 {
+	return o.getTTLNumberOr(sc.SplitScatterScheduleLimitKey, o.GetScheduleConfig().SplitScatterScheduleLimit)
+}
+
+// SetSplitScatterScheduleLimit sets the limit for split-scatter schedule.
+func (o *PersistOptions) SetSplitScatterScheduleLimit(limit uint64) {
+	v := o.GetScheduleConfig().Clone()
+	v.SplitScatterScheduleLimit = limit
+	o.SetScheduleConfig(v)
+}
+
 // SetPlacementRuleEnabled set PlacementRuleEnabled
 func (o *PersistOptions) SetPlacementRuleEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()
@@ -239,6 +251,7 @@ var supportedTTLConfigs = []string{
 	sc.ReplicaRescheduleLimitKey,
 	sc.MergeScheduleLimitKey,
 	sc.HotRegionScheduleLimitKey,
+	sc.SplitScatterScheduleLimitKey,
 	sc.SchedulerMaxWaitingOperatorKey,
 	sc.EnableLocationReplacement,
 	sc.EnableTiKVSplitRegion,

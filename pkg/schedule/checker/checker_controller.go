@@ -72,6 +72,7 @@ type Controller struct {
 	mergeChecker            *MergeChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
+	splitScatter            *splitScatterController
 	pendingProcessedRegions *cache.TTLUint64
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
 	patrolRegionContext     *PatrolRegionContext
@@ -96,7 +97,7 @@ type Controller struct {
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
-	return &Controller{
+	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
 		conf:                    conf,
@@ -114,6 +115,8 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
+	c.splitScatter = newSplitScatterController(ctx, cluster, opController, c.AddPendingProcessedRegions)
+	return c
 }
 
 // PatrolRegions is used to scan regions.
@@ -151,6 +154,8 @@ func (c *Controller) PatrolRegions() {
 			c.checkPriorityRegions()
 			// Check pending processed regions first.
 			c.checkPendingProcessedRegions()
+
+			c.splitScatter.dispatchSplitScatterRegions()
 
 			key, regions = c.checkRegions(key)
 			if len(regions) == 0 {
