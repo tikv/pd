@@ -181,32 +181,40 @@ func decodeResourceGroup(body io.Reader, group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	normalized, rawKeyspaceID, err := normalizeResourceGroupJSON(data)
+	legacyJSON, rawKeyspaceID, err := splitResourceGroupJSON(data)
 	if err != nil {
 		return err
 	}
-	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(normalized), group); err != nil {
+	// Keep the legacy encoding/json behavior for all existing ResourceGroup
+	// fields. In particular, it matches JSON field names case-insensitively.
+	if err := json.Unmarshal(legacyJSON, group); err != nil {
 		return err
+	}
+	if rawKeyspaceID != nil {
+		keyspaceID, err := decodeKeyspaceIDJSON(rawKeyspaceID)
+		if err != nil {
+			return err
+		}
+		group.KeyspaceId = keyspaceID
 	}
 	return validateResourceGroupKeyspaceID(group, rawKeyspaceID)
 }
 
-func normalizeResourceGroupJSON(data []byte) ([]byte, json.RawMessage, error) {
+func splitResourceGroupJSON(data []byte) ([]byte, json.RawMessage, error) {
 	if isJSONNull(data) {
 		return data, nil, nil
 	}
-	// ShouldBindJSON matched keyspace_id case-insensitively before it became a
-	// protobuf oneof. Normalize that field while keeping protobuf JSON decoding
-	// for enum values and the rest of ResourceGroup.
+	// KeyspaceIDValue became a protobuf oneof, which encoding/json cannot decode.
+	// Remove it from the legacy payload and decode it separately with jsonpb.
 	fields, err := decodeJSONObjectFields(data)
 	if err != nil {
 		return nil, nil, err
 	}
-	normalized := make(map[string]json.RawMessage, len(fields))
+	legacyFields := make([]jsonObjectField, 0, len(fields))
 	var rawKeyspaceID json.RawMessage
 	for _, field := range fields {
 		if !isKeyspaceIDJSONField(field.name) {
-			normalized[field.name] = field.value
+			legacyFields = append(legacyFields, field)
 			continue
 		}
 		if rawKeyspaceID != nil {
@@ -216,15 +224,29 @@ func normalizeResourceGroupJSON(data []byte) ([]byte, json.RawMessage, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		normalized["keyspace_id"] = rawKeyspaceID
 	}
-	normalizedData, err := json.Marshal(normalized)
-	return normalizedData, rawKeyspaceID, err
+	return marshalJSONObjectFields(legacyFields), rawKeyspaceID, nil
 }
 
 type jsonObjectField struct {
 	name  string
 	value json.RawMessage
+}
+
+func marshalJSONObjectFields(fields []jsonObjectField) []byte {
+	var buffer bytes.Buffer
+	buffer.WriteByte('{')
+	for i, field := range fields {
+		if i > 0 {
+			buffer.WriteByte(',')
+		}
+		name, _ := json.Marshal(field.name)
+		buffer.Write(name)
+		buffer.WriteByte(':')
+		buffer.Write(field.value)
+	}
+	buffer.WriteByte('}')
+	return buffer.Bytes()
 }
 
 func decodeJSONObjectFields(data []byte) ([]jsonObjectField, error) {
@@ -299,6 +321,18 @@ func normalizeKeyspaceIDJSON(data []byte) (json.RawMessage, error) {
 		normalized[name] = field.value
 	}
 	return json.Marshal(normalized)
+}
+
+func decodeKeyspaceIDJSON(rawKeyspaceID json.RawMessage) (*rmpb.KeyspaceIDValue, error) {
+	data, err := json.Marshal(map[string]json.RawMessage{"keyspace_id": rawKeyspaceID})
+	if err != nil {
+		return nil, err
+	}
+	var group rmpb.ResourceGroup
+	if err := (&jsonpb.Unmarshaler{AllowUnknownFields: true}).Unmarshal(bytes.NewReader(data), &group); err != nil {
+		return nil, err
+	}
+	return group.GetKeyspaceId(), nil
 }
 
 func validateResourceGroupKeyspaceID(group *rmpb.ResourceGroup, rawKeyspaceID json.RawMessage) error {

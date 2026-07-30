@@ -80,10 +80,9 @@ func sendRequest(
 	var bodyReader io.Reader
 	if body != nil {
 		if group, ok := body.(*rmpb.ResourceGroup); ok {
-			bodyBuffer := bytes.NewBuffer(nil)
-			err := (&jsonpb.Marshaler{OrigName: true}).Marshal(bodyBuffer, group)
+			data, err := marshalResourceGroup(group)
 			re.NoError(err)
-			bodyReader = bodyBuffer
+			bodyReader = bytes.NewReader(data)
 		} else {
 			data, err := json.Marshal(body)
 			re.NoError(err)
@@ -104,6 +103,25 @@ func sendRequest(
 	bodyBytes, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	return bodyBytes, resp.StatusCode
+}
+
+func marshalResourceGroup(group *rmpb.ResourceGroup) ([]byte, error) {
+	legacyGroup := *group
+	legacyGroup.KeyspaceId = nil
+	data, err := json.Marshal(&legacyGroup)
+	if err != nil || group.GetKeyspaceId() == nil {
+		return data, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	var keyspaceID bytes.Buffer
+	if err := (&jsonpb.Marshaler{OrigName: true}).Marshal(&keyspaceID, group.GetKeyspaceId()); err != nil {
+		return nil, err
+	}
+	fields["keyspace_id"] = keyspaceID.Bytes()
+	return json.Marshal(fields)
 }
 
 // mustSendRequest is a helper function that expects a successful response

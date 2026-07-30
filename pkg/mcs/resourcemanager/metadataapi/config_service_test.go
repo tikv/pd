@@ -99,6 +99,37 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 		re.Equal(http.StatusOK, resp.Code)
 	}
 
+	legacyFieldsBody := []byte(`{
+		"name":"legacy_fields_group",
+		"mode":1,
+		"PRIORITY":7,
+		"r_u_settings":{"R_U":{"SETTINGS":{"FILL_RATE":123,"BURST_LIMIT":456}}},
+		"keyspace_id":{"value":42}
+	}`)
+	resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyFieldsBody)
+	re.Equal(http.StatusOK, resp.Code)
+	legacyFieldsGroup := store.groups[groupKey(42, "legacy_fields_group")]
+	re.NotNil(legacyFieldsGroup)
+	re.Equal(uint32(7), legacyFieldsGroup.Priority)
+	re.NotNil(legacyFieldsGroup.RUSettings)
+	re.NotNil(legacyFieldsGroup.RUSettings.RU)
+	re.NotNil(legacyFieldsGroup.RUSettings.RU.Settings)
+	re.Equal(uint64(123), legacyFieldsGroup.RUSettings.RU.Settings.FillRate)
+	re.Equal(int64(456), legacyFieldsGroup.RUSettings.RU.Settings.BurstLimit)
+
+	legacyFieldsBody = []byte(`{
+		"name":"legacy_fields_group",
+		"mode":1,
+		"PRIORITY":9,
+		"r_u_settings":{"R_U":{"SETTINGS":{"FILL_RATE":321,"BURST_LIMIT":654}}},
+		"keyspace_id":{"value":42}
+	}`)
+	resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyFieldsBody)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(uint32(9), store.groups[groupKey(42, "legacy_fields_group")].Priority)
+	re.Equal(uint64(321), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.FillRate)
+	re.Equal(int64(654), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.BurstLimit)
+
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusInternalServerError, resp.Code)
