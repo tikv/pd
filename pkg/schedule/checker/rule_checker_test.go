@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -2378,6 +2379,56 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsOrphanRemovalOrder(
 	re.Nil(suite.rc.Check(region))
 }
 
+func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsSwapPeerOrder() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "a", "shared": "yes"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "b", "shared": "yes"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "b"})
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+
+	for _, rule := range []*placement.Rule{
+		{
+			GroupID: placement.DefaultGroupID,
+			ID:      "rule-a",
+			Index:   100,
+			Role:    placement.Voter,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "rule", Op: placement.In, Values: []string{"a"}},
+			},
+		},
+		{
+			GroupID: placement.DefaultGroupID,
+			ID:      "rule-b",
+			Index:   101,
+			Role:    placement.Voter,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "rule", Op: placement.In, Values: []string{"b"}},
+			},
+		},
+		{
+			GroupID: placement.DefaultGroupID,
+			ID:      "missing",
+			Index:   102,
+			Role:    placement.Learner,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "shared", Op: placement.In, Values: []string{"yes"}},
+			},
+		},
+	} {
+		re.NoError(suite.ruleManager.SetRule(rule))
+	}
+	re.NoError(suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
+	region := suite.cluster.GetRegion(1)
+	// The first matching peer has no replacement target. The checker stops
+	// there even though a later matching peer could be replaced through Store 3.
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+	re.Nil(suite.rc.Check(region))
+}
+
 func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {
 	re := suite.Require()
 	suite.cluster.AddLeaderStore(1, 1)
@@ -2443,6 +2494,41 @@ func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedIsInProgre
 	checker := NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, pendingProcessed)
 
 	re.Equal(RegionPlacementStateInProgress, checker.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingProcessedDoesNotHidePending() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	pendingProcessed := cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute)
+	pendingProcessed.Put(1, nil)
+	checker := NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, pendingProcessed)
+
+	re.Equal(RegionPlacementStatePending, checker.GetRegionPlacementState(suite.cluster.GetRegion(1)))
+}
+
+func (suite *ruleCheckerTestSuite) TestPendingProcessedRetryRetainedWithoutLeader() {
+	re := suite.Require()
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderRegion(1, 1)
+	region := suite.cluster.GetRegion(1).Clone(core.WithLeader(nil))
+	suite.cluster.PutRegion(region)
+
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, suite.cluster, false)
+	defer stream.Close()
+	opController := operator.NewController(
+		suite.ctx,
+		suite.cluster.GetBasicCluster(),
+		suite.cluster.GetSharedConfig(),
+		stream,
+	)
+	controller := NewController(suite.ctx, suite.cluster, suite.cluster.GetCheckerConfig(), opController)
+	controller.AddPendingProcessedRegions(false, region.GetID(), 2)
+
+	controller.checkPendingProcessedRegions()
+	// The retryable Region is retained, while the vanished Region is removed.
+	re.Equal([]uint64{region.GetID()}, controller.GetPendingProcessedRegions())
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingOfflinePeer() {

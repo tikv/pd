@@ -121,11 +121,15 @@ func (c *RuleChecker) GetRegionPlacementState(region *core.RegionInfo) RegionPla
 }
 
 func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, context *placementStateContext) RegionPlacementState {
-	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 || c.pendingProcessedRegions.Exists(region.GetID()) {
+	pendingProcessed := c.pendingProcessedRegions.Exists(region.GetID())
+	if region.GetLeader() == nil || len(region.GetPendingPeers()) > 0 {
 		return RegionPlacementStateInProgress
 	}
 	fit := c.ruleManager.FitRegionWithoutCache(c.cluster, region)
 	if isRegionPlacementSatisfied(region, fit) {
+		if pendingProcessed {
+			return RegionPlacementStateInProgress
+		}
 		return RegionPlacementStateReplicated
 	}
 	if len(fit.RuleFits) == 0 {
@@ -208,6 +212,9 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 	}
 	if hasUnfixablePlacement {
 		return RegionPlacementStatePending
+	}
+	if pendingProcessed {
+		return RegionPlacementStateInProgress
 	}
 	return RegionPlacementStateReplicated
 }
@@ -493,9 +500,8 @@ func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit 
 
 		fastFailover := isWitnessEnabled(c.cluster) && store.IsTiKV() && oldRuleFit.Rule.IsWitness
 		strategy, candidateSet := context.getStrategy(c, region, oldRuleFit.Rule, fastFailover)
-		if strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId()) {
-			return true
-		}
+		// addRulePeerWithOptions stops after trying the first matching peer.
+		return strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
 	}
 	return false
 }

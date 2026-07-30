@@ -266,12 +266,10 @@ func (c *Controller) checkPendingProcessedRegions() {
 	pendingProcessedRegionsGauge.Set(float64(len(ids)))
 	for _, id := range ids {
 		region := c.cluster.GetRegion(id)
-		c.RemovePendingProcessedRegion(id)
 		if region == nil {
+			c.RemovePendingProcessedRegion(id)
 			continue
 		}
-		// Remove the old entry before checking. A checker will add it back if
-		// temporary conditions still prevent scheduling.
 		c.tryAddOperators(region)
 	}
 }
