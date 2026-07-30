@@ -1321,11 +1321,25 @@ func (h *Handler) CheckRegionsReplicated(startKeyHex, endKeyHex string) (string,
 }
 
 func hasReplicaOperator(controller *operator.Controller, regions []*core.RegionInfo) bool {
-	regionIDs := make([]uint64, 0, len(regions))
-	for _, region := range regions {
-		regionIDs = append(regionIDs, region.GetID())
+	operators := controller.GetOperatorsOfKind(operator.OpReplica)
+	for _, op := range controller.GetWaitingOperators() {
+		if op.Kind()&operator.OpReplica != 0 {
+			operators = append(operators, op)
+		}
 	}
-	return controller.HasOperatorOfKind(regionIDs, operator.OpReplica)
+	if len(operators) == 0 {
+		return false
+	}
+	operatorRegions := make(map[uint64]struct{}, len(operators))
+	for _, op := range operators {
+		operatorRegions[op.RegionID()] = struct{}{}
+	}
+	for _, region := range regions {
+		if _, ok := operatorRegions[region.GetID()]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func regionsCoverRange(regions []*core.RegionInfo, startKey, endKey []byte) bool {

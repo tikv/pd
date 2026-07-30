@@ -808,17 +808,6 @@ func (oc *Controller) GetWaitingOperators() []*Operator {
 	return oc.wop.ListOperator()
 }
 
-// HasOperatorOfKind checks whether any of the Regions has a running or waiting
-// operator of the specified kind.
-func (oc *Controller) HasOperatorOfKind(regionIDs []uint64, mask OpKind) bool {
-	for _, regionID := range regionIDs {
-		if op := oc.GetOperator(regionID); op != nil && op.Kind()&mask != 0 {
-			return true
-		}
-	}
-	return oc.wop.HasOperator(regionIDs, mask)
-}
-
 // GetOperatorsOfKind returns the running operators of the kind.
 func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
 	operators := make([]*Operator, 0, oc.opNotifierQueue.len())

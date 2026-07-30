@@ -65,24 +65,6 @@ func TestListOperator(t *testing.T) {
 	re.Len(rb.ListOperator(), len(priorityWeight))
 }
 
-func TestHasWaitingOperator(t *testing.T) {
-	re := require.New(t)
-	rb := newRandBuckets()
-	regionOp := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 1})
-	replicaOp := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion|OpReplica, RemovePeer{FromStore: 2})
-	rb.PutOperator(regionOp)
-	rb.PutOperator(replicaOp)
-
-	re.True(rb.HasOperator([]uint64{2, 1}, OpReplica))
-	re.False(rb.HasOperator([]uint64{2}, OpReplica))
-	re.True(rb.HasOperator([]uint64{1}, OpRegion))
-
-	re.Equal(regionOp, rb.GetOperator()[0])
-	re.True(rb.HasOperator([]uint64{1}, OpReplica))
-	re.Equal(replicaOp, rb.GetOperator()[0])
-	re.False(rb.HasOperator([]uint64{1}, OpReplica))
-}
-
 func TestRandomBucketsWithMergeRegion(t *testing.T) {
 	re := require.New(t)
 	rb := newRandBuckets()

@@ -88,27 +88,30 @@ type placementStateCandidateKey struct {
 type placementStateContext struct {
 	storesLoaded bool
 	stores       []*core.StoreInfo
-	candidates   map[placementStateCandidateKey][]*core.StoreInfo
+	candidates   map[placementStateCandidateKey]*storeCandidateSet
 }
 
-func (ctx *placementStateContext) getStrategy(c *RuleChecker, region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+func (ctx *placementStateContext) getStrategy(
+	c *RuleChecker,
+	region *core.RegionInfo,
+	rule *placement.Rule,
+	fastFailover bool,
+) (*ReplicaStrategy, *storeCandidateSet) {
 	strategy := c.strategy(region, rule, fastFailover)
 	key := placementStateCandidateKey{rule: rule, fastFailover: fastFailover}
-	if candidates, ok := ctx.candidates[key]; ok {
-		strategy.storeCandidates = candidates
-		strategy.storeCandidatesPrepared = true
-		return strategy
+	if candidateSet, ok := ctx.candidates[key]; ok {
+		return strategy, candidateSet
 	}
 	if !ctx.storesLoaded {
 		ctx.stores = c.cluster.GetStores()
 		ctx.storesLoaded = true
 	}
 	if ctx.candidates == nil {
-		ctx.candidates = make(map[placementStateCandidateKey][]*core.StoreInfo)
+		ctx.candidates = make(map[placementStateCandidateKey]*storeCandidateSet)
 	}
-	strategy.prepareStoreCandidates(ctx.stores)
-	ctx.candidates[key] = strategy.storeCandidates
-	return strategy
+	candidateSet := strategy.newStoreCandidateSet(ctx.stores)
+	ctx.candidates[key] = candidateSet
+	return strategy, candidateSet
 }
 
 // GetRegionPlacementState evaluates the placement state without creating an
@@ -128,7 +131,7 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 	if len(fit.RuleFits) == 0 {
 		return RegionPlacementStateInProgress
 	}
-	if c.hasOrphanPeerAction(region, fit) {
+	if c.planOrphanPeerAction(region, fit).canProgress() {
 		return RegionPlacementStateInProgress
 	}
 
@@ -136,9 +139,8 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 	for _, rf := range fit.RuleFits {
 		if len(rf.Peers) < rf.Rule.Count {
 			isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
-			strategy := context.getStrategy(c, region, rf.Rule, isWitness)
-			storeID, filteredByTemporaryState := strategy.SelectStoreToAdd(getRuleFitStores(c.cluster, rf))
-			if storeID != 0 || filteredByTemporaryState ||
+			strategy, candidateSet := context.getStrategy(c, region, rf.Rule, isWitness)
+			if strategy.hasStoreToAdd(candidateSet, getRuleFitStores(c.cluster, rf)) ||
 				c.hasStoreToSwapForMissingRule(region, fit, rf, context) {
 				return RegionPlacementStateInProgress
 			}
@@ -166,9 +168,8 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 				continue
 			}
 
-			strategy := context.getStrategy(c, region, rf.Rule, fastFailover)
-			storeID, filteredByTemporaryState := strategy.SelectStoreToFix(getRuleFitStores(c.cluster, rf), peer.GetStoreId())
-			if storeID != 0 || filteredByTemporaryState {
+			strategy, candidateSet := context.getStrategy(c, region, rf.Rule, fastFailover)
+			if strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, rf), peer.GetStoreId()) {
 				return RegionPlacementStateInProgress
 			}
 			hasUnfixablePlacement = true
@@ -193,9 +194,8 @@ func (c *RuleChecker) evaluateRegionPlacementState(region *core.RegionInfo, cont
 			continue
 		}
 		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
-		strategy := context.getStrategy(c, region, rf.Rule, isWitness)
-		_, newStoreID, filteredByTemporaryState := strategy.getBetterLocation(c.cluster, region, fit, rf)
-		if newStoreID != 0 || filteredByTemporaryState {
+		strategy, candidateSet := context.getStrategy(c, region, rf.Rule, isWitness)
+		if strategy.hasBetterLocation(candidateSet, c.cluster, region, fit, rf) {
 			return RegionPlacementStateInProgress
 		}
 		if !statistics.IsRegionLabelIsolationSatisfied(
@@ -314,9 +314,34 @@ func (c *RuleChecker) hasAlternativeLeader(region *core.RegionInfo, fit *placeme
 	return false
 }
 
-func (c *RuleChecker) hasOrphanPeerAction(region *core.RegionInfo, fit *placement.RegionFit) bool {
+type orphanPeerActionKind uint8
+
+const (
+	orphanPeerActionNone orphanPeerActionKind = iota
+	orphanPeerActionRemove
+	orphanPeerActionPromoteAndRemove
+	orphanPeerActionDemoteAndRemove
+)
+
+type orphanPeerAction struct {
+	kind         orphanPeerActionKind
+	desc         string
+	peer         *metapb.Peer
+	peerToRemove *metapb.Peer
+	retryable    bool
+	schedulable  bool
+	replacement  bool
+	noFitCount   int
+	replaceCount int
+}
+
+func (a orphanPeerAction) canProgress() bool {
+	return a.retryable || (a.kind != orphanPeerActionNone && a.schedulable)
+}
+
+func (c *RuleChecker) planOrphanPeerAction(region *core.RegionInfo, fit *placement.RegionFit) orphanPeerAction {
 	if len(fit.OrphanPeers) == 0 {
-		return false
+		return orphanPeerAction{}
 	}
 
 	isPendingPeer := func(peer *metapb.Peer) bool {
@@ -333,37 +358,46 @@ func (c *RuleChecker) hasOrphanPeerAction(region *core.RegionInfo, fit *placemen
 		return region.GetLeader().GetId() != peer.GetId() ||
 			c.hasAlternativeLeader(region, fit, peer.GetId())
 	}
+	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool, bool) {
+		for _, peer := range peers {
+			down := isDownPeer(peer)
+			disconnected := isDisconnectedPeer(peer)
+			if disconnected || down {
+				retryable := disconnected && !down
+				if down {
+					retryable = !c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId())
+				}
+				return peer, true, retryable
+			}
+			if isPendingPeer(peer) {
+				return nil, true, true
+			}
+		}
+		return nil, false, false
+	}
 
-	allRulesSatisfiedAndHealthy := true
+	action := orphanPeerAction{}
+	hasUnhealthyFit := false
 	var pinDownPeer *metapb.Peer
 	for _, rf := range fit.RuleFits {
 		if !rf.IsSatisfied() {
-			allRulesSatisfiedAndHealthy = false
+			hasUnhealthyFit = true
 			break
 		}
-		for _, peer := range rf.Peers {
-			if isPendingPeer(peer) {
-				return true
-			}
-			if isDownPeer(peer) {
-				if !c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
-					return true
-				}
-				pinDownPeer = peer
-				allRulesSatisfiedAndHealthy = false
-				break
-			}
-			if isDisconnectedPeer(peer) {
-				return true
-			}
-		}
-		if !allRulesSatisfiedAndHealthy {
+		var retryable bool
+		pinDownPeer, hasUnhealthyFit, retryable = checkDownPeer(rf.Peers)
+		action.retryable = retryable
+		if hasUnhealthyFit {
 			break
 		}
 	}
-	if allRulesSatisfiedAndHealthy {
-		// fixOrphanPeers always tries the first orphan peer in this case.
-		return canRemovePeer(fit.OrphanPeers[0])
+	if !hasUnhealthyFit {
+		peer := fit.OrphanPeers[0]
+		action.kind = orphanPeerActionRemove
+		action.desc = "remove-orphan-peer"
+		action.peer = peer
+		action.schedulable = canRemovePeer(peer)
+		return action
 	}
 
 	if pinDownPeer != nil {
@@ -378,23 +412,42 @@ func (c *RuleChecker) hasOrphanPeerAction(region *core.RegionInfo, fit *placemen
 			}
 			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
 			if !fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
+				action.noFitCount++
 				continue
 			}
+			action.replaceCount++
 			destRole := pinDownPeer.GetRole()
 			orphanRole := orphanPeer.GetRole()
 			switch {
 			case orphanRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
-				return true
+				action.kind = orphanPeerActionPromoteAndRemove
+				action.desc = "replace-down-peer-with-orphan-peer"
+				action.peer = orphanPeer
+				action.peerToRemove = pinDownPeer
+				action.schedulable = true
+				action.replacement = true
+				return action
 			case orphanRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
-				return c.cluster.GetSharedConfig().IsUseJointConsensus()
-			case orphanRole == destRole:
-				return canRemovePeer(pinDownPeer)
+				action.kind = orphanPeerActionDemoteAndRemove
+				action.desc = "replace-down-peer-with-orphan-peer"
+				action.peer = orphanPeer
+				action.peerToRemove = pinDownPeer
+				action.schedulable = c.cluster.GetSharedConfig().IsUseJointConsensus()
+				action.replacement = true
+				return action
+			case orphanRole == destRole && !dstStore.IsDisconnected():
+				action.kind = orphanPeerActionRemove
+				action.desc = "remove-replaced-orphan-peer"
+				action.peer = pinDownPeer
+				action.schedulable = canRemovePeer(pinDownPeer)
+				action.replacement = true
+				return action
 			}
 		}
 	}
 
 	if len(fit.OrphanPeers) < 2 {
-		return false
+		return action
 	}
 	var disconnectedPeer *metapb.Peer
 	for _, orphanPeer := range fit.OrphanPeers {
@@ -406,18 +459,25 @@ func (c *RuleChecker) hasOrphanPeerAction(region *core.RegionInfo, fit *placemen
 	hasHealthyPeer := false
 	for _, orphanPeer := range fit.OrphanPeers {
 		if isPendingPeer(orphanPeer) || isDownPeer(orphanPeer) {
-			// fixOrphanPeers returns after trying the first unhealthy orphan.
-			return canRemovePeer(orphanPeer)
+			action.kind = orphanPeerActionRemove
+			action.desc = "remove-unhealthy-orphan-peer"
+			action.peer = orphanPeer
+			action.schedulable = canRemovePeer(orphanPeer)
+			return action
 		}
 		if hasHealthyPeer && fit.ExtraCount() > 0 {
 			if disconnectedPeer != nil {
-				return canRemovePeer(disconnectedPeer)
+				orphanPeer = disconnectedPeer
 			}
-			return canRemovePeer(orphanPeer)
+			action.kind = orphanPeerActionRemove
+			action.desc = "remove-orphan-peer"
+			action.peer = orphanPeer
+			action.schedulable = canRemovePeer(orphanPeer)
+			return action
 		}
 		hasHealthyPeer = true
 	}
-	return false
+	return action
 }
 
 func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit *placement.RegionFit, missingRuleFit *placement.RuleFit, context *placementStateContext) bool {
@@ -432,9 +492,8 @@ func (c *RuleChecker) hasStoreToSwapForMissingRule(region *core.RegionInfo, fit 
 		}
 
 		fastFailover := isWitnessEnabled(c.cluster) && store.IsTiKV() && oldRuleFit.Rule.IsWitness
-		strategy := context.getStrategy(c, region, oldRuleFit.Rule, fastFailover)
-		storeID, filteredByTemporaryState := strategy.SelectStoreToFix(getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId())
-		if storeID != 0 || filteredByTemporaryState {
+		strategy, candidateSet := context.getStrategy(c, region, oldRuleFit.Rule, fastFailover)
+		if strategy.hasStoreToFix(candidateSet, getRuleFitStores(c.cluster, oldRuleFit), peer.GetStoreId()) {
 			return true
 		}
 	}
@@ -831,145 +890,30 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	if len(fit.OrphanPeers) == 0 {
 		return nil, nil
 	}
-
-	isPendingPeer := func(id uint64) bool {
-		for _, pendingPeer := range region.GetPendingPeers() {
-			if pendingPeer.GetId() == id {
-				return true
-			}
-		}
-		return false
+	action := c.planOrphanPeerAction(region, fit)
+	if action.noFitCount > 0 {
+		ruleCheckerReplaceOrphanPeerNoFitCounter.Add(float64(action.noFitCount))
 	}
-
-	isDownPeer := func(id uint64) bool {
-		for _, downPeer := range region.GetDownPeers() {
-			if downPeer.Peer.GetId() == id {
-				return true
-			}
-		}
-		return false
+	if action.replaceCount > 0 {
+		ruleCheckerReplaceOrphanPeerCounter.Add(float64(action.replaceCount))
 	}
-
-	isUnhealthyPeer := func(id uint64) bool {
-		return isPendingPeer(id) || isDownPeer(id)
+	if action.kind == orphanPeerActionNone {
+		ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
+		return nil, nil
 	}
-
-	isInDisconnectedStore := func(p *metapb.Peer) bool {
-		// avoid to meet down store when fix orphan peers,
-		// isInDisconnectedStore is usually more strictly than IsUnhealthy.
-		store := c.cluster.GetStore(p.GetStoreId())
-		if store == nil {
-			return true
-		}
-		return store.IsDisconnected()
-	}
-
-	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool) {
-		for _, p := range peers {
-			if isInDisconnectedStore(p) || isDownPeer(p.GetId()) {
-				return p, true
-			}
-			if isPendingPeer(p.GetId()) {
-				return nil, true
-			}
-		}
-		return nil, false
-	}
-
-	// remove orphan peers only when all rules are satisfied (count+role) and all peers selected
-	// by RuleFits is not pending or down.
-	var pinDownPeer *metapb.Peer
-	hasUnhealthyFit := false
-	for _, rf := range fit.RuleFits {
-		if !rf.IsSatisfied() {
-			hasUnhealthyFit = true
-			break
-		}
-		pinDownPeer, hasUnhealthyFit = checkDownPeer(rf.Peers)
-		if hasUnhealthyFit {
-			break
-		}
-	}
-
-	// If hasUnhealthyFit is false, it is safe to delete the OrphanPeer.
-	if !hasUnhealthyFit {
+	if !action.replacement {
 		ruleCheckerRemoveOrphanPeerCounter.Inc()
-		return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, fit.OrphanPeers[0].StoreId)
 	}
-
-	// try to use orphan peers to replace unhealthy down peers.
-	for _, orphanPeer := range fit.OrphanPeers {
-		if pinDownPeer != nil {
-			if pinDownPeer.GetId() == orphanPeer.GetId() {
-				continue
-			}
-			// make sure the orphan peer is healthy.
-			if isUnhealthyPeer(orphanPeer.GetId()) || isInDisconnectedStore(orphanPeer) {
-				continue
-			}
-			// no consider witness in this path.
-			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
-				continue
-			}
-			// pinDownPeer's store should be disconnected, because we use more strict judge before.
-			if !isInDisconnectedStore(pinDownPeer) {
-				continue
-			}
-			// check if down peer can replace with orphan peer.
-			dstStore := c.cluster.GetStore(orphanPeer.GetStoreId())
-			if fit.Replace(pinDownPeer.GetStoreId(), dstStore) {
-				destRole := pinDownPeer.GetRole()
-				orphanPeerRole := orphanPeer.GetRole()
-				ruleCheckerReplaceOrphanPeerCounter.Inc()
-				switch {
-				case orphanPeerRole == metapb.PeerRole_Learner && destRole == metapb.PeerRole_Voter:
-					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
-				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
-					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
-				case orphanPeerRole == destRole && isInDisconnectedStore(pinDownPeer) && !dstStore.IsDisconnected():
-					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
-				default:
-					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
-					// destRole never be leader, so we not consider it.
-				}
-			} else {
-				ruleCheckerReplaceOrphanPeerNoFitCounter.Inc()
-			}
-		}
+	switch action.kind {
+	case orphanPeerActionRemove:
+		return operator.CreateRemovePeerOperator(action.desc, c.cluster, 0, region, action.peer.GetStoreId())
+	case orphanPeerActionPromoteAndRemove:
+		return operator.CreatePromoteLearnerOperatorAndRemovePeer(action.desc, c.cluster, region, action.peer, action.peerToRemove)
+	case orphanPeerActionDemoteAndRemove:
+		return operator.CreateDemoteLearnerOperatorAndRemovePeer(action.desc, c.cluster, region, action.peer, action.peerToRemove)
+	default:
+		return nil, nil
 	}
-
-	extra := fit.ExtraCount()
-	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
-	// Ref https://github.com/tikv/pd/issues/4045
-	if len(fit.OrphanPeers) >= 2 {
-		hasHealthPeer := false
-		var disconnectedPeer *metapb.Peer
-		for _, orphanPeer := range fit.OrphanPeers {
-			if isInDisconnectedStore(orphanPeer) {
-				disconnectedPeer = orphanPeer
-				break
-			}
-		}
-		for _, orphanPeer := range fit.OrphanPeers {
-			if isUnhealthyPeer(orphanPeer.GetId()) {
-				ruleCheckerRemoveOrphanPeerCounter.Inc()
-				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
-			}
-			// The healthy orphan peer can be removed to keep the high availability only if the peer count is greater than the rule requirement.
-			if hasHealthPeer && extra > 0 {
-				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
-				ruleCheckerRemoveOrphanPeerCounter.Inc()
-				// if there exists a disconnected orphan peer, we will pick it to remove firstly.
-				if disconnectedPeer != nil {
-					return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, disconnectedPeer.StoreId)
-				}
-				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
-			}
-			hasHealthPeer = true
-		}
-	}
-	ruleCheckerSkipRemoveOrphanPeerCounter.Inc()
-	return nil, nil
 }
 
 func (c *RuleChecker) isDownPeer(region *core.RegionInfo, peer *metapb.Peer) bool {
