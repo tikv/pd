@@ -37,8 +37,8 @@ import (
 func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 	t.Parallel()
 
-	transportFailure := true
-	nonTransportFailure := false
+	availabilityFailure := true
+	otherFailure := false
 
 	testCases := []struct {
 		name        string
@@ -48,8 +48,8 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 		enter       bool
 	}{
 		{
-			name:        "all current urls have transport failures and degraded-mode connections",
-			result:      newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure),
+			name:        "all current urls have availability failures and degraded-mode connections",
+			result:      newFailedMemberUpdateResult(availabilityFailure, availabilityFailure, availabilityFailure),
 			connections: observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure),
 			enter:       true,
 		},
@@ -60,33 +60,33 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 		},
 		{
 			name:        "not every url was attempted",
-			result:      newFailedMemberUpdateResult(transportFailure),
+			result:      newFailedMemberUpdateResult(availabilityFailure),
 			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
 			name:        "url set changed while failures were collected",
-			result:      newFailedMemberUpdateResult(transportFailure, transportFailure),
+			result:      newFailedMemberUpdateResult(availabilityFailure, availabilityFailure),
 			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 			currentURLs: []string{"url-0", "replacement-url"},
 		},
 		{
-			name:        "non-transport failure",
-			result:      newFailedMemberUpdateResult(transportFailure, nonTransportFailure),
+			name:        "other failure",
+			result:      newFailedMemberUpdateResult(availabilityFailure, otherFailure),
 			connections: observedMemberConnections(connectivity.TransientFailure, connectivity.TransientFailure),
 		},
 		{
 			name:        "missing connection",
-			result:      newFailedMemberUpdateResult(transportFailure),
+			result:      newFailedMemberUpdateResult(availabilityFailure),
 			connections: []memberConnection{{}},
 		},
 		{
 			name:        "ready connection",
-			result:      newFailedMemberUpdateResult(transportFailure),
+			result:      newFailedMemberUpdateResult(availabilityFailure),
 			connections: observedMemberConnections(connectivity.Ready),
 		},
 		{
 			name:        "shutdown connection",
-			result:      newFailedMemberUpdateResult(transportFailure),
+			result:      newFailedMemberUpdateResult(availabilityFailure),
 			connections: observedMemberConnections(connectivity.Shutdown),
 		},
 	}
@@ -111,7 +111,7 @@ func TestMemberRefreshControllerEntersDegradedModeStrictly(t *testing.T) {
 func TestMemberRefreshControllerCanRemainDegraded(t *testing.T) {
 	t.Parallel()
 
-	transportFailure := true
+	availabilityFailure := true
 	testCases := []struct {
 		name        string
 		connections []memberConnection
@@ -148,7 +148,7 @@ func TestMemberRefreshControllerCanRemainDegraded(t *testing.T) {
 			initialURLs := memberTestURLs(len(testCase.connections))
 			failures := make([]bool, len(testCase.connections))
 			for i := range failures {
-				failures[i] = transportFailure
+				failures[i] = availabilityFailure
 			}
 			require.True(t, controller.tryEnterDegraded(
 				newFailedMemberUpdateResult(failures...),
@@ -167,8 +167,8 @@ func TestMemberRefreshControllerCanRemainDegraded(t *testing.T) {
 }
 
 func TestMemberRefreshControllerCanRemainDegradedDoesNotAllocate(t *testing.T) {
-	transportFailure := true
-	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
+	availabilityFailure := true
+	result := newFailedMemberUpdateResult(availabilityFailure, availabilityFailure, availabilityFailure)
 	urls := memberTestURLs(3)
 	connections := observedMemberConnections(connectivity.Idle, connectivity.Connecting, connectivity.TransientFailure)
 	controller := memberRefreshController{}
@@ -181,10 +181,10 @@ func TestMemberRefreshControllerCanRemainDegradedDoesNotAllocate(t *testing.T) {
 
 var memberRefreshRemainDegradedSink bool
 
-func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
+func TestMemberAvailabilityFailureTrackerEpisodes(t *testing.T) {
 	t.Parallel()
 
-	tracker := memberTransportFailureTracker{}
+	tracker := memberAvailabilityFailureTracker{}
 	start := time.Unix(100, 0)
 
 	require.True(t, tracker.record(start, "http://pd-1:2379"))
@@ -214,84 +214,84 @@ func TestMemberTransportFailureTrackerEpisodes(t *testing.T) {
 	require.False(t, ok)
 }
 
-func TestIsMemberTransportFailure(t *testing.T) {
+func TestIsMemberAvailabilityFailure(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name      string
-		got       bool
-		transport bool
+		name         string
+		got          bool
+		availability bool
 	}{
 		{
-			name:      "connection refused rpc",
-			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
-			transport: true,
+			name:         "connection refused rpc",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connect: connection refused")),
+			availability: true,
 		},
 		{
-			name:      "tls rpc",
-			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
-			transport: true,
+			name:         "tls rpc",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.Unavailable, "transport: authentication handshake failed: tls certificate expired")),
+			availability: true,
 		},
 		{
-			name:      "dns rpc",
-			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
-			transport: true,
+			name:         "dns rpc",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.Unavailable, "lookup pd.invalid: no such host")),
+			availability: true,
 		},
 		{
-			name:      "deadline rpc",
-			got:       isMemberRPCTransportFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
-			transport: true,
+			name:         "deadline rpc",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.DeadlineExceeded, "context deadline exceeded")),
+			availability: true,
 		},
 		{
-			name:      "local deadline",
-			got:       isMemberRPCTransportFailure(context.DeadlineExceeded),
-			transport: true,
+			name:         "local deadline",
+			got:          isMemberRPCAvailabilityFailure(context.DeadlineExceeded),
+			availability: true,
 		},
 		{
 			name: "local cancellation",
-			got:  isMemberRPCTransportFailure(context.Canceled),
+			got:  isMemberRPCAvailabilityFailure(context.Canceled),
 		},
 		{
-			name:      "reset rpc",
-			got:       isMemberRPCTransportFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
-			transport: true,
+			name:         "reset rpc",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.Unavailable, "read: connection reset by peer")),
+			availability: true,
 		},
 		{
-			name:      "non-network grpc status",
-			got:       isMemberRPCTransportFailure(status.Error(codes.PermissionDenied, "permission denied")),
-			transport: false,
+			name:         "non-network grpc status",
+			got:          isMemberRPCAvailabilityFailure(status.Error(codes.PermissionDenied, "permission denied")),
+			availability: false,
 		},
 		{
-			name:      "blocking dial timeout",
-			got:       isMemberDialTransportFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
-			transport: true,
+			name:         "blocking dial timeout",
+			got:          isMemberDialAvailabilityFailure(clienterrs.ErrGRPCDial.Wrap(context.DeadlineExceeded).GenWithStackByCause()),
+			availability: true,
 		},
 		{
-			name:      "uncertain dial error",
-			got:       isMemberDialTransportFailure(errors.New("invalid client configuration")),
-			transport: false,
+			name:         "uncertain dial error",
+			got:          isMemberDialAvailabilityFailure(errors.New("invalid client configuration")),
+			availability: false,
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			require.Equal(t, testCase.transport, testCase.got)
+			require.Equal(t, testCase.availability, testCase.got)
 		})
 	}
 }
 
-func TestMemberTransportFailureSummaryAndRecoveryLogs(t *testing.T) {
+func TestMemberAvailabilityFailureSummaryAndRecoveryLogs(t *testing.T) {
 	core, observedLogs := observer.New(zap.InfoLevel)
 	restoreLogger := pingcaplog.ReplaceGlobals(zap.New(core), nil)
 	t.Cleanup(restoreLogger)
 
 	client := &serviceDiscovery{}
 	start := time.Unix(100, 0)
-	require.True(t, client.memberTransportFailures.record(start, "http://pd-1:2379"))
-	require.False(t, client.memberTransportFailures.record(start.Add(time.Second), "http://pd-1:2379"))
+	require.True(t, client.memberAvailabilityFailures.record(start, "http://pd-1:2379"))
+	require.False(t, client.memberAvailabilityFailures.record(start.Add(time.Second), "http://pd-1:2379"))
 
-	client.logMemberTransportFailureSummary(start.Add(2 * time.Second))
-	summaryLogs := observedLogs.FilterMessage("[pd] member transport failures are being suppressed").All()
+	client.logMemberAvailabilityFailureSummary(start.Add(2 * time.Second))
+	summaryLogs := observedLogs.FilterMessage("[pd] member availability failures are being suppressed").All()
 	require.Len(t, summaryLogs, 1)
 	summaryFields := summaryLogs[0].ContextMap()
 	require.Contains(t, summaryFields, "failed-urls")
@@ -300,8 +300,8 @@ func TestMemberTransportFailureSummaryAndRecoveryLogs(t *testing.T) {
 	require.Equal(t, uint64(1), summaryFields["suppressed-errors"])
 	require.NotContains(t, summaryFields, "error-classes")
 
-	client.logMemberTransportFailureRecovery(start.Add(3*time.Second), "http://pd-1:2379")
-	recoveryLogs := observedLogs.FilterMessage("[pd] member transport failure recovered").All()
+	client.logMemberAvailabilityFailureRecovery(start.Add(3*time.Second), "http://pd-1:2379")
+	recoveryLogs := observedLogs.FilterMessage("[pd] member availability failure recovered").All()
 	require.Len(t, recoveryLogs, 1)
 	recoveryFields := recoveryLogs[0].ContextMap()
 	require.Equal(t, "http://pd-1:2379", recoveryFields["url"])
@@ -309,8 +309,8 @@ func TestMemberTransportFailureSummaryAndRecoveryLogs(t *testing.T) {
 	require.Equal(t, uint64(1), recoveryFields["suppressed-errors"])
 }
 
-func TestMemberTransportFailureTrackerConcurrentAccess(_ *testing.T) {
-	tracker := memberTransportFailureTracker{}
+func TestMemberAvailabilityFailureTrackerConcurrentAccess(_ *testing.T) {
+	tracker := memberAvailabilityFailureTracker{}
 	now := time.Unix(100, 0)
 
 	var wg sync.WaitGroup
@@ -330,8 +330,8 @@ func TestMemberTransportFailureTrackerConcurrentAccess(_ *testing.T) {
 	wg.Wait()
 }
 
-func TestMemberTransportFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.T) {
-	tracker := memberTransportFailureTracker{}
+func TestMemberAvailabilityFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.T) {
+	tracker := memberAvailabilityFailureTracker{}
 	now := time.Unix(100, 0)
 	allocations := testing.AllocsPerRun(1000, func() {
 		_, _ = tracker.recover(now, "http://pd-1:2379")
@@ -340,8 +340,8 @@ func TestMemberTransportFailureTrackerHealthyRecoveryDoesNotAllocate(t *testing.
 }
 
 func BenchmarkMemberRefreshControllerCanRemainDegraded(b *testing.B) {
-	transportFailure := true
-	result := newFailedMemberUpdateResult(transportFailure, transportFailure, transportFailure)
+	availabilityFailure := true
+	result := newFailedMemberUpdateResult(availabilityFailure, availabilityFailure, availabilityFailure)
 	urls := memberTestURLs(3)
 	connections := observedMemberConnections(connectivity.TransientFailure, connectivity.Connecting, connectivity.Idle)
 	controller := memberRefreshController{}
@@ -352,8 +352,8 @@ func BenchmarkMemberRefreshControllerCanRemainDegraded(b *testing.B) {
 	}
 }
 
-func BenchmarkMemberTransportFailureTrackerSuppression(b *testing.B) {
-	tracker := memberTransportFailureTracker{}
+func BenchmarkMemberAvailabilityFailureTrackerSuppression(b *testing.B) {
+	tracker := memberAvailabilityFailureTracker{}
 	now := time.Unix(100, 0)
 	tracker.record(now, "http://pd-1:2379")
 	b.ReportAllocs()

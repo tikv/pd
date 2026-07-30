@@ -458,7 +458,7 @@ type serviceDiscovery struct {
 
 	flight singleflight.Group
 
-	memberTransportFailures memberTransportFailureTracker
+	memberAvailabilityFailures memberAvailabilityFailureTracker
 }
 
 // NewDefaultServiceDiscovery returns a new default service discovery-based client.
@@ -609,7 +609,7 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 				log.Info("[pd] exit member loop due to context canceled")
 				return
 			case <-memberUpdateCh:
-				c.logMemberTransportFailureSummary(time.Now())
+				c.logMemberAvailabilityFailureSummary(time.Now())
 				// The safety sweep covers the event that may have been coalesced
 				// while scheduled checks were disabled.
 				drainScheduledCheck()
@@ -643,7 +643,7 @@ func (c *serviceDiscovery) runMemberRefreshLoop(memberUpdateCh <-chan time.Time)
 				log.Info("[pd] exit member loop due to context canceled")
 				return
 			case <-memberUpdateCh:
-				c.logMemberTransportFailureSummary(time.Now())
+				c.logMemberAvailabilityFailureSummary(time.Now())
 			case <-c.checkMembershipCh:
 			}
 		}
@@ -1038,7 +1038,7 @@ func (c *serviceDiscovery) updateMember() error {
 func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) {
 	result := memberUpdateResult{}
 	for _, url := range c.GetServiceURLs() {
-		members, isTransportFailure, err := c.getMembersWithTransportFailure(c.ctx, url, UpdateMemberTimeout)
+		members, isAvailabilityFailure, err := c.getMembersWithAvailabilityFailure(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
 		updatedClusterID := members.GetHeader().GetClusterId()
 		if err == nil && updatedClusterID != c.clusterID {
@@ -1052,15 +1052,15 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 		}
 		// Failed to get members
 		if err != nil {
-			result.recordFailure(url, isTransportFailure)
+			result.recordFailure(url, isAvailabilityFailure)
 			failureTime := time.Now()
 			shouldLog := true
-			if isTransportFailure {
-				shouldLog = c.memberTransportFailures.record(failureTime, url)
+			if isAvailabilityFailure {
+				shouldLog = c.memberAvailabilityFailures.record(failureTime, url)
 			} else {
-				// Only transport failures are suppressed. A different failure
-				// ends any transport-failure episode for this URL.
-				c.memberTransportFailures.discard(url)
+				// Only availability failures are suppressed. A different failure
+				// ends any availability-failure episode for this URL.
+				c.memberAvailabilityFailures.discard(url)
 			}
 			if shouldLog {
 				log.Info("[pd] cannot update member from this url",
@@ -1074,9 +1074,9 @@ func (c *serviceDiscovery) updateMemberWithResult() (memberUpdateResult, error) 
 				continue
 			}
 		}
-		c.logMemberTransportFailureRecovery(time.Now(), url)
+		c.logMemberAvailabilityFailureRecovery(time.Now(), url)
 		c.updateURLs(members.GetMembers())
-		c.memberTransportFailures.retainCurrentFailures(c.GetServiceURLs(), result.failedURLs)
+		c.memberAvailabilityFailures.retainCurrentFailures(c.GetServiceURLs(), result.failedURLs)
 
 		return result, c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
@@ -1120,14 +1120,13 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 }
 
 func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
-	members, _, err := c.getMembersWithTransportFailure(ctx, url, timeout)
+	members, _, err := c.getMembersWithAvailabilityFailure(ctx, url, timeout)
 	return members, err
 }
 
-// getMembersWithTransportFailure reports whether a failed request is eligible
-// for transport-outage suppression. It preserves getMembers' response and
-// error contract.
-func (c *serviceDiscovery) getMembersWithTransportFailure(
+// getMembersWithAvailabilityFailure reports whether a failed request is an
+// availability failure. It preserves getMembers' response and error contract.
+func (c *serviceDiscovery) getMembersWithAvailabilityFailure(
 	ctx context.Context,
 	url string,
 	timeout time.Duration,
@@ -1136,7 +1135,7 @@ func (c *serviceDiscovery) getMembersWithTransportFailure(
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
 	if err != nil {
-		return nil, isMemberDialTransportFailure(err), err
+		return nil, isMemberDialAvailabilityFailure(err), err
 	}
 	start := time.Now()
 	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
@@ -1150,7 +1149,7 @@ func (c *serviceDiscovery) getMembersWithTransportFailure(
 		if err != nil {
 			metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 			attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
-			return nil, isMemberRPCTransportFailure(err), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+			return nil, isMemberRPCAvailabilityFailure(err), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 		}
 		val := res.Val
 		members := val.(*pdpb.GetMembersResponse)
@@ -1163,28 +1162,28 @@ func (c *serviceDiscovery) getMembersWithTransportFailure(
 	case <-ctx.Done():
 		attachErr := errors.Errorf("error:%s target:%s status:%s", ctx.Err(), cc.Target(), cc.GetState().String())
 		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
-		return nil, isMemberRPCTransportFailure(ctx.Err()), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
+		return nil, isMemberRPCAvailabilityFailure(ctx.Err()), errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 }
 
-func (c *serviceDiscovery) logMemberTransportFailureRecovery(now time.Time, url string) {
-	recovery, ok := c.memberTransportFailures.recover(now, url)
+func (c *serviceDiscovery) logMemberAvailabilityFailureRecovery(now time.Time, url string) {
+	recovery, ok := c.memberAvailabilityFailures.recover(now, url)
 	if !ok {
 		return
 	}
-	log.Info("[pd] member transport failure recovered",
+	log.Info("[pd] member availability failure recovered",
 		zap.String("url", url),
 		zap.Duration("failure-duration", recovery.failureDuration),
 		zap.Uint64("failed-attempts", recovery.failedAttempts),
 		zap.Uint64("suppressed-errors", recovery.suppressedErrors))
 }
 
-func (c *serviceDiscovery) logMemberTransportFailureSummary(now time.Time) {
-	summary, ok := c.memberTransportFailures.summary(now)
+func (c *serviceDiscovery) logMemberAvailabilityFailureSummary(now time.Time) {
+	summary, ok := c.memberAvailabilityFailures.summary(now)
 	if !ok {
 		return
 	}
-	log.Info("[pd] member transport failures are being suppressed",
+	log.Info("[pd] member availability failures are being suppressed",
 		zap.Strings("failed-urls", summary.failedURLs),
 		zap.Duration("longest-failure-duration", summary.longestFailureDuration),
 		zap.Uint64("failed-attempts", summary.failedAttempts),

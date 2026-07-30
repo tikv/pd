@@ -499,16 +499,16 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 
 	const memberURL = "http://pd.test:2379"
 	testCases := []struct {
-		name      string
-		response  func() (*pdpb.GetMembersResponse, error)
-		transport bool
+		name         string
+		response     func() (*pdpb.GetMembersResponse, error)
+		availability bool
 	}{
 		{
 			name: "rpc unavailable",
 			response: func() (*pdpb.GetMembersResponse, error) {
 				return nil, status.Error(codes.Unavailable, "dial tcp 192.0.2.1:2379: connection refused")
 			},
-			transport: true,
+			availability: true,
 		},
 		{
 			name: "response header error",
@@ -538,7 +538,7 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			testServer.getMembers = testCase.response
 			client := newMemberTestServiceDiscovery(ctx, cancel, memberURL, conn)
-			require.True(t, client.memberTransportFailures.record(time.Now(), memberURL))
+			require.True(t, client.memberAvailabilityFailures.record(time.Now(), memberURL))
 
 			result, structuredErr := client.updateMemberWithResult()
 			compatibilityErr := client.updateMember()
@@ -546,10 +546,10 @@ func TestUpdateMemberWithResultPreservesErrorContract(t *testing.T) {
 			require.Error(t, structuredErr)
 			require.Equal(t, structuredErr.Error(), compatibilityErr.Error())
 			require.Equal(t, []string{memberURL}, result.failedURLs)
-			require.Equal(t, testCase.transport, result.transportFailureCount == 1)
+			require.Equal(t, testCase.availability, result.availabilityFailureCount == 1)
 
-			_, ok := client.memberTransportFailures.summary(time.Now())
-			if testCase.transport {
+			_, ok := client.memberAvailabilityFailures.summary(time.Now())
+			if testCase.availability {
 				require.True(t, ok)
 			} else {
 				require.False(t, ok)
@@ -602,7 +602,7 @@ func TestUpdateMemberRetainsOnlyFailuresObservedBeforeSuccess(t *testing.T) {
 	}
 	for _, memberURL := range memberURLs {
 		client.clientConns.Store(memberURL, conn)
-		require.True(t, client.memberTransportFailures.record(time.Now(), memberURL))
+		require.True(t, client.memberAvailabilityFailures.record(time.Now(), memberURL))
 	}
 
 	result, err := client.updateMemberWithResult()
@@ -610,7 +610,7 @@ func TestUpdateMemberRetainsOnlyFailuresObservedBeforeSuccess(t *testing.T) {
 	require.Equal(t, int32(2), calls.Load())
 	require.Equal(t, []string{"http://pd-1.test:2379"}, result.failedURLs)
 
-	summary, ok := client.memberTransportFailures.summary(time.Now())
+	summary, ok := client.memberAvailabilityFailures.summary(time.Now())
 	require.True(t, ok)
 	require.Equal(t, []string{"http://pd-1.test:2379"}, summary.failedURLs)
 }
@@ -750,7 +750,7 @@ func TestUpdateMemberLoopDegradedModeSafetySweepAndConnectionRecovery(t *testing
 	syntheticMemberResponse.Store(true)
 	memberUpdateCh <- time.Now()
 	require.Eventually(t, func() bool {
-		_, failed := client.memberTransportFailures.summary(time.Now())
+		_, failed := client.memberAvailabilityFailures.summary(time.Now())
 		return !failed && getMembersCalls.Load() == callsAfterSafetySweep+1
 	}, time.Second, 10*time.Millisecond)
 	callsAfterSafetyRecovery := getMembersCalls.Load()
@@ -780,7 +780,7 @@ func TestUpdateMemberLoopDegradedModeSafetySweepAndConnectionRecovery(t *testing
 	// must resume the normal refresh loop without waiting for the periodic sweep.
 	connectionAvailable.Store(true)
 	require.Eventually(t, func() bool {
-		_, failed := client.memberTransportFailures.summary(time.Now())
+		_, failed := client.memberAvailabilityFailures.summary(time.Now())
 		return !failed && getMembersCalls.Load() > callsAfterSecondFailureBatch
 	}, 2*time.Second, 10*time.Millisecond)
 	callsAfterRecovery := getMembersCalls.Load()

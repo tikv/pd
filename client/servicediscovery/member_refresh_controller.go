@@ -30,16 +30,16 @@ import (
 	clienterrs "github.com/tikv/pd/client/errs"
 )
 
-// isMemberDialTransportFailure recognizes the explicit gRPC dial sentinel.
-func isMemberDialTransportFailure(err error) bool {
+// isMemberDialAvailabilityFailure recognizes the explicit gRPC dial sentinel.
+func isMemberDialAvailabilityFailure(err error) bool {
 	return errors.Is(err, clienterrs.ErrGRPCDial)
 }
 
-// isMemberRPCTransportFailure recognizes Unavailable and DeadlineExceeded,
-// including a local context deadline. These classifications only make an
-// error eligible for transport-outage suppression; entering degraded mode also
-// requires every corresponding gRPC connection to be in a degraded-mode state.
-func isMemberRPCTransportFailure(err error) bool {
+// isMemberRPCAvailabilityFailure recognizes Unavailable and DeadlineExceeded,
+// including a local context deadline. An availability failure alone does not
+// identify a transport outage; entering degraded mode also requires every
+// corresponding gRPC connection to be in a degraded-mode state.
+func isMemberRPCAvailabilityFailure(err error) bool {
 	code := status.Code(err)
 	if errors.Is(err, context.DeadlineExceeded) {
 		code = codes.DeadlineExceeded
@@ -49,19 +49,19 @@ func isMemberRPCTransportFailure(err error) bool {
 
 type memberUpdateResult struct {
 	// failedURLs is the ordered prefix attempted before the first success.
-	failedURLs            []string
-	transportFailureCount int
+	failedURLs               []string
+	availabilityFailureCount int
 }
 
-func (r *memberUpdateResult) recordFailure(url string, isTransportFailure bool) {
+func (r *memberUpdateResult) recordFailure(url string, isAvailabilityFailure bool) {
 	r.failedURLs = append(r.failedURLs, url)
-	if isTransportFailure {
-		r.transportFailureCount++
+	if isAvailabilityFailure {
+		r.availabilityFailureCount++
 	}
 }
 
-func (r *memberUpdateResult) allCurrentURLsFailedByTransport(urls []string) bool {
-	if len(urls) == 0 || len(r.failedURLs) != len(urls) || r.transportFailureCount != len(urls) {
+func (r *memberUpdateResult) allCurrentURLsHaveAvailabilityFailures(urls []string) bool {
+	if len(urls) == 0 || len(r.failedURLs) != len(urls) || r.availabilityFailureCount != len(urls) {
 		return false
 	}
 	return slices.Equal(r.failedURLs, urls)
@@ -86,7 +86,7 @@ func (c *memberRefreshController) tryEnterDegraded(
 	urls []string,
 	connections []memberConnection,
 ) bool {
-	if len(urls) != len(connections) || !result.allCurrentURLsFailedByTransport(urls) {
+	if len(urls) != len(connections) || !result.allCurrentURLsHaveAvailabilityFailures(urls) {
 		return false
 	}
 	for _, connection := range connections {
@@ -123,44 +123,44 @@ func isDegradedModeConnectionState(state connectivity.State) bool {
 		state == connectivity.TransientFailure
 }
 
-// A transport-failure episode starts with the first classified transport
-// failure for a URL. It ends when that URL succeeds, returns a non-transport
-// failure, leaves the current member set, or is not reached because an earlier
-// URL completed the refresh. Only a direct success emits a recovery log.
-type memberTransportFailureEpisode struct {
+// An availability-failure episode starts with the first availability failure
+// for a URL. It ends when that URL succeeds, returns a different failure,
+// leaves the current member set, or is not reached because an earlier URL
+// completed the refresh. Only a direct success emits a recovery log.
+type memberAvailabilityFailureEpisode struct {
 	firstFailure   time.Time
 	failedAttempts uint64
 }
 
-type memberTransportFailureRecovery struct {
+type memberAvailabilityFailureRecovery struct {
 	failureDuration  time.Duration
 	failedAttempts   uint64
 	suppressedErrors uint64
 }
 
-type memberTransportFailureSummary struct {
+type memberAvailabilityFailureSummary struct {
 	failedURLs             []string
 	longestFailureDuration time.Duration
 	failedAttempts         uint64
 	suppressedErrors       uint64
 }
 
-type memberTransportFailureTracker struct {
+type memberAvailabilityFailureTracker struct {
 	mu       sync.Mutex
-	episodes map[string]*memberTransportFailureEpisode
+	episodes map[string]*memberAvailabilityFailureEpisode
 }
 
 // record returns true when the caller should emit the detailed failure log.
-func (t *memberTransportFailureTracker) record(now time.Time, url string) bool {
+func (t *memberAvailabilityFailureTracker) record(now time.Time, url string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.episodes == nil {
-		t.episodes = make(map[string]*memberTransportFailureEpisode)
+		t.episodes = make(map[string]*memberAvailabilityFailureEpisode)
 	}
 	episode, ok := t.episodes[url]
 	if !ok {
-		t.episodes[url] = &memberTransportFailureEpisode{
+		t.episodes[url] = &memberAvailabilityFailureEpisode{
 			firstFailure:   now,
 			failedAttempts: 1,
 		}
@@ -171,30 +171,30 @@ func (t *memberTransportFailureTracker) record(now time.Time, url string) bool {
 	return false
 }
 
-func (t *memberTransportFailureTracker) recover(now time.Time, url string) (memberTransportFailureRecovery, bool) {
+func (t *memberAvailabilityFailureTracker) recover(now time.Time, url string) (memberAvailabilityFailureRecovery, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	episode, ok := t.episodes[url]
 	if !ok {
-		return memberTransportFailureRecovery{}, false
+		return memberAvailabilityFailureRecovery{}, false
 	}
 	delete(t.episodes, url)
-	return memberTransportFailureRecovery{
+	return memberAvailabilityFailureRecovery{
 		failureDuration:  now.Sub(episode.firstFailure),
 		failedAttempts:   episode.failedAttempts,
 		suppressedErrors: episode.failedAttempts - 1,
 	}, true
 }
 
-func (t *memberTransportFailureTracker) discard(url string) {
+func (t *memberAvailabilityFailureTracker) discard(url string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.episodes, url)
 }
 
 // retainCurrentFailures drops stale episodes after a successful refresh.
-func (t *memberTransportFailureTracker) retainCurrentFailures(currentURLs, failedURLs []string) {
+func (t *memberAvailabilityFailureTracker) retainCurrentFailures(currentURLs, failedURLs []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -205,12 +205,12 @@ func (t *memberTransportFailureTracker) retainCurrentFailures(currentURLs, faile
 	}
 }
 
-func (t *memberTransportFailureTracker) summary(now time.Time) (memberTransportFailureSummary, bool) {
+func (t *memberAvailabilityFailureTracker) summary(now time.Time) (memberAvailabilityFailureSummary, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if len(t.episodes) == 0 {
-		return memberTransportFailureSummary{}, false
+		return memberAvailabilityFailureSummary{}, false
 	}
 	urls := make([]string, 0, len(t.episodes))
 	for url := range t.episodes {
@@ -218,7 +218,7 @@ func (t *memberTransportFailureTracker) summary(now time.Time) (memberTransportF
 	}
 	sort.Strings(urls)
 
-	summary := memberTransportFailureSummary{
+	summary := memberAvailabilityFailureSummary{
 		failedURLs: urls,
 	}
 	earliest := now
