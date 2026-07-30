@@ -34,6 +34,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
@@ -105,7 +106,9 @@ func TestConvertSchedulingHeaderPreservesError(t *testing.T) {
 }
 
 func TestServiceDiscoveryRPCsReturnUnavailableWhenServerIsNotRunning(t *testing.T) {
-	grpcServer := &GrpcServer{Server: &Server{}}
+	grpcServer := &GrpcServer{Server: &Server{
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(&config.ServiceMiddlewareConfig{}),
+	}}
 	listener := bufconn.Listen(1024 * 1024)
 	transport := grpc.NewServer()
 	pdpb.RegisterPDServer(transport, grpcServer)

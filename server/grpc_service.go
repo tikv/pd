@@ -426,17 +426,17 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 
 // GetMembers implements gRPC PDServer.
 func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb.GetMembersResponse, error) {
-	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
-	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
-	if s.IsClosed() {
-		return nil, errs.ErrNotStarted
-	}
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
 	}
 	if done != nil {
 		defer done()
+	}
+	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
+	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
 	}
 	members, err := s.Server.GetMembers()
 	if err != nil {
