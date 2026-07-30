@@ -133,6 +133,11 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkRegionsReplicated)
 }
 
@@ -140,6 +145,18 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	re := suite.Require()
 	pauseAllCheckers(re, cluster)
 	leader := cluster.GetLeaderServer()
+	var checkerController *checker.Controller
+	if sche := cluster.GetSchedulingPrimaryServer(); sche == nil {
+		checkerController = leader.GetRaftCluster().GetCoordinator().GetCheckerController()
+	} else {
+		checkerController = sche.GetCluster().GetCoordinator().GetCheckerController()
+	}
+	checkerController.ClearSuspectKeyRanges()
+	checkerController.ClearPendingProcessedRegions()
+	defer func() {
+		checkerController.ClearSuspectKeyRanges()
+		checkerController.ClearPendingProcessedRegions()
+	}()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	// add test region
