@@ -791,6 +791,14 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	resp, err := cli.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	// In standalone RM mode, writes go through the PD proxy and the standalone
+	// RM observes persisted metadata asynchronously. Wait until the read path
+	// can see the group before the controller lazily loads it.
+	var getErr error
+	testutil.Eventually(re, func() bool {
+		_, getErr = cli.GetResourceGroup(suite.ctx, group.Name)
+		return getErr == nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
 	_, _, _, _, err = controller.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())

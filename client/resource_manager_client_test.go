@@ -27,6 +27,8 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
@@ -134,6 +136,7 @@ type testRMServer struct {
 	modifyCount atomic.Int32
 	deleteCount atomic.Int32
 	tokenCount  atomic.Int32
+	getErr      error
 }
 
 func (s *testRMServer) ListResourceGroups(context.Context, *rmpb.ListResourceGroupsRequest) (*rmpb.ListResourceGroupsResponse, error) {
@@ -147,6 +150,9 @@ func (s *testRMServer) ListResourceGroups(context.Context, *rmpb.ListResourceGro
 
 func (s *testRMServer) GetResourceGroup(context.Context, *rmpb.GetResourceGroupRequest) (*rmpb.GetResourceGroupResponse, error) {
 	s.getCount.Add(1)
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	return &rmpb.GetResourceGroupResponse{
 		Group: &rmpb.ResourceGroup{
 			Name: s.id,
@@ -316,6 +322,37 @@ func TestResourceManagerWritesUsePDAndReadsUseRM(t *testing.T) {
 	require.EqualValues(t, 0, rmServer.addCount.Load())
 	require.EqualValues(t, 0, rmServer.modifyCount.Load())
 	require.EqualValues(t, 0, rmServer.deleteCount.Load())
+}
+
+func TestGetResourceGroupPreservesContextErrors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pdAddr, _, pdCleanup := startTestRMServer(t, "pd")
+	t.Cleanup(pdCleanup)
+	rmAddr, rmServer, rmCleanup := startTestRMServer(t, "rm")
+	t.Cleanup(rmCleanup)
+
+	inner := newInnerClientForRMRouteTest(t, ctx, pdAddr)
+	inner.resourceManagerDiscovery = newTestResourceManagerDiscovery(t, ctx, rmAddr)
+	t.Cleanup(inner.resourceManagerDiscovery.Close)
+
+	cli := &client{inner: inner}
+
+	canceledCtx, cancelRequest := context.WithCancel(ctx)
+	cancelRequest()
+	_, err := cli.GetResourceGroup(canceledCtx, "test-group")
+	require.ErrorIs(t, err, context.Canceled)
+
+	expiredCtx, cancelDeadline := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancelDeadline()
+	_, err = cli.GetResourceGroup(expiredCtx, "test-group")
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	rmServer.getErr = status.Error(codes.DeadlineExceeded, "rm deadline exceeded")
+	_, err = cli.GetResourceGroup(ctx, "test-group")
+	require.NotErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, codes.DeadlineExceeded, status.Code(errors.Unwrap(err)))
 }
 
 func TestTryResourceManagerConnectUsesRMForTokenAndFallbackToPD(t *testing.T) {

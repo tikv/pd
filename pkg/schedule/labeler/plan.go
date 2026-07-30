@@ -51,7 +51,7 @@ func (p *Plan) SetLabelRule(rule *LabelRule) error {
 		return p.labeler.storage.SaveRegionRule(txn, rule.ID, rule)
 	})
 	p.applyLockedOps = append(p.applyLockedOps, func() {
-		p.labeler.labelRules[rule.ID] = rule
+		p.labeler.setLabelRuleInMemoryLocked(rule)
 	})
 	return nil
 }
@@ -66,10 +66,7 @@ func (p *Plan) DeleteLabelRule(id string) error {
 		return p.labeler.storage.DeleteRegionRule(txn, id)
 	})
 	p.applyLockedOps = append(p.applyLockedOps, func() {
-		if _, ok := p.labeler.labelRules[id]; !ok {
-			return
-		}
-		delete(p.labeler.labelRules, id)
+		p.labeler.deleteLabelRuleInMemoryLocked(id)
 	})
 	return nil
 }

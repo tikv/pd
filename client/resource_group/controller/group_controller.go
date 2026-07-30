@@ -320,11 +320,11 @@ func (gc *groupCostController) updateAvgRequestResourcePerSec() {
 	if counter.limiter.GetBurst() >= 0 {
 		isBurstable = false
 	}
+	gc.burstable.Store(isBurstable)
 	if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption)) {
 		return
 	}
 	logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec), zap.Bool("is-throttled", gc.isThrottled.Load()))
-	gc.burstable.Store(isBurstable)
 }
 
 func (gc *groupCostController) resetEmergencyTokenAcquisition() {
@@ -366,6 +366,14 @@ func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool 
 	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
 	})
+	// A freshly created controller might be published between the `updateRunState`
+	// and `updateAvgRequestResourcePerSec` passes of the same tick. In that case,
+	// `gc.run.now` still equals the `avgLastTime` set by `initRunState`, and the
+	// division below would be 0/0 = NaN, permanently poisoning `avgRUPerSec`.
+	// Skip the sample until the run state actually advances.
+	if deltaDuration <= 0 {
+		return false
+	}
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
 	failpoint.Inject("acceleratedSpeedTrend", func() {
