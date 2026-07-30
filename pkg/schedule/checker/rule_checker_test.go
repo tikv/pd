@@ -433,6 +433,44 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeader() {
 	re.Nil(suite.rc.Check(suite.cluster.GetRegion(1)))
 }
 
+func (suite *ruleCheckerTestSuite) TestFixFollowerRoleWithOverlappingRules() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"role": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "follower",
+		Index:   100,
+		Role:    placement.Follower,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "role", Op: placement.In, Values: []string{"follower"}},
+		},
+	}))
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "voter",
+		Index:   101,
+		Role:    placement.Voter,
+		Count:   1,
+	}))
+	re.NoError(suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("fix-follower-role", op.Desc())
+	re.Equal(uint64(2), op.Step(0).(operator.TransferLeader).ToStore)
+
+	// The current leader also matches the broad voter rule, but it must not be
+	// selected as its own transfer target when the other peer rejects leaders.
+	suite.cluster.SetLabelProperty(config.RejectLeader, "role", "voter")
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+	re.Nil(suite.rc.Check(region))
+}
+
 func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"role": "follower"})
@@ -2202,6 +2240,41 @@ func (suite *ruleCheckerTestSuite) TestDemoteVoter() {
 	re.Equal("fix-demote-voter", op.Desc())
 }
 
+func (suite *ruleCheckerTestSuite) TestDemoteLeaderRequiresAlternativeLeader() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"role": "learner"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"role": "voter"})
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "learner",
+		Index:   100,
+		Role:    placement.Learner,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "role", Op: placement.In, Values: []string{"learner"}},
+		},
+	}))
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "voter",
+		Index:   101,
+		Role:    placement.Voter,
+		Count:   1,
+	}))
+	re.NoError(suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	op := suite.rc.Check(region)
+	re.NotNil(op)
+	re.Equal("fix-demote-voter", op.Desc())
+
+	suite.cluster.SetLabelProperty(config.RejectLeader, "role", "voter")
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+	re.Nil(suite.rc.Check(region))
+}
+
 func (suite *ruleCheckerTestSuite) TestOfflineAndDownStore() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
@@ -2251,6 +2324,58 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	re.Equal(uint64(3), op.Step(0).(operator.AddLearner).ToStore)
 	_, exist = suite.rc.pendingList.Get(1)
 	re.False(exist)
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementPendingWithUnfixableOrphan() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z2"})
+	suite.cluster.AddLeaderRegion(1, 1, 2)
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   2,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "zone", Op: placement.In, Values: []string{"z1"}},
+		},
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+	re.Nil(suite.rc.Check(region))
+
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1"})
+	re.Equal(RegionPlacementStateInProgress, suite.rc.GetRegionPlacementState(region))
+	re.NotNil(suite.rc.Check(region))
+}
+
+func (suite *ruleCheckerTestSuite) TestRegionPlacementFollowsOrphanRemovalOrder() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"role": "blocked", "zone": "z1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"role": "blocked", "zone": "z2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"role": "blocked", "zone": "z3"})
+	suite.cluster.AddLeaderRegion(1, 1, 2, 3)
+	suite.cluster.SetLabelProperty(config.RejectLeader, "role", "blocked")
+	re.NoError(suite.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   1,
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "zone", Op: placement.In, Values: []string{"z2"}},
+		},
+	}))
+
+	region := suite.cluster.GetRegion(1)
+	fit := suite.ruleManager.FitRegionWithoutCache(suite.cluster, region)
+	re.Len(fit.OrphanPeers, 2)
+	re.Equal(uint64(1), fit.OrphanPeers[0].GetStoreId())
+	// The checker always tries the first orphan. It cannot remove the leader
+	// because no other peer is allowed to lead, even though the second orphan
+	// itself would be removable.
+	re.Equal(RegionPlacementStatePending, suite.rc.GetRegionPlacementState(region))
+	re.Nil(suite.rc.Check(region))
 }
 
 func (suite *ruleCheckerTestSuite) TestRegionsPlacementStateLoadsStoresOnce() {

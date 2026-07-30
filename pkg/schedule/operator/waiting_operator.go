@@ -29,6 +29,7 @@ type WaitingOperator interface {
 	PutMergeOperators(op []*Operator)
 	GetOperator() []*Operator
 	ListOperator() []*Operator
+	HasOperator(regionIDs []uint64, mask OpKind) bool
 }
 
 // bucket is used to maintain the operators created by a specific scheduler.
@@ -39,9 +40,10 @@ type bucket struct {
 
 // randBuckets is an implementation of waiting operators
 type randBuckets struct {
-	mu          syncutil.Mutex
-	totalWeight float64
-	buckets     []*bucket
+	mu                syncutil.RWMutex
+	totalWeight       float64
+	buckets           []*bucket
+	operatorsByRegion map[uint64][]*Operator
 }
 
 // newRandBuckets creates a random buckets.
@@ -52,7 +54,10 @@ func newRandBuckets() *randBuckets {
 			weight: priorityWeight[i],
 		})
 	}
-	return &randBuckets{buckets: buckets}
+	return &randBuckets{
+		buckets:           buckets,
+		operatorsByRegion: make(map[uint64][]*Operator),
+	}
 }
 
 // PutOperator puts an operator into the random buckets.
@@ -65,6 +70,7 @@ func (b *randBuckets) PutOperator(op *Operator) {
 		b.totalWeight += bucket.weight
 	}
 	bucket.ops = append(bucket.ops, op)
+	b.operatorsByRegion[op.RegionID()] = append(b.operatorsByRegion[op.RegionID()], op)
 }
 
 // PutMergeOperators puts two operators into the random buckets.
@@ -80,18 +86,36 @@ func (b *randBuckets) PutMergeOperators(ops []*Operator) {
 		b.totalWeight += bucket.weight
 	}
 	bucket.ops = append(bucket.ops, ops...)
+	for _, op := range ops {
+		b.operatorsByRegion[op.RegionID()] = append(b.operatorsByRegion[op.RegionID()], op)
+	}
 }
 
 // ListOperator lists all operator in the random buckets.
 func (b *randBuckets) ListOperator() []*Operator {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	var ops []*Operator
 	for i := range b.buckets {
 		bucket := b.buckets[i]
 		ops = append(ops, bucket.ops...)
 	}
 	return ops
+}
+
+// HasOperator checks whether any of the Regions has a waiting operator of the
+// specified kind.
+func (b *randBuckets) HasOperator(regionIDs []uint64, mask OpKind) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	for _, regionID := range regionIDs {
+		for _, op := range b.operatorsByRegion[regionID] {
+			if op.Kind()&mask != 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetOperator gets an operator from the random buckets.
@@ -125,11 +149,32 @@ func (b *randBuckets) GetOperator() []*Operator {
 			if len(bucket.ops) == 0 {
 				b.totalWeight -= bucket.weight
 			}
+			for _, op := range res {
+				b.removeOperatorFromRegion(op)
+			}
 			return res
 		}
 		sum += proportion
 	}
 	return nil
+}
+
+func (b *randBuckets) removeOperatorFromRegion(op *Operator) {
+	regionID := op.RegionID()
+	ops := b.operatorsByRegion[regionID]
+	for i, waitingOp := range ops {
+		if waitingOp != op {
+			continue
+		}
+		ops[i] = ops[len(ops)-1]
+		ops = ops[:len(ops)-1]
+		break
+	}
+	if len(ops) == 0 {
+		delete(b.operatorsByRegion, regionID)
+		return
+	}
+	b.operatorsByRegion[regionID] = ops
 }
 
 // waitingOperatorStatus is used to limit the count of each kind of operators.
