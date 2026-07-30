@@ -41,7 +41,8 @@ const (
 type KeyspaceClient interface {
 	// LoadKeyspace load and return target keyspace's metadata.
 	LoadKeyspace(ctx context.Context, name string) (*keyspacepb.KeyspaceMeta, error)
-	// LoadKeyspaceByID loads and returns target keyspace's metadata by ID.
+	// LoadKeyspaceByID loads and returns target keyspace's persisted metadata by ID.
+	// Unlike LoadKeyspace, a successful call does not guarantee that the keyspace region bounds are ready.
 	LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, error)
 	// UpdateKeyspaceState updates target keyspace's state.
 	UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error)
@@ -115,7 +116,8 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	return resp.Keyspace, nil
 }
 
-// LoadKeyspaceByID loads and returns target keyspace's metadata by ID.
+// LoadKeyspaceByID loads and returns target keyspace's persisted metadata by ID.
+// Unlike LoadKeyspace, a successful call does not guarantee that the keyspace region bounds are ready.
 func (c *client) LoadKeyspaceByID(ctx context.Context, id uint32) (*keyspacepb.KeyspaceMeta, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("keyspaceClient.LoadKeyspaceByID", opentracing.ChildOf(span.Context()))
