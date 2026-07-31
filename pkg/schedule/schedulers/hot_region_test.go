@@ -596,31 +596,49 @@ func TestHotReadLeaderScheduleWithPlacementScope(t *testing.T) {
 }
 
 func TestHotWriteLeaderScheduleWithPlacementScope(t *testing.T) {
-	re := require.New(t)
-	tc, hb := preparePlacementHotScheduler(t, writeType, writeLeader)
-	hb.conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
+	for _, testCase := range []struct {
+		name        string
+		rankVersion string
+		schedule    bool
+	}{
+		{name: "v2 uses scoped expectation", rankVersion: "v2", schedule: true},
+		{name: "v1 keeps global expectation", rankVersion: "v1"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			tc, hb := preparePlacementHotScheduler(t, writeType, writeLeader)
+			hb.conf.setRankFormulaVersion(testCase.rankVersion)
+			hb.conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
 
-	for id := uint64(1); id <= 6; id++ {
-		pool := "other"
-		if id <= 4 {
-			pool = "target"
-		}
-		tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
-		tc.UpdateStorageWrittenBytes(id, 0)
+			for id := uint64(1); id <= 6; id++ {
+				pool := "other"
+				if id <= 4 {
+					pool = "target"
+				}
+				tc.AddLabelsStore(id, 1, map[string]string{"pool": pool})
+				tc.UpdateStorageWrittenBytes(id, 0)
+			}
+			setPoolPlacementRule(t, tc)
+
+			// The target stores are above the global expectation (31/6) but
+			// below the placement-scoped expectation (31/4).
+			addRegionInfo(tc, utils.Write, []testRegionInfo{
+				{1, []uint64{1, 2, 3}, 2.5 * units.MiB, 0, 0},
+				{2, []uint64{1, 2, 3}, 17.5 * units.MiB, 0, 0},
+				{3, []uint64{2, 1, 3}, 5.5 * units.MiB, 0, 0},
+				{4, []uint64{3, 1, 2}, 5.5 * units.MiB, 0, 0},
+			})
+
+			ops, _ := hb.Schedule(tc, false)
+			if !testCase.schedule {
+				re.Empty(ops)
+				return
+			}
+			re.Len(ops, 1)
+			re.Equal(uint64(1), ops[0].RegionID())
+			operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
+		})
 	}
-	setPoolPlacementRule(t, tc)
-
-	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 2.5 * units.MiB, 0, 0},
-		{2, []uint64{1, 2, 3}, 17.5 * units.MiB, 0, 0},
-		{3, []uint64{2, 1, 3}, 0, 0, 0},
-		{4, []uint64{3, 1, 2}, 0, 0, 0},
-	})
-
-	ops, _ := hb.Schedule(tc, false)
-	re.Len(ops, 1)
-	re.Equal(uint64(1), ops[0].RegionID())
-	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
 }
 
 func TestHotWriteLeaderScheduleAcrossSameRoleRules(t *testing.T) {

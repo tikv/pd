@@ -21,9 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -147,10 +149,12 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 	for _, testCase := range []struct {
 		name                  string
 		revertTargetMatchesB  bool
+		historyRejectsRevert  bool
 		expectedOperatorCount int
 	}{
 		{name: "valid revert", revertTargetMatchesB: true, expectedOperatorCount: 2},
 		{name: "invalid revert", expectedOperatorCount: 1},
+		{name: "revert rejected by scoped history", revertTargetMatchesB: true, historyRejectsRevert: true, expectedOperatorCount: 1},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
@@ -161,11 +165,13 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 			re.NoError(err)
 			hb := sche.(*hotScheduler)
 			hb.types = []resourceType{writePeer}
-			hb.conf.setDstToleranceRatio(0.0)
-			hb.conf.setSrcToleranceRatio(0.0)
 			hb.conf.setRankFormulaVersion("v2")
-			hb.conf.setHistorySampleDuration(0)
 			hb.conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
+			// Retain one complete history sample so both current and historical
+			// placement-scoped safeguards are active without waiting in the test.
+			historyInterval := hb.conf.getHistorySampleInterval()
+			hb.conf.setHistorySampleDuration(historyInterval)
+			hb.updateHistoryLoadConfig(historyInterval, historyInterval)
 			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
 			for id, labels := range map[uint64]map[string]string{
@@ -192,11 +198,27 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 				LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
 			}))
 
-			tc.UpdateStorageWrittenStats(1, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
-			tc.UpdateStorageWrittenStats(2, 20*units.MiB*utils.StoreHeartBeatReportInterval, 14*units.MiB*utils.StoreHeartBeatReportInterval)
-			tc.UpdateStorageWrittenStats(3, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
-			tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
-			tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
+			storeLoads := map[uint64]statistics.Loads{
+				1: {utils.ByteDim: 15 * units.MiB, utils.KeyDim: 15 * units.MiB},
+				2: {utils.ByteDim: 20 * units.MiB, utils.KeyDim: 14 * units.MiB},
+				3: {utils.ByteDim: 15 * units.MiB, utils.KeyDim: 15 * units.MiB},
+				4: {utils.ByteDim: 15 * units.MiB, utils.KeyDim: 15 * units.MiB},
+				5: {utils.ByteDim: 10 * units.MiB, utils.KeyDim: 16 * units.MiB},
+			}
+			for id, loads := range storeLoads {
+				tc.UpdateStorageWrittenStats(
+					id,
+					uint64(loads[utils.ByteDim]*utils.StoreHeartBeatReportInterval),
+					uint64(loads[utils.KeyDim]*utils.StoreHeartBeatReportInterval),
+				)
+				historyLoads := loads
+				if testCase.historyRejectsRevert {
+					// The main move still passes by byte load, while the revert
+					// source and target no longer straddle their scoped key history.
+					historyLoads[utils.KeyDim] = 15 * units.MiB
+				}
+				hb.stHistoryLoads.Add(id, utils.Write, constant.RegionKind, historyLoads)
+			}
 			addRegionInfo(tc, utils.Write, []testRegionInfo{
 				{6, []uint64{3, 2, 1}, 3 * units.MiB, 1.8 * units.MiB, 0},
 				{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
@@ -215,7 +237,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 			ops, _ = hb.Schedule(tc, false)
 			re.Len(ops, testCase.expectedOperatorCount)
 			operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
-			if testCase.revertTargetMatchesB {
+			if testCase.expectedOperatorCount == 2 {
 				operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
 			}
 			re.True(hb.searchRevertRegions[writePeer])
