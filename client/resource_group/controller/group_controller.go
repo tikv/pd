@@ -151,6 +151,10 @@ func (s *requestSourceMetricsState) cleanup() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	// This cleanup assumes there is only one active ResourceGroupsController in the process.
+	// RequestSourceRUCounter is process-global, while this state is controller-local; with
+	// multiple controllers, deleting a shared label set here would stop the other controllers'
+	// cached counters from being exported.
 	for key := range s.items {
 		metrics.RequestSourceRUCounter.DeleteLabelValues(
 			s.resourceGroupName,
