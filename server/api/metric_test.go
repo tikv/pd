@@ -24,6 +24,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -79,14 +80,16 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 }
 
 func TestMetricQueryPinsValidatedTarget(t *testing.T) {
-	dialAddresses := make(chan string, 2)
+	dialAddresses := make(chan string, 3)
+	attemptDeadlines := make(chan time.Time, 2)
 	var peer net.Conn
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
 	baseTransport.DialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
 		dialAddresses <- address
-		if strings.HasPrefix(address, "192.0.2.10:") {
-			<-ctx.Done()
-			return nil, ctx.Err()
+		if strings.HasPrefix(address, "192.0.2.10:") || strings.HasPrefix(address, "192.0.2.11:") {
+			deadline, _ := ctx.Deadline()
+			attemptDeadlines <- deadline
+			return nil, errors.New("dial failed")
 		}
 		connection, otherEnd := net.Pipe()
 		peer = otherEnd
@@ -98,13 +101,26 @@ func TestMetricQueryPinsValidatedTarget(t *testing.T) {
 	resolver := staticMetricResolver{addresses: []netip.Addr{
 		netip.MustParseAddr("192.0.2.10"),
 		netip.MustParseAddr("192.0.2.11"),
+		netip.MustParseAddr("192.0.2.12"),
 	}}
 	target, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example:9090", resolver)
 	require.NoError(t, err)
-	ctx := context.WithValue(context.Background(), metricTargetContextKey{}, target)
+	ctx, cancel := context.WithTimeout(context.Background(), metricQueryTimeout)
+	defer cancel()
+	parentDeadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	ctx = context.WithValue(ctx, metricTargetContextKey{}, target)
 	connection, err := transport.DialContext(ctx, "tcp", "metrics.example:9090")
 	require.NoError(t, err)
-	require.ElementsMatch(t, []string{"192.0.2.10:9090", "192.0.2.11:9090"}, []string{<-dialAddresses, <-dialAddresses})
+	require.ElementsMatch(t,
+		[]string{"192.0.2.10:9090", "192.0.2.11:9090", "192.0.2.12:9090"},
+		[]string{<-dialAddresses, <-dialAddresses, <-dialAddresses},
+	)
+	for range 2 {
+		attemptDeadline := <-attemptDeadlines
+		require.False(t, attemptDeadline.IsZero())
+		require.True(t, attemptDeadline.Before(parentDeadline))
+	}
 	require.NoError(t, connection.Close())
 	require.NoError(t, peer.Close())
 }

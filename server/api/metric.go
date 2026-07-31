@@ -214,6 +214,15 @@ func isSafeMetricTargetIP(address netip.Addr) bool {
 	return !unsafe
 }
 
+func metricQueryDialDeadline(now, deadline time.Time, addressesRemaining int) time.Time {
+	timeRemaining := deadline.Sub(now)
+	timeout := timeRemaining / time.Duration(addressesRemaining)
+	if timeout < 2*time.Second {
+		timeout = min(timeRemaining, 2*time.Second)
+	}
+	return now.Add(timeout)
+}
+
 func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 	baseTransport := http.DefaultTransport
 	if baseClient != nil && baseClient.Transport != nil {
@@ -244,15 +253,25 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 		}
 		dialCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
+		dialDeadline, ok := dialCtx.Deadline()
+		if !ok {
+			dialDeadline = time.Now().Add(metricQueryTimeout)
+		}
 		// Keep fast fallback bounded while preserving the standard Dialer's multi-address behavior.
 		results := make(chan dialResult, 2)
 		next, inFlight := 0, 0
 		launch := func() {
 			address := target.addresses[next]
+			addressesRemaining := len(target.addresses) - next
 			next++
 			inFlight++
+			attemptCtx, attemptCancel := context.WithDeadline(
+				dialCtx,
+				metricQueryDialDeadline(time.Now(), dialDeadline, addressesRemaining),
+			)
 			go func() {
-				connection, err := dialContext(dialCtx, network, net.JoinHostPort(address.String(), target.port))
+				defer attemptCancel()
+				connection, err := dialContext(attemptCtx, network, net.JoinHostPort(address.String(), target.port))
 				results <- dialResult{connection: connection, err: err}
 			}()
 		}
