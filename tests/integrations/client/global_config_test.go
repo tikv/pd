@@ -32,15 +32,13 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
 
-const (
-	globalConfigPath            = "/global/config/"
-	resourceGroupControllerPath = "resource_group/controller"
-)
+const globalConfigPath = "/global/config/"
 
 type testReceiver struct {
 	re  *require.Assertions
@@ -148,13 +146,16 @@ func (suite *globalConfigTestSuite) TestRejectInvalidConfigPath() {
 		"/tmp/codex-repro/",
 		"/global/configuration/",
 		"/",
+		keypath.ControllerConfigPath() + "-other",
+		keypath.ControllerConfigPath() + "s",
+		keypath.ControllerConfigPath() + "/child",
 	}
 	for _, configPath := range invalidPaths {
 		_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
 			ConfigPath: configPath,
 			Changes: []*pdpb.GlobalConfigItem{{
 				Kind:    pdpb.EventType_PUT,
-				Name:    "source_id",
+				Name:    "",
 				Payload: []byte("1"),
 			}},
 		})
@@ -213,29 +214,32 @@ func (suite *globalConfigTestSuite) TestLiteralConfigPath() {
 	}
 }
 
-func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
+func (suite *globalConfigTestSuite) TestResourceGroupControllerPrefixLoadCompatibility() {
 	re := suite.Require()
-	siblingKey := resourceGroupControllerPath + "-other"
-	settingsKey := resourceGroupControllerPath + "/settings"
+	controllerPath := keypath.ControllerConfigPath()
+	siblingKey := controllerPath + "-other"
 	defer func() {
-		for _, key := range []string{resourceGroupControllerPath, siblingKey, settingsKey} {
+		for _, key := range []string{controllerPath, siblingKey} {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), key)
 			re.NoError(err)
 		}
 	}()
 
-	_, err := suite.server.GetClient().Put(suite.server.Context(), resourceGroupControllerPath, "controller")
+	_, err := suite.server.GetClient().Put(suite.server.Context(), controllerPath, "controller")
 	re.NoError(err)
 	_, err = suite.server.GetClient().Put(suite.server.Context(), siblingKey, "other")
 	re.NoError(err)
 
+	// LoadGlobalConfig without Names is a prefix query. Keep that legacy result
+	// behavior for the exact controller path while rejecting sibling paths as
+	// direct requests.
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
-		ConfigPath: resourceGroupControllerPath,
+		ConfigPath: controllerPath,
 	})
 	re.NoError(err)
 	re.Equal([]*pdpb.GlobalConfigItem{{
 		Kind:    pdpb.EventType_PUT,
-		Name:    resourceGroupControllerPath,
+		Name:    controllerPath,
 		Payload: []byte("controller"),
 	}, {
 		Kind:    pdpb.EventType_PUT,
@@ -244,32 +248,25 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
 	}}, res.Items)
 
 	_, err = suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
-		ConfigPath: resourceGroupControllerPath,
+		ConfigPath: controllerPath,
 		Changes: []*pdpb.GlobalConfigItem{{
 			Kind:    pdpb.EventType_PUT,
 			Name:    "settings",
 			Payload: []byte("1"),
 		}},
 	})
-	re.NoError(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 
-	res, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		Names:      []string{"settings"},
-		ConfigPath: resourceGroupControllerPath,
+		ConfigPath: controllerPath,
 	})
-	re.NoError(err)
-	re.Equal([]*pdpb.GlobalConfigItem{{
-		Kind:    pdpb.EventType_PUT,
-		Name:    "settings",
-		Payload: []byte("1"),
-	}}, res.Items)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 
-	watchCtx, cancel := context.WithCancel(suite.server.Context())
-	cancel()
 	err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
-		ConfigPath: resourceGroupControllerPath,
-	}, testReceiver{re: re, ctx: watchCtx})
-	re.NotEqual(codes.InvalidArgument, status.Code(err))
+		ConfigPath: controllerPath,
+	}, testReceiver{re: re, ctx: suite.server.Context()})
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (suite *globalConfigTestSuite) TestNestedConfigPath() {
