@@ -342,7 +342,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
 	metricHandler := newqueryMetric(svr)
-	svr.AddCloseCallback(metricHandler.clientCache.close)
+	if metricHandler.transport != nil {
+		svr.AddCloseCallback(metricHandler.transport.CloseIdleConnections)
+	}
 	registerFunc(apiRouter, "/metric/query", metricHandler.queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/metric/query_range", metricHandler.queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 

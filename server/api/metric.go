@@ -15,7 +15,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -23,10 +22,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,7 +36,6 @@ import (
 
 const (
 	metricQueryTimeout             = 30 * time.Second
-	metricQueryDialFallbackDelay   = 250 * time.Millisecond
 	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
 )
@@ -48,39 +44,42 @@ type metricIPResolver interface {
 	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
 }
 
-type metricDialContext func(context.Context, string, string) (net.Conn, error)
-
-type metricProxyOptions struct {
-	resolver            metricIPResolver
-	dialContext         metricDialContext
-	timeout             time.Duration
-	maxResponseBodySize int64
-	clientCache         *metricQueryClientCache
-}
-
 type queryMetric struct {
-	s           *server.Server
-	clientCache metricQueryClientCache
+	s            *server.Server
+	transport    *http.Transport
+	transportErr error
+	resolver     metricIPResolver
 }
 
 type resolvedMetricTarget struct {
 	url       *url.URL
-	hostname  string
 	port      string
 	addresses []netip.Addr
 }
 
+type metricTargetContextKey struct{}
+
 func newqueryMetric(s *server.Server) *queryMetric {
-	return &queryMetric{s: s}
+	transport, err := newMetricQueryTransport(s.GetHTTPClient())
+	return &queryMetric{
+		s:            s,
+		transport:    transport,
+		transportErr: err,
+		resolver:     net.DefaultResolver,
+	}
 }
 
 func (h *queryMetric) queryMetric(w http.ResponseWriter, r *http.Request) {
+	if h.transportErr != nil {
+		writeMetricQueryError(w, h.transportErr)
+		return
+	}
 	proxyMetricQuery(
 		w,
 		r,
 		h.s.GetConfig().PDServerCfg.MetricStorage,
-		h.s.GetHTTPClient(),
-		metricProxyOptions{clientCache: &h.clientCache},
+		h.transport,
+		h.resolver,
 	)
 }
 
@@ -88,42 +87,24 @@ func proxyMetricQuery(
 	w http.ResponseWriter,
 	r *http.Request,
 	metricStorage string,
-	baseClient *http.Client,
-	options metricProxyOptions,
+	transport http.RoundTripper,
+	resolver metricIPResolver,
 ) {
-	metricPath, ok := prometheusMetricPath(r.URL.Path)
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	options = options.withDefaults()
-	ctx, cancel := context.WithTimeout(r.Context(), options.timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), metricQueryTimeout)
 	defer cancel()
 
-	target, err := resolveMetricStorageTarget(ctx, metricStorage, options.resolver)
+	target, err := resolveMetricStorageTarget(ctx, metricStorage, resolver)
 	if err != nil {
 		writeMetricQueryError(w, err)
 		return
 	}
-	client, releaseClient, err := newMetricQueryHTTPClient(baseClient, target, options)
-	if err != nil {
-		writeMetricQueryError(w, err)
-		return
-	}
-	defer releaseClient()
+	ctx = context.WithValue(ctx, metricTargetContextKey{}, target)
 
-	requestURL := &url.URL{
-		Scheme:   target.url.Scheme,
-		Host:     target.url.Host,
-		Path:     metricPath,
-		RawQuery: r.URL.RawQuery,
-	}
-	request, err := http.NewRequestWithContext(ctx, r.Method, requestURL.String(), r.Body)
-	if err != nil {
-		writeMetricQueryError(w, errors.Annotate(err, "failed to build metric query request"))
-		return
-	}
-	request.ContentLength = r.ContentLength
+	request := r.Clone(ctx)
+	request.RequestURI = ""
+	request.URL.Scheme = target.url.Scheme
+	request.URL.Host = target.url.Host
+	request.URL.Path = strings.Replace(r.URL.Path, "/pd/api/v1/metric", "/api/v1", 1)
 	// Preserve end-to-end headers for authenticated metric storage, matching the
 	// historical proxy contract, but never forward connection-specific headers.
 	request.Header = r.Header.Clone()
@@ -131,7 +112,8 @@ func proxyMetricQuery(
 	request.Header.Del("Accept-Encoding")
 	request.Header.Set("Accept", "application/json")
 
-	response, err := client.Do(request) //nolint:gosec // The target is resolved and validated before dialing.
+	// RoundTrip does not follow redirects. The target is resolved and validated before dialing.
+	response, err := transport.RoundTrip(request) //nolint:gosec
 	if err != nil {
 		writeMetricQueryError(w, errors.Annotate(err, "metric storage request failed"))
 		return
@@ -142,7 +124,7 @@ func proxyMetricQuery(
 		return
 	}
 
-	body, err := readMetricQueryResponse(response.Body, options.maxResponseBodySize)
+	body, err := readMetricQueryResponse(response.Body, maxMetricQueryResponseBodySize)
 	if err != nil {
 		writeMetricQueryError(w, err)
 		return
@@ -160,31 +142,32 @@ func proxyMetricQuery(
 	}
 }
 
-func (options metricProxyOptions) withDefaults() metricProxyOptions {
-	if options.resolver == nil {
-		options.resolver = net.DefaultResolver
-	}
-	if options.dialContext == nil {
-		dialer := &net.Dialer{}
-		options.dialContext = dialer.DialContext
-	}
-	if options.timeout <= 0 {
-		options.timeout = metricQueryTimeout
-	}
-	if options.maxResponseBodySize <= 0 {
-		options.maxResponseBodySize = maxMetricQueryResponseBodySize
-	}
-	return options
-}
-
 func resolveMetricStorageTarget(
 	ctx context.Context,
 	rawURL string,
 	resolver metricIPResolver,
 ) (*resolvedMetricTarget, error) {
-	targetURL, hostname, port, err := parseMetricStorageURL(rawURL)
-	if err != nil {
-		return nil, err
+	targetURL, err := url.Parse(rawURL)
+	if err != nil || targetURL.Opaque != "" || targetURL.Hostname() == "" || targetURL.User != nil || targetURL.Fragment != "" {
+		return nil, errors.New("invalid metric-storage URL")
+	}
+	targetURL.Scheme = strings.ToLower(targetURL.Scheme)
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		return nil, errors.New("metric-storage must use HTTP or HTTPS")
+	}
+	hostname := targetURL.Hostname()
+	port := targetURL.Port()
+	if port == "" {
+		if strings.HasSuffix(targetURL.Host, ":") {
+			return nil, errors.New("metric-storage URL has an empty port")
+		}
+		if targetURL.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	} else if portNumber, err := strconv.Atoi(port); err != nil || portNumber < 1 || portNumber > 65535 {
+		return nil, errors.New("metric-storage URL has an invalid port")
 	}
 
 	var addresses []netip.Addr
@@ -200,359 +183,75 @@ func resolveMetricStorageTarget(
 		return nil, errors.New("metric-storage hostname resolved to no addresses")
 	}
 
-	validatedAddresses := make([]netip.Addr, 0, len(addresses))
-	seen := make(map[netip.Addr]struct{}, len(addresses))
-	for _, address := range addresses {
-		address = address.Unmap()
-		if err := validateMetricTargetIP(address); err != nil {
-			return nil, err
+	for i, address := range addresses {
+		addresses[i] = address.Unmap()
+		if !isSafeMetricTargetIP(addresses[i]) {
+			return nil, errors.New("metric-storage resolved to an unsafe address")
 		}
-		if _, ok := seen[address]; ok {
-			continue
-		}
-		seen[address] = struct{}{}
-		validatedAddresses = append(validatedAddresses, address)
 	}
 
 	return &resolvedMetricTarget{
 		url:       targetURL,
-		hostname:  canonicalMetricHostname(hostname),
 		port:      port,
-		addresses: validatedAddresses,
+		addresses: addresses,
 	}, nil
 }
 
-func parseMetricStorageURL(rawURL string) (targetURL *url.URL, hostname, port string, err error) {
-	targetURL, err = url.Parse(rawURL)
-	if err != nil {
-		return nil, "", "", errors.Annotate(err, "invalid metric-storage URL")
-	}
-	targetURL.Scheme = strings.ToLower(targetURL.Scheme)
-	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
-		return nil, "", "", errors.Errorf("unsupported metric-storage URL scheme %q", targetURL.Scheme)
-	}
-	if targetURL.Opaque != "" || targetURL.Host == "" || targetURL.Hostname() == "" {
-		return nil, "", "", errors.New("metric-storage must be an absolute HTTP or HTTPS URL")
-	}
-	if targetURL.User != nil {
-		return nil, "", "", errors.New("metric-storage URL must not contain user information")
-	}
-	if targetURL.Fragment != "" || targetURL.RawFragment != "" {
-		return nil, "", "", errors.New("metric-storage URL must not contain a fragment")
-	}
-
-	port = targetURL.Port()
-	if port == "" {
-		if strings.HasSuffix(targetURL.Host, ":") {
-			return nil, "", "", errors.New("metric-storage URL has an empty port")
-		}
-		if targetURL.Scheme == "http" {
-			port = "80"
-		} else {
-			port = "443"
-		}
-	} else {
-		portNumber, err := strconv.Atoi(port)
-		if err != nil || portNumber < 1 || portNumber > 65535 {
-			return nil, "", "", errors.Errorf("metric-storage URL has invalid port %q", port)
-		}
-	}
-
-	hostname = targetURL.Hostname()
-	if canonicalMetricHostname(hostname) == "" {
-		return nil, "", "", errors.New("metric-storage URL must contain a hostname")
-	}
-	return targetURL, hostname, port, nil
-}
-
-func validateMetricTargetIP(address netip.Addr) error {
-	if !address.IsValid() || address.Zone() != "" {
-		return errors.New("metric-storage resolved to an invalid address")
-	}
+func isSafeMetricTargetIP(address netip.Addr) bool {
 	address = address.Unmap()
-	if isMetadataServiceIP(address) {
-		return errors.New("metric-storage resolved to a metadata service address")
-	}
-	if address.IsLoopback() {
-		return errors.New("metric-storage resolved to a loopback address")
-	}
-	if address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() {
-		return errors.New("metric-storage resolved to a link-local address")
-	}
-	if address.IsUnspecified() {
-		return errors.New("metric-storage resolved to an unspecified address")
-	}
-	if address.IsMulticast() {
-		return errors.New("metric-storage resolved to a multicast address")
-	}
+	unsafe := !address.IsValid() || address.Zone() != "" || address.IsLoopback() ||
+		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
+		address.IsUnspecified() || address.IsMulticast() || !address.IsGlobalUnicast()
 	if address.Is4() {
 		octets := address.As4()
-		if octets[0] == 0 || octets[0] >= 240 {
-			return errors.New("metric-storage resolved to a reserved or broadcast address")
-		}
+		unsafe = unsafe || octets[0] == 0 || octets[0] >= 240
 	}
-	if !address.IsGlobalUnicast() {
-		return errors.New("metric-storage resolved to a non-unicast address")
-	}
-	return nil
-}
-
-func isMetadataServiceIP(address netip.Addr) bool {
 	switch address.String() {
 	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
-		return true
-	default:
-		return false
+		unsafe = true
 	}
+	return !unsafe
 }
 
-func newMetricQueryHTTPClient(
-	baseClient *http.Client,
-	target *resolvedMetricTarget,
-	options metricProxyOptions,
-) (*http.Client, func(), error) {
+func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 	baseTransport := http.DefaultTransport
 	if baseClient != nil && baseClient.Transport != nil {
 		baseTransport = baseClient.Transport
 	}
 	transport, ok := baseTransport.(*http.Transport)
 	if !ok {
-		return nil, nil, errors.New("metric query requires an HTTP transport")
+		return nil, errors.New("metric query requires an HTTP transport")
 	}
-	if options.clientCache != nil {
-		return options.clientCache.getOrCreate(baseClient, transport, target, options)
+	transport = transport.Clone()
+	dialContext := transport.DialContext
+	if dialContext == nil {
+		dialContext = (&net.Dialer{}).DialContext
 	}
-	return buildMetricQueryHTTPClient(baseClient, transport, target, options)
-}
-
-func buildMetricQueryHTTPClient(
-	baseClient *http.Client,
-	baseTransport *http.Transport,
-	target *resolvedMetricTarget,
-	options metricProxyOptions,
-) (*http.Client, func(), error) {
-	transport := baseTransport.Clone()
 	// A proxy would resolve and dial the target outside this transport, bypassing
 	// the destination validation below.
 	transport.Proxy = nil
 	transport.DialTLS = nil //nolint:staticcheck // Clear the deprecated hook as well to prevent a validation bypass.
 	transport.DialTLSContext = nil
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		hostname, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, errors.Annotate(err, "invalid metric query dial address")
+	transport.DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		target, ok := ctx.Value(metricTargetContextKey{}).(*resolvedMetricTarget)
+		if !ok {
+			return nil, errors.New("metric query target is not validated")
 		}
-		if canonicalMetricHostname(hostname) != target.hostname || port != target.port {
-			return nil, errors.New("metric query attempted to dial an unvalidated target")
-		}
-
-		return dialMetricStorageAddresses(
-			ctx,
-			network,
-			port,
-			target.addresses,
-			options.dialContext,
-		)
-	}
-
-	timeout := options.timeout
-	if baseClient != nil && baseClient.Timeout > 0 && baseClient.Timeout < timeout {
-		timeout = baseClient.Timeout
-	}
-	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	return client, transport.CloseIdleConnections, nil
-}
-
-type metricQueryClientCacheEntry struct {
-	key                  string
-	client               *http.Client
-	closeIdleConnections func()
-	references           int
-	retired              bool
-}
-
-type metricQueryClientCache struct {
-	mu      sync.Mutex
-	current *metricQueryClientCacheEntry
-	closed  bool
-}
-
-func (cache *metricQueryClientCache) getOrCreate(
-	baseClient *http.Client,
-	baseTransport *http.Transport,
-	target *resolvedMetricTarget,
-	options metricProxyOptions,
-) (*http.Client, func(), error) {
-	keyParts := []string{target.url.Scheme, target.url.Host, options.timeout.String()}
-	if baseClient != nil {
-		keyParts = append(keyParts, baseClient.Timeout.String())
-	}
-	addressKeys := make([]string, 0, len(target.addresses))
-	for _, address := range target.addresses {
-		addressKeys = append(addressKeys, address.String())
-	}
-	sort.Strings(addressKeys)
-	keyParts = append(keyParts, addressKeys...)
-	key := strings.Join(keyParts, "\x00")
-	cache.mu.Lock()
-	if cache.closed {
-		cache.mu.Unlock()
-		return nil, nil, errors.New("metric query client cache is closed")
-	}
-	if cache.current != nil && cache.current.key == key {
-		entry := cache.current
-		entry.references++
-		cache.mu.Unlock()
-		return entry.client, func() { cache.release(entry) }, nil
-	}
-
-	client, closeIdleConnections, err := buildMetricQueryHTTPClient(baseClient, baseTransport, target, options)
-	if err != nil {
-		cache.mu.Unlock()
-		return nil, nil, err
-	}
-	entry := &metricQueryClientCacheEntry{
-		key:                  key,
-		client:               client,
-		closeIdleConnections: closeIdleConnections,
-		references:           1,
-	}
-	oldCloseIdleConnections := retireMetricQueryClientCacheEntry(cache.current)
-	cache.current = entry
-	cache.mu.Unlock()
-
-	if oldCloseIdleConnections != nil {
-		oldCloseIdleConnections()
-	}
-	return client, func() { cache.release(entry) }, nil
-}
-
-func retireMetricQueryClientCacheEntry(entry *metricQueryClientCacheEntry) func() {
-	if entry == nil {
-		return nil
-	}
-	entry.retired = true
-	if entry.references != 0 {
-		return nil
-	}
-	closeIdleConnections := entry.closeIdleConnections
-	entry.closeIdleConnections = nil
-	return closeIdleConnections
-}
-
-func (cache *metricQueryClientCache) release(entry *metricQueryClientCacheEntry) {
-	cache.mu.Lock()
-	entry.references--
-	var closeIdleConnections func()
-	if entry.retired && entry.references == 0 {
-		closeIdleConnections = entry.closeIdleConnections
-		entry.closeIdleConnections = nil
-	}
-	cache.mu.Unlock()
-	if closeIdleConnections != nil {
-		closeIdleConnections()
-	}
-}
-
-func (cache *metricQueryClientCache) close() {
-	cache.mu.Lock()
-	if cache.closed {
-		cache.mu.Unlock()
-		return
-	}
-	cache.closed = true
-	closeIdleConnections := retireMetricQueryClientCacheEntry(cache.current)
-	cache.current = nil
-	cache.mu.Unlock()
-	if closeIdleConnections != nil {
-		closeIdleConnections()
-	}
-}
-
-type metricDialResult struct {
-	connection net.Conn
-	err        error
-}
-
-func dialMetricStorageAddresses(
-	ctx context.Context,
-	network string,
-	port string,
-	addresses []netip.Addr,
-	dialContext metricDialContext,
-) (net.Conn, error) {
-	if len(addresses) == 0 {
-		return nil, errors.New("metric-storage target has no validated addresses")
-	}
-
-	dialCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	done := make(chan struct{})
-	defer close(done)
-	results := make(chan metricDialResult)
-	launch := func(address netip.Addr) {
-		go func() {
-			connection, err := dialContext(dialCtx, network, net.JoinHostPort(address.String(), port))
-			select {
-			case results <- metricDialResult{connection: connection, err: err}:
-			case <-done:
-				if connection != nil {
-					_ = connection.Close()
-				}
+		var lastErr error
+		for _, address := range target.addresses {
+			connection, err := dialContext(ctx, network, net.JoinHostPort(address.String(), target.port))
+			if err == nil {
+				return connection, nil
 			}
-		}()
-	}
-
-	launch(addresses[0])
-	nextAddress := 1
-	inFlight := 1
-	var fallback <-chan time.Time
-	if nextAddress < len(addresses) {
-		fallback = time.After(metricQueryDialFallbackDelay)
-	}
-	var lastErr error
-	for inFlight > 0 {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case result := <-results:
-			inFlight--
-			if result.err == nil && result.connection != nil {
-				return result.connection, nil
-			}
-			if result.err != nil {
-				lastErr = result.err
-			} else {
-				lastErr = errors.New("metric-storage dial returned an empty connection")
-			}
-			if nextAddress < len(addresses) {
-				launch(addresses[nextAddress])
-				nextAddress++
-				inFlight++
-				if nextAddress < len(addresses) {
-					fallback = time.After(metricQueryDialFallbackDelay)
-				} else {
-					fallback = nil
-				}
-			}
-		case <-fallback:
-			launch(addresses[nextAddress])
-			nextAddress++
-			inFlight++
-			if nextAddress < len(addresses) {
-				fallback = time.After(metricQueryDialFallbackDelay)
-			} else {
-				fallback = nil
+			lastErr = err
+			if ctx.Err() != nil {
+				break
 			}
 		}
+		return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")
 	}
-	return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")
+
+	return transport, nil
 }
 
 func removeHopByHopHeaders(header http.Header) {
@@ -590,33 +289,28 @@ func readMetricQueryResponse(body io.Reader, limit int64) ([]byte, error) {
 
 func validatePrometheusQueryResponse(body []byte) error {
 	response := struct {
-		Status string          `json:"status"`
-		Data   json.RawMessage `json:"data"`
+		Status string `json:"status"`
+		Data   *struct {
+			ResultType string          `json:"resultType"`
+			Result     json.RawMessage `json:"result"`
+		} `json:"data"`
 	}{}
 	if err := json.Unmarshal(body, &response); err != nil {
 		return errors.Annotate(err, "metric storage returned invalid JSON")
 	}
-	data := bytes.TrimSpace(response.Data)
-	if response.Status != "success" || len(data) == 0 || bytes.Equal(data, []byte("null")) {
+	if response.Status != "success" || response.Data == nil {
 		return errors.New("metric storage returned a non-success Prometheus response")
 	}
-	queryData := struct {
-		ResultType string          `json:"resultType"`
-		Result     json.RawMessage `json:"result"`
-	}{}
-	if err := json.Unmarshal(data, &queryData); err != nil {
-		return errors.Annotate(err, "metric storage returned invalid Prometheus query data")
-	}
-	switch queryData.ResultType {
-	case "matrix", "vector", "scalar", "string":
-	default:
-		return errors.New("metric storage returned an invalid Prometheus result type")
-	}
-	result := bytes.TrimSpace(queryData.Result)
+	result := strings.TrimSpace(string(response.Data.Result))
 	if len(result) < 2 || result[0] != '[' || result[len(result)-1] != ']' {
 		return errors.New("metric storage returned an invalid Prometheus result")
 	}
-	return nil
+	switch response.Data.ResultType {
+	case "matrix", "vector", "scalar", "string":
+		return nil
+	default:
+		return errors.New("metric storage returned an invalid Prometheus result type")
+	}
 }
 
 func writeMetricQueryError(w http.ResponseWriter, err error) {
@@ -627,19 +321,4 @@ func writeMetricQueryError(w http.ResponseWriter, err error) {
 	if _, writeErr := io.WriteString(w, metricQueryErrorBody); writeErr != nil {
 		log.Warn("failed to write metric query error response", zap.Error(writeErr))
 	}
-}
-
-func prometheusMetricPath(requestPath string) (string, bool) {
-	switch requestPath {
-	case "/pd/api/v1/metric/query":
-		return "/api/v1/query", true
-	case "/pd/api/v1/metric/query_range":
-		return "/api/v1/query_range", true
-	default:
-		return "", false
-	}
-}
-
-func canonicalMetricHostname(hostname string) string {
-	return strings.TrimSuffix(strings.ToLower(hostname), ".")
 }
