@@ -2381,8 +2381,8 @@ const (
 	// For CDC compatibility, we need to initialize an empty config path to
 	// `globalConfigPath`.
 	globalConfigPath = "/global/config/"
-	// cloud-storage-engine loads the resource controller configs from this
-	// prefix through LoadGlobalConfig.
+	// cloud-storage-engine stores its resource controller configs under this
+	// prefix through the GlobalConfig API.
 	resourceGroupControllerPath = "resource_group/controller"
 )
 
@@ -2394,7 +2394,8 @@ func normalizeGlobalConfigPath(configPath string) (string, error) {
 	if configPath == rootPath {
 		return globalConfigPath, nil
 	}
-	if !strings.HasPrefix(configPath, globalConfigPath) {
+	if !strings.HasPrefix(configPath, globalConfigPath) &&
+		!strings.HasPrefix(configPath, resourceGroupControllerPath) {
 		return "", status.Errorf(codes.InvalidArgument, "global config path %q is not allowed", configPath)
 	}
 	return configPath, nil
@@ -2468,13 +2469,9 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	if done != nil {
 		defer done()
 	}
-	isResourceGroupControllerPath := request.Names == nil && request.GetConfigPath() == resourceGroupControllerPath
-	configPath := request.GetConfigPath()
-	if !isResourceGroupControllerPath {
-		configPath, err = normalizeGlobalConfigPath(configPath)
-		if err != nil {
-			return nil, err
-		}
+	configPath, err := normalizeGlobalConfigPath(request.GetConfigPath())
+	if err != nil {
+		return nil, err
 	}
 	keys := make([]string, len(request.GetNames()))
 	for i, name := range request.GetNames() {
