@@ -1914,16 +1914,51 @@ func (c *RaftCluster) isStorePrepared() bool {
 	return true
 }
 
+type regionSizeCacheKey struct {
+	startKey string
+	endKey   string
+}
+
+// regionSizeCache is scoped to one checkStores round and is refreshed on the next round.
+type regionSizeCache struct {
+	loader func(startKey, endKey []byte) int64
+	sizes  map[regionSizeCacheKey]int64
+}
+
+func newRegionSizeCache(loader func(startKey, endKey []byte) int64) *regionSizeCache {
+	return &regionSizeCache{
+		loader: loader,
+	}
+}
+
+func (c *regionSizeCache) get(startKey, endKey []byte) int64 {
+	key := regionSizeCacheKey{
+		startKey: string(startKey),
+		endKey:   string(endKey),
+	}
+	if size, ok := c.sizes[key]; ok {
+		return size
+	}
+
+	size := c.loader(startKey, endKey)
+	if c.sizes == nil {
+		c.sizes = make(map[regionSizeCacheKey]int64)
+	}
+	c.sizes[key] = size
+	return size
+}
+
 func (c *RaftCluster) checkStores() {
 	var (
 		offlineStores []*metapb.Store
 		upStoreCount  int
 		stores        = c.GetStores()
+		regionSizes   = newRegionSizeCache(c.GetRegionSizeByRange)
 	)
 
 	for _, store := range stores {
 		storeID := store.GetID()
-		isInUp, isInOffline := c.checkStore(storeID)
+		isInUp, isInOffline := c.checkStore(storeID, regionSizes)
 		if isInUp {
 			upStoreCount++
 		}
@@ -1940,7 +1975,7 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
+func (c *RaftCluster) checkStore(storeID uint64, regionSizes *regionSizeCache) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1960,7 +1995,7 @@ func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(c.GetStores(), store, &kr)
+			threshold = c.getThreshold(c.GetStores(), store, &kr, regionSizes)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
 				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
@@ -2013,37 +2048,60 @@ func (c *RaftCluster) checkStore(storeID uint64) (isInUp, isInOffline bool) {
 	return isInUp, isInOffline
 }
 
-func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo, kr *keyutil.KeyRange) float64 {
+func (c *RaftCluster) getThreshold(
+	stores []*core.StoreInfo,
+	store *core.StoreInfo,
+	kr *keyutil.KeyRange,
+	regionSizes *regionSizeCache,
+) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := c.GetRegionSizeByRange(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
+		regionSize := regionSizes.get(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
 		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
 
 	keys := c.ruleManager.GetSplitKeys(kr.StartKey, kr.EndKey)
 	if len(keys) == 0 {
-		return c.calculateRange(stores, store, kr.StartKey, kr.EndKey) * 0.9
+		return c.calculateRange(stores, store, kr.StartKey, kr.EndKey, regionSizes) * 0.9
 	}
 
 	storeSize := 0.0
 	startKey := kr.StartKey
 	for _, key := range keys {
 		endKey := key
-		storeSize += c.calculateRange(stores, store, startKey, endKey)
+		storeSize += c.calculateRange(stores, store, startKey, endKey, regionSizes)
 		startKey = endKey
 	}
 	// the range from the last split key to the last key
-	storeSize += c.calculateRange(stores, store, startKey, kr.EndKey)
+	storeSize += c.calculateRange(stores, store, startKey, kr.EndKey, regionSizes)
 	log.Debug("threshold calculation time", zap.Duration("cost", time.Since(start)))
 	return storeSize * 0.9
 }
 
-func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.StoreInfo, startKey, endKey []byte) float64 {
-	var storeSize float64
+func (c *RaftCluster) calculateRange(
+	stores []*core.StoreInfo,
+	store *core.StoreInfo,
+	startKey, endKey []byte,
+	regionSizes *regionSizeCache,
+) float64 {
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
-	for _, rule := range rules {
-		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+	firstMatchedRule := -1
+	for i, rule := range rules {
+		if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+			firstMatchedRule = i
+			break
+		}
+	}
+	if firstMatchedRule == -1 {
+		return 0
+	}
+
+	regionSize := regionSizes.get(startKey, endKey)
+	var storeSize float64
+	for i := firstMatchedRule; i < len(rules); i++ {
+		rule := rules[i]
+		if i != firstMatchedRule && !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
 			continue
 		}
 
@@ -2056,15 +2114,15 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 				matchStores = append(matchStores, s)
 			}
 		}
-		regionSize := c.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
+		ruleRegionSize := regionSize * int64(rule.Count)
 		weight := core.GetStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
-		storeSize += float64(regionSize) * weight
+		storeSize += float64(ruleRegionSize) * weight
 		log.Debug("calculate range result",
 			logutil.ZapRedactString("start-key", string(core.HexRegionKey(startKey))),
 			logutil.ZapRedactString("end-key", string(core.HexRegionKey(endKey))),
 			zap.Uint64("store-id", store.GetID()),
 			zap.String("rule", rule.String()),
-			zap.Int64("region-size", regionSize),
+			zap.Int64("region-size", ruleRegionSize),
 			zap.Float64("weight", weight),
 			zap.Float64("store-size", storeSize),
 		)
