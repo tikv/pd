@@ -12,6 +12,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.0
 	github.com/docker/go-units v0.5.0
 	github.com/go-sql-driver/mysql v1.7.0
+	github.com/golang/protobuf v1.5.4
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
 	github.com/pingcap/kvproto v0.0.0-20260724054804-059694ae4472
@@ -117,7 +118,6 @@ require (
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect

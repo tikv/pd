@@ -540,7 +540,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	manager.metaLock.Lock(keyspace.GetId())
 	defer manager.metaLock.Unlock(keyspace.GetId())
 
-	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		// Save keyspace ID.
 		// Check if keyspace with that name already exists.
 		nameExists, _, err := manager.store.LoadKeyspaceID(txn, keyspace.Name)
@@ -554,8 +554,6 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		if err != nil {
 			return err
 		}
-		// Update the keyspace name cache.
-		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
 		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.GetId())
@@ -567,6 +565,11 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
+	if err == nil {
+		// Update the keyspace name cache only after the transaction commits.
+		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
+	}
+	return err
 }
 
 // rollbackMetaServiceGroupAssignment decrements the assignment count that

@@ -69,11 +69,11 @@ type tsoStream struct {
 func (s *tsoStream) process(clusterID uint64, count, keyspaceID, keyspaceGroupID uint32) (tsoResp, error) {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       clusterID,
-			KeyspaceGroupId: keyspaceGroupID,
+			ClusterId: clusterID,
 			Keyspace: &tsopb.RequestHeader_KeyspaceId{
 				KeyspaceId: keyspaceID,
 			},
+			KeyspaceGroupId: keyspaceGroupID,
 		},
 		Count: count,
 	}

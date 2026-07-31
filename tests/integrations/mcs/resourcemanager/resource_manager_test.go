@@ -2251,7 +2251,10 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		client := suite.setupKeyspaceClient(re, keyspaceID)
 		clients[i] = client
 		// Create and save keyspace metadata
-		keyspaceMeta := &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceID}, Name: keyspaceName}
+		keyspaceMeta := &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceID},
+			Name:     keyspaceName,
+		}
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
 			return storage.SaveKeyspaceMeta(txn, keyspaceMeta)
 		})
@@ -2456,11 +2459,17 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	keyspaceA := uint32(10)
 	keyspaceB := uint32(11)
 	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
-		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceA}, Name: "ks_A"})
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceA},
+			Name:     "ks_A",
+		})
 	})
 	re.NoError(err)
 	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
-		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceB}, Name: "ks_B"})
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceB},
+			Name:     "ks_B",
+		})
 	})
 	re.NoError(err)
 

@@ -456,10 +456,10 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 			continue
 		}
 		gcSafePoints = append(gcSafePoints, &pdpb.GCSafePointV2{
-			GcSafePoint: gcState.GCSafePoint,
 			Keyspace: &pdpb.GCSafePointV2_KeyspaceId{
 				KeyspaceId: gcState.KeyspaceID,
 			},
+			GcSafePoint: gcState.GCSafePoint,
 		})
 	}
 

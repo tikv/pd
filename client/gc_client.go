@@ -44,10 +44,8 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
 	req := &pdpb.UpdateGCSafePointV2Request{
-		Header: c.requestHeader(),
-		Keyspace: &pdpb.UpdateGCSafePointV2Request_KeyspaceId{
-			KeyspaceId: keyspaceID,
-		},
+		Header:    c.requestHeader(),
+		Keyspace:  &pdpb.UpdateGCSafePointV2Request_KeyspaceId{KeyspaceId: keyspaceID},
 		SafePoint: safePoint,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
@@ -77,10 +75,8 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
 	req := &pdpb.UpdateServiceSafePointV2Request{
-		Header: c.requestHeader(),
-		Keyspace: &pdpb.UpdateServiceSafePointV2Request_KeyspaceId{
-			KeyspaceId: keyspaceID,
-		},
+		Header:    c.requestHeader(),
+		Keyspace:  &pdpb.UpdateServiceSafePointV2Request_KeyspaceId{KeyspaceId: keyspaceID},
 		ServiceId: []byte(serviceID),
 		SafePoint: safePoint,
 		Ttl:       ttl,
