@@ -62,8 +62,11 @@ func (s *resourceGroupProxyServer) closeClient(ctx context.Context) {
 
 func (s *resourceGroupProxyServer) getPDMetadataWriteDelegateClient(ctx context.Context) (resource_manager.ResourceManagerClient, string, error) {
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	forwardedHostFromMetadata := forwardedHost != ""
-	if forwardedHost == "" {
+	if forwardedHost != "" {
+		if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			return nil, "", err
+		}
+	} else {
 		leader := s.GetLeader()
 		if leader == nil || len(leader.GetClientUrls()) == 0 {
 			return nil, "", status.Error(codes.Unavailable, "pd leader is not available")
@@ -73,15 +76,7 @@ func (s *resourceGroupProxyServer) getPDMetadataWriteDelegateClient(ctx context.
 	if s.isLocalRequest(forwardedHost) {
 		return nil, "", nil
 	}
-	if !forwardedHostFromMetadata {
-		// Keep PD-discovered leader targets on the original trusted delegate path.
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, "", err
-		}
-		return resource_manager.NewResourceManagerClient(client), forwardedHost, nil
-	}
-	client, err := s.getPDForwardedDelegateClient(ctx, forwardedHost)
+	client, err := s.getDelegateClient(ctx, forwardedHost)
 	if err != nil {
 		return nil, "", err
 	}

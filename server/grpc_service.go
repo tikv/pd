@@ -230,8 +230,13 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 		time.Sleep(5 * time.Second)
 	})
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if forwardedHost != "" {
+		if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			return nil, err
+		}
+	}
 	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getPDForwardedDelegateClient(ctx, forwardedHost)
+		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			return nil, err
 		}
@@ -504,11 +509,12 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-		tsoRequestProxyCtx  context.Context
-		forwardedHost       = grpcutil.GetForwardedHost(stream.Context())
-		forwardedClientConn *grpc.ClientConn
-		forwarder           = newTSOForwarder(stream)
-		tsoStreamErr        error
+		tsoRequestProxyCtx   context.Context
+		forwardedHost        = grpcutil.GetForwardedHost(stream.Context())
+		forwardedClientConn  *grpc.ClientConn
+		forwarder            = newTSOForwarder(stream)
+		tsoStreamErr         error
+		forwardedHostChecked = forwardedHost == ""
 	)
 
 	defer func() {
@@ -565,9 +571,15 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrNotStarted
 		}
 
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+				return errors.WithStack(err)
+			}
+			forwardedHostChecked = true
+		}
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardedClientConn == nil {
-				forwardedClientConn, err = s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
+				forwardedClientConn, err = s.getDelegateClient(s.ctx, forwardedHost)
 				if err != nil {
 					return errors.WithStack(err)
 				}
@@ -1083,6 +1095,8 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		forwardErrCh                chan error
 		forwardSchedulingStream     schedulingpb.Scheduling_RegionBucketsClient
 		lastForwardedSchedulingHost string
+		metadataForwardedHost       = grpcutil.GetForwardedHost(stream.Context())
+		forwardedHostChecked        = metadataForwardedHost == ""
 	)
 	defer func() {
 		if cancel != nil {
@@ -1108,7 +1122,13 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(metadataForwardedHost); err != nil {
+				return err
+			}
+			forwardedHostChecked = true
+		}
+		forwardedHost := metadataForwardedHost
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -1117,7 +1137,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
 				if err != nil {
 					return err
 				}
@@ -1264,6 +1284,8 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		forwardErrCh                chan error
 		forwardSchedulingStream     schedulingpb.Scheduling_RegionHeartbeatClient
 		lastForwardedSchedulingHost string
+		metadataForwardedHost       = grpcutil.GetForwardedHost(stream.Context())
+		forwardedHostChecked        = metadataForwardedHost == ""
 	)
 	defer func() {
 		// cancel the forward stream
@@ -1286,7 +1308,13 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(metadataForwardedHost); err != nil {
+				return err
+			}
+			forwardedHostChecked = true
+		}
+		forwardedHost := metadataForwardedHost
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -1295,7 +1323,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				if cancel != nil {
 					cancel()
 				}
-				client, err := s.getPDForwardedDelegateClient(s.ctx, forwardedHost)
+				client, err := s.getDelegateClient(s.ctx, forwardedHost)
 				if err != nil {
 					return err
 				}
