@@ -181,7 +181,12 @@ func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
 
 	client, err := s.pdClient.Tso(ctx)
 	re.NoError(err)
-	defer client.CloseSend()
+	defer func() {
+		err := client.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
 	re.NoError(client.Send(s.defaultReq))
 	_, err = client.Recv()
 	re.Error(err)
