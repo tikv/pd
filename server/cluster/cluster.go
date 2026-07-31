@@ -2086,23 +2086,18 @@ func (c *RaftCluster) calculateRange(
 	regionSizes *regionSizeCache,
 ) float64 {
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
-	firstMatchedRule := -1
-	for i, rule := range rules {
-		if placement.MatchLabelConstraints(store, rule.LabelConstraints) {
-			firstMatchedRule = i
-			break
-		}
-	}
-	if firstMatchedRule == -1 {
-		return 0
-	}
-
-	regionSize := regionSizes.get(startKey, endKey)
-	var storeSize float64
-	for i := firstMatchedRule; i < len(rules); i++ {
-		rule := rules[i]
-		if i != firstMatchedRule && !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+	var (
+		regionSize       int64
+		regionSizeLoaded bool
+		storeSize        float64
+	)
+	for _, rule := range rules {
+		if !placement.MatchLabelConstraints(store, rule.LabelConstraints) {
 			continue
+		}
+		if !regionSizeLoaded {
+			regionSize = regionSizes.get(startKey, endKey)
+			regionSizeLoaded = true
 		}
 
 		var matchStores []*core.StoreInfo

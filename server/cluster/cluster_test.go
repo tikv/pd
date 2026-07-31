@@ -1878,6 +1878,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
 	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
 }
@@ -1904,27 +1905,40 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 		Count:   1,
 	}))
 
-	kr := keyutil.NewKeyRange("a", "z")
+	kr := keyutil.NewKeyRange("a", "m")
+	otherKR := keyutil.NewKeyRange("m", "z")
 	re.Len(cluster.ruleManager.GetRulesForApplyRange(kr.StartKey, kr.EndKey), 2)
-	loadCount := 0
+	loadCounts := make(map[regionSizeCacheKey]int)
 	loader := func(startKey, endKey []byte) int64 {
-		loadCount++
-		re.Equal(kr.StartKey, startKey)
-		re.Equal(kr.EndKey, endKey)
-		return 100
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		loadCounts[key]++
+		switch key {
+		case regionSizeCacheKey{startKey: "a", endKey: "m"}:
+			return 100
+		case regionSizeCacheKey{startKey: "m", endKey: "z"}:
+			return 200
+		default:
+			re.FailNow("unexpected range", "start-key: %q, end-key: %q", startKey, endKey)
+			return 0
+		}
 	}
 	regionSizes := newRegionSizeCache(loader)
 
 	stores := cluster.GetStores()
 	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
 	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
-	re.Positive(threshold1)
-	re.Equal(threshold1, threshold2)
-	re.Equal(1, loadCount)
+	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
+	re.Equal(180.0, threshold1)
+	re.Equal(180.0, threshold2)
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+
+	// A different range is loaded separately, then shared by all rules.
+	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
 
 	nextRoundRegionSizes := newRegionSizeCache(loader)
 	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
-	re.Equal(2, loadCount)
+	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
 func TestStatsRegions(t *testing.T) {
