@@ -146,8 +146,23 @@ func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
 	client, conn := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
 	defer conn.Close()
 
-	ctx := grpcutil.BuildForwardContext(context.Background(), s.follower.GetAddr())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, s.follower.GetAddr())
 	_, err := client.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	tsoClient, err := client.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := tsoClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(tsoClient.Send(s.defaultReq))
+	_, err = tsoClient.Recv()
 	re.Error(err)
 	re.Equal(codes.InvalidArgument, status.Code(err))
 }
