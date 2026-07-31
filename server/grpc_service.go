@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path"
 	"runtime"
 	"runtime/trace"
 	"strconv"
@@ -2378,32 +2377,37 @@ func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInf
 	}, nil
 }
 
-// for CDC compatibility, we need to initialize config path to `globalConfigPath`
-const globalConfigPath = "/global/config/"
+const (
+	// For CDC compatibility, we need to initialize an empty config path to
+	// `globalConfigPath`.
+	globalConfigPath = "/global/config/"
+	// cloud-storage-engine loads the resource controller config from this exact
+	// key through LoadGlobalConfig.
+	resourceGroupControllerPath = "resource_group/controller"
+)
 
 func normalizeGlobalConfigPath(configPath string) (string, error) {
 	if configPath == "" {
 		return globalConfigPath, nil
 	}
-	cleanedPath := path.Clean(configPath)
 	rootPath := strings.TrimSuffix(globalConfigPath, "/")
-	isCanonical := configPath == cleanedPath || configPath == cleanedPath+"/"
-	isInGlobalConfig := cleanedPath == rootPath || strings.HasPrefix(cleanedPath, globalConfigPath)
-	if strings.Contains(configPath, `\`) || !isCanonical || !isInGlobalConfig {
+	if configPath == rootPath {
+		return globalConfigPath, nil
+	}
+	if !strings.HasPrefix(configPath, globalConfigPath) {
 		return "", status.Errorf(codes.InvalidArgument, "global config path %q is not allowed", configPath)
 	}
-	return cleanedPath + "/", nil
+	return configPath, nil
 }
 
 func resolveGlobalConfigKey(configPath, name string) (string, error) {
 	if name == "" {
 		return "", status.Errorf(codes.InvalidArgument, "invalid global config name %q", name)
 	}
-	key := path.Join(configPath, name)
-	if !strings.HasPrefix(key, globalConfigPath) {
-		return "", status.Errorf(codes.InvalidArgument, "global config name %q resolves outside the allowed path", name)
+	if strings.HasSuffix(configPath, "/") {
+		return configPath + name, nil
 	}
-	return key, nil
+	return configPath + "/" + name, nil
 }
 
 // StoreGlobalConfig store global config into etcd by transaction
@@ -2467,9 +2471,13 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	if done != nil {
 		defer done()
 	}
-	configPath, err := normalizeGlobalConfigPath(request.GetConfigPath())
-	if err != nil {
-		return nil, err
+	isResourceGroupControllerPath := request.Names == nil && request.GetConfigPath() == resourceGroupControllerPath
+	configPath := request.GetConfigPath()
+	if !isResourceGroupControllerPath {
+		configPath, err = normalizeGlobalConfigPath(configPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	keys := make([]string, len(request.GetNames()))
 	for i, name := range request.GetNames() {
@@ -2495,7 +2503,12 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 	}
-	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
+	var r *clientv3.GetResponse
+	if isResourceGroupControllerPath {
+		r, err = s.client.Get(ctx, configPath)
+	} else {
+		r, err = s.client.Get(ctx, configPath, clientv3.WithPrefix())
+	}
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
 	}
