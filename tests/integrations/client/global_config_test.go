@@ -139,13 +139,16 @@ func (suite *globalConfigTestSuite) TestRejectInvalidConfigPath() {
 		"/tmp/codex-repro/",
 		"/global/configuration/",
 		"/",
+		resourceGroupControllerPath + "-other",
+		resourceGroupControllerPath + "s",
+		resourceGroupControllerPath + "/child",
 	}
 	for _, configPath := range invalidPaths {
 		_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
 			ConfigPath: configPath,
 			Changes: []*pdpb.GlobalConfigItem{{
 				Kind:    pdpb.EventType_PUT,
-				Name:    "source_id",
+				Name:    "",
 				Payload: []byte("1"),
 			}},
 		})
@@ -204,12 +207,11 @@ func (suite *globalConfigTestSuite) TestLiteralConfigPath() {
 	}
 }
 
-func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
+func (suite *globalConfigTestSuite) TestResourceGroupControllerPrefixLoadCompatibility() {
 	re := suite.Require()
 	siblingKey := resourceGroupControllerPath + "-other"
-	settingsKey := resourceGroupControllerPath + "/settings"
 	defer func() {
-		for _, key := range []string{resourceGroupControllerPath, siblingKey, settingsKey} {
+		for _, key := range []string{resourceGroupControllerPath, siblingKey} {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), key)
 			re.NoError(err)
 		}
@@ -220,6 +222,9 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
 	_, err = suite.server.GetClient().Put(suite.server.Context(), siblingKey, "other")
 	re.NoError(err)
 
+	// LoadGlobalConfig without Names is a prefix query. Keep that legacy result
+	// behavior for the exact controller path while rejecting sibling paths as
+	// direct requests.
 	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		ConfigPath: resourceGroupControllerPath,
 	})
@@ -242,25 +247,18 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
 			Payload: []byte("1"),
 		}},
 	})
-	re.NoError(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 
-	res, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		Names:      []string{"settings"},
 		ConfigPath: resourceGroupControllerPath,
 	})
-	re.NoError(err)
-	re.Equal([]*pdpb.GlobalConfigItem{{
-		Kind:    pdpb.EventType_PUT,
-		Name:    "settings",
-		Payload: []byte("1"),
-	}}, res.Items)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 
-	watchCtx, cancel := context.WithCancel(suite.server.Context())
-	cancel()
 	err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 		ConfigPath: resourceGroupControllerPath,
-	}, testReceiver{re: re, ctx: watchCtx})
-	re.NotEqual(codes.InvalidArgument, status.Code(err))
+	}, testReceiver{re: re, ctx: suite.server.Context()})
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (suite *globalConfigTestSuite) TestNestedConfigPath() {

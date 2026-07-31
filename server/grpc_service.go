@@ -2942,8 +2942,8 @@ const (
 	// For CDC compatibility, we need to initialize an empty config path to
 	// `globalConfigPath`.
 	globalConfigPath = "/global/config/"
-	// cloud-storage-engine stores its resource controller configs under this
-	// prefix through the GlobalConfig API.
+	// cloud-storage-engine loads the resource controller config through the
+	// GlobalConfig API using this exact path.
 	resourceGroupControllerPath = "resource_group/controller"
 )
 
@@ -2955,8 +2955,7 @@ func normalizeGlobalConfigPath(configPath string) (string, error) {
 	if configPath == rootPath {
 		return globalConfigPath, nil
 	}
-	if !strings.HasPrefix(configPath, globalConfigPath) &&
-		!strings.HasPrefix(configPath, resourceGroupControllerPath) {
+	if !strings.HasPrefix(configPath, globalConfigPath) {
 		return "", status.Errorf(codes.InvalidArgument, "global config path %q is not allowed", configPath)
 	}
 	return configPath, nil
@@ -3039,9 +3038,16 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 			return nil, err
 		}
 	}
-	configPath, err := normalizeGlobalConfigPath(request.GetConfigPath())
-	if err != nil {
-		return nil, err
+	configPath := request.GetConfigPath()
+	// Keep the legacy prefix-load behavior used by cloud-storage-engine, but
+	// only for the exact controller path. Other operations and direct sibling
+	// paths must remain within the global config namespace.
+	if request.Names != nil || configPath != resourceGroupControllerPath {
+		var err error
+		configPath, err = normalizeGlobalConfigPath(configPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
