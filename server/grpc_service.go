@@ -2381,8 +2381,8 @@ const (
 	// For CDC compatibility, we need to initialize an empty config path to
 	// `globalConfigPath`.
 	globalConfigPath = "/global/config/"
-	// cloud-storage-engine loads the resource controller config from this exact
-	// key through LoadGlobalConfig.
+	// cloud-storage-engine loads the resource controller configs from this
+	// prefix through LoadGlobalConfig.
 	resourceGroupControllerPath = "resource_group/controller"
 )
 
@@ -2400,14 +2400,14 @@ func normalizeGlobalConfigPath(configPath string) (string, error) {
 	return configPath, nil
 }
 
-func resolveGlobalConfigKey(configPath, name string) (string, error) {
+func resolveGlobalConfigKey(configPath, name string) string {
 	if name == "" {
-		return "", status.Errorf(codes.InvalidArgument, "invalid global config name %q", name)
+		return strings.TrimSuffix(configPath, "/")
 	}
 	if strings.HasSuffix(configPath, "/") {
-		return configPath + name, nil
+		return configPath + name
 	}
-	return configPath + "/" + name, nil
+	return configPath + "/" + name
 }
 
 // StoreGlobalConfig store global config into etcd by transaction
@@ -2430,10 +2430,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		key, err := resolveGlobalConfigKey(configPath, item.GetName())
-		if err != nil {
-			return nil, err
-		}
+		key := resolveGlobalConfigKey(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
 			// For CDC compatibility, we need to check the Value field firstly.
@@ -2481,10 +2478,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	}
 	keys := make([]string, len(request.GetNames()))
 	for i, name := range request.GetNames() {
-		keys[i], err = resolveGlobalConfigKey(configPath, name)
-		if err != nil {
-			return nil, err
-		}
+		keys[i] = resolveGlobalConfigKey(configPath, name)
 	}
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
@@ -2503,12 +2497,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		}
 		return &pdpb.LoadGlobalConfigResponse{Items: res}, nil
 	}
-	var r *clientv3.GetResponse
-	if isResourceGroupControllerPath {
-		r, err = s.client.Get(ctx, configPath)
-	} else {
-		r, err = s.client.Get(ctx, configPath, clientv3.WithPrefix())
-	}
+	r, err := s.client.Get(ctx, configPath, clientv3.WithPrefix())
 	if err != nil {
 		return &pdpb.LoadGlobalConfigResponse{}, err
 	}

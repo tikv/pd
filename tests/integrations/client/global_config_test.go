@@ -236,6 +236,10 @@ func (suite *globalConfigTestSuite) TestLoadResourceGroupControllerConfig() {
 		Kind:    pdpb.EventType_PUT,
 		Name:    resourceGroupControllerPath,
 		Payload: []byte("controller"),
+	}, {
+		Kind:    pdpb.EventType_PUT,
+		Name:    siblingKey,
+		Payload: []byte("other"),
 	}}, res.Items)
 
 	_, err = suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
@@ -306,37 +310,36 @@ func (suite *globalConfigTestSuite) TestNestedConfigPath() {
 	}}, res.Items)
 }
 
-func (suite *globalConfigTestSuite) TestRejectInvalidConfigName() {
+func (suite *globalConfigTestSuite) TestEmptyConfigName() {
 	re := suite.Require()
+	rootPath := "/global/config"
+	defer func() {
+		_, err := suite.server.GetClient().Delete(suite.server.Context(), rootPath)
+		re.NoError(err)
+	}()
+
 	_, err := suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
 		Changes: []*pdpb.GlobalConfigItem{{
 			Kind:    pdpb.EventType_PUT,
 			Name:    "",
-			Payload: []byte("1"),
+			Payload: []byte("root"),
 		}},
 	})
-	re.Equal(codes.InvalidArgument, status.Code(err))
+	re.NoError(err)
+	getRes, err := suite.server.GetClient().Get(suite.server.Context(), rootPath)
+	re.NoError(err)
+	re.Len(getRes.Kvs, 1)
+	re.Equal([]byte("root"), getRes.Kvs[0].Value)
 
-	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
+	res, err := suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
 		Names: []string{""},
 	})
-	re.Equal(codes.InvalidArgument, status.Code(err))
-
-	validName := "valid-before-invalid"
-	defer func() {
-		_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(validName))
-		re.NoError(err)
-	}()
-	_, err = suite.server.StoreGlobalConfig(suite.server.Context(), &pdpb.StoreGlobalConfigRequest{
-		Changes: []*pdpb.GlobalConfigItem{
-			{Kind: pdpb.EventType_PUT, Name: validName, Payload: []byte("1")},
-			{Kind: pdpb.EventType_PUT, Name: "", Payload: []byte("2")},
-		},
-	})
-	re.Equal(codes.InvalidArgument, status.Code(err))
-	res, err := suite.server.GetClient().Get(suite.server.Context(), getEtcdPath(validName))
 	re.NoError(err)
-	re.Empty(res.Kvs)
+	re.Equal([]*pdpb.GlobalConfigItem{{
+		Kind:    pdpb.EventType_PUT,
+		Name:    "",
+		Payload: []byte("root"),
+	}}, res.Items)
 }
 
 func (suite *globalConfigTestSuite) TestCompatibleConfigName() {
