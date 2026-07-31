@@ -23,8 +23,10 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -37,6 +39,7 @@ import (
 
 const (
 	metricQueryTimeout             = 30 * time.Second
+	metricQueryDialFallbackDelay   = 250 * time.Millisecond
 	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
 )
@@ -52,10 +55,12 @@ type metricProxyOptions struct {
 	dialContext         metricDialContext
 	timeout             time.Duration
 	maxResponseBodySize int64
+	clientCache         *metricQueryClientCache
 }
 
 type queryMetric struct {
-	s *server.Server
+	s           *server.Server
+	clientCache metricQueryClientCache
 }
 
 type resolvedMetricTarget struct {
@@ -70,7 +75,13 @@ func newqueryMetric(s *server.Server) *queryMetric {
 }
 
 func (h *queryMetric) queryMetric(w http.ResponseWriter, r *http.Request) {
-	proxyMetricQuery(w, r, h.s.GetConfig().PDServerCfg.MetricStorage, h.s.GetHTTPClient(), metricProxyOptions{})
+	proxyMetricQuery(
+		w,
+		r,
+		h.s.GetConfig().PDServerCfg.MetricStorage,
+		h.s.GetHTTPClient(),
+		metricProxyOptions{clientCache: &h.clientCache},
+	)
 }
 
 func proxyMetricQuery(
@@ -113,7 +124,10 @@ func proxyMetricQuery(
 		return
 	}
 	request.ContentLength = r.ContentLength
+	// Preserve end-to-end headers for authenticated metric storage, matching the
+	// historical proxy contract, but never forward connection-specific headers.
 	request.Header = r.Header.Clone()
+	removeHopByHopHeaders(request.Header)
 	request.Header.Del("Accept-Encoding")
 	request.Header.Set("Accept", "application/json")
 
@@ -244,8 +258,8 @@ func parseMetricStorageURL(rawURL string) (targetURL *url.URL, hostname, port st
 		}
 	}
 
-	hostname = canonicalMetricHostname(targetURL.Hostname())
-	if hostname == "" {
+	hostname = targetURL.Hostname()
+	if canonicalMetricHostname(hostname) == "" {
 		return nil, "", "", errors.New("metric-storage URL must contain a hostname")
 	}
 	return targetURL, hostname, port, nil
@@ -305,7 +319,19 @@ func newMetricQueryHTTPClient(
 	if !ok {
 		return nil, nil, errors.New("metric query requires an HTTP transport")
 	}
-	transport = transport.Clone()
+	if options.clientCache != nil {
+		return options.clientCache.getOrCreate(baseClient, transport, target, options)
+	}
+	return buildMetricQueryHTTPClient(baseClient, transport, target, options)
+}
+
+func buildMetricQueryHTTPClient(
+	baseClient *http.Client,
+	baseTransport *http.Transport,
+	target *resolvedMetricTarget,
+	options metricProxyOptions,
+) (*http.Client, func(), error) {
+	transport := baseTransport.Clone()
 	// A proxy would resolve and dial the target outside this transport, bypassing
 	// the destination validation below.
 	transport.Proxy = nil
@@ -320,15 +346,13 @@ func newMetricQueryHTTPClient(
 			return nil, errors.New("metric query attempted to dial an unvalidated target")
 		}
 
-		var lastErr error
-		for _, targetAddress := range target.addresses {
-			connection, err := options.dialContext(ctx, network, net.JoinHostPort(targetAddress.String(), port))
-			if err == nil {
-				return connection, nil
-			}
-			lastErr = err
-		}
-		return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")
+		return dialMetricStorageAddresses(
+			ctx,
+			network,
+			port,
+			target.addresses,
+			options.dialContext,
+		)
 	}
 
 	timeout := options.timeout
@@ -343,6 +367,166 @@ func newMetricQueryHTTPClient(
 		},
 	}
 	return client, transport.CloseIdleConnections, nil
+}
+
+type metricQueryClientCache struct {
+	mu                   sync.Mutex
+	key                  string
+	client               *http.Client
+	closeIdleConnections func()
+}
+
+func (cache *metricQueryClientCache) getOrCreate(
+	baseClient *http.Client,
+	baseTransport *http.Transport,
+	target *resolvedMetricTarget,
+	options metricProxyOptions,
+) (*http.Client, func(), error) {
+	keyParts := []string{target.url.Scheme, target.url.Host, options.timeout.String()}
+	if baseClient != nil {
+		keyParts = append(keyParts, baseClient.Timeout.String())
+	}
+	addressKeys := make([]string, 0, len(target.addresses))
+	for _, address := range target.addresses {
+		addressKeys = append(addressKeys, address.String())
+	}
+	sort.Strings(addressKeys)
+	keyParts = append(keyParts, addressKeys...)
+	key := strings.Join(keyParts, "\x00")
+	cache.mu.Lock()
+	if cache.client != nil && cache.key == key {
+		client := cache.client
+		cache.mu.Unlock()
+		return client, func() {}, nil
+	}
+
+	client, closeIdleConnections, err := buildMetricQueryHTTPClient(baseClient, baseTransport, target, options)
+	if err != nil {
+		cache.mu.Unlock()
+		return nil, nil, err
+	}
+	oldCloseIdleConnections := cache.closeIdleConnections
+	cache.key = key
+	cache.client = client
+	cache.closeIdleConnections = closeIdleConnections
+	cache.mu.Unlock()
+
+	if oldCloseIdleConnections != nil {
+		oldCloseIdleConnections()
+	}
+	return client, func() {}, nil
+}
+
+func (cache *metricQueryClientCache) close() {
+	cache.mu.Lock()
+	closeIdleConnections := cache.closeIdleConnections
+	cache.client = nil
+	cache.closeIdleConnections = nil
+	cache.mu.Unlock()
+	if closeIdleConnections != nil {
+		closeIdleConnections()
+	}
+}
+
+type metricDialResult struct {
+	connection net.Conn
+	err        error
+}
+
+func dialMetricStorageAddresses(
+	ctx context.Context,
+	network string,
+	port string,
+	addresses []netip.Addr,
+	dialContext metricDialContext,
+) (net.Conn, error) {
+	if len(addresses) == 0 {
+		return nil, errors.New("metric-storage target has no validated addresses")
+	}
+
+	dialCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	results := make(chan metricDialResult)
+	launch := func(address netip.Addr) {
+		go func() {
+			connection, err := dialContext(dialCtx, network, net.JoinHostPort(address.String(), port))
+			select {
+			case results <- metricDialResult{connection: connection, err: err}:
+			case <-done:
+				if connection != nil {
+					_ = connection.Close()
+				}
+			}
+		}()
+	}
+
+	launch(addresses[0])
+	nextAddress := 1
+	inFlight := 1
+	var fallback <-chan time.Time
+	if nextAddress < len(addresses) {
+		fallback = time.After(metricQueryDialFallbackDelay)
+	}
+	var lastErr error
+	for inFlight > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case result := <-results:
+			inFlight--
+			if result.err == nil && result.connection != nil {
+				return result.connection, nil
+			}
+			if result.err != nil {
+				lastErr = result.err
+			} else {
+				lastErr = errors.New("metric-storage dial returned an empty connection")
+			}
+			if nextAddress < len(addresses) {
+				launch(addresses[nextAddress])
+				nextAddress++
+				inFlight++
+				if nextAddress < len(addresses) {
+					fallback = time.After(metricQueryDialFallbackDelay)
+				} else {
+					fallback = nil
+				}
+			}
+		case <-fallback:
+			launch(addresses[nextAddress])
+			nextAddress++
+			inFlight++
+			if nextAddress < len(addresses) {
+				fallback = time.After(metricQueryDialFallbackDelay)
+			} else {
+				fallback = nil
+			}
+		}
+	}
+	return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")
+}
+
+func removeHopByHopHeaders(header http.Header) {
+	for _, connectionHeader := range header.Values("Connection") {
+		for _, name := range strings.Split(connectionHeader, ",") {
+			header.Del(strings.TrimSpace(name))
+		}
+	}
+	for _, name := range []string{
+		"Connection",
+		"Proxy-Connection",
+		"Keep-Alive",
+		"Proxy-Authenticate",
+		"Proxy-Authorization",
+		"Te",
+		"Trailer",
+		"Transfer-Encoding",
+		"Upgrade",
+	} {
+		header.Del(name)
+	}
 }
 
 func readMetricQueryResponse(body io.Reader, limit int64) ([]byte, error) {

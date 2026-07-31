@@ -47,7 +47,7 @@ func TestParseMetricStorageURL(t *testing.T) {
 		{
 			name:     "HTTPSDefaultPort",
 			rawURL:   "HTTPS://Prometheus.Example./prometheus?tenant=1",
-			hostname: "prometheus.example",
+			hostname: "Prometheus.Example.",
 			port:     "443",
 		},
 		{
@@ -149,6 +149,20 @@ func TestResolveMetricStorageTargetValidatesAllDNSAddresses(t *testing.T) {
 	}, resolved.addresses)
 }
 
+func TestResolveMetricStorageTargetPreservesAbsoluteHostname(t *testing.T) {
+	resolver := staticMetricResolver{addresses: map[string][]netip.Addr{
+		"Prometheus.Example.": {netip.MustParseAddr("192.0.2.10")},
+	}}
+	resolved, err := resolveMetricStorageTarget(
+		context.Background(),
+		"https://Prometheus.Example.:9090",
+		resolver,
+	)
+	require.NoError(t, err)
+	require.Equal(t, "prometheus.example", resolved.hostname)
+	require.Equal(t, []netip.Addr{netip.MustParseAddr("192.0.2.10")}, resolved.addresses)
+}
+
 func TestMetricQueryReturnsNormalizedPrometheusResponse(t *testing.T) {
 	type observedRequest struct {
 		body   string
@@ -199,6 +213,9 @@ func TestMetricQueryReturnsNormalizedPrometheusResponse(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer prometheus-credential")
 	request.Header.Set("X-Scope-OrgID", "tenant-1")
+	request.Header.Set("Connection", "X-Remove-Me")
+	request.Header.Set("X-Remove-Me", "secret hop-by-hop value")
+	request.Header.Set("Proxy-Authorization", "secret proxy credential")
 
 	recorder := httptest.NewRecorder()
 	proxyMetricQuery(
@@ -228,7 +245,101 @@ func TestMetricQueryReturnsNormalizedPrometheusResponse(t *testing.T) {
 	require.Equal(t, "application/json", observed.header.Get("Accept"))
 	require.Equal(t, "Bearer prometheus-credential", observed.header.Get("Authorization"))
 	require.Equal(t, "tenant-1", observed.header.Get("X-Scope-OrgID"))
+	require.Empty(t, observed.header.Get("Connection"))
+	require.Empty(t, observed.header.Get("X-Remove-Me"))
+	require.Empty(t, observed.header.Get("Proxy-Authorization"))
 	require.Equal(t, "192.0.2.10:9090", dialAddress)
+}
+
+func TestMetricQueryFallsBackFromUnreachableAddress(t *testing.T) {
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, err := io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+		require.NoError(t, err)
+	})
+	workingDialContext := pipeHTTPDialContext(upstream)
+	firstDialCanceled := make(chan struct{})
+	options := metricProxyOptions{
+		resolver: staticMetricResolver{addresses: map[string][]netip.Addr{
+			"prometheus.example": {
+				netip.MustParseAddr("192.0.2.10"),
+				netip.MustParseAddr("192.0.2.11"),
+			},
+		}},
+		dialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			if strings.HasPrefix(address, "192.0.2.10:") {
+				<-ctx.Done()
+				close(firstDialCanceled)
+				return nil, ctx.Err()
+			}
+			return workingDialContext(ctx, network, address)
+		},
+		timeout:             time.Second,
+		maxResponseBodySize: 1024,
+	}
+	recorder := httptest.NewRecorder()
+	proxyMetricQuery(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "http://pd/pd/api/v1/metric/query?query=up", nil),
+		"http://prometheus.example:9090",
+		http.DefaultClient,
+		options,
+	)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	select {
+	case <-firstDialCanceled:
+	case <-time.After(time.Second):
+		require.Fail(t, "the losing dial attempt was not canceled")
+	}
+}
+
+func TestMetricQueryReusesValidatedConnection(t *testing.T) {
+	var requests atomic.Int32
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		_, err := io.WriteString(w, `{"status":"success","data":{"resultType":"vector","result":[]}}`)
+		require.NoError(t, err)
+	})
+	options := safeMetricProxyOptions(upstream)
+	var dials atomic.Int32
+	var dialAddresses []string
+	workingDialContext := options.dialContext
+	options.dialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dials.Add(1)
+		dialAddresses = append(dialAddresses, address)
+		return workingDialContext(ctx, network, address)
+	}
+	cache := &metricQueryClientCache{}
+	defer cache.close()
+	options.clientCache = cache
+
+	for range 2 {
+		recorder := httptest.NewRecorder()
+		proxyMetricQuery(
+			recorder,
+			httptest.NewRequest(http.MethodGet, "http://pd/pd/api/v1/metric/query?query=up", nil),
+			"http://prometheus.example:9090",
+			http.DefaultClient,
+			options,
+		)
+		require.Equal(t, http.StatusOK, recorder.Code)
+	}
+	require.Equal(t, int32(2), requests.Load())
+	require.Equal(t, int32(1), dials.Load())
+
+	resolver := options.resolver.(staticMetricResolver)
+	resolver.addresses["prometheus.example"] = []netip.Addr{netip.MustParseAddr("192.0.2.11")}
+	recorder := httptest.NewRecorder()
+	proxyMetricQuery(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "http://pd/pd/api/v1/metric/query?query=up", nil),
+		"http://prometheus.example:9090",
+		http.DefaultClient,
+		options,
+	)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, int32(3), requests.Load())
+	require.Equal(t, int32(2), dials.Load())
+	require.Equal(t, []string{"192.0.2.10:9090", "192.0.2.11:9090"}, dialAddresses)
 }
 
 func TestMetricQueryDoesNotFollowRedirects(t *testing.T) {
