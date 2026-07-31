@@ -4230,9 +4230,10 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re.Equal(int(storeCount), cluster.GetStoreCount())
 
 	upStoreCount := 0
+	stores := cluster.GetStores()
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
-	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
+	for _, s := range stores {
+		isUp, _ := cluster.checkStore(s.GetID(), stores, regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4251,9 +4252,10 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 		}
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 	}
+	stores = cluster.GetStores()
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
-	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
+	for _, s := range stores {
+		isUp, _ := cluster.checkStore(s.GetID(), stores, regionSizes)
 		if isUp {
 			upStoreCount++
 		}
