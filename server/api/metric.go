@@ -36,6 +36,7 @@ import (
 
 const (
 	metricQueryTimeout             = 30 * time.Second
+	metricQueryDialFallbackDelay   = 300 * time.Millisecond
 	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
 )
@@ -237,15 +238,55 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 		if !ok {
 			return nil, errors.New("metric query target is not validated")
 		}
+		type dialResult struct {
+			connection net.Conn
+			err        error
+		}
+		dialCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		// Keep fast fallback bounded while preserving the standard Dialer's multi-address behavior.
+		results := make(chan dialResult, 2)
+		next, inFlight := 0, 0
+		launch := func() {
+			address := target.addresses[next]
+			next++
+			inFlight++
+			go func() {
+				connection, err := dialContext(dialCtx, network, net.JoinHostPort(address.String(), target.port))
+				results <- dialResult{connection: connection, err: err}
+			}()
+		}
+		launch()
+
 		var lastErr error
-		for _, address := range target.addresses {
-			connection, err := dialContext(ctx, network, net.JoinHostPort(address.String(), target.port))
-			if err == nil {
-				return connection, nil
+		for inFlight > 0 {
+			var fallback <-chan time.Time
+			if next < len(target.addresses) && inFlight < cap(results) {
+				fallback = time.After(metricQueryDialFallbackDelay)
 			}
-			lastErr = err
-			if ctx.Err() != nil {
-				break
+			select {
+			case result := <-results:
+				inFlight--
+				if result.err == nil && result.connection != nil {
+					cancel()
+					for inFlight > 0 {
+						result := <-results
+						inFlight--
+						if result.connection != nil {
+							_ = result.connection.Close()
+						}
+					}
+					return result.connection, nil
+				}
+				lastErr = result.err
+				if lastErr == nil {
+					lastErr = errors.New("metric-storage dial returned an empty connection")
+				}
+				if next < len(target.addresses) {
+					launch()
+				}
+			case <-fallback:
+				launch()
 			}
 		}
 		return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")

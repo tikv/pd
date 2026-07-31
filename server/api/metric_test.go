@@ -79,11 +79,15 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 }
 
 func TestMetricQueryPinsValidatedTarget(t *testing.T) {
-	var dialAddress string
+	dialAddresses := make(chan string, 2)
 	var peer net.Conn
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
-	baseTransport.DialContext = func(_ context.Context, _, address string) (net.Conn, error) {
-		dialAddress = address
+	baseTransport.DialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
+		dialAddresses <- address
+		if strings.HasPrefix(address, "192.0.2.10:") {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
 		connection, otherEnd := net.Pipe()
 		peer = otherEnd
 		return connection, nil
@@ -91,12 +95,16 @@ func TestMetricQueryPinsValidatedTarget(t *testing.T) {
 	transport, err := newMetricQueryTransport(&http.Client{Transport: baseTransport})
 	require.NoError(t, err)
 	defer transport.CloseIdleConnections()
-	target, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example:9090", safeMetricResolver())
+	resolver := staticMetricResolver{addresses: []netip.Addr{
+		netip.MustParseAddr("192.0.2.10"),
+		netip.MustParseAddr("192.0.2.11"),
+	}}
+	target, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example:9090", resolver)
 	require.NoError(t, err)
 	ctx := context.WithValue(context.Background(), metricTargetContextKey{}, target)
 	connection, err := transport.DialContext(ctx, "tcp", "metrics.example:9090")
 	require.NoError(t, err)
-	require.Equal(t, "192.0.2.10:9090", dialAddress)
+	require.ElementsMatch(t, []string{"192.0.2.10:9090", "192.0.2.11:9090"}, []string{<-dialAddresses, <-dialAddresses})
 	require.NoError(t, connection.Close())
 	require.NoError(t, peer.Close())
 }
@@ -120,9 +128,11 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			var authorization string
 			var requestPath string
+			var removedHeader string
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				authorization = r.Header.Get("Authorization")
 				requestPath = r.URL.Path
+				removedHeader = r.Header.Get("X-Remove")
 				return &http.Response{
 					StatusCode: testCase.statusCode,
 					Header: http.Header{
@@ -142,6 +152,7 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 
 			require.Equal(t, "Bearer token", authorization)
 			require.Equal(t, "/api/v1/query", requestPath)
+			require.Empty(t, removedHeader)
 			require.Empty(t, recorder.Header().Get("Server"))
 			require.Empty(t, recorder.Header().Get("Set-Cookie"))
 			require.Empty(t, recorder.Header().Get("Location"))
