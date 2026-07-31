@@ -171,6 +171,26 @@ func (s *tsoProxyTestSuite) verifyForwardedHostRejected(client pdpb.PDClient, fo
 	_, err = tsoClient.Recv()
 	re.Error(err)
 	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	regionHeartbeatClient, err := client.RegionHeartbeat(ctx)
+	re.NoError(err)
+	defer func() {
+		err := regionHeartbeatClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(regionHeartbeatClient.Send(&pdpb.RegionHeartbeatRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = regionHeartbeatClient.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	reportBucketsClient, err := client.ReportBuckets(ctx)
+	re.NoError(err)
+	re.NoError(reportBucketsClient.Send(&pdpb.ReportBucketsRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = reportBucketsClient.CloseAndRecv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
