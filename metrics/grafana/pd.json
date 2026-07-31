@@ -14018,7 +14018,12 @@
           "pointradius": 5,
           "points": false,
           "renderer": "flot",
-          "seriesOverrides": [],
+          "seriesOverrides": [
+            {
+              "alias": "/.*-in-progress/",
+              "yaxis": 2
+            }
+          ],
           "spaceLength": 10,
           "stack": false,
           "steppedLine": false,
@@ -14059,7 +14064,7 @@
           "yaxes": [
             {
               "format": "short",
-              "label": null,
+              "label": "events/min",
               "logBase": 1,
               "max": null,
               "min": null,
@@ -14067,7 +14072,7 @@
             },
             {
               "format": "short",
-              "label": null,
+              "label": "in progress",
               "logBase": 1,
               "max": null,
               "min": null,
