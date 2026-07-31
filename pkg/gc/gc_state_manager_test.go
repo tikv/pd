@@ -168,7 +168,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
-		re.Equal(uint32(1), ks1.Id)
+		re.Equal(uint32(1), ks1.GetId())
 
 		*id = 2
 		ks2, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
@@ -178,7 +178,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
-		re.Equal(uint32(2), ks2.Id)
+		re.Equal(uint32(2), ks2.GetId())
 
 		*id = 3
 		ks3, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
@@ -188,7 +188,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 			CreateTime: time.Now().Unix(),
 		})
 		re.NoError(err)
-		re.Equal(uint32(3), ks3.Id)
+		re.Equal(uint32(3), ks3.GetId())
 
 		*id = 4
 		ks4, err := keyspaceManager.CreateKeyspaceByID(&keyspace.CreateKeyspaceByIDRequest{
@@ -200,7 +200,7 @@ func newGCStateManagerForTest(t testing.TB, opt newGCStateManagerForTestOptions)
 		re.NoError(err)
 		_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
 		re.NoError(err)
-		re.Equal(uint32(4), ks4.Id)
+		re.Equal(uint32(4), ks4.GetId())
 	} else {
 		for _, req := range opt.specifyInitialKeyspaces {
 			_, err := keyspaceManager.CreateKeyspaceByID(req)

@@ -44,16 +44,10 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	})
 	re.NoError(err)
 
-	_, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID() + 1),
-		Id:     created.GetId(),
-	})
+	_, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID() + 1), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId()}})
 	re.Error(err)
 
-	resp, err := service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
-		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     created.GetId() + 1000,
-	})
+	resp, err := service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{Header: testutil.NewRequestHeader(suite.server.GetClusterID()), Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{Id: created.GetId() + 1000}})
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_ENTRY_NOT_FOUND, resp.GetHeader().GetError().GetType())
 	re.Nil(resp.GetKeyspace())
@@ -65,7 +59,9 @@ func (suite *keyspaceTestSuite) TestLoadKeyspaceByIDGRPC() {
 	re.False(suite.manager.CheckKeyspaceRegionBound(disabled))
 	resp, err = service.LoadKeyspaceByID(ctx, &keyspacepb.LoadKeyspaceByIDRequest{
 		Header: testutil.NewRequestHeader(suite.server.GetClusterID()),
-		Id:     disabled.GetId(),
+		Keyspace: &keyspacepb.LoadKeyspaceByIDRequest_Id{
+			Id: disabled.GetId(),
+		},
 	})
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())

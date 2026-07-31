@@ -44,9 +44,9 @@ func (c *client) updateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
 	req := &pdpb.UpdateGCSafePointV2Request{
-		Header:     c.requestHeader(),
-		KeyspaceId: keyspaceID,
-		SafePoint:  safePoint,
+		Header:    c.requestHeader(),
+		Keyspace:  &pdpb.UpdateGCSafePointV2Request_KeyspaceId{KeyspaceId: keyspaceID},
+		SafePoint: safePoint,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -75,11 +75,11 @@ func (c *client) updateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	//nolint:staticcheck
 	req := &pdpb.UpdateServiceSafePointV2Request{
-		Header:     c.requestHeader(),
-		KeyspaceId: keyspaceID,
-		ServiceId:  []byte(serviceID),
-		SafePoint:  safePoint,
-		Ttl:        ttl,
+		Header:    c.requestHeader(),
+		Keyspace:  &pdpb.UpdateServiceSafePointV2Request_KeyspaceId{KeyspaceId: keyspaceID},
+		ServiceId: []byte(serviceID),
+		SafePoint: safePoint,
+		Ttl:       ttl,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -109,7 +109,7 @@ func newGCInternalController(client *client, keyspaceID uint32) *gcInternalContr
 
 func wrapKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
 	return &pdpb.KeyspaceScope{
-		KeyspaceId: keyspaceID,
+		Keyspace: &pdpb.KeyspaceScope_KeyspaceId{KeyspaceId: keyspaceID},
 	}
 }
 
@@ -332,7 +332,7 @@ func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOp
 func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time, excludeGCBarriers bool) gc.GCState {
 	keyspaceID := constants.NullKeyspaceID
 	if pb.KeyspaceScope != nil {
-		keyspaceID = pb.KeyspaceScope.KeyspaceId
+		keyspaceID = pb.KeyspaceScope.GetKeyspaceId()
 	}
 	if excludeGCBarriers {
 		return gc.NewGCStateWithoutGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint())
@@ -436,7 +436,7 @@ func (c gcStatesClient) GetAllKeyspacesGCStates(ctx context.Context, opts ...gc.
 		if state.KeyspaceScope == nil {
 			keyspaceID = constants.NullKeyspaceID
 		} else {
-			keyspaceID = state.KeyspaceScope.KeyspaceId
+			keyspaceID = state.KeyspaceScope.GetKeyspaceId()
 		}
 		gcStates[keyspaceID] = pbToGCState(state, start, options.ExcludeGCBarriers)
 	}
