@@ -3043,16 +3043,12 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 	if err != nil {
 		return nil, err
 	}
-	keys := make([]string, len(request.GetNames()))
-	for i, name := range request.GetNames() {
-		keys[i] = resolveGlobalConfigKey(configPath, name)
-	}
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
 	if request.Names != nil {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
-			r, err := s.client.Get(ctx, keys[i])
+			r, err := s.client.Get(ctx, resolveGlobalConfigKey(configPath, name))
 			if err != nil {
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
 			} else if len(r.Kvs) == 0 {

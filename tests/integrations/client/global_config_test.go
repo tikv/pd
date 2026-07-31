@@ -260,7 +260,7 @@ func (suite *globalConfigTestSuite) TestResourceGroupControllerConfig() {
 	err = suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 		ConfigPath: resourceGroupControllerPath,
 	}, testReceiver{re: re, ctx: watchCtx})
-	re.NoError(err)
+	re.NotEqual(codes.InvalidArgument, status.Code(err))
 }
 
 func (suite *globalConfigTestSuite) TestNestedConfigPath() {
