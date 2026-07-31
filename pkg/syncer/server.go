@@ -460,18 +460,18 @@ func (s *RegionSyncer) validateDownstreamMember(requested *pdpb.Member) (*pdpb.M
 	}
 	members, err := s.server.GetMembers()
 	if err != nil {
-		return nil, false, status.Error(codes.Unavailable, "failed to load PD members")
+		return requested, false, nil
 	}
 	for _, member := range members {
 		if member.GetMemberId() != requested.GetMemberId() {
 			continue
 		}
-		if member.GetName() != requested.GetName() {
-			return nil, false, status.Error(codes.PermissionDenied, "region syncer downstream member does not match PD membership")
-		}
+		// Use the canonical member name for metrics and stream bookkeeping.
 		return member, true, nil
 	}
-	return nil, false, status.Error(codes.PermissionDenied, "region syncer downstream member is not in PD membership")
+	// A freshly joined member may not be visible yet. Keep RegionSync
+	// available, but do not create a caller-controlled metric label.
+	return requested, false, nil
 }
 
 type syncRegionRequestResult struct {

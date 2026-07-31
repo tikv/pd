@@ -376,6 +376,21 @@ func TestFullSyncMetrics(t *testing.T) {
 	re.Greater(promtestutil.ToFloat64(regionSyncerFullSyncLastDurationGauges[fullSyncResultFailure]), 0.0)
 }
 
+func TestUnknownMetricLabelsAreIgnored(t *testing.T) {
+	const unknown = "unknown"
+	re := require.New(t)
+	re.False(regionSyncerFullSyncCounter.DeleteLabelValues(unknown, unknown))
+	re.False(regionSyncerStreamEventsCounter.DeleteLabelValues(unknown))
+
+	re.NotPanics(func() {
+		observeFullSyncMetrics(unknown, unknown, time.Second)
+		incStreamEventMetrics(unknown)
+	})
+
+	re.False(regionSyncerFullSyncCounter.DeleteLabelValues(unknown, unknown))
+	re.False(regionSyncerStreamEventsCounter.DeleteLabelValues(unknown))
+}
+
 func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	re := require.New(t)
 	testCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -619,10 +634,12 @@ func TestSyncAllowsNonPDDownstreamWithoutCreatingMetrics(t *testing.T) {
 	waitTestRegionSyncerUnavailable(re, done)
 }
 
-func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
+func TestSyncMemberValidationDoesNotBlockStreams(t *testing.T) {
 	testCases := []struct {
-		name   string
-		member *pdpb.Member
+		name          string
+		member        *pdpb.Member
+		expectedName  string
+		collectMetric bool
 	}{
 		{
 			name: "unknown-member-id",
@@ -630,6 +647,7 @@ func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
 				MemberId: 999,
 				Name:     "untrusted-downstream-id",
 			},
+			expectedName: "untrusted-downstream-id",
 		},
 		{
 			name: "mismatched-member-name",
@@ -637,6 +655,8 @@ func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
 				MemberId: testDownstreamMemberID,
 				Name:     "untrusted-downstream-name",
 			},
+			expectedName:  "pd-follower",
+			collectMetric: true,
 		},
 	}
 	for _, testCase := range testCases {
@@ -644,7 +664,7 @@ func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
 			re := require.New(t)
 			syncer, _ := newTestRegionSyncer(t)
 			stream := newMockSyncRegionsServer()
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := startTestRegionSync(ctx, syncer, stream)
 			re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.member.GetName()))
@@ -654,11 +674,47 @@ func TestSyncRejectsUnknownDownstreamBeforeCreatingMetrics(t *testing.T) {
 				Member: testCase.member,
 			}
 
-			re.Equal(codes.PermissionDenied, status.Code(<-done))
-			re.Empty(syncer.GetAllDownstreamNames())
+			re.NotNil(<-stream.sendCh)
+			testutil.Eventually(re, func() bool {
+				names := syncer.GetAllDownstreamNames()
+				return len(names) == 1 && names[0] == testCase.expectedName
+			})
 			re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.member.GetName()))
+			if testCase.collectMetric {
+				re.True(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.expectedName))
+			}
+
+			cancel()
+			waitTestRegionSyncerUnavailable(re, done)
 		})
 	}
+}
+
+func TestSyncContinuesWhenMemberListIsUnavailable(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t)
+	syncer.server = &getMembersErrorServer{Server: syncer.server}
+	stream := newMockSyncRegionsServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startTestRegionSync(ctx, syncer, stream)
+	member := newTestDownstreamMember()
+	re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(member.GetName()))
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: member,
+	}
+
+	re.NotNil(<-stream.sendCh)
+	testutil.Eventually(re, func() bool {
+		names := syncer.GetAllDownstreamNames()
+		return len(names) == 1 && names[0] == member.GetName()
+	})
+	re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(member.GetName()))
+
+	cancel()
+	waitTestRegionSyncerUnavailable(re, done)
 }
 
 func TestSyncExitsWhenBroadcastSendFails(t *testing.T) {
@@ -1708,6 +1764,14 @@ type mockSyncRegionsServer struct {
 	blockCh chan struct{}
 	blocked chan struct{}
 	once    sync.Once
+}
+
+type getMembersErrorServer struct {
+	Server
+}
+
+func (*getMembersErrorServer) GetMembers() ([]*pdpb.Member, error) {
+	return nil, errors.New("failed to load members")
 }
 
 func newMockSyncRegionsServer() *mockSyncRegionsServer {

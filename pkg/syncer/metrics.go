@@ -201,12 +201,18 @@ func setRegionSyncerClientReadyMetrics(ready bool) {
 }
 
 func observeFullSyncMetrics(trigger, outcome string, duration time.Duration) {
-	regionSyncerFullSyncCounters[fullSyncMetricKey(trigger, outcome)].Inc()
+	counter, ok := regionSyncerFullSyncCounters[fullSyncMetricKey(trigger, outcome)]
+	if !ok {
+		return
+	}
+	counter.Inc()
 	result := fullSyncResultFailure
 	if outcome == fullSyncOutcomeSuccess {
 		result = fullSyncResultSuccess
 	}
-	regionSyncerFullSyncLastDurationGauges[result].Set(duration.Seconds())
+	if gauge, ok := regionSyncerFullSyncLastDurationGauges[result]; ok {
+		gauge.Set(duration.Seconds())
+	}
 }
 
 func observeHistoryBufferMetrics(length, capacity int) {
@@ -223,5 +229,7 @@ func incHistoryBufferLiveDrainMissMetrics() {
 }
 
 func incStreamEventMetrics(event string) {
-	regionSyncerStreamEventCounters[event].Inc()
+	if counter, ok := regionSyncerStreamEventCounters[event]; ok {
+		counter.Inc()
+	}
 }
