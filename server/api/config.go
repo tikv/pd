@@ -128,7 +128,6 @@ func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, _ *http.Request) {
 //	@Produce	json
 //	@Success	200	{string}	string	"The config is updated."
 //	@Failure	400	{string}	string	"The input is invalid."
-//	@Failure	403	{string}	string	"The operation is forbidden."
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/config [post]
 func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +162,6 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.rd.JSON(w, http.StatusOK, "The ttl config is updated.")
 		}
-		return
-	}
-
-	if statusCode, err := validateMetricStorageConfigUpdate(r, cfg.PDServerCfg.MetricStorage, conf); err != nil {
-		h.rd.JSON(w, statusCode, err.Error())
 		return
 	}
 

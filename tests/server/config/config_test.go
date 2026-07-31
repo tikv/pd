@@ -102,10 +102,6 @@ func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTest(suite.checkConfigAll)
 }
 
-func (suite *configTestSuite) TestMetricStorageConfigUpdate() {
-	suite.env.RunTest(suite.checkMetricStorageConfigUpdate)
-}
-
 func (suite *configTestSuite) TestKeyspaceConfigUpdate() {
 	suite.env.RunTest(suite.checkKeyspaceConfigUpdate)
 }
@@ -127,56 +123,6 @@ func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestClust
 
 	postData, err = json.Marshal(map[string]any{
 		"keyspace.wait-region-split": false,
-	})
-	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
-}
-
-func (suite *configTestSuite) checkMetricStorageConfigUpdate(cluster *tests.TestCluster) {
-	re := suite.Require()
-	leaderServer := cluster.GetLeaderServer()
-	addr := fmt.Sprintf("%s/pd/api/v1/config", leaderServer.GetAddr())
-
-	postData, err := json.Marshal(map[string]any{
-		"metric-storage": "http://127.0.0.1:9090",
-	})
-	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(
-		tests.TestDialClient,
-		addr,
-		postData,
-		testutil.Status(re, http.StatusForbidden),
-		testutil.StringContain(re, "mutually authenticated TLS connection"),
-	))
-	re.Empty(leaderServer.GetServer().GetConfig().PDServerCfg.MetricStorage)
-
-	oldLeaderScheduleLimit := leaderServer.GetServer().GetScheduleConfig().LeaderScheduleLimit
-	postData, err = json.Marshal(map[string]any{
-		"pd-server.metric-storage":       "http://127.0.0.1:9090",
-		"schedule.leader-schedule-limit": oldLeaderScheduleLimit + 1,
-	})
-	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(
-		tests.TestDialClient,
-		addr,
-		postData,
-		testutil.Status(re, http.StatusForbidden),
-	))
-	re.Equal(oldLeaderScheduleLimit, leaderServer.GetServer().GetScheduleConfig().LeaderScheduleLimit)
-
-	postData, err = json.Marshal(map[string]any{
-		"metric-storage": "file:///tmp/prometheus",
-	})
-	re.NoError(err)
-	re.NoError(testutil.CheckPostJSON(
-		tests.TestDialClient,
-		addr,
-		postData,
-		testutil.Status(re, http.StatusBadRequest),
-	))
-
-	postData, err = json.Marshal(map[string]any{
-		"metric-storage": "",
 	})
 	re.NoError(err)
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
@@ -210,9 +156,17 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re))
 	re.NoError(err)
 
+	l = map[string]any{
+		"metric-storage": "http://127.0.0.1:9090",
+	}
+	postData, err = json.Marshal(l)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re))
+	re.NoError(err)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
 
 	testutil.Eventually(re, func() bool {
 		newCfg := &config.Config{}
@@ -225,6 +179,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 		"schedule.tolerant-size-ratio":            2.5,
 		"schedule.enable-tikv-split-region":       "false",
 		"replication.location-labels":             "idc,host",
+		"pd-server.metric-storage":                "http://127.0.0.1:1234",
 		"log.level":                               "warn",
 		"cluster-version":                         "v4.0.0-beta",
 		"replication-mode.replication-mode":       "dr-auto-sync",
@@ -237,6 +192,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	cfg.Schedule.EnableTiKVSplitRegion = false
 	cfg.Schedule.TolerantSizeRatio = 2.5
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
+	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:1234"
 	cfg.Log.Level = "warn"
 	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
 	cfg.ReplicationMode.ReplicationMode = "dr-auto-sync"
@@ -429,6 +385,14 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 	l := map[string]any{
 		"location-labels":       "zone,rack",
 		"region-schedule-limit": 10,
+	}
+	postData, err = json.Marshal(l)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re))
+	re.NoError(err)
+
+	l = map[string]any{
+		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
 	re.NoError(err)
