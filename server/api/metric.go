@@ -105,12 +105,12 @@ func proxyMetricQuery(
 		writeMetricQueryError(w, err)
 		return
 	}
-	client, closeIdleConnections, err := newMetricQueryHTTPClient(baseClient, target, options)
+	client, releaseClient, err := newMetricQueryHTTPClient(baseClient, target, options)
 	if err != nil {
 		writeMetricQueryError(w, err)
 		return
 	}
-	defer closeIdleConnections()
+	defer releaseClient()
 
 	requestURL := &url.URL{
 		Scheme:   target.url.Scheme,
@@ -369,11 +369,18 @@ func buildMetricQueryHTTPClient(
 	return client, transport.CloseIdleConnections, nil
 }
 
-type metricQueryClientCache struct {
-	mu                   sync.Mutex
+type metricQueryClientCacheEntry struct {
 	key                  string
 	client               *http.Client
 	closeIdleConnections func()
+	references           int
+	retired              bool
+}
+
+type metricQueryClientCache struct {
+	mu      sync.Mutex
+	current *metricQueryClientCacheEntry
+	closed  bool
 }
 
 func (cache *metricQueryClientCache) getOrCreate(
@@ -394,10 +401,15 @@ func (cache *metricQueryClientCache) getOrCreate(
 	keyParts = append(keyParts, addressKeys...)
 	key := strings.Join(keyParts, "\x00")
 	cache.mu.Lock()
-	if cache.client != nil && cache.key == key {
-		client := cache.client
+	if cache.closed {
 		cache.mu.Unlock()
-		return client, func() {}, nil
+		return nil, nil, errors.New("metric query client cache is closed")
+	}
+	if cache.current != nil && cache.current.key == key {
+		entry := cache.current
+		entry.references++
+		cache.mu.Unlock()
+		return entry.client, func() { cache.release(entry) }, nil
 	}
 
 	client, closeIdleConnections, err := buildMetricQueryHTTPClient(baseClient, baseTransport, target, options)
@@ -405,23 +417,58 @@ func (cache *metricQueryClientCache) getOrCreate(
 		cache.mu.Unlock()
 		return nil, nil, err
 	}
-	oldCloseIdleConnections := cache.closeIdleConnections
-	cache.key = key
-	cache.client = client
-	cache.closeIdleConnections = closeIdleConnections
+	entry := &metricQueryClientCacheEntry{
+		key:                  key,
+		client:               client,
+		closeIdleConnections: closeIdleConnections,
+		references:           1,
+	}
+	oldCloseIdleConnections := retireMetricQueryClientCacheEntry(cache.current)
+	cache.current = entry
 	cache.mu.Unlock()
 
 	if oldCloseIdleConnections != nil {
 		oldCloseIdleConnections()
 	}
-	return client, func() {}, nil
+	return client, func() { cache.release(entry) }, nil
+}
+
+func retireMetricQueryClientCacheEntry(entry *metricQueryClientCacheEntry) func() {
+	if entry == nil {
+		return nil
+	}
+	entry.retired = true
+	if entry.references != 0 {
+		return nil
+	}
+	closeIdleConnections := entry.closeIdleConnections
+	entry.closeIdleConnections = nil
+	return closeIdleConnections
+}
+
+func (cache *metricQueryClientCache) release(entry *metricQueryClientCacheEntry) {
+	cache.mu.Lock()
+	entry.references--
+	var closeIdleConnections func()
+	if entry.retired && entry.references == 0 {
+		closeIdleConnections = entry.closeIdleConnections
+		entry.closeIdleConnections = nil
+	}
+	cache.mu.Unlock()
+	if closeIdleConnections != nil {
+		closeIdleConnections()
+	}
 }
 
 func (cache *metricQueryClientCache) close() {
 	cache.mu.Lock()
-	closeIdleConnections := cache.closeIdleConnections
-	cache.client = nil
-	cache.closeIdleConnections = nil
+	if cache.closed {
+		cache.mu.Unlock()
+		return
+	}
+	cache.closed = true
+	closeIdleConnections := retireMetricQueryClientCacheEntry(cache.current)
+	cache.current = nil
 	cache.mu.Unlock()
 	if closeIdleConnections != nil {
 		closeIdleConnections()

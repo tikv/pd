@@ -342,6 +342,50 @@ func TestMetricQueryReusesValidatedConnection(t *testing.T) {
 	require.Equal(t, []string{"192.0.2.10:9090", "192.0.2.11:9090"}, dialAddresses)
 }
 
+func TestMetricQueryClientCacheDefersCloseUntilRelease(t *testing.T) {
+	options := safeMetricProxyOptions(http.NotFoundHandler()).withDefaults()
+	cache := &metricQueryClientCache{}
+	options.clientCache = cache
+	target, err := resolveMetricStorageTarget(
+		context.Background(),
+		"http://prometheus.example:9090",
+		options.resolver,
+	)
+	require.NoError(t, err)
+
+	clientA, releaseA, err := newMetricQueryHTTPClient(http.DefaultClient, target, options)
+	require.NoError(t, err)
+	entryA := cache.current
+	require.Equal(t, 1, entryA.references)
+
+	targetWithNewAddress := *target
+	targetWithNewAddress.addresses = []netip.Addr{netip.MustParseAddr("192.0.2.11")}
+	clientB, releaseB, err := newMetricQueryHTTPClient(http.DefaultClient, &targetWithNewAddress, options)
+	require.NoError(t, err)
+	require.NotSame(t, clientA, clientB)
+	require.True(t, entryA.retired)
+	require.Equal(t, 1, entryA.references)
+	require.NotNil(t, entryA.closeIdleConnections)
+
+	releaseA()
+	require.Zero(t, entryA.references)
+	require.Nil(t, entryA.closeIdleConnections)
+
+	entryB := cache.current
+	cache.close()
+	require.True(t, cache.closed)
+	require.Nil(t, cache.current)
+	require.True(t, entryB.retired)
+	require.Equal(t, 1, entryB.references)
+	require.NotNil(t, entryB.closeIdleConnections)
+
+	releaseB()
+	require.Zero(t, entryB.references)
+	require.Nil(t, entryB.closeIdleConnections)
+	_, _, err = newMetricQueryHTTPClient(http.DefaultClient, target, options)
+	require.ErrorContains(t, err, "cache is closed")
+}
+
 func TestMetricQueryDoesNotFollowRedirects(t *testing.T) {
 	var requests atomic.Int32
 	redirectTarget := "http://169.254.169.254/secret"
