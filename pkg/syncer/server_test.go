@@ -323,8 +323,6 @@ func TestSyncFullRegionsFailsWhenCatchUpHistoryExceedsMax(t *testing.T) {
 
 func TestFullSyncMetrics(t *testing.T) {
 	re := require.New(t)
-	testCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	successCounter := regionSyncerFullSyncCounters[fullSyncMetricKey(
 		fullSyncTriggerInitial,
 		fullSyncOutcomeSuccess,
@@ -342,7 +340,7 @@ func TestFullSyncMetrics(t *testing.T) {
 	successStream := &testServerStream{}
 	successSyncStream := newRegionSyncStream(successStream, 10)
 
-	re.NoError(syncFullRegionsForTest(testCtx, successSyncer, successSyncStream, 10))
+	re.NoError(syncFullRegionsForTest(context.Background(), successSyncer, successSyncStream, 10))
 	re.Equal(successBefore+1, promtestutil.ToFloat64(successCounter))
 	re.Greater(promtestutil.ToFloat64(regionSyncerFullSyncLastDurationGauges[fullSyncResultSuccess]), 0.0)
 
@@ -355,7 +353,7 @@ func TestFullSyncMetrics(t *testing.T) {
 	unblockSend := failureStream.blockSend()
 	done := make(chan error, 1)
 	go func() {
-		done <- syncFullRegionsForTest(testCtx, failureSyncer, failureSyncStream, startIndex)
+		done <- syncFullRegionsForTest(context.Background(), failureSyncer, failureSyncStream, startIndex)
 	}()
 	testutil.Eventually(re, failureStream.isSendBlocked)
 	re.Equal(inProgressBefore+1, promtestutil.ToFloat64(regionSyncerFullSyncInProgressGauge))
@@ -393,8 +391,6 @@ func TestUnknownMetricLabelsAreIgnored(t *testing.T) {
 
 func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	re := require.New(t)
-	testCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	const downstream = "pd-metrics-follower"
 	bindCounter := regionSyncerStreamEventCounters[streamEventBind]
 	unbindCounter := regionSyncerStreamEventCounters[streamEventUnbind]
@@ -415,7 +411,7 @@ func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	syncStream.observeDownstreamLagMetrics(syncer.history.getNextIndex())
 	re.Equal(1.0, promtestutil.ToFloat64(regionSyncerDownstreamLagRecordsGauge.WithLabelValues(downstream)))
 
-	re.NoError(syncer.sendDownstream(testCtx, downstream, syncStream, false))
+	re.NoError(syncer.sendDownstream(context.Background(), downstream, syncStream, false))
 	re.Equal(0.0, promtestutil.ToFloat64(regionSyncerDownstreamLagRecordsGauge.WithLabelValues(downstream)))
 
 	syncer.unbindStream(downstream, syncStream)
@@ -430,7 +426,7 @@ func TestDownstreamLagAndStreamEventMetrics(t *testing.T) {
 	defer timeoutSyncer.unbindStream("pd-timeout-follower", timeoutSyncStream)
 	timeoutSyncer.history.record(newTestRegion(2))
 
-	re.Error(timeoutSyncer.sendDownstream(testCtx, "pd-timeout-follower", timeoutSyncStream, false))
+	re.Error(timeoutSyncer.sendDownstream(context.Background(), "pd-timeout-follower", timeoutSyncStream, false))
 	re.Equal(timeoutBefore+1, promtestutil.ToFloat64(timeoutCounter))
 	blockingStream.unblockSend()
 }
