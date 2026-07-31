@@ -1958,7 +1958,7 @@ func (c *RaftCluster) checkStores() {
 
 	for _, store := range stores {
 		storeID := store.GetID()
-		isInUp, isInOffline := c.checkStore(storeID, stores, regionSizes)
+		isInUp, isInOffline := c.checkStore(storeID, regionSizes)
 		if isInUp {
 			upStoreCount++
 		}
@@ -1975,11 +1975,7 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(
-	storeID uint64,
-	stores []*core.StoreInfo,
-	regionSizes *regionSizeCache,
-) (isInUp, isInOffline bool) {
+func (c *RaftCluster) checkStore(storeID uint64, regionSizes *regionSizeCache) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1999,7 +1995,7 @@ func (c *RaftCluster) checkStore(
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(stores, store, &kr, regionSizes)
+			threshold = c.getThreshold(c.GetStores(), store, &kr, regionSizes)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
 				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
