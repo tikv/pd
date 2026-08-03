@@ -228,13 +228,8 @@ func resolveMetricStorageTarget(
 	}
 
 	var addresses []netip.Addr
-	allowLoopback := false
 	if address, ok := target.literalAddress(); ok {
 		addresses = []netip.Addr{address}
-		// An explicit loopback address in the startup configuration is trusted for
-		// compatibility with local Prometheus deployments. Runtime updates cannot
-		// introduce or switch to a different loopback origin.
-		allowLoopback = address.IsLoopback()
 	} else {
 		addresses, err = resolver.LookupNetIP(ctx, "ip", target.hostname)
 		if err != nil {
@@ -247,7 +242,7 @@ func resolveMetricStorageTarget(
 
 	for i, address := range addresses {
 		addresses[i] = address.Unmap()
-		if !isSafeMetricTargetIP(addresses[i], allowLoopback) {
+		if !isSafeMetricTargetIP(addresses[i]) {
 			return nil, errors.New("metric-storage resolved to an unsafe address")
 		}
 	}
@@ -294,16 +289,9 @@ func (target *metricTarget) literalAddress() (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
-func (target *metricTarget) sameOrigin(other *metricTarget) bool {
-	address, ok := target.literalAddress()
-	otherAddress, otherOK := other.literalAddress()
-	return ok && otherOK && target.url.Scheme == other.url.Scheme &&
-		address == otherAddress && target.port == other.port
-}
-
-func validateMetricStorageConfigUpdate(current string, conf map[string]any) error {
+func validateMetricStorageConfigUpdate(conf map[string]any) error {
 	updated, found, err := metricStorageConfigUpdate(conf)
-	if err != nil || !found || updated == current || updated == "" {
+	if err != nil || !found || updated == "" {
 		return err
 	}
 
@@ -314,15 +302,6 @@ func validateMetricStorageConfigUpdate(current string, conf map[string]any) erro
 	updatedAddress, literal := updatedTarget.literalAddress()
 	if !literal || !updatedAddress.IsLoopback() {
 		return nil
-	}
-	if current != "" {
-		currentTarget, currentErr := parseMetricStorageTarget(current)
-		if currentErr == nil {
-			currentAddress, literal := currentTarget.literalAddress()
-			if literal && currentAddress.IsLoopback() && currentTarget.sameOrigin(updatedTarget) {
-				return nil
-			}
-		}
 	}
 	return errors.New("changing metric-storage to a loopback target is not allowed")
 }
@@ -350,13 +329,10 @@ func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
 	return updated, found, nil
 }
 
-func isSafeMetricTargetIP(address netip.Addr, allowLoopback bool) bool {
+func isSafeMetricTargetIP(address netip.Addr) bool {
 	address = address.Unmap()
 	if !address.IsValid() || address.Zone() != "" {
 		return false
-	}
-	if allowLoopback && address.IsLoopback() {
-		return true
 	}
 	unsafe := address.IsLoopback() ||
 		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||

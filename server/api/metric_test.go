@@ -50,10 +50,14 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, port, target.port)
 	}
-	for _, rawURL := range []string{"http://127.0.0.1:9090", "http://[::1]:9090"} {
-		target, err := resolveMetricStorageTarget(context.Background(), rawURL, resolver)
-		require.NoError(t, err)
-		require.True(t, target.addresses[0].IsLoopback())
+	for _, rawURL := range []string{
+		"http://127.0.0.1:9090",
+		"http://127.1.2.3:9090",
+		"http://[::1]:9090",
+		"http://[::ffff:127.0.0.1]:9090",
+	} {
+		_, err := resolveMetricStorageTarget(context.Background(), rawURL, resolver)
+		require.Error(t, err, rawURL)
 	}
 
 	unsafeAddresses := []string{
@@ -91,7 +95,6 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 func TestValidateMetricStorageConfigUpdate(t *testing.T) {
 	testCases := []struct {
 		name    string
-		current string
 		conf    map[string]any
 		wantErr bool
 	}{
@@ -100,22 +103,7 @@ func TestValidateMetricStorageConfigUpdate(t *testing.T) {
 		{name: "InvalidTarget", conf: map[string]any{metricStorageConfigKey: "file:///tmp/metrics"}, wantErr: true},
 		{name: "NewLoopback", conf: map[string]any{metricStorageConfigKey: "http://127.0.0.1:9090"}, wantErr: true},
 		{name: "NewPrefixedLoopback", conf: map[string]any{prefixedMetricStorageConfigKey: "http://[::1]:9090"}, wantErr: true},
-		{
-			name:    "ExistingLoopbackSameOrigin",
-			current: "HTTP://127.0.0.1:9090/prometheus",
-			conf:    map[string]any{metricStorageConfigKey: "http://127.0.0.1:09090/other"},
-		},
-		{
-			name:    "ExistingLoopbackDifferentPort",
-			current: "http://127.0.0.1:9090",
-			conf:    map[string]any{metricStorageConfigKey: "http://127.0.0.1:1234"},
-			wantErr: true,
-		},
-		{
-			name:    "ClearLoopback",
-			current: "http://127.0.0.1:9090",
-			conf:    map[string]any{metricStorageConfigKey: ""},
-		},
+		{name: "ClearLoopback", conf: map[string]any{metricStorageConfigKey: ""}},
 		{
 			name: "ConflictingKeys",
 			conf: map[string]any{
@@ -128,7 +116,7 @@ func TestValidateMetricStorageConfigUpdate(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			err := validateMetricStorageConfigUpdate(testCase.current, testCase.conf)
+			err := validateMetricStorageConfigUpdate(testCase.conf)
 			if testCase.wantErr {
 				require.Error(t, err)
 				return
@@ -329,23 +317,26 @@ func TestMetricQuerySuppressesInformationalResponse(t *testing.T) {
 	require.JSONEq(t, successMetricResponse, recorder.Body.String())
 }
 
-func TestMetricQueryAllowsExplicitLoopback(t *testing.T) {
-	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader(successMetricResponse)),
-		}, nil
-	})
-	recorder := httptest.NewRecorder()
-	proxyMetricQuery(
-		recorder,
-		httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
-		"http://127.0.0.1:9090",
-		transport,
-		safeMetricResolver(),
-	)
-	require.Equal(t, http.StatusOK, recorder.Code)
-	require.JSONEq(t, successMetricResponse, recorder.Body.String())
+func TestMetricQueryRejectsExplicitLoopback(t *testing.T) {
+	for _, metricStorage := range []string{"http://127.0.0.1:9090", "http://[::1]:9090"} {
+		t.Run(metricStorage, func(t *testing.T) {
+			transportCalled := false
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalled = true
+				return nil, errors.New("unexpected metric-storage request")
+			})
+			recorder := httptest.NewRecorder()
+			proxyMetricQuery(
+				recorder,
+				httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
+				metricStorage,
+				transport,
+				safeMetricResolver(),
+			)
+			require.False(t, transportCalled)
+			requireGenericMetricQueryError(t, recorder, metricStorage)
+		})
+	}
 }
 
 func TestMetricQueryHidesPolicyAndNetworkErrors(t *testing.T) {
