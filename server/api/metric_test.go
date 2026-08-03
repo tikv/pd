@@ -48,7 +48,7 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 	} {
 		target, err := resolveMetricStorageTarget(context.Background(), rawURL, resolver)
 		require.NoError(t, err)
-		require.Equal(t, port, target.port)
+		require.Equal(t, port, target.Port)
 	}
 	for _, rawURL := range []string{
 		"http://127.0.0.1:9090",
@@ -103,6 +103,9 @@ func TestValidateMetricStorageConfigUpdate(t *testing.T) {
 		{name: "InvalidTarget", conf: map[string]any{metricStorageConfigKey: "file:///tmp/metrics"}, wantErr: true},
 		{name: "NewLoopback", conf: map[string]any{metricStorageConfigKey: "http://127.0.0.1:9090"}, wantErr: true},
 		{name: "NewPrefixedLoopback", conf: map[string]any{prefixedMetricStorageConfigKey: "http://[::1]:9090"}, wantErr: true},
+		{name: "Localhost", conf: map[string]any{metricStorageConfigKey: "http://localhost:9090"}, wantErr: true},
+		{name: "Metadata", conf: map[string]any{metricStorageConfigKey: "http://100.100.100.200"}, wantErr: true},
+		{name: "Unspecified", conf: map[string]any{metricStorageConfigKey: "http://0.0.0.0"}, wantErr: true},
 		{name: "ClearLoopback", conf: map[string]any{metricStorageConfigKey: ""}},
 		{
 			name: "ConflictingKeys",

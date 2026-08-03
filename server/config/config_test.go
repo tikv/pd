@@ -162,7 +162,7 @@ lease = 0
 max-request-bytes = 20000000
 
 [pd-server]
-metric-storage = "http://127.0.0.1:9090"
+metric-storage = "http://192.168.0.1:9090"
 
 [schedule]
 max-merge-region-size = 0
@@ -203,7 +203,7 @@ leader-schedule-limit = 0
 	re.Equal(0, cfg.Log.File.MaxDays)
 	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
-	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
+	re.Equal("http://192.168.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
 	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
@@ -407,6 +407,24 @@ dashboard-address = "foo"
 		if !test.hasErr {
 			re.Equal(test.dashboardAddress, cfg.PDServerCfg.DashboardAddress)
 		}
+	}
+}
+
+func TestPDServerMetricStorageConfig(t *testing.T) {
+	testCases := []struct {
+		metricStorage string
+		wantErr       bool
+	}{
+		{metricStorage: "http://192.168.0.1:9090"},
+		{metricStorage: "http://127.0.0.1:9090", wantErr: true},
+		{metricStorage: "http://localhost:9090", wantErr: true},
+	}
+	for _, testCase := range testCases {
+		cfg := NewConfig()
+		meta, err := toml.Decode(fmt.Sprintf("[pd-server]\nmetric-storage = %q\n", testCase.metricStorage), &cfg)
+		require.NoError(t, err)
+		err = cfg.Adjust(&meta, false)
+		require.Equal(t, testCase.wantErr, err != nil)
 	}
 }
 

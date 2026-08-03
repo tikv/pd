@@ -602,6 +602,9 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
+	if err := ValidateMetricStorageURL(c.MetricStorage); err != nil {
+		return err
+	}
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":

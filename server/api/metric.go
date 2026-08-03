@@ -23,8 +23,6 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -60,9 +59,7 @@ type queryMetric struct {
 }
 
 type metricTarget struct {
-	url       *url.URL
-	hostname  string
-	port      string
+	*config.MetricStorageURL
 	addresses []netip.Addr
 }
 
@@ -148,14 +145,14 @@ func proxyMetricQuery(
 func newMetricReverseProxy(target *metricTarget, transport http.RoundTripper) *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
-			request.Out.URL.Scheme = target.url.Scheme
-			request.Out.URL.Host = target.url.Host
+			request.Out.URL.Scheme = target.URL.Scheme
+			request.Out.URL.Host = target.URL.Host
 			request.Out.URL.Path = strings.Replace(request.In.URL.Path, "/pd/api/v1/metric", "/api/v1", 1)
 			request.Out.URL.RawPath = ""
 			// ReverseProxy sanitizes malformed queries before Rewrite. Restore the
 			// original value to retain the historical transparent proxy contract.
 			request.Out.URL.RawQuery = request.In.URL.RawQuery
-			request.Out.Host = target.url.Host
+			request.Out.Host = target.URL.Host
 			// ReverseProxy already removes hop-by-hop headers, except headers needed
 			// for protocol upgrades and TE trailers. The metric API supports neither.
 			request.Out.Header.Del("Connection")
@@ -222,16 +219,17 @@ func resolveMetricStorageTarget(
 	rawURL string,
 	resolver metricIPResolver,
 ) (*metricTarget, error) {
-	target, err := parseMetricStorageTarget(rawURL)
+	storageURL, err := config.ParseMetricStorageURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
+	target := &metricTarget{MetricStorageURL: storageURL}
 
 	var addresses []netip.Addr
-	if address, ok := target.literalAddress(); ok {
+	if address, ok := target.LiteralAddress(); ok {
 		addresses = []netip.Addr{address}
 	} else {
-		addresses, err = resolver.LookupNetIP(ctx, "ip", target.hostname)
+		addresses, err = resolver.LookupNetIP(ctx, "ip", target.Hostname)
 		if err != nil {
 			return nil, errors.Annotate(err, "failed to resolve metric-storage hostname")
 		}
@@ -242,7 +240,7 @@ func resolveMetricStorageTarget(
 
 	for i, address := range addresses {
 		addresses[i] = address.Unmap()
-		if !isSafeMetricTargetIP(addresses[i]) {
+		if !config.IsSafeMetricStorageAddress(addresses[i]) {
 			return nil, errors.New("metric-storage resolved to an unsafe address")
 		}
 	}
@@ -251,59 +249,13 @@ func resolveMetricStorageTarget(
 	return target, nil
 }
 
-func parseMetricStorageTarget(rawURL string) (*metricTarget, error) {
-	targetURL, err := url.Parse(rawURL)
-	if err != nil || targetURL.Opaque != "" || targetURL.Hostname() == "" || targetURL.User != nil ||
-		targetURL.Fragment != "" || targetURL.RawFragment != "" {
-		return nil, errors.New("invalid metric-storage URL")
-	}
-	targetURL.Scheme = strings.ToLower(targetURL.Scheme)
-	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
-		return nil, errors.New("metric-storage must use HTTP or HTTPS")
-	}
-	port := targetURL.Port()
-	if port == "" {
-		if strings.HasSuffix(targetURL.Host, ":") {
-			return nil, errors.New("metric-storage URL has an empty port")
-		}
-		if targetURL.Scheme == "http" {
-			port = "80"
-		} else {
-			port = "443"
-		}
-	} else {
-		portNumber, err := strconv.Atoi(port)
-		if err != nil || portNumber < 1 || portNumber > 65535 {
-			return nil, errors.New("metric-storage URL has an invalid port")
-		}
-		port = strconv.Itoa(portNumber)
-	}
-	return &metricTarget{url: targetURL, hostname: targetURL.Hostname(), port: port}, nil
-}
-
-func (target *metricTarget) literalAddress() (netip.Addr, bool) {
-	address, err := netip.ParseAddr(target.hostname)
-	if err != nil {
-		return netip.Addr{}, false
-	}
-	return address.Unmap(), true
-}
-
 func validateMetricStorageConfigUpdate(conf map[string]any) error {
 	updated, found, err := metricStorageConfigUpdate(conf)
 	if err != nil || !found || updated == "" {
 		return err
 	}
 
-	updatedTarget, err := parseMetricStorageTarget(updated)
-	if err != nil {
-		return err
-	}
-	updatedAddress, literal := updatedTarget.literalAddress()
-	if !literal || !updatedAddress.IsLoopback() {
-		return nil
-	}
-	return errors.New("changing metric-storage to a loopback target is not allowed")
+	return config.ValidateMetricStorageURL(updated)
 }
 
 func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
@@ -327,27 +279,6 @@ func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
 		found = true
 	}
 	return updated, found, nil
-}
-
-func isSafeMetricTargetIP(address netip.Addr) bool {
-	address = address.Unmap()
-	if !address.IsValid() || address.Zone() != "" {
-		return false
-	}
-	unsafe := address.IsLoopback() ||
-		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
-		address.IsUnspecified() || address.IsMulticast() || !address.IsGlobalUnicast()
-	if address.Is4() {
-		octets := address.As4()
-		unsafe = unsafe || octets[0] == 0 || octets[0] >= 240
-	}
-	// Block well-known cloud instance metadata endpoints explicitly, including
-	// addresses that are not covered by the generic IP classifications above.
-	switch address.String() {
-	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
-		unsafe = true
-	}
-	return !unsafe
 }
 
 func metricQueryDialDeadline(now, deadline time.Time, addressesRemaining int) time.Time {
@@ -407,7 +338,7 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 			)
 			go func() {
 				defer attemptCancel()
-				connection, err := dialContext(attemptCtx, network, net.JoinHostPort(address.String(), target.port))
+				connection, err := dialContext(attemptCtx, network, net.JoinHostPort(address.String(), target.Port))
 				results <- dialResult{connection: connection, err: err}
 			}()
 		}
@@ -476,7 +407,7 @@ func validatePrometheusQueryResponse(body []byte) error {
 	if response.Status != "success" || response.Data == nil {
 		return errors.New("metric storage returned a non-success Prometheus response")
 	}
-	result := strings.TrimSpace(string(response.Data.Result))
+	result := bytes.TrimSpace(response.Data.Result)
 	if len(result) < 2 || result[0] != '[' || result[len(result)-1] != ']' {
 		return errors.New("metric storage returned an invalid Prometheus result")
 	}

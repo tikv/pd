@@ -163,7 +163,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, addr, postData,
 		testutil.Status(re, http.StatusBadRequest),
-		testutil.StringContain(re, "loopback target is not allowed"))
+		testutil.StringContain(re, "target is not allowed"))
 	re.NoError(err)
 
 	l = map[string]any{
