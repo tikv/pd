@@ -415,16 +415,10 @@ func (td *tsoDispatcher) processRequests(
 		}
 	}
 	defer func() {
-		for i := range spans {
+		for i := len(spans) - 1; i >= 0; i-- {
 			spans[i].Finish()
 		}
-<<<<<<< HEAD
-		for i := range traceRegions {
-			traceRegions[i].End()
-		}
-=======
 		traceRegion.End()
->>>>>>> 4f08e58847 (client: use batch-level runtime trace regions (#10965))
 	}()
 
 	var (
