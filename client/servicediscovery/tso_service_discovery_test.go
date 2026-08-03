@@ -15,13 +15,170 @@
 package servicediscovery
 
 import (
+	"context"
+	"net"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
+
+	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 )
+
+type legacyFindGroupServer struct {
+	tsopb.UnimplementedTSOServer
+	requests chan *tsopb.FindGroupByKeyspaceIDRequest
+	response *tsopb.FindGroupByKeyspaceIDResponse
+	err      error
+}
+
+func (s *legacyFindGroupServer) FindGroupByKeyspaceID(
+	_ context.Context,
+	request *tsopb.FindGroupByKeyspaceIDRequest,
+) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
+	s.requests <- request
+	return s.response, s.err
+}
+
+func startLegacyFindGroupServer(t *testing.T, response *tsopb.FindGroupByKeyspaceIDResponse, err error) (
+	serverURL string,
+	calleeID string,
+	server *legacyFindGroupServer,
+) {
+	t.Helper()
+	listener, listenErr := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, listenErr)
+	grpcServer := grpc.NewServer()
+	server = &legacyFindGroupServer{
+		requests: make(chan *tsopb.FindGroupByKeyspaceIDRequest, 1),
+		response: response,
+		err:      err,
+	}
+	tsopb.RegisterTSOServer(grpcServer, server)
+	go func() {
+		_ = grpcServer.Serve(listener)
+	}()
+	t.Cleanup(grpcServer.Stop)
+	return "http://" + listener.Addr().String(), listener.Addr().String(), server
+}
+
+func newLegacyTSOServiceDiscovery(t *testing.T, clusterID uint64) *tsoServiceDiscovery {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	discovery := &tsoServiceDiscovery{
+		ctx:       ctx,
+		cancel:    cancel,
+		clusterID: clusterID,
+		option:    opt.NewOption(),
+	}
+	t.Cleanup(discovery.Close)
+	return discovery
+}
+
+func TestFindGroupByKeyspaceIDLegacyProtocol(t *testing.T) {
+	const (
+		clusterID   = uint64(1)
+		keyspaceID  = uint32(2)
+		modRevision = uint64(10)
+	)
+	tests := []struct {
+		name                  string
+		response              *tsopb.FindGroupByKeyspaceIDResponse
+		rpcErr                error
+		wantGroup             *tsopb.KeyspaceGroup
+		wantRevision          uint64
+		wantErr               string
+		wantConnectionRemoved bool
+	}{
+		{
+			name: "success",
+			response: &tsopb.FindGroupByKeyspaceIDResponse{
+				Header:        &tsopb.ResponseHeader{},
+				KeyspaceGroup: &tsopb.KeyspaceGroup{Id: 3},
+				ModRevision:   11,
+			},
+			wantGroup:    &tsopb.KeyspaceGroup{Id: 3},
+			wantRevision: 11,
+		},
+		{
+			name:    "rpc error",
+			rpcErr:  status.Error(codes.Unavailable, "tso unavailable"),
+			wantErr: "tso unavailable",
+		},
+		{
+			name: "callee mismatch",
+			response: &tsopb.FindGroupByKeyspaceIDResponse{
+				Header: &tsopb.ResponseHeader{
+					Error: &tsopb.Error{Message: errs.MismatchCalleeIDErr},
+				},
+			},
+			wantErr:               errs.MismatchCalleeIDErr,
+			wantConnectionRemoved: true,
+		},
+		{
+			name: "missing keyspace group",
+			response: &tsopb.FindGroupByKeyspaceIDResponse{
+				Header:      &tsopb.ResponseHeader{},
+				ModRevision: modRevision,
+			},
+			wantErr: "no keyspace group found",
+		},
+		{
+			name: "stale revision",
+			response: &tsopb.FindGroupByKeyspaceIDResponse{
+				Header:        &tsopb.ResponseHeader{},
+				KeyspaceGroup: &tsopb.KeyspaceGroup{Id: 3},
+				ModRevision:   modRevision - 1,
+			},
+			wantErr: "response mod revision less than the given mod revision",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			re := require.New(t)
+			serverURL, calleeID, server := startLegacyFindGroupServer(t, test.response, test.rpcErr)
+			discovery := newLegacyTSOServiceDiscovery(t, clusterID)
+
+			group, revision, err := discovery.findGroupByKeyspaceID(
+				keyspaceID,
+				serverURL,
+				time.Second,
+				modRevision,
+			)
+
+			request := <-server.requests
+			re.Equal(clusterID, request.GetHeader().GetClusterId())
+			re.IsType(&tsopb.RequestHeader_KeyspaceId{}, request.GetHeader().GetKeyspace())
+			re.Equal(keyspaceID, request.GetHeader().GetKeyspaceId())
+			re.Equal(constants.DefaultKeyspaceGroupID, request.GetHeader().GetKeyspaceGroupId())
+			re.Equal(calleeID, request.GetHeader().GetCalleeId())
+			re.IsType(&tsopb.FindGroupByKeyspaceIDRequest_KeyspaceId{}, request.GetKeyspace())
+			re.Equal(keyspaceID, request.GetKeyspaceId())
+			re.Equal(modRevision, request.GetModRevision())
+
+			if test.wantErr == "" {
+				re.NoError(err)
+				re.Equal(test.wantGroup, group)
+				re.Equal(test.wantRevision, revision)
+			} else {
+				re.ErrorContains(err, test.wantErr)
+				re.Nil(group)
+				re.Zero(revision)
+			}
+			_, connectionExists := discovery.clientConns.Load(serverURL)
+			re.Equal(!test.wantConnectionRemoved, connectionExists)
+		})
+	}
+}
 
 func TestKeyspaceGroupSvcDiscoveryUpdateKeepsPrimary(t *testing.T) {
 	re := require.New(t)
