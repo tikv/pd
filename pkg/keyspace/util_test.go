@@ -332,8 +332,8 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 		// Invalid keyspace label ID - non-canonical keyspace ID.
 		{
 			labelRule: &labeler.LabelRule{
-				ID:     "keyspaces/+1",
-				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "+1"}},
+				ID:     "keyspaces/01",
+				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "01"}},
 			},
 			expectedID: 0,
 			expectedOK: false,

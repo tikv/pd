@@ -447,10 +447,8 @@ func parseKeyspaceRuleID(ruleID string) (uint32, string, bool) {
 		return 0, "", false
 	}
 	id64, err := strconv.ParseUint(idText, 10, 32)
-	nonCanonicalID := len(idText) == 0 || idText[0] == '+' || len(idText) > 1 && idText[0] == '0'
-	if err != nil ||
-		id64 > uint64(constant.MaxValidKeyspaceID) ||
-		nonCanonicalID {
+	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
+	if err != nil || id64 > uint64(constant.MaxValidKeyspaceID) || hasLeadingZero {
 		return 0, "", false
 	}
 	return uint32(id64), idText, true

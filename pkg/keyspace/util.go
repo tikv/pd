@@ -241,10 +241,8 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 		idText,
 		endpoint.SpaceIDBase, 32,
 	)
-	nonCanonicalID := len(idText) == 0 || idText[0] == '+' || len(idText) > 1 && idText[0] == '0'
-	if err != nil ||
-		keyspaceID > uint64(constant.MaxValidKeyspaceID) ||
-		nonCanonicalID {
+	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
+	if err != nil || keyspaceID > uint64(constant.MaxValidKeyspaceID) || hasLeadingZero {
 		return 0, false
 	}
 	// Double check the keyspace ID from the label rule.

@@ -111,8 +111,8 @@ func TestKeyspaceRuleIndex(t *testing.T) {
 func TestKeyspaceRuleIndexRejectsNonCanonicalID(t *testing.T) {
 	re := require.New(t)
 	rule := makeKeyspaceRuleForTest(1, codec.TxnKeyspaceModePrefix)
-	rule.ID = constant.RegionLabelIDPrefix + "+1"
-	rule.Labels[0].Value = "+1"
+	rule.ID = constant.RegionLabelIDPrefix + "01"
+	rule.Labels[0].Value = "01"
 	re.NoError(rule.checkAndAdjust())
 
 	var index keyspaceRuleIndex
@@ -391,9 +391,24 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.RawKeyspaceModePrefix), constant.RegionLabelKey))
 	re.Equal("42", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix), constant.RegionLabelKey))
 
-	re.NoError(regionLabeler.DeleteLabelRule(updated.ID))
-	re.False(regionLabeler.ruleIndex.rangesDirty)
+	// Moving a rule between the canonical and generic indexes keeps the two
+	// derived views in sync with the authoritative map.
+	genericReplacement := makeKeyspaceRuleForTest(42, codec.TxnKeyspaceModePrefix)
+	genericReplacement.Labels[0].Key = "generic-replacement"
+	re.NoError(regionLabeler.SetLabelRule(genericReplacement))
 	re.False(regionLabeler.ruleIndex.keyspaces.Contains(updated))
+	re.Contains(regionLabeler.ruleIndex.generic, genericReplacement.ID)
+	re.Equal("42", regionLabeler.GetRegionLabel(
+		makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix), "generic-replacement"))
+
+	restored := makeKeyspaceRuleForTest(42, codec.TxnKeyspaceModePrefix)
+	re.NoError(regionLabeler.SetLabelRule(restored))
+	re.True(regionLabeler.ruleIndex.keyspaces.Contains(restored))
+	re.NotContains(regionLabeler.ruleIndex.generic, restored.ID)
+
+	re.NoError(regionLabeler.DeleteLabelRule(restored.ID))
+	re.False(regionLabeler.ruleIndex.rangesDirty)
+	re.False(regionLabeler.ruleIndex.keyspaces.Contains(restored))
 	re.Equal("yes", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix), "generic"))
 }
 
