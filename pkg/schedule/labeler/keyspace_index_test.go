@@ -138,6 +138,19 @@ func TestKeyspaceRuleIndexBoundaries(t *testing.T) {
 	re.Equal(expected, index.GetSplitKeys(nil, nil))
 }
 
+func TestKeyspaceRuleIndexSparseGap(t *testing.T) {
+	re := require.New(t)
+	rule := makeKeyspaceRuleForTest(keyspaceMaxID, keyspaceTxnMode)
+	re.NoError(rule.checkAndAdjust())
+
+	var index keyspaceRuleIndex
+	re.True(index.Add(rule))
+	start := keyspaceBoundaryBytes(keyspaceTxnMode, 0)
+	end := keyspaceBoundaryBytes(keyspaceTxnMode, keyspaceMaxID)
+	re.Empty(index.GetSplitKeys(start, end))
+	re.False(index.HasSplitKey(start, end))
+}
+
 func TestKeyspaceRuleSetUsesSparseChunks(t *testing.T) {
 	re := require.New(t)
 	var set keyspaceRuleSet
@@ -158,6 +171,8 @@ func TestKeyspaceRuleSetUsesSparseChunks(t *testing.T) {
 	re.Len(set.chunks, 1)
 	set.clear(1)
 	re.Empty(set.chunks)
+	re.Zero(set.nonEmptyChunks)
+	re.Zero(set.nonEmptyChunkMapWords)
 }
 
 func TestKeyspaceRuleIndexReplaceReusesSparseStorage(t *testing.T) {
@@ -383,6 +398,22 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 		for range b.N {
 			if keys := index.GetSplitKeys(nil, nil); len(keys) != 2 {
 				b.Fatalf("expected 2 split keys, got %d", len(keys))
+			}
+		}
+	})
+
+	b.Run("high-id-negative-split", func(b *testing.B) {
+		highRule := makeKeyspaceRuleForTest(keyspaceMaxID, keyspaceTxnMode)
+		require.NoError(b, highRule.checkAndAdjust())
+		var index keyspaceRuleIndex
+		require.True(b, index.Add(highRule))
+		start := keyspaceBoundaryBytes(keyspaceTxnMode, 0)
+		end := keyspaceBoundaryBytes(keyspaceTxnMode, keyspaceMaxID)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if keys := index.GetSplitKeys(start, end); len(keys) != 0 {
+				b.Fatalf("expected no split keys, got %d", len(keys))
 			}
 		}
 	})
