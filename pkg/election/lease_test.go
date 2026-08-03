@@ -16,6 +16,7 @@ package election
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,8 +113,29 @@ func TestLeaseKeepAlive(t *testing.T) {
 	lease := NewLease(client, "test_lease")
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
-	ch := lease.keepAliveWorker(ctx, 2*time.Second)
+	ch := lease.keepAliveWorker(ctx, 2*time.Second, nil)
 	time.Sleep(2 * time.Second)
 	<-ch
+	re.NoError(lease.Close())
+}
+
+func TestLeaseKeepAliveGuard(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	lease := NewLease(client, "test_lease_guard")
+	re.NoError(lease.Grant(defaultLeaseTimeout))
+	re.False(lease.IsExpired())
+
+	var guardCalls atomic.Int32
+	go lease.runKeepAlive(ctx, func() bool {
+		guardCalls.Add(1)
+		return false
+	})
+	re.Eventually(lease.IsExpired, time.Second, 10*time.Millisecond)
+	re.Equal(int32(1), guardCalls.Load())
 	re.NoError(lease.Close())
 }

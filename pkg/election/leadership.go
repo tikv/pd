@@ -210,13 +210,24 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 // Keep will keep the leadership available by update the lease's expired time continuously
 func (ls *Leadership) Keep(ctx context.Context) {
+	ls.startKeepAlive(ctx, nil)
+}
+
+// KeepWithLeaseGuard keeps the leadership available while guard confirms that
+// the caller is still allowed to renew it. The guard is checked immediately
+// before every lease keepalive request.
+func (ls *Leadership) KeepWithLeaseGuard(ctx context.Context, guard func() bool) {
+	ls.startKeepAlive(ctx, guard)
+}
+
+func (ls *Leadership) startKeepAlive(ctx context.Context, guard func() bool) {
 	if ls == nil {
 		return
 	}
 	ls.keepAliveCancelFuncLock.Lock()
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
 	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.GetLease().KeepAlive(ls.keepAliveCtx)
+	go ls.GetLease().runKeepAlive(ls.keepAliveCtx, guard)
 }
 
 // Check returns whether the leadership is still available.

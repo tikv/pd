@@ -272,6 +272,47 @@ func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
 }
 
+func TestPDLeaderLeaseStopsWhenEtcdLeaderChanges(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	re.NoError(cluster.RunInitialServers())
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeader := cluster.GetServer(oldLeaderName)
+	re.NotNil(oldLeader)
+
+	var newEtcdLeader *tests.TestServer
+	for _, cfg := range cluster.GetConfig().InitialServers {
+		if cfg.Name != oldLeaderName {
+			newEtcdLeader = cluster.GetServer(cfg.Name)
+			break
+		}
+	}
+	re.NotNil(newEtcdLeader)
+
+	// Mask only campaignLeader's periodic etcd-leader check. The lease keepalive
+	// must independently stop after the embedded-etcd leadership moves away.
+	failpointName := "github.com/tikv/pd/server/skipCampaignLeaderEtcdLeaderCheck"
+	re.NoError(failpoint.Enable(failpointName, fmt.Sprintf("return(\"%d\")", oldLeader.GetServerID())))
+	defer func() {
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	re.NoError(oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), newEtcdLeader.GetServerID()))
+	testutil.Eventually(re, func() bool {
+		leaderID, err := oldLeader.GetEtcdLeaderID()
+		return err == nil && leaderID == newEtcdLeader.GetServerID()
+	})
+
+	newLeaderName := waitLeaderChange(re, cluster, oldLeaderName)
+	re.NotEqual(oldLeaderName, newLeaderName)
+}
+
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string) string {
 	var leader string
 	testutil.Eventually(re, func() bool {

@@ -173,6 +173,10 @@ func (l *Lease) loadExpireTime() time.Time {
 
 // KeepAlive auto renews the lease and update expireTime.
 func (l *Lease) KeepAlive(ctx context.Context) {
+	l.runKeepAlive(ctx, nil)
+}
+
+func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 	defer logutil.LogPanic()
 
 	if l == nil {
@@ -180,7 +184,21 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
+	var guardRejected atomic.Bool
+	if guard != nil {
+		check := guard
+		guard = func() bool {
+			if check() {
+				return true
+			}
+			if guardRejected.CompareAndSwap(false, true) {
+				l.expireTime.Store(typeutil.ZeroTime)
+				cancel()
+			}
+			return false
+		}
+	}
+	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, guard)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -235,6 +253,12 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 				zap.String("purpose", l.purpose))
 			return
 		case <-ctx.Done():
+			if guardRejected.Load() {
+				log.Info("lease keep alive stopped because its guard rejected the renewal",
+					zap.String("purpose", l.purpose),
+					zap.Int64("lease-id", int64(l.GetID())))
+				return
+			}
 			log.Info("lease keep alive canceled by caller",
 				zap.String("purpose", l.purpose),
 				zap.Error(ctx.Err()))
@@ -245,7 +269,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, guard func() bool) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
@@ -271,6 +295,9 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 			go func() {
 				defer logutil.LogPanic()
 
+				if guard != nil && !guard() {
+					return
+				}
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
 				// Record the start time of the `KeepAliveOnce` request to track the request duration
