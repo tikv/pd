@@ -292,7 +292,10 @@ func TestStoresLabelsVersion(t *testing.T) {
 	stores := NewStoresInfo()
 	version := stores.GetStoresLabelsVersion()
 
-	store := NewStoreInfoWithLabel(1, map[string]string{"zone": "z1"})
+	store := NewStoreInfo(&metapb.Store{Id: 1, Labels: []*metapb.StoreLabel{
+		{Key: "zone", Value: "z1"},
+		{Key: "host", Value: "h1"},
+	}})
 	stores.PutStore(store)
 	re.Greater(stores.GetStoresLabelsVersion(), version)
 	version = stores.GetStoresLabelsVersion()
@@ -302,7 +305,28 @@ func TestStoresLabelsVersion(t *testing.T) {
 	stores.PutStore(store, SetLeaderCount(2))
 	re.Equal(version, stores.GetStoresLabelsVersion())
 
-	store = stores.GetStore(1).Clone(SetStoreLabels([]*metapb.StoreLabel{{Key: "zone", Value: "z2"}}))
+	store = stores.GetStore(1).Clone(SetStoreLabels([]*metapb.StoreLabel{
+		{Key: "host", Value: "h1"},
+		{Key: "zone", Value: "z1"},
+	}))
+	stores.PutStore(store)
+	re.Equal(version, stores.GetStoresLabelsVersion())
+
+	meta := typeutil.DeepClone(store.GetMeta(), StoreFactory)
+	meta.Address = "mock://tikv-1:2"
+	meta.Labels = []*metapb.StoreLabel{
+		{Key: "zone", Value: "z1"},
+		{Key: "host", Value: "h1"},
+	}
+	store = store.Clone(SetStoreMeta(meta))
+	stores.PutStore(store)
+	re.Equal(version, stores.GetStoresLabelsVersion())
+	re.Equal(meta.GetAddress(), stores.GetStore(1).GetAddress())
+
+	store = stores.GetStore(1).Clone(SetStoreLabels([]*metapb.StoreLabel{
+		{Key: "zone", Value: "z2"},
+		{Key: "host", Value: "h1"},
+	}))
 	stores.PutStore(store)
 	re.Greater(stores.GetStoresLabelsVersion(), version)
 	version = stores.GetStoresLabelsVersion()
