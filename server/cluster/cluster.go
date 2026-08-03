@@ -1925,13 +1925,14 @@ type regionSizeCache struct {
 	sizes  map[regionSizeCacheKey]int64
 }
 
-func newRegionSizeCache(loader func(startKey, endKey []byte) int64) *regionSizeCache {
-	return &regionSizeCache{
+func newRegionSizeCache(loader func(startKey, endKey []byte) int64) regionSizeCache {
+	return regionSizeCache{
 		loader: loader,
+		sizes:  make(map[regionSizeCacheKey]int64),
 	}
 }
 
-func (c *regionSizeCache) get(startKey, endKey []byte) int64 {
+func (c regionSizeCache) getRegionSize(startKey, endKey []byte) int64 {
 	key := regionSizeCacheKey{
 		startKey: string(startKey),
 		endKey:   string(endKey),
@@ -1941,9 +1942,6 @@ func (c *regionSizeCache) get(startKey, endKey []byte) int64 {
 	}
 
 	size := c.loader(startKey, endKey)
-	if c.sizes == nil {
-		c.sizes = make(map[regionSizeCacheKey]int64)
-	}
 	c.sizes[key] = size
 	return size
 }
@@ -1975,7 +1973,7 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(storeID uint64, regionSizes *regionSizeCache) (isInUp, isInOffline bool) {
+func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -2052,11 +2050,11 @@ func (c *RaftCluster) getThreshold(
 	stores []*core.StoreInfo,
 	store *core.StoreInfo,
 	kr *keyutil.KeyRange,
-	regionSizes *regionSizeCache,
+	regionSizes regionSizeCache,
 ) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := regionSizes.get(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
+		regionSize := regionSizes.getRegionSize(kr.StartKey, kr.EndKey) * int64(c.opt.GetMaxReplicas())
 		weight := core.GetStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
@@ -2083,7 +2081,7 @@ func (c *RaftCluster) calculateRange(
 	stores []*core.StoreInfo,
 	store *core.StoreInfo,
 	startKey, endKey []byte,
-	regionSizes *regionSizeCache,
+	regionSizes regionSizeCache,
 ) float64 {
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
 	var (
@@ -2096,7 +2094,7 @@ func (c *RaftCluster) calculateRange(
 			continue
 		}
 		if !regionSizeLoaded {
-			regionSize = regionSizes.get(startKey, endKey)
+			regionSize = regionSizes.getRegionSize(startKey, endKey)
 			regionSizeLoaded = true
 		}
 
