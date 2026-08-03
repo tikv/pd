@@ -1941,6 +1941,181 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
+func TestPreparingRegionSizeLazilyStartsSizeTree(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster := &RaftCluster{ctx: ctx, BasicCluster: core.NewBasicCluster()}
+	defer cluster.StopRegionSizeTree()
+	peer := &metapb.Peer{Id: 1, StoreId: 1}
+	region := core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("z"),
+		Peers:    []*metapb.Peer{peer},
+	}, peer, core.SetApproximateSize(10))
+	cluster.PutRegion(region)
+	rootSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
+	_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
+	re.False(ready)
+	result := cluster.getPreparingRegionSize(nil, nil, rootSizes)
+	re.Equal(int64(10), result.size)
+	re.True(result.available)
+	re.False(result.needsConfirmation)
+	_, ready = cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
+	re.False(ready)
+
+	// The first bounded query starts the index and defers the decision instead of
+	// scanning the root tree while the full rebuild is doing the same work.
+	result = cluster.getPreparingRegionSize([]byte("a"), []byte("z"), rootSizes)
+	re.False(result.available)
+	re.Eventually(func() bool {
+		_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
+		return ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	updated := region.Clone(core.SetApproximateSize(40))
+	_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), updated)
+	re.NoError(err)
+	re.Equal(int64(40), cluster.GetRegionSizeByRange(nil, nil))
+	rootSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
+	result = cluster.getPreparingRegionSize(nil, nil, rootSizes)
+	re.Equal(int64(40), result.size)
+	re.True(result.available)
+	re.False(result.needsConfirmation)
+	re.Eventually(func() bool {
+		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"), rootSizes)
+		return result.size == 40 && result.available && result.needsConfirmation
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestPreparingRegionSizeDoesNotFallbackWhileIndexBuilds(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cluster := &RaftCluster{ctx: ctx, BasicCluster: core.NewBasicCluster()}
+	defer cluster.StopRegionSizeTree()
+	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("z"),
+	}, nil, core.SetApproximateSize(10)))
+
+	loadCount := 0
+	rootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+		loadCount++
+		return cluster.GetRegionSizeByRange(startKey, endKey)
+	})
+	approxSizes := newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
+		return cluster.getPreparingRegionSize(startKey, endKey, rootSizes)
+	})
+
+	// A canceled context keeps the lazy index unready. The approximate lookup
+	// must not scan the root while an initial rebuild would normally be running.
+	result := approxSizes.getRegionSizeResult([]byte("a"), []byte("z"))
+	re.False(result.available)
+	re.False(result.needsConfirmation)
+	re.Zero(loadCount)
+}
+
+func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	opt.SetPlacementRuleEnabled(true)
+	opt.SetMaxReplicas(1)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	re.NoError(cluster.ruleManager.SetRule(&placement.Rule{
+		GroupID:     placement.DefaultGroupID,
+		ID:          "bounded",
+		StartKeyHex: "00",
+		EndKeyHex:   "ff",
+		Role:        placement.Voter,
+		Count:       1,
+	}))
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.SetPrepared()
+	cluster.progressManager = progress.NewManager(cluster.GetCoordinator().GetCheckerController(),
+		nodeStateCheckJobInterval)
+
+	now := time.Now()
+	stores := newTestStores(3, "8.5.0")
+	for i, store := range stores {
+		if i < 2 {
+			store = store.Clone(
+				core.SetNodeState(metapb.NodeState_Preparing),
+				core.SetStoreStartTime(now.Unix()),
+			)
+		}
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+		cluster.PutStore(cluster.GetStore(store.GetID()).Clone(
+			core.SetLastHeartbeatTS(now),
+			core.SetRegionCount(10),
+			core.SetRegionSize(190),
+		))
+	}
+
+	for i := range core.InitClusterRegionThreshold {
+		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: stores[2].GetID()}
+		region := core.NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			StartKey: []byte(fmt.Sprintf("%04d", i)),
+			EndKey:   []byte(fmt.Sprintf("%04d", i+1)),
+			Peers:    []*metapb.Peer{peer},
+		}, peer, core.SetApproximateSize(3))
+		cluster.PutRegion(region)
+	}
+
+	loadedRanges := make(map[regionSizeCacheKey]int)
+	staleSizes := newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		loadedRanges[key]++
+		size := int64(0)
+		if key == (regionSizeCacheKey{startKey: "\x00", endKey: "\xff"}) {
+			size = 300
+		}
+		return regionSizeCacheValue{size: size, available: true, needsConfirmation: true}
+	})
+
+	// An unavailable lazy index defers both the state decision and this round's
+	// progress sample instead of treating an unknown threshold as zero.
+	unavailableSizes := newRegionSizeCacheWithResult(func([]byte, []byte) regionSizeCacheValue {
+		return regionSizeCacheValue{}
+	})
+	cluster.checkStore(stores[0].GetID(), unavailableSizes)
+	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[0].GetID()).GetNodeState())
+	re.Nil(cluster.progressManager.GetProgressByStoreID(stores[0].GetID()))
+
+	// Both the default and bounded rules contribute: 300 * 2 rules / 3 stores
+	// * 0.9 = 180, so the first store can serve after root confirmation.
+	cluster.checkStore(stores[0].GetID(), staleSizes)
+	re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[0].GetID()).GetNodeState())
+
+	// Grow the authoritative range to 600 while the asynchronous value remains
+	// 300. A fresh confirmation for the second store must use threshold 360,
+	// rather than a root result cached while checking the first store.
+	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(303))
+	cluster.PutRegion(region)
+	cluster.checkStore(stores[1].GetID(), staleSizes)
+	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[1].GetID()).GetNodeState())
+	re.Zero(loadedRanges[regionSizeCacheKey{}])
+	re.Equal(1, loadedRanges[regionSizeCacheKey{startKey: "\x00", endKey: "\xff"}])
+
+	// The same stale value marked exact skips root confirmation and is used
+	// directly, proving confirmation is limited to asynchronous results.
+	exactSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+		if string(startKey) == "\x00" && string(endKey) == "\xff" {
+			return 300
+		}
+		return 0
+	})
+	cluster.checkStore(stores[1].GetID(), exactSizes)
+	re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[1].GetID()).GetNodeState())
+}
+
 func TestStatsRegions(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

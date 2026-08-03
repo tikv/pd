@@ -1022,6 +1022,7 @@ func (c *RaftCluster) Stop() {
 	}
 
 	c.wg.Wait()
+	c.StopRegionSizeTree()
 	log.Info("raft cluster is stopped")
 }
 
@@ -1919,31 +1920,82 @@ type regionSizeCacheKey struct {
 	endKey   string
 }
 
-// regionSizeCache is scoped to one checkStores round and is refreshed on the next round.
-type regionSizeCache struct {
-	loader func(startKey, endKey []byte) int64
-	sizes  map[regionSizeCacheKey]int64
+type regionSizeCacheValue struct {
+	size              int64
+	available         bool
+	needsConfirmation bool
 }
 
-func newRegionSizeCache(loader func(startKey, endKey []byte) int64) regionSizeCache {
-	return regionSizeCache{
-		loader: loader,
-		sizes:  make(map[regionSizeCacheKey]int64),
+// regionSizeCache is scoped to one checkStores round and is refreshed on the next round.
+type regionSizeCache struct {
+	loader func(startKey, endKey []byte) regionSizeCacheValue
+	sizes  map[regionSizeCacheKey]regionSizeCacheValue
+
+	available         bool
+	needsConfirmation bool
+}
+
+func newRegionSizeCache(loader func(startKey, endKey []byte) int64) *regionSizeCache {
+	return newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
+		return regionSizeCacheValue{size: loader(startKey, endKey), available: true}
+	})
+}
+
+func newRegionSizeCacheWithResult(
+	loader func(startKey, endKey []byte) regionSizeCacheValue,
+) *regionSizeCache {
+	return &regionSizeCache{
+		loader:    loader,
+		sizes:     make(map[regionSizeCacheKey]regionSizeCacheValue),
+		available: true,
 	}
 }
 
-func (c regionSizeCache) getRegionSize(startKey, endKey []byte) int64 {
+func (c *regionSizeCache) beginUse() {
+	c.available = true
+	c.needsConfirmation = false
+}
+
+func (c *regionSizeCache) getRegionSizeResult(startKey, endKey []byte) regionSizeCacheValue {
 	key := regionSizeCacheKey{
 		startKey: string(startKey),
 		endKey:   string(endKey),
 	}
-	if size, ok := c.sizes[key]; ok {
-		return size
+	result, ok := c.sizes[key]
+	if !ok {
+		result = c.loader(startKey, endKey)
+		c.sizes[key] = result
 	}
+	c.available = c.available && result.available
+	c.needsConfirmation = c.needsConfirmation || result.needsConfirmation
+	return result
+}
 
-	size := c.loader(startKey, endKey)
-	c.sizes[key] = size
-	return size
+func (c *regionSizeCache) getRegionSize(startKey, endKey []byte) int64 {
+	return c.getRegionSizeResult(startKey, endKey).size
+}
+
+func (c *RaftCluster) getPreparingRegionSize(
+	startKey, endKey []byte,
+	rootSizes *regionSizeCache,
+) regionSizeCacheValue {
+	if len(startKey) == 0 && len(endKey) == 0 {
+		// The root tree already maintains the full-range total in O(1).
+		return rootSizes.getRegionSizeResult(startKey, endKey)
+	}
+	// Most clusters only use the full-range total. Build the additional index
+	// lazily when a placement-rule boundary first needs a non-empty range.
+	if c.ctx == nil {
+		return rootSizes.getRegionSizeResult(startKey, endKey)
+	}
+	c.StartRegionSizeTree(c.ctx)
+	if size, ready := c.GetRegionSizeByRangeFromSizeTree(startKey, endKey); ready {
+		return regionSizeCacheValue{size: size, available: true, needsConfirmation: true}
+	}
+	// Avoid scanning the root tree while the initial full-tree rebuild is doing
+	// the same work. Preparing can safely defer this one-way state transition
+	// until the independently maintained index is ready.
+	return regionSizeCacheValue{}
 }
 
 func (c *RaftCluster) checkStores() {
@@ -1951,12 +2003,15 @@ func (c *RaftCluster) checkStores() {
 		offlineStores []*metapb.Store
 		upStoreCount  int
 		stores        = c.GetStores()
-		regionSizes   = newRegionSizeCache(c.GetRegionSizeByRange)
 	)
+	rootSizes := newRegionSizeCache(c.GetRegionSizeByRange)
+	approxSizes := newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
+		return c.getPreparingRegionSize(startKey, endKey, rootSizes)
+	})
 
 	for _, store := range stores {
 		storeID := store.GetID()
-		isInUp, isInOffline := c.checkStore(storeID, regionSizes)
+		isInUp, isInOffline := c.checkStore(storeID, approxSizes)
 		if isInUp {
 			upStoreCount++
 		}
@@ -1973,7 +2028,10 @@ func (c *RaftCluster) checkStores() {
 	}
 }
 
-func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (isInUp, isInOffline bool) {
+func (c *RaftCluster) checkStore(
+	storeID uint64,
+	approxSizes *regionSizeCache,
+) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
 
@@ -1984,8 +2042,9 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 	}
 
 	var (
-		regionSize = float64(store.GetRegionSize())
-		threshold  float64
+		regionSize         = float64(store.GetRegionSize())
+		threshold          float64
+		thresholdAvailable = true
 	)
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing:
@@ -1993,11 +2052,22 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !readyToServe && (c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared())) {
 			kr := keyutil.NewKeyRange("", "")
-			threshold = c.getThreshold(c.GetStores(), store, &kr, regionSizes)
-			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
-				zap.Float64("threshold", threshold),
-				zap.Float64("region-size", regionSize))
-			readyToServe = regionSize >= threshold
+			stores := c.GetStores()
+			approxSizes.beginUse()
+			threshold = c.getThreshold(stores, store, &kr, approxSizes)
+			thresholdAvailable = approxSizes.available
+			if thresholdAvailable {
+				if approxSizes.needsConfirmation && regionSize >= threshold {
+					// The size tree can lag behind the root tree. Confirm the one-way
+					// Preparing-to-Serving transition with a fresh per-store root cache.
+					rootSizes := newRegionSizeCache(c.GetRegionSizeByRange)
+					threshold = c.getThreshold(stores, store, &kr, rootSizes)
+				}
+				log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
+					zap.Float64("threshold", threshold),
+					zap.Float64("region-size", regionSize))
+				readyToServe = regionSize >= threshold
+			}
 		}
 		if readyToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
@@ -2038,7 +2108,9 @@ func (c *RaftCluster) checkStore(storeID uint64, regionSizes regionSizeCache) (i
 			log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 		}
 	}
-	c.progressManager.UpdateProgress(store, regionSize, threshold)
+	if thresholdAvailable {
+		c.progressManager.UpdateProgress(store, regionSize, threshold)
+	}
 	// When store is preparing or serving, we think it is in up.
 	// `checkStore` only may change store state from preparing to serving.
 	// So we don't need to get store again.
@@ -2050,7 +2122,7 @@ func (c *RaftCluster) getThreshold(
 	stores []*core.StoreInfo,
 	store *core.StoreInfo,
 	kr *keyutil.KeyRange,
-	regionSizes regionSizeCache,
+	regionSizes *regionSizeCache,
 ) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
@@ -2081,7 +2153,7 @@ func (c *RaftCluster) calculateRange(
 	stores []*core.StoreInfo,
 	store *core.StoreInfo,
 	startKey, endKey []byte,
-	regionSizes regionSizeCache,
+	regionSizes *regionSizeCache,
 ) float64 {
 	rules := c.ruleManager.GetRulesForApplyRange(startKey, endKey)
 	var (

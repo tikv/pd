@@ -1059,6 +1059,10 @@ type RegionsInfo struct {
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
 	// This tree is used to check the overlaps among all the subtrees.
 	overlapTree *regionTree
+	// sizeTree is enabled only by the primary PD service. It never holds the
+	// root-tree or subtree lock while updating the size index.
+	sizeTreeMu syncutil.Mutex
+	sizeTree   atomic.Pointer[regionSizeTree]
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -1073,6 +1077,78 @@ func NewRegionsInfo() *RegionsInfo {
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
 		overlapTree:  newRegionTreeWithCountRef(),
+	}
+}
+
+// StartRegionSizeTree starts the eventually consistent range-size index.
+func (r *RegionsInfo) StartRegionSizeTree(ctx context.Context) {
+	if r.sizeTree.Load() != nil {
+		return
+	}
+	r.sizeTreeMu.Lock()
+	defer r.sizeTreeMu.Unlock()
+	if r.sizeTree.Load() != nil {
+		return
+	}
+	sizeTree := newRegionSizeTree(ctx, r)
+	resetRegionSizeTreeMetrics()
+	r.sizeTree.Store(sizeTree)
+	sizeTree.requestRebuild()
+	sizeTree.start()
+}
+
+// StopRegionSizeTree stops the range-size index and waits for its worker.
+func (r *RegionsInfo) StopRegionSizeTree() {
+	r.sizeTreeMu.Lock()
+	defer r.sizeTreeMu.Unlock()
+	if sizeTree := r.sizeTree.Swap(nil); sizeTree != nil {
+		sizeTree.stop()
+		resetRegionSizeTreeMetrics()
+	}
+}
+
+func (r *RegionsInfo) notifyRegionSizeTree(regionIDs ...uint64) {
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		sizeTree.notify(regionIDs...)
+	}
+}
+
+func (r *RegionsInfo) notifyRegionSizeTreeIfChanged(
+	origin, region *RegionInfo,
+	overlaps []*RegionInfo,
+	rangeChanged bool,
+) {
+	sizeTree := r.sizeTree.Load()
+	if sizeTree == nil {
+		return
+	}
+	sizeChanged := origin == nil || rangeChanged ||
+		origin.GetApproximateSize() != region.GetApproximateSize()
+	if len(overlaps) == 0 {
+		if sizeChanged {
+			sizeTree.notify(region.GetID())
+		}
+		return
+	}
+	capacity := len(overlaps)
+	if sizeChanged {
+		capacity++
+	}
+	regionIDs := make([]uint64, 0, capacity)
+	if sizeChanged {
+		regionIDs = append(regionIDs, region.GetID())
+	}
+	for _, overlap := range overlaps {
+		if overlap.GetID() != region.GetID() {
+			regionIDs = append(regionIDs, overlap.GetID())
+		}
+	}
+	sizeTree.notify(regionIDs...)
+}
+
+func (r *RegionsInfo) resetRegionSizeTree() {
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		sizeTree.requestReset()
 	}
 }
 
@@ -1108,6 +1184,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
+	r.notifyRegionSizeTreeIfChanged(origin, region, overlaps, rangeChanged)
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	return overlaps
 }
@@ -1146,6 +1223,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	tracer.OnSetRegionFinished()
+	r.notifyRegionSizeTreeIfChanged(origin, region, overlaps, rangeChanged)
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	tracer.OnUpdateSubTreeFinished()
 	return overlaps, nil
@@ -1169,9 +1247,10 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 		return nil, err
 	}
 	tracer.OnValidateRegionFinished()
-	_, overlaps, _ := r.setRegionLocked(region, true, ols...)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
 	tracer.OnSetRegionFinished()
+	r.notifyRegionSizeTreeIfChanged(origin, region, overlaps, rangeChanged)
 	return overlaps, nil
 }
 
@@ -1342,8 +1421,10 @@ func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 // SetRegion sets the RegionInfo to regionTree and regionMap and return the update info of subtree.
 func (r *RegionsInfo) SetRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	r.t.Lock()
-	defer r.t.Unlock()
-	return r.setRegionLocked(region, false)
+	origin, overlaps, rangeChanged := r.setRegionLocked(region, false)
+	r.t.Unlock()
+	r.notifyRegionSizeTreeIfChanged(origin, region, overlaps, rangeChanged)
+	return origin, overlaps, rangeChanged
 }
 
 func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
@@ -1455,10 +1536,11 @@ func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 // RemoveRegion removes RegionInfo from regionTree and regionMap
 func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.t.Lock()
-	defer r.t.Unlock()
 	// Remove from tree and regions.
 	r.tree.remove(region)
 	delete(r.regions, region.GetID())
+	r.t.Unlock()
+	r.notifyRegionSizeTree(region.GetID())
 }
 
 // ResetRegionCache resets the regions info.
@@ -1466,6 +1548,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
+	r.resetRegionSizeTree()
 	r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
@@ -2263,11 +2346,25 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	return size
 }
 
+// GetRegionSizeByRangeFromSizeTree returns the approximate total size of
+// Regions intersecting [startKey, endKey) and whether the eventually
+// consistent index is ready.
+func (r *RegionsInfo) GetRegionSizeByRangeFromSizeTree(startKey, endKey []byte) (int64, bool) {
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil && sizeTree.isReady() {
+		return sizeTree.getRegionSizeByRange(startKey, endKey), true
+	}
+	return 0, false
+}
+
 // metrics default poll interval
 const defaultPollInterval = 15 * time.Second
 
 // CollectWaitLockMetrics collects the metrics of waiting time for lock
 func (r *RegionsInfo) CollectWaitLockMetrics() {
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		sizeTree.collectMetrics()
+	}
+
 	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
 	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
 
