@@ -26,7 +26,6 @@ import (
 type MetaServiceGroupStorage interface {
 	SaveMetaServiceGroupStatus(txn kv.Txn, id string, status *MetaServiceGroupStatus) error
 	LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]string) (map[string]*MetaServiceGroupStatus, error)
-	RemoveMetaServiceGroupStatus(txn kv.Txn, id string) error
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 	// LoadMetaServiceGroupStatusModRevision loads a single meta-service
 	// group's status along with its modification revision, for use with
@@ -67,13 +66,6 @@ func (*StorageEndpoint) LoadMetaServiceGroupStatus(txn kv.Txn, ids map[string]st
 		statusMap[id] = status
 	}
 	return statusMap, nil
-}
-
-// RemoveMetaServiceGroupStatus removes the persisted status of the designated
-// meta-service group, so re-adding a group with the same ID later starts fresh
-// instead of inheriting a stale status.
-func (*StorageEndpoint) RemoveMetaServiceGroupStatus(txn kv.Txn, id string) error {
-	return txn.Remove(keypath.MetaServiceGroupStatusPath(id))
 }
 
 func loadMetaServiceGroupStatus(txn kv.Txn, id string) (*MetaServiceGroupStatus, error) {

@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -298,7 +299,13 @@ func (m *MetaServiceGroupManager) finishRebuild(startTerm uint64, counts map[str
 		return false
 	}
 	if scanErr != nil {
-		log.Warn("[keyspace] failed to rebuild meta-service group assignment counts", zap.Error(scanErr))
+		// A canceled or deadline-exceeded context is an expected leadership
+		// transition (the caller's leader-term context observed the lease
+		// being lost), not a scan failure: warn only for anything else, so a
+		// routine leadership change doesn't look like a rebuild problem.
+		if !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
+			log.Warn("[keyspace] failed to rebuild meta-service group assignment counts", zap.Error(scanErr))
+		}
 		m.rebuilding = false
 		m.rebuildDeltas = nil
 		return true
