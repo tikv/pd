@@ -224,8 +224,8 @@ func resolveMetricStorageTarget(
 	}, nil
 }
 
-func parseMetricStorageURL(rawURL string) (*url.URL, string, string, error) {
-	targetURL, err := url.Parse(rawURL)
+func parseMetricStorageURL(rawURL string) (targetURL *url.URL, hostname, port string, err error) {
+	targetURL, err = url.Parse(rawURL)
 	if err != nil || targetURL.Opaque != "" || targetURL.Hostname() == "" || targetURL.User != nil ||
 		targetURL.Fragment != "" || targetURL.RawFragment != "" {
 		return nil, "", "", errors.New("invalid metric-storage URL")
@@ -234,8 +234,8 @@ func parseMetricStorageURL(rawURL string) (*url.URL, string, string, error) {
 	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
 		return nil, "", "", errors.New("metric-storage must use HTTP or HTTPS")
 	}
-	hostname := targetURL.Hostname()
-	port := targetURL.Port()
+	hostname = targetURL.Hostname()
+	port = targetURL.Port()
 	if port == "" {
 		if strings.HasSuffix(targetURL.Host, ":") {
 			return nil, "", "", errors.New("metric-storage URL has an empty port")
