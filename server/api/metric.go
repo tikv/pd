@@ -38,7 +38,7 @@ import (
 
 const (
 	metricQueryTimeout             = 30 * time.Second
-	metricQueryDialFallbackDelay   = 300 * time.Millisecond
+	metricQueryDialAttemptTimeout  = 2 * time.Second
 	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
 	metricStorageConfigKey         = "metric-storage"
@@ -184,8 +184,6 @@ func normalizeMetricQueryResponse(response *http.Response) error {
 
 	_ = response.Body.Close()
 	response.Body = io.NopCloser(bytes.NewReader(body))
-	response.StatusCode = http.StatusOK
-	response.Status = "200 OK"
 	response.Header = make(http.Header, 2)
 	response.Header.Set("Content-Type", "application/json; charset=utf-8")
 	response.Header.Set("Cache-Control", "no-store")
@@ -250,19 +248,6 @@ func resolveMetricStorageTarget(
 }
 
 func validateMetricStorageConfigUpdate(conf map[string]any) error {
-	updated, found, err := metricStorageConfigUpdate(conf)
-	if err != nil || !found || updated == "" {
-		return err
-	}
-
-	return config.ValidateMetricStorageURL(updated)
-}
-
-func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
-	var (
-		updated string
-		found   bool
-	)
 	for _, key := range []string{metricStorageConfigKey, prefixedMetricStorageConfigKey} {
 		value, ok := conf[key]
 		if !ok {
@@ -270,23 +255,23 @@ func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
 		}
 		valueString, ok := value.(string)
 		if !ok {
-			return "", false, errors.Errorf("config item %s must be a string", key)
+			return errors.Errorf("config item %s must be a string", key)
 		}
-		if found && valueString != updated {
-			return "", false, errors.New("metric-storage is specified with conflicting values")
+		if valueString != "" {
+			if err := config.ValidateMetricStorageURL(valueString); err != nil {
+				return err
+			}
 		}
-		updated = valueString
-		found = true
 	}
-	return updated, found, nil
+	return nil
 }
 
 func metricQueryDialDeadline(now, deadline time.Time, addressesRemaining int) time.Time {
-	timeRemaining := deadline.Sub(now)
-	timeout := timeRemaining / time.Duration(addressesRemaining)
-	if timeout < 2*time.Second {
-		timeout = min(timeRemaining, 2*time.Second)
+	if addressesRemaining == 1 {
+		return deadline
 	}
+	// Bound earlier attempts so one unreachable address cannot consume the overall timeout.
+	timeout := min(deadline.Sub(now)/time.Duration(addressesRemaining), metricQueryDialAttemptTimeout)
 	return now.Add(timeout)
 }
 
@@ -314,65 +299,29 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 		if !ok {
 			return nil, errors.New("metric query target is not validated")
 		}
-		type dialResult struct {
-			connection net.Conn
-			err        error
-		}
-		dialCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		dialDeadline, ok := dialCtx.Deadline()
+		dialDeadline, ok := ctx.Deadline()
 		if !ok {
 			dialDeadline = time.Now().Add(metricQueryTimeout)
 		}
-		// Keep fast fallback bounded while preserving the standard Dialer's multi-address behavior.
-		results := make(chan dialResult, 2)
-		next, inFlight := 0, 0
-		launch := func() {
-			address := target.addresses[next]
-			addressesRemaining := len(target.addresses) - next
-			next++
-			inFlight++
-			attemptCtx, attemptCancel := context.WithDeadline(
-				dialCtx,
-				metricQueryDialDeadline(time.Now(), dialDeadline, addressesRemaining),
-			)
-			go func() {
-				defer attemptCancel()
-				connection, err := dialContext(attemptCtx, network, net.JoinHostPort(address.String(), target.Port))
-				results <- dialResult{connection: connection, err: err}
-			}()
-		}
-		launch()
 
 		var lastErr error
-		for inFlight > 0 {
-			var fallback <-chan time.Time
-			if next < len(target.addresses) && inFlight < cap(results) {
-				fallback = time.After(metricQueryDialFallbackDelay)
+		for i, address := range target.addresses {
+			addressesRemaining := len(target.addresses) - i
+			attemptCtx, attemptCancel := context.WithDeadline(
+				ctx,
+				metricQueryDialDeadline(time.Now(), dialDeadline, addressesRemaining),
+			)
+			connection, err := dialContext(attemptCtx, network, net.JoinHostPort(address.String(), target.Port))
+			attemptCancel()
+			if err == nil && connection != nil {
+				return connection, nil
 			}
-			select {
-			case result := <-results:
-				inFlight--
-				if result.err == nil && result.connection != nil {
-					cancel()
-					for inFlight > 0 {
-						result := <-results
-						inFlight--
-						if result.connection != nil {
-							_ = result.connection.Close()
-						}
-					}
-					return result.connection, nil
-				}
-				lastErr = result.err
-				if lastErr == nil {
-					lastErr = errors.New("metric-storage dial returned an empty connection")
-				}
-				if next < len(target.addresses) {
-					launch()
-				}
-			case <-fallback:
-				launch()
+			if connection != nil {
+				_ = connection.Close()
+			}
+			lastErr = err
+			if lastErr == nil {
+				lastErr = errors.New("metric-storage dial returned an empty connection")
 			}
 		}
 		return nil, errors.Annotate(lastErr, "failed to dial metric-storage target")

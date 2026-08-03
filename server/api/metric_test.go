@@ -108,10 +108,17 @@ func TestValidateMetricStorageConfigUpdate(t *testing.T) {
 		{name: "Unspecified", conf: map[string]any{metricStorageConfigKey: "http://0.0.0.0"}, wantErr: true},
 		{name: "ClearLoopback", conf: map[string]any{metricStorageConfigKey: ""}},
 		{
-			name: "ConflictingKeys",
+			name: "DifferentKeys",
 			conf: map[string]any{
 				metricStorageConfigKey:         "http://192.168.0.1:9090",
 				prefixedMetricStorageConfigKey: "http://192.168.0.2:9090",
+			},
+		},
+		{
+			name: "UnsafeSecondKey",
+			conf: map[string]any{
+				metricStorageConfigKey:         "http://192.168.0.1:9090",
+				prefixedMetricStorageConfigKey: "http://127.0.0.1:9090",
 			},
 			wantErr: true,
 		},
@@ -193,7 +200,7 @@ func TestMetricQueryPinsValidatedTarget(t *testing.T) {
 	ctx = context.WithValue(ctx, metricTargetContextKey{}, target)
 	connection, err := transport.DialContext(ctx, "tcp", "metrics.example:9090")
 	require.NoError(t, err)
-	require.ElementsMatch(t,
+	require.Equal(t,
 		[]string{"192.0.2.10:9090", "192.0.2.11:9090", "192.0.2.12:9090"},
 		[]string{<-dialAddresses, <-dialAddresses, <-dialAddresses},
 	)
@@ -204,6 +211,16 @@ func TestMetricQueryPinsValidatedTarget(t *testing.T) {
 	}
 	require.NoError(t, connection.Close())
 	require.NoError(t, peer.Close())
+}
+
+func TestMetricQueryDialDeadline(t *testing.T) {
+	now := time.Unix(0, 0)
+	deadline := now.Add(metricQueryTimeout)
+	require.Equal(t, now.Add(metricQueryDialAttemptTimeout), metricQueryDialDeadline(now, deadline, 3))
+	require.Equal(t, deadline, metricQueryDialDeadline(now, deadline, 1))
+
+	shortDeadline := now.Add(time.Second)
+	require.Equal(t, now.Add(500*time.Millisecond), metricQueryDialDeadline(now, shortDeadline, 2))
 }
 
 func TestMetricQueryResponseNormalization(t *testing.T) {
@@ -284,7 +301,7 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 			require.Empty(t, recorder.Header().Get("Location"))
 			require.Empty(t, recorder.Header().Get("X-Secret-Trailer"))
 			if testCase.wantOK {
-				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Equal(t, testCase.statusCode, recorder.Code)
 				require.JSONEq(t, successMetricResponse, recorder.Body.String())
 				return
 			}
