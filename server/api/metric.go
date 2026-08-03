@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -44,6 +45,9 @@ const (
 	metricStorageConfigKey         = "metric-storage"
 	prefixedMetricStorageConfigKey = "pd-server.metric-storage"
 )
+
+// Keep one warning per minute; repeated failures remain available at debug level.
+var metricQueryErrorLogLimiter = ratelimit.NewRateLimiter(1.0/time.Minute.Seconds(), 1)
 
 type metricIPResolver interface {
 	LookupNetIP(context.Context, string, string) ([]netip.Addr, error)
@@ -238,8 +242,8 @@ func resolveMetricStorageTarget(
 
 	for i, address := range addresses {
 		addresses[i] = address.Unmap()
-		if !config.IsSafeMetricStorageAddress(addresses[i]) {
-			return nil, errors.New("metric-storage resolved to an unsafe address")
+		if !config.PassesMetricStorageAddressBaseline(addresses[i]) {
+			return nil, errors.New("metric-storage resolved to an address outside the permitted baseline")
 		}
 	}
 
@@ -258,7 +262,7 @@ func validateMetricStorageConfigUpdate(conf map[string]any) error {
 			return errors.Errorf("config item %s must be a string", key)
 		}
 		if valueString != "" {
-			if err := config.ValidateMetricStorageURL(valueString); err != nil {
+			if err := config.ValidateMetricStorageTarget(valueString); err != nil {
 				return err
 			}
 		}
@@ -369,11 +373,19 @@ func validatePrometheusQueryResponse(body []byte) error {
 }
 
 func writeMetricQueryError(w http.ResponseWriter, err error) {
-	log.Warn("failed to query metric storage", zap.Error(err))
+	logMetricQueryError("failed to query metric storage", err)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusBadGateway)
 	if _, writeErr := io.WriteString(w, metricQueryErrorBody); writeErr != nil {
-		log.Warn("failed to write metric query error response", zap.Error(writeErr))
+		logMetricQueryError("failed to write metric query error response", writeErr)
+	}
+}
+
+func logMetricQueryError(message string, err error) {
+	if metricQueryErrorLogLimiter.Allow() {
+		log.Warn(message, zap.Error(err))
+	} else {
+		log.Debug(message, zap.Error(err))
 	}
 }

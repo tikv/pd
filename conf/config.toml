@@ -105,7 +105,8 @@
 ## The metric storage is the cluster metric storage. This is use for query metric data.
 ## Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 ## Set it to a reachable Prometheus address, for example: http://prometheus.example.com:9090
-## Loopback, link-local, metadata, unspecified, multicast, and other unsafe destinations are rejected.
+## Metric queries reject loopback, link-local, metadata, unspecified, multicast,
+## and other non-service destinations.
 # metric-storage = ""
 ## There are some values supported: "auto", "none", or a specific address, default: "auto".
 # dashboard-address = "auto"

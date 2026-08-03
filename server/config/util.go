@@ -72,30 +72,41 @@ func (target *MetricStorageURL) LiteralAddress() (netip.Addr, bool) {
 	return address.Unmap(), true
 }
 
-// IsSafeMetricStorageAddress reports whether an IP can be used as a metric-storage destination.
-func IsSafeMetricStorageAddress(address netip.Addr) bool {
+// PassesMetricStorageAddressBaseline reports whether an IP passes the
+// metric-storage destination baseline. Private unicast addresses are allowed.
+func PassesMetricStorageAddressBaseline(address netip.Addr) bool {
 	address = address.Unmap()
 	if !address.IsValid() || address.Zone() != "" {
 		return false
 	}
-	unsafe := address.IsLoopback() ||
+	blocked := address.IsLoopback() ||
 		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
 		address.IsUnspecified() || address.IsMulticast() || !address.IsGlobalUnicast()
 	if address.Is4() {
 		octets := address.As4()
-		unsafe = unsafe || octets[0] == 0 || octets[0] >= 240
+		blocked = blocked || octets[0] == 0 || octets[0] >= 240
 	}
 	// Block well-known cloud instance metadata endpoints explicitly, including
 	// addresses that are not covered by the generic IP classifications above.
 	switch address.String() {
 	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
-		unsafe = true
+		blocked = true
 	}
-	return !unsafe
+	return !blocked
 }
 
-// ValidateMetricStorageURL validates a metric-storage URL without resolving its hostname.
+// ValidateMetricStorageURL validates the syntax of a metric-storage URL.
 func ValidateMetricStorageURL(rawURL string) error {
+	if rawURL == "" {
+		return nil
+	}
+	_, err := ParseMetricStorageURL(rawURL)
+	return err
+}
+
+// ValidateMetricStorageTarget checks a metric-storage URL against the address
+// baseline without resolving its hostname.
+func ValidateMetricStorageTarget(rawURL string) error {
 	if rawURL == "" {
 		return nil
 	}
@@ -107,7 +118,7 @@ func ValidateMetricStorageURL(rawURL string) error {
 	if hostname == "localhost" || strings.HasSuffix(hostname, ".localhost") {
 		return errors.New("metric-storage target is not allowed")
 	}
-	if address, literal := target.LiteralAddress(); literal && !IsSafeMetricStorageAddress(address) {
+	if address, literal := target.LiteralAddress(); literal && !PassesMetricStorageAddressBaseline(address) {
 		return errors.New("metric-storage target is not allowed")
 	}
 	// Other hostnames are resolved and checked immediately before every query,

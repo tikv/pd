@@ -824,6 +824,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	if isExist {
+		warnIfMetricStorageTargetRejected(cfg.PDServerCfg.MetricStorage)
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
 		o.pdServerConfig.Store(&cfg.PDServerCfg)

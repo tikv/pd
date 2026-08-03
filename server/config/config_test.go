@@ -70,6 +70,7 @@ func TestReloadConfig(t *testing.T) {
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
+	opt.GetPDServerConfig().MetricStorage = "http://127.0.0.1:9090"
 	re.NoError(opt.Persist(storage))
 
 	newOpt, err := newTestScheduleOption()
@@ -79,6 +80,7 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(5, newOpt.GetMaxReplicas())
 	re.Equal(uint64(10), newOpt.GetMaxSnapshotCount())
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
+	re.Equal("http://127.0.0.1:9090", newOpt.GetPDServerConfig().MetricStorage)
 }
 
 func TestReloadUpgrade(t *testing.T) {
@@ -162,7 +164,7 @@ lease = 0
 max-request-bytes = 20000000
 
 [pd-server]
-metric-storage = "http://192.168.0.1:9090"
+metric-storage = "http://127.0.0.1:9090"
 
 [schedule]
 max-merge-region-size = 0
@@ -203,7 +205,7 @@ leader-schedule-limit = 0
 	re.Equal(0, cfg.Log.File.MaxDays)
 	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
-	re.Equal("http://192.168.0.1:9090", cfg.PDServerCfg.MetricStorage)
+	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
 	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
@@ -416,8 +418,9 @@ func TestPDServerMetricStorageConfig(t *testing.T) {
 		wantErr       bool
 	}{
 		{metricStorage: "http://192.168.0.1:9090"},
-		{metricStorage: "http://127.0.0.1:9090", wantErr: true},
-		{metricStorage: "http://localhost:9090", wantErr: true},
+		{metricStorage: "http://127.0.0.1:9090"},
+		{metricStorage: "http://localhost:9090"},
+		{metricStorage: "file:///tmp/metrics", wantErr: true},
 	}
 	for _, testCase := range testCases {
 		cfg := NewConfig()
