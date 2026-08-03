@@ -478,9 +478,10 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 						continue
 					}
 					if switched.Load() {
-						atomic.AddInt64(&okAfter, 1)
 						if rgController.IsDegraded() {
 							atomic.AddInt64(&degradedAfter, 1)
+						} else {
+							atomic.AddInt64(&okAfter, 1)
 						}
 					} else {
 						atomic.AddInt64(&okBefore, 1)

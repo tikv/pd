@@ -149,6 +149,17 @@ func TestTopologyWeightWithEmptyStoreLabelValue(t *testing.T) {
 	re.Empty(store.GetLabels()[0].Value)
 }
 
+func TestTopologyWeightUsesCaseSensitiveLabelKeys(t *testing.T) {
+	re := require.New(t)
+
+	store := NewStoreInfoWithLabel(1, map[string]string{"Zone": "z1"})
+	topology, _, _, _ := buildTopology(store, []*StoreInfo{store}, []string{"zone"}, 3)
+	defer putTopology(topology)
+
+	re.Contains(topology, "")
+	re.NotContains(topology, "z1")
+}
+
 func TestTopologyWeightWithNoEligibleStores(t *testing.T) {
 	re := require.New(t)
 
