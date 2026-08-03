@@ -164,7 +164,7 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if err := validateMetricStorageConfigUpdate(conf); err != nil {
+	if err := validateMetricStorageConfigUpdate(conf, cfg.PDServerCfg.MetricStorage); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

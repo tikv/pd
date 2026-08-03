@@ -251,7 +251,7 @@ func resolveMetricStorageTarget(
 	return target, nil
 }
 
-func validateMetricStorageConfigUpdate(conf map[string]any) error {
+func validateMetricStorageConfigUpdate(conf map[string]any, current string) error {
 	for _, key := range []string{metricStorageConfigKey, prefixedMetricStorageConfigKey} {
 		value, ok := conf[key]
 		if !ok {
@@ -260,6 +260,9 @@ func validateMetricStorageConfigUpdate(conf map[string]any) error {
 		valueString, ok := value.(string)
 		if !ok {
 			return errors.Errorf("config item %s must be a string", key)
+		}
+		if valueString == current {
+			continue
 		}
 		if valueString != "" {
 			if err := config.ValidateMetricStorageTarget(valueString); err != nil {

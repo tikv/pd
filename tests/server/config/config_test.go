@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -79,6 +80,48 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+}
+
+func TestLegacyMetricStorageCompatibility(t *testing.T) {
+	const legacyTarget = "file:///tmp/legacy-metrics"
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.PDServerCfg.MetricStorage = legacyTarget
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NotNil(leader)
+
+	queryResp, err := tests.TestDialClient.Get(leader.GetAddr() + "/pd/api/v1/metric/query")
+	re.NoError(err)
+	queryBody, err := io.ReadAll(queryResp.Body)
+	re.NoError(err)
+	re.NoError(queryResp.Body.Close())
+	re.Equal(http.StatusBadGateway, queryResp.StatusCode)
+	re.JSONEq(`{"status":"error","errorType":"proxy","error":"metric query failed"}`, string(queryBody))
+
+	configURL := leader.GetAddr() + "/pd/api/v1/config"
+	postData, err := json.Marshal(map[string]any{
+		"metric-storage":                 legacyTarget,
+		"schedule.leader-schedule-limit": 5,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, postData, testutil.StatusOK(re)))
+	re.Equal(legacyTarget, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
+	re.Equal(uint64(5), leader.GetServer().GetConfig().Schedule.LeaderScheduleLimit)
+
+	postData, err = json.Marshal(map[string]any{
+		"metric-storage": "http://127.0.0.1:9090",
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, postData,
+		testutil.Status(re, http.StatusBadRequest)))
+	re.Equal(legacyTarget, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
 }
 
 type configTestSuite struct {
