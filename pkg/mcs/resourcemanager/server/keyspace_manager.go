@@ -237,7 +237,20 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 // performed a synthesis, so callers that participate in the async bulk-load
 // merge (loadResourceGroupIfNeeded) know when they must publish a
 // sync-loaded marker for what this call just wrote.
-func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() bool {
+// initDefaultResourceGroup synthesizes and persists the built-in default
+// group if nothing confirmed exists yet. defaultGroupMu only serializes
+// callers that share this krgm instance; it does nothing across a term
+// change, since Init gives the new term an entirely new krgm object with its
+// own, separate defaultGroupMu. stillCurrent, when non-nil, is checked
+// immediately before the persist (right after defaultGroupMu is acquired) so
+// a caller with access to the owning Manager can catch a term change that
+// completed before this point - typically by comparing this krgm against the
+// manager's live entry for its keyspace ID. It cannot catch a term change
+// that lands while the persist's storage write is already in flight; closing
+// that residual window needs a conditional (CAS) storage write, which this
+// does not implement. Pass nil when no such coordination is needed or
+// available (e.g. in tests that exercise krgm without a Manager).
+func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup(stillCurrent func() bool) bool {
 	// A confirmed cached entry means initialization is unnecessary; a missing
 	// or reserved-placeholder entry means nothing is persisted for the
 	// default group (e.g. a fresh store), so it must still be created and
@@ -247,13 +260,17 @@ func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() bool {
 		return false
 	}
 	// Serialize against every other synthesis or real Add/ModifyResourceGroup
-	// targeting "default": see the defaultGroupMu doc comment on the struct.
+	// targeting "default" that shares this krgm instance: see the
+	// defaultGroupMu doc comment on the struct.
 	krgm.defaultGroupMu.Lock()
 	defer krgm.defaultGroupMu.Unlock()
 	// Re-check under defaultGroupMu: while this goroutine waited for the
 	// lock, a real write may have already confirmed the default group, in
 	// which case synthesizing here would silently clobber it.
 	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false
+	}
+	if stillCurrent != nil && !stillCurrent() {
 		return false
 	}
 	defaultGroup := newDefaultResourceGroup()
