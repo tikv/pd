@@ -95,12 +95,12 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 		// Get some local TSOs first
 		oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 		for _, dcLocation := range dcLocationConfig {
-			localTSO := suite.getTimestampByDC(ctx, re, cluster, dcLocation)
+			localTSO := suite.getTimestampByDC(ctx, re, dcLocation)
 			oldLocalTSOs = append(oldLocalTSOs, localTSO)
 			re.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, localTSO))
 		}
 		// Get a global TSO then
-		globalTSO := suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
+		globalTSO := suite.getTimestampByDC(ctx, re, tso.GlobalDCLocation)
 		for _, oldLocalTSO := range oldLocalTSOs {
 			re.Equal(1, tsoutil.CompareTimestamp(globalTSO, oldLocalTSO))
 		}
@@ -110,7 +110,7 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 		// Get some local TSOs again
 		newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 		for _, dcLocation := range dcLocationConfig {
-			newLocalTSOs = append(newLocalTSOs, suite.getTimestampByDC(ctx, re, cluster, dcLocation))
+			newLocalTSOs = append(newLocalTSOs, suite.getTimestampByDC(ctx, re, dcLocation))
 		}
 		for _, newLocalTSO := range newLocalTSOs {
 			re.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, newLocalTSO))
@@ -121,7 +121,6 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 func (suite *tsoConsistencyTestSuite) getTimestampByDC(
 	ctx context.Context,
 	re *require.Assertions,
-	cluster *tests.TestCluster,
 	dcLocation string,
 ) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
@@ -131,8 +130,6 @@ func (suite *tsoConsistencyTestSuite) getTimestampByDC(
 	}
 	pdClient, ok := suite.dcClientMap[dcLocation]
 	re.True(ok)
-	forwardedHost := cluster.GetServer(suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
-	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
 	tsoClient, err := pdClient.Tso(ctx)
 	re.NoError(err)
 	defer tsoClient.CloseSend()
@@ -171,7 +168,7 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/globalTSOOverflow", `return(true)`))
-	suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
+	suite.getTimestampByDC(ctx, re, tso.GlobalDCLocation)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/globalTSOOverflow"))
 }
 
@@ -202,7 +199,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
+	suite.getTimestampByDC(ctx, re, tso.GlobalDCLocation)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange"))
 }
 
@@ -320,7 +317,6 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 						DcLocation: dcLocation,
 					}
 					ctx, cancel := context.WithCancel(context.Background())
-					ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
 					ts := testGetTimestamp(re, ctx, dcClientMap[dcLocation], req)
 					cancel()
 					lastTS := lastList[dcLocation]
