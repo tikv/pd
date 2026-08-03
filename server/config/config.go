@@ -605,7 +605,6 @@ func (c *PDServerConfig) Validate() error {
 	if err := ValidateMetricStorageURL(c.MetricStorage); err != nil {
 		return err
 	}
-	warnIfMetricStorageTargetRejected(c.MetricStorage)
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":
@@ -632,17 +631,6 @@ func (c *PDServerConfig) Validate() error {
 	}
 
 	return nil
-}
-
-func warnIfMetricStorageTargetRejected(rawURL string) {
-	if err := ValidateMetricStorageURL(rawURL); err != nil {
-		log.Warn("metric-storage URL is invalid; metric queries will be rejected", zap.Error(err))
-		return
-	}
-	if err := ValidateMetricStorageTarget(rawURL); err != nil {
-		log.Warn("metric-storage target does not pass the metric query address baseline; metric queries will be rejected",
-			zap.Error(err))
-	}
 }
 
 // StoreLabel is the config item of LabelPropertyConfig.
