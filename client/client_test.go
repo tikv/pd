@@ -126,7 +126,7 @@ func TestNewClientWithKeyspaceInvalidTLSConfig(t *testing.T) {
 		context.Background(),
 		caller.TestComponent,
 		42,
-		nil,
+		[]string{testClientURL},
 		SecurityOption{
 			SSLCABytes:   []byte("invalid"),
 			SSLCertBytes: []byte("invalid"),
@@ -135,6 +135,7 @@ func TestNewClientWithKeyspaceInvalidTLSConfig(t *testing.T) {
 	)
 	require.Error(t, err)
 	require.Nil(t, cli)
+	require.ErrorIs(t, err, errs.ErrCryptoX509KeyPair)
 }
 
 func TestNewClientWithKeyspaceNameInvalidTLSConfig(t *testing.T) {
@@ -142,7 +143,7 @@ func TestNewClientWithKeyspaceNameInvalidTLSConfig(t *testing.T) {
 		context.Background(),
 		NewAPIContextV2("test-keyspace"),
 		caller.TestComponent,
-		nil,
+		[]string{testClientURL},
 		SecurityOption{
 			SSLCABytes:   []byte("invalid"),
 			SSLCertBytes: []byte("invalid"),
@@ -151,6 +152,7 @@ func TestNewClientWithKeyspaceNameInvalidTLSConfig(t *testing.T) {
 	)
 	require.Error(t, err)
 	require.Nil(t, cli)
+	require.ErrorIs(t, err, errs.ErrCryptoX509KeyPair)
 }
 
 func TestIsRetryableGetTSError(t *testing.T) {
