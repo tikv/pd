@@ -356,6 +356,28 @@ func TestMetricQueryRejectsExplicitLoopback(t *testing.T) {
 	}
 }
 
+func TestMetricQueryRejectsInvalidConfiguredURL(t *testing.T) {
+	for _, metricStorage := range []string{"file:///tmp/metrics", "http://user:pass@metrics.example", "not a URL"} {
+		t.Run(metricStorage, func(t *testing.T) {
+			transportCalled := false
+			transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+				transportCalled = true
+				return nil, errors.New("unexpected metric-storage request")
+			})
+			recorder := httptest.NewRecorder()
+			proxyMetricQuery(
+				recorder,
+				httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
+				metricStorage,
+				transport,
+				safeMetricResolver(),
+			)
+			require.False(t, transportCalled)
+			requireGenericMetricQueryError(t, recorder, metricStorage)
+		})
+	}
+}
+
 func TestMetricQueryHidesPolicyAndNetworkErrors(t *testing.T) {
 	testCases := []struct {
 		metricStorage string

@@ -43,30 +43,6 @@ func TestValidateURLWithScheme(t *testing.T) {
 	}
 }
 
-func TestValidateMetricStorageURL(t *testing.T) {
-	for _, rawURL := range []string{
-		"",
-		"http://metrics.example",
-		"HTTPS://metrics.example:9090/prometheus",
-		"http://192.168.0.1:9090",
-		"http://[fc00::1]:9090",
-		"http://localhost:9090",
-		"http://127.1.2.3:9090",
-	} {
-		require.NoError(t, ValidateMetricStorageURL(rawURL), rawURL)
-	}
-
-	for _, rawURL := range []string{
-		"file:///tmp/metrics",
-		"http://user:pass@metrics.example",
-		"http://metrics.example:",
-		"http://metrics.example:70000",
-		"http://metrics.example/#secret",
-	} {
-		require.Error(t, ValidateMetricStorageURL(rawURL), rawURL)
-	}
-}
-
 func TestValidateMetricStorageTarget(t *testing.T) {
 	for _, rawURL := range []string{
 		"",

@@ -95,15 +95,6 @@ func PassesMetricStorageAddressBaseline(address netip.Addr) bool {
 	return !blocked
 }
 
-// ValidateMetricStorageURL validates the syntax of a metric-storage URL.
-func ValidateMetricStorageURL(rawURL string) error {
-	if rawURL == "" {
-		return nil
-	}
-	_, err := ParseMetricStorageURL(rawURL)
-	return err
-}
-
 // ValidateMetricStorageTarget checks a metric-storage URL against the address
 // baseline without resolving its hostname.
 func ValidateMetricStorageTarget(rawURL string) error {

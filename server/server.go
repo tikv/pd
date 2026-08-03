@@ -1531,6 +1531,13 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetPDServerConfig()
+	// Legacy metric-storage values must not block unrelated config updates after
+	// an upgrade. Validate only when the value itself is changed at runtime.
+	if old.MetricStorage != cfg.MetricStorage {
+		if err := config.ValidateMetricStorageTarget(cfg.MetricStorage); err != nil {
+			return err
+		}
+	}
 	// See https://github.com/tikv/pd/issues/10114 for more details
 	if old.DashboardAddress != cfg.DashboardAddress {
 		switch cfg.DashboardAddress {

@@ -509,6 +509,8 @@ type PDServerConfig struct {
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
 	// Currently, we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+	// Legacy values are preserved at startup for upgrade compatibility and must
+	// be validated before runtime updates and use.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
@@ -602,9 +604,6 @@ func (c *PDServerConfig) Clone() *PDServerConfig {
 
 // Validate is used to validate if some pd-server configurations are right.
 func (c *PDServerConfig) Validate() error {
-	if err := ValidateMetricStorageURL(c.MetricStorage); err != nil {
-		return err
-	}
 	switch c.DashboardAddress {
 	case "auto":
 	case "none":
