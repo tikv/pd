@@ -16,11 +16,22 @@ package tso_test
 
 import (
 	"context"
+<<<<<<< HEAD
+=======
+	"io"
+	"net"
+>>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+<<<<<<< HEAD
+=======
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+>>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -115,6 +126,99 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
 	re.GreaterOrEqual(uint32(timestamp.GetLogical()), s.defaultReq.GetCount())
+}
+
+func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
+	re := s.Require()
+	client, conn := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
+	defer conn.Close()
+
+	s.verifyForwardedHostRejected(client, s.follower.GetAddr())
+	s.verifyForwardedHostRejected(s.pdClient, s.follower.GetAddr())
+}
+
+func (s *tsoProxyTestSuite) verifyForwardedHostRejected(client pdpb.PDClient, forwardedHost string) {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
+	_, err := client.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	tsoClient, err := client.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := tsoClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(tsoClient.Send(s.defaultReq))
+	_, err = tsoClient.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	regionHeartbeatClient, err := client.RegionHeartbeat(ctx)
+	re.NoError(err)
+	defer func() {
+		err := regionHeartbeatClient.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(regionHeartbeatClient.Send(&pdpb.RegionHeartbeatRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = regionHeartbeatClient.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	reportBucketsClient, err := client.ReportBuckets(ctx)
+	re.NoError(err)
+	re.NoError(reportBucketsClient.Send(&pdpb.ReportBucketsRequest{Header: s.defaultReq.GetHeader()}))
+	_, err = reportBucketsClient.CloseAndRecv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+}
+
+func (s *tsoProxyTestSuite) TestRejectUnknownForwardedHost() {
+	re := s.Require()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	accepted := make(chan bool, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			accepted <- false
+			return
+		}
+		conn.Close()
+		accepted <- true
+	}()
+	defer func() {
+		re.NoError(listener.Close())
+		re.False(<-accepted)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, "http://"+listener.Addr().String())
+
+	_, err = s.pdClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	client, err := s.pdClient.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := client.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	re.NoError(client.Send(s.defaultReq))
+	_, err = client.Recv()
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 }
 
 func (s *tsoProxyTestSuite) assertReceiveError(re *require.Assertions, errStr string) {

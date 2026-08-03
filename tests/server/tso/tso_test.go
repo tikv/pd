@@ -44,7 +44,48 @@ func TestLoadTimestamp(t *testing.T) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
+<<<<<<< HEAD
 	defer cluster.Destroy()
+=======
+	s.env.PDCount = 2
+}
+
+func (s *tsoTestSuite) TearDownSuite() {
+	s.env.Cleanup()
+}
+
+func (s *tsoTestSuite) TearDownTest() {
+	s.env.Reset(s.Require())
+}
+
+func (s *tsoTestSuite) TestRequestFollower() {
+	s.env.RunTestInNonMicroserviceEnv(s.checkRequestFollower)
+}
+
+func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
+	re := s.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var followerServer *tests.TestServer
+	for _, s := range cluster.GetServers() {
+		if s.GetConfig().Name != cluster.GetLeader() {
+			followerServer = s
+		}
+	}
+	re.NotNil(followerServer)
+
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, followerServer.GetAddr())
+	defer conn.Close()
+	clusterID := followerServer.GetClusterID()
+	req := &pdpb.TsoRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Count:  1,
+	}
+	// Connect directly without forwarding metadata to verify the original
+	// follower request behavior.
+	tsoClient, err := grpcPDClient.Tso(ctx)
+>>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 
