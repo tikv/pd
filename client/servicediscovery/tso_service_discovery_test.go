@@ -16,6 +16,7 @@ package servicediscovery
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -63,10 +64,17 @@ func startLegacyFindGroupServer(t *testing.T, response *tsopb.FindGroupByKeyspac
 		err:      err,
 	}
 	tsopb.RegisterTSOServer(grpcServer, server)
+	serveErr := make(chan error, 1)
 	go func() {
-		_ = grpcServer.Serve(listener)
+		defer close(serveErr)
+		if err := grpcServer.Serve(listener); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
+			serveErr <- err
+		}
 	}()
-	t.Cleanup(grpcServer.Stop)
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		require.NoError(t, <-serveErr)
+	})
 	return "http://" + listener.Addr().String(), listener.Addr().String(), server
 }
 
