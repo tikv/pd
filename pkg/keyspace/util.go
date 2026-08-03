@@ -206,7 +206,7 @@ func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 
 // getRegionLabelID returns the region label id of the target keyspace.
 func getRegionLabelID(id uint32) string {
-	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
+	return constant.RegionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
 // MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
@@ -220,7 +220,7 @@ func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 		Index: 0,
 		Labels: []labeler.RegionLabel{
 			{
-				Key:   regionLabelKey,
+				Key:   constant.RegionLabelKey,
 				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
 			},
 		},
@@ -234,12 +234,16 @@ func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 // rule is a keyspace label rule.
 func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 	// Validate the ID matches the expected format "keyspaces/<id>".
-	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+	if rule == nil {
+		return 0, false
+	}
+	idText, ok := strings.CutPrefix(rule.ID, constant.RegionLabelIDPrefix)
+	if !ok {
 		return 0, false
 	}
 	// Retrieve the keyspace ID.
 	keyspaceID, err := strconv.ParseUint(
-		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		idText,
 		endpoint.SpaceIDBase, 32,
 	)
 	if err != nil {
@@ -248,7 +252,7 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 	// Double check the keyspace ID from the label rule.
 	var idFromLabel uint64
 	for _, label := range rule.Labels {
-		if label.Key == regionLabelKey {
+		if label.Key == constant.RegionLabelKey {
 			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
 			if err != nil {
 				return 0, false

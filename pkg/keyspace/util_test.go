@@ -291,7 +291,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -306,7 +306,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -320,7 +320,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
