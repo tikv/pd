@@ -360,14 +360,26 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 	group.Priority = 11
 	group.RUSettings.RU.Settings.FillRate = 960
 	group.RUSettings.RU.Settings.BurstLimit = 1024
-	modifyResp, err := followerClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
-	re.NoError(err)
-	re.Equal("Success!", modifyResp.GetBody())
+	forwardedCtx := grpcutil.BuildForwardContext(ctx, suite.pdFollower.GetAddr())
+	_, err = followerClient.ModifyResourceGroup(forwardedCtx, &rmpb.PutResourceGroupRequest{Group: group})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
 
 	getReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: groupName,
 		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
+	unmodifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
+	re.NoError(err)
+	re.NotNil(unmodifiedResp.GetGroup())
+	re.Equal(uint32(5), unmodifiedResp.GetGroup().GetPriority())
+	re.Equal(uint64(320), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	re.Equal(int64(480), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+
+	modifyResp, err := followerClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	re.NoError(err)
+	re.Equal("Success!", modifyResp.GetBody())
+
 	modifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
 	re.NotNil(modifiedResp.GetGroup())

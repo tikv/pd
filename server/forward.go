@@ -21,6 +21,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -450,6 +452,22 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	// and return the one we loaded.
 	newConn.Close()
 	return conn.(*grpc.ClientConn), nil
+}
+
+// validatePDForwardedHost checks that a PD address received from forwarding
+// metadata belongs to the current PD leader. The metadata is controlled by the
+// caller, so it must be validated before both local handling and dialing.
+func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
+	leader := s.GetLeader()
+	if leader == nil || len(leader.GetClientUrls()) == 0 {
+		return status.Error(codes.Unavailable, "PD leader is not available")
+	}
+	for _, clientURL := range leader.GetClientUrls() {
+		if clientURL == forwardedHost {
+			return nil
+		}
+	}
+	return status.Errorf(codes.InvalidArgument, "forwarded host %q is not a client URL of the PD leader", forwardedHost)
 }
 
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
