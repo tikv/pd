@@ -108,6 +108,17 @@ func TestKeyspaceRuleIndex(t *testing.T) {
 	re.Empty(index.GetSplitKeys(rawStart[:], rawEnd[:]))
 }
 
+func TestKeyspaceRuleIndexRejectsNonCanonicalID(t *testing.T) {
+	re := require.New(t)
+	rule := makeKeyspaceRuleForTest(1, codec.TxnKeyspaceModePrefix)
+	rule.ID = constant.RegionLabelIDPrefix + "+1"
+	rule.Labels[0].Value = "+1"
+	re.NoError(rule.checkAndAdjust())
+
+	var index keyspaceRuleIndex
+	re.False(index.Add(rule))
+}
+
 func TestKeyspaceRuleIndexBoundaries(t *testing.T) {
 	re := require.New(t)
 	ids := []uint32{0, 63, 64, 1023, 1024, constant.MaxValidKeyspaceID}
@@ -305,12 +316,12 @@ func TestKeyspaceRuleIndexPreservesLegacyResults(t *testing.T) {
 	legacy := buildLegacyRangeList(rules)
 	var regions []*core.RegionInfo
 	for _, id := range []uint32{0, 1, 42, 63, 64, 1023, 1024, constant.MaxValidKeyspaceID} {
-		for _, mode := range []byte{codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix} {
+		for _, mode := range codec.KeyspaceModes() {
 			regions = append(regions, makeRegionForKeyspace(id, mode))
 		}
 	}
 	for _, id := range []uint32{0, 63, 1023} {
-		for _, mode := range []byte{codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix} {
+		for _, mode := range codec.KeyspaceModes() {
 			left, right := makeRegionForKeyspace(id, mode), makeRegionForKeyspace(id+1, mode)
 			regions = append(regions, core.NewTestRegionInfo(2, 1, left.GetStartKey(), right.GetEndKey()))
 		}
@@ -354,15 +365,15 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 		Data:     MakeKeyRanges("", ""),
 	}
 	re.NoError(regionLabeler.SetLabelRule(genericRule))
-	re.Len(regionLabeler.genericRules, 1)
+	re.Len(regionLabeler.ruleIndex.generic, 1)
 
 	rule := makeKeyspaceRuleForTest(42, codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix)
 	re.NoError(regionLabeler.SetLabelRule(rule))
-	re.False(regionLabeler.rangeListDirty)
-	re.Len(regionLabeler.genericRules, 1)
-	re.True(regionLabeler.keyspaceRules.Contains(rule))
+	re.False(regionLabeler.ruleIndex.rangesDirty)
+	re.Len(regionLabeler.ruleIndex.generic, 1)
+	re.True(regionLabeler.ruleIndex.keyspaces.Contains(rule))
 
-	for _, mode := range []byte{codec.RawKeyspaceModePrefix, codec.TxnKeyspaceModePrefix} {
+	for _, mode := range codec.KeyspaceModes() {
 		region := makeRegionForKeyspace(42, mode)
 		re.Equal("42", regionLabeler.GetRegionLabel(region, constant.RegionLabelKey))
 		re.Equal("yes", regionLabeler.GetRegionLabel(region, "generic"))
@@ -376,13 +387,13 @@ func TestRegionLabelerUpdatesKeyspaceRulesIncrementally(t *testing.T) {
 	// Changing the deterministic rule only touches its old and new slots.
 	updated := makeKeyspaceRuleForTest(42, codec.TxnKeyspaceModePrefix)
 	re.NoError(regionLabeler.SetLabelRule(updated))
-	re.False(regionLabeler.rangeListDirty)
+	re.False(regionLabeler.ruleIndex.rangesDirty)
 	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.RawKeyspaceModePrefix), constant.RegionLabelKey))
 	re.Equal("42", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix), constant.RegionLabelKey))
 
 	re.NoError(regionLabeler.DeleteLabelRule(updated.ID))
-	re.False(regionLabeler.rangeListDirty)
-	re.False(regionLabeler.keyspaceRules.Contains(updated))
+	re.False(regionLabeler.ruleIndex.rangesDirty)
+	re.False(regionLabeler.ruleIndex.keyspaces.Contains(updated))
 	re.Equal("yes", regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix), "generic"))
 }
 
@@ -406,6 +417,29 @@ func TestRegionLabelerUpdatesMutatedKeyspaceRule(t *testing.T) {
 	fetched.Labels[0].Value = "mutated"
 	re.NoError(regionLabeler.DeleteLabelRule(fetched.ID))
 	re.Empty(regionLabeler.GetRegionLabel(makeRegionForKeyspace(42, codec.RawKeyspaceModePrefix), constant.RegionLabelKey))
+}
+
+func TestNewLabelRuleIndexBuildsAuthoritativeSnapshot(t *testing.T) {
+	re := require.New(t)
+	rule := makeKeyspaceRuleForTest(42, codec.TxnKeyspaceModePrefix)
+	re.NoError(rule.checkAndAdjust())
+	stale := makeKeyspaceRuleForTest(41, codec.TxnKeyspaceModePrefix)
+	re.NoError(stale.checkAndAdjust())
+
+	index := newLabelRuleIndex(map[string]*LabelRule{stale.ID: stale})
+	re.True(index.keyspaces.Contains(stale))
+	index = newLabelRuleIndex(map[string]*LabelRule{rule.ID: rule})
+	re.False(index.keyspaces.Contains(stale))
+	re.True(index.keyspaces.Contains(rule))
+	re.Empty(index.generic)
+
+	regionLabeler := &RegionLabeler{ruleIndex: index}
+	regionLabeler.Lock()
+	regionLabeler.ruleIndex.delete(rule.ID)
+	regionLabeler.Unlock()
+	region := makeRegionForKeyspace(42, codec.TxnKeyspaceModePrefix)
+	re.Empty(regionLabeler.GetRegionLabel(region, constant.RegionLabelKey))
+	re.Empty(regionLabeler.GetSplitKeys(region.GetStartKey(), region.GetEndKey()))
 }
 
 func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
@@ -459,57 +493,44 @@ func BenchmarkRegionLabelerKeyspaceIndex(b *testing.B) {
 		b.Run(fmt.Sprintf("startup/%d", count), func(b *testing.B) {
 			b.ReportAllocs()
 			for range b.N {
-				regionLabeler := &RegionLabeler{
-					labelRules:     make(map[string]*LabelRule, count),
-					genericRules:   make(map[string]*LabelRule),
-					rangeListDirty: true,
-				}
+				rules := make(map[string]*LabelRule, count)
 				for id := range count {
 					rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
 					require.NoError(b, rule.checkAndAdjust())
-					regionLabeler.labelRules[rule.ID] = rule
+					rules[rule.ID] = rule
 				}
-				regionLabeler.BuildRangeListLocked()
+				_ = newLabelRuleIndex(rules)
 			}
 		})
 
 		b.Run(fmt.Sprintf("single-rule-update/%d", count), func(b *testing.B) {
-			regionLabeler := &RegionLabeler{
-				labelRules:     make(map[string]*LabelRule, count),
-				genericRules:   make(map[string]*LabelRule),
-				rangeListDirty: true,
-			}
+			rulesByID := make(map[string]*LabelRule, count)
 			rules := make([]*LabelRule, 0, count)
 			for id := range count {
 				rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
 				require.NoError(b, rule.checkAndAdjust())
-				regionLabeler.labelRules[rule.ID] = rule
+				rulesByID[rule.ID] = rule
 				rules = append(rules, rule)
 			}
-			regionLabeler.BuildRangeListLocked()
+			regionLabeler := &RegionLabeler{ruleIndex: newLabelRuleIndex(rulesByID)}
 			target := rules[len(rules)/2]
 			b.ReportAllocs()
 			b.ResetTimer()
 			for range b.N {
 				regionLabeler.Lock()
-				regionLabeler.setLabelRuleInMemoryLocked(target)
-				regionLabeler.BuildRangeListLocked()
+				regionLabeler.ruleIndex.set(target)
 				regionLabeler.Unlock()
 			}
 		})
 
 		b.Run(fmt.Sprintf("lookup/%d", count), func(b *testing.B) {
-			regionLabeler := &RegionLabeler{
-				labelRules:     make(map[string]*LabelRule, count),
-				genericRules:   make(map[string]*LabelRule),
-				rangeListDirty: true,
-			}
+			rules := make(map[string]*LabelRule, count)
 			for id := range count {
 				rule := makeKeyspaceRuleForTest(uint32(id), codec.TxnKeyspaceModePrefix)
 				require.NoError(b, rule.checkAndAdjust())
-				regionLabeler.labelRules[rule.ID] = rule
+				rules[rule.ID] = rule
 			}
-			regionLabeler.BuildRangeListLocked()
+			regionLabeler := &RegionLabeler{ruleIndex: newLabelRuleIndex(rules)}
 			region := makeRegionForKeyspace(uint32(count/2), codec.TxnKeyspaceModePrefix)
 			b.ReportAllocs()
 			b.ResetTimer()

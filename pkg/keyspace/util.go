@@ -160,20 +160,15 @@ func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-	rawLeftBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id)
-	rawRightBound := codec.MakeKeyspacePrefix(codec.RawKeyspaceModePrefix, id+1)
-	txnLeftBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id)
-	txnRightBound := codec.MakeKeyspacePrefix(codec.TxnKeyspaceModePrefix, id+1)
-	if id == constant.MaxValidKeyspaceID {
-		// The right bound is an exclusive fencepost, not a real keyspace prefix.
-		rawRightBound = []byte{'s', 0, 0, 0}
-		txnRightBound = []byte{'y', 0, 0, 0}
-	}
+	rawLeftBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id)
+	rawRightBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id+1)
+	txnLeftBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+	txnRightBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id+1)
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(rawLeftBound),
-		RawRightBound: codec.EncodeBytes(rawRightBound),
-		TxnLeftBound:  codec.EncodeBytes(txnLeftBound),
-		TxnRightBound: codec.EncodeBytes(txnRightBound),
+		RawLeftBound:  rawLeftBound[:],
+		RawRightBound: rawRightBound[:],
+		TxnLeftBound:  txnLeftBound[:],
+		TxnRightBound: txnRightBound[:],
 	}
 }
 
@@ -246,13 +241,20 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 		idText,
 		endpoint.SpaceIDBase, 32,
 	)
-	if err != nil {
+	nonCanonicalID := len(idText) == 0 || idText[0] == '+' || len(idText) > 1 && idText[0] == '0'
+	if err != nil ||
+		keyspaceID > uint64(constant.MaxValidKeyspaceID) ||
+		nonCanonicalID {
 		return 0, false
 	}
 	// Double check the keyspace ID from the label rule.
-	var idFromLabel uint64
+	var (
+		idFromLabel  uint64
+		foundIDLabel bool
+	)
 	for _, label := range rule.Labels {
 		if label.Key == constant.RegionLabelKey {
+			foundIDLabel = true
 			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
 			if err != nil {
 				return 0, false
@@ -260,7 +262,7 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 			break
 		}
 	}
-	if keyspaceID != idFromLabel {
+	if !foundIDLabel || keyspaceID != idFromLabel {
 		return 0, false
 	}
 	return uint32(keyspaceID), true
