@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path"
 	"runtime"
 	"runtime/trace"
 	"strconv"
@@ -28,6 +27,15 @@ import (
 	"sync/atomic"
 	"time"
 
+<<<<<<< HEAD
+=======
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+>>>>>>> b7b0d6faf2 (server: restrict GlobalConfig to its namespace (#11076))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -2939,8 +2947,33 @@ func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAll
 	return nil
 }
 
-// for CDC compatibility, we need to initialize config path to `globalConfigPath`
+// For CDC compatibility, we need to initialize an empty config path to
+// `globalConfigPath`.
 const globalConfigPath = "/global/config/"
+
+func normalizeGlobalConfigPath(configPath string) (string, error) {
+	if configPath == "" {
+		return globalConfigPath, nil
+	}
+	rootPath := strings.TrimSuffix(globalConfigPath, "/")
+	if configPath == rootPath {
+		return globalConfigPath, nil
+	}
+	if !strings.HasPrefix(configPath, globalConfigPath) {
+		return "", status.Errorf(codes.InvalidArgument, "global config path %q is not allowed", configPath)
+	}
+	return configPath, nil
+}
+
+func resolveGlobalConfigKey(configPath, name string) string {
+	if name == "" {
+		return strings.TrimSuffix(configPath, "/")
+	}
+	if strings.HasSuffix(configPath, "/") {
+		return configPath + name
+	}
+	return configPath + "/" + name
+}
 
 // StoreGlobalConfig store global config into etcd by transaction
 // Since item value needs to support marshal of different struct types,
@@ -2963,13 +2996,13 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 			}, nil
 		}
 	}
-	configPath := request.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
+	configPath, err := normalizeGlobalConfigPath(request.GetConfigPath())
+	if err != nil {
+		return nil, err
 	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := path.Join(configPath, item.GetName())
+		key := resolveGlobalConfigKey(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
 			// For CDC compatibility, we need to check the Value field firstly.
@@ -2977,9 +3010,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 			if value == "" {
 				value = string(item.GetPayload())
 			}
-			ops[i] = clientv3.OpPut(name, value)
+			ops[i] = clientv3.OpPut(key, value)
 		case pdpb.EventType_DELETE:
-			ops[i] = clientv3.OpDelete(name)
+			ops[i] = clientv3.OpDelete(key)
 		}
 	}
 	res, err :=
@@ -3010,15 +3043,21 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		}
 	}
 	configPath := request.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
+	// Keep the legacy prefix-load behavior used by cloud-storage-engine, but
+	// only for the exact controller path. Other operations and direct sibling
+	// paths must remain within the global config namespace.
+	if request.Names != nil || configPath != keypath.ControllerConfigPath() {
+		configPath, err = normalizeGlobalConfigPath(configPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
 	if request.Names != nil {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
-			r, err := s.client.Get(ctx, path.Join(configPath, name))
+			r, err := s.client.Get(ctx, resolveGlobalConfigKey(configPath, name))
 			if err != nil {
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
 			} else if len(r.Kvs) == 0 {
@@ -3057,12 +3096,12 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			return err
 		}
 	}
+	configPath, err := normalizeGlobalConfigPath(req.GetConfigPath())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
-	configPath := req.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
-	}
 	revision := req.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
