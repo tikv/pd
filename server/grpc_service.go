@@ -543,21 +543,15 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-<<<<<<< HEAD
-		tsoRequestProxyCtx context.Context
-		forwardStream      tsopb.TSO_TsoClient
-		cancelForward      context.CancelFunc
-		forwardCtx         context.Context
-		tsoStreamErr       error
-		lastForwardedHost  string
-=======
 		tsoRequestProxyCtx   context.Context
 		forwardedHost        = grpcutil.GetForwardedHost(stream.Context())
 		forwardedClientConn  *grpc.ClientConn
-		forwarder            = newTSOForwarder(stream)
+		forwardStream        tsopb.TSO_TsoClient
+		cancelForward        context.CancelFunc
+		forwardCtx           context.Context
 		tsoStreamErr         error
+		lastForwardedHost    string
 		forwardedHostChecked = forwardedHost == ""
->>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 	)
 
 	defer func() {
@@ -1143,24 +1137,13 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	var (
-<<<<<<< HEAD
-		server            = &bucketHeartbeatServer{stream: stream}
-		forwardStream     pdpb.PD_ReportBucketsClient
-		cancel            context.CancelFunc
-		lastForwardedHost string
-		errCh             chan error
-=======
-		server                      = &bucketHeartbeatServer{stream: stream}
-		forwardStream               pdpb.PD_ReportBucketsClient
-		cancel                      context.CancelFunc
-		lastForwardedHost           string
-		errCh                       chan error
-		forwardErrCh                chan error
-		forwardSchedulingStream     schedulingpb.Scheduling_RegionBucketsClient
-		lastForwardedSchedulingHost string
-		metadataForwardedHost       = grpcutil.GetForwardedHost(stream.Context())
-		forwardedHostChecked        = metadataForwardedHost == ""
->>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
+		server                = &bucketHeartbeatServer{stream: stream}
+		forwardStream         pdpb.PD_ReportBucketsClient
+		cancel                context.CancelFunc
+		lastForwardedHost     string
+		errCh                 chan error
+		metadataForwardedHost = grpcutil.GetForwardedHost(stream.Context())
+		forwardedHostChecked  = metadataForwardedHost == ""
 	)
 	defer func() {
 		if cancel != nil {

@@ -20,14 +20,6 @@ import (
 	"strings"
 	"time"
 
-<<<<<<< HEAD
-=======
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
->>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"

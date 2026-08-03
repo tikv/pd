@@ -16,22 +16,15 @@ package tso_test
 
 import (
 	"context"
-<<<<<<< HEAD
-=======
 	"io"
 	"net"
->>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-<<<<<<< HEAD
-=======
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
->>>>>>> e3d71823d8 (server: validate forwarded PD hosts before dialing (#11069))
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -130,8 +123,7 @@ func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
 
 func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
 	re := s.Require()
-	client, conn := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
-	defer conn.Close()
+	client := testutil.MustNewGrpcClient(re, s.leader.GetAddr())
 
 	s.verifyForwardedHostRejected(client, s.follower.GetAddr())
 	s.verifyForwardedHostRejected(s.pdClient, s.follower.GetAddr())
