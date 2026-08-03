@@ -250,7 +250,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		usePlacementScope := bs.mayUsePlacementScope(srcStore.IsTiKV())
+		usePlacementScope := bs.beginSourcePlacement(srcStore.IsTiKV())
 		sourceResultRecorded := !usePlacementScope
 		var globalSourceFailure, sourceFailure string
 		if usePlacementScope {
@@ -1003,6 +1003,17 @@ func (bs *balanceSolver) mayUsePlacementScope(isTiKV bool) bool {
 	if !bs.placementV2Enabled {
 		return false
 	}
+	if isTiKV {
+		return bs.placementCanRestrict[0]
+	}
+	return bs.placementCanRestrict[1]
+}
+
+func (bs *balanceSolver) beginSourcePlacement(isTiKV bool) bool {
+	if !bs.placementV2Enabled {
+		return false
+	}
+	bs.curScope = nil
 	if isTiKV {
 		return bs.placementCanRestrict[0]
 	}

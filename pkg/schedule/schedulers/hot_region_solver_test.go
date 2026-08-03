@@ -776,6 +776,17 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
 }
 
+func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
+	bs := &balanceSolver{
+		curScope:             &placementLoadScope{},
+		placementV2Enabled:   true,
+		placementCanRestrict: [2]bool{true, false},
+	}
+
+	require.False(t, bs.beginSourcePlacement(false))
+	require.Nil(t, bs.curScope)
+}
+
 func TestRevertRegionPlacementSafeguard(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
