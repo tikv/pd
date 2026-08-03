@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -669,6 +670,109 @@ func TestReusePeerAddress(t *testing.T) {
 		Version:     "2.0.0",
 		DeployPath:  getTestDeployPath(4003),
 	}))
+}
+
+func TestConcurrentPutStoreAddressUniqueness(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	const (
+		rounds      = 20
+		concurrency = 16
+		peerAddress = "mock://tiflash-peer-concurrent:20170"
+	)
+
+	for round := range rounds {
+		cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+		cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+		var (
+			wg       sync.WaitGroup
+			success  atomic.Int32
+			failures atomic.Int32
+		)
+		wg.Add(concurrency)
+		for i := range concurrency {
+			go func(i int) {
+				defer wg.Done()
+				storeID := uint64(1000*round + i + 1)
+				err := cluster.PutMetaStore(&metapb.Store{
+					Id:          storeID,
+					Address:     fmt.Sprintf("mock://tiflash-%d-%d:3930", round, i),
+					PeerAddress: peerAddress,
+					State:       metapb.StoreState_Up,
+					Version:     "2.0.0",
+					DeployPath:  getTestDeployPath(storeID),
+				})
+				if err == nil {
+					success.Add(1)
+					return
+				}
+				failures.Add(1)
+				re.Contains(err.Error(), "duplicated store peer address")
+			}(i)
+		}
+		wg.Wait()
+
+		re.Equal(int32(1), success.Load(), "round %d: exactly one PutStore should succeed", round)
+		re.Equal(int32(concurrency-1), failures.Load(), "round %d: the rest should fail", round)
+
+		matched := 0
+		for _, store := range cluster.GetStores() {
+			if store.IsRemoved() || store.IsPhysicallyDestroyed() {
+				continue
+			}
+			if store.GetMeta().GetPeerAddress() == peerAddress {
+				matched++
+			}
+		}
+		re.Equal(1, matched, "round %d: only one live store should own the peer address", round)
+	}
+
+	// Concurrent cross-collision: address equals an existing peer address.
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          1,
+		Address:     "mock://tiflash-a:3930",
+		PeerAddress: peerAddress,
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(1),
+	}))
+
+	var (
+		wg       sync.WaitGroup
+		success  atomic.Int32
+		failures atomic.Int32
+	)
+	wg.Add(concurrency)
+	for i := range concurrency {
+		go func(i int) {
+			defer wg.Done()
+			storeID := uint64(2000 + i)
+			err := cluster.PutMetaStore(&metapb.Store{
+				Id:         storeID,
+				Address:    peerAddress,
+				State:      metapb.StoreState_Up,
+				Version:    "2.0.0",
+				DeployPath: getTestDeployPath(storeID),
+			})
+			if err == nil {
+				success.Add(1)
+				return
+			}
+			failures.Add(1)
+			re.Contains(err.Error(), "duplicated store address")
+		}(i)
+	}
+	wg.Wait()
+	re.Equal(int32(0), success.Load())
+	re.Equal(int32(concurrency), failures.Load())
 }
 
 func TestUpStore(t *testing.T) {
