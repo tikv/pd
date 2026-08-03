@@ -917,6 +917,25 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 // fn runs with the keyspace manager write lock held and must not do I/O; it
 // returns whether to record the sync-loaded marker and, when a group was
 // (re)installed, the group to sync burstability for.
+//
+// Known gap: this "skip if the new term already confirmed the group" rule
+// assumes the confirming write's storage effect is genuinely the latest one,
+// which holds for Add/Modify (both persist before they can be parked - see
+// addResourceGroupBeforePublish/modifyResourceGroupBeforePublish) but not for
+// Delete, which can be parked before its storage phase
+// (deleteResourceGroupBeforeStorage). If an old-term Delete is parked there,
+// a new-term Add for the same group persists and publishes (getting
+// confirmed), and only then does the old Delete's storage removal finally
+// run, it deletes that newer write in storage - making Delete genuinely the
+// last writer - but this function skips its publish because the group is
+// already "confirmed", leaving the cache showing the deleted group as
+// present. Nothing re-syncs it afterward, since it reads as confirmed to
+// every other path too. This mirrors, in the opposite direction, a gap the
+// old unconditional-apply code had (a delayed Delete publish could instead
+// wipe a newer confirmed Add). Neither direction is fully closed without a
+// storage-side revision to tell which write actually landed last; that's the
+// same class of gap tracked for initDefaultResourceGroup's stillCurrent
+// check. No regression test exercises this interleaving yet.
 func (m *Manager) publishResourceGroupMutation(
 	keyspaceID uint32, name string, krgm *keyspaceResourceGroupManager,
 	fn func(krgm *keyspaceResourceGroupManager) (mark bool, synced *ResourceGroup),
