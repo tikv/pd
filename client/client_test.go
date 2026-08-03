@@ -121,6 +121,38 @@ func TestNewClientInitializationWithInvalidTLSConfig(t *testing.T) {
 	require.Nil(t, cli)
 }
 
+func TestNewClientWithKeyspaceInvalidTLSConfig(t *testing.T) {
+	cli, err := NewClientWithKeyspace(
+		context.Background(),
+		caller.TestComponent,
+		42,
+		nil,
+		SecurityOption{
+			SSLCABytes:   []byte("invalid"),
+			SSLCertBytes: []byte("invalid"),
+			SSLKEYBytes:  []byte("invalid"),
+		},
+	)
+	require.Error(t, err)
+	require.Nil(t, cli)
+}
+
+func TestNewClientWithKeyspaceNameInvalidTLSConfig(t *testing.T) {
+	cli, err := NewClientWithAPIContext(
+		context.Background(),
+		NewAPIContextV2("test-keyspace"),
+		caller.TestComponent,
+		nil,
+		SecurityOption{
+			SSLCABytes:   []byte("invalid"),
+			SSLCertBytes: []byte("invalid"),
+			SSLKEYBytes:  []byte("invalid"),
+		},
+	)
+	require.Error(t, err)
+	require.Nil(t, cli)
+}
+
 func TestIsRetryableGetTSError(t *testing.T) {
 	re := require.New(t)
 
