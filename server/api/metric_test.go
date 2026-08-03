@@ -23,7 +23,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"net/netip"
+	"net/textproto"
 	"strings"
 	"testing"
 	"time"
@@ -221,6 +223,7 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 		wantOK     bool
 	}{
 		{name: "Success", statusCode: http.StatusOK, body: successMetricResponse, wantOK: true},
+		{name: "Accepted", statusCode: http.StatusAccepted, body: successMetricResponse, wantOK: true},
 		{name: "Non2xx", statusCode: http.StatusUnauthorized, body: "upstream secret"},
 		{name: "Redirect", statusCode: http.StatusFound, body: "redirect secret"},
 		{name: "InvalidJSON", statusCode: http.StatusOK, body: "not json"},
@@ -231,14 +234,26 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			var authorization string
+			var tenant string
+			var requestBody string
+			var requestMethod string
 			var requestPath string
+			var requestQuery string
 			var requestHost string
 			var removedHeader string
+			var removedTrailer string
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				authorization = r.Header.Get("Authorization")
+				tenant = r.Header.Get("X-Scope-OrgID")
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				requestBody = string(body)
+				requestMethod = r.Method
 				requestPath = r.URL.Path
+				requestQuery = r.URL.RawQuery
 				requestHost = r.Host
 				removedHeader = r.Header.Get("X-Remove")
+				removedTrailer = r.Trailer.Get("X-Secret-Trailer")
 				return &http.Response{
 					StatusCode: testCase.statusCode,
 					Header: http.Header{
@@ -246,24 +261,37 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 						"Set-Cookie": []string{"secret=value"},
 						"Location":   []string{"http://169.254.169.254/secret"},
 					},
-					Body: io.NopCloser(strings.NewReader(testCase.body)),
+					Body:    io.NopCloser(strings.NewReader(testCase.body)),
+					Trailer: http.Header{"X-Secret-Trailer": []string{"secret"}},
 				}, nil
 			})
-			request := httptest.NewRequest(http.MethodGet, "http://pd/pd/api/v1/metric/query?query=up", nil)
+			request := httptest.NewRequest(
+				http.MethodPost,
+				"http://pd/pd/api/v1/metric/query?query=up;down&tenant=a+b",
+				strings.NewReader("query=up"),
+			)
 			request.Host = "admin.internal"
 			request.Header.Set("Authorization", "Bearer token")
+			request.Header.Set("X-Scope-OrgID", "tenant-1")
 			request.Header.Set("Connection", "X-Remove")
 			request.Header.Set("X-Remove", "secret")
+			request.Trailer = http.Header{"X-Secret-Trailer": []string{"secret"}}
 			recorder := httptest.NewRecorder()
 			proxyMetricQuery(recorder, request, "http://metrics.example:9090", transport, safeMetricResolver())
 
 			require.Equal(t, "Bearer token", authorization)
+			require.Equal(t, "tenant-1", tenant)
+			require.Equal(t, "query=up", requestBody)
+			require.Equal(t, http.MethodPost, requestMethod)
 			require.Equal(t, "/api/v1/query", requestPath)
+			require.Equal(t, "query=up;down&tenant=a+b", requestQuery)
 			require.Equal(t, "metrics.example:9090", requestHost)
 			require.Empty(t, removedHeader)
+			require.Empty(t, removedTrailer)
 			require.Empty(t, recorder.Header().Get("Server"))
 			require.Empty(t, recorder.Header().Get("Set-Cookie"))
 			require.Empty(t, recorder.Header().Get("Location"))
+			require.Empty(t, recorder.Header().Get("X-Secret-Trailer"))
 			if testCase.wantOK {
 				require.Equal(t, http.StatusOK, recorder.Code)
 				require.JSONEq(t, successMetricResponse, recorder.Body.String())
@@ -272,6 +300,33 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 			requireGenericMetricQueryError(t, recorder, testCase.body)
 		})
 	}
+}
+
+func TestMetricQuerySuppressesInformationalResponse(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		trace := httptrace.ContextClientTrace(request.Context())
+		require.NotNil(t, trace)
+		require.NotNil(t, trace.Got1xxResponse)
+		err := trace.Got1xxResponse(http.StatusEarlyHints, textproto.MIMEHeader{
+			"Link": []string{"<http://internal.example/secret>"},
+		})
+		require.NoError(t, err)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(successMetricResponse)),
+		}, nil
+	})
+	recorder := httptest.NewRecorder()
+	proxyMetricQuery(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
+		"http://metrics.example:9090",
+		transport,
+		safeMetricResolver(),
+	)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Empty(t, recorder.Header().Get("Link"))
+	require.JSONEq(t, successMetricResponse, recorder.Body.String())
 }
 
 func TestMetricQueryAllowsExplicitLoopback(t *testing.T) {
