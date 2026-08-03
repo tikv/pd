@@ -309,13 +309,13 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 					dstStoreID := dstStore.GetID()
 					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
 						revertRegion, revertFit := bs.getRegion(revertPeerStat, dstStoreID)
-						useRevertPlacement := bs.mayUsePlacementScope(dstStore.IsTiKV())
+						useRevertPlacementScope := bs.mayUsePlacementScope(dstStore.IsTiKV())
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) ||
-							useRevertPlacement && !bs.isRevertRegionValid(revertRegion, revertFit) {
+							revertFit != nil && !bs.isRevertRegionValid(revertRegion, revertFit) {
 							continue
 						}
-						if useRevertPlacement {
+						if useRevertPlacementScope {
 							bs.revertScope = nil
 							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
 						}

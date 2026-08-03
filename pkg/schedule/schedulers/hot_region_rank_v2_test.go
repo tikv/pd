@@ -150,11 +150,13 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 		name                  string
 		revertTargetMatchesB  bool
 		historyRejectsRevert  bool
+		locationLabelsOnly    bool
 		expectedOperatorCount int
 	}{
 		{name: "valid revert", revertTargetMatchesB: true, expectedOperatorCount: 2},
 		{name: "invalid revert", expectedOperatorCount: 1},
 		{name: "revert rejected by scoped history", revertTargetMatchesB: true, historyRejectsRevert: true, expectedOperatorCount: 1},
+		{name: "revert rejected by location labels", locationLabelsOnly: true, expectedOperatorCount: 1},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			re := require.New(t)
@@ -174,29 +176,46 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 			hb.updateHistoryLoadConfig(historyInterval, historyInterval)
 			tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-			for id, labels := range map[uint64]map[string]string{
+			storeLabels := map[uint64]map[string]string{
 				1: {"b": "yes"},
 				2: {"a": "yes"},
 				3: {"b": "yes"},
 				4: {"a": "yes"},
 				5: {"a": "yes", "b": "yes"},
-			} {
-				if id == 2 && testCase.revertTargetMatchesB {
-					labels["b"] = "yes"
+			}
+			if testCase.locationLabelsOnly {
+				storeLabels = map[uint64]map[string]string{
+					1: {"zone": "a"},
+					2: {"zone": "a"},
+					3: {"zone": "b"},
+					4: {"zone": "b"},
+					5: {"zone": "c"},
 				}
+			} else if testCase.revertTargetMatchesB {
+				storeLabels[2]["b"] = "yes"
+			}
+			for id, labels := range storeLabels {
 				tc.AddLabelsStore(id, 20, labels)
 			}
 			tc.SetStoreBusy(4, true)
-			re.NoError(tc.SetRule(&placement.Rule{
-				GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
-				Role: placement.Voter, Count: 1,
-				LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
-			}))
-			re.NoError(tc.SetRule(&placement.Rule{
-				GroupID: placement.DefaultGroupID, ID: "voter-b",
-				Role: placement.Voter, Count: 2,
-				LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
-			}))
+			if testCase.locationLabelsOnly {
+				re.NoError(tc.SetRule(&placement.Rule{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 3, LocationLabels: []string{"zone"},
+				}))
+				re.False(hb.getPlacementLoadState(tc, "v2").enabled)
+			} else {
+				re.NoError(tc.SetRule(&placement.Rule{
+					GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+					Role: placement.Voter, Count: 1,
+					LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+				}))
+				re.NoError(tc.SetRule(&placement.Rule{
+					GroupID: placement.DefaultGroupID, ID: "voter-b",
+					Role: placement.Voter, Count: 2,
+					LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
+				}))
+			}
 
 			storeLoads := map[uint64]statistics.Loads{
 				1: {utils.ByteDim: 15 * units.MiB, utils.KeyDim: 15 * units.MiB},
@@ -223,6 +242,11 @@ func TestHotWriteRegionScheduleWithRevertRegionsAndPlacementRulesV2(t *testing.T
 				{6, []uint64{3, 2, 1}, 3 * units.MiB, 1.8 * units.MiB, 0},
 				{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
 			})
+			if testCase.locationLabelsOnly {
+				revertFit := tc.GetRuleManager().FitRegion(tc.GetBasicCluster(), tc.GetRegion(7))
+				re.True(revertFit.IsSatisfied())
+				re.False(revertFit.Replace(5, tc.GetStore(2)))
+			}
 			mainRegion := tc.GetRegion(6)
 			sourcePeers := append(mainRegion.GetPeers()[:0:0], mainRegion.GetStorePeer(2))
 			for _, item := range tc.ExpiredWriteItems(mainRegion.Clone(core.SetPeers(sourcePeers))) {
