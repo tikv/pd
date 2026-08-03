@@ -78,7 +78,7 @@ func TestNewClientInitialization(t *testing.T) {
 	defer cancel()
 	serverURLs := []string{"http://127.0.0.1:2379"}
 
-	cli, err := newClient(
+	cli, err := createClient(
 		ctx,
 		caller.TestComponent,
 		42,
@@ -106,7 +106,7 @@ func TestNewClientInitialization(t *testing.T) {
 }
 
 func TestNewClientInitializationWithInvalidTLSConfig(t *testing.T) {
-	cli, err := newClient(
+	cli, err := createClient(
 		context.Background(),
 		caller.TestComponent,
 		constants.NullKeyspaceID,

@@ -238,15 +238,15 @@ func createClientWithKeyspace(
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
-	c, err := newClient(ctx, callerComponent, keyspaceID, svrAddrs, security, opts...)
+	c, err := createClient(ctx, callerComponent, keyspaceID, svrAddrs, security, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return c, c.inner.init(nil)
 }
 
-// newClient creates the client state shared by all initialization paths.
-func newClient(
+// createClient creates the client state shared by all initialization paths.
+func createClient(
 	ctx context.Context,
 	callerComponent caller.Component,
 	keyspaceID uint32, svrAddrs []string,
@@ -372,7 +372,7 @@ func newClientWithKeyspaceName(
 ) (Client, error) {
 	// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the service discovery for the following interactions.
-	c, err := newClient(ctx, callerComponent, constants.NullKeyspaceID, svrAddrs, security, opts...)
+	c, err := createClient(ctx, callerComponent, constants.NullKeyspaceID, svrAddrs, security, opts...)
 	if err != nil {
 		return nil, err
 	}
