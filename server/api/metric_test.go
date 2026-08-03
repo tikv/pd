@@ -168,49 +168,46 @@ func TestMetricQueryTransportInitializesAfterHTTPClient(t *testing.T) {
 }
 
 func TestMetricQueryPinsValidatedTarget(t *testing.T) {
-	dialAddresses := make(chan string, 3)
-	attemptDeadlines := make(chan time.Time, 2)
-	var peer net.Conn
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer listener.Close()
+	_, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+
+	baseDialerCalled := false
 	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
-	baseTransport.DialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
-		dialAddresses <- address
-		if strings.HasPrefix(address, "192.0.2.10:") || strings.HasPrefix(address, "192.0.2.11:") {
-			deadline, _ := ctx.Deadline()
-			attemptDeadlines <- deadline
-			return nil, errors.New("dial failed")
-		}
-		connection, otherEnd := net.Pipe()
-		peer = otherEnd
-		return connection, nil
+	baseTransport.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		baseDialerCalled = true
+		return nil, errors.New("custom dialer must not be used")
 	}
 	transport, err := newMetricQueryTransport(&http.Client{Transport: baseTransport})
 	require.NoError(t, err)
 	defer transport.CloseIdleConnections()
-	resolver := staticMetricResolver{addresses: []netip.Addr{
-		netip.MustParseAddr("192.0.2.10"),
-		netip.MustParseAddr("192.0.2.11"),
-		netip.MustParseAddr("192.0.2.12"),
-	}}
-	target, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example:9090", resolver)
+	target, err := resolveMetricStorageTarget(
+		context.Background(),
+		"http://metrics.example:"+port,
+		safeMetricResolver(),
+	)
 	require.NoError(t, err)
+	target.addresses = []netip.Addr{
+		netip.MustParseAddr("127.0.0.2"),
+		netip.MustParseAddr("127.0.0.1"),
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), metricQueryTimeout)
 	defer cancel()
-	parentDeadline, ok := ctx.Deadline()
-	require.True(t, ok)
 	ctx = context.WithValue(ctx, metricTargetContextKey{}, target)
+	var dialAddresses []string
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		ConnectStart: func(_, address string) {
+			dialAddresses = append(dialAddresses, address)
+		},
+	})
 	connection, err := transport.DialContext(ctx, "tcp", "metrics.example:9090")
 	require.NoError(t, err)
-	require.Equal(t,
-		[]string{"192.0.2.10:9090", "192.0.2.11:9090", "192.0.2.12:9090"},
-		[]string{<-dialAddresses, <-dialAddresses, <-dialAddresses},
-	)
-	for range 2 {
-		attemptDeadline := <-attemptDeadlines
-		require.False(t, attemptDeadline.IsZero())
-		require.True(t, attemptDeadline.Before(parentDeadline))
-	}
+	require.False(t, baseDialerCalled)
+	require.Equal(t, []string{"127.0.0.2:" + port, "127.0.0.1:" + port}, dialAddresses)
+	require.Equal(t, listener.Addr().String(), connection.RemoteAddr().String())
 	require.NoError(t, connection.Close())
-	require.NoError(t, peer.Close())
 }
 
 func TestMetricQueryDialDeadline(t *testing.T) {

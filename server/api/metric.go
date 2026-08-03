@@ -289,10 +289,11 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 		return nil, errors.New("metric query requires an HTTP transport")
 	}
 	transport = transport.Clone()
-	dialContext := transport.DialContext
-	if dialContext == nil {
-		dialContext = (&net.Dialer{}).DialContext
-	}
+	// Do not inherit a custom dialer: it could ignore the validated address.
+	dialContext := (&net.Dialer{
+		Timeout:   metricQueryTimeout,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
 	// A proxy would resolve and dial the target outside this transport, bypassing
 	// the destination validation below.
 	transport.Proxy = nil
