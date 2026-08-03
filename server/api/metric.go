@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,6 +40,8 @@ const (
 	metricQueryDialFallbackDelay   = 300 * time.Millisecond
 	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
+	metricStorageConfigKey         = "metric-storage"
+	prefixedMetricStorageConfigKey = "pd-server.metric-storage"
 )
 
 type metricIPResolver interface {
@@ -46,10 +49,12 @@ type metricIPResolver interface {
 }
 
 type queryMetric struct {
-	s            *server.Server
-	transport    *http.Transport
-	transportErr error
-	resolver     metricIPResolver
+	s             *server.Server
+	transportMu   sync.Mutex
+	transport     *http.Transport
+	closed        bool
+	getHTTPClient func() *http.Client
+	resolver      metricIPResolver
 }
 
 type resolvedMetricTarget struct {
@@ -61,27 +66,59 @@ type resolvedMetricTarget struct {
 type metricTargetContextKey struct{}
 
 func newqueryMetric(s *server.Server) *queryMetric {
-	transport, err := newMetricQueryTransport(s.GetHTTPClient())
 	return &queryMetric{
-		s:            s,
-		transport:    transport,
-		transportErr: err,
-		resolver:     net.DefaultResolver,
+		s:             s,
+		getHTTPClient: s.GetHTTPClient,
+		resolver:      net.DefaultResolver,
 	}
 }
 
 func (h *queryMetric) queryMetric(w http.ResponseWriter, r *http.Request) {
-	if h.transportErr != nil {
-		writeMetricQueryError(w, h.transportErr)
+	transport, err := h.getTransport()
+	if err != nil {
+		writeMetricQueryError(w, err)
 		return
 	}
 	proxyMetricQuery(
 		w,
 		r,
 		h.s.GetConfig().PDServerCfg.MetricStorage,
-		h.transport,
+		transport,
 		h.resolver,
 	)
+}
+
+func (h *queryMetric) getTransport() (*http.Transport, error) {
+	h.transportMu.Lock()
+	defer h.transportMu.Unlock()
+	if h.closed {
+		return nil, errors.New("metric query transport is closed")
+	}
+	if h.transport != nil {
+		return h.transport, nil
+	}
+	if h.getHTTPClient == nil {
+		return nil, errors.New("metric query HTTP client is not initialized")
+	}
+	baseClient := h.getHTTPClient()
+	if baseClient == nil {
+		return nil, errors.New("metric query HTTP client is not initialized")
+	}
+	transport, err := newMetricQueryTransport(baseClient)
+	if err != nil {
+		return nil, err
+	}
+	h.transport = transport
+	return transport, nil
+}
+
+func (h *queryMetric) close() {
+	h.transportMu.Lock()
+	defer h.transportMu.Unlock()
+	h.closed = true
+	if h.transport != nil {
+		h.transport.CloseIdleConnections()
+	}
 }
 
 func proxyMetricQuery(
@@ -105,6 +142,7 @@ func proxyMetricQuery(
 	request.RequestURI = ""
 	request.URL.Scheme = target.url.Scheme
 	request.URL.Host = target.url.Host
+	request.Host = target.url.Host
 	request.URL.Path = strings.Replace(r.URL.Path, "/pd/api/v1/metric", "/api/v1", 1)
 	// Preserve end-to-end headers for authenticated metric storage, matching the
 	// historical proxy contract, but never forward connection-specific headers.
@@ -148,32 +186,20 @@ func resolveMetricStorageTarget(
 	rawURL string,
 	resolver metricIPResolver,
 ) (*resolvedMetricTarget, error) {
-	targetURL, err := url.Parse(rawURL)
-	if err != nil || targetURL.Opaque != "" || targetURL.Hostname() == "" || targetURL.User != nil || targetURL.Fragment != "" {
-		return nil, errors.New("invalid metric-storage URL")
-	}
-	targetURL.Scheme = strings.ToLower(targetURL.Scheme)
-	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
-		return nil, errors.New("metric-storage must use HTTP or HTTPS")
-	}
-	hostname := targetURL.Hostname()
-	port := targetURL.Port()
-	if port == "" {
-		if strings.HasSuffix(targetURL.Host, ":") {
-			return nil, errors.New("metric-storage URL has an empty port")
-		}
-		if targetURL.Scheme == "http" {
-			port = "80"
-		} else {
-			port = "443"
-		}
-	} else if portNumber, err := strconv.Atoi(port); err != nil || portNumber < 1 || portNumber > 65535 {
-		return nil, errors.New("metric-storage URL has an invalid port")
+	targetURL, hostname, port, err := parseMetricStorageURL(rawURL)
+	if err != nil {
+		return nil, err
 	}
 
 	var addresses []netip.Addr
+	allowLoopback := false
 	if address, err := netip.ParseAddr(hostname); err == nil {
+		address = address.Unmap()
 		addresses = []netip.Addr{address}
+		// An explicit loopback address in the startup configuration is trusted for
+		// compatibility with local Prometheus deployments. Runtime updates cannot
+		// introduce or switch to a different loopback origin.
+		allowLoopback = address.IsLoopback()
 	} else {
 		addresses, err = resolver.LookupNetIP(ctx, "ip", hostname)
 		if err != nil {
@@ -186,7 +212,7 @@ func resolveMetricStorageTarget(
 
 	for i, address := range addresses {
 		addresses[i] = address.Unmap()
-		if !isSafeMetricTargetIP(addresses[i]) {
+		if !isSafeMetricTargetIP(addresses[i], allowLoopback) {
 			return nil, errors.New("metric-storage resolved to an unsafe address")
 		}
 	}
@@ -198,15 +224,103 @@ func resolveMetricStorageTarget(
 	}, nil
 }
 
-func isSafeMetricTargetIP(address netip.Addr) bool {
+func parseMetricStorageURL(rawURL string) (*url.URL, string, string, error) {
+	targetURL, err := url.Parse(rawURL)
+	if err != nil || targetURL.Opaque != "" || targetURL.Hostname() == "" || targetURL.User != nil ||
+		targetURL.Fragment != "" || targetURL.RawFragment != "" {
+		return nil, "", "", errors.New("invalid metric-storage URL")
+	}
+	targetURL.Scheme = strings.ToLower(targetURL.Scheme)
+	if targetURL.Scheme != "http" && targetURL.Scheme != "https" {
+		return nil, "", "", errors.New("metric-storage must use HTTP or HTTPS")
+	}
+	hostname := targetURL.Hostname()
+	port := targetURL.Port()
+	if port == "" {
+		if strings.HasSuffix(targetURL.Host, ":") {
+			return nil, "", "", errors.New("metric-storage URL has an empty port")
+		}
+		if targetURL.Scheme == "http" {
+			port = "80"
+		} else {
+			port = "443"
+		}
+	} else {
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return nil, "", "", errors.New("metric-storage URL has an invalid port")
+		}
+		port = strconv.Itoa(portNumber)
+	}
+	return targetURL, hostname, port, nil
+}
+
+func validateMetricStorageConfigUpdate(current string, conf map[string]any) error {
+	updated, found, err := metricStorageConfigUpdate(conf)
+	if err != nil || !found || updated == current || updated == "" {
+		return err
+	}
+
+	updatedURL, updatedHostname, updatedPort, err := parseMetricStorageURL(updated)
+	if err != nil {
+		return err
+	}
+	updatedAddress, err := netip.ParseAddr(updatedHostname)
+	if err != nil || !updatedAddress.Unmap().IsLoopback() {
+		return nil
+	}
+	if current != "" {
+		currentURL, currentHostname, currentPort, currentErr := parseMetricStorageURL(current)
+		currentAddress, addressErr := netip.ParseAddr(currentHostname)
+		if currentErr == nil && addressErr == nil && currentAddress.Unmap().IsLoopback() &&
+			currentURL.Scheme == updatedURL.Scheme && currentAddress.Unmap() == updatedAddress.Unmap() &&
+			currentPort == updatedPort {
+			return nil
+		}
+	}
+	return errors.New("changing metric-storage to a loopback target is not allowed")
+}
+
+func metricStorageConfigUpdate(conf map[string]any) (string, bool, error) {
+	var (
+		updated string
+		found   bool
+	)
+	for _, key := range []string{metricStorageConfigKey, prefixedMetricStorageConfigKey} {
+		value, ok := conf[key]
+		if !ok {
+			continue
+		}
+		valueString, ok := value.(string)
+		if !ok {
+			return "", false, errors.Errorf("config item %s must be a string", key)
+		}
+		if found && valueString != updated {
+			return "", false, errors.New("metric-storage is specified with conflicting values")
+		}
+		updated = valueString
+		found = true
+	}
+	return updated, found, nil
+}
+
+func isSafeMetricTargetIP(address netip.Addr, allowLoopback bool) bool {
 	address = address.Unmap()
-	unsafe := !address.IsValid() || address.Zone() != "" || address.IsLoopback() ||
+	if !address.IsValid() || address.Zone() != "" {
+		return false
+	}
+	if allowLoopback && address.IsLoopback() {
+		return true
+	}
+	unsafe := address.IsLoopback() ||
 		address.IsLinkLocalUnicast() || address.IsLinkLocalMulticast() ||
 		address.IsUnspecified() || address.IsMulticast() || !address.IsGlobalUnicast()
 	if address.Is4() {
 		octets := address.As4()
 		unsafe = unsafe || octets[0] == 0 || octets[0] >= 240
 	}
+	// Block well-known cloud instance metadata endpoints explicitly, including
+	// addresses that are not covered by the generic IP classifications above.
 	switch address.String() {
 	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
 		unsafe = true

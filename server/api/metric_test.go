@@ -16,6 +16,8 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"net"
@@ -45,6 +47,11 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 		target, err := resolveMetricStorageTarget(context.Background(), rawURL, resolver)
 		require.NoError(t, err)
 		require.Equal(t, port, target.port)
+	}
+	for _, rawURL := range []string{"http://127.0.0.1:9090", "http://[::1]:9090"} {
+		target, err := resolveMetricStorageTarget(context.Background(), rawURL, resolver)
+		require.NoError(t, err)
+		require.True(t, target.addresses[0].IsLoopback())
 	}
 
 	unsafeAddresses := []string{
@@ -77,6 +84,87 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 	}}
 	_, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example", resolver)
 	require.Error(t, err, "every resolved address must be safe")
+}
+
+func TestValidateMetricStorageConfigUpdate(t *testing.T) {
+	testCases := []struct {
+		name    string
+		current string
+		conf    map[string]any
+		wantErr bool
+	}{
+		{name: "Unrelated", conf: map[string]any{"schedule.leader-schedule-limit": 1}},
+		{name: "PrivateTarget", conf: map[string]any{metricStorageConfigKey: "http://192.168.0.1:9090"}},
+		{name: "InvalidTarget", conf: map[string]any{metricStorageConfigKey: "file:///tmp/metrics"}, wantErr: true},
+		{name: "NewLoopback", conf: map[string]any{metricStorageConfigKey: "http://127.0.0.1:9090"}, wantErr: true},
+		{name: "NewPrefixedLoopback", conf: map[string]any{prefixedMetricStorageConfigKey: "http://[::1]:9090"}, wantErr: true},
+		{
+			name:    "ExistingLoopbackSameOrigin",
+			current: "HTTP://127.0.0.1:9090/prometheus",
+			conf:    map[string]any{metricStorageConfigKey: "http://127.0.0.1:09090/other"},
+		},
+		{
+			name:    "ExistingLoopbackDifferentPort",
+			current: "http://127.0.0.1:9090",
+			conf:    map[string]any{metricStorageConfigKey: "http://127.0.0.1:1234"},
+			wantErr: true,
+		},
+		{
+			name:    "ClearLoopback",
+			current: "http://127.0.0.1:9090",
+			conf:    map[string]any{metricStorageConfigKey: ""},
+		},
+		{
+			name: "ConflictingKeys",
+			conf: map[string]any{
+				metricStorageConfigKey:         "http://192.168.0.1:9090",
+				prefixedMetricStorageConfigKey: "http://192.168.0.2:9090",
+			},
+			wantErr: true,
+		},
+		{name: "NonString", conf: map[string]any{metricStorageConfigKey: 1}, wantErr: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validateMetricStorageConfigUpdate(testCase.current, testCase.conf)
+			if testCase.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestMetricQueryTransportInitializesAfterHTTPClient(t *testing.T) {
+	var baseClient *http.Client
+	handler := &queryMetric{
+		getHTTPClient: func() *http.Client { return baseClient },
+	}
+	_, err := handler.getTransport()
+	require.Error(t, err)
+
+	rootCAs := x509.NewCertPool()
+	baseTransport := http.DefaultTransport.(*http.Transport).Clone()
+	baseTransport.TLSClientConfig = &tls.Config{
+		Certificates: []tls.Certificate{{}},
+		RootCAs:      rootCAs,
+		MinVersion:   tls.VersionTLS12,
+	}
+	baseClient = &http.Client{Transport: baseTransport}
+	transport, err := handler.getTransport()
+	require.NoError(t, err)
+	require.NotSame(t, baseTransport, transport)
+	require.Same(t, rootCAs, transport.TLSClientConfig.RootCAs)
+	require.Len(t, transport.TLSClientConfig.Certificates, 1)
+	require.Equal(t, uint16(tls.VersionTLS12), transport.TLSClientConfig.MinVersion)
+
+	cachedTransport, err := handler.getTransport()
+	require.NoError(t, err)
+	require.Same(t, transport, cachedTransport)
+	handler.close()
+	_, err = handler.getTransport()
+	require.Error(t, err)
 }
 
 func TestMetricQueryPinsValidatedTarget(t *testing.T) {
@@ -144,10 +232,12 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			var authorization string
 			var requestPath string
+			var requestHost string
 			var removedHeader string
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 				authorization = r.Header.Get("Authorization")
 				requestPath = r.URL.Path
+				requestHost = r.Host
 				removedHeader = r.Header.Get("X-Remove")
 				return &http.Response{
 					StatusCode: testCase.statusCode,
@@ -160,6 +250,7 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 				}, nil
 			})
 			request := httptest.NewRequest(http.MethodGet, "http://pd/pd/api/v1/metric/query?query=up", nil)
+			request.Host = "admin.internal"
 			request.Header.Set("Authorization", "Bearer token")
 			request.Header.Set("Connection", "X-Remove")
 			request.Header.Set("X-Remove", "secret")
@@ -168,6 +259,7 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 
 			require.Equal(t, "Bearer token", authorization)
 			require.Equal(t, "/api/v1/query", requestPath)
+			require.Equal(t, "metrics.example:9090", requestHost)
 			require.Empty(t, removedHeader)
 			require.Empty(t, recorder.Header().Get("Server"))
 			require.Empty(t, recorder.Header().Get("Set-Cookie"))
@@ -182,13 +274,32 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 	}
 }
 
+func TestMetricQueryAllowsExplicitLoopback(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(successMetricResponse)),
+		}, nil
+	})
+	recorder := httptest.NewRecorder()
+	proxyMetricQuery(
+		recorder,
+		httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
+		"http://127.0.0.1:9090",
+		transport,
+		safeMetricResolver(),
+	)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.JSONEq(t, successMetricResponse, recorder.Body.String())
+}
+
 func TestMetricQueryHidesPolicyAndNetworkErrors(t *testing.T) {
 	testCases := []struct {
 		metricStorage string
 		resolver      metricIPResolver
 		networkError  error
 	}{
-		{metricStorage: "http://127.0.0.1:9090", resolver: safeMetricResolver()},
+		{metricStorage: "http://metrics.example:9090", resolver: staticMetricResolver{addresses: []netip.Addr{netip.MustParseAddr("127.0.0.1")}}},
 		{metricStorage: "http://metrics.example:9090", resolver: safeMetricResolver(), networkError: errors.New("private network error")},
 	}
 	for _, testCase := range testCases {
