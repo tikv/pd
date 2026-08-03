@@ -163,7 +163,12 @@ func TestFindGroupByKeyspaceIDLegacyProtocol(t *testing.T) {
 				modRevision,
 			)
 
-			request := <-server.requests
+			var request *tsopb.FindGroupByKeyspaceIDRequest
+			select {
+			case request = <-server.requests:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for FindGroupByKeyspaceID request")
+			}
 			re.Equal(clusterID, request.GetHeader().GetClusterId())
 			re.IsType(&tsopb.RequestHeader_KeyspaceId{}, request.GetHeader().GetKeyspace())
 			re.Equal(keyspaceID, request.GetHeader().GetKeyspaceId())
