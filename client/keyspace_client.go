@@ -35,6 +35,8 @@ const (
 	KeyspaceConfigGCManagementTypeKeyspaceLevel = "keyspace_level"
 	// KeyspaceConfigGCManagementTypeUnified is the value representing unified GC in keyspace config.
 	KeyspaceConfigGCManagementTypeUnified = "unified"
+	keyspaceConfigSafePointVersion        = "safe_point_version"
+	keyspaceConfigSafePointVersionV2      = "v2"
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -247,4 +249,9 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 // case.
 func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
 	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel
+}
+
+// IsCESKeyspaceLevelGC reports whether a keyspace uses the CES keyspace-level GC metadata format.
+func IsCESKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
+	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
 }

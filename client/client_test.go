@@ -128,3 +128,32 @@ func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
 	}
 	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
 }
+
+func TestIsCESKeyspaceLevelGC(t *testing.T) {
+	tests := []struct {
+		name string
+		meta *keyspacepb.KeyspaceMeta
+		want bool
+	}{
+		{name: "nil metadata", meta: nil, want: false},
+		{name: "nil config", meta: &keyspacepb.KeyspaceMeta{}, want: false},
+		{name: "missing safe point version", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{}}, want: false},
+		{name: "safe point version v2", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": "v2"}}, want: true},
+		{name: "uppercase safe point version", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": "V2"}}, want: false},
+		{name: "padded safe point version", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": " v2 "}}, want: false},
+		{name: "native keyspace level GC", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"gc_management_type": "keyspace_level"}}, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			meta := test.meta
+
+			// When
+			got := IsCESKeyspaceLevelGC(meta)
+
+			// Then
+			require.Equal(t, test.want, got)
+		})
+	}
+}
