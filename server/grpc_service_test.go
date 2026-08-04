@@ -15,16 +15,26 @@
 package server
 
 import (
+	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
@@ -93,4 +103,50 @@ func TestConvertSchedulingHeaderPreservesError(t *testing.T) {
 			re.Equal(testCase.want, header.GetError())
 		})
 	}
+}
+
+func TestServiceDiscoveryRPCsReturnUnavailableWhenServerIsNotRunning(t *testing.T) {
+	grpcServer := &GrpcServer{Server: &Server{
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(&config.ServiceMiddlewareConfig{}),
+	}}
+	listener := bufconn.Listen(1024 * 1024)
+	transport := grpc.NewServer()
+	pdpb.RegisterPDServer(transport, grpcServer)
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- transport.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		transport.Stop()
+		require.NoError(t, <-serveErr)
+	})
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	client := pdpb.NewPDClient(conn)
+
+	members, err := client.GetMembers(context.Background(), &pdpb.GetMembersRequest{})
+	require.Nil(t, members)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	clusterInfo, err := client.GetClusterInfo(context.Background(), &pdpb.GetClusterInfoRequest{})
+	require.Nil(t, clusterInfo)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+func TestGetMembersErrorResult(t *testing.T) {
+	notStarted := errors.WithStack(errs.ErrServerNotStarted.FastGenByArgs())
+	response, err := getMembersErrorResult(notStarted)
+	require.Nil(t, response)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	internalErr := errors.New("failed to load members")
+	response, err = getMembersErrorResult(internalErr)
+	require.NoError(t, err)
+	require.Equal(t, pdpb.ErrorType_UNKNOWN, response.GetHeader().GetError().GetType())
+	require.Equal(t, internalErr.Error(), response.GetHeader().GetError().GetMessage())
 }

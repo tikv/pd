@@ -255,9 +255,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
-		return &pdpb.GetClusterInfoResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
-		}, nil
+		return nil, errs.ErrNotStarted
 	}
 
 	var tsoServiceAddrs []string
@@ -444,15 +442,11 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
-		return &pdpb.GetMembersResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
-		}, nil
+		return nil, errs.ErrNotStarted
 	}
 	members, err := s.Server.GetMembers()
 	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
+		return getMembersErrorResult(err)
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
@@ -462,9 +456,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	if (pdLeader == nil && leader != nil) || (etcdLeader == nil && leaderID != 0) {
 		members, err = s.ReloadMembers()
 		if err != nil {
-			return &pdpb.GetMembersResponse{
-				Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return getMembersErrorResult(err)
 		}
 		leaderID = s.member.GetEtcdLeader()
 		leader = s.member.GetLeader()
@@ -476,6 +468,17 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		Members:    members,
 		Leader:     pdLeader,
 		EtcdLeader: etcdLeader,
+	}, nil
+}
+
+func getMembersErrorResult(err error) (*pdpb.GetMembersResponse, error) {
+	if errors.ErrorEqual(err, errs.ErrServerNotStarted.FastGenByArgs()) {
+		return nil, errs.ErrNotStarted
+	}
+	// Keep other server-side failures in the response header so clients don't
+	// mistake them for service or transport availability failures.
+	return &pdpb.GetMembersResponse{
+		Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 	}, nil
 }
 
