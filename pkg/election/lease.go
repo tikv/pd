@@ -177,7 +177,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	l.runKeepAlive(ctx, nil)
 }
 
-func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
+func (l *Lease) runKeepAlive(ctx context.Context, canRenew func() bool) {
 	defer logutil.LogPanic()
 
 	if l == nil {
@@ -186,15 +186,15 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
-		guardRejected  atomic.Bool
-		guardedRenewal func() bool
+		guardRejected       atomic.Bool
+		checkRenewalAllowed func() bool
 	)
-	if renewalGuard := guard; renewalGuard != nil {
-		guardedRenewal = func() bool {
+	if canRenew != nil {
+		checkRenewalAllowed = func() bool {
 			if guardRejected.Load() {
 				return false
 			}
-			if renewalGuard() {
+			if canRenew() {
 				return true
 			}
 			if guardRejected.CompareAndSwap(false, true) {
@@ -204,7 +204,7 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 			return false
 		}
 	}
-	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, guardedRenewal)
+	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, checkRenewalAllowed)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -293,7 +293,7 @@ func (l *Lease) tryStoreExpireTime(t time.Time) bool {
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, guard func() bool) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, canRenew func() bool) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
@@ -319,7 +319,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, gua
 			go func() {
 				defer logutil.LogPanic()
 
-				if guard != nil && !guard() {
+				if canRenew != nil && !canRenew() {
 					return
 				}
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)

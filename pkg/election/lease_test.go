@@ -118,7 +118,6 @@ func TestLeaseKeepAlive(t *testing.T) {
 
 	re.NoError(lease.Grant(defaultLeaseTimeout))
 	ch := lease.keepAliveWorker(ctx, 2*time.Second, nil)
-	time.Sleep(2 * time.Second)
 	<-ch
 	re.NoError(lease.Close())
 }
