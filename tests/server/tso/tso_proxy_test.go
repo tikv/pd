@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,31 @@ func (s *tsoProxyTestSuite) TestRejectFollowerForwardedHost() {
 
 	s.verifyForwardedHostRejected(client, s.follower.GetAddr())
 	s.verifyForwardedHostRejected(s.pdClient, s.follower.GetAddr())
+}
+
+func (s *tsoProxyTestSuite) TestAcceptLeaderForwardedHostWithDifferentScheme() {
+	re := s.Require()
+	forwardedHost := strings.Replace(s.leader.GetAddr(), "http://", "https://", 1)
+	re.NotEqual(s.leader.GetAddr(), forwardedHost)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
+
+	resp, err := s.pdClient.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
+	re.NoError(err)
+	re.NotNil(resp)
+	re.Equal(s.defaultReq.GetHeader().GetClusterId(), resp.GetHeader().GetClusterId())
+
+	client, err := s.pdClient.Tso(ctx)
+	re.NoError(err)
+	defer func() {
+		err := client.CloseSend()
+		if err != nil && err != io.EOF {
+			re.NoError(err)
+		}
+	}()
+	s.verifyProxyIsHealthyWith(client)
 }
 
 func (s *tsoProxyTestSuite) verifyForwardedHostRejected(client pdpb.PDClient, forwardedHost string) {

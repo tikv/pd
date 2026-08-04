@@ -31,6 +31,35 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestIsSamePDClientURL(t *testing.T) {
+	testCases := []struct {
+		name   string
+		first  string
+		second string
+		same   bool
+	}{
+		{name: "same HTTP URL", first: "http://127.0.0.1:2379", second: "http://127.0.0.1:2379", same: true},
+		{name: "same HTTPS URL", first: "https://127.0.0.1:2379", second: "https://127.0.0.1:2379", same: true},
+		{name: "HTTP to HTTPS", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379", same: true},
+		{name: "HTTPS to HTTP", first: "https://127.0.0.1:2379", second: "http://127.0.0.1:2379", same: true},
+		{name: "uppercase scheme", first: "HTTP://127.0.0.1:2379", second: "https://127.0.0.1:2379"},
+		{name: "different host", first: "http://127.0.0.1:2379", second: "https://127.0.0.2:2379"},
+		{name: "different port", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2380"},
+		{name: "different path", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379/path"},
+		{name: "different query", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379?query=value"},
+		{name: "missing scheme", first: "http://127.0.0.1:2379", second: "127.0.0.1:2379"},
+		{name: "unsupported scheme", first: "http://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
+		{name: "same unsupported URL", first: "ftp://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
+		{name: "empty URLs"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.same, isSamePDClientURL(testCase.first, testCase.second))
+		})
+	}
+}
+
 func TestNewSchedulingAskBatchSplitRequestPreservesReason(t *testing.T) {
 	re := require.New(t)
 	req := newSchedulingAskBatchSplitRequest(&pdpb.AskBatchSplitRequest{

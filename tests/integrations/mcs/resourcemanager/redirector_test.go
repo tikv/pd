@@ -376,7 +376,10 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 	re.Equal(uint64(320), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
 	re.Equal(int64(480), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
 
-	modifyResp, err := followerClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
+	forwardedHost := strings.Replace(suite.pdLeader.GetAddr(), "http://", "https://", 1)
+	re.NotEqual(suite.pdLeader.GetAddr(), forwardedHost)
+	forwardedCtx = grpcutil.BuildForwardContext(ctx, forwardedHost)
+	modifyResp, err := followerClient.ModifyResourceGroup(forwardedCtx, &rmpb.PutResourceGroupRequest{Group: group})
 	re.NoError(err)
 	re.Equal("Success!", modifyResp.GetBody())
 
