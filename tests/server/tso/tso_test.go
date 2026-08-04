@@ -87,7 +87,6 @@ func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLoca
 			DcLocation: dcLocation,
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		ctx = grpcutil.BuildForwardContext(ctx, cluster.GetServer(leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr())
 		tsMap[dcLocation] = testGetTimestamp(re, ctx, dcClientMap[dcLocation], req)
 		cancel()
 	}

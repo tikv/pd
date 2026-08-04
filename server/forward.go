@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -393,6 +394,25 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return conn.(*grpc.ClientConn), nil
 }
 
+// validatePDForwardedHost checks that a PD address received from forwarding
+// metadata belongs to the current PD leader. The metadata is controlled by the
+// caller, so it must be validated before both local handling and dialing.
+func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
+	leader := s.GetLeader()
+	if leader == nil || len(leader.GetClientUrls()) == 0 {
+		return ErrNotLeader
+	}
+	for _, clientURL := range leader.GetClientUrls() {
+		if isSamePDClientURL(clientURL, forwardedHost) {
+			return nil
+		}
+	}
+	// Preserve the not-leader marker because legacy PD clients use it to
+	// synchronously refresh membership when their forwarded host becomes stale.
+	return status.Errorf(codes.InvalidArgument,
+		"forwarded host %q is not a client URL of the PD leader: pd %s of cluster", forwardedHost, errs.NotLeaderErr)
+}
+
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
 	client, ok := s.clientConns.LoadAndDelete(forwardedHost)
 	if !ok {
@@ -411,11 +431,20 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
 	for _, addr := range memberAddrs {
-		if addr == host {
+		if isSamePDClientURL(addr, host) {
 			return true
 		}
 	}
 	return false
+}
+
+// isSamePDClientURL checks whether two HTTP(S) client URLs differ only in
+// scheme. PD clients may rewrite the scheme to match their TLS configuration,
+// while gRPC uses the URL host and the TLS configuration independently.
+func isSamePDClientURL(first, second string) bool {
+	firstHasValidScheme := strings.HasPrefix(first, "http://") || strings.HasPrefix(first, "https://")
+	secondHasValidScheme := strings.HasPrefix(second, "http://") || strings.HasPrefix(second, "https://")
+	return firstHasValidScheme && secondHasValidScheme && typeutil.EqualBaseURLs(first, second)
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
