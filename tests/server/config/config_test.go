@@ -96,7 +96,7 @@ func TestMetricStorageValidationAtQueryTime(t *testing.T) {
 	} {
 		postData, err := json.Marshal(map[string]any{"metric-storage": metricStorage})
 		re.NoError(err)
-		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, postData, testutil.StatusOK(re)))
+		re.NoError(tu.CheckPostJSON(tests.TestDialClient, configURL, postData, tu.StatusOK(re)))
 		re.Equal(metricStorage, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
 
 		queryResp, err := tests.TestDialClient.Get(queryURL)
