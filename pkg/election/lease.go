@@ -185,8 +185,10 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var guardRejected atomic.Bool
-	var guardedRenewal func() bool
+	var (
+		guardRejected  atomic.Bool
+		guardedRenewal func() bool
+	)
 	if renewalGuard := guard; renewalGuard != nil {
 		guardedRenewal = func() bool {
 			if guardRejected.Load() {
