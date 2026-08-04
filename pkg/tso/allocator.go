@@ -61,10 +61,11 @@ type Allocator struct {
 	// for election use
 	member          member.Election
 	timestampOracle *timestampOracle
-	// lifecycleMu serializes allocator initialization and reset. lifecycleVersion
-	// changes whenever the timestamp in memory is initialized or reset.
-	lifecycleMu      sync.Mutex
-	lifecycleVersion uint64
+	// timestampStateMu serializes timestamp initialization and reset.
+	// timestampStateID changes after each successful initialization and every reset,
+	// so an UpdateTSO failure can only reset the state it started with.
+	timestampStateMu sync.Mutex
+	timestampStateID uint64
 
 	// observability
 	tsoAllocatorRoleGauge prometheus.Gauge
@@ -130,22 +131,9 @@ func (a *Allocator) allocatorUpdater() {
 			if !a.isServing() || !a.IsInitialize() {
 				continue
 			}
-			a.lifecycleMu.Lock()
-			lifecycleVersion := a.lifecycleVersion
-			a.lifecycleMu.Unlock()
+			stateIDBeforeUpdate := a.captureTimestampStateID()
 			if err := a.UpdateTSO(); err != nil {
-				a.lifecycleMu.Lock()
-				if lifecycleVersion == a.lifecycleVersion {
-					log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
-						append(a.logFields, errs.ZapError(err))...)
-					a.resetLocked(true)
-				} else {
-					log.Warn("ignored a stale allocator update failure after reinitialization",
-						append(a.logFields, errs.ZapError(err))...)
-				}
-				a.lifecycleMu.Unlock()
-				// To wait for the allocator to be re-initialized next time.
-				continue
+				a.handleTSOUpdateFailure(stateIDBeforeUpdate, err)
 			}
 		case <-a.ctx.Done():
 			a.Reset(false)
@@ -166,13 +154,13 @@ func (a *Allocator) Close() {
 
 // Initialize will initialize the created TSO allocator.
 func (a *Allocator) Initialize() error {
-	a.lifecycleMu.Lock()
-	defer a.lifecycleMu.Unlock()
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
 	a.tsoAllocatorRoleGauge.Set(1)
 	if err := a.timestampOracle.syncTimestamp(); err != nil {
 		return err
 	}
-	a.lifecycleVersion++
+	a.timestampStateID++
 	return nil
 }
 
@@ -199,6 +187,26 @@ func (a *Allocator) UpdateTSO() (err error) {
 	return err
 }
 
+func (a *Allocator) captureTimestampStateID() uint64 {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	return a.timestampStateID
+}
+
+func (a *Allocator) handleTSOUpdateFailure(stateIDBeforeUpdate uint64, err error) {
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+
+	if stateIDBeforeUpdate != a.timestampStateID {
+		log.Warn("ignored a stale allocator update failure because the timestamp state has changed",
+			append(a.logFields, errs.ZapError(err))...)
+		return
+	}
+	log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
+		append(a.logFields, errs.ZapError(err))...)
+	a.resetAllocatorLocked(true)
+}
+
 // SetTSO sets the physical part with given TSO.
 func (a *Allocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	return a.timestampOracle.resetUserTimestamp(tso, ignoreSmaller, skipUpperBoundCheck)
@@ -218,14 +226,14 @@ func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timesta
 
 // Reset is used to reset the TSO allocator, it will also reset the leadership if the `resetLeadership` flag is true.
 func (a *Allocator) Reset(resetLeadership bool) {
-	a.lifecycleMu.Lock()
-	defer a.lifecycleMu.Unlock()
-	a.resetLocked(resetLeadership)
+	a.timestampStateMu.Lock()
+	defer a.timestampStateMu.Unlock()
+	a.resetAllocatorLocked(resetLeadership)
 }
 
-// resetLocked resets the allocator while lifecycleMu is held.
-func (a *Allocator) resetLocked(resetLeadership bool) {
-	a.lifecycleVersion++
+// resetAllocatorLocked resets the allocator. The caller must hold timestampStateMu.
+func (a *Allocator) resetAllocatorLocked(resetLeadership bool) {
+	a.timestampStateID++
 	a.tsoAllocatorRoleGauge.Set(0)
 	a.timestampOracle.resetTimestamp()
 	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.

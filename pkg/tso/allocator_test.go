@@ -104,7 +104,7 @@ func TestAllocatorIgnoresStaleUpdateFailure(t *testing.T) {
 	storage.stopFailures()
 	re.NoError(allocator.Initialize())
 	time.Sleep(2 * updateTSORetryInterval)
-	re.True(allocator.IsInitialize(), "a stale failure reset the new lease's timestamp")
+	re.True(allocator.IsInitialize(), "a stale update failure reset the reinitialized timestamp")
 
 	member.PromoteSelf()
 	_, err := allocator.GenerateTSO(context.Background(), 1)
