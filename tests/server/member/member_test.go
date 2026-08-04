@@ -303,7 +303,9 @@ func TestPDLeaderLeaseStopsWhenEtcdLeaderChanges(t *testing.T) {
 		re.NoError(failpoint.Disable(failpointName))
 	}()
 
-	re.NoError(oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), newEtcdLeader.GetServerID()))
+	testutil.Eventually(re, func() bool {
+		return oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), newEtcdLeader.GetServerID()) == nil
+	})
 	testutil.Eventually(re, func() bool {
 		leaderID, err := oldLeader.GetEtcdLeaderID()
 		return err == nil && leaderID == newEtcdLeader.GetServerID()

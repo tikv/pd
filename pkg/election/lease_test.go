@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -216,29 +218,71 @@ func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
 	re.Equal(int32(1), clientLease.calls.Load())
 }
 
-func TestTryStoreExpireTimeDoesNotReviveResetLease(t *testing.T) {
-	const attempts = 1000
+func TestKeepAliveResponseDoesNotReviveResetLease(t *testing.T) {
 	re := require.New(t)
-	lease := &Lease{}
-	for range attempts {
-		lease.expireTime.Store(time.Now().Add(time.Minute))
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			<-start
-			lease.expireTime.Store(typeutil.ZeroTime)
-		}()
-		go func() {
-			defer wg.Done()
-			<-start
-			lease.tryStoreExpireTime(time.Now().Add(time.Minute))
-		}()
-		close(start)
-		wg.Wait()
-		re.True(lease.IsExpired())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientLease := &keepAliveOnceCountingLease{}
+	lease := &Lease{
+		purpose:      "test_keepalive_response_after_reset",
+		lease:        clientLease,
+		leaseTimeout: 30 * time.Second,
+		metrics:      newLeaseMetrics("test_keepalive_response_after_reset"),
 	}
+	lease.setID(1)
+	lease.expireTime.Store(time.Now().Add(time.Minute))
+
+	loadedOldExpireTime := make(chan struct{})
+	resumeStore := make(chan struct{})
+	var injectOnce sync.Once
+	var resumeOnce sync.Once
+	resume := func() {
+		resumeOnce.Do(func() {
+			close(resumeStore)
+		})
+	}
+	defer resume()
+
+	failpointName := "github.com/tikv/pd/pkg/election/beforeCompareAndSwapExpireTime"
+	re.NoError(failpoint.EnableCall(failpointName, func() {
+		injectOnce.Do(func() {
+			close(loadedOldExpireTime)
+			<-resumeStore
+		})
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable(failpointName))
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lease.runKeepAlive(ctx, nil)
+	}()
+
+	re.Eventually(func() bool {
+		select {
+		case <-loadedOldExpireTime:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	lease.expireTime.Store(typeutil.ZeroTime)
+	resume()
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	re.True(lease.IsExpired())
+	re.True(lease.loadExpireTime().IsZero())
+	re.Equal(int32(1), clientLease.calls.Load())
 }
 
 type keepAliveOnceCountingLease struct {

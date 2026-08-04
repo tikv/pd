@@ -22,6 +22,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -282,6 +283,7 @@ func (l *Lease) tryStoreExpireTime(t time.Time) bool {
 		if oldExpireTime.IsZero() {
 			return false
 		}
+		failpoint.InjectCall("beforeCompareAndSwapExpireTime")
 		if l.expireTime.CompareAndSwap(oldExpireTime, t) {
 			return true
 		}
