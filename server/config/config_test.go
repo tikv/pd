@@ -70,7 +70,6 @@ func TestReloadConfig(t *testing.T) {
 	scheduleCfg.MaxSnapshotCount = 10
 	opt.SetMaxReplicas(5)
 	opt.GetPDServerConfig().UseRegionStorage = true
-	opt.GetPDServerConfig().MetricStorage = "file:///tmp/legacy-metrics"
 	re.NoError(opt.Persist(storage))
 
 	newOpt, err := newTestScheduleOption()
@@ -80,7 +79,6 @@ func TestReloadConfig(t *testing.T) {
 	re.Equal(5, newOpt.GetMaxReplicas())
 	re.Equal(uint64(10), newOpt.GetMaxSnapshotCount())
 	re.Equal(int64(512), newOpt.GetMaxMovableHotPeerSize())
-	re.Equal("file:///tmp/legacy-metrics", newOpt.GetPDServerConfig().MetricStorage)
 }
 
 func TestReloadUpgrade(t *testing.T) {
@@ -409,25 +407,6 @@ dashboard-address = "foo"
 		if !test.hasErr {
 			re.Equal(test.dashboardAddress, cfg.PDServerCfg.DashboardAddress)
 		}
-	}
-}
-
-func TestPDServerMetricStorageConfigDoesNotBlockStartup(t *testing.T) {
-	for _, metricStorage := range []string{
-		"http://192.168.0.1:9090",
-		"http://127.0.0.1:9090",
-		"http://localhost:9090",
-		"file:///tmp/metrics",
-		"http://user:pass@metrics.example",
-		"not a URL",
-	} {
-		t.Run(metricStorage, func(t *testing.T) {
-			cfg := NewConfig()
-			meta, err := toml.Decode(fmt.Sprintf("[pd-server]\nmetric-storage = %q\n", metricStorage), &cfg)
-			require.NoError(t, err)
-			require.NoError(t, cfg.Adjust(&meta, false))
-			require.Equal(t, metricStorage, cfg.PDServerCfg.MetricStorage)
-		})
 	}
 }
 

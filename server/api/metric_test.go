@@ -31,8 +31,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/tikv/pd/server/config"
 )
 
 func TestResolveMetricStorageTarget(t *testing.T) {
@@ -94,55 +92,6 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 	}}
 	_, err := resolveMetricStorageTarget(context.Background(), "http://metrics.example", resolver)
 	require.Error(t, err, "every resolved address must be safe")
-}
-
-func TestValidateMetricStorageConfigUpdate(t *testing.T) {
-	const legacyTarget = "file:///tmp/legacy-metrics"
-	testCases := []struct {
-		name    string
-		conf    map[string]any
-		current string
-		wantErr bool
-	}{
-		{name: "Unrelated", conf: map[string]any{"schedule.leader-schedule-limit": 1}},
-		{name: "PrivateTarget", conf: map[string]any{metricStorageConfigKey: "http://192.168.0.1:9090"}},
-		{name: "InvalidTarget", conf: map[string]any{metricStorageConfigKey: "file:///tmp/metrics"}, wantErr: true},
-		{name: "UnchangedLegacyTarget", conf: map[string]any{metricStorageConfigKey: legacyTarget}, current: legacyTarget},
-		{name: "UnchangedPrefixedLegacyTarget", conf: map[string]any{prefixedMetricStorageConfigKey: legacyTarget}, current: legacyTarget},
-		{name: "ChangedLegacyTarget", conf: map[string]any{metricStorageConfigKey: "http://127.0.0.1:9090"}, current: legacyTarget, wantErr: true},
-		{name: "NewLoopback", conf: map[string]any{metricStorageConfigKey: "http://127.0.0.1:9090"}, wantErr: true},
-		{name: "NewPrefixedLoopback", conf: map[string]any{prefixedMetricStorageConfigKey: "http://[::1]:9090"}, wantErr: true},
-		{name: "Localhost", conf: map[string]any{metricStorageConfigKey: "http://localhost:9090"}, wantErr: true},
-		{name: "Metadata", conf: map[string]any{metricStorageConfigKey: "http://100.100.100.200"}, wantErr: true},
-		{name: "Unspecified", conf: map[string]any{metricStorageConfigKey: "http://0.0.0.0"}, wantErr: true},
-		{name: "ClearLoopback", conf: map[string]any{metricStorageConfigKey: ""}},
-		{
-			name: "DifferentKeys",
-			conf: map[string]any{
-				metricStorageConfigKey:         "http://192.168.0.1:9090",
-				prefixedMetricStorageConfigKey: "http://192.168.0.2:9090",
-			},
-		},
-		{
-			name: "UnsafeSecondKey",
-			conf: map[string]any{
-				metricStorageConfigKey:         "http://192.168.0.1:9090",
-				prefixedMetricStorageConfigKey: "http://127.0.0.1:9090",
-			},
-			wantErr: true,
-		},
-		{name: "NonString", conf: map[string]any{metricStorageConfigKey: 1}, wantErr: true},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			err := validateMetricStorageConfigUpdate(testCase.conf, testCase.current)
-			if testCase.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-		})
-	}
 }
 
 func TestMetricQueryTransportInitializesAfterHTTPClient(t *testing.T) {
@@ -352,9 +301,9 @@ func TestMetricQueryDoesNotForwardResponseTrailers(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	storageURL, err := config.ParseMetricStorageURL(upstream.URL)
+	storageURL, err := parseMetricStorageURL(upstream.URL)
 	require.NoError(t, err)
-	proxy := newMetricReverseProxy(&metricTarget{MetricStorageURL: storageURL}, http.DefaultTransport)
+	proxy := newMetricReverseProxy(&metricTarget{metricStorageURL: storageURL}, http.DefaultTransport)
 	recorder := httptest.NewRecorder()
 	proxy.ServeHTTP(
 		&metricQueryResponseWriter{ResponseWriter: recorder},

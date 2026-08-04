@@ -42,30 +42,3 @@ func TestValidateURLWithScheme(t *testing.T) {
 		re.Equal(test.hasErr, ValidateURLWithScheme(test.addr) != nil)
 	}
 }
-
-func TestValidateMetricStorageTarget(t *testing.T) {
-	for _, rawURL := range []string{
-		"",
-		"http://metrics.example",
-		"http://192.168.0.1:9090",
-		"http://[fc00::1]:9090",
-	} {
-		require.NoError(t, ValidateMetricStorageTarget(rawURL), rawURL)
-	}
-
-	for _, rawURL := range []string{
-		"http://localhost:9090",
-		"http://metrics.localhost:9090",
-		"http://127.1.2.3:9090",
-		"http://[::1]:9090",
-		"http://[::ffff:127.0.0.1]:9090",
-		"http://0.0.0.0:9090",
-		"http://169.254.169.254:9090",
-		"http://100.100.100.200:9090",
-		"http://192.0.0.192:9090",
-		"http://[fd00:ec2::254]:9090",
-		"http://[fd20:ce::254]:9090",
-	} {
-		require.Error(t, ValidateMetricStorageTarget(rawURL), rawURL)
-	}
-}

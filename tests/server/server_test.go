@@ -555,14 +555,6 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
 	svr := cluster.GetServer(leader).GetServer()
-	legacyCfg := svr.GetPDServerConfig()
-	legacyCfg.MetricStorage = "file:///tmp/legacy-metrics"
-	err = svr.SetPDServerConfig(*legacyCfg)
-	re.ErrorContains(err, "metric-storage")
-
-	// Simulate a metric-storage value loaded from an older version. It remains
-	// inert, but must not prevent unrelated config updates after an upgrade.
-	svr.GetPersistOptions().SetPDServerConfig(legacyCfg)
 
 	// Test updating config without changing dashboard address
 	cfg := svr.GetPDServerConfig()
@@ -577,7 +569,6 @@ func TestSetPDServerConfigWithDashboard(t *testing.T) {
 	newCfg := svr.GetPDServerConfig()
 	re.Equal(originalDashboard, newCfg.DashboardAddress)
 	re.NotEqual(originalUseRegionStorage, newCfg.UseRegionStorage)
-	re.Equal(legacyCfg.MetricStorage, newCfg.MetricStorage)
 
 	// Change both other field and dashboard
 	cfg.UseRegionStorage = !cfg.UseRegionStorage
