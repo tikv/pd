@@ -158,6 +158,63 @@ func TestLeaseKeepAliveGuard(t *testing.T) {
 	re.Zero(clientLease.calls.Load())
 }
 
+func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	clientLease := &keepAliveOnceCountingLease{}
+	lease := &Lease{
+		purpose:      "test_lease_guard_transition",
+		lease:        clientLease,
+		leaseTimeout: 900 * time.Millisecond,
+		metrics:      newLeaseMetrics("test_lease_guard_transition"),
+	}
+	lease.setID(1)
+	initialExpireTime := time.Now().Add(100 * time.Millisecond)
+	lease.expireTime.Store(initialExpireTime)
+
+	var guardCalls atomic.Int32
+	rejectRenewal := make(chan struct{})
+	var rejectOnce sync.Once
+	reject := func() {
+		rejectOnce.Do(func() {
+			close(rejectRenewal)
+		})
+	}
+	defer reject()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lease.runKeepAlive(ctx, func() bool {
+			if guardCalls.Add(1) == 1 {
+				return true
+			}
+			<-rejectRenewal
+			return false
+		})
+	}()
+
+	// Confirm that the lease was renewed before changing the guard result.
+	re.Eventually(func() bool {
+		return clientLease.calls.Load() == 1 && lease.loadExpireTime().After(initialExpireTime)
+	}, time.Second, 10*time.Millisecond)
+	reject()
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+
+	re.True(lease.IsExpired())
+	re.GreaterOrEqual(guardCalls.Load(), int32(2))
+	re.Equal(int32(1), clientLease.calls.Load())
+}
+
 func TestTryStoreExpireTimeDoesNotReviveResetLease(t *testing.T) {
 	const attempts = 1000
 	re := require.New(t)
