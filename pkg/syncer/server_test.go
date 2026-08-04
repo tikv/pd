@@ -162,6 +162,28 @@ func TestDirectSyncSendLifecycleMetrics(t *testing.T) {
 	}
 }
 
+func TestLiveSyncSendLifecycleMetrics(t *testing.T) {
+	re := require.New(t)
+	canceledCounter := regionSyncerStreamEventCounters[streamEventContextCanceled]
+	sendErrorCounter := regionSyncerStreamEventCounters[streamEventSendError]
+	canceledBefore := promtestutil.ToFloat64(canceledCounter)
+	sendErrorBefore := promtestutil.ToFloat64(sendErrorCounter)
+	syncStream := newRegionSyncStream(&testServerStream{
+		sendErr: status.Error(codes.Canceled, "send canceled"),
+	}, 10)
+	syncer := newTestRegionSyncerWithStreams(t, map[string]*regionSyncStream{
+		"pd-follower": syncStream,
+	})
+	syncer.history.resetWithIndex(10)
+	syncer.history.record(newHistoryBufferTestRegion(1))
+
+	err := syncer.sendDownstream(context.Background(), "pd-follower", syncStream, false)
+
+	re.Error(err)
+	re.Equal(canceledBefore+1, promtestutil.ToFloat64(canceledCounter))
+	re.Equal(sendErrorBefore, promtestutil.ToFloat64(sendErrorCounter))
+}
+
 func TestSyncFullRegionsBuffersLiveRecords(t *testing.T) {
 	re := require.New(t)
 	syncer, _ := newTestRegionSyncer(t, newHistoryBufferTestRegion(1))
@@ -445,7 +467,7 @@ func TestDownstreamMetricsLifecycleIsConcurrentSafe(t *testing.T) {
 		defer wg.Done()
 		<-start
 		for range iterations {
-			syncStream.setDownstreamMetrics(downstream, 10, 11)
+			syncStream.setDownstreamMetrics(downstream, 11)
 			syncStream.deleteDownstreamMetrics()
 		}
 	}()
@@ -465,7 +487,7 @@ func TestSetDownstreamMetricsDoesNotWaitForSendLock(t *testing.T) {
 	syncStream.sendMu.Lock()
 	done := make(chan struct{})
 	go func() {
-		syncStream.setDownstreamMetrics("pd-lock-order-follower", 10, 11)
+		syncStream.setDownstreamMetrics("pd-lock-order-follower", 11)
 		close(done)
 	}()
 
@@ -482,7 +504,7 @@ func TestSetDownstreamMetricsDoesNotWaitForSendLock(t *testing.T) {
 
 func TestEmptyDownstreamNameMetricsAreDeleted(t *testing.T) {
 	syncStream := newRegionSyncStream(&testServerStream{}, 10)
-	syncStream.setDownstreamMetrics("", 10, 11)
+	syncStream.setDownstreamMetrics("", 11)
 	syncStream.deleteDownstreamMetrics()
 
 	require.False(t, regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(""))
@@ -632,10 +654,8 @@ func TestSyncAllowsNonPDDownstreamWithoutCreatingMetrics(t *testing.T) {
 
 func TestSyncMemberValidationDoesNotBlockStreams(t *testing.T) {
 	testCases := []struct {
-		name          string
-		member        *pdpb.Member
-		expectedName  string
-		collectMetric bool
+		name   string
+		member *pdpb.Member
 	}{
 		{
 			name: "unknown-member-id",
@@ -643,7 +663,6 @@ func TestSyncMemberValidationDoesNotBlockStreams(t *testing.T) {
 				MemberId: 999,
 				Name:     "untrusted-downstream-id",
 			},
-			expectedName: "untrusted-downstream-id",
 		},
 		{
 			name: "mismatched-member-name",
@@ -651,8 +670,6 @@ func TestSyncMemberValidationDoesNotBlockStreams(t *testing.T) {
 				MemberId: testDownstreamMemberID,
 				Name:     "untrusted-downstream-name",
 			},
-			expectedName:  "pd-follower",
-			collectMetric: true,
 		},
 	}
 	for _, testCase := range testCases {
@@ -673,17 +690,97 @@ func TestSyncMemberValidationDoesNotBlockStreams(t *testing.T) {
 			re.NotNil(<-stream.sendCh)
 			testutil.Eventually(re, func() bool {
 				names := syncer.GetAllDownstreamNames()
-				return len(names) == 1 && names[0] == testCase.expectedName
+				return len(names) == 1 && names[0] == testCase.member.GetName()
 			})
 			re.False(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.member.GetName()))
-			if testCase.collectMetric {
-				re.True(regionSyncerDownstreamLagRecordsGauge.DeleteLabelValues(testCase.expectedName))
-			}
+			_, initialized := downstreamMetricsState(getDownstreamStream(syncer, testCase.member.GetName()))
+			re.False(initialized)
 
 			cancel()
 			waitTestRegionSyncerUnavailable(re, done)
 		})
 	}
+}
+
+func TestSyncMemberLookupDoesNotBlockStream(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
+	server := &blockingGetMembersServer{
+		Server:  syncer.server,
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		members: []*pdpb.Member{newTestDownstreamMember()},
+	}
+	syncer.server = server
+	stream := newMockSyncRegionsServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startTestRegionSync(ctx, syncer, stream)
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: newTestDownstreamMember(),
+	}
+	<-server.started
+	re.NotNil(mustRecvSyncRegionResponse(t, stream, "member lookup blocked RegionSync"))
+	waitTestRegionSyncerBound(re, syncer)
+	close(server.release)
+	testutil.Eventually(re, func() bool {
+		name, initialized := downstreamMetricsState(getDownstreamStream(syncer, "pd-follower"))
+		return initialized && name == "pd-follower"
+	})
+
+	cancel()
+	waitTestRegionSyncerUnavailable(re, done)
+}
+
+func TestDownstreamMetricsInitializeWhenMemberBecomesAvailable(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t, newTestSyncRegion(1, 11))
+	server := &mutableGetMembersServer{Server: syncer.server}
+	syncer.server = server
+	stream := newMockSyncRegionsServer()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := startTestRegionSync(ctx, syncer, stream)
+	syncer.history.resetWithIndex(10)
+
+	stream.recvCh <- &pdpb.SyncRegionRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Member: newTestDownstreamMember(),
+	}
+	re.NotNil(mustRecvSyncRegionResponse(t, stream, "initial RegionSync response was not sent"))
+	waitTestRegionSyncerBound(re, syncer)
+	_, initialized := downstreamMetricsState(getDownstreamStream(syncer, "pd-follower"))
+	re.False(initialized)
+	syncStream := getDownstreamStream(syncer, "pd-follower")
+	syncStream.setDownstreamSyncIndex(7)
+
+	server.setMembers([]*pdpb.Member{newTestDownstreamMember()})
+	testutil.Eventually(re, func() bool {
+		name, initialized := downstreamMetricsState(syncStream)
+		return initialized && name == "pd-follower" &&
+			promtestutil.ToFloat64(regionSyncerDownstreamLagRecordsGauge.WithLabelValues(name)) == 3
+	})
+
+	cancel()
+	waitTestRegionSyncerUnavailable(re, done)
+}
+
+func TestStaleMemberLookupDoesNotInitializeReplacedStreamMetrics(t *testing.T) {
+	re := require.New(t)
+	syncer, _ := newTestRegionSyncer(t)
+	oldStream, _ := syncer.bindStreamForSync("pd-follower", &testServerStream{}, 0, false)
+	newStream, _ := syncer.bindStreamForSync("pd-follower", &testServerStream{}, 0, false)
+
+	re.False(syncer.setDownstreamMetricsIfCurrent("pd-follower", oldStream))
+	_, initialized := downstreamMetricsState(oldStream)
+	re.False(initialized)
+	re.True(syncer.setDownstreamMetricsIfCurrent("pd-follower", newStream))
+	_, initialized = downstreamMetricsState(newStream)
+	re.True(initialized)
+
+	syncer.unbindStream("pd-follower", newStream)
 }
 
 func TestSyncContinuesWhenMemberListIsUnavailable(t *testing.T) {
@@ -1768,6 +1865,55 @@ type getMembersErrorServer struct {
 
 func (*getMembersErrorServer) GetMembers() ([]*pdpb.Member, error) {
 	return nil, errors.New("failed to load members")
+}
+
+type blockingGetMembersServer struct {
+	Server
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+	members []*pdpb.Member
+}
+
+func (s *blockingGetMembersServer) GetMembers() ([]*pdpb.Member, error) {
+	s.once.Do(func() {
+		close(s.started)
+	})
+	<-s.release
+	return s.members, nil
+}
+
+type mutableGetMembersServer struct {
+	Server
+	mu      sync.RWMutex
+	members []*pdpb.Member
+}
+
+func (s *mutableGetMembersServer) GetMembers() ([]*pdpb.Member, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.members, nil
+}
+
+func (s *mutableGetMembersServer) setMembers(members []*pdpb.Member) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.members = members
+}
+
+func getDownstreamStream(syncer *RegionSyncer, name string) *regionSyncStream {
+	syncer.mu.RLock()
+	defer syncer.mu.RUnlock()
+	return syncer.mu.streams[name]
+}
+
+func downstreamMetricsState(stream *regionSyncStream) (string, bool) {
+	if stream == nil {
+		return "", false
+	}
+	stream.metrics.RLock()
+	defer stream.metrics.RUnlock()
+	return stream.metrics.downstream, stream.metrics.initialized
 }
 
 func newMockSyncRegionsServer() *mockSyncRegionsServer {
