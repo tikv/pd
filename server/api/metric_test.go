@@ -411,6 +411,45 @@ func TestMetricQueryResponseLimit(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestValidatePrometheusQueryResponseResultShape(t *testing.T) {
+	testCases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "EmptyArray", body: `{"status":"success","data":{"resultType":"vector","result":[]}}`},
+		{name: "NestedArray", body: `{"status":"success","data":{"resultType":"vector","result":[[1], {"value":2}]}}`},
+		{name: "Whitespace", body: "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\": \n[1, 2]\t}}"},
+		{name: "Missing", body: `{"status":"success","data":{"resultType":"vector"}}`, wantErr: true},
+		{name: "Null", body: `{"status":"success","data":{"resultType":"vector","result":null}}`, wantErr: true},
+		{name: "Object", body: `{"status":"success","data":{"resultType":"vector","result":{}}}`, wantErr: true},
+		{name: "String", body: `{"status":"success","data":{"resultType":"vector","result":"[]"}}`, wantErr: true},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			err := validatePrometheusQueryResponse([]byte(testCase.body))
+			if testCase.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func BenchmarkValidatePrometheusQueryResponseLargeResult(b *testing.B) {
+	body := []byte(`{"status":"success","data":{"resultType":"vector","result":[` +
+		strings.Repeat("0,", 1<<19) + `0]}}`)
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if err := validatePrometheusQueryResponse(body); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 const successMetricResponse = `{"status":"success","data":{"resultType":"vector","result":[]}}`
 
 type staticMetricResolver struct {

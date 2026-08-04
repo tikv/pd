@@ -350,12 +350,22 @@ func readMetricQueryResponse(body io.Reader, limit int64) ([]byte, error) {
 	return data, nil
 }
 
+// prometheusQueryResult records only the JSON shape so validation does not
+// retain a second copy of a potentially large result.
+type prometheusQueryResult bool
+
+func (result *prometheusQueryResult) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	*result = len(data) >= 2 && data[0] == '[' && data[len(data)-1] == ']'
+	return nil
+}
+
 func validatePrometheusQueryResponse(body []byte) error {
 	response := struct {
 		Status string `json:"status"`
 		Data   *struct {
-			ResultType string          `json:"resultType"`
-			Result     json.RawMessage `json:"result"`
+			ResultType string                `json:"resultType"`
+			Result     prometheusQueryResult `json:"result"`
 		} `json:"data"`
 	}{}
 	if err := json.Unmarshal(body, &response); err != nil {
@@ -364,8 +374,7 @@ func validatePrometheusQueryResponse(body []byte) error {
 	if response.Status != "success" || response.Data == nil {
 		return errors.New("metric storage returned a non-success Prometheus response")
 	}
-	result := bytes.TrimSpace(response.Data.Result)
-	if len(result) < 2 || result[0] != '[' || result[len(result)-1] != ']' {
+	if !response.Data.Result {
 		return errors.New("metric storage returned an invalid Prometheus result")
 	}
 	switch response.Data.ResultType {
