@@ -855,7 +855,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Reset(100 * time.Millisecond)
+		ticker.Reset(2 * time.Second)
 	})
 	defer ticker.Stop()
 
@@ -865,7 +865,6 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 			log.Info("node state check job has been stopped")
 			return
 		case <-ticker.C:
-			failpoint.InjectCall("blockCheckStores")
 			c.checkStores()
 		}
 	}
