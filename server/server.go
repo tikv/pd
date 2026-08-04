@@ -2076,7 +2076,13 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
-			if !s.member.IsServing() {
+			isServing := s.member.IsServing()
+			failpoint.Inject("skipCampaignLeaderServingCheck", func(val failpoint.Value) {
+				if memberFailpointEnabled(val, s.member.ID()) {
+					isServing = true
+				}
+			})
+			if !isServing {
 				log.Info("no longer a leader because lease has expired, PD leader will step down")
 				return
 			}

@@ -245,15 +245,14 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		// Add a header to the response, it is used to mark whether the request has been forwarded to the microservice.
 		w.Header().Add(apiutil.XForwardedToMicroserviceHeader, "true")
 	} else if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) == 0 {
-		leader := h.waitForLeader(r)
+		leader, serveLocally := h.waitForLeader(r)
+		if serveLocally {
+			next(w, r)
+			return
+		}
 		// The leader has not been elected yet.
 		if leader == nil {
 			http.Error(w, errs.ErrRedirectNoLeader.FastGenByArgs().Error(), http.StatusServiceUnavailable)
-			return
-		}
-		// If the leader is the current server now, we can handle the request directly.
-		if h.s.GetMember().IsServing() || leader.GetName() == h.s.Name() {
-			next(w, r)
 			return
 		}
 		clientUrls = leader.GetClientUrls()
@@ -284,32 +283,40 @@ const (
 	backoffInterval = 100 * time.Millisecond
 )
 
-// If current server does not have a leader, backoff to increase the chance of success.
-func (h *redirector) waitForLeader(r *http.Request) (leader *pdpb.Member) {
+// If the current server is not serving and does not know another leader, backoff to increase the chance of success.
+func (h *redirector) waitForLeader(r *http.Request) (*pdpb.Member, bool) {
 	var (
 		interval = backoffInterval
 		maxDelay = backoffMaxDelay
 		curDelay = time.Duration(0)
 	)
 	for {
-		leader = h.s.GetMember().GetLeader()
-		if leader != nil {
-			return
+		if h.s.GetMember().IsServing() {
+			return nil, true
+		}
+		leader := h.s.GetMember().GetLeader()
+		if leader != nil && leader.GetMemberId() != h.s.GetMember().ID() {
+			// The local server may have become the leader after the cached leader
+			// was loaded. Prefer serving locally when that transition completes.
+			if h.s.GetMember().IsServing() {
+				return nil, true
+			}
+			return leader, false
 		}
 		select {
 		case <-time.After(interval):
 			curDelay += interval
 			if curDelay >= maxDelay {
-				return
+				return nil, false
 			}
 			interval *= 2
 			if curDelay+interval > maxDelay {
 				interval = maxDelay - curDelay
 			}
 		case <-r.Context().Done():
-			return
+			return nil, false
 		case <-h.s.Context().Done():
-			return
+			return nil, false
 		}
 	}
 }

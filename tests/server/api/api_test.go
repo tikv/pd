@@ -714,6 +714,66 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	}
 }
 
+func TestRedirectorRejectsStaleSelfWhenCampaignDoesNotExit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2, func(conf *config.Config, _ string) {
+		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeader := cluster.GetServer(oldLeaderName)
+	re.NotNil(oldLeader)
+
+	var newLeader *tests.TestServer
+	for name, svr := range cluster.GetServers() {
+		if name != oldLeaderName {
+			newLeader = svr
+			break
+		}
+	}
+	re.NotNil(newLeader)
+
+	memberID := oldLeader.GetServerID()
+	servingCheckFailpoint := "github.com/tikv/pd/server/skipCampaignLeaderServingCheck"
+	etcdLeaderCheckFailpoint := "github.com/tikv/pd/server/skipCampaignLeaderEtcdLeaderCheck"
+	re.NoError(failpoint.Enable(servingCheckFailpoint, fmt.Sprintf("return(\"%d\")", memberID)))
+	defer func() {
+		re.NoError(failpoint.Disable(servingCheckFailpoint))
+	}()
+	re.NoError(failpoint.Enable(etcdLeaderCheckFailpoint, fmt.Sprintf("return(\"%d\")", memberID)))
+	defer func() {
+		re.NoError(failpoint.Disable(etcdLeaderCheckFailpoint))
+	}()
+
+	testutil.Eventually(re, func() bool {
+		return oldLeader.MoveEtcdLeader(oldLeader.GetServerID(), newLeader.GetServerID()) == nil
+	})
+	testutil.Eventually(re, func() bool {
+		leaderID, err := oldLeader.GetEtcdLeaderID()
+		return err == nil && leaderID == newLeader.GetServerID()
+	})
+	testutil.Eventually(re, newLeader.IsLeader)
+	re.False(oldLeader.IsLeader())
+	re.Equal(oldLeaderName, oldLeader.GetLeader().GetName())
+
+	resp, err := tests.TestDialClient.Get(oldLeader.GetAddr() + "/pd/api/v1/leader")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusServiceUnavailable, resp.StatusCode)
+
+	resp, err = tests.TestDialClient.Get(newLeader.GetAddr() + "/pd/api/v1/leader")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+}
+
 func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re := suite.Require()
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
