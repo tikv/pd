@@ -253,7 +253,6 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
-		rw.regionLabeler.BuildRangeListLocked()
 		if rw.checkerController == nil {
 			return errors.New("checker controller is nil")
 		}
