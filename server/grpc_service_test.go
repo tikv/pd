@@ -58,6 +58,7 @@ func TestIsSamePDClientURL(t *testing.T) {
 		{name: "different port", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2380"},
 		{name: "different path", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379/path"},
 		{name: "different query", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379?query=value"},
+		{name: "nested scheme", first: "http://127.0.0.1:2379", second: "https://http://127.0.0.1:2379"},
 		{name: "missing scheme", first: "http://127.0.0.1:2379", second: "127.0.0.1:2379"},
 		{name: "unsupported scheme", first: "http://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
 		{name: "same unsupported URL", first: "ftp://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
