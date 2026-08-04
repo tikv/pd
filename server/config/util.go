@@ -89,7 +89,7 @@ func PassesMetricStorageAddressBaseline(address netip.Addr) bool {
 	// Block well-known cloud instance metadata endpoints explicitly, including
 	// addresses that are not covered by the generic IP classifications above.
 	switch address.String() {
-	case "169.254.169.254", "100.100.100.200", "fd00:ec2::254":
+	case "169.254.169.254", "100.100.100.200", "192.0.0.192", "fd00:ec2::254", "fd20:ce::254":
 		blocked = true
 	}
 	return !blocked

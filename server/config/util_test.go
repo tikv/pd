@@ -62,7 +62,9 @@ func TestValidateMetricStorageTarget(t *testing.T) {
 		"http://0.0.0.0:9090",
 		"http://169.254.169.254:9090",
 		"http://100.100.100.200:9090",
+		"http://192.0.0.192:9090",
 		"http://[fd00:ec2::254]:9090",
+		"http://[fd20:ce::254]:9090",
 	} {
 		require.Error(t, ValidateMetricStorageTarget(rawURL), rawURL)
 	}

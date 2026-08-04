@@ -71,7 +71,9 @@ func TestResolveMetricStorageTarget(t *testing.T) {
 		"224.0.0.1",
 		"240.0.0.1",
 		"100.100.100.200",
+		"192.0.0.192",
 		"fd00:ec2::254",
+		"fd20:ce::254",
 	}
 	for _, address := range unsafeAddresses {
 		resolver := staticMetricResolver{addresses: []netip.Addr{netip.MustParseAddr(address)}}
