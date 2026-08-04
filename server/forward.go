@@ -21,6 +21,8 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -126,9 +128,11 @@ func (f *tsoForwarder) forwardTSORequest(
 ) (*tsopb.TsoResponse, error) {
 	tsopbReq := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       request.GetHeader().GetClusterId(),
-			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
+			ClusterId: request.GetHeader().GetClusterId(),
+			SenderId:  request.GetHeader().GetSenderId(),
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: request.GetCount(),
@@ -450,6 +454,22 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return conn.(*grpc.ClientConn), nil
 }
 
+// validatePDForwardedHost checks that a PD address received from forwarding
+// metadata belongs to the current PD leader. The metadata is controlled by the
+// caller, so it must be validated before both local handling and dialing.
+func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
+	leader := s.GetLeader()
+	if leader == nil || len(leader.GetClientUrls()) == 0 {
+		return status.Error(codes.Unavailable, "PD leader is not available")
+	}
+	for _, clientURL := range leader.GetClientUrls() {
+		if clientURL == forwardedHost {
+			return nil
+		}
+	}
+	return status.Errorf(codes.InvalidArgument, "forwarded host %q is not a client URL of the PD leader", forwardedHost)
+}
+
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
 	client, ok := s.clientConns.LoadAndDelete(forwardedHost)
 	if !ok {
@@ -481,8 +501,10 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       keypath.ClusterID(),
-			KeyspaceId:      keyspace.GetBootstrapKeyspaceID(),
+			ClusterId: keypath.ClusterID(),
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspace.GetBootstrapKeyspaceID(),
+			},
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,

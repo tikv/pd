@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -86,6 +88,7 @@ func (suite *resourceManagerRedirectorTestSuite) SetupTest() {
 	meta, err := suite.pdLeader.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{Name: suite.keyspaceName})
 	re.NoError(err)
 	suite.keyspaceID = meta.GetId()
+	suite.waitForResourceManagerGroup(server.DefaultResourceGroupName)
 }
 
 func (suite *resourceManagerRedirectorTestSuite) TearDownTest() {
@@ -103,6 +106,24 @@ func (suite *resourceManagerRedirectorTestSuite) waitForResourceManagerPrimary()
 		addr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(ctx, constant.ResourceManagerServiceName)
 		return ok && addr != ""
 	}, testutil.WithWaitFor(30*time.Second))
+}
+
+func (suite *resourceManagerRedirectorTestSuite) waitForResourceManagerGroup(groupName string) {
+	re := suite.Require()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	conn, err := grpcutil.GetClientConn(ctx, suite.rmPrimary.GetAddr(), nil)
+	re.NoError(err)
+	defer conn.Close()
+	client := rmpb.NewResourceManagerClient(conn)
+	req := &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: groupName,
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
+	}
+	testutil.Eventually(re, func() bool {
+		resp, err := client.GetResourceGroup(ctx, req)
+		return err == nil && resp.GetError() == nil && resp.GetGroup() != nil
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *resourceManagerRedirectorTestSuite) TestRedirectsConfigRequests() {
@@ -196,9 +217,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 	rmClient := rmpb.NewResourceManagerClient(rmConn)
 	getReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: groupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	pdResp, err := pdClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
@@ -228,7 +247,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	_, err = rmClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: addGroup})
 	assertMetadataWriteRejected(err)
@@ -240,9 +259,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	addGetReq := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 	pdAddGetResp, err := pdClient.GetResourceGroup(ctx, addGetReq)
 	re.NoError(err)
@@ -287,17 +304,13 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCRedirectsResourceGroupR
 
 	_, err = rmClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	assertMetadataWriteRejected(err)
 
 	deleteResp, err := pdClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: addGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: suite.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	re.NoError(err)
 	re.Nil(deleteResp.GetError())
@@ -337,7 +350,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
 
 	addResp, err := leaderClient.AddResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
@@ -347,14 +360,26 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 	group.Priority = 11
 	group.RUSettings.RU.Settings.FillRate = 960
 	group.RUSettings.RU.Settings.BurstLimit = 1024
+	forwardedCtx := grpcutil.BuildForwardContext(ctx, suite.pdFollower.GetAddr())
+	_, err = followerClient.ModifyResourceGroup(forwardedCtx, &rmpb.PutResourceGroupRequest{Group: group})
+	re.Error(err)
+	re.Equal(codes.InvalidArgument, status.Code(err))
+
+	getReq := &rmpb.GetResourceGroupRequest{
+		ResourceGroupName: groupName,
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
+	}
+	unmodifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
+	re.NoError(err)
+	re.NotNil(unmodifiedResp.GetGroup())
+	re.Equal(uint32(5), unmodifiedResp.GetGroup().GetPriority())
+	re.Equal(uint64(320), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetFillRate())
+	re.Equal(int64(480), unmodifiedResp.GetGroup().GetRUSettings().GetRU().GetSettings().GetBurstLimit())
+
 	modifyResp, err := followerClient.ModifyResourceGroup(ctx, &rmpb.PutResourceGroupRequest{Group: group})
 	re.NoError(err)
 	re.Equal("Success!", modifyResp.GetBody())
 
-	getReq := &rmpb.GetResourceGroupRequest{
-		ResourceGroupName: groupName,
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
-	}
 	modifiedResp, err := leaderClient.GetResourceGroup(ctx, getReq)
 	re.NoError(err)
 	re.NotNil(modifiedResp.GetGroup())
@@ -364,7 +389,7 @@ func (suite *resourceManagerRedirectorTestSuite) TestGRPCMetadataWritesForwardFr
 
 	deleteResp, err := followerClient.DeleteResourceGroup(ctx, &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: groupName,
-		KeyspaceId:        &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	})
 	re.NoError(err)
 	re.Equal("Success!", deleteResp.GetBody())
@@ -386,10 +411,11 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 				Settings: &rmpb.TokenLimitSettings{FillRate: fillRate, BurstLimit: 200},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: suite.keyspaceID},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 	}
-	payload, err := json.Marshal(group)
+	payloadJSON, err := (&jsonpb.Marshaler{}).MarshalToString(group)
 	re.NoError(err)
+	payload := []byte(payloadJSON)
 	pdPostURL := fmt.Sprintf("%s%sconfig/group", suite.pdLeader.GetAddr(), apis.APIPathPrefix)
 	re.NoError(testutil.CheckPostJSON(
 		tests.TestDialClient,
@@ -399,6 +425,7 @@ func (suite *resourceManagerRedirectorTestSuite) createResourceGroupViaPD(name s
 		testutil.StringContain(re, "Success!"),
 		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
 	))
+	suite.waitForResourceManagerGroup(name)
 }
 
 func (suite *resourceManagerRedirectorTestSuite) fetchResourceGroup(addr, groupName string, opts ...func([]byte, int, http.Header)) *server.ResourceGroup {

@@ -25,6 +25,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -82,12 +84,146 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/group/test_group", nil)
 	re.Equal(http.StatusNotFound, resp.Code)
 
+	legacyKeyspaceIDs := []struct {
+		name       string
+		keyspaceID uint32
+		body       []byte
+	}{
+		{"legacy_default_group", 0, []byte(`{"name":"legacy_default_group","keyspace_id":{}}`)},
+		{"legacy_camel_default_group", 0, []byte(`{"name":"legacy_camel_default_group","keyspaceId":{}}`)},
+		{"legacy_uppercase_group", 42, []byte(`{"name":"legacy_uppercase_group","KEYSPACE_ID":{"VALUE":42}}`)},
+	}
+	for _, legacyKeyspaceID := range legacyKeyspaceIDs {
+		resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyKeyspaceID.body)
+		re.Equal(http.StatusOK, resp.Code)
+		re.Contains(store.groups, groupKey(legacyKeyspaceID.keyspaceID, legacyKeyspaceID.name))
+		resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyKeyspaceID.body)
+		re.Equal(http.StatusOK, resp.Code)
+	}
+
+	legacyFieldsBody := []byte(`{
+		"name":"legacy_fields_group",
+		"mode":1,
+		"PRIORITY":7,
+		"r_u_settings":{"R_U":{"SETTINGS":{"FILL_RATE":123,"BURST_LIMIT":456}}},
+		"keyspace_id":{"value":42}
+	}`)
+	resp = doRawResourceGroupRequest(handler, http.MethodPost, legacyFieldsBody)
+	re.Equal(http.StatusOK, resp.Code)
+	legacyFieldsGroup := store.groups[groupKey(42, "legacy_fields_group")]
+	re.NotNil(legacyFieldsGroup)
+	re.Equal(uint32(7), legacyFieldsGroup.Priority)
+	re.NotNil(legacyFieldsGroup.RUSettings)
+	re.NotNil(legacyFieldsGroup.RUSettings.RU)
+	re.NotNil(legacyFieldsGroup.RUSettings.RU.Settings)
+	re.Equal(uint64(123), legacyFieldsGroup.RUSettings.RU.Settings.FillRate)
+	re.Equal(int64(456), legacyFieldsGroup.RUSettings.RU.Settings.BurstLimit)
+
+	legacyFieldsBody = []byte(`{
+		"name":"legacy_fields_group",
+		"mode":1,
+		"PRIORITY":9,
+		"r_u_settings":{"R_U":{"SETTINGS":{"FILL_RATE":321,"BURST_LIMIT":654}}},
+		"keyspace_id":{"value":42}
+	}`)
+	resp = doRawResourceGroupRequest(handler, http.MethodPut, legacyFieldsBody)
+	re.Equal(http.StatusOK, resp.Code)
+	re.Equal(uint32(9), store.groups[groupKey(42, "legacy_fields_group")].Priority)
+	re.Equal(uint64(321), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.FillRate)
+	re.Equal(int64(654), store.groups[groupKey(42, "legacy_fields_group")].RUSettings.RU.Settings.BurstLimit)
+
+	protobufJSONGroup := &rmpb.ResourceGroup{
+		Name:       "protobuf_json_group",
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   11,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 42}},
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   789,
+					BurstLimit: 987,
+				},
+			},
+		},
+	}
+	var protobufJSON bytes.Buffer
+	re.NoError((&jsonpb.Marshaler{}).Marshal(&protobufJSON, protobufJSONGroup))
+	re.Contains(protobufJSON.String(), `"mode":"RUMode"`)
+	re.Contains(protobufJSON.String(), `"fillRate":"789"`)
+	re.Contains(protobufJSON.String(), `"burstLimit":"987"`)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, protobufJSON.Bytes())
+		re.Equal(http.StatusOK, resp.Code, resp.Body.String())
+		storedGroup := store.groups[groupKey(42, protobufJSONGroup.Name)]
+		re.NotNil(storedGroup)
+		re.Equal(rmpb.GroupMode_RUMode, storedGroup.Mode)
+		re.Equal(uint32(11), storedGroup.Priority)
+		re.Equal(uint64(789), storedGroup.RUSettings.RU.Settings.FillRate)
+		re.Equal(int64(987), storedGroup.RUSettings.RU.Settings.BurstLimit)
+	}
+
 	store.addErr = errors.New("add failed")
 	resp = doJSONRequest(re, handler, http.MethodPost, "/resource-manager/api/v1/config/group", group)
 	re.Equal(http.StatusInternalServerError, resp.Code)
+	store.addErr = nil
 
-	resp = doRawRequest(handler, http.MethodPost, "/resource-manager/api/v1/config/group", []byte("{invalid"))
+	resp = doRawResourceGroupRequest(handler, http.MethodPost, []byte("{invalid"))
 	re.Equal(http.StatusBadRequest, resp.Code)
+
+	invalidKeyspaceIDs := []struct {
+		body    []byte
+		message string
+	}{
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"Keyspace":{"value":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{},"keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}}}`),
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspaceId":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}},"keyspace_id":{}}`),
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","keyspace_id":{"keyspace_identity":{"namespace_id":1,"keyspace_id":42}},"keyspace_id":{}}`),
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","KEYSPACE_ID":{},"keyspaceId":{"value":42}}`),
+			"keyspace_id must be set only once",
+		},
+		{
+			[]byte(`{"name":"test_group","mode":"RUMode","keyspaceId":{"keyspaceIdentity":{"namespaceId":1,"keyspaceId":42}}}`),
+			"keyspace_id must contain a legacy value",
+		},
+	}
+	for _, invalidKeyspaceID := range invalidKeyspaceIDs {
+		for _, method := range []string{http.MethodPost, http.MethodPut} {
+			resp = doRawResourceGroupRequest(handler, method, invalidKeyspaceID.body)
+			re.Equal(http.StatusBadRequest, resp.Code)
+			re.Contains(resp.Body.String(), invalidKeyspaceID.message)
+		}
+	}
+
+	mixedJSONDialects := []byte(`{"name":"mixed_json_group","mode":"RUMode","PRIORITY":7}`)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, mixedJSONDialects)
+		re.Equal(http.StatusBadRequest, resp.Code)
+		re.NotContains(store.groups, groupKey(constant.NullKeyspaceID, "mixed_json_group"))
+	}
+
+	oversizedBody := bytes.Repeat([]byte("x"), int(maxResourceGroupRequestBytes)+1)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		resp = doRawResourceGroupRequest(handler, method, oversizedBody)
+		re.Equal(http.StatusRequestEntityTooLarge, resp.Code)
+		re.Contains(resp.Body.String(), "request body too large")
+	}
 }
 
 // TestConfigServiceLoadingReturns503 asserts the "resource groups are still
@@ -369,8 +505,8 @@ func doJSONRequest(re *require.Assertions, handler http.Handler, method, path st
 	return resp
 }
 
-func doRawRequest(handler http.Handler, method, path string, body []byte) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+func doRawResourceGroupRequest(handler http.Handler, method string, body []byte) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, "/resource-manager/api/v1/config/group", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)

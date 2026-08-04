@@ -1033,7 +1033,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 			gcState := GCState{
-				KeyspaceID:      keyspaceMeta.Id,
+				KeyspaceID:      keyspaceMeta.GetId(),
 				IsKeyspaceLevel: false,
 			}
 			cb(gcState)
@@ -1262,7 +1262,7 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
 			continue
 		}
-		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.Id)
+		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.GetId())
 		if err2 != nil {
 			err = err2
 			return
@@ -1270,7 +1270,7 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 		if txnSafePoint > maxTxnSafePoint {
 			maxTxnSafePoint = txnSafePoint
 			keyspaceName = keyspaceMeta.Name
-			keyspaceID = keyspaceMeta.Id
+			keyspaceID = keyspaceMeta.GetId()
 		}
 	}
 	// NOTE, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!

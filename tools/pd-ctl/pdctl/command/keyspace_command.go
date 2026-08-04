@@ -471,7 +471,7 @@ func showKeyspaceRangeByNameCommandFunc(cmd *cobra.Command, args []string) {
 
 	// Generate key ranges based on raw flag
 	var ranges map[string]string
-	bound := keyspace.MakeRegionBound(keyspaceMeta.Id)
+	bound := keyspace.MakeRegionBound(keyspaceMeta.GetId())
 	if raw {
 		ranges = map[string]string{
 			"start_key": hex.EncodeToString(bound.RawLeftBound),
