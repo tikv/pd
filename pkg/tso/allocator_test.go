@@ -17,7 +17,7 @@ package tso
 import (
 	"context"
 	"errors"
-	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -42,9 +43,13 @@ func (m *staleUpdateElection) Resign() {
 }
 
 type staleUpdateStorage struct {
-	failing     atomic.Bool
-	calls       atomic.Int32
-	thirdFailed chan struct{}
+	failing atomic.Bool
+	calls   atomic.Int32
+
+	mu                  sync.Mutex
+	finalFailureReached chan struct{}
+	releaseFinalFailure <-chan struct{}
+	nextSuccessfulSave  chan struct{}
 }
 
 func (*staleUpdateStorage) LoadTimestamp(uint32) (time.Time, error) {
@@ -53,32 +58,64 @@ func (*staleUpdateStorage) LoadTimestamp(uint32) (time.Time, error) {
 
 func (s *staleUpdateStorage) SaveTimestamp(context.Context, uint32, time.Time, *election.Leadership) error {
 	if !s.failing.Load() {
+		s.mu.Lock()
+		nextSuccessfulSave := s.nextSuccessfulSave
+		s.nextSuccessfulSave = nil
+		s.mu.Unlock()
+		if nextSuccessfulSave != nil {
+			close(nextSuccessfulSave)
+		}
 		return nil
 	}
 	if s.calls.Add(1) == maxUpdateTSORetryCount {
-		close(s.thirdFailed)
+		s.mu.Lock()
+		finalFailureReached := s.finalFailureReached
+		releaseFinalFailure := s.releaseFinalFailure
+		s.mu.Unlock()
+		close(finalFailureReached)
+		if releaseFinalFailure != nil {
+			<-releaseFinalFailure
+		}
 	}
 	return errors.New("tso update failed")
 }
 
 func (*staleUpdateStorage) DeleteTimestamp(context.Context, uint32) error { return nil }
 
-func (s *staleUpdateStorage) startFailures() <-chan struct{} {
+func (s *staleUpdateStorage) startFailures(releaseFinalFailure <-chan struct{}) <-chan struct{} {
+	s.mu.Lock()
+	s.finalFailureReached = make(chan struct{})
+	s.releaseFinalFailure = releaseFinalFailure
+	finalFailureReached := s.finalFailureReached
+	s.mu.Unlock()
 	s.calls.Store(0)
-	s.thirdFailed = make(chan struct{})
 	s.failing.Store(true)
-	return s.thirdFailed
+	return finalFailureReached
 }
 
 func (s *staleUpdateStorage) stopFailures() {
 	s.failing.Store(false)
 }
 
+func (s *staleUpdateStorage) notifyOnNextSuccessfulSave() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextSuccessfulSave = make(chan struct{})
+	return s.nextSuccessfulSave
+}
+
+func isSignaled(signal <-chan struct{}) bool {
+	select {
+	case <-signal:
+		return true
+	default:
+		return false
+	}
+}
+
 // TestAllocatorIgnoresStaleUpdateFailure is a regression test for #11086.
 func TestAllocatorIgnoresStaleUpdateFailure(t *testing.T) {
 	re := require.New(t)
-	previousProcs := runtime.GOMAXPROCS(1)
-	defer runtime.GOMAXPROCS(previousProcs)
 
 	member := &staleUpdateElection{
 		resigned: make(chan struct{}),
@@ -93,33 +130,30 @@ func TestAllocatorIgnoresStaleUpdateFailure(t *testing.T) {
 	defer allocator.Close()
 
 	re.NoError(allocator.Initialize())
-	staleFailure := storage.startFailures()
-	select {
-	case <-staleFailure:
-	case <-time.After(2 * time.Second):
-		t.Fatal("old UpdateTSO did not reach its final failure")
-	}
+	releaseStaleFailure := make(chan struct{}, 1)
+	defer close(releaseStaleFailure)
+	staleFailure := storage.startFailures(releaseStaleFailure)
+	testutil.Eventually(re, func() bool { return isSignaled(staleFailure) })
 
+	// Reinitialize and promote before the old UpdateTSO returns its final error.
 	member.serving.Store(false)
 	storage.stopFailures()
 	re.NoError(allocator.Initialize())
-	time.Sleep(2 * updateTSORetryInterval)
+	nextSuccessfulSave := storage.notifyOnNextSuccessfulSave()
+	member.PromoteSelf()
+	releaseStaleFailure <- struct{}{}
+	// The updater must handle the stale error before it can perform this save.
+	testutil.Eventually(re, func() bool {
+		return isSignaled(nextSuccessfulSave) || isSignaled(member.resigned)
+	})
+	re.False(isSignaled(member.resigned), "a stale update failure resigned the reinitialized allocator")
 	re.True(allocator.IsInitialize(), "a stale update failure reset the reinitialized timestamp")
 
-	member.PromoteSelf()
 	_, err := allocator.GenerateTSO(context.Background(), 1)
 	re.NoError(err)
 
-	currentFailure := storage.startFailures()
-	select {
-	case <-currentFailure:
-	case <-time.After(2 * time.Second):
-		t.Fatal("current UpdateTSO did not reach its final failure")
-	}
-	select {
-	case <-member.resigned:
-	case <-time.After(2 * time.Second):
-		t.Fatal("current lease was not resigned after UpdateTSO failed")
-	}
+	currentFailure := storage.startFailures(nil)
+	testutil.Eventually(re, func() bool { return isSignaled(currentFailure) })
+	testutil.Eventually(re, func() bool { return isSignaled(member.resigned) })
 	re.False(allocator.IsInitialize())
 }
