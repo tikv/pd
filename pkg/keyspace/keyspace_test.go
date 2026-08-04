@@ -1277,9 +1277,12 @@ func (s *cancelAfterFirstRevisionPageStorage) LoadRangeKeyspaceAtRevision(
 	if s.rangeCalls > 1 {
 		return nil, nil
 	}
+	// The entries' content doesn't matter to this test, only that a full page
+	// is returned; leave every field at its zero value so this doesn't depend
+	// on the field kvproto currently uses to represent the keyspace ID.
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, limit)
 	for i := range keyspaces {
-		keyspaces[i] = &keyspacepb.KeyspaceMeta{Id: uint32(i + 1)}
+		keyspaces[i] = &keyspacepb.KeyspaceMeta{}
 	}
 	s.cancel()
 	return keyspaces, nil

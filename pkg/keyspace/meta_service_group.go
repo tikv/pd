@@ -662,6 +662,11 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	// again after this reset, the same ABA hole by another name. Overwriting
 	// instead of removing keeps the revision strictly increasing across the
 	// group's entire lifetime.
+	//
+	// The overwrite itself goes through the same modification-revision CAS as
+	// PatchStatus, not a blind Save: a blind write here would itself be an
+	// unfenced stale-term write, able to land after (and silently undo) a
+	// newer leader's legitimate patch to the same, since-recreated group.
 	m.statusMu.Lock()
 	var addedGroups []string
 	for id := range metaServiceGroups {
@@ -670,15 +675,8 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 		}
 	}
 	m.statusMu.Unlock()
-	if len(addedGroups) > 0 {
-		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-			for _, id := range addedGroups {
-				if err := m.store.SaveMetaServiceGroupStatus(txn, id, &endpoint.MetaServiceGroupStatus{}); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
+	for _, id := range addedGroups {
+		if err := m.resetMetaServiceGroupStatus(id); err != nil {
 			return err
 		}
 	}
@@ -706,18 +704,39 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 	// Overwritten rather than removed, for the same modification-revision reason
 	// as the reset above: removing it would let the key's absence repeat, which
 	// breaks the ABA guarantee PatchStatus's CAS depends on.
-	if len(deletedGroups) > 0 {
-		if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-			for _, id := range deletedGroups {
-				if err := m.store.SaveMetaServiceGroupStatus(txn, id, &endpoint.MetaServiceGroupStatus{}); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			log.Warn("[keyspace] failed to clear status for deleted meta-service groups",
-				zap.Strings("deleted-groups", deletedGroups), zap.Error(err))
+	//
+	// Also CAS'd rather than a blind Save, and for a reason beyond ABA this
+	// time: this cleanup runs after persist() has already committed the
+	// deletion, so it can be delayed (goroutine scheduling, a slow prior
+	// commit) well past that point. If the group was re-added and patched in
+	// the meantime, a blind write here would silently overwrite that patch on
+	// no evidence beyond "this ID used to be deleted". CAS turns that into a
+	// conflict instead: the failure is expected and exactly what "best
+	// effort" already covers, not a new failure mode.
+	for _, id := range deletedGroups {
+		if err := m.resetMetaServiceGroupStatus(id); err != nil {
+			log.Warn("[keyspace] failed to clear status for deleted meta-service group",
+				zap.String("deleted-group", id), zap.Error(err))
 		}
+	}
+	return nil
+}
+
+// resetMetaServiceGroupStatus overwrites id's persisted status to the zero
+// value (disabled, zero count), guarded by the same modification-revision CAS
+// PatchStatus uses. Returns ErrMetaServiceGroupStatusConflict if the key
+// changed between the read and the write.
+func (m *MetaServiceGroupManager) resetMetaServiceGroupStatus(id string) error {
+	_, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(id)
+	if err != nil {
+		return err
+	}
+	committed, err := m.store.CASMetaServiceGroupStatus(id, modRevision, &endpoint.MetaServiceGroupStatus{})
+	if err != nil {
+		return err
+	}
+	if !committed {
+		return ErrMetaServiceGroupStatusConflict
 	}
 	return nil
 }

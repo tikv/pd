@@ -35,8 +35,8 @@ type cleanupFailingMetaServiceGroupStorage struct {
 	*endpoint.StorageEndpoint
 }
 
-func (*cleanupFailingMetaServiceGroupStorage) SaveMetaServiceGroupStatus(kv.Txn, string, *endpoint.MetaServiceGroupStatus) error {
-	return errInjectedStatusCleanup
+func (*cleanupFailingMetaServiceGroupStorage) CASMetaServiceGroupStatus(string, int64, *endpoint.MetaServiceGroupStatus) (bool, error) {
+	return false, errInjectedStatusCleanup
 }
 
 type metaServiceGroupTestSuite struct {
@@ -793,4 +793,54 @@ func TestPatchStatusModRevisionCASRejectsFormerLeaderAcrossDeleteRecreateCycle(t
 	status, err := current.GetStatus(context.Background())
 	re.NoError(err)
 	re.False(status["group"].Enabled, "a former leader must not enable a re-added group")
+}
+
+// TestFormerLeaderDeletedGroupCleanupDoesNotOverwriteReaddedGroupPatch guards
+// against persistGroupsLocked's deleted-group status cleanup itself being an
+// unfenced stale-term write: it runs after persist() has already committed
+// the deletion, so it can be arbitrarily delayed. Without routing it through
+// the same modification-revision CAS PatchStatus uses, a former leader's
+// delayed cleanup could silently overwrite a newer leader's legitimate patch
+// to the same, since-recreated group with no evidence beyond "this ID used to
+// be deleted".
+func TestFormerLeaderDeletedGroupCleanupDoesNotOverwriteReaddedGroupPatch(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	base := kv.NewEtcdKVBase(client)
+	groups := map[string]string{"group": "addr"}
+
+	formerStore := &preCommitBlockingMetaServiceGroupStorage{
+		StorageEndpoint: endpoint.NewStorageEndpoint(base, nil),
+		casPrepared:     make(chan struct{}),
+		resumeCAS:       make(chan struct{}),
+	}
+	former, err := NewMetaServiceGroupManager(context.Background(), formerStore, groups)
+	re.NoError(err)
+
+	formerStore.blockNextCAS.Store(true)
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- former.UpdateGroupsSafely(context.Background(), map[string]string{},
+			[]string{"group"}, func() error { return nil }, nil)
+	}()
+	<-formerStore.casPrepared // The deletion config is already persisted; only the best-effort cleanup CAS is paused.
+
+	currentStore := endpoint.NewStorageEndpoint(base, nil)
+	current, err := NewMetaServiceGroupManager(context.Background(), currentStore, map[string]string{})
+	re.NoError(err)
+	re.NoError(current.UpdateGroupsSafely(context.Background(), groups, nil, func() error { return nil }, nil))
+	enabled := true
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+
+	close(formerStore.resumeCAS)
+	// The cleanup is best-effort: losing its CAS must not fail the delete
+	// that already committed.
+	re.NoError(<-deleteDone)
+
+	re.NoError(current.RefreshCache(context.Background()))
+	status, err := current.GetStatus(context.Background())
+	re.NoError(err)
+	re.True(status["group"].Enabled, "a former leader's delayed cleanup must not overwrite the re-added group's patch")
 }
