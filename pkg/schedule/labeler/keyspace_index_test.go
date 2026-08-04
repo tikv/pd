@@ -15,6 +15,7 @@
 package labeler
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -157,10 +158,61 @@ func TestKeyspaceRuleIndexSparseGap(t *testing.T) {
 
 	var index keyspaceRuleIndex
 	re.True(index.Add(rule))
+	gapRegion := makeRegionForKeyspace(1, codec.TxnKeyspaceModePrefix)
+	matched, withinKeyspace := index.matchRule(gapRegion.GetStartKey(), gapRegion.GetEndKey())
+	re.Nil(matched)
+	re.True(withinKeyspace)
+	labelIndex := newLabelRuleIndex(map[string]*LabelRule{rule.ID: rule})
+	rangeRules, keyspaceRule, ok := labelIndex.getRangeRules(gapRegion.GetStartKey(), gapRegion.GetEndKey())
+	re.True(ok)
+	re.Empty(rangeRules)
+	re.Nil(keyspaceRule)
+	rangeRules, keyspaceRule, ok = labelIndex.getRangeRules([]byte{'a'}, []byte{'b'})
+	re.True(ok)
+	re.Empty(rangeRules)
+	re.Nil(keyspaceRule)
 	start := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, 0)
 	end := keyspaceBoundaryBytes(codec.TxnKeyspaceModePrefix, constant.MaxValidKeyspaceID)
 	re.Empty(index.GetSplitKeys(start, end))
 	re.False(index.HasSplitKey(start, end))
+	afterFence := []byte{'z'}
+	re.Empty(index.GetSplitKeys(afterFence, nil))
+	re.False(index.HasSplitKey(afterFence, nil))
+}
+
+func TestKeyspaceBoundaryBoundMatchesBinarySearch(t *testing.T) {
+	re := require.New(t)
+	keys := [][]byte{nil, {'a'}, {'z'}, {0xff}}
+	for _, mode := range codec.KeyspaceModes() {
+		keys = append(keys, []byte{mode}, []byte{mode, 1}, []byte{mode + 1})
+		for _, id := range []uint32{0, 1, 63, 64, 1023, 1024, constant.MaxValidKeyspaceID, constant.MaxValidKeyspaceID + 1} {
+			boundary := keyspaceBoundary(mode, id)
+			exact := append([]byte(nil), boundary[:]...)
+			before := append([]byte(nil), boundary[:]...)
+			before[len(before)-1]--
+			after := append([]byte(nil), boundary[:]...)
+			after[len(after)-1]++
+			keys = append(keys, exact, before, after)
+			for length := 1; length < len(boundary); length++ {
+				keys = append(keys, append([]byte(nil), boundary[:length]...))
+			}
+		}
+	}
+
+	for _, mode := range codec.KeyspaceModes() {
+		for _, key := range keys {
+			lower := sort.Search(keyspaceBoundaryCount, func(id int) bool {
+				boundary := keyspaceBoundary(mode, uint32(id))
+				return bytes.Compare(boundary[:], key) >= 0
+			})
+			upper := sort.Search(keyspaceBoundaryCount, func(id int) bool {
+				boundary := keyspaceBoundary(mode, uint32(id))
+				return bytes.Compare(boundary[:], key) > 0
+			})
+			re.Equal(lower, keyspaceBoundaryBound(mode, key, false), "lower bound for %x", key)
+			re.Equal(upper, keyspaceBoundaryBound(mode, key, true), "upper bound for %x", key)
+		}
+	}
 }
 
 func TestKeyspaceRuleSetUsesSparseChunks(t *testing.T) {
@@ -498,6 +550,39 @@ func BenchmarkKeyspaceRuleIndexSparse(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkRegionLabelerNegativeLookup(b *testing.B) {
+	keyspaceRegion := makeRegionForKeyspace(1, codec.TxnKeyspaceModePrefix)
+	classicRegion := core.NewTestRegionInfo(1, 1, []byte{'a'}, []byte{'b'})
+	for _, testCase := range []struct {
+		name         string
+		withHighRule bool
+		region       *core.RegionInfo
+	}{
+		{name: "empty-keyspace", region: keyspaceRegion},
+		{name: "empty-classic", region: classicRegion},
+		{name: "sparse-high-keyspace-gap", withHighRule: true, region: keyspaceRegion},
+		{name: "sparse-high-classic-gap", withHighRule: true, region: classicRegion},
+	} {
+		b.Run(testCase.name, func(b *testing.B) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			regionLabeler, err := NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+			require.NoError(b, err)
+			if testCase.withHighRule {
+				rule := makeKeyspaceRuleForTest(constant.MaxValidKeyspaceID, codec.TxnKeyspaceModePrefix)
+				require.NoError(b, regionLabeler.SetLabelRule(rule))
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				if value := regionLabeler.GetRegionLabel(testCase.region, constant.RegionLabelKey); value != "" {
+					b.Fatalf("unexpected label %q", value)
+				}
+			}
+		})
+	}
 }
 
 // The startup/1000000 benchmark has a 3-second readiness target. It includes

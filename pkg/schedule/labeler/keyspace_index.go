@@ -17,7 +17,6 @@ package labeler
 import (
 	"bytes"
 	"math/bits"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -223,6 +222,10 @@ type keyspaceRuleIndex struct {
 	txn keyspaceRuleSet
 }
 
+func (i *keyspaceRuleIndex) isEmpty() bool {
+	return len(i.raw.chunks) == 0 && len(i.txn.chunks) == 0
+}
+
 func (i *keyspaceRuleIndex) ruleSet(mode byte) *keyspaceRuleSet {
 	switch mode {
 	case codec.RawKeyspaceModePrefix:
@@ -332,34 +335,39 @@ func (i *keyspaceRuleIndex) Contains(rule *LabelRule) bool {
 
 // GetRule returns the keyspace rule covering the whole range.
 func (i *keyspaceRuleIndex) GetRule(start, end []byte) *LabelRule {
+	rule, _ := i.matchRule(start, end)
+	return rule
+}
+
+func (i *keyspaceRuleIndex) matchRule(start, end []byte) (*LabelRule, bool) {
 	if len(end) == 0 {
-		return nil
+		return nil, false
 	}
 	mode, id, ok := codec.DecodeKeyspaceKey(start)
 	if !ok {
-		return nil
+		return nil, false
 	}
 	set := i.ruleSet(mode)
 	if set == nil {
-		return nil
+		return nil, false
 	}
 	rule := set.get(id)
-	if rule == nil {
-		return nil
+	if len(end) >= codec.KeyspacePrefixLen && bytes.Equal(start[:codec.KeyspacePrefixLen], end[:codec.KeyspacePrefixLen]) {
+		return rule, true
 	}
-	left := keyspaceBoundary(mode, id)
 	right := keyspaceBoundary(mode, id+1)
-	if bytes.Compare(start, left[:]) < 0 || bytes.Compare(end, right[:]) > 0 {
-		return nil
+	// DecodeKeyspaceKey guarantees that start is not below this ID's boundary.
+	if bytes.Compare(end, right[:]) > 0 {
+		return nil, false
 	}
-	return rule
+	return rule, true
 }
 
 // HasSplitKey reports whether a keyspace boundary exists in (start, end).
 func (i *keyspaceRuleIndex) HasSplitKey(start, end []byte) bool {
 	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
-		if len(set.chunks) == 0 {
+		if len(set.chunks) == 0 || !keyspaceModeOverlapsRange(mode, start, end) {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
@@ -380,7 +388,7 @@ func (i *keyspaceRuleIndex) GetSplitKeys(start, end []byte) [][]byte {
 	var keys [][]byte
 	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
-		if len(set.chunks) == 0 {
+		if len(set.chunks) == 0 || !keyspaceModeOverlapsRange(mode, start, end) {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
@@ -478,18 +486,80 @@ func keyspaceBoundaryBytes(mode byte, id uint32) []byte {
 }
 
 func keyspaceBoundaryRange(mode byte, start, end []byte) (lo, hi int) {
-	lo = sort.Search(keyspaceBoundaryCount, func(id int) bool {
-		key := keyspaceBoundary(mode, uint32(id))
-		return bytes.Compare(key[:], start) > 0
-	})
+	lo = keyspaceBoundaryBound(mode, start, true)
 	hi = keyspaceBoundaryCount
 	if len(end) > 0 {
-		hi = sort.Search(keyspaceBoundaryCount, func(id int) bool {
-			key := keyspaceBoundary(mode, uint32(id))
-			return bytes.Compare(key[:], end) >= 0
-		})
+		hi = keyspaceBoundaryBound(mode, end, false)
 	}
 	return lo, hi
+}
+
+func keyspaceModeOverlapsRange(mode byte, start, end []byte) bool {
+	first := keyspaceBoundary(mode, 0)
+	if len(end) > 0 && bytes.Compare(end, first[:]) <= 0 {
+		return false
+	}
+	fence := keyspaceBoundary(mode, uint32(keyspaceBoundaryCount-1))
+	return bytes.Compare(start, fence[:]) < 0
+}
+
+func keyspaceModesOverlapRange(start, end []byte) bool {
+	if len(end) > 0 {
+		switch {
+		case end[0] < codec.RawKeyspaceModePrefix:
+			return false
+		case end[0] == codec.RawKeyspaceModePrefix:
+			first := keyspaceBoundary(codec.RawKeyspaceModePrefix, 0)
+			if bytes.Compare(end, first[:]) <= 0 {
+				return false
+			}
+		}
+	}
+	if len(start) == 0 || start[0] < codec.TxnKeyspaceModePrefix+1 {
+		return true
+	}
+	if start[0] > codec.TxnKeyspaceModePrefix+1 {
+		return false
+	}
+	fence := keyspaceBoundary(codec.TxnKeyspaceModePrefix, uint32(keyspaceBoundaryCount-1))
+	return bytes.Compare(start, fence[:]) < 0
+}
+
+func keyspaceBoundaryBound(mode byte, key []byte, upper bool) int {
+	first := keyspaceBoundary(mode, 0)
+	if cmp := bytes.Compare(first[:], key); cmp > 0 || cmp == 0 && !upper {
+		return 0
+	}
+
+	fenceID := uint32(keyspaceBoundaryCount - 1)
+	fence := keyspaceBoundary(mode, fenceID)
+	if cmp := bytes.Compare(fence[:], key); cmp < 0 || cmp == 0 && upper {
+		return keyspaceBoundaryCount
+	} else if cmp == 0 {
+		return int(fenceID)
+	}
+
+	// A key between the last boundary of this mode and its fence belongs at
+	// the fence. This also handles a fence prefix shorter than the boundary.
+	if key[0] != mode {
+		return int(fenceID)
+	}
+
+	var id uint32
+	if len(key) > 1 {
+		id |= uint32(key[1]) << 16
+	}
+	if len(key) > 2 {
+		id |= uint32(key[2]) << 8
+	}
+	if len(key) > 3 {
+		id |= uint32(key[3])
+	}
+	boundary := keyspaceBoundary(mode, id)
+	if cmp := bytes.Compare(boundary[:], key); cmp > 0 || cmp == 0 && !upper {
+		return int(id)
+	}
+	return int(id) + 1
 }
 
 func mergeSplitKeys(left, right [][]byte) [][]byte {

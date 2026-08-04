@@ -122,9 +122,18 @@ func (i *labelRuleIndex) getRangeRules(start, end []byte) ([]any, *LabelRule, bo
 	if !ok {
 		return nil, nil, false
 	}
-	keyspaceRule := i.keyspaces.GetRule(start, end)
-	if keyspaceRule == nil && i.keyspaces.HasSplitKey(start, end) {
+	if i.keyspaces.isEmpty() {
+		return rules, nil, true
+	}
+	if !keyspaceModesOverlapRange(start, end) {
+		return rules, nil, true
+	}
+	keyspaceRule, withinKeyspace := i.keyspaces.matchRule(start, end)
+	if withinKeyspace {
+		return rules, keyspaceRule, true
+	}
+	if i.keyspaces.HasSplitKey(start, end) {
 		return nil, nil, false
 	}
-	return rules, keyspaceRule, true
+	return rules, nil, true
 }
