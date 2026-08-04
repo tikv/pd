@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -442,9 +441,16 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 // scheme. PD clients may rewrite the scheme to match their TLS configuration,
 // while gRPC uses the URL host and the TLS configuration independently.
 func isSamePDClientURL(first, second string) bool {
-	firstHasValidScheme := strings.HasPrefix(first, "http://") || strings.HasPrefix(first, "https://")
-	secondHasValidScheme := strings.HasPrefix(second, "http://") || strings.HasPrefix(second, "https://")
-	return firstHasValidScheme && secondHasValidScheme && typeutil.EqualBaseURLs(first, second)
+	firstBaseURL, firstHasValidScheme := trimPDClientURLScheme(first)
+	secondBaseURL, secondHasValidScheme := trimPDClientURLScheme(second)
+	return firstHasValidScheme && secondHasValidScheme && firstBaseURL == secondBaseURL
+}
+
+func trimPDClientURLScheme(url string) (string, bool) {
+	if baseURL, ok := strings.CutPrefix(url, "http://"); ok {
+		return baseURL, true
+	}
+	return strings.CutPrefix(url, "https://")
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
