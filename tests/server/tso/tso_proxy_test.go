@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -137,6 +138,7 @@ func (s *tsoProxyTestSuite) verifyForwardedHostRejected(client pdpb.PDClient, fo
 	_, err := client.GetAllStores(ctx, &pdpb.GetAllStoresRequest{Header: s.defaultReq.GetHeader()})
 	re.Error(err)
 	re.Equal(codes.InvalidArgument, status.Code(err))
+	re.ErrorContains(err, errs.NotLeaderErr)
 
 	tsoClient, err := client.Tso(ctx)
 	re.NoError(err)
