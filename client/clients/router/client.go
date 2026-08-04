@@ -597,23 +597,24 @@ batchLoop:
 
 func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 	var (
-		requests     = c.batchController.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
+		requests = c.batchController.GetCollectedRequests()
+		spans    = make([]opentracing.Span, 0, len(requests))
 	)
+	traceCtx := context.Background()
+	if len(requests) > 0 {
+		traceCtx = requests[0].requestCtx
+	}
+	traceRegion := trace.StartRegion(traceCtx, "pdclient.regionReqSendBatch")
 	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.regionReqSend"))
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
 			spans = append(spans, span.Tracer().StartSpan("pdclient.processRegionRequests", opentracing.ChildOf(span.Context())))
 		}
 	}
 	defer func() {
-		for i := range spans {
+		for i := len(spans) - 1; i >= 0; i-- {
 			spans[i].Finish()
 		}
-		for i := range traceRegions {
-			traceRegions[i].End()
-		}
+		traceRegion.End()
 	}()
 
 	queryReq := &pdpb.QueryRegionRequest{
