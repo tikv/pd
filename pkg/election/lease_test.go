@@ -122,14 +122,14 @@ func TestLeaseKeepAlive(t *testing.T) {
 	re.NoError(lease.Close())
 }
 
-func TestLeaseKeepAliveGuard(t *testing.T) {
+func TestLeaseKeepAliveStopsWhenConditionReturnsFalse(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	clientLease := &keepAliveOnceCountingLease{}
 	lease := &Lease{
-		purpose:      "test_lease_guard",
+		purpose:      "test_lease_keepalive_condition",
 		lease:        clientLease,
 		leaseTimeout: time.Second,
 	}
@@ -137,12 +137,12 @@ func TestLeaseKeepAliveGuard(t *testing.T) {
 	lease.expireTime.Store(time.Now().Add(time.Second))
 	re.False(lease.IsExpired())
 
-	var guardCalls atomic.Int32
+	var conditionChecks atomic.Int32
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		lease.runKeepAlive(ctx, func() bool {
-			guardCalls.Add(1)
+			conditionChecks.Add(1)
 			return false
 		})
 	}()
@@ -155,27 +155,27 @@ func TestLeaseKeepAliveGuard(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond)
 	re.True(lease.IsExpired())
-	re.Positive(guardCalls.Load())
+	re.Positive(conditionChecks.Load())
 	re.Zero(clientLease.calls.Load())
 }
 
-func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
+func TestLeaseKeepAliveConditionStopsAfterRenewal(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	clientLease := &keepAliveOnceCountingLease{}
 	lease := &Lease{
-		purpose:      "test_lease_guard_transition",
+		purpose:      "test_lease_keepalive_transition",
 		lease:        clientLease,
 		leaseTimeout: 900 * time.Millisecond,
-		metrics:      newLeaseMetrics("test_lease_guard_transition"),
+		metrics:      newLeaseMetrics("test_lease_keepalive_transition"),
 	}
 	lease.setID(1)
 	initialExpireTime := time.Now().Add(100 * time.Millisecond)
 	lease.expireTime.Store(initialExpireTime)
 
-	var guardCalls atomic.Int32
+	var conditionChecks atomic.Int32
 	rejectRenewal := make(chan struct{})
 	var rejectOnce sync.Once
 	reject := func() {
@@ -189,7 +189,7 @@ func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
 	go func() {
 		defer close(done)
 		lease.runKeepAlive(ctx, func() bool {
-			if guardCalls.Add(1) == 1 {
+			if conditionChecks.Add(1) == 1 {
 				return true
 			}
 			<-rejectRenewal
@@ -197,7 +197,7 @@ func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
 		})
 	}()
 
-	// Confirm that the lease was renewed before changing the guard result.
+	// Confirm that the lease was renewed before changing the condition result.
 	re.Eventually(func() bool {
 		return clientLease.calls.Load() == 1 && lease.loadExpireTime().After(initialExpireTime)
 	}, time.Second, 10*time.Millisecond)
@@ -213,7 +213,7 @@ func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
 
 	re.True(lease.IsExpired())
 	re.True(lease.loadExpireTime().IsZero())
-	re.GreaterOrEqual(guardCalls.Load(), int32(2))
+	re.GreaterOrEqual(conditionChecks.Load(), int32(2))
 	re.Equal(int32(1), clientLease.calls.Load())
 }
 

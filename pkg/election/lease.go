@@ -177,7 +177,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	l.runKeepAlive(ctx, nil)
 }
 
-func (l *Lease) runKeepAlive(ctx context.Context, canRenew func() bool) {
+func (l *Lease) runKeepAlive(ctx context.Context, shouldContinueKeepAlive func() bool) {
 	defer logutil.LogPanic()
 
 	if l == nil {
@@ -186,25 +186,25 @@ func (l *Lease) runKeepAlive(ctx context.Context, canRenew func() bool) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
-		guardRejected       atomic.Bool
-		checkRenewalAllowed func() bool
+		renewalStopped   atomic.Bool
+		shouldRenewLease func() bool
 	)
-	if canRenew != nil {
-		checkRenewalAllowed = func() bool {
-			if guardRejected.Load() {
+	if shouldContinueKeepAlive != nil {
+		shouldRenewLease = func() bool {
+			if renewalStopped.Load() {
 				return false
 			}
-			if canRenew() {
+			if shouldContinueKeepAlive() {
 				return true
 			}
-			if guardRejected.CompareAndSwap(false, true) {
+			if renewalStopped.CompareAndSwap(false, true) {
 				l.expireTime.Store(typeutil.ZeroTime)
 				cancel()
 			}
 			return false
 		}
 	}
-	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, checkRenewalAllowed)
+	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, shouldRenewLease)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -236,7 +236,7 @@ func (l *Lease) runKeepAlive(ctx context.Context, canRenew func() bool) {
 				default:
 					// A zero expiration is terminal for this lease grant. Update
 					// with CAS so an in-flight response cannot overwrite a
-					// concurrent guard rejection or reset.
+					// concurrent keepalive stop or reset.
 					if !l.tryStoreExpireTime(t) {
 						return
 					}
@@ -264,8 +264,8 @@ func (l *Lease) runKeepAlive(ctx context.Context, canRenew func() bool) {
 				zap.String("purpose", l.purpose))
 			return
 		case <-ctx.Done():
-			if guardRejected.Load() {
-				log.Info("lease keep alive stopped because its guard rejected the renewal",
+			if renewalStopped.Load() {
+				log.Info("lease keep alive stopped because renewal is no longer allowed",
 					zap.String("purpose", l.purpose),
 					zap.Int64("lease-id", int64(l.GetID())))
 				return
@@ -293,7 +293,7 @@ func (l *Lease) tryStoreExpireTime(t time.Time) bool {
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.
-func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, canRenew func() bool) <-chan time.Time {
+func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, shouldRenewLease func() bool) <-chan time.Time {
 	ch := make(chan time.Time)
 
 	go func() {
@@ -319,7 +319,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration, can
 			go func() {
 				defer logutil.LogPanic()
 
-				if canRenew != nil && !canRenew() {
+				if shouldRenewLease != nil && !shouldRenewLease() {
 					return
 				}
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)

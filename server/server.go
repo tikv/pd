@@ -1989,7 +1989,7 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	log.Info("start to keep leader lease")
 	keepLeaderStart := time.Now()
-	s.member.GetLeadership().KeepWithLeaseGuard(ctx, func() bool {
+	s.member.GetLeadership().KeepWhile(ctx, func() bool {
 		return s.member.GetEtcdLeader() == s.member.ID()
 	})
 	keepLeaderDuration := time.Since(keepLeaderStart)

@@ -213,21 +213,22 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.startKeepAlive(ctx, nil)
 }
 
-// KeepWithLeaseGuard keeps the leadership available while canRenew returns true.
-// Returning false stops this keepalive run before the next lease renewal request.
-// canRenew must be safe for concurrent calls and should not block.
-func (ls *Leadership) KeepWithLeaseGuard(ctx context.Context, canRenew func() bool) {
-	ls.startKeepAlive(ctx, canRenew)
+// KeepWhile keeps the leadership available while shouldContinueKeepAlive returns true.
+// Returning false permanently stops the current keepalive run, invalidates the
+// local lease, and prevents another lease renewal request. The callback must be
+// safe for concurrent calls and should not block.
+func (ls *Leadership) KeepWhile(ctx context.Context, shouldContinueKeepAlive func() bool) {
+	ls.startKeepAlive(ctx, shouldContinueKeepAlive)
 }
 
-func (ls *Leadership) startKeepAlive(ctx context.Context, canRenew func() bool) {
+func (ls *Leadership) startKeepAlive(ctx context.Context, shouldContinueKeepAlive func() bool) {
 	if ls == nil {
 		return
 	}
 	ls.keepAliveCancelFuncLock.Lock()
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
 	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.GetLease().runKeepAlive(ls.keepAliveCtx, canRenew)
+	go ls.GetLease().runKeepAlive(ls.keepAliveCtx, shouldContinueKeepAlive)
 }
 
 // Check returns whether the leadership is still available.
