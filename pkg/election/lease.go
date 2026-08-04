@@ -228,7 +228,12 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 					l.metrics.contextCanceled.Inc()
 					return
 				default:
-					l.expireTime.Store(t)
+					// A guard rejection can race with this response after the
+					// context check above. Make the rejection terminal for the
+					// local lease state even if this response stores last.
+					if !l.storeExpireTime(t, &guardRejected) {
+						return
+					}
 				}
 			}
 			timer.Reset(l.leaseTimeout)
@@ -266,6 +271,15 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 			return
 		}
 	}
+}
+
+func (l *Lease) storeExpireTime(t time.Time, guardRejected *atomic.Bool) bool {
+	l.expireTime.Store(t)
+	if !guardRejected.Load() {
+		return true
+	}
+	l.expireTime.Store(typeutil.ZeroTime)
+	return false
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.

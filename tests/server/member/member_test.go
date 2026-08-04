@@ -311,6 +311,8 @@ func TestPDLeaderLeaseStopsWhenEtcdLeaderChanges(t *testing.T) {
 
 	newLeaderName := waitLeaderChange(re, cluster, oldLeaderName)
 	re.NotEqual(oldLeaderName, newLeaderName)
+	re.False(oldLeader.IsLeader())
+	re.Equal(newLeaderName, cluster.WaitLeader())
 }
 
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string) string {

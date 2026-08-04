@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -123,19 +124,55 @@ func TestLeaseKeepAliveGuard(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
 
-	lease := NewLease(client, "test_lease_guard")
-	re.NoError(lease.Grant(defaultLeaseTimeout))
+	clientLease := &keepAliveOnceCountingLease{}
+	lease := &Lease{
+		purpose:      "test_lease_guard",
+		lease:        clientLease,
+		leaseTimeout: time.Second,
+	}
+	lease.setID(1)
+	lease.expireTime.Store(time.Now().Add(time.Second))
 	re.False(lease.IsExpired())
 
 	var guardCalls atomic.Int32
-	go lease.runKeepAlive(ctx, func() bool {
-		guardCalls.Add(1)
-		return false
-	})
-	re.Eventually(lease.IsExpired, time.Second, 10*time.Millisecond)
-	re.Equal(int32(1), guardCalls.Load())
-	re.NoError(lease.Close())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		lease.runKeepAlive(ctx, func() bool {
+			guardCalls.Add(1)
+			return false
+		})
+	}()
+	re.Eventually(func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, 10*time.Millisecond)
+	re.True(lease.IsExpired())
+	re.Positive(guardCalls.Load())
+	re.Zero(clientLease.calls.Load())
+}
+
+func TestStoreExpireTimeAfterGuardRejected(t *testing.T) {
+	lease := &Lease{}
+	lease.expireTime.Store(typeutil.ZeroTime)
+	var guardRejected atomic.Bool
+	guardRejected.Store(true)
+
+	require.False(t, lease.storeExpireTime(time.Now().Add(time.Minute), &guardRejected))
+	require.True(t, lease.IsExpired())
+}
+
+type keepAliveOnceCountingLease struct {
+	clientv3.Lease
+	calls atomic.Int32
+}
+
+func (l *keepAliveOnceCountingLease) KeepAliveOnce(context.Context, clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error) {
+	l.calls.Add(1)
+	return &clientv3.LeaseKeepAliveResponse{TTL: 1}, nil
 }

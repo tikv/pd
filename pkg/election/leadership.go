@@ -215,7 +215,8 @@ func (ls *Leadership) Keep(ctx context.Context) {
 
 // KeepWithLeaseGuard keeps the leadership available while guard confirms that
 // the caller is still allowed to renew it. The guard is checked immediately
-// before every lease keepalive request.
+// before every lease keepalive request. It must be safe for concurrent calls
+// and should not block.
 func (ls *Leadership) KeepWithLeaseGuard(ctx context.Context, guard func() bool) {
 	ls.startKeepAlive(ctx, guard)
 }
