@@ -236,9 +236,9 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 		{name: "Accepted", statusCode: http.StatusAccepted, body: successMetricResponse, wantOK: true},
 		{name: "Non2xx", statusCode: http.StatusUnauthorized, body: "upstream secret"},
 		{name: "Redirect", statusCode: http.StatusFound, body: "redirect secret"},
-		{name: "InvalidJSON", statusCode: http.StatusOK, body: "not json"},
-		{name: "PrometheusError", statusCode: http.StatusOK, body: `{"status":"error","error":"secret"}`},
-		{name: "InvalidResult", statusCode: http.StatusOK, body: `{"status":"success","data":{"resultType":"vector","result":{}}}`},
+		{name: "InvalidJSON", statusCode: http.StatusOK, body: "not json", wantOK: true},
+		{name: "PrometheusError", statusCode: http.StatusOK, body: `{"status":"error","error":"secret"}`, wantOK: true},
+		{name: "InvalidResult", statusCode: http.StatusOK, body: `{"status":"success","data":{"resultType":"vector","result":{}}}`, wantOK: true},
 	}
 
 	for _, testCase := range testCases {
@@ -304,12 +304,37 @@ func TestMetricQueryResponseNormalization(t *testing.T) {
 			require.Empty(t, recorder.Header().Get("X-Secret-Trailer"))
 			if testCase.wantOK {
 				require.Equal(t, testCase.statusCode, recorder.Code)
-				require.JSONEq(t, successMetricResponse, recorder.Body.String())
+				require.Equal(t, testCase.body, recorder.Body.String())
 				return
 			}
 			requireGenericMetricQueryError(t, recorder, testCase.body)
 		})
 	}
+}
+
+func TestMetricQueryResponseNormalizationStreamsBody(t *testing.T) {
+	upstreamBody := &trackingReadCloser{Reader: strings.NewReader(successMetricResponse)}
+	response := &http.Response{
+		StatusCode:    http.StatusOK,
+		Body:          upstreamBody,
+		ContentLength: 1 << 40,
+		Header:        http.Header{"Server": []string{"private-prometheus"}},
+		Trailer:       http.Header{"X-Secret-Trailer": []string{"secret"}},
+	}
+
+	require.NoError(t, normalizeMetricQueryResponse(response))
+	require.Zero(t, upstreamBody.reads)
+	require.False(t, upstreamBody.closed)
+	require.Same(t, upstreamBody, response.Body)
+	require.Equal(t, int64(1<<40), response.ContentLength)
+	require.Empty(t, response.Header.Get("Server"))
+	require.Empty(t, response.Trailer)
+
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, successMetricResponse, string(body))
+	require.NoError(t, response.Body.Close())
+	require.True(t, upstreamBody.closed)
 }
 
 func TestMetricQuerySuppressesInformationalResponse(t *testing.T) {
@@ -403,53 +428,6 @@ func TestMetricQueryHidesPolicyAndNetworkErrors(t *testing.T) {
 	}
 }
 
-func TestMetricQueryResponseLimit(t *testing.T) {
-	data, err := readMetricQueryResponse(strings.NewReader("1234"), 4)
-	require.NoError(t, err)
-	require.Equal(t, "1234", string(data))
-	_, err = readMetricQueryResponse(strings.NewReader("12345"), 4)
-	require.Error(t, err)
-}
-
-func TestValidatePrometheusQueryResponseResultShape(t *testing.T) {
-	testCases := []struct {
-		name    string
-		body    string
-		wantErr bool
-	}{
-		{name: "EmptyArray", body: `{"status":"success","data":{"resultType":"vector","result":[]}}`},
-		{name: "NestedArray", body: `{"status":"success","data":{"resultType":"vector","result":[[1], {"value":2}]}}`},
-		{name: "Whitespace", body: "{\"status\":\"success\",\"data\":{\"resultType\":\"vector\",\"result\": \n[1, 2]\t}}"},
-		{name: "Missing", body: `{"status":"success","data":{"resultType":"vector"}}`, wantErr: true},
-		{name: "Null", body: `{"status":"success","data":{"resultType":"vector","result":null}}`, wantErr: true},
-		{name: "Object", body: `{"status":"success","data":{"resultType":"vector","result":{}}}`, wantErr: true},
-		{name: "String", body: `{"status":"success","data":{"resultType":"vector","result":"[]"}}`, wantErr: true},
-	}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			err := validatePrometheusQueryResponse([]byte(testCase.body))
-			if testCase.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-		})
-	}
-}
-
-func BenchmarkValidatePrometheusQueryResponseLargeResult(b *testing.B) {
-	body := []byte(`{"status":"success","data":{"resultType":"vector","result":[` +
-		strings.Repeat("0,", 1<<19) + `0]}}`)
-	b.SetBytes(int64(len(body)))
-	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
-		if err := validatePrometheusQueryResponse(body); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 const successMetricResponse = `{"status":"success","data":{"resultType":"vector","result":[]}}`
 
 type staticMetricResolver struct {
@@ -468,6 +446,22 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return roundTrip(request)
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	reads  int
+	closed bool
+}
+
+func (reader *trackingReadCloser) Read(data []byte) (int, error) {
+	reader.reads++
+	return reader.Reader.Read(data)
+}
+
+func (reader *trackingReadCloser) Close() error {
+	reader.closed = true
+	return nil
 }
 
 func requireGenericMetricQueryError(t *testing.T, recorder *httptest.ResponseRecorder, secrets ...string) {

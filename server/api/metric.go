@@ -15,9 +15,7 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -40,7 +38,6 @@ import (
 const (
 	metricQueryTimeout             = 30 * time.Second
 	metricQueryDialAttemptTimeout  = 2 * time.Second
-	maxMetricQueryResponseBodySize = int64(32 << 20)
 	metricQueryErrorBody           = `{"status":"error","errorType":"proxy","error":"metric query failed"}`
 	metricStorageConfigKey         = "metric-storage"
 	prefixedMetricStorageConfigKey = "pd-server.metric-storage"
@@ -178,23 +175,10 @@ func normalizeMetricQueryResponse(response *http.Response) error {
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 		return errors.Errorf("metric storage returned status %d", response.StatusCode)
 	}
-	body, err := readMetricQueryResponse(response.Body, maxMetricQueryResponseBodySize)
-	if err != nil {
-		return err
-	}
-	if err := validatePrometheusQueryResponse(body); err != nil {
-		return err
-	}
-
-	_ = response.Body.Close()
-	response.Body = io.NopCloser(bytes.NewReader(body))
 	response.Header = make(http.Header, 2)
 	response.Header.Set("Content-Type", "application/json; charset=utf-8")
 	response.Header.Set("Cache-Control", "no-store")
-	response.ContentLength = int64(len(body))
-	response.TransferEncoding = nil
 	response.Trailer = nil
-	response.Uncompressed = false
 	return nil
 }
 
@@ -336,53 +320,6 @@ func newMetricQueryTransport(baseClient *http.Client) (*http.Transport, error) {
 	}
 
 	return transport, nil
-}
-
-func readMetricQueryResponse(body io.Reader, limit int64) ([]byte, error) {
-	limitedBody := io.LimitReader(body, limit+1)
-	data, err := io.ReadAll(limitedBody)
-	if err != nil {
-		return nil, errors.Annotate(err, "failed to read metric query response")
-	}
-	if int64(len(data)) > limit {
-		return nil, errors.New("metric query response exceeds the size limit")
-	}
-	return data, nil
-}
-
-// prometheusQueryResult records only the JSON shape so validation does not
-// retain a second copy of a potentially large result.
-type prometheusQueryResult bool
-
-func (result *prometheusQueryResult) UnmarshalJSON(data []byte) error {
-	data = bytes.TrimSpace(data)
-	*result = len(data) >= 2 && data[0] == '[' && data[len(data)-1] == ']'
-	return nil
-}
-
-func validatePrometheusQueryResponse(body []byte) error {
-	response := struct {
-		Status string `json:"status"`
-		Data   *struct {
-			ResultType string                `json:"resultType"`
-			Result     prometheusQueryResult `json:"result"`
-		} `json:"data"`
-	}{}
-	if err := json.Unmarshal(body, &response); err != nil {
-		return errors.Annotate(err, "metric storage returned invalid JSON")
-	}
-	if response.Status != "success" || response.Data == nil {
-		return errors.New("metric storage returned a non-success Prometheus response")
-	}
-	if !response.Data.Result {
-		return errors.New("metric storage returned an invalid Prometheus result")
-	}
-	switch response.Data.ResultType {
-	case "matrix", "vector", "scalar", "string":
-		return nil
-	default:
-		return errors.New("metric storage returned an invalid Prometheus result type")
-	}
 }
 
 func writeMetricQueryError(w http.ResponseWriter, err error) {
