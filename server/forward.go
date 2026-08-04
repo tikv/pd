@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -402,7 +403,7 @@ func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
 		return ErrNotLeader
 	}
 	for _, clientURL := range leader.GetClientUrls() {
-		if clientURL == forwardedHost {
+		if isSamePDClientURL(clientURL, forwardedHost) {
 			return nil
 		}
 	}
@@ -430,11 +431,20 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
 	for _, addr := range memberAddrs {
-		if addr == host {
+		if isSamePDClientURL(addr, host) {
 			return true
 		}
 	}
 	return false
+}
+
+// isSamePDClientURL checks whether two HTTP(S) client URLs differ only in
+// scheme. PD clients may rewrite the scheme to match their TLS configuration,
+// while gRPC uses the URL host and the TLS configuration independently.
+func isSamePDClientURL(first, second string) bool {
+	firstHasValidScheme := strings.HasPrefix(first, "http://") || strings.HasPrefix(first, "https://")
+	secondHasValidScheme := strings.HasPrefix(second, "http://") || strings.HasPrefix(second, "https://")
+	return firstHasValidScheme && secondHasValidScheme && typeutil.EqualBaseURLs(first, second)
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
