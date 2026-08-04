@@ -1026,7 +1026,7 @@ func (s *fakeTokenBucketsStream) Send(resp *resource_manager.TokenBucketsRespons
 func newRUTokenBucketRequest(keyspaceID uint32, name string, ru float64) *resource_manager.TokenBucketRequest {
 	return &resource_manager.TokenBucketRequest{
 		ResourceGroupName: name,
-		KeyspaceId:        &resource_manager.KeyspaceIDValue{Value: keyspaceID},
+		KeyspaceId:        &resource_manager.KeyspaceIDValue{Keyspace: &resource_manager.KeyspaceIDValue_Value{Value: keyspaceID}},
 		Request: &resource_manager.TokenBucketRequest_RuItems{
 			RuItems: &resource_manager.TokenBucketRequest_RequestRU{
 				RequestRU: []*resource_manager.RequestUnitItem{
