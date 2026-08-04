@@ -15,6 +15,7 @@
 package syncer
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -128,6 +129,7 @@ var (
 	regionSyncerFullSyncCounters           map[fullSyncMetricLabels]prometheus.Counter
 	regionSyncerFullSyncLastDurationGauges map[string]prometheus.Gauge
 	regionSyncerStreamEventCounters        map[string]prometheus.Counter
+	registerRegionSyncerMetricsOnce        sync.Once
 )
 
 type fullSyncMetricLabels struct {
@@ -137,17 +139,21 @@ type fullSyncMetricLabels struct {
 
 func init() {
 	prometheus.MustRegister(regionSyncerStatus)
-	prometheus.MustRegister(regionSyncerClientReadyGauge)
-	prometheus.MustRegister(regionSyncerFullSyncCounter)
-	prometheus.MustRegister(regionSyncerFullSyncInProgressGauge)
-	prometheus.MustRegister(regionSyncerFullSyncLastDurationGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferCapacityRecordsGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferLengthRecordsGauge)
-	prometheus.MustRegister(regionSyncerHistoryBufferLiveDrainMissCounter)
-	prometheus.MustRegister(regionSyncerDownstreamLagRecordsGauge)
-	prometheus.MustRegister(regionSyncerStreamEventsCounter)
-
 	initRegionSyncerMetrics()
+}
+
+func registerRegionSyncerMetrics() {
+	registerRegionSyncerMetricsOnce.Do(func() {
+		prometheus.MustRegister(regionSyncerClientReadyGauge)
+		prometheus.MustRegister(regionSyncerFullSyncCounter)
+		prometheus.MustRegister(regionSyncerFullSyncInProgressGauge)
+		prometheus.MustRegister(regionSyncerFullSyncLastDurationGauge)
+		prometheus.MustRegister(regionSyncerHistoryBufferCapacityRecordsGauge)
+		prometheus.MustRegister(regionSyncerHistoryBufferLengthRecordsGauge)
+		prometheus.MustRegister(regionSyncerHistoryBufferLiveDrainMissCounter)
+		prometheus.MustRegister(regionSyncerDownstreamLagRecordsGauge)
+		prometheus.MustRegister(regionSyncerStreamEventsCounter)
+	})
 }
 
 func initRegionSyncerMetrics() {

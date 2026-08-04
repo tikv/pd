@@ -18,10 +18,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -45,6 +48,38 @@ func newTestDownstreamMember() *pdpb.Member {
 		MemberId:   testDownstreamMemberID,
 		Name:       "pd-follower",
 		ClientUrls: []string{"http://127.0.0.1:2379"},
+	}
+}
+
+func TestRegionSyncerMetricsRegistrationIsLazy(t *testing.T) {
+	const testModeEnv = "PD_REGION_SYNCER_METRICS_TEST_MODE"
+	testMode := os.Getenv(testModeEnv)
+	if testMode != "" {
+		if testMode == "registered" {
+			registerRegionSyncerMetrics()
+		}
+		metricFamilies, err := prometheus.DefaultGatherer.Gather()
+		require.NoError(t, err)
+		registered := false
+		for _, metricFamily := range metricFamilies {
+			if metricFamily.GetName() == "pd_region_syncer_client_ready" {
+				registered = true
+				break
+			}
+		}
+		require.Equal(t, testMode == "registered", registered)
+		return
+	}
+
+	for _, testMode := range []string{"import-only", "registered"} {
+		t.Run(testMode, func(t *testing.T) {
+			// os.Args[0] is the current Go test binary, not external input.
+			//nolint:gosec
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=TestRegionSyncerMetricsRegistrationIsLazy$")
+			cmd.Env = append(os.Environ(), testModeEnv+"="+testMode)
+			output, err := cmd.CombinedOutput()
+			require.NoError(t, err, string(output))
+		})
 	}
 }
 

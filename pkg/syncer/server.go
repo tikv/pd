@@ -265,6 +265,7 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	if regionStorage == nil {
 		return nil
 	}
+	registerRegionSyncerMetrics()
 	historyBufferMaxSize := historyBufferMaxSizeFromMemory(memory.GetMemTotalIgnoreErr())
 	syncer := &RegionSyncer{
 		server:      s,
