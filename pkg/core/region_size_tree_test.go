@@ -82,8 +82,11 @@ func TestRegionSizeTreeIsOptInAndRebuilds(t *testing.T) {
 }
 
 func TestRegionSizeTreeMetrics(t *testing.T) {
-	tree := newRegionSizeTree(context.Background(), NewRegionsInfo())
+	regions := NewRegionsInfo()
+	tree := newRegionSizeTree(context.Background(), regions)
+	regions.sizeTree.Store(tree)
 	t.Cleanup(func() {
+		regions.sizeTree.Store(nil)
 		tree.cancel()
 		resetRegionSizeTreeMetrics()
 	})
@@ -93,7 +96,7 @@ func TestRegionSizeTreeMetrics(t *testing.T) {
 	tree.pendingSince = time.Now().Add(-time.Second)
 	tree.pendingMu.Unlock()
 	tree.ready.Store(true)
-	tree.collectMetrics()
+	regions.CollectRegionSizeTreeMetrics()
 	require.Equal(t, 1.0, testutil.ToFloat64(regionSizeTreeReadyGauge))
 	require.Equal(t, 2.0, testutil.ToFloat64(regionSizeTreePendingGauge))
 	require.GreaterOrEqual(t,
@@ -101,7 +104,7 @@ func TestRegionSizeTreeMetrics(t *testing.T) {
 	)
 
 	tree.drain()
-	tree.collectMetrics()
+	regions.CollectRegionSizeTreeMetrics()
 	require.Zero(t, testutil.ToFloat64(regionSizeTreePendingGauge))
 	require.Zero(t, testutil.ToFloat64(regionSizeTreeOldestPendingDurationGauge))
 }

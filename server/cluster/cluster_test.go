@@ -23,11 +23,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
+	prometheus_testutil "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -44,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
@@ -2041,25 +2045,32 @@ func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T)
 	cluster.progressManager = progress.NewManager(cluster.GetCoordinator().GetCheckerController(),
 		nodeStateCheckJobInterval)
 
+	const confirmedStoreCount = 50
 	now := time.Now()
-	stores := newTestStores(3, "8.5.0")
+	// Keep one additional Preparing store below the approximate threshold so it
+	// can verify that the next check round reloads root sizes.
+	stores := newTestStores(confirmedStoreCount+2, "8.5.0")
 	for i, store := range stores {
-		if i < 2 {
+		if i <= confirmedStoreCount {
 			store = store.Clone(
 				core.SetNodeState(metapb.NodeState_Preparing),
 				core.SetStoreStartTime(now.Unix()),
 			)
 		}
 		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+		regionSize := int64(15)
+		if i == confirmedStoreCount {
+			regionSize = 5
+		}
 		cluster.PutStore(cluster.GetStore(store.GetID()).Clone(
 			core.SetLastHeartbeatTS(now),
 			core.SetRegionCount(10),
-			core.SetRegionSize(190),
+			core.SetRegionSize(regionSize),
 		))
 	}
 
 	for i := range core.InitClusterRegionThreshold {
-		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: stores[2].GetID()}
+		peer := &metapb.Peer{Id: uint64(i + 1), StoreId: stores[len(stores)-1].GetID()}
 		region := core.NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			StartKey: []byte(fmt.Sprintf("%04d", i)),
@@ -2079,30 +2090,57 @@ func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T)
 		}
 		return regionSizeCacheValue{size: size, available: true, needsConfirmation: true}
 	})
+	rootLoadedRanges := make(map[regionSizeCacheKey]int)
+	rootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		rootLoadedRanges[key]++
+		return cluster.GetRegionSizeByRange(startKey, endKey)
+	})
 
 	// An unavailable lazy index defers both the state decision and this round's
 	// progress sample instead of treating an unknown threshold as zero.
 	unavailableSizes := newRegionSizeCacheWithResult(func([]byte, []byte) regionSizeCacheValue {
 		return regionSizeCacheValue{}
 	})
-	cluster.checkStore(stores[0].GetID(), unavailableSizes)
+	cluster.checkStore(stores[0].GetID(), unavailableSizes, rootSizes)
 	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[0].GetID()).GetNodeState())
 	re.Nil(cluster.progressManager.GetProgressByStoreID(stores[0].GetID()))
 
-	// Both the default and bounded rules contribute: 300 * 2 rules / 3 stores
-	// * 0.9 = 180, so the first store can serve after root confirmation.
-	cluster.checkStore(stores[0].GetID(), staleSizes)
-	re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[0].GetID()).GetNodeState())
+	// Both the default and bounded rules contribute. All 50 candidates share
+	// the same root cache, so each placement interval is scanned only once.
+	for i := range confirmedStoreCount {
+		cluster.checkStore(stores[i].GetID(), staleSizes, rootSizes)
+		re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[i].GetID()).GetNodeState())
+	}
+	re.Len(rootLoadedRanges, 3)
+	for _, count := range rootLoadedRanges {
+		re.Equal(1, count)
+	}
+	re.Len(loadedRanges, 3)
+	for _, count := range loadedRanges {
+		re.Equal(1, count)
+	}
 
 	// Grow the authoritative range to 600 while the asynchronous value remains
-	// 300. A fresh confirmation for the second store must use threshold 360,
-	// rather than a root result cached while checking the first store.
+	// 300. The next round uses a new root cache and keeps the remaining store in
+	// Preparing because its current size is below the refreshed threshold.
 	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(303))
 	cluster.PutRegion(region)
-	cluster.checkStore(stores[1].GetID(), staleSizes)
-	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[1].GetID()).GetNodeState())
+	remainingStoreID := stores[confirmedStoreCount].GetID()
+	cluster.PutStore(cluster.GetStore(remainingStoreID).Clone(core.SetRegionSize(15)))
+	nextRoundRootLoadedRanges := make(map[regionSizeCacheKey]int)
+	nextRoundRootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		nextRoundRootLoadedRanges[key]++
+		return cluster.GetRegionSizeByRange(startKey, endKey)
+	})
+	cluster.checkStore(remainingStoreID, staleSizes, nextRoundRootSizes)
+	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(remainingStoreID).GetNodeState())
+	re.Len(nextRoundRootLoadedRanges, 3)
+	for _, count := range nextRoundRootLoadedRanges {
+		re.Equal(1, count)
+	}
 	re.Zero(loadedRanges[regionSizeCacheKey{}])
-	re.Equal(1, loadedRanges[regionSizeCacheKey{startKey: "\x00", endKey: "\xff"}])
 
 	// The same stale value marked exact skips root confirmation and is used
 	// directly, proving confirmation is limited to asynchronous results.
@@ -2112,8 +2150,37 @@ func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T)
 		}
 		return 0
 	})
-	cluster.checkStore(stores[1].GetID(), exactSizes)
-	re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[1].GetID()).GetNodeState())
+	cluster.checkStore(remainingStoreID, exactSizes, nextRoundRootSizes)
+	re.Equal(metapb.NodeState_Serving, cluster.GetStore(remainingStoreID).GetNodeState())
+}
+
+func TestClusterMetricsCollectRegionSizeTreeInIndependentSchedulingMode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster := &RaftCluster{BasicCluster: core.NewBasicCluster()}
+	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
+		Id:       1,
+		StartKey: []byte("a"),
+		EndKey:   []byte("z"),
+	}, nil, core.SetApproximateSize(10)))
+	cluster.StartRegionSizeTree(ctx)
+	t.Cleanup(cluster.StopRegionSizeTree)
+	require.Eventually(t, func() bool {
+		_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
+		return ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
+	cluster.collectMetrics()
+	require.NoError(t, prometheus_testutil.GatherAndCompare(
+		prometheus.DefaultGatherer,
+		strings.NewReader(`# HELP pd_core_region_size_tree_ready Whether the eventually consistent Region size tree is ready for queries.
+# TYPE pd_core_region_size_tree_ready gauge
+pd_core_region_size_tree_ready 1
+`),
+		"pd_core_region_size_tree_ready",
+	))
 }
 
 func TestStatsRegions(t *testing.T) {
@@ -4421,7 +4488,7 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	upStoreCount := 0
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes, regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4442,7 +4509,7 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	}
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes, regionSizes)
 		if isUp {
 			upStoreCount++
 		}

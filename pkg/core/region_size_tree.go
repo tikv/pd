@@ -371,8 +371,10 @@ func (t *regionSizeTree) reconcileLocked(regionID uint64, region *RegionInfo) {
 		t.totalSize -= origin.size
 		delete(t.regions, regionID)
 	}
-	// Region ranges are immutable after insertion into the root B-tree, so the
-	// compact index can share their key bytes without retaining RegionInfo.
+	// Region ranges are immutable. The compact index retains the key slices
+	// captured from the root state without retaining the complete RegionInfo. A
+	// later same-range heartbeat may replace the root RegionInfo and its backing
+	// arrays without refreshing these slices.
 	item := &regionSizeItem{
 		regionID: regionID,
 		startKey: region.GetStartKey(),

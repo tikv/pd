@@ -2359,12 +2359,15 @@ func (r *RegionsInfo) GetRegionSizeByRangeFromSizeTree(startKey, endKey []byte) 
 // metrics default poll interval
 const defaultPollInterval = 15 * time.Second
 
-// CollectWaitLockMetrics collects the metrics of waiting time for lock
-func (r *RegionsInfo) CollectWaitLockMetrics() {
+// CollectRegionSizeTreeMetrics collects the Region size tree metrics.
+func (r *RegionsInfo) CollectRegionSizeTreeMetrics() {
 	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
 		sizeTree.collectMetrics()
 	}
+}
 
+// CollectWaitLockMetrics collects the metrics of waiting time for lock
+func (r *RegionsInfo) CollectWaitLockMetrics() {
 	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
 	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
 

@@ -2011,7 +2011,7 @@ func (c *RaftCluster) checkStores() {
 
 	for _, store := range stores {
 		storeID := store.GetID()
-		isInUp, isInOffline := c.checkStore(storeID, approxSizes)
+		isInUp, isInOffline := c.checkStore(storeID, approxSizes, rootSizes)
 		if isInUp {
 			upStoreCount++
 		}
@@ -2030,7 +2030,7 @@ func (c *RaftCluster) checkStores() {
 
 func (c *RaftCluster) checkStore(
 	storeID uint64,
-	approxSizes *regionSizeCache,
+	approxSizes, rootSizes *regionSizeCache,
 ) (isInUp, isInOffline bool) {
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
@@ -2059,8 +2059,7 @@ func (c *RaftCluster) checkStore(
 			if thresholdAvailable {
 				if approxSizes.needsConfirmation && regionSize >= threshold {
 					// The size tree can lag behind the root tree. Confirm the one-way
-					// Preparing-to-Serving transition with a fresh per-store root cache.
-					rootSizes := newRegionSizeCache(c.GetRegionSizeByRange)
+					// Preparing-to-Serving transition with this round's root cache.
 					threshold = c.getThreshold(stores, store, &kr, rootSizes)
 				}
 				log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
@@ -2241,6 +2240,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
+	c.CollectRegionSizeTreeMetrics()
 	c.collectHealthStatus()
 }
 
