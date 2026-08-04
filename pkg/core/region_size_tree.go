@@ -26,11 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-type regionSizeTreeUpdate struct {
-	regionID uint64
-	region   *RegionInfo
-}
-
 type regionSizeItem struct {
 	regionID uint64
 	startKey []byte
@@ -58,10 +53,9 @@ type regionSizeTree struct {
 	owner  *RegionsInfo
 	ready  atomic.Bool
 
-	mu        syncutil.RWMutex
-	tree      *btree.BTreeG[*regionSizeItem]
-	regions   map[uint64]*regionSizeItem
-	totalSize int64
+	mu      syncutil.RWMutex
+	tree    *btree.BTreeG[*regionSizeItem]
+	regions map[uint64]*regionSizeItem
 
 	pendingMu      syncutil.Mutex
 	pending        map[uint64]struct{}
@@ -88,8 +82,12 @@ func newRegionSizeTree(ctx context.Context, owner *RegionsInfo) *regionSizeTree 
 }
 
 func (t *regionSizeTree) start() {
+	t.pendingMu.Lock()
+	t.rebuildPending = true
+	t.pendingMu.Unlock()
 	t.wg.Add(1)
 	go t.run()
+	t.wake()
 }
 
 func (t *regionSizeTree) stop() {
@@ -122,14 +120,6 @@ func (t *regionSizeTree) requestReset() {
 	t.pendingMu.Lock()
 	t.ready.Store(false)
 	t.resetPending = true
-	t.pendingMu.Unlock()
-	t.wake()
-}
-
-func (t *regionSizeTree) requestRebuild() {
-	t.pendingMu.Lock()
-	t.ready.Store(false)
-	t.rebuildPending = true
 	t.pendingMu.Unlock()
 	t.wake()
 }
@@ -319,21 +309,10 @@ func (t *regionSizeTree) reconcileIDs(regionIDs []uint64) {
 		return
 	}
 	regions := t.owner.getRegionsByIDs(regionIDs)
-	updates := make([]regionSizeTreeUpdate, len(regionIDs))
-	for i, regionID := range regionIDs {
-		updates[i] = regionSizeTreeUpdate{regionID: regionID, region: regions[i]}
-	}
-	t.reconcile(updates)
-}
-
-func (t *regionSizeTree) reconcile(updates []regionSizeTreeUpdate) {
-	if len(updates) == 0 {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, update := range updates {
-		t.reconcileLocked(update.regionID, update.region)
+	for i, regionID := range regionIDs {
+		t.reconcileLocked(regionID, regions[i])
 	}
 }
 
@@ -350,7 +329,6 @@ func (t *regionSizeTree) reconcileLocked(regionID uint64, region *RegionInfo) {
 	if region == nil {
 		if origin != nil {
 			t.tree.Delete(origin)
-			t.totalSize -= origin.size
 			delete(t.regions, regionID)
 		}
 		return
@@ -358,17 +336,12 @@ func (t *regionSizeTree) reconcileLocked(regionID uint64, region *RegionInfo) {
 
 	if origin != nil && bytes.Equal(origin.startKey, region.GetStartKey()) &&
 		bytes.Equal(origin.endKey, region.GetEndKey()) {
-		if origin.size == region.GetApproximateSize() {
-			return
-		}
-		t.totalSize += region.GetApproximateSize() - origin.size
 		origin.size = region.GetApproximateSize()
 		return
 	}
 
 	if origin != nil {
 		t.tree.Delete(origin)
-		t.totalSize -= origin.size
 		delete(t.regions, regionID)
 	}
 	// Region ranges are immutable. The compact index retains the key slices
@@ -383,11 +356,9 @@ func (t *regionSizeTree) reconcileLocked(regionID uint64, region *RegionInfo) {
 	}
 	for _, overlap := range t.overlapsLocked(item) {
 		t.tree.Delete(overlap)
-		t.totalSize -= overlap.size
 		delete(t.regions, overlap.regionID)
 	}
 	t.tree.ReplaceOrInsert(item)
-	t.totalSize += item.size
 	t.regions[regionID] = item
 }
 
@@ -424,16 +395,9 @@ func (t *regionSizeTree) reset() {
 	defer t.mu.Unlock()
 	t.tree = btree.NewG[*regionSizeItem](defaultBTreeDegree)
 	t.regions = make(map[uint64]*regionSizeItem)
-	t.totalSize = 0
 }
 
 func (t *regionSizeTree) getRegionSizeByRange(startKey, endKey []byte) int64 {
-	if len(startKey) == 0 && len(endKey) == 0 {
-		t.mu.RLock()
-		defer t.mu.RUnlock()
-		return t.totalSize
-	}
-
 	var size int64
 	for {
 		t.mu.RLock()
@@ -461,10 +425,4 @@ func (t *regionSizeTree) getRegionSizeByRange(startKey, endKey []byte) int64 {
 		}
 	}
 	return size
-}
-
-func (t *regionSizeTree) length() int {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.tree.Len()
 }

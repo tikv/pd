@@ -1985,9 +1985,6 @@ func (c *RaftCluster) getPreparingRegionSize(
 	}
 	// Most clusters only use the full-range total. Build the additional index
 	// lazily when a placement-rule boundary first needs a non-empty range.
-	if c.ctx == nil {
-		return rootSizes.getRegionSizeResult(startKey, endKey)
-	}
 	c.StartRegionSizeTree(c.ctx)
 	if size, ready := c.GetRegionSizeByRangeFromSizeTree(startKey, endKey); ready {
 		return regionSizeCacheValue{size: size, available: true, needsConfirmation: true}

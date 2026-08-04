@@ -27,60 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
-func TestRegionSizeTreeStructuralUpdates(t *testing.T) {
-	re := require.New(t)
-	tree := newRegionSizeTree(context.Background(), NewRegionsInfo())
-	t.Cleanup(tree.cancel)
-	merged := newRegionSizeTreeTestRegion(1, "a", "z", 1, 100)
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: merged.GetID(), region: merged}})
-	re.Equal(int64(100), tree.getRegionSizeByRange(nil, nil))
-	re.Equal(int64(100), tree.getRegionSizeByRange([]byte("b"), []byte("m")))
-
-	left := newRegionSizeTreeTestRegion(1, "a", "m", 2, 40)
-	right := newRegionSizeTreeTestRegion(2, "m", "z", 2, 60)
-	// Apply the right side first to cover out-of-order split notifications.
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: right.GetID(), region: right}})
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: left.GetID(), region: left}})
-	re.Equal(2, tree.length())
-	re.Equal(int64(100), tree.getRegionSizeByRange(nil, nil))
-	re.Equal(int64(40), tree.getRegionSizeByRange([]byte("b"), []byte("m")))
-	re.Equal(int64(60), tree.getRegionSizeByRange([]byte("m"), []byte("z")))
-
-	left = newRegionSizeTreeTestRegion(1, "a", "m", 2, 50)
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: left.GetID(), region: left}})
-	re.Equal(int64(110), tree.getRegionSizeByRange(nil, nil))
-
-	merged = newRegionSizeTreeTestRegion(3, "a", "z", 3, 120)
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: merged.GetID(), region: merged}})
-	re.Equal(1, tree.length())
-	re.Equal(int64(120), tree.getRegionSizeByRange(nil, nil))
-
-	// A delayed child removal deletes by ID and cannot remove the merged Region.
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: right.GetID()}})
-	re.Equal(1, tree.length())
-	re.Equal(int64(120), tree.getRegionSizeByRange(nil, nil))
-
-	tree.reset()
-	re.Zero(tree.length())
-	re.Zero(tree.getRegionSizeByRange(nil, nil))
-}
-
-func TestRegionSizeTreeIsOptInAndRebuilds(t *testing.T) {
-	re := require.New(t)
-	regions := NewRegionsInfo()
-	region := newRegionSizeTreeTestRegion(1, "a", "z", 1, 10)
-	regions.PutRegion(region)
-
-	re.Nil(regions.sizeTree.Load())
-	_, ready := regions.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
-	re.False(ready)
-
-	startRegionSizeTreeForTest(t, regions)
-	requireRegionSizeEventually(t, regions, []byte("a"), []byte("z"), 10)
-	regions.StopRegionSizeTree()
-	re.Nil(regions.sizeTree.Load())
-}
-
 func TestRegionSizeTreeMetrics(t *testing.T) {
 	regions := NewRegionsInfo()
 	tree := newRegionSizeTree(context.Background(), regions)
@@ -143,11 +89,14 @@ func TestRegionSizeTreeRebuildsAndScansInBatches(t *testing.T) {
 		))
 	}
 
+	require.Nil(t, regions.sizeTree.Load())
+	_, ready := regions.GetRegionSizeByRangeFromSizeTree([]byte("0000"), []byte("9999"))
+	require.False(t, ready)
 	atomic.StoreInt64(&regions.t.lockCount, 0)
 	startRegionSizeTreeForTest(t, regions)
 	// Rebuild scans 1000 Regions at a time and does not reload every ID.
 	require.Equal(t, int64(2), atomic.LoadInt64(&regions.t.lockCount))
-	requireRegionSizeEventually(t, regions, nil, nil, int64(regionCount))
+	requireTotalRegionSizeEventually(t, regions, int64(regionCount))
 	require.Equal(t, int64(regionCount), getRegionSizeFromReadyTree(t, regions,
 		[]byte("0000"), []byte("9999"),
 	))
@@ -170,6 +119,8 @@ func TestRegionSizeTreeRebuildsAndScansInBatches(t *testing.T) {
 			))
 		})
 	}
+	regions.StopRegionSizeTree()
+	require.Nil(t, regions.sizeTree.Load())
 }
 
 func TestRegionSizeTreeRebuildDoesNotReplayTakenPending(t *testing.T) {
@@ -183,7 +134,9 @@ func TestRegionSizeTreeRebuildDoesNotReplayTakenPending(t *testing.T) {
 	regions.sizeTree.Store(tree)
 	t.Cleanup(regions.StopRegionSizeTree)
 	tree.notify(1, 2)
-	tree.requestRebuild()
+	tree.pendingMu.Lock()
+	tree.rebuildPending = true
+	tree.pendingMu.Unlock()
 
 	atomic.StoreInt64(&regions.t.lockCount, 0)
 	tree.drain()
@@ -226,7 +179,7 @@ func TestRegionSizeTreeCanceledRebuildIsNeverReady(t *testing.T) {
 	require.False(t, <-rebuildDone)
 	tree.markReadyIfCurrent()
 	require.False(t, tree.isReady())
-	require.Less(t, tree.length(), regionCount)
+	require.Less(t, regionSizeTreeLengthForTest(tree), regionCount)
 }
 
 func TestRegionSizeTreeResetDuringRebuildPublishesResetState(t *testing.T) {
@@ -263,34 +216,13 @@ func TestRegionSizeTreeResetDuringRebuildPublishesResetState(t *testing.T) {
 	tree.mu.RUnlock()
 	require.False(t, <-rebuildDone)
 	require.Equal(t, rootLockCount, atomic.LoadInt64(&regions.t.lockCount))
-	require.Less(t, tree.length(), regionCount)
+	require.Less(t, regionSizeTreeLengthForTest(tree), regionCount)
 	tree.markReadyIfCurrent()
 	require.False(t, tree.isReady())
 
-	tree.start()
-	requireRegionSizeEventually(t, regions, nil, nil, 40)
-	require.Equal(t, 1, tree.length())
-}
-
-func TestRegionSizeTreeReconcilesPendingInRootBatches(t *testing.T) {
-	regions := NewRegionsInfo()
-	regionCount := ScanRegionLimit
-	pending := make(map[uint64]struct{}, regionCount)
-	for i := range regionCount {
-		regionID := uint64(i + 1)
-		regions.PutRegion(newRegionSizeTreeTestRegion(
-			regionID, fmt.Sprintf("%04d", i), fmt.Sprintf("%04d", i+1), 1, 1,
-		))
-		pending[regionID] = struct{}{}
-	}
-
-	tree := newRegionSizeTree(context.Background(), regions)
-	t.Cleanup(tree.cancel)
-	atomic.StoreInt64(&regions.t.lockCount, 0)
-	require.True(t, tree.reconcilePending(pending))
-	require.Equal(t, int64((regionCount+batchSearchSize-1)/batchSearchSize),
-		atomic.LoadInt64(&regions.t.lockCount))
-	require.Equal(t, regionCount, tree.length())
+	tree.drain()
+	require.Equal(t, int64(40), getRegionSizeFromReadyTree(t, regions, nil, nil))
+	require.Equal(t, 1, regionSizeTreeLengthForTest(tree))
 }
 
 func TestRegionSizeTreePendingReconcileCanBeInterrupted(t *testing.T) {
@@ -350,7 +282,7 @@ func TestRegionSizeTreePendingReconcileCanBeInterrupted(t *testing.T) {
 			test.interrupt(tree)
 			tree.mu.RUnlock()
 			require.False(t, <-reconcileDone)
-			require.Equal(t, ScanRegionLimit, tree.length())
+			require.Equal(t, ScanRegionLimit, regionSizeTreeLengthForTest(tree))
 			require.Equal(t, int64((ScanRegionLimit+batchSearchSize-1)/batchSearchSize),
 				atomic.LoadInt64(&regions.t.lockCount))
 		})
@@ -376,7 +308,7 @@ func TestRegionSizeTreeEventuallyReconcilesLatestRootState(t *testing.T) {
 	}, peer2, SetApproximateSize(20))
 	regions.PutRegion(region1)
 	regions.PutRegion(region2)
-	requireRegionSizeEventually(t, regions, nil, nil, 30)
+	requireTotalRegionSizeEventually(t, regions, 30)
 	re.Equal(int64(10), getRegionSizeFromReadyTree(t, regions, []byte("b"), []byte("m")))
 
 	tree := regions.sizeTree.Load()
@@ -386,18 +318,18 @@ func TestRegionSizeTreeEventuallyReconcilesLatestRootState(t *testing.T) {
 	re.NoError(err)
 	re.Equal(int64(60), regions.GetRegionSizeByRange(nil, nil))
 	// The root update only enqueues the ID and does not wait for the size tree.
-	re.Equal(int64(30), tree.totalSize)
+	re.Equal(int64(10), tree.regions[region1.GetID()].size)
 	tree.mu.RUnlock()
 
 	// The size tree converges even if the corresponding subtree task is dropped.
-	requireRegionSizeEventually(t, regions, nil, nil, 60)
+	requireTotalRegionSizeEventually(t, regions, 60)
 	re.Equal(int64(40), getRegionSizeFromReadyTree(t, regions, []byte("b"), []byte("m")))
 	re.Equal(int32(1), updated.GetRef())
 	regions.CheckAndPutSubTree(updated)
 	re.Equal(int32(2), updated.GetRef())
 
 	regions.RemoveRegionIfExist(region2.GetID())
-	requireRegionSizeEventually(t, regions, nil, nil, 40)
+	requireTotalRegionSizeEventually(t, regions, 40)
 }
 
 func TestRegionSizeTreeQueryDoesNotBlockSubTreeUpdate(t *testing.T) {
@@ -406,7 +338,7 @@ func TestRegionSizeTreeQueryDoesNotBlockSubTreeUpdate(t *testing.T) {
 	tree := startRegionSizeTreeForTest(t, regions)
 	region := newRegionSizeTreeTestRegion(1, "a", "z", 1, 10)
 	regions.PutRegion(region)
-	requireRegionSizeEventually(t, regions, nil, nil, 10)
+	requireTotalRegionSizeEventually(t, regions, 10)
 
 	// Simulate a long range query. The synchronous root/subtree path must only
 	// enqueue the ID and must not wait for the size-tree writer lock.
@@ -427,7 +359,7 @@ func TestRegionSizeTreeQueryDoesNotBlockSubTreeUpdate(t *testing.T) {
 	tree.mu.RUnlock()
 	re.True(completed, "subtree update waited for the size-tree query")
 	re.Equal(int64(20), regions.GetRegionSizeByRange(nil, nil))
-	requireRegionSizeEventually(t, regions, nil, nil, 20)
+	requireTotalRegionSizeEventually(t, regions, 20)
 }
 
 func TestRegionSizeTreeSplitMerge(t *testing.T) {
@@ -436,7 +368,7 @@ func TestRegionSizeTreeSplitMerge(t *testing.T) {
 		startRegionSizeTreeForTest(t, regions)
 		original := newRegionSizeTreeTestRegion(1, "a", "z", 1, 100)
 		regions.PutRegion(original)
-		requireRegionSizeEventually(t, regions, nil, nil, 100)
+		requireTotalRegionSizeEventually(t, regions, 100)
 
 		left := newRegionSizeTreeTestRegion(1, "a", "m", 2, 40)
 		right := newRegionSizeTreeTestRegion(2, "m", "z", 2, 60)
@@ -450,7 +382,7 @@ func TestRegionSizeTreeSplitMerge(t *testing.T) {
 		require.Eventually(t, func() bool {
 			tree := regions.sizeTree.Load()
 			size, ready := regions.GetRegionSizeByRangeFromSizeTree(nil, nil)
-			return tree != nil && tree.length() == 2 &&
+			return tree != nil && regionSizeTreeLengthForTest(tree) == 2 &&
 				ready && size == 100
 		}, 5*time.Second, 10*time.Millisecond)
 
@@ -459,7 +391,7 @@ func TestRegionSizeTreeSplitMerge(t *testing.T) {
 		require.Eventually(t, func() bool {
 			tree := regions.sizeTree.Load()
 			size, ready := regions.GetRegionSizeByRangeFromSizeTree(nil, nil)
-			return tree != nil && tree.length() == 1 &&
+			return tree != nil && regionSizeTreeLengthForTest(tree) == 1 &&
 				ready && size == 120
 		}, 5*time.Second, 10*time.Millisecond)
 
@@ -476,7 +408,7 @@ func TestRegionSizeTreeDelayedChildNotificationsDoNotRemoveMergedRegion(t *testi
 	// Keep the worker stopped so both delayed child notifications are present
 	// before reconciliation reloads their latest root state.
 	tree := newRegionSizeTree(context.Background(), regions)
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: merged.GetID(), region: merged}})
+	tree.reconcileIDs([]uint64{merged.GetID()})
 	regions.sizeTree.Store(tree)
 	t.Cleanup(regions.StopRegionSizeTree)
 
@@ -487,7 +419,7 @@ func TestRegionSizeTreeDelayedChildNotificationsDoNotRemoveMergedRegion(t *testi
 	re.Equal(2, pendingCount)
 	tree.drain()
 
-	re.Equal(1, tree.length())
+	re.Equal(1, regionSizeTreeLengthForTest(tree))
 	re.Equal(int64(120), tree.getRegionSizeByRange(nil, nil))
 }
 
@@ -500,7 +432,7 @@ func TestRegionSizeTreeCoalescesRemoveAndSameIDReplacement(t *testing.T) {
 	// Keep the worker stopped so remove and replacement deterministically
 	// coalesce into one pending ID before the latest root state is loaded.
 	tree := newRegionSizeTree(context.Background(), regions)
-	tree.reconcile([]regionSizeTreeUpdate{{regionID: original.GetID(), region: original}})
+	tree.reconcileIDs([]uint64{original.GetID()})
 	regions.sizeTree.Store(tree)
 	t.Cleanup(regions.StopRegionSizeTree)
 
@@ -515,7 +447,7 @@ func TestRegionSizeTreeCoalescesRemoveAndSameIDReplacement(t *testing.T) {
 	re.True(pending)
 	tree.drain()
 
-	re.Equal(1, tree.length())
+	re.Equal(1, regionSizeTreeLengthForTest(tree))
 	re.Equal(int64(40), tree.getRegionSizeByRange(nil, nil))
 }
 
@@ -562,7 +494,7 @@ func TestRegionSizeTreeConvergesAfterCoalescedOverlapReplacementRemoval(t *testi
 			// and remove notifications deterministically coalesce before loading
 			// the latest root state.
 			tree := newRegionSizeTree(context.Background(), regions)
-			tree.reconcile([]regionSizeTreeUpdate{{regionID: original.GetID(), region: original}})
+			tree.reconcileIDs([]uint64{original.GetID()})
 			regions.sizeTree.Store(tree)
 			t.Cleanup(regions.StopRegionSizeTree)
 
@@ -576,7 +508,7 @@ func TestRegionSizeTreeConvergesAfterCoalescedOverlapReplacementRemoval(t *testi
 			re.Nil(regions.GetRegion(original.GetID()))
 			re.Nil(regions.GetRegion(replacement.GetID()))
 			tree.drain()
-			re.Zero(tree.length())
+			re.Zero(regionSizeTreeLengthForTest(tree))
 			re.Zero(tree.getRegionSizeByRange(nil, nil))
 		})
 	}
@@ -588,7 +520,7 @@ func TestRegionSizeTreeResetDoesNotBlockRootOrSubTree(t *testing.T) {
 	tree := startRegionSizeTreeForTest(t, regions)
 	regions.PutRegion(newRegionSizeTreeTestRegion(1, "a", "m", 1, 10))
 	regions.PutRegion(newRegionSizeTreeTestRegion(2, "m", "z", 1, 20))
-	requireRegionSizeEventually(t, regions, nil, nil, 30)
+	requireTotalRegionSizeEventually(t, regions, 30)
 
 	tree.mu.RLock()
 	resetDone := make(chan struct{})
@@ -621,7 +553,7 @@ func TestRegionSizeTreeResetDoesNotBlockRootOrSubTree(t *testing.T) {
 	re.True(updateCompleted, "post-reset update waited for the size-tree query")
 	require.Eventually(t, func() bool {
 		size, ready := regions.GetRegionSizeByRangeFromSizeTree(nil, nil)
-		return tree.length() == 1 && ready && size == 40
+		return regionSizeTreeLengthForTest(tree) == 1 && ready && size == 40
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
@@ -638,9 +570,9 @@ func startRegionSizeTreeForTest(t *testing.T, regions *RegionsInfo) *regionSizeT
 	return tree
 }
 
-func requireRegionSizeEventually(t *testing.T, regions *RegionsInfo, startKey, endKey []byte, expected int64) {
+func requireTotalRegionSizeEventually(t *testing.T, regions *RegionsInfo, expected int64) {
 	require.Eventually(t, func() bool {
-		size, ready := regions.GetRegionSizeByRangeFromSizeTree(startKey, endKey)
+		size, ready := regions.GetRegionSizeByRangeFromSizeTree(nil, nil)
 		return ready && size == expected
 	}, 5*time.Second, 10*time.Millisecond)
 }
@@ -649,6 +581,12 @@ func getRegionSizeFromReadyTree(t *testing.T, regions *RegionsInfo, startKey, en
 	size, ready := regions.GetRegionSizeByRangeFromSizeTree(startKey, endKey)
 	require.True(t, ready)
 	return size
+}
+
+func regionSizeTreeLengthForTest(tree *regionSizeTree) int {
+	tree.mu.RLock()
+	defer tree.mu.RUnlock()
+	return tree.tree.Len()
 }
 
 func newRegionSizeTreeTestRegion(id uint64, startKey, endKey string, version uint64, size int64) *RegionInfo {

@@ -1091,9 +1091,7 @@ func (r *RegionsInfo) StartRegionSizeTree(ctx context.Context) {
 		return
 	}
 	sizeTree := newRegionSizeTree(ctx, r)
-	resetRegionSizeTreeMetrics()
 	r.sizeTree.Store(sizeTree)
-	sizeTree.requestRebuild()
 	sizeTree.start()
 }
 
