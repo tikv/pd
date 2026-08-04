@@ -16,6 +16,7 @@ package election
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,14 +158,29 @@ func TestLeaseKeepAliveGuard(t *testing.T) {
 	re.Zero(clientLease.calls.Load())
 }
 
-func TestStoreExpireTimeAfterGuardRejected(t *testing.T) {
+func TestTryStoreExpireTimeDoesNotReviveResetLease(t *testing.T) {
+	const attempts = 1000
+	re := require.New(t)
 	lease := &Lease{}
-	lease.expireTime.Store(typeutil.ZeroTime)
-	var guardRejected atomic.Bool
-	guardRejected.Store(true)
-
-	require.False(t, lease.storeExpireTime(time.Now().Add(time.Minute), &guardRejected))
-	require.True(t, lease.IsExpired())
+	for range attempts {
+		lease.expireTime.Store(time.Now().Add(time.Minute))
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			lease.expireTime.Store(typeutil.ZeroTime)
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			lease.tryStoreExpireTime(time.Now().Add(time.Minute))
+		}()
+		close(start)
+		wg.Wait()
+		re.True(lease.IsExpired())
+	}
 }
 
 type keepAliveOnceCountingLease struct {

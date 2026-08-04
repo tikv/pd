@@ -185,10 +185,13 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var guardRejected atomic.Bool
-	if guard != nil {
-		check := guard
-		guard = func() bool {
-			if check() {
+	var guardedRenewal func() bool
+	if renewalGuard := guard; renewalGuard != nil {
+		guardedRenewal = func() bool {
+			if guardRejected.Load() {
+				return false
+			}
+			if renewalGuard() {
 				return true
 			}
 			if guardRejected.CompareAndSwap(false, true) {
@@ -198,7 +201,7 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 			return false
 		}
 	}
-	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, guard)
+	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3, guardedRenewal)
 	defer log.Info("lease keep alive stopped", zap.String("purpose", l.purpose))
 
 	var (
@@ -228,10 +231,10 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 					l.metrics.contextCanceled.Inc()
 					return
 				default:
-					// A guard rejection can race with this response after the
-					// context check above. Make the rejection terminal for the
-					// local lease state even if this response stores last.
-					if !l.storeExpireTime(t, &guardRejected) {
+					// A zero expiration is terminal for this lease grant. Update
+					// with CAS so an in-flight response cannot overwrite a
+					// concurrent guard rejection or reset.
+					if !l.tryStoreExpireTime(t) {
 						return
 					}
 				}
@@ -273,13 +276,16 @@ func (l *Lease) runKeepAlive(ctx context.Context, guard func() bool) {
 	}
 }
 
-func (l *Lease) storeExpireTime(t time.Time, guardRejected *atomic.Bool) bool {
-	l.expireTime.Store(t)
-	if !guardRejected.Load() {
-		return true
+func (l *Lease) tryStoreExpireTime(t time.Time) bool {
+	for {
+		oldExpireTime := l.loadExpireTime()
+		if oldExpireTime.IsZero() {
+			return false
+		}
+		if l.expireTime.CompareAndSwap(oldExpireTime, t) {
+			return true
+		}
 	}
-	l.expireTime.Store(typeutil.ZeroTime)
-	return false
 }
 
 // Periodically call `lease.KeepAliveOnce` and post back latest received expire time into the channel.

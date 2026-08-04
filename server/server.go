@@ -1981,7 +1981,6 @@ func (s *Server) campaignLeader() {
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
-	var leaseGuardRejectedOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		s.member.Resign()
@@ -1991,16 +1990,7 @@ func (s *Server) campaignLeader() {
 	log.Info("start to keep leader lease")
 	keepLeaderStart := time.Now()
 	s.member.GetLeadership().KeepWithLeaseGuard(ctx, func() bool {
-		etcdLeader := s.member.GetEtcdLeader()
-		if etcdLeader == s.member.ID() {
-			return true
-		}
-		leaseGuardRejectedOnce.Do(func() {
-			log.Info("stop keeping PD leader lease because embedded etcd leadership changed",
-				zap.Uint64("member-id", s.member.ID()),
-				zap.Uint64("etcd-leader-id", etcdLeader))
-		})
-		return false
+		return s.member.GetEtcdLeader() == s.member.ID()
 	})
 	keepLeaderDuration := time.Since(keepLeaderStart)
 	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
