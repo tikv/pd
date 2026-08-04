@@ -45,6 +45,8 @@ const (
 	writeRetryBaseDelay = time.Second
 )
 
+var mockWriteErrorHook func(attempt int) bool
+
 // Collector collects events into records with caller-defined fields.
 type Collector interface {
 	Category() string
@@ -230,15 +232,22 @@ func (mw *Writer) flushMeteringData(ctx context.Context, ts int64) {
 		for {
 			attempt++
 			writeCtx, cancel := context.WithTimeout(ctx, flushTimeout)
+			mockWriteError := false
 			// Inject mock write error for testing, value is the count to encounter error.
 			failpoint.Inject("mockWriteError", func(val failpoint.Value) {
 				baseDelay = time.Millisecond
 				if val.(int) >= attempt {
-					cancel()
+					mockWriteError = true
 				}
 			})
+			if mockWriteErrorHook != nil {
+				baseDelay = time.Millisecond
+				mockWriteError = mockWriteErrorHook(attempt)
+			}
 			// Ensure the context is valid before writing.
-			if writeCtx.Err() != nil {
+			if mockWriteError {
+				err = errors.New("mock write error")
+			} else if writeCtx.Err() != nil {
 				err = writeCtx.Err()
 			} else {
 				// TODO: write with pagination if needed.

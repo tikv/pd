@@ -1465,6 +1465,11 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 // This constant is public for test purposes.
 const IteratorLoadingBatchSize int = 100
 
+var (
+	iteratorLoadingBatchSize = IteratorLoadingBatchSize
+	iteratorOnLoadRange      func()
+)
+
 // Iterator iterates over all keyspaces.
 // Create this using keyspace.Manager.IterateKeyspaces, and use Next method for iteration.
 type Iterator struct {
@@ -1516,10 +1521,13 @@ func (it *Iterator) loadBatch() error {
 
 	var err error
 	it.currentIndex = 0
-	batchSize := IteratorLoadingBatchSize
+	batchSize := iteratorLoadingBatchSize
 	failpoint.Inject("keyspaceIteratorLoadingBatchSize", func(val failpoint.Value) {
 		batchSize = val.(int)
 	})
+	if iteratorOnLoadRange != nil {
+		iteratorOnLoadRange()
+	}
 	failpoint.InjectCall("keyspaceIteratorOnLoadRange")
 	it.currentBatch, err = it.manager.LoadRangeKeyspace(nextID, batchSize)
 	if err != nil {

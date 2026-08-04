@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -199,6 +200,8 @@ func (*countingServiceDiscovery) Close()                                        
 func (*countingServiceDiscovery) GetClusterID() uint64                               { return 0 }
 func (*countingServiceDiscovery) GetKeyspaceID() uint32                              { return 0 }
 func (*countingServiceDiscovery) SetKeyspaceID(uint32)                               {}
+func (*countingServiceDiscovery) GetKeyspaceIdentity() *apipb.KeyspaceIdentity       { return nil }
+func (*countingServiceDiscovery) SetKeyspaceIdentity(*apipb.KeyspaceIdentity)        {}
 func (*countingServiceDiscovery) GetKeyspaceGroupID() uint32                         { return 0 }
 func (*countingServiceDiscovery) GetServiceURLs() []string                           { return nil }
 func (*countingServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn     { return nil }
