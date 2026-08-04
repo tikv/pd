@@ -211,6 +211,7 @@ func TestLeaseKeepAliveGuardStopsAfterRenewal(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	re.True(lease.IsExpired())
+	re.True(lease.loadExpireTime().IsZero())
 	re.GreaterOrEqual(guardCalls.Load(), int32(2))
 	re.Equal(int32(1), clientLease.calls.Load())
 }
