@@ -186,6 +186,20 @@ func normalizeMetricQueryResponse(response *http.Response) error {
 // upstream headers are exposed before the final response is normalized.
 type metricQueryResponseWriter struct {
 	http.ResponseWriter
+	wroteHeader bool
+	lateHeader  http.Header
+}
+
+// Header returns a private header map after the final response headers have
+// been written, preventing late upstream trailers from reaching the client.
+func (w *metricQueryResponseWriter) Header() http.Header {
+	if !w.wroteHeader {
+		return w.ResponseWriter.Header()
+	}
+	if w.lateHeader == nil {
+		w.lateHeader = make(http.Header)
+	}
+	return w.lateHeader
 }
 
 // WriteHeader discards informational responses and forwards final responses.
@@ -193,6 +207,7 @@ func (w *metricQueryResponseWriter) WriteHeader(statusCode int) {
 	if statusCode >= 100 && statusCode < 200 {
 		return
 	}
+	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 

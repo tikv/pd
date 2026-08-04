@@ -31,6 +31,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/server/config"
 )
 
 func TestResolveMetricStorageTarget(t *testing.T) {
@@ -335,6 +337,35 @@ func TestMetricQueryResponseNormalizationStreamsBody(t *testing.T) {
 	require.JSONEq(t, successMetricResponse, string(body))
 	require.NoError(t, response.Body.Close())
 	require.True(t, upstreamBody.closed)
+}
+
+func TestMetricQueryDoesNotForwardResponseTrailers(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Trailer", "X-Secret-Trailer")
+		w.WriteHeader(http.StatusOK)
+		if _, err := io.WriteString(w, successMetricResponse); err != nil {
+			t.Errorf("failed to write upstream response: %v", err)
+		}
+		w.Header().Set("X-Secret-Trailer", "secret")
+	}))
+	t.Cleanup(upstream.Close)
+
+	storageURL, err := config.ParseMetricStorageURL(upstream.URL)
+	require.NoError(t, err)
+	proxy := newMetricReverseProxy(&metricTarget{MetricStorageURL: storageURL}, http.DefaultTransport)
+	recorder := httptest.NewRecorder()
+	proxy.ServeHTTP(
+		&metricQueryResponseWriter{ResponseWriter: recorder},
+		httptest.NewRequest(http.MethodGet, "/pd/api/v1/metric/query", nil),
+	)
+
+	response := recorder.Result()
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.JSONEq(t, successMetricResponse, string(body))
+	require.Empty(t, response.Trailer.Get("X-Secret-Trailer"))
+	require.Empty(t, recorder.Header().Get("X-Secret-Trailer"))
 }
 
 func TestMetricQuerySuppressesInformationalResponse(t *testing.T) {
