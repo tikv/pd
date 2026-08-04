@@ -462,14 +462,17 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
 	leader := s.GetLeader()
 	if leader == nil || len(leader.GetClientUrls()) == 0 {
-		return status.Error(codes.Unavailable, "PD leader is not available")
+		return errs.ErrNotLeader
 	}
 	for _, clientURL := range leader.GetClientUrls() {
 		if isSamePDClientURL(clientURL, forwardedHost) {
 			return nil
 		}
 	}
-	return status.Errorf(codes.InvalidArgument, "forwarded host %q is not a client URL of the PD leader", forwardedHost)
+	// Preserve the not-leader marker because PD clients use it to
+	// synchronously refresh membership when their forwarded host becomes stale.
+	return status.Errorf(codes.InvalidArgument,
+		"forwarded host %q is not a client URL of the PD leader: pd %s of cluster", forwardedHost, errs.NotLeaderErr)
 }
 
 func (s *GrpcServer) closeDelegateClient(forwardedHost string) {

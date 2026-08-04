@@ -19,16 +19,27 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestValidatePDForwardedHostWithoutLeader(t *testing.T) {
+	grpcServer := &GrpcServer{Server: &Server{member: member.NewMember(nil, nil, 1)}}
+	err := grpcServer.validatePDForwardedHost("http://127.0.0.1:2379")
+	require.ErrorIs(t, err, errs.ErrNotLeader)
+	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
 func TestIsSamePDClientURL(t *testing.T) {
