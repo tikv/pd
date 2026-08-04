@@ -399,7 +399,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 func (s *GrpcServer) validatePDForwardedHost(forwardedHost string) error {
 	leader := s.GetLeader()
 	if leader == nil || len(leader.GetClientUrls()) == 0 {
-		return status.Error(codes.Unavailable, "PD leader is not available")
+		return ErrNotLeader
 	}
 	for _, clientURL := range leader.GetClientUrls() {
 		if clientURL == forwardedHost {

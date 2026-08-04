@@ -18,11 +18,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
+
+	"github.com/tikv/pd/pkg/member"
 )
+
+func TestValidatePDForwardedHostWithoutLeader(t *testing.T) {
+	grpcServer := &GrpcServer{Server: &Server{member: &member.EmbeddedEtcdMember{}}}
+	err := grpcServer.validatePDForwardedHost("http://127.0.0.1:2379")
+	require.ErrorIs(t, err, ErrNotLeader)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
 
 func TestNewSchedulingAskBatchSplitRequestPreservesReason(t *testing.T) {
 	re := require.New(t)
