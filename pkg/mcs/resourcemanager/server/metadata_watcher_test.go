@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type countingServiceLimitLoadStorage struct {
@@ -45,9 +46,10 @@ func (s *countingServiceLimitLoadStorage) LoadServiceLimits(f func(keyspaceID ui
 
 func newMetadataWatcherTestManager(store storage.Storage) *Manager {
 	return &Manager{
-		storage:          store,
-		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
-		controllerConfig: &ControllerConfig{},
+		storage:           store,
+		krgms:             make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig:  &ControllerConfig{},
+		serviceLimitLocks: syncutil.NewLockGroup(),
 	}
 }
 
@@ -436,4 +438,41 @@ func TestMetadataWatcherModeReleasesSyncLoadedGroups(t *testing.T) {
 	m.RUnlock()
 	re.Nil(syncLoadedGroups)
 	re.NotNil(m.getKeyspaceResourceGroupManager(10).getResourceGroup("watched", false))
+}
+
+// TestGetOrCreateKeyspaceResourceGroupManagerWatcherModeDoesNotClobberPendingDefault
+// guards against trusting LoadingStateCompleted as "cache is authoritative" in
+// metadata-watcher mode. There it only means the initial bootstrap finished,
+// not that every write already in storage has had its watch event delivered
+// to this replica's cache yet. If getOrCreateKeyspaceResourceGroupManager
+// synthesized directly on that signal, a request landing after a customized
+// default was persisted but before its watch event arrived would find
+// nothing cached and persist the built-in default over it.
+func TestGetOrCreateKeyspaceResourceGroupManagerWatcherModeDoesNotClobberPendingDefault(t *testing.T) {
+	re := require.New(t)
+
+	store := storage.NewStorageWithMemoryBackend()
+	// A customized default is already persisted - e.g. by PD - but its watch
+	// event has not been delivered to this replica's cache yet.
+	customized := newMetadataWatcherResourceGroup(DefaultResourceGroupName, middlePriority, 555, 555)
+	re.NoError(store.SaveResourceGroupSetting(1, DefaultResourceGroupName, customized))
+
+	m := newMetadataWatcherTestManager(store)
+	m.enableMetadataWatcher = true
+	m.setLoadingState(LoadingStateCompleted)
+
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(1, true)
+	re.NotNil(krgm)
+
+	group := krgm.getResourceGroup(DefaultResourceGroupName, false)
+	re.NotNil(group)
+	re.Equal(float64(555), group.getFillRate(),
+		"the customized default already in storage must be picked up by a point load, not overwritten by a synthesized built-in default")
+
+	raw, err := store.LoadResourceGroupSetting(1, DefaultResourceGroupName)
+	re.NoError(err)
+	loaded := &rmpb.ResourceGroup{}
+	re.NoError(proto.Unmarshal([]byte(raw), loaded))
+	re.Equal(uint64(555), loaded.RUSettings.RU.Settings.FillRate,
+		"the customized default persisted before the watcher delivered its event must survive in storage")
 }

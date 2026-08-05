@@ -997,6 +997,100 @@ func TestAsyncLoadResourceGroupsCrossTermSetServiceLimitPublishesToNewTerm(t *te
 	re.Equal(float64(4242), raw, "the service limit must be persisted regardless of the leadership change")
 }
 
+// TestAsyncLoadResourceGroupsCrossTermSetServiceLimitSerializesAgainstCompetingCall
+// guards against the unconditional publish-phase mirror in
+// SetKeyspaceServiceLimit clobbering a competing, fully-completed call for
+// the same keyspace. Without serviceLimitLocks, an old-term call parked
+// mid-persist could resume after a new-term call for the same keyspace
+// already persisted and published its own value, and mirror its own older
+// value back in - leaving the live cache stale even though storage (and
+// every other observer) already moved on. serviceLimitLocks makes the
+// new-term call wait for the old one to fully finish, including its own
+// mirror step, before it can even start, so this interleaving can no longer
+// happen.
+func TestAsyncLoadResourceGroupsCrossTermSetServiceLimitSerializesAgainstCompetingCall(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	store.waitEntered(t)
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(constant.NullKeyspaceID, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	// Park the old-term call between resolving its keyspace manager and its
+	// storage phase - it already holds serviceLimitLocks for this keyspace
+	// by this point. The new-term call goes through this same, still-armed
+	// failpoint too once serviceLimitLocks lets it proceed; parkOnce keeps
+	// only the first (old-term) hit actually parking, so the second one
+	// passes straight through instead of trying to close(reached) again.
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var parkOnce sync.Once
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setServiceLimitBeforeStorage", func() {
+		parkOnce.Do(func() {
+			close(reached)
+			<-release
+		})
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setServiceLimitBeforeStorage"))
+	}()
+	var oldErr error
+	oldDone := make(chan struct{})
+	go func() {
+		defer close(oldDone)
+		oldErr = m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 100)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the old-term call to reach its storage phase")
+	}
+
+	// Leadership changes while the old-term call is parked.
+	cancelTerm1()
+	re.NoError(m.Init(context.Background()))
+
+	// A new-term call for the same keyspace must not be able to run while the
+	// old-term call still holds serviceLimitLocks for it: it should block
+	// before even reaching the (still-armed) failpoint above, since
+	// serviceLimitLocks is acquired first.
+	var newErr error
+	newDone := make(chan struct{})
+	go func() {
+		defer close(newDone)
+		newErr = m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 200)
+	}()
+	select {
+	case <-newDone:
+		t.Fatal("the new-term call must be blocked by serviceLimitLocks while the old-term call is still parked")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	// Resume the old-term call: it persists and publishes 100, then releases
+	// serviceLimitLocks, letting the new-term call finally run and persist
+	// and publish 200.
+	close(release)
+	<-oldDone
+	re.NoError(oldErr)
+	<-newDone
+	re.NoError(newErr)
+
+	limiter := m.GetKeyspaceServiceLimiter(constant.NullKeyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(200), limiter.ServiceLimit,
+		"the new-term call must run - and win - only after the old-term call fully finished, not race ahead of or get clobbered by it")
+}
+
 // BenchmarkAsyncLoadMergeReaderStall measures the worst-case time a concurrent
 // reader is blocked while the async bulk merge installs a large number of
 // resource groups. The probe uses GetControllerConfig, whose only cost is the

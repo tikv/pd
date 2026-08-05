@@ -125,6 +125,18 @@ type Manager struct {
 	// from a previous term that was blocked in a storage scan can never merge
 	// stale data into, or publish completion for, a newer term.
 	loadEpoch uint64
+	// serviceLimitLocks serializes SetKeyspaceServiceLimit calls per keyspace
+	// ID. Unlike krgm-scoped locks (e.g. defaultGroupMu), this lives on the
+	// Manager itself and is never reset by Init, so it keeps serializing a
+	// call parked mid-persist in an old term against a competing call in a
+	// new term for the same keyspace - without it, the old call's eventual
+	// publish could overwrite a newer value the new-term call already both
+	// persisted and published. Entries are intentionally never removed: the
+	// keyspace ID space is bounded, matching krgms/keyspaceNameLookup's own
+	// grow-only lifetime, so there's no working-set pressure to justify the
+	// extra bookkeeping (and its own subtleties - see LockGroup's Unlock)
+	// that WithRemoveEntryOnUnlock would add.
+	serviceLimitLocks *syncutil.LockGroup
 }
 
 // LoadingState represents the current loading state of resource groups
@@ -171,6 +183,7 @@ func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupW
 		metrics:               newMetrics(),
 		ruCollector:           newRUCollector(),
 		syncLoadedGroups:      make(map[trackerKey]bool),
+		serviceLimitLocks:     syncutil.NewLockGroup(),
 	}
 	m.setLoadingState(LoadingStateNotStarted)
 	return m
@@ -275,6 +288,16 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	// Serialize against every other SetKeyspaceServiceLimit call for this
+	// keyspace, including ones that started in a different term: krgm
+	// identity resets on every Init, but this lock doesn't, so it's what
+	// keeps a call parked mid-persist in an old term from clobbering a
+	// competing new-term call's result once it resumes. See the
+	// serviceLimitLocks field doc for why a krgm-scoped lock (like
+	// defaultGroupMu) can't provide this guarantee on its own.
+	m.serviceLimitLocks.Lock(keyspaceID)
+	defer m.serviceLimitLocks.Unlock(keyspaceID)
+
 	// If the keyspace is not found, create a new keyspace resource group manager.
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
 	failpoint.InjectCall("setServiceLimitBeforeStorage")
@@ -289,9 +312,11 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	// the next full reload. This mirrors the storage-then-publish shape of
 	// publishResourceGroupMutation, but there's no reserved/confirmed
 	// distinction to protect here: a service limit is a single scalar with
-	// no CAS at the storage layer either (the same known gap tracked
-	// elsewhere in this file), so whatever value ends up winning in storage
-	// is simply mirrored into the live cache without persisting again.
+	// no CAS at the storage layer, so nothing short of the serviceLimitLocks
+	// guard above tells this call whether cur already holds a newer value.
+	// With that guard held for the whole call, no other SetKeyspaceServiceLimit
+	// for this keyspace can run concurrently, so whatever's in storage now is
+	// still what this call itself just wrote - safe to mirror unconditionally.
 	m.Lock()
 	cur, ok := m.krgms[keyspaceID]
 	if !ok {
@@ -362,13 +387,22 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 	}
 	m.Unlock()
 	if initDefault {
-		if m.getLoadingState() == LoadingStateCompleted {
-			// Async loading (if any) has already finished, so if the default
-			// group isn't cached yet it truly doesn't exist anywhere; it's
-			// safe to synthesize and persist it directly. This is a
-			// best-effort pre-warm: any failure (stale term or a real
-			// storage error) is already logged inside initDefaultResourceGroup,
-			// and a later request for the default group will retry through
+		// In metadata-watcher mode, LoadingStateCompleted only means the
+		// initial watcher bootstrap finished, not that every subsequent PD
+		// write has been observed yet - same caveat loadResourceGroupIfNeeded
+		// documents at its own entry point. Without this guard, a request
+		// landing right after bootstrap but before the watcher delivers a
+		// just-written customized default would see nothing cached, take
+		// this branch, and persist the built-in default over it. Always fall
+		// through to loadResourceGroupIfNeeded in that mode, which does a
+		// storage point load first instead of trusting the cache.
+		if !m.enableMetadataWatcher && m.getLoadingState() == LoadingStateCompleted {
+			// Async loading has already finished, so if the default group
+			// isn't cached yet it truly doesn't exist anywhere; it's safe to
+			// synthesize and persist it directly. This is a best-effort
+			// pre-warm: any failure (stale term or a real storage error) is
+			// already logged inside initDefaultResourceGroup, and a later
+			// request for the default group will retry through
 			// loadResourceGroupIfNeeded, which does surface such errors.
 			_, _ = krgm.initDefaultResourceGroup(func() bool {
 				m.RLock()
