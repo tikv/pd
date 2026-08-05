@@ -1996,6 +1996,112 @@ func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsNoPar
 	re.Nil(barriers)
 }
 
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersRejectsRevisionConflict() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+	_, err := s.manager.SetGlobalGCBarrier(
+		ctx,
+		"snapshot",
+		100,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	failpointName :=
+		"github.com/tikv/pd/pkg/gc/" +
+			"getGCStateWithGlobalGCBarriersAfterRead"
+	readDone := make(chan struct{})
+	continueRead := make(chan struct{})
+	var (
+		readDoneOnce sync.Once
+		releaseOnce  sync.Once
+		enabled      = true
+	)
+	re.NoError(failpoint.EnableCall(failpointName, func() {
+		readDoneOnce.Do(func() {
+			close(readDone)
+		})
+		<-continueRead
+	}))
+	defer func() {
+		releaseOnce.Do(func() {
+			close(continueRead)
+		})
+		if enabled {
+			re.NoError(failpoint.Disable(failpointName))
+		}
+	}()
+
+	type result struct {
+		state    GCState
+		barriers []*endpoint.GlobalGCBarrier
+		err      error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		state, barriers, err :=
+			s.manager.GetGCStateWithGlobalGCBarriers(
+				constant.NullKeyspaceID,
+				true,
+			)
+		resultCh <- result{
+			state:    state,
+			barriers: barriers,
+			err:      err,
+		}
+	}()
+
+	select {
+	case <-readDone:
+	case <-time.After(5 * time.Second):
+		re.FailNow(
+			"combined GC state read did not reach the failpoint",
+		)
+	}
+
+	otherManager := NewGCStateManager(
+		s.provider,
+		s.manager.cfg,
+		s.manager.keyspaceManager,
+	)
+	otherManager.OnNodeBecomesLeader()
+	_, err = otherManager.SetGlobalGCBarrier(
+		ctx,
+		"snapshot",
+		200,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	releaseOnce.Do(func() {
+		close(continueRead)
+	})
+	var first result
+	select {
+	case first = <-resultCh:
+	case <-time.After(5 * time.Second):
+		re.FailNow("combined GC state read did not return")
+	}
+	re.True(errors.ErrorEqual(first.err, errs.ErrEtcdTxnConflict))
+	re.Equal(GCState{}, first.state)
+	re.Nil(first.barriers)
+
+	re.NoError(failpoint.Disable(failpointName))
+	enabled = false
+
+	_, barriers, err :=
+		s.manager.GetGCStateWithGlobalGCBarriers(
+			constant.NullKeyspaceID,
+			true,
+		)
+	re.NoError(err)
+	re.Len(barriers, 1)
+	re.Equal(uint64(200), barriers[0].BarrierTS)
+}
+
 func (s *gcStateManagerTestSuite) TestGetGCState() {
 	re := s.Require()
 

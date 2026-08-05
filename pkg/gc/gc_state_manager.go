@@ -929,7 +929,11 @@ func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, exclu
 			return err1
 		}
 		globalBarriers, err1 = m.gcMetaStorage.LoadAllGlobalGCBarriers()
-		return err1
+		if err1 != nil {
+			return err1
+		}
+		failpoint.InjectCall("getGCStateWithGlobalGCBarriersAfterRead")
+		return nil
 	})
 	if err != nil {
 		log.Error("failed to get GC state with global GC barriers",
