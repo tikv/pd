@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -33,6 +35,39 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
+
+var benchmarkBalanceSolvers [2]*balanceSolver
+
+func BenchmarkNewBalanceReadSolvers(b *testing.B) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	b.Cleanup(cancel)
+	scheduler, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
+	if err != nil {
+		b.Fatal(err)
+	}
+	hot := scheduler.(*hotScheduler)
+	for id := uint64(1); id <= 1000; id++ {
+		detail := &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{
+				StoreInfo: core.NewStoreInfoWithLabel(id, map[string]string{
+					"zone": "z1",
+					"rack": "r1",
+					"host": "h1",
+				}),
+			},
+			LoadPred: (statistics.StoreLoad{}).ToLoadPred(utils.Read, nil),
+		}
+		hot.stLoadInfos[readLeader][id] = detail
+		hot.stLoadInfos[readPeer][id] = detail
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		benchmarkBalanceSolvers[0], benchmarkBalanceSolvers[1] = newBalanceReadSolvers(hot, tc)
+	}
+}
 
 func TestSplitBucketsBySize(t *testing.T) {
 	re := require.New(t)
@@ -654,6 +689,151 @@ func TestExpect(t *testing.T) {
 		re.Equal(testCase.allow, bs.checkSrcHistoryLoadsByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
 		re.Equal(testCase.allow, bs.checkDstHistoryLoadsByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
 	}
+}
+
+func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
+	re := require.New(t)
+	details := make(map[uint64]*statistics.StoreLoadDetail)
+	for id, load := range map[uint64]float64{1: 10.5, 2: 9.5, 3: 10, 4: 10, 5: 100, 6: 100, 7: 200, 8: 300} {
+		pool := "other"
+		if id <= 4 || id == 7 {
+			pool = "target"
+		}
+		labels := map[string]string{"pool": pool}
+		if id >= 7 {
+			labels[core.EngineKey] = core.EngineTiFlash
+		}
+		current := statistics.StoreLoad{
+			Loads:        statistics.Loads{load, 10},
+			HotPeerCount: 1,
+			HistoryLoads: statistics.HistoryLoads{{10}, {10}},
+		}
+		details[id] = &statistics.StoreLoadDetail{
+			StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: core.NewStoreInfoWithLabel(id, labels)},
+			LoadPred:         current.ToLoadPred(utils.Write, nil),
+		}
+	}
+	bs := &balanceSolver{
+		stLoadDetail: details, firstPriority: utils.ByteDim, secondPriority: utils.KeyDim,
+		resourceTy: writePeer,
+	}
+	bs.rank = initRankV2(bs)
+	rule := &placement.Rule{LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	scope := bs.getPlacementLoadScope([]*placement.Rule{rule}, true)
+	re.NotNil(scope)
+	re.Equal(float64(10), scope.expect.Loads[utils.ByteDim])
+	re.Equal([]float64{10}, scope.expect.HistoryLoads[utils.ByteDim])
+	re.InDelta(math.Sqrt(0.125)/10, scope.stddev.Loads[utils.ByteDim], 1e-9)
+	crossEngineRule := &placement.Rule{LabelConstraints: append(rule.LabelConstraints,
+		placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: []string{"other"}})}
+	re.Equal(float64(10), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, true).expect.Loads[utils.ByteDim])
+	re.Equal(float64(200), bs.getPlacementLoadScope([]*placement.Rule{crossEngineRule}, false).expect.Loads[utils.ByteDim])
+	re.False(bs.checkSrcByPriorityAndTolerance(details[1].LoadPred.Min(), &scope.expect, 1.05))
+	re.False(bs.checkSrcHistoryLoadsByPriorityAndTolerance(&details[1].LoadPred.Current, &scope.expect, 1.05))
+
+	bs.cur = &solution{}
+	bs.curScope = scope
+	re.True(bs.isUniformFirstPriority(details[1]))
+	unconstrainedRule := &placement.Rule{}
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	cacheSize := len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope([]*placement.Rule{unconstrainedRule}, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	equivalentRule := &placement.Rule{GroupID: "other", ID: "same-scope", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target"}},
+	}}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{equivalentRule}, true))
+	samePopulationRule := &placement.Rule{GroupID: "other", ID: "same-population", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target", "unused"}},
+	}}
+	samePopulationScope := bs.getPlacementLoadScope([]*placement.Rule{samePopulationRule}, true)
+	re.NotSame(scope, samePopulationScope)
+	re.Equal(scope.population, samePopulationScope.population)
+	re.True(samePlacementLoadPopulation(scope, true, samePopulationScope, true))
+	re.True(samePlacementLoadPopulation(nil, true, nil, true))
+	re.False(samePlacementLoadPopulation(nil, true, nil, false))
+	re.False(samePlacementLoadPopulation(scope, true, nil, true))
+
+	otherRule := &placement.Rule{GroupID: "pd", ID: "other", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"other"}},
+	}}
+	updatedRule := &placement.Rule{GroupID: "pd", ID: "updated", Version: 1, LabelConstraints: rule.LabelConstraints}
+	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true))
+	updatedRule.LabelConstraints = otherRule.LabelConstraints
+	updatedRule.Version++
+	re.Equal(float64(100), bs.getPlacementLoadScope([]*placement.Rule{updatedRule}, true).expect.Loads[utils.ByteDim])
+
+	rules := []*placement.Rule{rule, otherRule}
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	cacheSize = len(bs.placementScopeCache)
+	re.Nil(bs.getPlacementLoadScope(rules, true))
+	re.Len(bs.placementScopeCache, cacheSize)
+
+	targetRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: rule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: rule.LabelConstraints},
+	}
+	otherRules := []*placement.Rule{
+		{GroupID: "pd", ID: "a", LabelConstraints: otherRule.LabelConstraints},
+		{GroupID: "pd", ID: "b", LabelConstraints: otherRule.LabelConstraints},
+	}
+	targetScope := bs.getPlacementLoadScope(targetRules, true)
+	otherScope := bs.getPlacementLoadScope(otherRules, true)
+	re.Equal(float64(10), targetScope.expect.Loads[utils.ByteDim])
+	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
+	re.False(samePlacementLoadPopulation(targetScope, true, otherScope, true))
+}
+
+func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
+	bs := &balanceSolver{
+		curScope:             &placementLoadScope{},
+		placementV2Enabled:   true,
+		placementCanRestrict: [2]bool{true, false},
+	}
+
+	require.False(t, bs.beginSourcePlacement(false))
+	require.Nil(t, bs.curScope)
+}
+
+func TestRevertRegionPlacementSafeguard(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnablePlacementRules(true)
+	for id, labels := range map[uint64]map[string]string{
+		1: {"a": "yes"},
+		2: {"a": "yes", "b": "yes"},
+		3: {"a": "yes"},
+		4: {"a": "yes"},
+	} {
+		tc.AddLabelsStore(id, 1, labels)
+	}
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID,
+		Role: placement.Voter, Count: 2,
+		LabelConstraints: []placement.LabelConstraint{{Key: "a", Op: placement.In, Values: []string{"yes"}}},
+	}))
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID, ID: "voter-b",
+		Role: placement.Voter, Count: 1,
+		LabelConstraints: []placement.LabelConstraint{{Key: "b", Op: placement.In, Values: []string{"yes"}}},
+	}))
+
+	peers := []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}, {Id: 4, StoreId: 4}}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1])
+	fit := tc.GetRuleManager().FitRegion(tc.GetBasicCluster(), region)
+	re.True(fit.IsSatisfied())
+	scheduler, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	bs := newBalanceSolver(scheduler.(*hotScheduler), tc, utils.Write, movePeer)
+	bs.cur = &solution{
+		srcStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(1)}},
+		dstStore: &statistics.StoreLoadDetail{StoreSummaryInfo: &statistics.StoreSummaryInfo{StoreInfo: tc.GetStore(2)}},
+	}
+	re.False(bs.isRevertRegionValid(region, fit))
 }
 
 func TestBucketFirstStat(t *testing.T) {

@@ -58,10 +58,13 @@ const (
 	EngineTiKV = "tikv"
 )
 
+var storeLabelsVersion atomic.Uint64
+
 // StoreInfo contains information about a store.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreInfo struct {
-	meta *metapb.Store
+	meta          *metapb.Store
+	labelsVersion uint64
 	*storeStats
 	pauseLeaderTransferIn  atomic.Int64 // not allow to be used as target of transfer leader
 	pauseLeaderTransferOut atomic.Int64 // not allow to be used as source of transfer leader
@@ -88,6 +91,7 @@ type StoreInfo struct {
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
 		meta:          store,
+		labelsVersion: storeLabelsVersion.Add(1),
 		storeStats:    newStoreStats(),
 		leaderWeight:  1.0,
 		regionWeight:  1.0,
@@ -122,6 +126,7 @@ func NewStoreInfoWithLabel(id uint64, labels map[string]string) *StoreInfo {
 func (s *StoreInfo) Clone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                typeutil.DeepClone(s.meta, StoreFactory),
+		labelsVersion:       s.labelsVersion,
 		storeStats:          s.storeStats,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -169,6 +174,7 @@ func (s *StoreInfo) Feedback(e float64) {
 func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	store := &StoreInfo{
 		meta:                s.meta,
+		labelsVersion:       s.labelsVersion,
 		storeStats:          s.storeStats,
 		leaderCount:         s.leaderCount,
 		regionCount:         s.regionCount,
@@ -373,6 +379,11 @@ func (s *StoreInfo) GetVersion() string {
 // GetLabels returns the labels of the store.
 func (s *StoreInfo) GetLabels() []*metapb.StoreLabel {
 	return s.meta.GetLabels()
+}
+
+// GetLabelsVersion returns the identity of the current store labels.
+func (s *StoreInfo) GetLabelsVersion() uint64 {
+	return s.labelsVersion
 }
 
 // GetID returns the ID of the store.
@@ -759,7 +770,8 @@ func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*me
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
 	syncutil.RWMutex
-	stores map[uint64]*StoreInfo
+	stores        map[uint64]*StoreInfo
+	labelsVersion atomic.Uint64
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo
@@ -859,6 +871,12 @@ func (s *StoresInfo) GetStoreCount() int {
 	return len(s.stores)
 }
 
+// GetStoresLabelsVersion returns a version that changes when the store label
+// topology changes.
+func (s *StoresInfo) GetStoresLabelsVersion() uint64 {
+	return s.labelsVersion.Load()
+}
+
 // GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
 func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	s.RLock()
@@ -914,8 +932,12 @@ func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 
 // putStoreLocked sets a StoreInfo with storeID.
 func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
+	origin := s.stores[store.GetID()]
 	if len(opts) > 0 {
-		store = s.stores[store.GetID()].Clone(opts...)
+		store = origin.Clone(opts...)
+	}
+	if origin == nil || origin.GetLabelsVersion() != store.GetLabelsVersion() {
+		s.labelsVersion.Add(1)
 	}
 	s.stores[store.GetID()] = store
 }
@@ -925,6 +947,7 @@ func (s *StoresInfo) ResetStores() {
 	s.Lock()
 	defer s.Unlock()
 	s.stores = make(map[uint64]*StoreInfo)
+	s.labelsVersion.Add(1)
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID. The store can not be selected
@@ -1055,7 +1078,10 @@ func (s *StoresInfo) ResetStoreLimit(storeID uint64, limitType storelimit.Type, 
 func (s *StoresInfo) DeleteStore(store *StoreInfo) {
 	s.Lock()
 	defer s.Unlock()
-	delete(s.stores, store.GetID())
+	if _, ok := s.stores[store.GetID()]; ok {
+		delete(s.stores, store.GetID())
+		s.labelsVersion.Add(1)
+	}
 }
 
 // UpdateStoreStatus updates the information of the store.

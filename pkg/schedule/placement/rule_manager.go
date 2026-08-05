@@ -24,6 +24,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"go.uber.org/zap"
 
@@ -60,6 +61,9 @@ type RuleManager struct {
 	initialized bool
 	ruleConfig  *ruleConfig
 	ruleList    ruleList
+	// storeLoadRestrictions caches ruleConfig.mayRestrictStoreLoad as bits for
+	// the hot scheduler's lock-free fast path.
+	storeLoadRestrictions atomic.Uint32
 
 	// used for rule validation
 	keyType          string
@@ -155,6 +159,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 		}
 	}
 	m.ruleConfig.adjust()
+	m.updateStoreLoadRestrictions()
 	ruleList, err := buildRuleList(m.ruleConfig)
 	if err != nil {
 		return err
@@ -368,6 +373,27 @@ func (m *RuleManager) GetRulesCount() int {
 	return len(m.ruleConfig.rules)
 }
 
+// MayRestrictStoreLoad returns whether placement rules may restrict the load
+// statistics population for the given store engine.
+func (m *RuleManager) MayRestrictStoreLoad(isTiKV bool) bool {
+	restrictions := m.storeLoadRestrictions.Load()
+	if isTiKV {
+		return restrictions&1 != 0
+	}
+	return restrictions&2 != 0
+}
+
+func (m *RuleManager) updateStoreLoadRestrictions() {
+	var restrictions uint32
+	if m.ruleConfig.mayRestrictStoreLoad[0] {
+		restrictions |= 1
+	}
+	if m.ruleConfig.mayRestrictStoreLoad[1] {
+		restrictions |= 2
+	}
+	m.storeLoadRestrictions.Store(restrictions)
+}
+
 // GetGroupsCount returns the number of rule groups.
 func (m *RuleManager) GetGroupsCount() int {
 	m.RLock()
@@ -510,6 +536,7 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 
 	// update in-memory state
 	patch.commit()
+	m.updateStoreLoadRestrictions()
 	m.ruleList = ruleList
 	return nil
 }
