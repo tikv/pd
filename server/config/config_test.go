@@ -146,6 +146,13 @@ func TestValidation(t *testing.T) {
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.TolerantSizeRatio = 0.6
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimit["foo"] = sc.StoreLimitConfig{}
+	re.Error(cfg.Schedule.Validate())
+	delete(cfg.Schedule.StoreLimit, "foo")
+	cfg.Schedule.StoreLimit["100"] = sc.StoreLimitConfig{AddPeer: 1, RemovePeer: 1}
+	re.NoError(cfg.Schedule.Validate())
 	// check quota
 	re.Equal(defaultQuotaBackendBytes, cfg.QuotaBackendBytes)
 	// check request bytes
@@ -660,6 +667,107 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 			}
 			re.NoError(err)
 			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
+}
+
+func TestStoreLimit(t *testing.T) {
+	re := require.New(t)
+
+	cfgData := `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+
+	re.Equal(30.0, cfg.Schedule.StoreLimit["100"].AddPeer)
+	re.Equal(40.0, cfg.Schedule.StoreLimit["100"].RemovePeer)
+}
+
+func TestStoreLimitRejectsNonNumericKey(t *testing.T) {
+	re := require.New(t)
+
+	cfgData := `
+	[schedule.store-limit.foo]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`
+	cfg := NewConfig()
+	meta, err := toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+
+	err = cfg.Adjust(&meta, false)
+	re.Error(err)
+	re.Contains(err.Error(), `invalid schedule.store-limit key "foo"`)
+}
+
+func TestStoreLimitRejectsInvalidConfig(t *testing.T) {
+	testCases := []struct {
+		name    string
+		cfgData string
+	}{
+		{
+			name: "non-canonical store ID",
+			cfgData: `
+	[schedule.store-limit.00100]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`,
+		},
+		{
+			name: "zero store ID",
+			cfgData: `
+	[schedule.store-limit.0]
+	add-peer = 30.0
+	remove-peer = 40.0
+	`,
+		},
+		{
+			name: "missing rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	`,
+		},
+		{
+			name: "non-positive rates",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = -1.0
+	remove-peer = 0.0
+	`,
+		},
+		{
+			name: "NaN rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = nan
+	remove-peer = 40.0
+	`,
+		},
+		{
+			name: "infinite rate",
+			cfgData: `
+	[schedule.store-limit.100]
+	add-peer = 30.0
+	remove-peer = inf
+	`,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			cfg := NewConfig()
+			meta, err := toml.Decode(testCase.cfgData, &cfg)
+			re.NoError(err)
+			re.Error(cfg.Adjust(&meta, false))
 		})
 	}
 }
