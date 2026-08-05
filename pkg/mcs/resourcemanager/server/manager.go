@@ -326,8 +326,16 @@ func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error
 	} else {
 		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
 	}
+	// Capture the config object to save while still holding the lock, instead
+	// of re-reading the m.controllerConfig field after unlocking below:
+	// initControllerConfig can reassign that field wholesale (under the same
+	// lock) on a leadership change, so an unlocked re-read races with it and
+	// can end up saving a different config object than the one just mutated
+	// above. Matches the pattern initControllerConfig itself already uses -
+	// save a locally captured reference, never the field.
+	controllerConfig := m.controllerConfig
 	m.Unlock()
-	return m.storage.SaveControllerConfig(m.controllerConfig)
+	return m.storage.SaveControllerConfig(controllerConfig)
 }
 
 // GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
@@ -458,16 +466,19 @@ func (m *Manager) initControllerConfig() error {
 	if err = json.Unmarshal([]byte(v), &controllerConfig); err != nil {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
-	m.Lock()
-	m.controllerConfig = controllerConfig
-	m.Unlock()
-
-	// re-save the config to make sure the config has been persisted.
+	// re-save the config to make sure the config has been persisted. This
+	// must run before controllerConfig is published into m.controllerConfig
+	// below: once published, it's reachable (and mutable) by any concurrent
+	// caller holding m.Lock() - e.g. SetKeyspaceRUVersion - which would race
+	// with this unlocked marshal-and-save if it ran after instead.
 	if m.writeRole.AllowsMetadataWrite() {
 		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
 			return err
 		}
 	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
 	return nil
 }
 

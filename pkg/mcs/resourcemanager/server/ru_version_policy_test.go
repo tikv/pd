@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -278,4 +279,37 @@ func TestManagerSetKeyspaceRUVersionResetToDefault(t *testing.T) {
 	re.NotNil(policy)
 	_, exists := policy.Overrides[1]
 	re.False(exists)
+}
+
+// TestManagerSetKeyspaceRUVersionConcurrentWithLeadershipChange guards
+// against a data race between SetKeyspaceRUVersion and a leadership change.
+// SetKeyspaceRUVersion used to mutate m.controllerConfig under the lock, then
+// re-read the m.controllerConfig field itself after unlocking to persist it -
+// racing against initControllerConfig, which can reassign that same field
+// wholesale (also under the lock) when Init runs again for a new term. Run
+// under -race: any regression back to the unlocked re-read fails this test
+// without needing a specific interleaving to be forced.
+func TestManagerSetKeyspaceRUVersionConcurrentWithLeadershipChange(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	re.NoError(m.Init(context.Background()))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range 100 {
+			_ = m.SetKeyspaceRUVersion(1, int32(i%2)+1)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 20 {
+			m.cancel()
+			m.wg.Wait()
+			_ = m.Init(context.Background())
+		}
+	}()
+	wg.Wait()
+	stopAsyncTestManager(m)
 }
