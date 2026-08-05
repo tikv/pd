@@ -19,11 +19,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -65,6 +68,82 @@ func (suite *regionTestSuite) TearDownSuite() {
 func (suite *regionTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.env.Reset(re)
+}
+
+func (suite *regionTestSuite) TestGetKeyspaceRegionsInBatches() {
+	suite.env.RunTest(suite.checkGetKeyspaceRegionsInBatches)
+}
+
+func (suite *regionTestSuite) checkGetKeyspaceRegionsInBatches(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	keyspaceID := keyspace.GetBootstrapKeyspaceID()
+	bound := keyspace.MakeRegionBound(keyspaceID)
+	rawMiddle := append(append([]byte(nil), bound.RawLeftBound...), 1)
+	txnMiddle := append(append([]byte(nil), bound.TxnLeftBound...), 1)
+
+	regions := []*core.RegionInfo{
+		tests.MustPutRegion(re, cluster, 9001, 1, bound.RawLeftBound, rawMiddle),
+		tests.MustPutRegion(re, cluster, 9002, 1, rawMiddle, bound.RawRightBound),
+		tests.MustPutRegion(re, cluster, 9003, 1, bound.TxnLeftBound, txnMiddle),
+		tests.MustPutRegion(re, cluster, 9004, 1, txnMiddle, bound.TxnRightBound),
+	}
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions/keyspace/id/%d", leader.GetAddr(), keyspaceID)
+
+	getRegions := func(query string) *response.RegionsInfo {
+		got := &response.RegionsInfo{}
+		re.NoError(testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix+query, got))
+		return got
+	}
+
+	want := getRegions("?limit=0")
+	got := getRegions("?limit=0&batch=1")
+	re.Equal(want, got)
+	re.Equal(len(regions), got.Count)
+	for i, region := range regions {
+		re.Equal(region.GetID(), got.Regions[i].ID)
+	}
+
+	got = getRegions("?limit=3&batch=2")
+	re.Equal(3, got.Count)
+	re.Equal([]uint64{9001, 9002, 9003}, []uint64{got.Regions[0].ID, got.Regions[1].ID, got.Regions[2].ID})
+
+	rc := leader.GetRaftCluster().GetBasicCluster()
+	runWithTopologyChange := func(change func()) (got *response.RegionsInfo) {
+		var changed atomic.Bool
+		re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/api/afterKeyspaceRegionsBatch", func() {
+			if changed.CompareAndSwap(false, true) {
+				change()
+			}
+		}))
+		defer func() {
+			re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/afterKeyspaceRegionsBatch"))
+		}()
+		got = getRegions("?limit=0&batch=1")
+		re.True(changed.Load())
+		return got
+	}
+
+	got = runWithTopologyChange(func() {
+		rc.PutRegion(core.NewTestRegionInfo(9010, 1, bound.RawLeftBound, bound.RawRightBound))
+	})
+	re.Equal(got.Count, len(got.Regions))
+	re.Equal([]uint64{9001, 9002, 9003, 9004}, []uint64{got.Regions[0].ID, got.Regions[1].ID, got.Regions[2].ID, got.Regions[3].ID})
+
+	rc.PutRegion(core.NewTestRegionInfo(9001, 1, bound.RawLeftBound, rawMiddle))
+	rc.PutRegion(core.NewTestRegionInfo(9002, 1, rawMiddle, bound.RawRightBound))
+	rawMiddle2 := append(append([]byte(nil), bound.RawLeftBound...), 2)
+	got = runWithTopologyChange(func() {
+		rc.PutRegion(core.NewTestRegionInfo(9011, 1, rawMiddle, rawMiddle2))
+		rc.PutRegion(core.NewTestRegionInfo(9012, 1, rawMiddle2, bound.RawRightBound))
+	})
+	re.Equal(got.Count, len(got.Regions))
+	re.Equal([]uint64{9001, 9002, 9003, 9004}, []uint64{got.Regions[0].ID, got.Regions[1].ID, got.Regions[2].ID, got.Regions[3].ID})
+
+	for _, batch := range []string{"", "invalid", "0", "-1"} {
+		url := urlPrefix + "?limit=0&batch=" + batch
+		re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil, testutil.Status(re, http.StatusBadRequest)))
+	}
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
@@ -829,5 +908,41 @@ func BenchmarkGetRegions(b *testing.B) {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
 		re.NoError(err)
 		resp.Body.Close()
+	}
+}
+
+func BenchmarkGetKeyspaceRegionsInBatches(b *testing.B) {
+	re := require.New(b)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	bound := keyspace.MakeRegionBound(keyspace.GetBootstrapKeyspaceID())
+	const regionCount = 100000
+	startKey := bound.RawLeftBound
+	for i := range regionCount {
+		endKey := bound.RawRightBound
+		if i < regionCount-1 {
+			endKey = append(append([]byte(nil), bound.RawLeftBound...), fmt.Appendf(nil, "%09d", i+1)...)
+		}
+		tests.MustPutRegion(re, cluster, uint64(i+100), 1, startKey, endKey)
+		startKey = endKey
+	}
+	url := fmt.Sprintf("%s/pd/api/v1/regions/keyspace/id/%d?limit=0&batch=1024", leaderServer.GetAddr(), keyspace.GetBootstrapKeyspaceID())
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, url, nil)
+		re.NoError(err)
+		_, err = io.Copy(io.Discard, resp.Body)
+		re.NoError(err)
+		re.NoError(resp.Body.Close())
 	}
 }
