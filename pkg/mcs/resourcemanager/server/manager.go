@@ -404,7 +404,7 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 			// already logged inside initDefaultResourceGroup, and a later
 			// request for the default group will retry through
 			// loadResourceGroupIfNeeded, which does surface such errors.
-			_, _ = krgm.initDefaultResourceGroup(func() bool {
+			_, _ = m.initDefaultResourceGroup(keyspaceID, krgm, func() bool {
 				m.RLock()
 				defer m.RUnlock()
 				return m.krgms[keyspaceID] == krgm
@@ -893,7 +893,11 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 					defer m.RUnlock()
 					return m.loadEpoch == epoch && m.krgms[keyspaceID] == krgm
 				}
-				created, initErr := krgm.initDefaultResourceGroup(stillCurrent)
+				// initDefaultResourceGroup publishes through
+				// publishResourceGroupMutation, which sets the sync-loaded
+				// marker itself atomically with the cache effect - no
+				// separate marker-setting step is needed here.
+				_, initErr := m.initDefaultResourceGroup(keyspaceID, krgm, stillCurrent)
 				if initErr != nil {
 					if errs.ErrResourceGroupsLoading.Equal(initErr) {
 						// stillCurrent caught a term change that landed after the
@@ -909,19 +913,6 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 					// write error): propagate it rather than silently reporting
 					// success for a group that was never actually created.
 					return initErr
-				}
-				if created {
-					// This synthesis bypassed publishResourceGroupMutation, so the
-					// sync-loaded marker was never set. Set it now: otherwise a
-					// bulk merge still in progress for this term doesn't know this
-					// group is already confirmed, and can replace it - including
-					// any live consumption update applied after this point - with
-					// a possibly-stale snapshot taken by the storage scan.
-					m.Lock()
-					if m.loadEpoch == epoch && m.krgms[keyspaceID] == krgm && m.syncLoadedGroups != nil {
-						m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: DefaultResourceGroupName}] = true
-					}
-					m.Unlock()
 				}
 				return nil
 			}
@@ -1082,9 +1073,86 @@ func (m *Manager) publishResourceGroupMutation(
 		cur.syncBurstabilityWithServiceLimitLocked(synced)
 	}
 	cur.Unlock()
+	failpoint.InjectCall("publishMutationBeforeMark")
 	if mark && m.syncLoadedGroups != nil {
 		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
 	}
+}
+
+// initDefaultResourceGroup synthesizes and persists the built-in default
+// group for keyspaceID into krgm if nothing confirmed exists yet, publishing
+// it through publishResourceGroupMutation - the same path a real
+// Add/ModifyResourceGroup uses - so the cache effect and the sync-loaded
+// marker land atomically with respect to the async bulk merge. This used to
+// publish through krgm's own lock only, with the caller setting the marker
+// afterward in a separate critical section; that left a window where the
+// bulk merge could run in between and replace the synthesized group - along
+// with any live consumption/token update applied to it in that window - with
+// its own possibly-stale scanned copy, since it had no way yet to know the
+// group was confirmed. Routing through publishResourceGroupMutation closes
+// that window the same way it already does for Add/Modify/Delete.
+//
+// created reports whether it actually performed a synthesis. The three
+// (created, err) outcomes need different handling and must not be collapsed
+// into a single bool by the caller: (false, nil) means confirmed data
+// already existed - nothing to do, safe to treat as success; (false,
+// errs.ErrResourceGroupsLoading) means stillCurrent caught a term change
+// before the persist started - the group was not created anywhere, so the
+// caller must retry against the fresh term rather than treat this as
+// success; (false, any other non-nil error) means the persist itself failed
+// (e.g. a storage write error) - the caller must propagate it rather than
+// silently swallow a real failure as success.
+//
+// defaultGroupMu only serializes callers that share the krgm instance; it
+// does nothing across a term change, since Init gives the new term an
+// entirely new krgm object with its own, separate defaultGroupMu.
+// stillCurrent, when non-nil, is checked immediately before the persist
+// (right after defaultGroupMu is acquired) to fail fast and avoid a wasted
+// storage write when the caller already knows krgm is stale - typically by
+// comparing it against the manager's live entry for its keyspace ID. It is
+// no longer the only guard against a term change landing while the persist's
+// storage write is in flight: publishResourceGroupMutation's own
+// cur != krgm && cur.hasConfirmedResourceGroup(name) check now also protects
+// that window (and, if the new term hasn't confirmed a default yet, still
+// applies this call's result into the new term's live krgm instead of
+// silently dropping it into a detached one). Pass nil when no such
+// fail-fast check is needed or available (e.g. in tests that exercise a
+// krgm/Manager pair with no concurrent writer to race against).
+func (m *Manager) initDefaultResourceGroup(keyspaceID uint32, krgm *keyspaceResourceGroupManager, stillCurrent func() bool) (created bool, err error) {
+	// A confirmed cached entry means initialization is unnecessary; a missing
+	// or reserved-placeholder entry means nothing is persisted for the
+	// default group (e.g. a fresh store), so it must still be created and
+	// persisted, otherwise its settings are never stored and state
+	// persistence stays skipped.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false, nil
+	}
+	// Serialize against every other synthesis or real Add/ModifyResourceGroup
+	// targeting "default" that shares this krgm instance: see the
+	// defaultGroupMu doc comment on the struct.
+	krgm.defaultGroupMu.Lock()
+	defer krgm.defaultGroupMu.Unlock()
+	// Re-check under defaultGroupMu: while this goroutine waited for the
+	// lock, a real write may have already confirmed the default group, in
+	// which case synthesizing here would silently clobber it.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false, nil
+	}
+	if stillCurrent != nil && !stillCurrent() {
+		return false, errs.ErrResourceGroupsLoading
+	}
+	defaultGroup := newDefaultResourceGroup()
+	group, err := krgm.persistResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID))
+	if err != nil {
+		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
+		return false, err
+	}
+	m.publishResourceGroupMutation(keyspaceID, DefaultResourceGroupName, krgm, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.groups[group.Name] = group
+		delete(cur.reservedGroups, group.Name)
+		return true, group
+	})
+	return true, nil
 }
 
 func (m *Manager) isResourceGroupLoadingComplete() bool {
@@ -1201,7 +1269,7 @@ func (m *Manager) initReserved(epoch uint64) {
 		// Any failure is already logged inside initDefaultResourceGroup; a
 		// later request for the default group retries through
 		// loadResourceGroupIfNeeded once serving starts.
-		_, _ = krgm.initDefaultResourceGroup(nil)
+		_, _ = m.initDefaultResourceGroup(krgm.keyspaceID, krgm, nil)
 	}
 }
 

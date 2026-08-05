@@ -923,6 +923,73 @@ func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.
 		"the confirmed running state must be preserved, not reset to a synthetic placeholder")
 }
 
+// TestInitDefaultResourceGroupMarksAtomicallyWithPublish guards against a
+// window where a synthesized default group became visible in the cache
+// before its sync-loaded marker was set. initDefaultResourceGroup used to
+// publish through krgm's own lock directly, with the caller (loadResourceGroupIfNeeded)
+// setting the sync-loaded marker afterward in a separate, later m.Lock()
+// critical section. A concurrent bulk-merge batch - which only skips an item
+// already marked - could run in that window and overwrite the synthesized
+// group, including any live consumption/token update applied to it in the
+// meantime, with its own possibly-stale scanned copy. initDefaultResourceGroup
+// now publishes through publishResourceGroupMutation, which holds m.Lock()
+// across both the cache-visibility change and the marker set, so nothing
+// that also needs m.Lock() - including a merge batch - can ever observe one
+// without the other.
+func TestInitDefaultResourceGroupMarksAtomicallyWithPublish(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	const keyspaceID = 1
+	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+	m.krgms[keyspaceID] = krgm
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/publishMutationBeforeMark", func() {
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/publishMutationBeforeMark"))
+	}()
+
+	var initErr error
+	initDone := make(chan struct{})
+	go func() {
+		defer close(initDone)
+		_, initErr = m.initDefaultResourceGroup(keyspaceID, krgm, nil)
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initDefaultResourceGroup to reach its publish")
+	}
+
+	// While parked between the cache-visibility change and the marker set,
+	// nothing that needs m.Lock() (e.g. a concurrent merge batch checking
+	// whether to skip this group) should be able to proceed.
+	checkDone := make(chan bool)
+	go func() {
+		m.RLock()
+		_, marked := m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: DefaultResourceGroupName}]
+		m.RUnlock()
+		checkDone <- marked
+	}()
+
+	select {
+	case <-checkDone:
+		t.Fatal("a concurrent m.Lock()-holding operation must not proceed while the publish is parked between visibility and marking")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	<-initDone
+	re.NoError(initErr)
+	marked := <-checkDone
+	re.True(marked, "the marker must already be set by the time any concurrent m.Lock() holder can observe the published group")
+}
+
 // TestAsyncLoadResourceGroupsCrossTermSetServiceLimitPublishesToNewTerm
 // reproduces a leadership change straddling SetKeyspaceServiceLimit: it
 // resolves a keyspace manager, then stalls before its storage phase while the

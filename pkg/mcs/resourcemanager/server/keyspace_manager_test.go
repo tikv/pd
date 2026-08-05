@@ -86,8 +86,12 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	_, exists := krgm.groups[DefaultResourceGroupName]
 	re.False(exists)
 
-	// Initialize the default resource group.
-	created, err := krgm.initDefaultResourceGroup(nil)
+	// Initialize the default resource group. initDefaultResourceGroup now
+	// publishes through Manager.publishResourceGroupMutation, so it needs a
+	// Manager with krgm registered as the live entry for keyspace 1.
+	m := prepareManager()
+	m.krgms[1] = krgm
+	created, err := m.initDefaultResourceGroup(1, krgm, nil)
 	re.NoError(err)
 	re.True(created)
 
@@ -227,7 +231,9 @@ func TestDeleteResourceGroupBehavior(t *testing.T) {
 		_, ok := krgm.groupRUTrackers[group.GetName()]
 		re.False(ok)
 
-		_, err := krgm.initDefaultResourceGroup(nil)
+		m := prepareManager()
+		m.krgms[1] = krgm
+		_, err := m.initDefaultResourceGroup(1, krgm, nil)
 		re.NoError(err)
 		re.Error(krgm.deleteResourceGroup(DefaultResourceGroupName))
 		re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
@@ -364,7 +370,9 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Equal("group2", groups[1].Name)
 	re.Equal("group3", groups[2].Name)
 
-	_, err := krgm.initDefaultResourceGroup(nil)
+	m := prepareManager()
+	m.krgms[1] = krgm
+	_, err := m.initDefaultResourceGroup(1, krgm, nil)
 	re.NoError(err)
 	groups = krgm.getResourceGroupList(false, true)
 	re.Len(groups, 4)

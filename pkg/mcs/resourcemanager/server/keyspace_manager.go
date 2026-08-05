@@ -245,63 +245,6 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 	return nil
 }
 
-// initDefaultResourceGroup synthesizes and persists the built-in default
-// group if nothing confirmed exists yet. created reports whether it actually
-// performed a synthesis, so callers that participate in the async bulk-load
-// merge (loadResourceGroupIfNeeded) know when they must publish a
-// sync-loaded marker for what this call just wrote. The three (created, err)
-// outcomes need different handling and must not be collapsed into a single
-// bool by the caller: (false, nil) means confirmed data already existed -
-// nothing to do, safe to treat as success; (false, errs.ErrResourceGroupsLoading)
-// means stillCurrent caught a term change before the persist started - the
-// group was not created anywhere, so the caller must retry against the fresh
-// term rather than treat this as success; (false, any other non-nil error)
-// means the persist itself failed (e.g. a storage write error) - the caller
-// must propagate it rather than silently swallow a real failure as success.
-//
-// defaultGroupMu only serializes callers that share this krgm instance; it
-// does nothing across a term change, since Init gives the new term an
-// entirely new krgm object with its own, separate defaultGroupMu.
-// stillCurrent, when non-nil, is checked immediately before the persist
-// (right after defaultGroupMu is acquired) so a caller with access to the
-// owning Manager can catch a term change that completed before this point -
-// typically by comparing this krgm against the manager's live entry for its
-// keyspace ID. It cannot catch a term change that lands while the persist's
-// storage write is already in flight; closing that residual window needs a
-// conditional (CAS) storage write, which this does not implement. Pass nil
-// when no such coordination is needed or available (e.g. in tests that
-// exercise krgm without a Manager).
-func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup(stillCurrent func() bool) (created bool, err error) {
-	// A confirmed cached entry means initialization is unnecessary; a missing
-	// or reserved-placeholder entry means nothing is persisted for the
-	// default group (e.g. a fresh store), so it must still be created and
-	// persisted, otherwise its settings are never stored and state
-	// persistence stays skipped.
-	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
-		return false, nil
-	}
-	// Serialize against every other synthesis or real Add/ModifyResourceGroup
-	// targeting "default" that shares this krgm instance: see the
-	// defaultGroupMu doc comment on the struct.
-	krgm.defaultGroupMu.Lock()
-	defer krgm.defaultGroupMu.Unlock()
-	// Re-check under defaultGroupMu: while this goroutine waited for the
-	// lock, a real write may have already confirmed the default group, in
-	// which case synthesizing here would silently clobber it.
-	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
-		return false, nil
-	}
-	if stillCurrent != nil && !stillCurrent() {
-		return false, errs.ErrResourceGroupsLoading
-	}
-	defaultGroup := newDefaultResourceGroup()
-	if err := krgm.addResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID)); err != nil {
-		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
-		return false, err
-	}
-	return true, nil
-}
-
 func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
 	krgm.RLock()
 	_, ok := krgm.groups[DefaultResourceGroupName]
