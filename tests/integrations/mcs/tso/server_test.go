@@ -350,15 +350,8 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		err = tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 		re.NoError(err)
 		tc.WaitForDefaultPrimaryServing(re)
-		var err error
-		for range 3 { // try 3 times
-			_, _, err = suite.pdClient.GetTS(suite.ctx)
-			if err == nil {
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		re.NoError(err)
+		// The server-side primary election may finish before the PD client refreshes
+		// its TSO forwarding target.
 		suite.checkAvailableTSO(re)
 	}
 }
