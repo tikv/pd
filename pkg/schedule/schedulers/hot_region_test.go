@@ -473,15 +473,20 @@ func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
 	tc.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	state := hot.getPlacementLoadState(tc, "v2")
 	require.False(t, state.enabled)
+	require.Nil(t, state.populationIndex)
 
 	tc.AddLabelsStore(2, 1, map[string]string{"$group": "other"})
 	state = hot.getPlacementLoadState(tc, "v2")
 	require.True(t, state.enabled)
 	require.True(t, state.canRestrict[0])
+	require.NotNil(t, state.populationIndex)
+	require.Len(t, state.populationIndex.stores, 2)
+	previousPopulation := state.populationIndex
 
 	tc.SetStoreLabel(2, map[string]string{"zone": "z1"})
 	state = hot.getPlacementLoadState(tc, "v2")
 	require.False(t, state.enabled)
+	require.Nil(t, state.populationIndex)
 
 	require.NoError(t, tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
@@ -495,6 +500,8 @@ func TestPlacementLoadStateTracksLabelAndRuleChanges(t *testing.T) {
 	state = hot.getPlacementLoadState(tc, "v2")
 	require.True(t, state.enabled)
 	require.True(t, state.canRestrict[0])
+	require.NotSame(t, previousPopulation, state.populationIndex)
+	require.Len(t, state.populationIndex.stores, 2)
 	require.False(t, hot.getPlacementLoadState(tc, "v1").enabled)
 }
 

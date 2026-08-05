@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"math"
+	stdslices "slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,11 +58,12 @@ type balanceSolver struct {
 	curFit *placement.RegionFit
 	// curScope and revertScope contain placement-scoped load statistics. A nil
 	// scope uses the existing engine-wide statistics.
-	curScope             *placementLoadScope
-	revertScope          *placementLoadScope
-	placementScopeCache  map[placementScopeKey]*placementLoadScope
-	placementV2Enabled   bool
-	placementCanRestrict [2]bool
+	curScope                 *placementLoadScope
+	revertScope              *placementLoadScope
+	placementScopeCache      map[placementScopeKey]*placementLoadScope
+	placementPopulationIndex *placementPopulationIndex
+	placementV2Enabled       bool
+	placementCanRestrict     [2]bool
 
 	best *solution
 	ops  []*operator.Operator
@@ -92,13 +94,20 @@ type placementScopeKey struct {
 }
 
 type placementLoadScope struct {
-	expect statistics.StoreLoad
-	stddev statistics.StoreLoad
+	expect     statistics.StoreLoad
+	stddev     statistics.StoreLoad
+	population []uint64
+}
+
+type placementPopulationIndex struct {
+	stores    map[uint64]uint
+	wordCount int
 }
 
 type placementLoadState struct {
-	enabled     bool
-	canRestrict [2]bool
+	enabled         bool
+	canRestrict     [2]bool
+	populationIndex *placementPopulationIndex
 }
 
 func (bs *balanceSolver) init(placementState *placementLoadState) {
@@ -154,9 +163,11 @@ func (bs *balanceSolver) init(placementState *placementLoadState) {
 		state := bs.sche.getPlacementLoadState(bs.SchedulerCluster, rankFormulaVersion)
 		bs.placementV2Enabled = state.enabled
 		bs.placementCanRestrict = state.canRestrict
+		bs.placementPopulationIndex = state.populationIndex
 	} else {
 		bs.placementV2Enabled = placementState.enabled
 		bs.placementCanRestrict = placementState.canRestrict
+		bs.placementPopulationIndex = placementState.populationIndex
 	}
 }
 
@@ -319,7 +330,8 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 							bs.revertScope = nil
 							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
 						}
-						if bs.placementV2Enabled && bs.curScope != bs.revertScope &&
+						if bs.placementV2Enabled &&
+							!samePlacementLoadPopulation(bs.curScope, srcStore.IsTiKV(), bs.revertScope, dstStore.IsTiKV()) &&
 							(bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
 								bs.destinationStoreFailure(srcStore, bs.revertScope, bs.dstToleranceRatio(srcStore)) != "") {
 							continue
@@ -1074,7 +1086,11 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 		}
 		if len(details) < allCount {
 			expect, stddev := summary.Result(details)
-			scope = &placementLoadScope{expect: expect, stddev: stddev}
+			scope = &placementLoadScope{
+				expect:     expect,
+				stddev:     stddev,
+				population: bs.getPlacementLoadPopulation(details),
+			}
 		}
 		if bs.placementScopeCache == nil {
 			bs.placementScopeCache = make(map[placementScopeKey]*placementLoadScope)
@@ -1085,6 +1101,43 @@ func (bs *balanceSolver) getPlacementLoadScope(rules []*placement.Rule, isTiKV b
 		bs.placementScopeCache[ruleKey] = scope
 	}
 	return scope
+}
+
+func (bs *balanceSolver) getPlacementLoadPopulation(details []*statistics.StoreLoadDetail) []uint64 {
+	if bs.placementPopulationIndex == nil {
+		bs.placementPopulationIndex = newPlacementPopulationIndex(bs.stLoadDetail)
+	}
+	population := make([]uint64, bs.placementPopulationIndex.wordCount)
+	for _, detail := range details {
+		position := bs.placementPopulationIndex.stores[detail.GetID()]
+		population[position/64] |= 1 << (position % 64)
+	}
+	return population
+}
+
+func newPlacementPopulationIndex(details map[uint64]*statistics.StoreLoadDetail) *placementPopulationIndex {
+	index := &placementPopulationIndex{
+		stores:    make(map[uint64]uint, len(details)),
+		wordCount: (len(details) + 63) / 64,
+	}
+	position := uint(0)
+	for storeID := range details {
+		index.stores[storeID] = position
+		position++
+	}
+	return index
+}
+
+func samePlacementLoadPopulation(
+	first *placementLoadScope,
+	firstIsTiKV bool,
+	second *placementLoadScope,
+	secondIsTiKV bool,
+) bool {
+	if first == nil || second == nil {
+		return first == second && firstIsTiKV == secondIsTiKV
+	}
+	return firstIsTiKV == secondIsTiKV && stdslices.Equal(first.population, second.population)
 }
 
 func appendPlacementScopeKeyPart(builder *strings.Builder, value string) {

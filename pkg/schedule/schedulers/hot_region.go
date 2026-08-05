@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -207,6 +208,8 @@ type hotScheduler struct {
 	placementLabels     placementLoadState
 	placementLabelsVer  uint64
 	placementLabelsInit bool
+	placementPopulation *placementPopulationIndex
+	placementPopVer     uint64
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -360,9 +363,11 @@ func (s *hotScheduler) getPlacementLoadState(cluster sche.SchedulerCluster, rank
 		cluster.GetRuleManager().MayRestrictStoreLoad(false),
 	}}
 	labelsVersion := cluster.GetBasicCluster().GetStoresLabelsVersion()
+	var stores []*core.StoreInfo
 	if !s.placementLabelsInit || s.placementLabelsVer != labelsVersion {
 		s.placementLabels = placementLoadState{}
-		for _, store := range cluster.GetStores() {
+		stores = cluster.GetStores()
+		for _, store := range stores {
 			recordStorePlacementRestriction(&s.placementLabels.canRestrict, store)
 		}
 		s.placementLabelsVer = labelsVersion
@@ -372,14 +377,32 @@ func (s *hotScheduler) getPlacementLoadState(cluster sche.SchedulerCluster, rank
 		state.canRestrict[i] = state.canRestrict[i] || s.placementLabels.canRestrict[i]
 		state.enabled = state.enabled || state.canRestrict[i]
 	}
+	if state.enabled {
+		if s.placementPopulation == nil || s.placementPopVer != labelsVersion {
+			if stores == nil {
+				stores = cluster.GetStores()
+			}
+			population := &placementPopulationIndex{
+				stores:    make(map[uint64]uint, len(stores)),
+				wordCount: (len(stores) + 63) / 64,
+			}
+			for position, store := range stores {
+				population.stores[store.GetID()] = uint(position)
+			}
+			s.placementPopulation = population
+			s.placementPopVer = labelsVersion
+		}
+		state.populationIndex = s.placementPopulation
+	}
 	return state
 }
 
 func newBalanceReadSolvers(s *hotScheduler, cluster sche.SchedulerCluster) (leaderSolver, peerSolver *balanceSolver) {
 	leaderSolver = newBalanceSolver(s, cluster, utils.Read, transferLeader)
 	placementState := &placementLoadState{
-		enabled:     leaderSolver.placementV2Enabled,
-		canRestrict: leaderSolver.placementCanRestrict,
+		enabled:         leaderSolver.placementV2Enabled,
+		canRestrict:     leaderSolver.placementCanRestrict,
+		populationIndex: leaderSolver.placementPopulationIndex,
 	}
 	peerSolver = newBalanceSolverWithPlacementState(s, cluster, utils.Read, movePeer, placementState)
 	return leaderSolver, peerSolver

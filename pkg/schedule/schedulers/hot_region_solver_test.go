@@ -746,6 +746,16 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 		{Key: "pool", Op: placement.In, Values: []string{"target"}},
 	}}
 	re.Same(scope, bs.getPlacementLoadScope([]*placement.Rule{equivalentRule}, true))
+	samePopulationRule := &placement.Rule{GroupID: "other", ID: "same-population", LabelConstraints: []placement.LabelConstraint{
+		{Key: "pool", Op: placement.In, Values: []string{"target", "unused"}},
+	}}
+	samePopulationScope := bs.getPlacementLoadScope([]*placement.Rule{samePopulationRule}, true)
+	re.NotSame(scope, samePopulationScope)
+	re.Equal(scope.population, samePopulationScope.population)
+	re.True(samePlacementLoadPopulation(scope, true, samePopulationScope, true))
+	re.True(samePlacementLoadPopulation(nil, true, nil, true))
+	re.False(samePlacementLoadPopulation(nil, true, nil, false))
+	re.False(samePlacementLoadPopulation(scope, true, nil, true))
 
 	otherRule := &placement.Rule{GroupID: "pd", ID: "other", LabelConstraints: []placement.LabelConstraint{
 		{Key: "pool", Op: placement.In, Values: []string{"other"}},
@@ -774,6 +784,7 @@ func TestPlacementLoadScopePreservesExpectationGuards(t *testing.T) {
 	otherScope := bs.getPlacementLoadScope(otherRules, true)
 	re.Equal(float64(10), targetScope.expect.Loads[utils.ByteDim])
 	re.Equal(float64(100), otherScope.expect.Loads[utils.ByteDim])
+	re.False(samePlacementLoadPopulation(targetScope, true, otherScope, true))
 }
 
 func TestBeginSourcePlacementClearsPreviousEngineScope(t *testing.T) {
