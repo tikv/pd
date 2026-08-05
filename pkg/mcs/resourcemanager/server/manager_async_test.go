@@ -1091,6 +1091,157 @@ func TestAsyncLoadResourceGroupsCrossTermSetServiceLimitSerializesAgainstCompeti
 		"the new-term call must run - and win - only after the old-term call fully finished, not race ahead of or get clobbered by it")
 }
 
+// TestLoadServiceLimitsDoesNotClobberConcurrentSet guards against a race
+// between loadServiceLimits' bulk replay (run on every Init/leadership
+// change) and a concurrent SetKeyspaceServiceLimit call for the same
+// keyspace. loadServiceLimits used to apply the value its bulk storage scan
+// had already read before doing any locking; if a concurrent
+// SetKeyspaceServiceLimit call persisted and mirrored a newer value while the
+// replay's callback for that keyspace was still in flight, the replay would
+// silently overwrite the cache with its own now-stale snapshot, leaving the
+// cache stuck behind storage until the next full reload. serviceLimitLocks
+// alone (the fix for the sibling cross-term race above) does not close this:
+// the stale value here was captured before any lock was ever taken, so
+// merely serializing the two callers does not stop the replay from applying
+// data that was already out of date the moment it read it. The fix instead
+// re-reads the keyspace's service limit from storage under the same lock,
+// discarding the bulk scan's value entirely.
+func TestLoadServiceLimitsDoesNotClobberConcurrentSet(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+	const keyspaceID = 1
+	re.NoError(m.storage.SaveServiceLimit(keyspaceID, 100))
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/loadServiceLimitsBeforeApply", func(gotKeyspaceID uint32) {
+		if gotKeyspaceID != keyspaceID {
+			return
+		}
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/loadServiceLimitsBeforeApply"))
+	}()
+
+	loadDone := make(chan struct{})
+	go func() {
+		defer close(loadDone)
+		re.NoError(m.loadServiceLimits())
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for loadServiceLimits to reach its replay callback")
+	}
+
+	// While the replay is parked - holding only the (100) value its scan
+	// already captured - a concurrent SetKeyspaceServiceLimit call persists
+	// and mirrors a newer value into the same, live keyspace manager.
+	re.NoError(m.SetKeyspaceServiceLimit(keyspaceID, 200))
+
+	close(release)
+	<-loadDone
+
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(200), limiter.ServiceLimit,
+		"the replay must not overwrite a concurrently-set newer value with its own stale snapshot")
+}
+
+// TestAsyncLoadResourceGroupsMergeGroupNeverVisibleUnsynced guards against a
+// window in the bulk merge where a newly-loaded group became visible in
+// krgm.groups (readable by any concurrent GetResourceGroup/token request)
+// before its burst limit was synced against the keyspace's active service
+// limit. A group with no explicit burst limit reads as unbounded until that
+// sync runs, so a request landing in the gap could be granted unlimited
+// burst and bypass the service limit until the merge caught up. The fix
+// moved the sync inside the same krgm.Lock() critical section as the insert,
+// so a concurrent reader - which also needs krgm's lock - can no longer
+// observe the group until both have happened.
+func TestAsyncLoadResourceGroupsMergeGroupNeverVisibleUnsynced(t *testing.T) {
+	re := require.New(t)
+	store := storage.NewStorageWithMemoryBackend()
+	const keyspaceID = 1
+	const groupName = "burstable-rg"
+	unbounded := &resource_manager.ResourceGroup{
+		Name:     groupName,
+		Mode:     resource_manager.GroupMode_RUMode,
+		Priority: middlePriority,
+		RUSettings: &resource_manager.GroupRequestUnitSettings{
+			RU: &resource_manager.TokenBucket{
+				Settings: &resource_manager.TokenLimitSettings{
+					FillRate:   UnlimitedRate,
+					BurstLimit: UnlimitedBurstLimit,
+				},
+			},
+		},
+	}
+	re.NoError(store.SaveResourceGroupSetting(keyspaceID, groupName, unbounded))
+	re.NoError(store.SaveServiceLimit(keyspaceID, 50))
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/mergeBeforeBurstSync", func(gotKeyspaceID uint32, gotName string) {
+		if gotKeyspaceID != keyspaceID || gotName != groupName {
+			return
+		}
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/mergeBeforeBurstSync"))
+	}()
+
+	re.NoError(m.Init(context.Background()))
+	defer stopAsyncTestManager(m)
+	// Unblock the merge first (LIFO), so stopAsyncTestManager's wg.Wait()
+	// cannot hang if a later assertion aborts the test before the explicit
+	// unblock() call below is reached.
+	defer unblock()
+
+	// loadServiceLimits (run synchronously inside Init, before the async
+	// merge starts) already created krgm for keyspaceID via the service
+	// limit saved above - capture it now, before parking, so the reader
+	// below can call krgm.getResourceGroup directly instead of going through
+	// m.getKeyspaceResourceGroupManager. The latter needs m.RLock(), which
+	// the merge holds for its *entire* batch regardless of this fix, so
+	// routing the read through it would block on the wrong lock and the test
+	// would pass even without the fix; reading via the captured krgm
+	// isolates the one lock (krgm's own) this test is actually about.
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	re.NotNil(krgm)
+
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the merge to reach its burst-sync point")
+	}
+
+	readDone := make(chan *ResourceGroup)
+	go func() {
+		readDone <- krgm.getResourceGroup(groupName, false)
+	}()
+
+	select {
+	case <-readDone:
+		t.Fatal("a concurrent reader must not observe the group while the merge is parked between insert and burst sync - krgm's lock should still be held")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	unblock()
+	group := <-readDone
+	re.NotNil(group)
+	re.GreaterOrEqual(group.getOverrideBurstLimit(), int64(0),
+		"the group must never become visible without its burst override already synced")
+}
+
 // BenchmarkAsyncLoadMergeReaderStall measures the worst-case time a concurrent
 // reader is blocked while the async bulk merge installs a large number of
 // resource groups. The probe uses GetControllerConfig, whose only cost is the

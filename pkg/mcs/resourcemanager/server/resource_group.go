@@ -178,6 +178,10 @@ func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
 func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 	rg.RLock()
 	defer rg.RUnlock()
+	return rg.getOverrideBurstLimitLocked()
+}
+
+func (rg *ResourceGroup) getOverrideBurstLimitLocked() int64 {
 	return rg.RUSettings.RU.overrideBurstLimit
 }
 

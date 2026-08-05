@@ -540,7 +540,26 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 }
 
 func (m *Manager) loadServiceLimits() error {
-	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
+	return m.storage.LoadServiceLimits(func(keyspaceID uint32, _ float64) {
+		failpoint.InjectCall("loadServiceLimitsBeforeApply", keyspaceID)
+		// Serialize against SetKeyspaceServiceLimit for this keyspace, and
+		// re-read the value from storage instead of trusting the one the
+		// bulk scan above already fetched: that value was read before this
+		// lock was acquired, so a concurrent SetKeyspaceServiceLimit call
+		// (from either this term or a still-in-flight previous one) can
+		// persist and mirror a newer value in between, which this callback
+		// would otherwise silently clobber with its now-stale snapshot. A
+		// fresh point read taken under the same lock SetKeyspaceServiceLimit
+		// itself uses is guaranteed to observe whichever write actually
+		// landed last, since setServiceLimit's storage write always
+		// completes before SetKeyspaceServiceLimit releases this lock.
+		m.serviceLimitLocks.Lock(keyspaceID)
+		defer m.serviceLimitLocks.Unlock(keyspaceID)
+		serviceLimit, err := m.storage.LoadServiceLimit(keyspaceID)
+		if err != nil {
+			log.Warn("failed to reload service limit", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+			return
+		}
 		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})
 }
@@ -665,11 +684,6 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 		aborted := false
 		for start := 0; start < len(pending); start += mergeBatchSize {
 			end := min(start+mergeBatchSize, len(pending))
-			type syncItem struct {
-				krgm  *keyspaceResourceGroupManager
-				group *ResourceGroup
-			}
-			toSync := make([]syncItem, 0, end-start)
 			m.Lock()
 			if m.loadEpoch != epoch {
 				// The manager was reinitialized for a new term while this
@@ -697,16 +711,15 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 				// placeholder by loadResourceGroupIfNeeded or skipped by the
 				// state persist loop.
 				delete(krgm.reservedGroups, it.name)
+				failpoint.InjectCall("mergeBeforeBurstSync", it.keyspaceID, it.name)
+				// Sync burstability while still holding krgm's lock, so the
+				// group never becomes visible to a concurrent reader with an
+				// unsynced burst setting - see syncBurstabilityWithServiceLimitLocked.
+				krgm.syncBurstabilityWithServiceLimitLocked(it.group)
 				krgm.Unlock()
-				toSync = append(toSync, syncItem{krgm: krgm, group: it.group})
 				loaded++
 			}
 			m.Unlock()
-			// Sync burstability outside m.Lock; it only needs the keyspace and
-			// group locks.
-			for _, s := range toSync {
-				s.krgm.syncBurstabilityWithServiceLimit(s.group)
-			}
 		}
 		if aborted {
 			log.Info("async loading resource groups aborted: manager was reinitialized")
@@ -951,15 +964,18 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			inserted = true
 		}
 		delete(krgm.reservedGroups, name)
+		if inserted {
+			// Sync burstability while krgm's lock is still held, so the group
+			// never becomes visible to a concurrent reader with an unsynced
+			// burst setting - see syncBurstabilityWithServiceLimitLocked.
+			krgm.syncBurstabilityWithServiceLimitLocked(group)
+		}
 		krgm.Unlock()
 		if m.syncLoadedGroups != nil {
 			m.syncLoadedGroups[markKey] = true
 		}
 		m.Unlock()
 		failpoint.Inject("lazyLoadAfterCachePublish", func() {})
-		if inserted {
-			krgm.syncBurstabilityWithServiceLimit(group)
-		}
 		syncLoadGroupCounter.Inc()
 		return nil
 	}
@@ -1010,23 +1026,35 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 // (re)installed, the group to sync burstability for.
 //
 // Known gap: this "skip if the new term already confirmed the group" rule
-// assumes the confirming write's storage effect is genuinely the latest one,
-// which holds for Add/Modify (both persist before they can be parked - see
-// addResourceGroupBeforePublish/modifyResourceGroupBeforePublish) but not for
-// Delete, which can be parked before its storage phase
-// (deleteResourceGroupBeforeStorage). If an old-term Delete is parked there,
-// a new-term Add for the same group persists and publishes (getting
-// confirmed), and only then does the old Delete's storage removal finally
-// run, it deletes that newer write in storage - making Delete genuinely the
-// last writer - but this function skips its publish because the group is
-// already "confirmed", leaving the cache showing the deleted group as
-// present. Nothing re-syncs it afterward, since it reads as confirmed to
-// every other path too. This mirrors, in the opposite direction, a gap the
-// old unconditional-apply code had (a delayed Delete publish could instead
-// wipe a newer confirmed Add). Neither direction is fully closed without a
-// storage-side revision to tell which write actually landed last; that's the
-// same class of gap tracked for initDefaultResourceGroup's stillCurrent
-// check. No regression test exercises this interleaving yet.
+// assumes the confirming write's storage effect is genuinely the latest one.
+// That assumption can fail for any mutation kind, not just Delete:
+//
+//   - Delete can be parked before its storage phase (deleteResourceGroupBeforeStorage).
+//     If an old-term Delete is parked there, a new-term Add for the same group
+//     persists and publishes (getting confirmed), and only then does the old
+//     Delete's storage removal finally run, it deletes that newer write in
+//     storage - making Delete genuinely the last writer - but this function
+//     skips its publish because the group is already "confirmed", leaving the
+//     cache showing the deleted group as present.
+//   - Add/Modify's own storage write always completes before either of them can
+//     be parked (see addResourceGroupBeforePublish/modifyResourceGroupBeforePublish,
+//     both placed after the storage write) - but that only rules out being
+//     parked *after* persisting, not the storage write itself taking real
+//     wall-clock time to land. A new-term bulk merge or lazy load can read and
+//     confirm an older snapshot while an old-term Add/Modify's storage write is
+//     still in flight; when that write then completes, it's the latest value in
+//     storage, but this function still sees "already confirmed" for the older
+//     snapshot and drops the publish, leaving the cache stale relative to
+//     storage indefinitely.
+//
+// In both cases nothing re-syncs the cache afterward, since it reads as
+// confirmed to every other path too. The Delete case also mirrors, in the
+// opposite direction, a gap the old unconditional-apply code had (a delayed
+// Delete publish could instead wipe a newer confirmed Add). None of this is
+// fully closed without a storage-side revision to tell which write actually
+// landed last; that's the same class of gap tracked for
+// initDefaultResourceGroup's stillCurrent check. No regression test exercises
+// either interleaving yet.
 //
 // TODO(#11105): close this gap with a storage-side revision/CAS check.
 func (m *Manager) publishResourceGroupMutation(
@@ -1047,10 +1075,13 @@ func (m *Manager) publishResourceGroupMutation(
 	}
 	cur.Lock()
 	mark, synced := fn(cur)
-	cur.Unlock()
 	if synced != nil {
-		cur.syncBurstabilityWithServiceLimit(synced)
+		// Sync burstability while cur's lock is still held, so the group
+		// never becomes visible to a concurrent reader with an unsynced
+		// burst setting - see syncBurstabilityWithServiceLimitLocked.
+		cur.syncBurstabilityWithServiceLimitLocked(synced)
 	}
+	cur.Unlock()
 	if mark && m.syncLoadedGroups != nil {
 		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
 	}

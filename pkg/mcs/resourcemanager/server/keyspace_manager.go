@@ -172,15 +172,28 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 	existing := krgm.groups[group.Name]
 	krgm.RUnlock()
 	if existing != nil {
-		if err := existing.ApplySettings(group); err != nil {
+		// Merge the settings patch and the burst-limit sync into a single
+		// rg.Lock() critical section: ApplySettings can flip a group from
+		// bounded to unbounded (e.g. a raw burst limit going negative)
+		// without touching overrideBurstLimit at all, so applying them as two
+		// separate critical sections would let a concurrent token request
+		// observe the now-unbounded settings before the sync catches up and
+		// bypass an active keyspace service limit in between.
+		serviceLimit, isSet := krgm.getServiceLimit()
+		existing.Lock()
+		patchErr := existing.patchSettingsLocked(group, false)
+		if patchErr == nil {
+			applyBurstabilitySyncLocked(existing, serviceLimit, isSet)
+		}
+		existing.Unlock()
+		if patchErr != nil {
 			log.Error("failed to apply the keyspace resource group settings from raw value",
-				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
-			return err
+				zap.Uint32("keyspace-id", krgm.keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(patchErr))
+			return patchErr
 		}
 		krgm.Lock()
 		delete(krgm.reservedGroups, group.Name)
 		krgm.Unlock()
-		krgm.syncBurstabilityWithServiceLimit(existing)
 		return nil
 	}
 
@@ -188,8 +201,8 @@ func (krgm *keyspaceResourceGroupManager) upsertResourceGroupFromRaw(name string
 	krgm.Lock()
 	krgm.groups[group.Name] = resourceGroup
 	delete(krgm.reservedGroups, group.Name)
+	krgm.syncBurstabilityWithServiceLimitLocked(resourceGroup)
 	krgm.Unlock()
-	krgm.syncBurstabilityWithServiceLimit(resourceGroup)
 	return nil
 }
 
@@ -297,17 +310,13 @@ func (krgm *keyspaceResourceGroupManager) ensureReservedDefaultGroupInCache() {
 		return
 	}
 	defaultGroup := newDefaultResourceGroup()
-	inserted := false
 	krgm.Lock()
 	if _, ok := krgm.groups[DefaultResourceGroupName]; !ok {
 		krgm.groups[DefaultResourceGroupName] = defaultGroup
 		krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
-		inserted = true
+		krgm.syncBurstabilityWithServiceLimitLocked(defaultGroup)
 	}
 	krgm.Unlock()
-	if inserted {
-		krgm.syncBurstabilityWithServiceLimit(defaultGroup)
-	}
 }
 
 func newDefaultResourceGroup() *ResourceGroup {
@@ -330,8 +339,8 @@ func (krgm *keyspaceResourceGroupManager) restoreDefaultResourceGroupFromReserve
 	krgm.Lock()
 	krgm.groups[DefaultResourceGroupName] = defaultGroup
 	krgm.reservedGroups[DefaultResourceGroupName] = struct{}{}
+	krgm.syncBurstabilityWithServiceLimitLocked(defaultGroup)
 	krgm.Unlock()
-	krgm.syncBurstabilityWithServiceLimit(defaultGroup)
 }
 
 // persistResourceGroup validates grouppb, builds the in-memory group, and
@@ -364,8 +373,8 @@ func (krgm *keyspaceResourceGroupManager) addResourceGroup(grouppb *rmpb.Resourc
 	krgm.Lock()
 	krgm.groups[group.Name] = group
 	delete(krgm.reservedGroups, group.Name)
+	krgm.syncBurstabilityWithServiceLimitLocked(group)
 	krgm.Unlock()
-	krgm.syncBurstabilityWithServiceLimit(group)
 	return nil
 }
 
@@ -582,6 +591,12 @@ func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
 func (krgm *keyspaceResourceGroupManager) getServiceLimit() (float64, bool) {
 	krgm.RLock()
 	defer krgm.RUnlock()
+	return krgm.getServiceLimitLocked()
+}
+
+// getServiceLimitLocked is getServiceLimit for a caller that already holds
+// krgm's lock (read or write).
+func (krgm *keyspaceResourceGroupManager) getServiceLimitLocked() (float64, bool) {
 	if krgm.serviceLimiter == nil {
 		return 0, false
 	}
@@ -1033,14 +1048,55 @@ func (krgm *keyspaceResourceGroupManager) cleanupOverrides() {
 // Newly loaded groups can miss the initial service-limit replay, so apply the
 // same baseline burst invalidation when they enter the cache.
 func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimit(group *ResourceGroup) {
-	if group == nil || group.getBurstLimit(true) >= 0 || group.getOverrideBurstLimit() >= 0 {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	krgm.syncBurstabilityWithServiceLimitLocked(group)
+}
+
+// syncBurstabilityWithServiceLimitLocked is syncBurstabilityWithServiceLimit
+// for a caller that already holds krgm's lock (read or write). It must never
+// call back into a krgm-locking helper (e.g. getServiceLimit/syncBurstabilityWithServiceLimit
+// itself): krgm's lock isn't reentrant, so doing so from the same goroutine
+// would deadlock. Taking group's own lock below is safe while holding krgm's:
+// group has no back-reference to krgm, so this one-directional nesting
+// (krgm's lock outer, group's lock inner) can't cycle with any other lock
+// ordering in this package.
+//
+// Callers use this to make a group's cache insertion and its burst-limit
+// sync take effect atomically under a single krgm.Lock() critical section:
+// without it, a concurrent token request could observe the group between the
+// insert and a separately-locked sync call and read its unsynced, possibly
+// unlimited/negative burst setting, letting it bypass an active keyspace
+// service limit until the sync catches up.
+func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimitLocked(group *ResourceGroup) {
+	if group == nil {
 		return
 	}
-	serviceLimit, isSet := krgm.getServiceLimit()
+	serviceLimit, isSet := krgm.getServiceLimitLocked()
+	group.Lock()
+	defer group.Unlock()
+	applyBurstabilitySyncLocked(group, serviceLimit, isSet)
+}
+
+// applyBurstabilitySyncLocked is the group-lock-only core shared by both
+// syncBurstabilityWithServiceLimitLocked (krgm-lock callers) and
+// upsertResourceGroupFromRaw's in-place update path (which merges this into
+// the same rg.Lock() critical section as ApplySettings, so a settings patch
+// that newly makes a group unbounded can never become visible without its
+// burst override already applied). The caller must already hold group's
+// lock; serviceLimit/isSet come from a plain krgm.getServiceLimit() read
+// taken before acquiring it - service-limit staleness of a few instructions
+// here is the same self-healing eventual consistency already accepted
+// elsewhere in this file (e.g. invalidateBurstability), unlike the group's
+// own settings-vs-override visibility this function exists to make atomic.
+func applyBurstabilitySyncLocked(group *ResourceGroup, serviceLimit float64, isSet bool) {
+	if group == nil || group.getBurstLimitLocked(true) >= 0 || group.getOverrideBurstLimitLocked() >= 0 {
+		return
+	}
 	if !isSet || serviceLimit <= 0 {
 		return
 	}
-	group.overrideBurstLimit(int64(serviceLimit))
+	group.overrideBurstLimitLocked(int64(serviceLimit))
 }
 
 // Since the burstable resource groups won't require tokens from the server anymore,
