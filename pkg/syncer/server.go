@@ -164,9 +164,22 @@ type RegionSyncer struct {
 	history     *historyBuffer
 	limit       *ratelimit.RateLimiter
 	sendTimeout time.Duration
-	tlsConfig   *grpcutil.TLSConfig
+	// fullSyncProgressTimeout bounds a full-sync stream that stops making
+	// durable progress. Tests shorten it to exercise the recovery path.
+	fullSyncProgressTimeout time.Duration
+	tlsConfig               *grpcutil.TLSConfig
 	// status when as client
 	streamingRunning atomic.Bool
+	// historySynced is a durable, sticky signal that this member has completed
+	// at least one region history synchronization.
+	historySynced atomic.Bool
+	// initialFollowerSyncCompleted is set only after volatile Region state has
+	// been rebuilt successfully following this process start.
+	initialFollowerSyncCompleted atomic.Bool
+	// initialRegionLoadCompleted is set after persisted Region metadata has
+	// been loaded into the in-memory cache for this process.
+	initialRegionLoadCompleted atomic.Bool
+	regionLoadMu               syncutil.Mutex
 }
 
 // NewRegionSyncer returns a region syncer that ensures final consistency through the heartbeat,
@@ -178,14 +191,42 @@ func NewRegionSyncer(s Server) *RegionSyncer {
 	}
 	historyBufferMaxSize := historyBufferMaxSizeFromMemory(memory.GetMemTotalIgnoreErr())
 	syncer := &RegionSyncer{
-		server:      s,
-		history:     newHistoryBuffer(defaultHistoryBufferSize, historyBufferMaxSize, regionStorage.(kv.Base)),
-		limit:       ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
-		sendTimeout: syncerKeepAliveInterval,
-		tlsConfig:   s.GetTLSConfig(),
+		server:                  s,
+		history:                 newHistoryBuffer(defaultHistoryBufferSize, historyBufferMaxSize, regionStorage.(kv.Base)),
+		limit:                   ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
+		sendTimeout:             syncerKeepAliveInterval,
+		fullSyncProgressTimeout: fullSyncProgressTimeout,
+		tlsConfig:               s.GetTLSConfig(),
 	}
 	syncer.mu.streams = make(map[string]*regionSyncStream)
+	syncer.reloadHistorySynced()
 	return syncer
+}
+
+func (s *RegionSyncer) reloadHistorySynced() {
+	synced, exists, err := s.history.loadSynced()
+	if err != nil {
+		log.Warn("load region sync completion marker failed", errs.ZapError(err))
+		return
+	}
+	// Before the completion marker existed, a persisted non-zero history
+	// index was only reachable after a follower had completed its first full
+	// sync and then received live updates. Preserve that upgrade path.
+	if !exists && s.history.getNextIndex() > 0 {
+		if err := s.history.saveSynced(true); err != nil {
+			log.Warn("persist migrated region sync completion marker failed", errs.ZapError(err))
+		} else {
+			synced = true
+		}
+	} else if !exists {
+		// Persist the negative state before any historical records can advance
+		// historyIndex. After a crash, a partial catch-up must not look like a
+		// completed sync to the upgrade compatibility fallback above.
+		if err := s.history.saveSynced(false); err != nil {
+			log.Warn("persist initial region sync completion marker failed", errs.ZapError(err))
+		}
+	}
+	s.historySynced.Store(synced)
 }
 
 func historyBufferMaxSizeFromMemory(totalMemory uint64) int {
@@ -440,7 +481,15 @@ func (s *RegionSyncer) syncHistoryRegionLocked(
 		zap.Uint64("from-index", startIndex),
 		zap.Uint64("last-index", endIndex),
 		zap.Int("records-length", len(records)))
-	return s.syncHistoryRecordsLocked(startIndex, records, syncStream)
+	if err := s.syncHistoryRecordsLocked(startIndex, records, syncStream); err != nil {
+		return err
+	}
+	// Explicitly delimit the historical catch-up so the follower can mark the
+	// synchronization as complete after applying this marker durably.
+	return syncStream.sendStreamIfOpen(&pdpb.SyncRegionResponse{
+		Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+		StartIndex: endIndex,
+	})
 }
 
 func buildSyncRegionResponse(startIndex uint64, records []*core.RegionInfo) *pdpb.SyncRegionResponse {
@@ -498,6 +547,17 @@ func (s *RegionSyncer) syncFullRegionsLocked(ctx context.Context, name string, s
 	stats := make([]*pdpb.RegionStat, 0, maxSyncRegionBatchSize)
 	leaders := make([]*metapb.Peer, 0, maxSyncRegionBatchSize)
 	buckets := make([]*metapb.Buckets, 0, maxSyncRegionBatchSize)
+	if len(regions) == 0 {
+		// An empty full snapshot needs an explicit frame before the completion
+		// response. Otherwise, a follower cannot distinguish it from an
+		// incremental catch-up that has no records and may retain stale Regions.
+		if err := syncStream.sendStreamIfOpen(&pdpb.SyncRegionResponse{
+			Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
+			StartIndex: 0,
+		}); err != nil {
+			return err
+		}
+	}
 	for syncedIndex, r := range regions {
 		select {
 		case <-ctx.Done():

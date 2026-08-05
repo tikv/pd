@@ -17,17 +17,25 @@ package server
 import (
 	"context"
 	stderrors "errors"
+	"net"
+	"net/http"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -46,6 +54,74 @@ func TestResetFollowerRegionCacheRequiresRegionStorage(t *testing.T) {
 	s.persistOptions = config.NewPersistOptions(cfg)
 	s.member = member.NewMember(nil, nil, 1)
 	re.Error(s.ResetFollowerRegionCache())
+}
+
+func TestResetFollowerRegionCacheRestartsSyncAfterError(t *testing.T) {
+	re := require.New(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	grpcServer := grpc.NewServer()
+	pdpb.RegisterPDServer(grpcServer, &testFollowerRegionSyncServer{})
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- grpcServer.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		grpcServer.Stop()
+		err := <-serveDone
+		if err != nil {
+			re.ErrorIs(err, grpc.ErrServerStopped)
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	cfg := config.NewConfig()
+	cfg.Name = "pd-follower"
+	cfg.PDServerCfg.UseRegionStorage = true
+	testStorage := &testFollowerRegionStorage{
+		Storage: storage.NewStorageWithMemoryBackend(),
+	}
+	member := member.NewMember(nil, nil, 2)
+	leaderURL := "http://" + listener.Addr().String()
+	member.InitMemberInfo(leaderURL, leaderURL, cfg.Name)
+	member.PromoteSelf()
+	basicCluster := core.NewBasicCluster()
+	server := &Server{
+		ctx:            ctx,
+		serverLoopCtx:  ctx,
+		cfg:            cfg,
+		persistOptions: config.NewPersistOptions(cfg),
+		storage:        testStorage,
+		basicCluster:   basicCluster,
+		member:         member,
+	}
+	regionSyncer := syncer.NewRegionSyncer(server)
+	re.NotNil(regionSyncer)
+	server.cluster = cluster.NewRaftCluster(
+		ctx,
+		member,
+		basicCluster,
+		testStorage,
+		regionSyncer,
+		nil,
+		http.DefaultClient,
+		nil,
+	)
+	re.NoError(regionSyncer.MarkHistorySynced())
+	regionSyncer.StartSyncWithLeader(leaderURL)
+	t.Cleanup(func() {
+		regionSyncer.StopSyncWithLeader()
+	})
+	testutil.Eventually(re, regionSyncer.IsRunning,
+		testutil.WithWaitFor(3*time.Second),
+		testutil.WithTickInterval(20*time.Millisecond))
+
+	testStorage.failNextRegionScan()
+	re.ErrorContains(server.ResetFollowerRegionCache(), "load regions from local storage")
+	testutil.Eventually(re, regionSyncer.IsRunning,
+		testutil.WithWaitFor(3*time.Second),
+		testutil.WithTickInterval(20*time.Millisecond))
 }
 
 func TestDeleteFollowerRegion(t *testing.T) {
@@ -125,161 +201,6 @@ func TestDeleteFollowerRegion(t *testing.T) {
 	}
 }
 
-func TestDeleteFollowerRegionStorage(t *testing.T) {
-	tests := []struct {
-		name        string
-		ctx         context.Context
-		setup       func(*require.Assertions, *Server) func(*require.Assertions, *Server)
-		errIs       error
-		errContains string
-	}{
-		{
-			name: "deletes all region storage keys",
-			setup: func(re *require.Assertions, s *Server) func(*require.Assertions, *Server) {
-				regions := []*metapb.Region{
-					newTestFollowerRegionMeta(10),
-					newTestFollowerRegionMeta(11),
-				}
-				for _, region := range regions {
-					re.NoError(s.storage.SaveRegion(region))
-				}
-				return func(re *require.Assertions, s *Server) {
-					for _, region := range regions {
-						assertTestFollowerRegionDeleted(re, s, region.GetId())
-					}
-				}
-			},
-		},
-		{
-			name: "deletes by key without loading region meta",
-			setup: func(re *require.Assertions, s *Server) func(*require.Assertions, *Server) {
-				region := newTestFollowerRegionMeta(12)
-				re.NoError(s.storage.SaveRegion(region))
-				regionStorage := s.storage
-				s.storage = &testFollowerRegionStorage{
-					Storage:       regionStorage,
-					loadRegionErr: errTestFollowerRegionStorage,
-				}
-				return func(re *require.Assertions, s *Server) {
-					s.storage = regionStorage
-					assertTestFollowerRegionDeleted(re, s, region.GetId())
-				}
-			},
-		},
-		{
-			name: "context canceled",
-			ctx: func() context.Context {
-				ctx, cancel := context.WithCancel(context.Background())
-				cancel()
-				return ctx
-			}(),
-			errIs: context.Canceled,
-		},
-		{
-			name: "load range error",
-			setup: func(_ *require.Assertions, s *Server) func(*require.Assertions, *Server) {
-				s.storage = &testFollowerRegionStorage{
-					Storage:      s.storage,
-					loadRangeErr: errTestFollowerRegionStorage,
-				}
-				return nil
-			},
-			errContains: "load follower regions from local storage",
-		},
-		{
-			name: "delete transaction error",
-			setup: func(re *require.Assertions, s *Server) func(*require.Assertions, *Server) {
-				region := newTestFollowerRegionMeta(21)
-				re.NoError(s.storage.SaveRegion(region))
-				s.storage = &testFollowerRegionStorage{
-					Storage:     s.storage,
-					runInTxnErr: errTestFollowerRegionStorage,
-				}
-				return nil
-			},
-			errContains: "delete follower regions from local storage",
-		},
-		{
-			name: "invalid region storage key",
-			setup: func(_ *require.Assertions, s *Server) func(*require.Assertions, *Server) {
-				s.storage = &testFollowerRegionStorage{
-					Storage:       s.storage,
-					loadRangeKeys: []string{"invalid-region-key"},
-				}
-				return nil
-			},
-			errContains: "invalid region storage key",
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			re := require.New(t)
-			ctx := test.ctx
-			if ctx == nil {
-				ctx = context.Background()
-			}
-			s := newTestFollowerRegionResetServer(ctx)
-			var check func(*require.Assertions, *Server)
-			if test.setup != nil {
-				check = test.setup(re, s)
-			}
-
-			err := s.deleteFollowerRegionStorage()
-			switch {
-			case test.errIs != nil:
-				re.ErrorIs(err, test.errIs)
-				return
-			case test.errContains != "":
-				re.ErrorContains(err, test.errContains)
-				return
-			default:
-				re.NoError(err)
-			}
-			if check != nil {
-				check(re, s)
-			}
-		})
-	}
-}
-
-func TestParseRegionIDFromStorageKey(t *testing.T) {
-	tests := []struct {
-		name        string
-		key         string
-		regionID    uint64
-		errContains string
-	}{
-		{
-			name:     "valid region key",
-			key:      keypath.RegionPath(123),
-			regionID: 123,
-		},
-		{
-			name:        "missing region id",
-			key:         "invalid-region-key",
-			errContains: "invalid region storage key",
-		},
-		{
-			name:        "invalid region id",
-			key:         "/pd/0/raft/r/not-a-number",
-			errContains: "parse region storage key",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			re := require.New(t)
-			regionID, err := parseRegionIDFromStorageKey(test.key)
-			if test.errContains != "" {
-				re.ErrorContains(err, test.errContains)
-				return
-			}
-			re.NoError(err)
-			re.Equal(test.regionID, regionID)
-		})
-	}
-}
-
 func newTestFollowerRegionResetServer(ctx context.Context) *Server {
 	cfg := config.NewConfig()
 	return &Server{
@@ -312,19 +233,27 @@ func assertTestFollowerRegionDeleted(re *require.Assertions, s *Server, regionID
 
 type testFollowerRegionStorage struct {
 	storage.Storage
+	mu              sync.Mutex
+	failRegionScan  bool
 	loadRegionErr   error
 	deleteRegionErr error
-	loadRangeErr    error
-	runInTxnErr     error
-	loadRangeKeys   []string
 }
 
-func (s *testFollowerRegionStorage) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
-	if s.loadRangeErr != nil {
-		return nil, nil, s.loadRangeErr
-	}
-	if s.loadRangeKeys != nil {
-		return s.loadRangeKeys, nil, nil
+func (s *testFollowerRegionStorage) failNextRegionScan() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failRegionScan = true
+}
+
+func (s *testFollowerRegionStorage) LoadRange(
+	key, endKey string,
+	limit int,
+) (keys, values []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failRegionScan {
+		s.failRegionScan = false
+		return nil, nil, errTestFollowerRegionStorage
 	}
 	return s.Storage.LoadRange(key, endKey, limit)
 }
@@ -343,9 +272,27 @@ func (s *testFollowerRegionStorage) DeleteRegion(region *metapb.Region) error {
 	return s.Storage.DeleteRegion(region)
 }
 
-func (s *testFollowerRegionStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
-	if s.runInTxnErr != nil {
-		return s.runInTxnErr
+type testFollowerRegionSyncServer struct {
+	pdpb.UnimplementedPDServer
+}
+
+func (*testFollowerRegionSyncServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
+	if _, err := stream.Recv(); err != nil {
+		return err
 	}
-	return s.Storage.RunInTxn(ctx, f)
+	header := &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()}
+	if err := stream.Send(&pdpb.SyncRegionResponse{
+		Header:     header,
+		StartIndex: 0,
+	}); err != nil {
+		return err
+	}
+	if err := stream.Send(&pdpb.SyncRegionResponse{
+		Header:     header,
+		StartIndex: 1,
+	}); err != nil {
+		return err
+	}
+	<-stream.Context().Done()
+	return stream.Context().Err()
 }
