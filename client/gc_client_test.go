@@ -45,7 +45,7 @@ func TestPBToGCStatePreservesKeyspaceLevelGC(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			pbState := &pdpb.GCState{
-				KeyspaceScope:     &pdpb.KeyspaceScope{KeyspaceId: 42},
+				KeyspaceScope:     wrapKeyspaceScope(42),
 				IsKeyspaceLevelGc: testCase.isKeyspaceLevelGC,
 				TxnSafePoint:      100,
 				GcSafePoint:       90,

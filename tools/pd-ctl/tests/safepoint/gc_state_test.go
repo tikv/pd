@@ -117,6 +117,7 @@ func TestGCState(t *testing.T) {
 		},
 	)
 	re.NoError(err)
+	keyspaceLevelID := keyspaceLevel.GetId()
 
 	var unifiedKeyspaceID uint32
 	if !kerneltype.IsNextGen() {
@@ -130,7 +131,7 @@ func TestGCState(t *testing.T) {
 			},
 		)
 		re.NoError(err)
-		unifiedKeyspaceID = unified.Id
+		unifiedKeyspaceID = unified.GetId()
 	}
 
 	manager := leaderServer.GetServer().GetGCStateManager()
@@ -156,12 +157,12 @@ func TestGCState(t *testing.T) {
 	)
 	re.NoError(err)
 
-	_, err = manager.AdvanceTxnSafePoint(keyspaceLevel.Id, 200, now)
+	_, err = manager.AdvanceTxnSafePoint(keyspaceLevelID, 200, now)
 	re.NoError(err)
-	_, _, err = manager.AdvanceGCSafePoint(keyspaceLevel.Id, 190)
+	_, _, err = manager.AdvanceGCSafePoint(keyspaceLevelID, 190)
 	re.NoError(err)
 	_, err = manager.SetGCBarrier(
-		keyspaceLevel.Id,
+		keyspaceLevelID,
 		"z-local",
 		220,
 		time.Hour,
@@ -169,7 +170,7 @@ func TestGCState(t *testing.T) {
 	)
 	re.NoError(err)
 	_, err = manager.SetGCBarrier(
-		keyspaceLevel.Id,
+		keyspaceLevelID,
 		"a-local",
 		210,
 		time.Duration(math.MaxInt64),
@@ -179,7 +180,7 @@ func TestGCState(t *testing.T) {
 	// Backdate the creation time so the barrier stays persisted until the next
 	// safe-point advancement but is already inactive when the RPC reads it.
 	_, err = manager.SetGCBarrier(
-		keyspaceLevel.Id,
+		keyspaceLevelID,
 		"expired-local",
 		230,
 		time.Hour,
@@ -213,9 +214,9 @@ func TestGCState(t *testing.T) {
 	re.NoError(err)
 
 	pdAddr := cluster.GetConfig().GetClientURL()
-	keyspaceLevelID := strconv.FormatUint(uint64(keyspaceLevel.Id), 10)
+	keyspaceLevelIDString := strconv.FormatUint(uint64(keyspaceLevelID), 10)
 	output, err := tests.ExecuteCommand(
-		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelID,
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelIDString,
 	)
 	re.NoError(err)
 	var singleProperties map[string]json.RawMessage
@@ -223,8 +224,8 @@ func TestGCState(t *testing.T) {
 	re.NotContains(singleProperties, "global_gc_barriers")
 	var keyspaceLevelResponse gcStateCommandSingle
 	re.NoError(json.Unmarshal(output, &keyspaceLevelResponse), string(output))
-	re.Equal(keyspaceLevel.Id, keyspaceLevelResponse.RequestedKeyspaceID)
-	re.Equal(keyspaceLevel.Id, keyspaceLevelResponse.EffectiveKeyspaceID)
+	re.Equal(keyspaceLevelID, keyspaceLevelResponse.RequestedKeyspaceID)
+	re.Equal(keyspaceLevelID, keyspaceLevelResponse.EffectiveKeyspaceID)
 	re.True(keyspaceLevelResponse.IsKeyspaceLevelGC)
 	re.Equal(uint64(200), keyspaceLevelResponse.TxnSafePoint)
 	re.Equal(uint64(190), keyspaceLevelResponse.GCSafePoint)
@@ -234,7 +235,7 @@ func TestGCState(t *testing.T) {
 	})
 
 	output, err = tests.ExecuteCommand(
-		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelID,
+		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelIDString,
 		"--include-expired",
 	)
 	re.NoError(err)
@@ -291,7 +292,7 @@ func TestGCState(t *testing.T) {
 		{barrierID: "z-null", barrierTS: 120, expires: true},
 	})
 
-	keyspaceLevelState, ok := statesByID[keyspaceLevel.Id]
+	keyspaceLevelState, ok := statesByID[keyspaceLevelID]
 	re.True(ok)
 	re.True(keyspaceLevelState.IsKeyspaceLevelGC)
 	re.Equal(uint64(200), keyspaceLevelState.TxnSafePoint)
@@ -315,7 +316,7 @@ func TestGCState(t *testing.T) {
 	for _, state := range allWithExpired.GCStates {
 		statesByIDWithExpired[state.KeyspaceID] = state
 	}
-	keyspaceLevelStateWithExpired, ok := statesByIDWithExpired[keyspaceLevel.Id]
+	keyspaceLevelStateWithExpired, ok := statesByIDWithExpired[keyspaceLevelID]
 	re.True(ok)
 	requireGCStateCommandBarriers(re, keyspaceLevelStateWithExpired.GCBarriers, []expectedGCStateCommandBarrier{
 		{barrierID: "a-local", barrierTS: 210},
