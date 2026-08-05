@@ -332,8 +332,12 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 		if m.getLoadingState() == LoadingStateCompleted {
 			// Async loading (if any) has already finished, so if the default
 			// group isn't cached yet it truly doesn't exist anywhere; it's
-			// safe to synthesize and persist it directly.
-			krgm.initDefaultResourceGroup(func() bool {
+			// safe to synthesize and persist it directly. This is a
+			// best-effort pre-warm: any failure (stale term or a real
+			// storage error) is already logged inside initDefaultResourceGroup,
+			// and a later request for the default group will retry through
+			// loadResourceGroupIfNeeded, which does surface such errors.
+			_, _ = krgm.initDefaultResourceGroup(func() bool {
 				m.RLock()
 				defer m.RUnlock()
 				return m.krgms[keyspaceID] == krgm
@@ -806,7 +810,24 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 					defer m.RUnlock()
 					return m.loadEpoch == epoch && m.krgms[keyspaceID] == krgm
 				}
-				if krgm.initDefaultResourceGroup(stillCurrent) {
+				created, initErr := krgm.initDefaultResourceGroup(stillCurrent)
+				if initErr != nil {
+					if errs.ErrResourceGroupsLoading.Equal(initErr) {
+						// stillCurrent caught a term change that landed after the
+						// stale check above but before the persist started; the
+						// group was not created anywhere, so retry against the
+						// fresh term instead of reporting a bogus success.
+						if attempt >= maxLoadAttempts {
+							return errs.ErrResourceGroupsLoading
+						}
+						continue
+					}
+					// A real failure persisting the default group (e.g. a storage
+					// write error): propagate it rather than silently reporting
+					// success for a group that was never actually created.
+					return initErr
+				}
+				if created {
 					// This synthesis bypassed publishResourceGroupMutation, so the
 					// sync-loaded marker was never set. Set it now: otherwise a
 					// bulk merge still in progress for this term doesn't know this
@@ -1076,7 +1097,10 @@ func (m *Manager) initReserved(epoch uint64) {
 	// no concurrent Add/ModifyResourceGroup or other initDefaultResourceGroup
 	// call to race against.
 	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-		krgm.initDefaultResourceGroup(nil)
+		// Any failure is already logged inside initDefaultResourceGroup; a
+		// later request for the default group retries through
+		// loadResourceGroupIfNeeded once serving starts.
+		_, _ = krgm.initDefaultResourceGroup(nil)
 	}
 }
 

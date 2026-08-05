@@ -87,7 +87,9 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.False(exists)
 
 	// Initialize the default resource group.
-	krgm.initDefaultResourceGroup(nil)
+	created, err := krgm.initDefaultResourceGroup(nil)
+	re.NoError(err)
+	re.True(created)
 
 	// Verify the default resource group is created.
 	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
@@ -225,7 +227,8 @@ func TestDeleteResourceGroupBehavior(t *testing.T) {
 		_, ok := krgm.groupRUTrackers[group.GetName()]
 		re.False(ok)
 
-		krgm.initDefaultResourceGroup(nil)
+		_, err := krgm.initDefaultResourceGroup(nil)
+		re.NoError(err)
 		re.Error(krgm.deleteResourceGroup(DefaultResourceGroupName))
 		re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
 	})
@@ -361,7 +364,8 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Equal("group2", groups[1].Name)
 	re.Equal("group3", groups[2].Name)
 
-	krgm.initDefaultResourceGroup(nil)
+	_, err := krgm.initDefaultResourceGroup(nil)
+	re.NoError(err)
 	groups = krgm.getResourceGroupList(false, true)
 	re.Len(groups, 4)
 	groups = krgm.getResourceGroupList(false, false)
