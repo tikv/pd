@@ -2266,4 +2266,20 @@ func TestPutStoreValidateStoreAddress(t *testing.T) {
 	})
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
+
+	// TiKV registers its store address before it starts listening on it, so an
+	// address whose host is reachable but whose port refuses the connection
+	// must still be accepted.
+	notYetListening, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	notYetListeningAddr := notYetListening.Addr().String()
+	re.NoError(notYetListening.Close())
+
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      104,
+		Address: notYetListeningAddr,
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
 }

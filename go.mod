@@ -40,7 +40,6 @@ require (
 	github.com/pingcap/metering_sdk v0.0.0-20260203082503-b9f282339654
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20260424073400-8efaf2f70a41
-	github.com/prometheus-community/pro-bing v0.9.1
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/client_model v0.6.1
 	github.com/rleungx/leakcheck v1.0.1-0.20250721100113-2eb456ffd3e3
