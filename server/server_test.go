@@ -319,14 +319,14 @@ type testFollowerRegionStorage struct {
 	loadRangeKeys   []string
 }
 
-func (s *testFollowerRegionStorage) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
+func (s *testFollowerRegionStorage) LoadRange(key, endKey string, limit int, opts ...kv.RangeOption) (keys []string, values []string, err error) {
 	if s.loadRangeErr != nil {
 		return nil, nil, s.loadRangeErr
 	}
 	if s.loadRangeKeys != nil {
 		return s.loadRangeKeys, nil, nil
 	}
-	return s.Storage.LoadRange(key, endKey, limit)
+	return s.Storage.LoadRange(key, endKey, limit, opts...)
 }
 
 func (s *testFollowerRegionStorage) LoadRegion(regionID uint64, region *metapb.Region) (bool, error) {

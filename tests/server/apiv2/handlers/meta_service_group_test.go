@@ -20,7 +20,10 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -30,6 +33,7 @@ import (
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -158,7 +162,17 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupIDKey)
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupAddressesKey)
 	// Meta-service groups are disabled by default and must be enabled before assignment.
-	for _, group := range mustLoadMetaServiceGroups(re, suite.server) {
+	var groups []*handlers.MetaServiceGroupStatus
+	re.Eventually(func() bool {
+		groups = mustLoadMetaServiceGroups(re, suite.server)
+		for _, group := range groups {
+			if !group.AssignmentCountReady {
+				return false
+			}
+		}
+		return true
+	}, time.Second, time.Millisecond)
+	for _, group := range groups {
 		re.False(group.Status.Enabled)
 		mustEnableMetaServiceGroup(re, suite.server, group.ID)
 	}
@@ -166,7 +180,7 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20)
 	collectedGroups := collectStatus(re, keyspaces)
 	// Make sure result collected from keyspace config and load meta-service group api matches.
-	groups := mustLoadMetaServiceGroups(re, suite.server)
+	groups = mustLoadMetaServiceGroups(re, suite.server)
 	re.Len(groups, len(collectedGroups))
 	for _, group := range groups {
 		collectedStatus := collectedGroups[group.ID]
@@ -264,4 +278,61 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	for _, group := range groups {
 		re.NotEqual("etcd-group-unused", group.ID)
 	}
+}
+
+// TestPatchMetaServiceGroupStatusConflictReturns409 guards against
+// PatchStatus's modification-revision CAS conflict (ErrMetaServiceGroupStatusConflict)
+// falling through the handler's error mapping to a 500: the endpoint
+// documents retryable conflicts as 409, so the new conflict error needs the
+// same treatment as the pre-existing errs.ErrEtcdTxnConflict case. Raw
+// writers race the status key's modification revision in the background so
+// an in-flight PATCH is very likely to lose its CAS at least once.
+func (suite *metaServiceGroupTestSuite) TestPatchMetaServiceGroupStatusConflictReturns409() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := suite.server.GetEtcdClient()
+	statusPath := keypath.MetaServiceGroupStatusPath("etcd-group-0")
+	var ready, wg sync.WaitGroup
+	ready.Add(8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			first := true
+			for ctx.Err() == nil {
+				_, err := client.Put(ctx, statusPath, `{"assignment_count":0,"enabled":false}`)
+				if err != nil {
+					return
+				}
+				if first {
+					ready.Done()
+					first = false
+				}
+			}
+		}()
+	}
+	ready.Wait()
+
+	for range 100 {
+		req, err := http.NewRequest(http.MethodPatch,
+			suite.server.GetAddr()+metaServiceGroupsPrefix+"/etcd-group-0/status",
+			bytes.NewBufferString(`{"enabled":true}`))
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		body, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		re.NoError(resp.Body.Close())
+		if strings.Contains(string(body), keyspace.ErrMetaServiceGroupStatusConflict.Error()) {
+			cancel()
+			wg.Wait()
+			re.Equal(http.StatusConflict, resp.StatusCode, string(body))
+			return
+		}
+	}
+	cancel()
+	wg.Wait()
+	re.Fail("failed to trigger a meta-service group status conflict")
 }

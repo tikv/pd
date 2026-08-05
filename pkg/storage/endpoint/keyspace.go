@@ -47,7 +47,17 @@ type KeyspaceStorage interface {
 	RemoveKeyspace(txn kv.Txn, id uint32, name string) error
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
 	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
+	// LoadRangeKeyspaceAtRevision is LoadRangeKeyspace pinned to a specific
+	// MVCC revision, read directly against the backend rather than through
+	// RunInTxn. It's meant for multi-batch scans that must see one consistent
+	// point in time across all batches; going through RunInTxn instead would
+	// make every batch's implicit read-conflict check race against any
+	// unrelated key written elsewhere while the scan is still in progress.
+	LoadRangeKeyspaceAtRevision(startID uint32, limit int, revision int64) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
+	// CurrentRevision returns the storage backend's current MVCC revision, for
+	// use with LoadRangeKeyspaceAtRevision.
+	CurrentRevision(ctx context.Context) (int64, error)
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
@@ -122,13 +132,29 @@ func (*StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int)
 	if err != nil {
 		return nil, err
 	}
+	return unmarshalKeyspaces(keys, values)
+}
+
+// LoadRangeKeyspaceAtRevision is LoadRangeKeyspace pinned to a specific MVCC
+// revision. See the KeyspaceStorage interface doc for why it bypasses RunInTxn.
+func (se *StorageEndpoint) LoadRangeKeyspaceAtRevision(startID uint32, limit int, revision int64) ([]*keyspacepb.KeyspaceMeta, error) {
+	startKey := keypath.KeyspaceMetaPath(startID)
+	endKey := clientv3.GetPrefixRangeEnd(keypath.KeyspaceMetaPrefix())
+	keys, values, err := se.LoadRange(startKey, endKey, limit, kv.WithRevision(revision))
+	if err != nil {
+		return nil, err
+	}
+	return unmarshalKeyspaces(keys, values)
+}
+
+func unmarshalKeyspaces(keys, values []string) ([]*keyspacepb.KeyspaceMeta, error) {
 	if len(keys) == 0 {
 		return []*keyspacepb.KeyspaceMeta{}, nil
 	}
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(keys))
 	for _, value := range values {
 		keyspace := &keyspacepb.KeyspaceMeta{}
-		if err = proto.Unmarshal([]byte(value), keyspace); err != nil {
+		if err := proto.Unmarshal([]byte(value), keyspace); err != nil {
 			return nil, err
 		}
 		keyspaces = append(keyspaces, keyspace)

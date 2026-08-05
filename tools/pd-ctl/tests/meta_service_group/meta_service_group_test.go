@@ -202,22 +202,6 @@ func (suite *metaServiceGroupCLITestSuite) TestSetEnabled() {
 	re.False(findGroup(groups, "group-0").Status.Enabled)
 }
 
-func (suite *metaServiceGroupCLITestSuite) TestSetAssignmentCount() {
-	re := suite.Require()
-
-	// Enable the group first, then set its assignment count.
-	_, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "true")
-	re.NoError(err)
-	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "group-0", "10")
-	re.NoError(err)
-	var groups []*handlers.MetaServiceGroupStatus
-	re.NoError(json.Unmarshal(output, &groups))
-	g := findGroup(groups, "group-0")
-	re.Equal(10, g.Status.AssignmentCount)
-	// Enabled state is preserved across an assignment-count patch.
-	re.True(g.Status.Enabled)
-}
-
 func (suite *metaServiceGroupCLITestSuite) TestSetStatusInvalidInput() {
 	re := suite.Require()
 
@@ -225,16 +209,6 @@ func (suite *metaServiceGroupCLITestSuite) TestSetStatusInvalidInput() {
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "group-0", "notabool")
 	re.NoError(err)
 	re.Contains(string(output), "Invalid value for enabled flag")
-
-	// Invalid integer for set-assignment-count is reported by the CLI.
-	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "group-0", "notanint")
-	re.NoError(err)
-	re.Contains(string(output), "Invalid value for assignment count")
-
-	// Negative assignment count is rejected by the server (HTTP 400).
-	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-assignment-count", "--", "group-0", "-1")
-	re.NoError(err)
-	re.Contains(string(output), "assignment count must be non-negative")
 
 	// Patching an unknown group is rejected by the server (HTTP 404).
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), "-u", suite.pdAddr, "meta-service-group", "set-enabled", "nonexistent-group", "true")

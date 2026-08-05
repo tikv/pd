@@ -59,8 +59,9 @@ func (kv *memoryKV) Load(key string) (string, error) {
 	return item.value, nil
 }
 
-// LoadRange loads the keys in the range of [key, endKey).
-func (kv *memoryKV) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
+// LoadRange loads the keys in the range of [key, endKey). The in-memory KV has
+// no MVCC revision concept, so any RangeOption (e.g. WithRevision) is ignored.
+func (kv *memoryKV) LoadRange(key, endKey string, limit int, _ ...RangeOption) (keys, values []string, err error) {
 	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
 		rangeLimit, ok := val.(int)
 		if ok && limit > rangeLimit {
@@ -167,8 +168,13 @@ func (txn *memTxn) Load(key string) (string, error) {
 }
 
 // LoadRange executes base's load range directly.
-func (txn *memTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
-	return txn.kv.LoadRange(key, endKey, limit)
+func (txn *memTxn) LoadRange(key, endKey string, limit int, opts ...RangeOption) (keys []string, values []string, err error) {
+	return txn.kv.LoadRange(key, endKey, limit, opts...)
+}
+
+// CurrentRevision returns 0: the in-memory KV has no MVCC revision concept.
+func (*memoryKV) CurrentRevision(_ context.Context) (int64, error) {
+	return 0, nil
 }
 
 // commit executes operations in ops.

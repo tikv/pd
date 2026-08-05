@@ -46,8 +46,10 @@ var (
 
 	// ErrUnknownMetaServiceGroup is returned when the specified meta-service group does not exist.
 	ErrUnknownMetaServiceGroup = errors.New("unknown meta-service group")
-	// ErrInvalidAssignmentCount is returned when the patched assignment count is negative.
+	// ErrInvalidAssignmentCount is returned when an assignment count is negative.
 	ErrInvalidAssignmentCount = errors.New("assignment count must be non-negative")
+	// ErrAssignmentCountPatchUnsupported is returned when patching the derived assignment count.
+	ErrAssignmentCountPatchUnsupported = errors.New("assignment count patch is unsupported")
 	// ErrMetaServiceGroupDisabled is returned when assigning a keyspace to a
 	// disabled meta-service group, which is not eligible for assignment.
 	ErrMetaServiceGroupDisabled = errors.New("meta-service group is disabled")
@@ -55,6 +57,13 @@ var (
 	// that still has keyspaces assigned to it. It is exported so HTTP handlers can
 	// map it to a 400 Bad Request via errors.Is.
 	ErrGroupHasAssignedKeyspaces = errors.New("cannot delete meta-service group with assigned keyspaces")
+	// ErrMetaServiceGroupStatusConflict is returned when PatchStatus's
+	// modification-revision compare-and-swap fails: the persisted status
+	// changed between the read and the write, most likely because a leader
+	// whose term has since ended raced this request. Retrying against the
+	// current leader picks up the fresh revision and does not repeat the
+	// conflict.
+	ErrMetaServiceGroupStatusConflict = errors.New("meta-service group status changed concurrently")
 
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
