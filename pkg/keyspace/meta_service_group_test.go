@@ -958,3 +958,56 @@ func TestFormerLeaderRejectedByTermContextBeforeReadingDeletedGroupStatus(t *tes
 	re.True(status["group"].Enabled,
 		"a former leader rejected by its term context must not overwrite the re-added group's patch")
 }
+
+// TestFormerLeaderReturningNilTermContextDoesNotOverwriteReaddedGroupStatus
+// guards against a wired-but-currently-nil term source (RaftCluster.Context()
+// returns nil once the cluster has stopped, since running is set false before
+// the old context is even canceled) being treated as "no constraint applies"
+// instead of "no term is held, reject". A nil check that falls through would
+// disable the fence for every write between a stop and whatever eventually
+// rebuilds the source for a new term.
+func TestFormerLeaderReturningNilTermContextDoesNotOverwriteReaddedGroupStatus(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	base := kv.NewEtcdKVBase(client)
+	groups := map[string]string{"group": "addr"}
+	former, err := NewMetaServiceGroupManager(context.Background(), endpoint.NewStorageEndpoint(base, nil), groups)
+	re.NoError(err)
+	formerTermCtx, cancelFormerTerm := context.WithCancel(context.Background())
+	blocking := &blockingTermContext{
+		checkStarted: make(chan struct{}),
+		resumeCheck:  make(chan struct{}),
+	}
+	blocking.setCtx(formerTermCtx)
+	former.SetTermContextFunc(blocking.get)
+
+	blocking.blockNext.Store(true)
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- former.UpdateGroupsSafely(context.Background(), map[string]string{},
+			[]string{"group"}, func() error { return nil }, nil)
+	}()
+	<-blocking.checkStarted
+
+	current, err := NewMetaServiceGroupManager(context.Background(), endpoint.NewStorageEndpoint(base, nil), map[string]string{})
+	re.NoError(err)
+	re.NoError(current.UpdateGroupsSafely(context.Background(), groups, nil, func() error { return nil }, nil))
+	enabled := true
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+
+	// RaftCluster.Stop sets running=false before canceling the old context;
+	// Context returns nil from this point onward, which is exactly the
+	// production value being simulated here, not a caller mistake.
+	blocking.setCtx(nil) //nolint:staticcheck
+	cancelFormerTerm()
+	close(blocking.resumeCheck)
+	re.NoError(<-deleteDone)
+
+	re.NoError(current.RefreshCache(context.Background()))
+	status, err := current.GetStatus(context.Background())
+	re.NoError(err)
+	re.True(status["group"].Enabled,
+		"a nil context from a stopped former leader must not disable the term fence")
+}

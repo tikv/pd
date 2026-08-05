@@ -765,10 +765,18 @@ func (m *MetaServiceGroupManager) resetMetaServiceGroupStatus(id string) error {
 // to have ended first.
 func (m *MetaServiceGroupManager) casMetaServiceGroupStatusLocked(id string, mutate func(*endpoint.MetaServiceGroupStatus)) error {
 	if m.termCtxFunc != nil {
-		if termCtx := m.termCtxFunc(); termCtx != nil {
-			if err := termCtx.Err(); err != nil {
-				return err
-			}
+		// A nil context (e.g. RaftCluster.Context() once the cluster has
+		// stopped) means "no term is currently held", not "no constraint
+		// applies": a wired but currently-nil source must reject the write,
+		// the same as an explicitly canceled one, or the fence silently goes
+		// dark for every write issued after this server stops being leader
+		// but before whatever wired the func is rebuilt for a new term.
+		termCtx := m.termCtxFunc()
+		if termCtx == nil {
+			return context.Canceled
+		}
+		if err := termCtx.Err(); err != nil {
+			return err
 		}
 	}
 	current, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(id)
