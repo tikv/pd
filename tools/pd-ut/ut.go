@@ -372,7 +372,7 @@ func cmdRun(args ...string) bool {
 		go works[i].worker(&wg, taskCh)
 	}
 
-	sortTasks(tasks)
+	orderTasks(tasks)
 
 	start = time.Now()
 	for _, task := range tasks {
@@ -911,13 +911,36 @@ func filter(input []string, f func(string) bool) []string {
 	return ret
 }
 
-func sortTasks(tasks []task) {
+func orderTasks(tasks []task) {
 	sort.Slice(tasks, func(i, j int) bool {
 		if tasks[i].pkg != tasks[j].pkg {
 			return tasks[i].pkg < tasks[j].pkg
 		}
 		return tasks[i].test < tasks[j].test
 	})
+
+	groups := make([][]task, 0)
+	for i := 0; i < len(tasks); {
+		j := i + 1
+		for j < len(tasks) && tasks[j].pkg == tasks[i].pkg {
+			j++
+		}
+		groups = append(groups, tasks[i:j])
+		i = j
+	}
+
+	ordered := make([]task, 0, len(tasks))
+	for len(groups) > 0 {
+		next := groups[:0]
+		for _, group := range groups {
+			ordered = append(ordered, group[0])
+			if len(group) > 1 {
+				next = append(next, group[1:])
+			}
+		}
+		groups = next
+	}
+	copy(tasks, ordered)
 }
 
 type errWithStack struct {
