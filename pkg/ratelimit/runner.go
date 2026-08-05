@@ -29,13 +29,14 @@ import (
 
 // RegionHeartbeatStageName is the name of the stage of the region heartbeat.
 const (
-	HandleStatsAsync        = "HandleStatsAsync"
-	ObserveRegionStatsAsync = "ObserveRegionStatsAsync"
-	UpdateSubTree           = "UpdateSubTree"
-	HandleOverlaps          = "HandleOverlaps"
-	CollectRegionStatsAsync = "CollectRegionStatsAsync"
-	SaveRegionToKV          = "SaveRegionToKV"
-	SyncRegionToFollower    = "SyncRegionToFollower"
+	HandleStatsAsync          = "HandleStatsAsync"
+	ObserveRegionStatsAsync   = "ObserveRegionStatsAsync"
+	UpdateSubTree             = "UpdateSubTree"
+	HandleOverlaps            = "HandleOverlaps"
+	CollectRegionStatsAsync   = "CollectRegionStatsAsync"
+	SaveRegionToKV            = "SaveRegionToKV"
+	SyncRegionToFollower      = "SyncRegionToFollower"
+	SyncRegionStatsToFollower = "SyncRegionStatsToFollower"
 )
 
 const (

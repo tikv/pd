@@ -191,7 +191,7 @@ type RaftCluster struct {
 	unsafeRecoveryController *unsaferecovery.Controller
 	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
-	changedRegions           chan *core.RegionInfo
+	changedRegions           chan syncer.RegionUpdate
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
@@ -324,9 +324,9 @@ func (c *RaftCluster) InitCluster(
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
-	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	c.changedRegions = make(chan syncer.RegionUpdate, defaultChangedRegionsLimit)
 	failpoint.Inject("syncRegionChannelFull", func() {
-		c.changedRegions = make(chan *core.RegionInfo, 100)
+		c.changedRegions = make(chan syncer.RegionUpdate, 100)
 	})
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
@@ -1437,17 +1437,53 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 	}
 
-	if saveKV || needSync {
-		ctx.SyncRegionRunner.RunTask(
-			regionID,
-			ratelimit.SyncRegionToFollower,
-			func(context.Context) {
-				c.changedRegions <- region
-			},
-			ratelimit.WithRetained(true),
-		)
+	if update, ok := c.prepareRegionUpdateForSync(region, origin, saveKV, needSync); ok {
+		c.runRegionUpdateSyncTask(ctx, regionID, update)
 	}
 	return nil
+}
+
+func (c *RaftCluster) runRegionUpdateSyncTask(
+	ctx *core.MetaProcessContext,
+	regionID uint64,
+	update syncer.RegionUpdate,
+) {
+	taskName := ratelimit.SyncRegionToFollower
+	if update.StatsOnly {
+		// Keep stats-only updates in a separate coalescing class so they
+		// cannot replace a pending correctness-critical update.
+		taskName = ratelimit.SyncRegionStatsToFollower
+	}
+	ctx.SyncRegionRunner.RunTask(
+		regionID,
+		taskName,
+		func(context.Context) {
+			c.changedRegions <- update
+		},
+		ratelimit.WithRetained(true),
+	)
+}
+
+func (c *RaftCluster) prepareRegionUpdateForSync(
+	region, origin *core.RegionInfo,
+	saveKV, needSync bool,
+) (syncer.RegionUpdate, bool) {
+	if !saveKV && !needSync {
+		return syncer.RegionUpdate{}, false
+	}
+	statsOnly := !saveKV && needSync && origin != nil &&
+		(region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
+			region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
+			region.GetFlowRoundDivisor() < origin.GetFlowRoundDivisor()) &&
+		region.GetLeader().GetId() == origin.GetLeader().GetId() &&
+		core.SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) &&
+		core.SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers())
+	// The scheduling service receives the complete heartbeat directly, while
+	// Region Syncer followers use only routing and peer state.
+	if statsOnly && c.IsServiceIndependent(constant.SchedulingServiceName) {
+		return syncer.RegionUpdate{}, false
+	}
+	return syncer.RegionUpdate{Region: region, StatsOnly: statsOnly}, true
 }
 
 func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
@@ -2245,7 +2281,7 @@ func (c *RaftCluster) OnStoreVersionChange() {
 		zap.Stringer("new-cluster-version", minVersion))
 }
 
-func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
+func (c *RaftCluster) changedRegionNotifier() <-chan syncer.RegionUpdate {
 	return c.changedRegions
 }
 
