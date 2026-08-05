@@ -15,6 +15,7 @@
 package pdctl
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -90,5 +91,27 @@ func TestReadStdin(t *testing.T) {
 		for i, target := range v.targets {
 			re.Equal(target, in[i])
 		}
+	}
+}
+
+func TestRegionMetaConsistencyInvalidArgumentsExitWithStatusTwo(t *testing.T) {
+	tests := [][]string{
+		{"region", "meta-consistency", "extra"},
+		{"region", "meta-consistency", "--batch-size=invalid"},
+		{"region", "meta-consistency", "--unknown-flag"},
+	}
+	for _, args := range tests {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			root := GetRootCmd()
+			var stdout, stderr bytes.Buffer
+			root.SetOut(&stdout)
+			root.SetErr(&stderr)
+			root.SetArgs(args)
+
+			require.Equal(t, 2, execute(root))
+			require.Empty(t, stdout.String())
+			require.NotContains(t, stderr.String(), "Usage:")
+			require.NotEmpty(t, stderr.String())
+		})
 	}
 }
