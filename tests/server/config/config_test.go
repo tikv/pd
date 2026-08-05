@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -71,6 +72,41 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
+}
+
+func TestMetricStorageValidationAtQueryTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NotNil(leader)
+
+	configURL := leader.GetAddr() + "/pd/api/v1/config"
+	queryURL := leader.GetAddr() + "/pd/api/v1/metric/query"
+	for _, metricStorage := range []string{
+		"file:///tmp/metrics",
+		"http://127.0.0.1:9090",
+		"http://user:pass@metrics.example",
+		"not a URL",
+	} {
+		postData, err := json.Marshal(map[string]any{"metric-storage": metricStorage})
+		re.NoError(err)
+		re.NoError(tu.CheckPostJSON(tests.TestDialClient, configURL, postData, tu.StatusOK(re)))
+		re.Equal(metricStorage, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
+
+		queryResp, err := tests.TestDialClient.Get(queryURL)
+		re.NoError(err)
+		queryBody, err := io.ReadAll(queryResp.Body)
+		re.NoError(err)
+		re.NoError(queryResp.Body.Close())
+		re.Equal(http.StatusBadGateway, queryResp.StatusCode)
+		re.JSONEq(`{"status":"error","errorType":"proxy","error":"metric query failed"}`, string(queryBody))
+	}
 }
 
 type configTestSuite struct {
