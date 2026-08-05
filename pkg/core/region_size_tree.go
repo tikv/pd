@@ -57,14 +57,13 @@ type regionSizeTree struct {
 	tree    *btree.BTreeG[*regionSizeItem]
 	regions map[uint64]*regionSizeItem
 
-	pendingMu      syncutil.Mutex
-	pending        map[uint64]struct{}
-	pendingSince   time.Time
-	activePending  int
-	activeSince    time.Time
-	resetPending   bool
-	rebuildPending bool
-	notifyCh       chan struct{}
+	pendingMu     syncutil.Mutex
+	pending       map[uint64]struct{}
+	pendingSince  time.Time
+	activePending int
+	activeSince   time.Time
+	resetPending  bool
+	notifyCh      chan struct{}
 }
 
 func newRegionSizeTree(ctx context.Context, owner *RegionsInfo) *regionSizeTree {
@@ -82,26 +81,16 @@ func newRegionSizeTree(ctx context.Context, owner *RegionsInfo) *regionSizeTree 
 }
 
 func (t *regionSizeTree) start() {
-	t.pendingMu.Lock()
-	t.rebuildPending = true
-	t.pendingMu.Unlock()
 	t.wg.Add(1)
 	go t.run()
-	t.wake()
 }
 
 func (t *regionSizeTree) stop() {
-	t.pendingMu.Lock()
 	t.cancel()
-	t.ready.Store(false)
-	t.pendingMu.Unlock()
 	t.wg.Wait()
 }
 
 func (t *regionSizeTree) notify(regionIDs ...uint64) {
-	if len(regionIDs) == 0 {
-		return
-	}
 	t.pendingMu.Lock()
 	for _, regionID := range regionIDs {
 		if _, ok := t.pending[regionID]; ok {
@@ -131,11 +120,11 @@ func (t *regionSizeTree) wake() {
 	}
 }
 
-func (t *regionSizeTree) takePending() (reset, rebuild bool, pending map[uint64]struct{}) {
+func (t *regionSizeTree) takePending() (reset bool, pending map[uint64]struct{}) {
 	t.pendingMu.Lock()
 	defer t.pendingMu.Unlock()
-	reset, rebuild = t.resetPending, t.rebuildPending
-	t.resetPending, t.rebuildPending = false, false
+	reset = t.resetPending
+	t.resetPending = false
 	if len(t.pending) > 0 {
 		pending = t.pending
 		t.activePending = len(pending)
@@ -143,7 +132,7 @@ func (t *regionSizeTree) takePending() (reset, rebuild bool, pending map[uint64]
 		t.pending = make(map[uint64]struct{})
 		t.pendingSince = time.Time{}
 	}
-	return reset, rebuild, pending
+	return reset, pending
 }
 
 func (t *regionSizeTree) finishPending() {
@@ -157,6 +146,11 @@ func (t *regionSizeTree) run() {
 	defer t.wg.Done()
 	defer logutil.LogPanic()
 	defer t.ready.Store(false)
+	start := time.Now()
+	if t.rebuild() {
+		t.markReadyIfCurrent()
+	}
+	regionSizeTreeRebuildDuration.Observe(time.Since(start).Seconds())
 	for {
 		select {
 		case <-t.done:
@@ -175,24 +169,11 @@ func (t *regionSizeTree) drain() {
 		default:
 		}
 
-		reset, rebuild, pending := t.takePending()
-		if !reset && !rebuild && len(pending) == 0 {
+		reset, pending := t.takePending()
+		if !reset && len(pending) == 0 {
 			return
 		}
-		if rebuild {
-			t.reset()
-			start := time.Now()
-			rebuilt := t.rebuild()
-			regionSizeTreeRebuildDuration.Observe(time.Since(start).Seconds())
-			if !rebuilt {
-				t.finishPending()
-				return
-			}
-			// The full rebuild already covers notifications taken before it
-			// started. Updates that arrive during the scan are in the new pending
-			// map and will be reconciled by the next drain iteration.
-			pending = nil
-		} else if reset {
+		if reset {
 			t.reset()
 		}
 		if !t.reconcilePending(pending) {
@@ -200,7 +181,7 @@ func (t *regionSizeTree) drain() {
 			continue
 		}
 		t.finishPending()
-		if rebuild || reset {
+		if reset {
 			t.markReadyIfCurrent()
 		}
 	}
@@ -209,7 +190,7 @@ func (t *regionSizeTree) drain() {
 func (t *regionSizeTree) markReadyIfCurrent() {
 	t.pendingMu.Lock()
 	defer t.pendingMu.Unlock()
-	if !t.isStopped() && !t.resetPending && !t.rebuildPending {
+	if !t.isStopped() && !t.resetPending {
 		t.ready.Store(true)
 	}
 }
@@ -279,7 +260,7 @@ func (t *regionSizeTree) shouldInterruptReconcile() bool {
 	}
 	t.pendingMu.Lock()
 	defer t.pendingMu.Unlock()
-	return t.resetPending || t.rebuildPending
+	return t.resetPending
 }
 
 func (t *regionSizeTree) collectMetrics() {

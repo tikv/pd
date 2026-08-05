@@ -1878,13 +1878,17 @@ func TestCalculateStoreSize1(t *testing.T) {
 	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available := cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(4500.0, threshold)
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available = cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(2250.0, threshold)
 }
 
 func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
@@ -1929,28 +1933,33 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	regionSizes := newRegionSizeCache(loader)
 
 	stores := cluster.GetStores()
-	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
-	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	threshold1, available := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
+	re.True(available)
+	threshold2, available := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	re.True(available)
 	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
 	re.Equal(180.0, threshold1)
 	re.Equal(180.0, threshold2)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 
 	// A different range is loaded separately, then shared by all rules.
-	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	threshold, available := cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes)
+	re.True(available)
+	re.Equal(360.0, threshold)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
 
 	nextRoundRegionSizes := newRegionSizeCache(loader)
-	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
+	threshold, available = cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes)
+	re.True(available)
+	re.Equal(threshold1, threshold)
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
-func TestPreparingRegionSizeLazilyStartsSizeTree(t *testing.T) {
+func TestPreparingRegionSizeUsesRegionSizeTree(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster := &RaftCluster{ctx: ctx, BasicCluster: core.NewBasicCluster()}
-	defer cluster.StopRegionSizeTree()
 	peer := &metapb.Peer{Id: 1, StoreId: 1}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:       1,
@@ -1959,70 +1968,31 @@ func TestPreparingRegionSizeLazilyStartsSizeTree(t *testing.T) {
 		Peers:    []*metapb.Peer{peer},
 	}, peer, core.SetApproximateSize(10))
 	cluster.PutRegion(region)
-	rootSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
-	_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
-	re.False(ready)
-	result := cluster.getPreparingRegionSize(nil, nil, rootSizes)
+	result := cluster.getPreparingRegionSize(nil, nil)
 	re.Equal(int64(10), result.size)
 	re.True(result.available)
-	re.False(result.needsConfirmation)
-	_, ready = cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
-	re.False(ready)
 
-	// The first bounded query starts the index and defers the decision instead of
-	// scanning the root tree while the full rebuild is doing the same work.
-	result = cluster.getPreparingRegionSize([]byte("a"), []byte("z"), rootSizes)
-	re.False(result.available)
+	cluster.StartRegionSizeTree(ctx)
+	t.Cleanup(cluster.StopRegionSizeTree)
 	re.Eventually(func() bool {
-		_, ready := cluster.GetRegionSizeByRangeFromSizeTree([]byte("a"), []byte("z"))
-		return ready
+		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"))
+		return result.size == 10 && result.available
 	}, 5*time.Second, 10*time.Millisecond)
 
 	updated := region.Clone(core.SetApproximateSize(40))
 	_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), updated)
 	re.NoError(err)
 	re.Equal(int64(40), cluster.GetRegionSizeByRange(nil, nil))
-	rootSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
-	result = cluster.getPreparingRegionSize(nil, nil, rootSizes)
+	result = cluster.getPreparingRegionSize(nil, nil)
 	re.Equal(int64(40), result.size)
 	re.True(result.available)
-	re.False(result.needsConfirmation)
 	re.Eventually(func() bool {
-		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"), rootSizes)
-		return result.size == 40 && result.available && result.needsConfirmation
+		result := cluster.getPreparingRegionSize([]byte("a"), []byte("z"))
+		return result.size == 40 && result.available
 	}, 5*time.Second, 10*time.Millisecond)
 }
 
-func TestPreparingRegionSizeDoesNotFallbackWhileIndexBuilds(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	cluster := &RaftCluster{ctx: ctx, BasicCluster: core.NewBasicCluster()}
-	defer cluster.StopRegionSizeTree()
-	cluster.PutRegion(core.NewRegionInfo(&metapb.Region{
-		Id:       1,
-		StartKey: []byte("a"),
-		EndKey:   []byte("z"),
-	}, nil, core.SetApproximateSize(10)))
-
-	loadCount := 0
-	rootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
-		loadCount++
-		return cluster.GetRegionSizeByRange(startKey, endKey)
-	})
-	approxSizes := newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
-		return cluster.getPreparingRegionSize(startKey, endKey, rootSizes)
-	})
-
-	// A canceled context keeps the lazy index unready. The approximate lookup
-	// must not scan the root while an initial rebuild would normally be running.
-	result := approxSizes.getRegionSizeResult([]byte("a"), []byte("z"))
-	re.False(result.available)
-	re.False(result.needsConfirmation)
-	re.Zero(loadCount)
-}
-
-func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T) {
+func TestCheckStoreDefersPreparingWhenRegionSizeTreeIsUnavailable(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -2045,27 +2015,20 @@ func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T)
 	cluster.progressManager = progress.NewManager(cluster.GetCoordinator().GetCheckerController(),
 		nodeStateCheckJobInterval)
 
-	const confirmedStoreCount = 50
 	now := time.Now()
-	// Keep one additional Preparing store below the approximate threshold so it
-	// can verify that the next check round reloads root sizes.
-	stores := newTestStores(confirmedStoreCount+2, "8.5.0")
+	stores := newTestStores(2, "8.5.0")
 	for i, store := range stores {
-		if i <= confirmedStoreCount {
+		if i == 0 {
 			store = store.Clone(
 				core.SetNodeState(metapb.NodeState_Preparing),
 				core.SetStoreStartTime(now.Unix()),
 			)
 		}
 		re.NoError(cluster.PutMetaStore(store.GetMeta()))
-		regionSize := int64(15)
-		if i == confirmedStoreCount {
-			regionSize = 5
-		}
 		cluster.PutStore(cluster.GetStore(store.GetID()).Clone(
 			core.SetLastHeartbeatTS(now),
 			core.SetRegionCount(10),
-			core.SetRegionSize(regionSize),
+			core.SetRegionSize(15),
 		))
 	}
 
@@ -2080,78 +2043,16 @@ func TestCheckStoreOnlyConfirmsAsyncPreparingThresholdWithRootTree(t *testing.T)
 		cluster.PutRegion(region)
 	}
 
-	loadedRanges := make(map[regionSizeCacheKey]int)
-	staleSizes := newRegionSizeCacheWithResult(func(startKey, endKey []byte) regionSizeCacheValue {
-		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
-		loadedRanges[key]++
-		size := int64(0)
-		if key == (regionSizeCacheKey{startKey: "\x00", endKey: "\xff"}) {
-			size = 300
-		}
-		return regionSizeCacheValue{size: size, available: true, needsConfirmation: true}
-	})
-	rootLoadedRanges := make(map[regionSizeCacheKey]int)
-	rootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
-		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
-		rootLoadedRanges[key]++
-		return cluster.GetRegionSizeByRange(startKey, endKey)
-	})
+	indexCtx, stopIndex := context.WithCancel(ctx)
+	stopIndex()
+	cluster.StartRegionSizeTree(indexCtx)
+	t.Cleanup(cluster.StopRegionSizeTree)
 
-	// An unavailable lazy index defers both the state decision and this round's
-	// progress sample instead of treating an unknown threshold as zero.
-	unavailableSizes := newRegionSizeCacheWithResult(func([]byte, []byte) regionSizeCacheValue {
-		return regionSizeCacheValue{}
-	})
-	cluster.checkStore(stores[0].GetID(), unavailableSizes, rootSizes)
+	// The unavailable bounded index neither falls back to a root range scan nor
+	// treats the unknown threshold as zero.
+	cluster.checkStores()
 	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(stores[0].GetID()).GetNodeState())
 	re.Nil(cluster.progressManager.GetProgressByStoreID(stores[0].GetID()))
-
-	// Both the default and bounded rules contribute. All 50 candidates share
-	// the same root cache, so each placement interval is scanned only once.
-	for i := range confirmedStoreCount {
-		cluster.checkStore(stores[i].GetID(), staleSizes, rootSizes)
-		re.Equal(metapb.NodeState_Serving, cluster.GetStore(stores[i].GetID()).GetNodeState())
-	}
-	re.Len(rootLoadedRanges, 3)
-	for _, count := range rootLoadedRanges {
-		re.Equal(1, count)
-	}
-	re.Len(loadedRanges, 3)
-	for _, count := range loadedRanges {
-		re.Equal(1, count)
-	}
-
-	// Grow the authoritative range to 600 while the asynchronous value remains
-	// 300. The next round uses a new root cache and keeps the remaining store in
-	// Preparing because its current size is below the refreshed threshold.
-	region := cluster.GetRegion(1).Clone(core.SetApproximateSize(303))
-	cluster.PutRegion(region)
-	remainingStoreID := stores[confirmedStoreCount].GetID()
-	cluster.PutStore(cluster.GetStore(remainingStoreID).Clone(core.SetRegionSize(15)))
-	nextRoundRootLoadedRanges := make(map[regionSizeCacheKey]int)
-	nextRoundRootSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
-		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
-		nextRoundRootLoadedRanges[key]++
-		return cluster.GetRegionSizeByRange(startKey, endKey)
-	})
-	cluster.checkStore(remainingStoreID, staleSizes, nextRoundRootSizes)
-	re.Equal(metapb.NodeState_Preparing, cluster.GetStore(remainingStoreID).GetNodeState())
-	re.Len(nextRoundRootLoadedRanges, 3)
-	for _, count := range nextRoundRootLoadedRanges {
-		re.Equal(1, count)
-	}
-	re.Zero(loadedRanges[regionSizeCacheKey{}])
-
-	// The same stale value marked exact skips root confirmation and is used
-	// directly, proving confirmation is limited to asynchronous results.
-	exactSizes := newRegionSizeCache(func(startKey, endKey []byte) int64 {
-		if string(startKey) == "\x00" && string(endKey) == "\xff" {
-			return 300
-		}
-		return 0
-	})
-	cluster.checkStore(remainingStoreID, exactSizes, nextRoundRootSizes)
-	re.Equal(metapb.NodeState_Serving, cluster.GetStore(remainingStoreID).GetNodeState())
 }
 
 func TestClusterMetricsCollectRegionSizeTreeInIndependentSchedulingMode(t *testing.T) {
@@ -2291,7 +2192,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	threshold, available := cluster.getThreshold(stores, store, &kr, regionSizes)
+	re.True(available)
+	re.Equal(3000.0, threshold)
 }
 
 func TestStores(t *testing.T) {
@@ -4488,7 +4391,7 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	upStoreCount := 0
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes, regionSizes)
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4509,7 +4412,7 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	}
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID(), regionSizes, regionSizes)
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}

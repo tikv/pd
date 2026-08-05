@@ -1082,9 +1082,6 @@ func NewRegionsInfo() *RegionsInfo {
 
 // StartRegionSizeTree starts the eventually consistent range-size index.
 func (r *RegionsInfo) StartRegionSizeTree(ctx context.Context) {
-	if r.sizeTree.Load() != nil {
-		return
-	}
 	r.sizeTreeMu.Lock()
 	defer r.sizeTreeMu.Unlock()
 	if r.sizeTree.Load() != nil {
@@ -1102,12 +1099,6 @@ func (r *RegionsInfo) StopRegionSizeTree() {
 	if sizeTree := r.sizeTree.Swap(nil); sizeTree != nil {
 		sizeTree.stop()
 		resetRegionSizeTreeMetrics()
-	}
-}
-
-func (r *RegionsInfo) notifyRegionSizeTree(regionIDs ...uint64) {
-	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
-		sizeTree.notify(regionIDs...)
 	}
 }
 
@@ -1142,12 +1133,6 @@ func (r *RegionsInfo) notifyRegionSizeTreeIfChanged(
 		}
 	}
 	sizeTree.notify(regionIDs...)
-}
-
-func (r *RegionsInfo) resetRegionSizeTree() {
-	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
-		sizeTree.requestReset()
-	}
 }
 
 // GetRegion returns the RegionInfo with regionID
@@ -1538,7 +1523,9 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	r.tree.remove(region)
 	delete(r.regions, region.GetID())
 	r.t.Unlock()
-	r.notifyRegionSizeTree(region.GetID())
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		sizeTree.notify(region.GetID())
+	}
 }
 
 // ResetRegionCache resets the regions info.
@@ -1546,7 +1533,9 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
-	r.resetRegionSizeTree()
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		sizeTree.requestReset()
+	}
 	r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
