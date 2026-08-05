@@ -68,6 +68,7 @@ func GetRootCmd() *cobra.Command {
 		command.NewLogCommand(),
 		command.NewPluginCommand(),
 		command.NewServiceGCSafepointCommand(),
+		command.NewGCStateCommand(),
 		command.NewMinResolvedTSCommand(),
 		command.NewCompletionCommand(),
 		command.NewUnsafeCommand(),
