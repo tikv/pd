@@ -34,7 +34,7 @@ func TestSaveLoadKeyspace(t *testing.T) {
 	keyspaces := makeTestKeyspaces()
 	err := storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
 		for _, keyspace := range keyspaces {
-			re.NoError(storage.SaveKeyspaceID(txn, keyspace.Id, keyspace.Name))
+			re.NoError(storage.SaveKeyspaceID(txn, keyspace.GetId(), keyspace.Name))
 			re.NoError(storage.SaveKeyspaceMeta(txn, keyspace))
 		}
 		return nil
@@ -46,9 +46,9 @@ func TestSaveLoadKeyspace(t *testing.T) {
 			loadSuccess, id, err := storage.LoadKeyspaceID(txn, expectedMeta.Name)
 			re.NoError(err)
 			re.True(loadSuccess)
-			re.Equal(expectedMeta.Id, id)
+			re.Equal(expectedMeta.GetId(), id)
 			// Test load keyspace.
-			loadedMeta, err := storage.LoadKeyspaceMeta(txn, expectedMeta.Id)
+			loadedMeta, err := storage.LoadKeyspaceMeta(txn, expectedMeta.GetId())
 			re.NoError(err)
 			re.Equal(expectedMeta, loadedMeta)
 		}
@@ -109,7 +109,7 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	return []*keyspacepb.KeyspaceMeta{
 		{
-			Id:             10,
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 10},
 			Name:           "keyspace1",
 			State:          keyspacepb.KeyspaceState_ENABLED,
 			CreatedAt:      now,
@@ -120,7 +120,7 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             11,
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 11},
 			Name:           "keyspace2",
 			State:          keyspacepb.KeyspaceState_ARCHIVED,
 			CreatedAt:      now + 300,
@@ -131,7 +131,7 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 			},
 		},
 		{
-			Id:             100,
+			Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 100},
 			Name:           "keyspace3",
 			State:          keyspacepb.KeyspaceState_DISABLED,
 			CreatedAt:      now + 500,

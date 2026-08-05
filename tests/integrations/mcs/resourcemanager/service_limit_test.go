@@ -114,9 +114,7 @@ func (suite *serviceLimitTestSuite) TestKeyspaceServiceLimit() {
 				ConsumptionSinceLastRequest: &rmpb.Consumption{
 					RRU: requestRU,
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: suite.keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: suite.keyspaceID}},
 			},
 		},
 		TargetRequestPeriodMs: 1000,

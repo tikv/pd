@@ -119,9 +119,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -149,9 +147,7 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -192,12 +188,10 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	}
 	// ensure to use the keyspace ID of the inner client
 	if metaGroup.KeyspaceId == nil {
-		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		}
-	} else if metaGroup.KeyspaceId.Value != c.inner.keyspaceID {
+		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}}
+	} else if metaGroup.KeyspaceId.GetValue() != c.inner.keyspaceID {
 		return "", errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(
-			metaGroup.KeyspaceId.Value, c.inner.keyspaceID)
+			metaGroup.KeyspaceId.GetValue(), c.inner.keyspaceID)
 	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
@@ -228,9 +222,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {

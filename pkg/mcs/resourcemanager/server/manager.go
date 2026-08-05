@@ -719,13 +719,13 @@ func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
 // GetKeyspaceIDByName gets the keyspace ID by name.
 func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.KeyspaceIDValue, error) {
 	if len(name) == 0 {
-		return &rmpb.KeyspaceIDValue{Value: constant.NullKeyspaceID}, nil
+		return &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: constant.NullKeyspaceID}}, nil
 	}
 	m.RLock()
 	id, ok := m.keyspaceIDLookup[name]
 	m.RUnlock()
 	if ok {
-		return &rmpb.KeyspaceIDValue{Value: id}, nil
+		return &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: id}}, nil
 	}
 	var (
 		loadedID uint32
@@ -747,7 +747,7 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 	}
 	// Update the cache.
 	m.updateKeyspaceNameLookup(loadedID, name)
-	return &rmpb.KeyspaceIDValue{Value: loadedID}, nil
+	return &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: loadedID}}, nil
 }
 
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {

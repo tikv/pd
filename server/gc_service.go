@@ -456,7 +456,9 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 			continue
 		}
 		gcSafePoints = append(gcSafePoints, &pdpb.GCSafePointV2{
-			KeyspaceId:  gcState.KeyspaceID,
+			Keyspace: &pdpb.GCSafePointV2_KeyspaceId{
+				KeyspaceId: gcState.KeyspaceID,
+			},
 			GcSafePoint: gcState.GCSafePoint,
 		})
 	}
@@ -520,7 +522,9 @@ func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	}
 	return &pdpb.GCState{
 		KeyspaceScope: &pdpb.KeyspaceScope{
-			KeyspaceId: gcState.KeyspaceID,
+			Keyspace: &pdpb.KeyspaceScope_KeyspaceId{
+				KeyspaceId: gcState.KeyspaceID,
+			},
 		},
 		IsKeyspaceLevelGc: gcState.IsKeyspaceLevel,
 		TxnSafePoint:      gcState.TxnSafePoint,

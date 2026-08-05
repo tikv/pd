@@ -24,6 +24,8 @@ import (
 	"net/url"
 	"testing"
 
+	//nolint:staticcheck // kvproto is generated against the legacy protobuf runtime.
+	"github.com/golang/protobuf/jsonpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -77,9 +79,15 @@ func sendRequest(
 ) ([]byte, int) {
 	var bodyReader io.Reader
 	if body != nil {
-		data, err := json.Marshal(body)
-		re.NoError(err)
-		bodyReader = bytes.NewBuffer(data)
+		if group, ok := body.(*rmpb.ResourceGroup); ok {
+			data, err := marshalResourceGroup(group)
+			re.NoError(err)
+			bodyReader = bytes.NewReader(data)
+		} else {
+			data, err := json.Marshal(body)
+			re.NoError(err)
+			bodyReader = bytes.NewBuffer(data)
+		}
 	}
 	path, err := url.JoinPath(leaderAddr, apis.APIPathPrefix, path)
 	re.NoError(err)
@@ -95,6 +103,25 @@ func sendRequest(
 	bodyBytes, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	return bodyBytes, resp.StatusCode
+}
+
+func marshalResourceGroup(group *rmpb.ResourceGroup) ([]byte, error) {
+	legacyGroup := *group
+	legacyGroup.KeyspaceId = nil
+	data, err := json.Marshal(&legacyGroup)
+	if err != nil || group.GetKeyspaceId() == nil {
+		return data, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	var keyspaceID bytes.Buffer
+	if err := (&jsonpb.Marshaler{OrigName: true}).Marshal(&keyspaceID, group.GetKeyspaceId()); err != nil {
+		return nil, err
+	}
+	fields["keyspace_id"] = keyspaceID.Bytes()
+	return json.Marshal(fields)
 }
 
 // mustSendRequest is a helper function that expects a successful response
@@ -124,9 +151,8 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			},
 		)
 		re.NoError(err)
-		keyspaceID := &rmpb.KeyspaceIDValue{
-			Value: meta.GetId(),
-		}
+		keyspaceID := &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: meta.GetId()}}
+
 		// Add a resource group.
 		groupToAdd := &rmpb.ResourceGroup{
 			Name:     "test_group",
@@ -254,9 +280,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
 						},
 					},
 				},
-				KeyspaceId: &rmpb.KeyspaceIDValue{
-					Value: keyspaceID,
-				},
+				KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 			}
 			suite.mustUpdateResourceGroup(re, groupToUpdate)
 		},

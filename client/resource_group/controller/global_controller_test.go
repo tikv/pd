@@ -568,7 +568,13 @@ func TestGetResourceGroupRuntimeState(t *testing.T) {
 					},
 				},
 			}
-			gc, err := newGroupCostController(group, DefaultRUConfig(), make(chan notifyMsg), make(chan *groupCostController))
+			gc, err := newGroupCostController(
+				group,
+				DefaultRUConfig(),
+				make(chan notifyMsg),
+				make(chan *groupCostController),
+				newRequestSourceMetricsState(group.Name),
+			)
 			re.NoError(err)
 
 			controller := &ResourceGroupsController{}
