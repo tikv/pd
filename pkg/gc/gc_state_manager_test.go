@@ -1881,6 +1881,121 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 	}
 }
 
+func globalGCBarrierIDs(barriers []*endpoint.GlobalGCBarrier) []string {
+	ids := make([]string, 0, len(barriers))
+	for _, barrier := range barriers {
+		ids = append(ids, barrier.BarrierID)
+	}
+	return ids
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriers() {
+	re := s.Require()
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	state, barriers, err := s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+	re.Zero(state.TxnSafePoint)
+	re.Zero(state.GCSafePoint)
+	re.Empty(state.GCBarriers)
+	re.Empty(barriers)
+
+	_, err = s.manager.SetGlobalGCBarrier(
+		ctx,
+		"active",
+		20,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(
+		ctx,
+		"expired",
+		15,
+		time.Second,
+		now.Add(-2*time.Second),
+	)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(
+		constant.NullKeyspaceID,
+		"local",
+		25,
+		time.Hour,
+		now,
+	)
+	re.NoError(err)
+
+	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Empty(state.GCBarriers)
+	re.ElementsMatch(
+		[]string{"active", "expired"},
+		globalGCBarrierIDs(barriers),
+	)
+
+	state, barriers, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		false,
+	)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("local", state.GCBarriers[0].BarrierID)
+	re.ElementsMatch(
+		[]string{"active", "expired"},
+		globalGCBarrierIDs(barriers),
+	)
+
+	if !kerneltype.IsNextGen() {
+		state, barriers, err =
+			s.manager.GetGCStateWithGlobalGCBarriers(1, true)
+		re.NoError(err)
+		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+		re.ElementsMatch(
+			[]string{"active", "expired"},
+			globalGCBarrierIDs(barriers),
+		)
+	}
+
+	s.manager.gcStateCache.remove(constant.NullKeyspaceID)
+	tracker := s.trackGCStateCacheAccessCounters()
+	_, _, err = s.manager.GetGCStateWithGlobalGCBarriers(
+		constant.NullKeyspaceID,
+		true,
+	)
+	re.NoError(err)
+	re.Equal(gcStateCacheAccessCounterSnapshot{}, tracker.snapshot())
+
+	_, err = s.manager.GetGCState(constant.NullKeyspaceID, true)
+	re.NoError(err)
+	re.Equal(1, tracker.snapshot().hit)
+	re.Zero(tracker.snapshot().miss)
+}
+
+func (s *gcStateManagerTestSuite) TestGetGCStateWithGlobalGCBarriersReturnsNoPartialResult() {
+	re := s.Require()
+	re.NoError(s.storage.Save(
+		keypath.GlobalGCBarrierPath("corrupt"),
+		"{",
+	))
+
+	state, barriers, err :=
+		s.manager.GetGCStateWithGlobalGCBarriers(
+			constant.NullKeyspaceID,
+			true,
+		)
+	re.Error(err)
+	re.Equal(GCState{}, state)
+	re.Nil(barriers)
+}
+
 func (s *gcStateManagerTestSuite) TestGetGCState() {
 	re := s.Require()
 
