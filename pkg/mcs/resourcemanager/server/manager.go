@@ -276,7 +276,32 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 		return errMetadataWriteDisabled
 	}
 	// If the keyspace is not found, create a new keyspace resource group manager.
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+	failpoint.InjectCall("setServiceLimitBeforeStorage")
+	// Storage phase: this persists synchronously inside setServiceLimit.
+	krgm.setServiceLimit(serviceLimit)
+	// Publish phase: mirror the persisted value into whichever keyspace
+	// manager is current now, in case Init replaced the whole krgms map for
+	// a new term while the storage write above was in flight - without
+	// this, the write still lands in storage but only updates the detached
+	// krgm's in-memory limiter, leaving the live serving cache (and
+	// GetKeyspaceServiceLimiter) showing the stale pre-write value until
+	// the next full reload. This mirrors the storage-then-publish shape of
+	// publishResourceGroupMutation, but there's no reserved/confirmed
+	// distinction to protect here: a service limit is a single scalar with
+	// no CAS at the storage layer either (the same known gap tracked
+	// elsewhere in this file), so whatever value ends up winning in storage
+	// is simply mirrored into the live cache without persisting again.
+	m.Lock()
+	cur, ok := m.krgms[keyspaceID]
+	if !ok {
+		cur = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+		m.krgms[keyspaceID] = cur
+	}
+	m.Unlock()
+	if cur != krgm {
+		cur.setServiceLimitFromStorage(serviceLimit)
+	}
 	return nil
 }
 

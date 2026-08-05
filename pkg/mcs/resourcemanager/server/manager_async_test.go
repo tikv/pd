@@ -923,6 +923,80 @@ func TestAsyncLoadResourceGroupsCrossTermModifyDefaultStaysConfirmed(t *testing.
 		"the confirmed running state must be preserved, not reset to a synthetic placeholder")
 }
 
+// TestAsyncLoadResourceGroupsCrossTermSetServiceLimitPublishesToNewTerm
+// reproduces a leadership change straddling SetKeyspaceServiceLimit: it
+// resolves a keyspace manager, then stalls before its storage phase while the
+// leadership change replaces m.krgms and the new term's synchronous
+// loadServiceLimits reads the still-unwritten old value. When the call
+// resumes, its storage write must still land, and its cache effect must be
+// mirrored into the *current* term's keyspace manager, not just the detached
+// term-1 one - otherwise the new term keeps serving the stale (default zero)
+// limit indefinitely, with nothing to ever re-sync it.
+func TestAsyncLoadResourceGroupsCrossTermSetServiceLimitPublishesToNewTerm(t *testing.T) {
+	re := require.New(t)
+	store := newBlockingResourceGroupStorage()
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+	re.NoError(m.Init(context.Background()))
+	cancelTerm1 := m.cancel
+	defer stopAsyncTestManager(m)
+	defer store.unblock()
+
+	// Let term 1 load fully so the call starts against a settled term.
+	store.waitEntered(t)
+	store.unblock()
+	testutil.Eventually(re, func() bool {
+		_, err := m.GetResourceGroupList(constant.NullKeyspaceID, false)
+		return err == nil
+	}, testutil.WithTickInterval(20*time.Millisecond))
+
+	// Park SetKeyspaceServiceLimit between resolving its keyspace manager and
+	// its storage phase.
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setServiceLimitBeforeStorage", func() {
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setServiceLimitBeforeStorage"))
+	}()
+	var setErr error
+	setDone := make(chan struct{})
+	go func() {
+		defer close(setDone)
+		setErr = m.SetKeyspaceServiceLimit(constant.NullKeyspaceID, 4242)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for SetKeyspaceServiceLimit to reach its storage phase")
+	}
+
+	// Leadership changes while the write is parked: term 2's synchronous
+	// loadServiceLimits runs and completes here, reading storage before the
+	// parked write has persisted anything.
+	cancelTerm1()
+	re.NoError(m.Init(context.Background()))
+
+	// Resume the write: it persists into storage now, then must publish into
+	// whichever keyspace manager is current (term 2), not the detached term-1
+	// one.
+	close(release)
+	<-setDone
+	re.NoError(setErr)
+
+	limiter := m.GetKeyspaceServiceLimiter(constant.NullKeyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(4242), limiter.ServiceLimit,
+		"the service limit set during the leadership change must be visible in the new term, not stuck on the detached old one")
+
+	raw, err := store.LoadServiceLimit(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Equal(float64(4242), raw, "the service limit must be persisted regardless of the leadership change")
+}
+
 // BenchmarkAsyncLoadMergeReaderStall measures the worst-case time a concurrent
 // reader is blocked while the async bulk merge installs a large number of
 // resource groups. The probe uses GetControllerConfig, whose only cost is the
