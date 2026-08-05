@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -372,7 +372,7 @@ func cmdRun(args ...string) bool {
 		go works[i].worker(&wg, taskCh)
 	}
 
-	shuffle(tasks)
+	sortTasks(tasks)
 
 	start = time.Now()
 	for _, task := range tasks {
@@ -911,11 +911,13 @@ func filter(input []string, f func(string) bool) []string {
 	return ret
 }
 
-func shuffle(tasks []task) {
-	for i := 0; i < len(tasks); i++ {
-		pos := rand.IntN(len(tasks))
-		tasks[i], tasks[pos] = tasks[pos], tasks[i]
-	}
+func sortTasks(tasks []task) {
+	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].pkg != tasks[j].pkg {
+			return tasks[i].pkg < tasks[j].pkg
+		}
+		return tasks[i].test < tasks[j].test
+	})
 }
 
 type errWithStack struct {
