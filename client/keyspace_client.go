@@ -251,7 +251,7 @@ func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool 
 	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel
 }
 
-// IsCESKeyspaceLevelGC reports whether a keyspace uses the CES keyspace-level GC metadata format.
-func IsCESKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
+// IsCSEKeyspaceLevelGC reports whether a keyspace uses the CSE keyspace-level GC metadata format.
+func IsCSEKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
 	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
 }

@@ -129,7 +129,7 @@ func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
 	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
 }
 
-func TestIsCESKeyspaceLevelGC(t *testing.T) {
+func TestIsCSEKeyspaceLevelGC(t *testing.T) {
 	tests := []struct {
 		name string
 		meta *keyspacepb.KeyspaceMeta
@@ -150,7 +150,7 @@ func TestIsCESKeyspaceLevelGC(t *testing.T) {
 			meta := test.meta
 
 			// When
-			got := IsCESKeyspaceLevelGC(meta)
+			got := IsCSEKeyspaceLevelGC(meta)
 
 			// Then
 			require.Equal(t, test.want, got)
