@@ -41,7 +41,60 @@ const (
 	TxnKeyspaceModePrefix = byte('x')
 	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
 	KeyspacePrefixLen = 4
+
+	encodedKeyspacePrefixLen = encGroupSize + 1
+	keyspacePrefixMarker     = encMarker - byte(encGroupSize-KeyspacePrefixLen)
 )
+
+// KeyspaceModes returns all supported keyspace API modes.
+func KeyspaceModes() [2]byte {
+	return [2]byte{RawKeyspaceModePrefix, TxnKeyspaceModePrefix}
+}
+
+func parseKeyspaceMode(prefix byte) (byte, bool) {
+	switch prefix {
+	case RawKeyspaceModePrefix:
+		return RawKeyspaceModePrefix, true
+	case TxnKeyspaceModePrefix:
+		return TxnKeyspaceModePrefix, true
+	default:
+		return 0, false
+	}
+}
+
+// EncodeKeyspaceBoundary returns the fixed-width memcomparable boundary for a
+// keyspace ID. An ID beyond the 24-bit keyspace prefix is encoded as the
+// mode's exclusive fencepost.
+func EncodeKeyspaceBoundary(mode byte, id uint32) [encodedKeyspacePrefixLen]byte {
+	if id >= 1<<(8*(KeyspacePrefixLen-1)) {
+		// The next prefix byte is the exclusive upper bound of this mode's
+		// keyspace range.
+		mode++
+		id = 0
+	}
+	return [encodedKeyspacePrefixLen]byte{
+		mode,
+		byte(id >> 16),
+		byte(id >> 8),
+		byte(id),
+		0, 0, 0, 0,
+		keyspacePrefixMarker,
+	}
+}
+
+// DecodeKeyspaceKey extracts the API mode and keyspace ID from a
+// memcomparable key that contains the complete four-byte keyspace prefix.
+func DecodeKeyspaceKey(key []byte) (byte, uint32, bool) {
+	if len(key) < encodedKeyspacePrefixLen || key[encGroupSize] < keyspacePrefixMarker {
+		return 0, 0, false
+	}
+	mode, ok := parseKeyspaceMode(key[0])
+	if !ok {
+		return 0, 0, false
+	}
+	id := uint32(key[1])<<16 | uint32(key[2])<<8 | uint32(key[3])
+	return mode, id, true
+}
 
 // Key represents high-level Key type.
 type Key []byte
@@ -61,8 +114,8 @@ func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
 	if len(key) < KeyspacePrefixLen {
 		return 0, 0, false
 	}
-	mode = key[0]
-	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
+	mode, ok = parseKeyspaceMode(key[0])
+	if !ok {
 		return 0, 0, false
 	}
 	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}

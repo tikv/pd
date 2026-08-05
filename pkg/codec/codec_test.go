@@ -35,6 +35,38 @@ func TestDecodeBytes(t *testing.T) {
 	}
 }
 
+func TestKeyspaceBoundaryCodec(t *testing.T) {
+	re := require.New(t)
+	for _, mode := range KeyspaceModes() {
+		prefix := mode
+		boundary := EncodeKeyspaceBoundary(mode, 0x010203)
+		re.Equal(EncodeBytes([]byte{prefix, 0x01, 0x02, 0x03}), Key(boundary[:]))
+
+		decodedMode, id, ok := DecodeKeyspaceKey(boundary[:])
+		re.True(ok)
+		re.Equal(mode, decodedMode)
+		re.Equal(uint32(0x010203), id)
+
+		key := EncodeBytes([]byte{prefix, 0x01, 0x02, 0x03, 'k'})
+		decodedMode, id, ok = DecodeKeyspaceKey(key)
+		re.True(ok)
+		re.Equal(mode, decodedMode)
+		re.Equal(uint32(0x010203), id)
+	}
+
+	rawFence := EncodeKeyspaceBoundary(RawKeyspaceModePrefix, 1<<(8*(KeyspacePrefixLen-1)))
+	txnFence := EncodeKeyspaceBoundary(TxnKeyspaceModePrefix, 1<<(8*(KeyspacePrefixLen-1)))
+	re.Equal(EncodeBytes([]byte{'s', 0, 0, 0}), Key(rawFence[:]))
+	re.Equal(EncodeBytes([]byte{'y', 0, 0, 0}), Key(txnFence[:]))
+
+	_, _, ok := DecodeKeyspaceKey(nil)
+	re.False(ok)
+	_, _, ok = DecodeKeyspaceKey([]byte{'z', 0, 0, 0, 0, 0, 0, 0, keyspacePrefixMarker})
+	re.False(ok)
+	_, _, ok = DecodeKeyspaceKey([]byte{'r', 0, 0, 0, 0, 0, 0, 0, keyspacePrefixMarker - 1})
+	re.False(ok)
+}
+
 func TestTableID(t *testing.T) {
 	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
