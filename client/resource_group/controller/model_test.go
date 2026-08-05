@@ -16,6 +16,7 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -56,6 +57,26 @@ type copRequestInfoWithoutPrediction struct {
 
 func (*copRequestInfoWithoutPrediction) IsCop() bool {
 	return true
+}
+
+type legacyResponseInfo struct {
+	readBytes uint64
+}
+
+func (res *legacyResponseInfo) ReadBytes() uint64 {
+	return res.readBytes
+}
+
+func (*legacyResponseInfo) KVCPU() time.Duration {
+	return 0
+}
+
+func (*legacyResponseInfo) Succeed() bool {
+	return true
+}
+
+func (res *legacyResponseInfo) ResponseSize() uint64 {
+	return res.readBytes
 }
 
 func TestGetRUValueFromConsumption(t *testing.T) {
@@ -259,6 +280,100 @@ func TestRequestInfoMissingPredictionProviderReturnsZeroHint(t *testing.T) {
 
 	re.True(ok)
 	re.Zero(bytesForEst)
+}
+
+func TestGenerateRUConfigRemoteReadCost(t *testing.T) {
+	re := require.New(t)
+
+	config := DefaultConfig()
+	config.RequestUnit.ReadCostPerByte = 2
+	config.RequestUnit.ReadCostPerByteRemote = nil
+	ruConfig := GenerateRUConfig(config)
+	re.InDelta(1.0, float64(ruConfig.RemoteReadBytesCost), 1e-7)
+
+	explicitZero := 0.0
+	config.RequestUnit.ReadCostPerByteRemote = &explicitZero
+	ruConfig = GenerateRUConfig(config)
+	re.Zero(ruConfig.RemoteReadBytesCost)
+}
+
+func TestCalculateReadCostSplitsLocalAndRemoteBytes(t *testing.T) {
+	ruConfig := DefaultRUConfig()
+	ruConfig.ReadBytesCost = 2
+	ruConfig.RemoteReadBytesCost = 0.5
+	kvCalc := newKVCalculator(ruConfig)
+
+	testCases := []struct {
+		name        string
+		response    ResponseInfo
+		expectedRRU float64
+	}{
+		{
+			name:        "legacy response charges all bytes at normal rate",
+			response:    &legacyResponseInfo{readBytes: 100},
+			expectedRRU: 200,
+		},
+		{
+			name: "remote subset uses remote rate",
+			response: &TestResponseInfo{
+				readBytes:       100,
+				remoteReadBytes: 40,
+				succeed:         true,
+			},
+			expectedRRU: 140,
+		},
+		{
+			name: "remote subset is clamped to total bytes",
+			response: &TestResponseInfo{
+				readBytes:       100,
+				remoteReadBytes: 200,
+				succeed:         true,
+			},
+			expectedRRU: 50,
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			consumption := &rmpb.Consumption{}
+			kvCalc.calculateReadCost(consumption, testCase.response)
+			re.Equal(float64(100), consumption.ReadBytes)
+			re.InDelta(testCase.expectedRRU, consumption.RRU, 1e-7)
+		})
+	}
+}
+
+func TestRemoteReadCostPreservesPagingSettlementFormula(t *testing.T) {
+	re := require.New(t)
+	ruConfig := DefaultRUConfig()
+	ruConfig.ReadBytesCost = 2
+	ruConfig.RemoteReadBytesCost = 0.5
+	ruConfig.CPUMsCost = 3
+	kvCalc := newKVCalculator(ruConfig)
+	req := &TestRequestInfo{
+		isCop:              true,
+		predictedReadBytes: 80,
+	}
+	resp := &TestResponseInfo{
+		readBytes:       100,
+		remoteReadBytes: 40,
+		kvCPU:           10 * time.Millisecond,
+		succeed:         true,
+	}
+
+	consumption := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(consumption, req)
+	kvCalc.AfterKVRequest(consumption, req, resp)
+
+	baseCost := float64(ruConfig.ReadBaseCost) +
+		float64(ruConfig.ReadPerBatchBaseCost)*defaultAvgBatchProportion
+	expectedByteCost := 60*float64(ruConfig.ReadBytesCost) +
+		40*float64(ruConfig.RemoteReadBytesCost)
+	expectedCPUCost := 10 * float64(ruConfig.CPUMsCost)
+	re.InDelta(baseCost+expectedByteCost+expectedCPUCost, consumption.RRU, 1e-7)
+	re.Equal(float64(100), consumption.ReadBytes)
+	re.Equal(float64(10), consumption.TotalCpuTimeMs)
 }
 
 func TestReportedConsumptionStripsPagingPrecharge(t *testing.T) {
