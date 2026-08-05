@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net"
@@ -26,9 +27,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
-	probing "github.com/prometheus-community/pro-bing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -834,40 +835,26 @@ func dialAddress(ctx context.Context, address string) error {
 	if u, err := url.Parse(address); err == nil && u.Host != "" {
 		hostPort = u.Host
 	}
-	host, _, err := net.SplitHostPort(hostPort)
-	if err != nil {
+	if _, _, err := net.SplitHostPort(hostPort); err != nil {
 		return errors.WithStack(err)
 	}
 
-	pinger, err := probing.NewPinger(host)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	pinger.Count = 1
-	pinger.Timeout = defaultGRPCDialTimeout
-	pinger.SetPrivileged(false)
-
-	done := make(chan error, 1)
-	go func() {
-		done <- pinger.Run()
-	}()
-
-	select {
-	case <-ctx.Done():
-		pinger.Stop()
-		return errors.WithStack(ctx.Err())
-	case err := <-done:
-		if err != nil {
-			return errors.WithStack(err)
-		}
+	dialCtx, cancel := context.WithTimeout(ctx, defaultGRPCDialTimeout)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", hostPort)
+	if err == nil {
+		return conn.Close()
 	}
 
-	stats := pinger.Statistics()
-	if stats.PacketsRecv == 0 {
-		return errors.Errorf("no ICMP reply from %s", host)
+	// TiKV puts the store before it starts listening on its store address, so a
+	// "connection refused" only proves the host rejected the connection at the
+	// TCP layer, i.e. the address is valid but nothing is listening yet. Any
+	// other failure (DNS lookup failure, no route to host, timeout, ...)
+	// indicates the address itself is wrong or unreachable.
+	if stderrors.Is(err, syscall.ECONNREFUSED) {
+		return nil
 	}
-
-	return nil
+	return errors.WithStack(err)
 }
 
 func validateStoreAddress(ctx context.Context, store *metapb.Store) error {
