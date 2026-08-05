@@ -55,6 +55,15 @@ const assignmentCountRebuildRetryInterval = time.Second
 // nothing. patchMu sits between the two: RWMutex(RLock)->patchMu->statusMu. It
 // is held only by PatchStatus, across storage I/O, so it must never be taken
 // while already holding statusMu.
+// TODO: MetaServiceGroupManager is currently a server-lifetime singleton,
+// constructed once at server startup and never rebuilt across leader terms;
+// term validity is tracked ad hoc via termGen and termCtxFunc below. Once
+// RaftCluster owns it (constructed fresh in RaftCluster.Start, torn down in
+// Stop, like ruleManager/regionLabeler/affinityManager already are), a stale
+// instance simply stops being reachable and most of that bookkeeping goes
+// away. See the PR discussion for why this is deferred rather than done here:
+// it requires KeyspaceManager.mgm to stop being a fixed pointer set once at
+// construction, which touches ~20 call sites across keyspace.go.
 type MetaServiceGroupManager struct {
 	store endpoint.MetaServiceGroupStorage
 	syncutil.RWMutex
@@ -94,6 +103,15 @@ type MetaServiceGroupManager struct {
 	// current rebuild scan is in flight. When the scan completes, the committed
 	// count is scan result plus these deltas so writes during loading are not lost.
 	rebuildDeltas map[string]int
+	// termCtxFunc, when set, returns the context of the current PD leader term:
+	// canceled once this server's leadership ends. It is queried lazily (called
+	// fresh at each check, never cached) by casMetaServiceGroupStatusLocked, so
+	// every write always observes the live signal rather than a term snapshot
+	// taken earlier that could itself be stale by the time it's used. Nil
+	// before it's wired (e.g. in unit tests without a real cluster), in which
+	// case no additional leadership constraint is applied beyond the caller's
+	// own context and the modification-revision CAS.
+	termCtxFunc func() context.Context
 }
 
 // SetKeyspaceAssignmentCounter sets the authoritative keyspace assignment
@@ -101,6 +119,13 @@ type MetaServiceGroupManager struct {
 // update.
 func (m *MetaServiceGroupManager) SetKeyspaceAssignmentCounter(counter func(ctx context.Context, groupIDs map[string]struct{}) (map[string]int, error)) {
 	m.keyspaceAssignmentCounter = counter
+}
+
+// SetTermContextFunc wires the PD leader term context source. See the
+// termCtxFunc field doc for what it's used for and why it's a function rather
+// than a captured context.
+func (m *MetaServiceGroupManager) SetTermContextFunc(termCtxFunc func() context.Context) {
+	m.termCtxFunc = termCtxFunc
 }
 
 // NewMetaServiceGroupManager creates a new MetaServiceGroupManager.
@@ -391,28 +416,11 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 	// holding the read lock here is enough to keep the group from being deleted
 	// between the existence check and the write.
 	if patch.Enabled != nil {
-		// CAS on the status key's modification revision, not its value: a
-		// value-only compare cannot fence a leader whose term has already
-		// ended, because it can't distinguish a key that was never touched
-		// from one that changed and changed back to the same value (ABA) in
-		// between this read and this write. The modification revision
-		// advances on every write regardless of value, so a stale revision
-		// here reliably fails the compare instead of silently reverting a
-		// newer write.
-		current, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(groupID)
-		if err != nil {
+		enabled := *patch.Enabled
+		if err := m.casMetaServiceGroupStatusLocked(groupID, func(status *endpoint.MetaServiceGroupStatus) {
+			status.Enabled = enabled
+		}); err != nil {
 			return err
-		}
-		if current == nil {
-			current = &endpoint.MetaServiceGroupStatus{}
-		}
-		current.Enabled = *patch.Enabled
-		committed, err := m.store.CASMetaServiceGroupStatus(groupID, modRevision, current)
-		if err != nil {
-			return err
-		}
-		if !committed {
-			return ErrMetaServiceGroupStatusConflict
 		}
 	}
 	m.statusMu.Lock()
@@ -636,6 +644,12 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 ) error {
 	m.Lock()
 	defer m.Unlock()
+	// Checked once, up front: everything below (the delete guard's storage
+	// scan, the added-group reset, persist(), the deleted-group cleanup) is
+	// meaningless work if the request that asked for it is already gone.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(deletedGroups) > 0 {
 		counts, err := m.assignedKeyspaceCounts(ctx, deletedGroups)
 		if err != nil {
@@ -727,11 +741,45 @@ func (m *MetaServiceGroupManager) persistGroupsLocked(
 // PatchStatus uses. Returns ErrMetaServiceGroupStatusConflict if the key
 // changed between the read and the write.
 func (m *MetaServiceGroupManager) resetMetaServiceGroupStatus(id string) error {
-	_, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(id)
+	return m.casMetaServiceGroupStatusLocked(id, func(status *endpoint.MetaServiceGroupStatus) {
+		*status = endpoint.MetaServiceGroupStatus{}
+	})
+}
+
+// casMetaServiceGroupStatusLocked loads id's persisted status, applies mutate
+// to it, and writes the result back guarded by a modification-revision CAS
+// against the value just loaded. The caller must hold the mgm lock (RLock or
+// Lock; both PatchStatus and persistGroupsLocked's callers do).
+//
+// Before reading, it checks termCtxFunc (when wired): a value-only or
+// modification-revision CAS alone fences changes that happen between this
+// read and this write, but not a write whose *read* itself was delayed past
+// the point its premise stopped holding. A former leader paused before ever
+// calling LoadMetaServiceGroupStatusModRevision, then resumed after a newer
+// leader's legitimate write, would read a fresh revision that already
+// reflects that write and CAS successfully against it — the read-write
+// window it captures is internally consistent, it's just anchored too late.
+// Checking termCtxFunc first closes that: by the time a stale leader's
+// goroutine resumes from any such pause, its own term context is already
+// canceled, because a newer leader acting at all requires this leader's term
+// to have ended first.
+func (m *MetaServiceGroupManager) casMetaServiceGroupStatusLocked(id string, mutate func(*endpoint.MetaServiceGroupStatus)) error {
+	if m.termCtxFunc != nil {
+		if termCtx := m.termCtxFunc(); termCtx != nil {
+			if err := termCtx.Err(); err != nil {
+				return err
+			}
+		}
+	}
+	current, modRevision, err := m.store.LoadMetaServiceGroupStatusModRevision(id)
 	if err != nil {
 		return err
 	}
-	committed, err := m.store.CASMetaServiceGroupStatus(id, modRevision, &endpoint.MetaServiceGroupStatus{})
+	if current == nil {
+		current = &endpoint.MetaServiceGroupStatus{}
+	}
+	mutate(current)
+	committed, err := m.store.CASMetaServiceGroupStatus(id, modRevision, current)
 	if err != nil {
 		return err
 	}

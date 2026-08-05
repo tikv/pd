@@ -146,9 +146,11 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			c.AbortWithStatusJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-		if errors.Is(err, errs.ErrEtcdTxnConflict) {
-			// A concurrent group update or assignment lost the etcd txn compare;
-			// this is a retryable conflict rather than an internal error.
+		if errors.Is(err, errs.ErrEtcdTxnConflict) || errors.Is(err, keyspace.ErrMetaServiceGroupStatusConflict) {
+			// A concurrent group update or assignment lost the etcd txn
+			// compare, or an added group's pre-persist status reset lost its
+			// modification-revision CAS; either is a retryable conflict, not
+			// an internal error.
 			c.AbortWithStatusJSON(http.StatusConflict, err.Error())
 			return
 		}

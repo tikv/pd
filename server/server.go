@@ -538,6 +538,11 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// s.cluster.Context() is RaftCluster's per-term context: fresh on every
+	// Start() (leadership won), canceled on Stop() (leadership lost). Queried
+	// lazily by the manager (see termCtxFunc's doc) rather than captured once,
+	// so a write always checks the live signal.
+	s.metaServiceGroupManager.SetTermContextFunc(s.cluster.Context)
 	s.AddServiceReadyCallback(func(ctx context.Context) error {
 		if s.metaServiceGroupManager == nil {
 			return nil

@@ -17,6 +17,7 @@ package keyspace
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -843,4 +844,117 @@ func TestFormerLeaderDeletedGroupCleanupDoesNotOverwriteReaddedGroupPatch(t *tes
 	status, err := current.GetStatus(context.Background())
 	re.NoError(err)
 	re.True(status["group"].Enabled, "a former leader's delayed cleanup must not overwrite the re-added group's patch")
+}
+
+// blockingTermContext pauses the first call to get(), once armed, right
+// before returning the context it currently holds. It lets a test hold a
+// casMetaServiceGroupStatusLocked call open at its term check, i.e. before
+// the call has read the status key at all, to simulate a leader delayed
+// before its read rather than between its read and its write.
+type blockingTermContext struct {
+	mu           sync.Mutex
+	ctx          context.Context
+	blockNext    atomic.Bool
+	checkStarted chan struct{}
+	resumeCheck  chan struct{}
+}
+
+func (b *blockingTermContext) setCtx(ctx context.Context) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.ctx = ctx
+}
+
+func (b *blockingTermContext) get() context.Context {
+	if b.blockNext.CompareAndSwap(true, false) {
+		close(b.checkStarted)
+		<-b.resumeCheck
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.ctx
+}
+
+// TestCASMetaServiceGroupStatusLockedRejectsAlreadyCanceledTerm is a direct,
+// non-concurrent check that the term-context gate in
+// casMetaServiceGroupStatusLocked actually fires: a canceled term context
+// must reject the write before it ever reads storage.
+func TestCASMetaServiceGroupStatusLockedRejectsAlreadyCanceledTerm(t *testing.T) {
+	re := require.New(t)
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	manager, err := NewMetaServiceGroupManager(context.Background(), store, map[string]string{"group": "addr"})
+	re.NoError(err)
+
+	termCtx, cancelTerm := context.WithCancel(context.Background())
+	cancelTerm()
+	manager.SetTermContextFunc(func() context.Context { return termCtx })
+
+	enabled := true
+	err = manager.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled})
+	re.ErrorIs(err, context.Canceled)
+
+	status, err := manager.GetStatus(context.Background())
+	re.NoError(err)
+	re.False(status["group"].Enabled, "a patch rejected by an already-ended term must not be published to the cache")
+}
+
+// TestFormerLeaderRejectedByTermContextBeforeReadingDeletedGroupStatus closes
+// the gap the modification-revision CAS alone cannot: a former leader paused
+// before it ever reads the status key (not just before it commits) would
+// otherwise resume, read a revision that already reflects a newer leader's
+// legitimate re-add-and-patch, and CAS a stale reset against it successfully,
+// because that read-write window is internally consistent even though it's
+// anchored on stale premises. Checking the term context before the read
+// closes it: a newer leader acting at all requires this leader's term to
+// have already ended, so by the time this leader's paused goroutine resumes,
+// its own term context is already canceled.
+func TestFormerLeaderRejectedByTermContextBeforeReadingDeletedGroupStatus(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	base := kv.NewEtcdKVBase(client)
+	groups := map[string]string{"group": "addr"}
+
+	formerStore := endpoint.NewStorageEndpoint(base, nil)
+	former, err := NewMetaServiceGroupManager(context.Background(), formerStore, groups)
+	re.NoError(err)
+	formerTermCtx, cancelFormerTerm := context.WithCancel(context.Background())
+	blocking := &blockingTermContext{
+		checkStarted: make(chan struct{}),
+		resumeCheck:  make(chan struct{}),
+	}
+	blocking.setCtx(formerTermCtx)
+	former.SetTermContextFunc(blocking.get)
+
+	blocking.blockNext.Store(true)
+	deleteDone := make(chan error, 1)
+	go func() {
+		deleteDone <- former.UpdateGroupsSafely(context.Background(), map[string]string{},
+			[]string{"group"}, func() error { return nil }, nil)
+	}()
+	<-blocking.checkStarted // Config deletion is persisted; the cleanup is about to check its term, before reading the status key.
+
+	currentStore := endpoint.NewStorageEndpoint(base, nil)
+	current, err := NewMetaServiceGroupManager(context.Background(), currentStore, map[string]string{})
+	re.NoError(err)
+	re.NoError(current.UpdateGroupsSafely(context.Background(), groups, nil, func() error { return nil }, nil))
+	enabled := true
+	re.NoError(current.PatchStatus(context.Background(), "group", &MetaServiceGroupStatusPatch{Enabled: &enabled}))
+
+	// Former's term actually ends now (e.g. its lease was lost), which is
+	// exactly what must have already happened for current's actions above to
+	// be legitimate in the first place.
+	cancelFormerTerm()
+	close(blocking.resumeCheck)
+
+	// The cleanup is best-effort: being rejected by the term check must not
+	// fail the delete that already committed.
+	re.NoError(<-deleteDone)
+
+	re.NoError(current.RefreshCache(context.Background()))
+	status, err := current.GetStatus(context.Background())
+	re.NoError(err)
+	re.True(status["group"].Enabled,
+		"a former leader rejected by its term context must not overwrite the re-added group's patch")
 }
