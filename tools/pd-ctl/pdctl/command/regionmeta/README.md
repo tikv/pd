@@ -1,14 +1,14 @@
 # PD region meta consistency check
 
-`pd-ctl region meta-consistency` 检查同一 PD 集群中 Leader 与各 Follower 本地缓存的 region meta 是否一致。命令直接访问每个 PD 实例，以小批量、同批跨实例并发、单实例串行和全局限速方式扫描，输出一个 JSON 报告。
+`pd-ctl region meta-consistency` compares the region meta cached locally by the PD leader and every follower in the same cluster. It scans each PD instance directly in small batches, starts the same batch concurrently across instances, keeps requests serial per instance, applies a global rate limit, and produces one JSON report.
 
-本命令使用 `/members`、`/regions/count`、`/regions/key` 和 `/region/id/{id}` API，并依赖 Follower 本地读取 Header。兼容性测试覆盖当前 master 和 [`v8.5.4-20260625-8b1b130`](https://github.com/tikv/pd/releases/tag/v8.5.4-20260625-8b1b130)；用于其他版本前，应确认这些接口的行为兼容。
+The command uses the `/members`, `/regions/count`, `/regions/key`, and `/region/id/{id}` APIs and depends on follower-local read headers. Compatibility tests cover current master and [`v8.5.4-20260625-8b1b130`](https://github.com/tikv/pd/releases/tag/v8.5.4-20260625-8b1b130). Verify these API semantics before using the command with another PD version.
 
-> 全量检查会增加 PD 的 HTTP 处理、JSON 序列化、网络流量和短时 Region tree 读锁开销。默认参数用于限制这些开销；如果生产要求严格零扰动，不应执行本命令。
+> A full scan adds PD HTTP processing, JSON serialization, network traffic, and short-lived Region tree read-lock work. The defaults bound these costs. Do not run this command when any production impact is unacceptable.
 
-## 快速执行
+## Quick start
 
-建议从同 VPC 的独立运维机执行，并为每轮检查使用新的输出文件：
+Run the command from a separate operations host in the same VPC and use a new output file for every check:
 
 ```bash
 report="region-meta-report-$(date -u +%Y%m%dT%H%M%SZ).json"
@@ -22,79 +22,79 @@ printf 'exit_code=%s report=%s\n' "$rc" "$report"
 test ! -s "$report" || jq '{status, summary, confirmation, nodes}' "$report"
 ```
 
-一个 URL 仅作为 seed。命令通过 `/pd/api/v1/members` 发现成员，并直连每个成员公布的 `client_urls`；不要使用负载均衡地址代替成员直连地址。
+The supplied URL is only a seed. The command discovers the cluster through `/pd/api/v1/members` and connects directly to each advertised `client_urls` address. Do not use a load balancer address in place of direct member addresses.
 
-| 退出码 | 状态 | 含义 |
+| Exit code | Status | Meaning |
 | ---: | --- | --- |
-| `0` | `consistent` | 本轮没有保留差异。 |
-| `1` | `inconsistent` | 检查成功，并确认至少一个稳定差异。 |
-| `2` | `incomplete` 或无新报告 | 证据不足或执行失败；检查 stderr，不要沿用旧报告。 |
-| `130` | 无新报告 | 用户通过 Ctrl-C 中断。 |
+| `0` | `consistent` | No difference remained in this observation. |
+| `1` | `inconsistent` | The check completed and confirmed at least one stable difference. |
+| `2` | `incomplete` or no new report | The evidence was insufficient or execution failed. Inspect stderr and do not reuse an older report. |
+| `130` | No new report | The user interrupted the command with Ctrl-C. |
 
-退出码 `1` 表示发现不一致，不是命令执行失败。
+Exit code `1` means that the command found an inconsistency; it does not mean that command execution failed.
 
-## 执行条件
+## Prerequisites
 
-- 集群至少有两个 PD 成员；执行机能直连所有成员公布的 `client_urls`。
-- Follower Region Syncer 正常，能够处理携带 `PD-Allow-Follower-Handle: true` 的本地读取请求。
-- 在业务低峰执行，PD CPU、内存、业务延迟和现有告警均有明确余量。
-- 扫描期间不安排 PD 重启、扩缩容或主动 Leader 切换。
-- `--work-dir` 与输出目录已存在、可写且空间充足；报告按内部诊断数据保护。
+- The cluster has at least two PD members, and the execution host can connect directly to every advertised `client_urls` address.
+- The follower Region Syncer is healthy and follower-local reads with `PD-Allow-Follower-Handle: true` are available.
+- PD CPU, memory, request latency, and existing alerts have clear headroom. Run the check during an off-peak window.
+- No PD restart, scale operation, or planned PD leader transfer occurs during the scan.
+- The `--work-dir` and output directories already exist, are writable, and have enough free space. Treat the report as internal diagnostic data.
 
-推荐独立检查机至少为 `1 vCPU / 512 MiB RAM / 3 GiB 可用磁盘 / 100 Mbps`；建议配置为 `2 vCPU / 1 GiB RAM / 5 GiB 可用磁盘`。
+The minimum recommended independent checker host is `1 vCPU / 512 MiB RAM / 3 GiB free disk / 100 Mbps`. Prefer `2 vCPU / 1 GiB RAM / 5 GiB free disk`.
 
-## 检查内容
+## Compared fields
 
-| 类别 | 比较字段 |
+| Category | Fields |
 | --- | --- |
 | Region | Region ID |
-| Key Range | `start_key`、`end_key` |
-| Epoch | `conf_ver`、`version` |
-| Peers | `id`、`store_id`、`role`、`is_witness` |
-| Region Leader Peer | `id`、`store_id`、`role`、`is_witness` |
+| Key range | `start_key`, `end_key` |
+| Epoch | `conf_ver`, `version` |
+| Peers | `id`, `store_id`, `role`, `is_witness` |
+| Region leader peer | `id`, `store_id`, `role`, `is_witness` |
 
-流量、大小、`pending_peers`、`down_peers`、Buckets 等心跳统计字段不参与比较；Peer 数组顺序也不参与比较。报告中的 `reference` 只是扫描开始时的 PD Leader 身份，不代表该节点的数据必然正确。`leader_peer` 表示 Region Leader Peer，与 PD Leader 是两个概念。
+Heartbeat statistics such as traffic, size, `pending_peers`, `down_peers`, and buckets are not compared. Peer array order is also ignored. The report's `reference` identifies the PD leader at the start of the scan; it does not assert that this member's data is correct. `leader_peer` means the Region leader peer, not the PD leader.
 
-## 工作流程与结论边界
+## Workflow and result boundaries
 
-1. 读取成员、PD Leader 和 cluster ID，为每个 PD 实例建立直接 HTTP 连接。
-2. 同时读取各实例 Region 数，通过 `/pd/api/v1/regions/key` 按 Key Range 分页；同一批请求尽量同时开始。
-3. 每个实例最多有一个在途请求。所有实例共享请求预算：一组包含 N 个请求时消耗 N 份预算，因此默认长期总速率不超过 20 requests/s。
-4. 请求携带 `PD-Allow-Follower-Handle: true`、`PD-Redirector: pd-ctl-region-meta-consistency` 和 `X-Caller-ID: pd-ctl`，直接读取目标实例的本地 Region cache。
-5. 相同数据比较后立即释放；只有差异写入有界临时 JSONL，并按 Region ID 外部归并排序。
-6. 对 Region ID 最小的前 `--confirm-limit` 个差异等待 1 秒后并发复查。结束时再次核对 PD Leader、cluster ID 和成员身份。
+1. Read the member list, PD leader, and cluster ID, then establish a direct HTTP connection to every PD instance.
+2. Read Region counts from all instances and page through `/pd/api/v1/regions/key` by key range. Requests for the same batch start as close together as possible.
+3. Keep at most one request in flight per instance. All instances share one request budget: a group containing N requests consumes N budget units, so the default long-term aggregate rate does not exceed 20 requests/s.
+4. Send `PD-Allow-Follower-Handle: true`, `PD-Redirector: pd-ctl-region-meta-consistency`, and `X-Caller-ID: pd-ctl` so each target instance serves its local Region cache.
+5. Release matching data immediately. Write only differences to bounded temporary JSONL files and externally merge-sort them by Region ID.
+6. Wait one second and concurrently recheck up to `--confirm-limit` differences with the smallest Region IDs. Verify the PD leader, cluster ID, and membership again before producing the result.
 
-只有某节点的扫描前数量、实际扫描数量、扫描后数量相等，本轮扫描才会被接受。默认不自动重扫，避免在 Region 持续变化时放大负载。
+A member scan is accepted only when its Region count before the scan, number of scanned Regions, and Region count after the scan are equal. The default does not retry the full scan, which avoids multiplying load while Region metadata is changing continuously.
 
-多个独立 HTTP 请求不能组成分布式原子快照：
+Independent HTTP requests cannot form a distributed atomic snapshot:
 
-- `consistent` 表示本轮观察没有留下差异，不等价于线性一致性证明。
-- `inconsistent` 表示至少一个已复查差异保持相同，是较强的不一致证据。
-- `incomplete` 表示证据不足，不能解释为一致。
+- `consistent` means that no difference remained in this observation. It is not proof of linearizable equality.
+- `inconsistent` means that at least one rechecked difference remained unchanged, which is strong evidence of divergence.
+- `incomplete` means that the evidence is insufficient and must not be interpreted as consistency.
 
-## 参数
+## Parameters
 
-完整参数以 `pd-ctl region meta-consistency --help` 为准。
+Run `pd-ctl region meta-consistency --help` for the authoritative parameter list.
 
-| 参数 | 默认值（含单位） | 说明 |
+| Parameter | Default with unit | Description |
 | --- | ---: | --- |
-| `-u, --pd` | `http://127.0.0.1:2379`（URL） | 一个 seed URL；不能包含用户名、密码、Path、Query 或 Fragment。 |
-| `--batch-size` | `128 Region/请求` | 每次最多读取的 Region 数，范围 `1..1024 Region/请求`。 |
-| `--interval` | `50ms/请求` | 每份全局 HTTP 请求预算的间隔；必须使用 Go duration，如 `100ms`、`1s`。三实例同批请求的最小组间隔为 `150ms`。 |
-| `--timeout` | `10s/请求` | 单个 HTTP 请求的超时。 |
-| `--max-runtime` | `4h/整轮` | 整轮检查的 wall-clock 硬上限。 |
-| `--retries` | `0 次/请求` | 单请求额外重试次数，范围 `0..10 次`。 |
-| `--scan-retries` | `0 次/整轮` | Region 数变化时的整集群重扫次数，范围 `0..3 次`。 |
-| `--confirm-limit` | `128 Region/整轮` | 二次确认上限，范围 `0..1024 Region`；`0` 禁用确认。 |
-| `--work-dir` | 系统临时目录（路径） | 临时差异和 stdout 临时报告所在目录。 |
-| `--max-temporary-disk-mib` | `1024 MiB` | 差异排序与归并临时数据硬上限。 |
-| `--max-output-mib` | `1024 MiB` | 最终 JSON 报告硬上限。 |
-| `--output` | `-`（stdout 或路径） | `-` 输出到 stdout；文件路径采用完整写入后原子替换。 |
-| `--cacert` | 系统 CA（路径） | HTTPS CA bundle。 |
-| `--cert`、`--key` | 未设置（路径） | mTLS 客户端证书与私钥，必须同时提供。 |
-| `--authorization-file` | 未设置（路径） | 包含一行完整 Authorization Header 值的文件，只允许通过 HTTPS 发送。 |
+| `-u, --pd` | `http://127.0.0.1:2379` (URL) | One seed URL. User information, path, query, and fragment are rejected. |
+| `--batch-size` | `128 Regions/request` | Maximum Regions per request; range `1..1024 Regions/request`. |
+| `--interval` | `50ms/request` | Interval for each global HTTP request budget unit. Use a Go duration such as `100ms` or `1s`. A three-member batch has a minimum group interval of `150ms`. |
+| `--timeout` | `10s/request` | Timeout for one HTTP request. |
+| `--max-runtime` | `4h/check` | Wall-clock hard limit for the complete check. |
+| `--retries` | `0 retries/request` | Additional retries for one request; range `0..10`. |
+| `--scan-retries` | `0 retries/check` | Full-cluster retries after a Region count change; range `0..3`. |
+| `--confirm-limit` | `128 Regions/check` | Maximum differences to recheck; range `0..1024`. Set to `0` to disable confirmation. |
+| `--work-dir` | System temporary directory (path) | Directory for temporary differences and a temporary stdout report. |
+| `--max-temporary-disk-mib` | `1024 MiB` | Hard limit for temporary difference sorting and merging. |
+| `--max-output-mib` | `1024 MiB` | Hard limit for the final JSON report. |
+| `--output` | `-` (stdout or path) | `-` writes to stdout. A file path is atomically replaced after the complete report is written. |
+| `--cacert` | System CA (path) | HTTPS CA bundle. |
+| `--cert`, `--key` | Unset (path) | mTLS client certificate and private key. Both must be supplied together. |
+| `--authorization-file` | Unset (path) | File containing one complete Authorization header value. Authorization is sent only over HTTPS. |
 
-`--interval 0` 只用于无业务隔离测试，不能用于生产。集群负载较高但仍允许受控诊断时，可进一步降低单次和长期负载：
+`--interval 0` is only for isolated test environments with no production traffic and must not be used in production. If controlled diagnosis is permitted but cluster load is elevated, reduce both per-request and sustained load:
 
 ```bash
 pd-ctl -u http://10.0.0.1:2379 region meta-consistency \
@@ -103,23 +103,23 @@ pd-ctl -u http://10.0.0.1:2379 region meta-consistency \
   --output region-meta-report.json
 ```
 
-## 输出
+## Output
 
-报告为单行紧凑 JSON。关键字段如下：
+The report is compact single-line JSON.
 
-| 字段 | 含义 |
+| Field | Meaning |
 | --- | --- |
-| `status` | `consistent`、`inconsistent` 或 `incomplete`。 |
-| `reference` | 扫描开始时的 PD Leader 名称、ID 和 URL。 |
-| `settings` | 限速、并发、硬上限、HTTP 请求数、Response Body 字节数和临时磁盘峰值。 |
-| `nodes` | 各 PD 的名称、地址、角色、Region 数、批次数、扫描次数和时间。 |
-| `confirmation` | 差异复查范围、稳定/消失/变化的 Region ID 和未复查数量。 |
-| `summary` | 不同 Region 总数和按字段计数。 |
-| `differences` | 按 Region ID 排序的全部保留差异。 |
+| `status` | `consistent`, `inconsistent`, or `incomplete`. |
+| `reference` | Name, ID, and URL of the PD leader at scan start. |
+| `settings` | Rate limit, concurrency, hard limits, HTTP request count, response body bytes, and peak temporary disk usage. |
+| `nodes` | Name, address, role, Region count, batch count, scan attempts, and timestamps for every PD member. |
+| `confirmation` | Recheck scope, stable/resolved/changed Region IDs, and the number of unconfirmed Regions. |
+| `summary` | Total differing Regions and counts by differing field. |
+| `differences` | Every retained difference, sorted by Region ID. |
 
-每个差异包含 `region_id`，并且只输出真正不同的字段：`missing_on`、`key_range`、`epoch`、`peers`、`leader_peer`。实例使用 `<PD member name>@<host:port>` 标识；Peer `role` 数值为 `0=Voter`、`1=Learner`、`2=IncomingVoter`、`3=DemotingVoter`。
+Every difference contains `region_id` and only fields that actually differ: `missing_on`, `key_range`, `epoch`, `peers`, and `leader_peer`. Instances use `<PD member name>@<host:port>`. Peer role values are `0=Voter`, `1=Learner`, `2=IncomingVoter`, and `3=DemotingVoter`.
 
-一致结果的关键字段：
+Key fields in a consistent report:
 
 ```json
 {
@@ -130,7 +130,7 @@ pd-ctl -u http://10.0.0.1:2379 region meta-consistency \
 }
 ```
 
-不一致结果的关键字段：
+Key fields in an inconsistent report:
 
 ```json
 {
@@ -155,7 +155,7 @@ pd-ctl -u http://10.0.0.1:2379 region meta-consistency \
 }
 ```
 
-常用查询：
+Common queries:
 
 ```bash
 jq '{status, summary, confirmation}' region-meta-report.json
@@ -164,62 +164,62 @@ jq '.differences[] | select(has("missing_on") or has("key_range") or has("epoch"
 jq '.differences[] | select(has("peers") or has("leader_peer"))' region-meta-report.json
 ```
 
-## 资源与容量
+## Resources and capacity
 
-命令每个 PD 最多保留一个当前响应，每个响应有 8 MiB 硬上限。差异排序使用固定 8 MiB 缓冲，二次确认只保留 `--confirm-limit` 个候选，报告逐条写入。因此内存主要由 PD 节点数、批量、当前响应和确认上限决定，不随 Region 总数线性增长。Region 数增加主要表现为请求数、累计网络流量和运行时间增加。
+The command retains at most one current response per PD member, with an 8 MiB hard limit for each response. Difference sorting uses a fixed 8 MiB buffer, confirmation retains at most `--confirm-limit` candidates, and the report is written incrementally. Memory usage therefore depends mainly on the number of PD members, batch size, current responses, and confirmation limit; it does not grow linearly with the total Region count. More Regions primarily increase request count, cumulative network traffic, and runtime.
 
-| 资源 | 最低配置 | 建议配置 | 说明 |
+| Resource | Minimum | Recommended | Notes |
 | --- | ---: | ---: | --- |
-| CPU | 1 vCPU | 2 vCPU | 网络读取最多与 PD 实例数相同，比较与报告写入在主进程完成。 |
-| 内存 | 512 MiB | 1 GiB | 覆盖三实例并发当前页、JSON 解码和固定排序缓冲。 |
-| 可用磁盘 | 3 GiB | 5 GiB | 覆盖默认 1 GiB 临时上限、1 GiB 报告上限和文件系统余量。 |
-| 网络 | 100 Mbps | 与 PD 同 VPC/可用区 | 必须直连所有 PD 地址。 |
-| 任务窗口 | 4 h | 大于 4 h | 默认硬上限为 4 h。 |
+| CPU | 1 vCPU | 2 vCPU | Network reads can match the PD member count; comparison and report generation run in the main process. |
+| Memory | 512 MiB | 1 GiB | Covers three concurrent current pages, JSON decoding, and the fixed sorting buffer. |
+| Free disk | 3 GiB | 5 GiB | Covers the default 1 GiB temporary limit, 1 GiB report limit, and filesystem headroom. |
+| Network | 100 Mbps | Same VPC or Availability Zone as PD | Must reach every PD address directly. |
+| Task window | 4 h | More than 4 h | The default runtime hard limit is 4 h. |
 
-若 `--work-dir` 与输出目录位于不同文件系统，两处都应分别按对应上限预留空间。
+If `--work-dir` and the output directory are on different filesystems, reserve the corresponding capacity on each filesystem.
 
-### 百万 Region 实测
+### Million-Region benchmark
 
-以下容量数据使用 [`v8.5.4-20260625-8b1b130`](https://github.com/tikv/pd/releases/tag/v8.5.4-20260625-8b1b130) 的 PD API。测试环境为 AWS EC2 `r7i.4xlarge`（16 vCPU、123 GiB 可见内存、无 swap）和 Ubuntu 22.04.5。三个 PD、三个模拟 Store、每 Region 三个 Peer；每档使用全新数据目录，在心跳停止、三个节点 Region 数相等且 Region Syncer 索引追平后执行。`pd-ctl` 使用 Go 1.26.5 构建自 commit `ecbbc0cea2ee8507512a7384e1e015e349e911ab`，测试二进制 SHA-256 为 `248cba827138361ecaa6cf8456a0e90492dcd0bfe2edf2a1b4624643a0b95d05`。其他 PD 版本和数据模型应按等价环境重新测量。
+The capacity data below uses the PD API from [`v8.5.4-20260625-8b1b130`](https://github.com/tikv/pd/releases/tag/v8.5.4-20260625-8b1b130). The test host was an AWS EC2 `r7i.4xlarge` with 16 vCPUs, 123 GiB visible memory, no swap, and Ubuntu 22.04.5. The topology contained three PD members and three simulated stores, with three peers per Region. Every scale used a fresh data directory. Heartbeats were stopped before each check, all three members had equal Region counts, and Region Syncer indexes had caught up. The `pd-ctl` binary was built with Go 1.26.5 from commit `ecbbc0cea2ee8507512a7384e1e015e349e911ab`; its SHA-256 was `248cba827138361ecaa6cf8456a0e90492dcd0bfe2edf2a1b4624643a0b95d05`. Re-measure other PD versions and data models in an equivalent environment.
 
-| 每个 PD 的 Region 数 | HTTP 请求数 | Response Body | 默认限速时间下界 | `interval=0` Wall time | 检查器最大 RSS |
+| Regions per PD | HTTP requests | Response body | Default rate-limit lower bound | `interval=0` wall time | Checker peak RSS |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1,000,000 | 23,447 | 1.24 GiB | 19 min 32 s | 15.187 s | 42.25 MiB |
 | 2,000,000 | 46,883 | 2.48 GiB | 39 min 04 s | 29.729 s | 42.25 MiB |
 | 4,000,000 | 93,758 | 4.99 GiB | 1 h 18 min 08 s | 59.849 s | 43.84 MiB |
 | 8,000,000 | 187,508 | 10.02 GiB | 2 h 36 min 15 s | 123.029 s | 43.02 MiB |
 
-| 每个 PD 的 Region 数 | 三台 PD CPU 增量合计 | 单台 PD RSS 最大值（扫描前 → 扫描后） | 报告大小 |
+| Regions per PD | Combined PD CPU time | Maximum per-PD RSS (before to after) | Report size |
 | ---: | ---: | ---: | ---: |
-| 1,000,000 | 21.08 s | 2.21 GiB → 2.67 GiB | 1,567 B |
-| 2,000,000 | 32.91 s | 4.50 GiB → 5.41 GiB | 1,569 B |
-| 4,000,000 | 63.80 s | 9.78 GiB → 11.20 GiB | 1,571 B |
-| 8,000,000 | 196.51 s | 16.15 GiB → 18.30 GiB | 1,572 B |
+| 1,000,000 | 21.08 s | 2.21 GiB to 2.67 GiB | 1,567 B |
+| 2,000,000 | 32.91 s | 4.50 GiB to 5.41 GiB | 1,569 B |
+| 4,000,000 | 63.80 s | 9.78 GiB to 11.20 GiB | 1,571 B |
+| 8,000,000 | 196.51 s | 16.15 GiB to 18.30 GiB | 1,572 B |
 
-四档均为 `consistent`，每个节点只扫描一次，没有请求重试或整轮重扫；`differences` 为空，临时差异磁盘为 `0`。`interval=0` 仅用于无业务隔离环境的极限测量，不能作为生产运行参数；生产时间由默认全局请求预算控制。8,000,000 Region 在默认预算下的三个 PD 合计平均 Body 流量约为 1.10 MiB/s。
+All four scales returned `consistent`. Every member completed one scan without request retries or full-scan retries, `differences` was empty, and temporary difference disk usage was `0`. `interval=0` measures the isolated upper-throughput case and must not be used as a production setting. Production runtime is governed by the default global request budget. With 8,000,000 Regions, aggregate average response body traffic across the three PD members was approximately 1.10 MiB/s under the default budget.
 
-检查器 RSS 保持稳定，是因为 `http_response_bytes` 是整轮累计值，而内存中只保留各节点当前页、固定排序缓冲和有限确认候选。PD 侧仍要为每次请求执行 Region tree 扫描和 JSON 序列化；无主动限速测试中，单个 PD 的最大 RSS 增量达到 3.76 GiB。因此优先从独立运维机执行；必须与 PD 同机时，除检查器资源外，还应至少保留一个空闲逻辑 CPU、6 GiB `MemAvailable` 和 3 GiB 非 PD 数据盘空间。对于本测试的 8,000,000 Region 数据模型，PD 主机至少使用 32 GiB 内存；真实 Key 长度、Peer 数、业务负载和 PD 配置不同，执行前必须按等价环境重新确认余量。
+Checker RSS remains stable because `http_response_bytes` is cumulative for the complete run, while memory holds only each member's current page, the fixed sorting buffer, and bounded confirmation candidates. PD still scans the Region tree and serializes JSON for every request. In the unthrottled test, peak RSS for one PD increased by as much as 3.76 GiB. Prefer a separate operations host. If the checker must share a PD host, reserve at least one idle logical CPU, 6 GiB `MemAvailable`, and 3 GiB on a non-PD data disk in addition to checker resources. The 8,000,000-Region test model requires at least 32 GiB on a PD host. Real key lengths, peer counts, workload, and PD configuration can change these requirements; validate headroom in an equivalent environment before execution.
 
-## 生产运行守则
+## Production safeguards
 
-- 使用生产默认参数；不要为了缩短时间而增大批量、取消限速或首先启用整轮重扫。
-- 监控现有生产阈值下的 PD CPU、Go heap/GC、业务请求延迟，以及 `pd_region_syncer_status{type="sync_index"}` 和 `{type="last_index"}`。
-- 任一现有 SLO、告警或资源阈值触发时立即 Ctrl-C，不临时放宽阈值。
-- 报告包含 PD 地址、Region ID、Key Range、Peer ID 和 Store ID，不要发布到公开渠道。
-- Authorization 文件仅限当前用户读取，通过 HTTPS 发送，并按组织安全规范保管。
+- Use the production defaults. Do not increase the batch size, remove rate limiting, or enable full-scan retries first merely to shorten runtime.
+- Monitor PD CPU, Go heap and GC, request latency, existing alerts, `pd_region_syncer_status{type="sync_index"}`, and `pd_region_syncer_status{type="last_index"}` against existing production thresholds.
+- Press Ctrl-C immediately if any existing SLO, alert, or resource threshold is reached. Do not relax thresholds during the check.
+- The report contains PD addresses, Region IDs, key ranges, Peer IDs, and Store IDs. Do not publish it.
+- Restrict the Authorization file to the current user, transmit it only over HTTPS, and handle it according to organizational security requirements.
 
-每 100 个扫描批次会向 stderr 输出一次进度，不会污染 JSON stdout。
+Progress is written to stderr every 100 scan batches and never contaminates JSON stdout.
 
-## 测试
+## Tests
 
-核心测试覆盖一致、Region 缺失、Key Range、Epoch、Peers、Region Leader Peer、Role、Witness、uint64、瞬时差异、扫描期间数量增长与重试、成员变化、同批并发、全局请求预算、响应/磁盘/输出硬上限和外部排序：
+Core tests cover consistent metadata, missing Regions, key range, epoch, peers, Region leader peers, role, witness state, `uint64` values, transient differences, Region count growth and retry, membership changes, concurrent same-batch requests, global request budgeting, response/disk/output limits, and external sorting:
 
 ```bash
 make -C tools gotest \
   GOTEST_ARGS='./pd-ctl/pdctl/command/regionmeta -count=1'
 ```
 
-三 PD 集成测试会灌入 Region 心跳，直接改写一个 Follower 的本地缓存，并验证命令能报告具体 Epoch 差异和 Region 缺失：
+The three-PD integration test injects Region heartbeats, mutates one follower's local cache, and verifies exact epoch and missing-Region differences:
 
 ```bash
 make -C tools gotest \
