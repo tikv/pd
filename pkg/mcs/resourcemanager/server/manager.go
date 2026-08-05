@@ -918,8 +918,6 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 // returns whether to record the sync-loaded marker and, when a group was
 // (re)installed, the group to sync burstability for.
 //
-// TODO(#11105): close this gap with a storage-side revision/CAS check.
-//
 // Known gap: this "skip if the new term already confirmed the group" rule
 // assumes the confirming write's storage effect is genuinely the latest one,
 // which holds for Add/Modify (both persist before they can be parked - see
@@ -938,6 +936,8 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 // storage-side revision to tell which write actually landed last; that's the
 // same class of gap tracked for initDefaultResourceGroup's stillCurrent
 // check. No regression test exercises this interleaving yet.
+//
+// TODO(#11105): close this gap with a storage-side revision/CAS check.
 func (m *Manager) publishResourceGroupMutation(
 	keyspaceID uint32, name string, krgm *keyspaceResourceGroupManager,
 	fn func(krgm *keyspaceResourceGroupManager) (mark bool, synced *ResourceGroup),
