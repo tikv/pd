@@ -449,8 +449,31 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NotNil(labeler.GetLabelRule("rule1"))
 }
 
+func TestExpiredRuleRemovalPublishesRangeIndex(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+	re.NoError(err)
+	re.NoError(labeler.SetLabelRule(&LabelRule{
+		ID:       "expiring-rule",
+		Labels:   []RegionLabel{{Key: "k", Value: "v", TTL: "1s"}},
+		RuleType: KeyRange,
+		Data:     MakeKeyRanges("1234", "5678"),
+	}))
+	re.NotEmpty(labeler.GetSplitKeys(nil, nil))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
+	}()
+	re.Nil(labeler.GetLabelRule("expiring-rule"))
+	labeler.checkAndClearExpiredLabels()
+	re.Empty(labeler.GetSplitKeys(nil, nil))
+}
+
 func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
-	re.Equal(exist, labeler.labelRules[ruleID] != nil)
+	re.Equal(exist, labeler.ruleIndex.rules[ruleID] != nil)
 	existInStorage := false
 	err := labeler.storage.LoadRegionRules(func(k, _ string) {
 		if k == ruleID {
@@ -490,7 +513,7 @@ func TestGC(t *testing.T) {
 		re.NoError(err)
 	}
 
-	re.Len(labeler.labelRules, len(ttls))
+	re.Len(labeler.ruleIndex.rules, len(ttls))
 
 	// check all rules until some rule expired.
 	for {
@@ -502,12 +525,12 @@ func TestGC(t *testing.T) {
 	}
 
 	// no rule was cleared because the gc interval is big.
-	re.Len(labeler.labelRules, len(ttls))
+	re.Len(labeler.ruleIndex.rules, len(ttls))
 
 	labeler.checkAndClearExpiredLabels()
 
 	labeler.RLock()
-	currentRuleLen := len(labeler.labelRules)
+	currentRuleLen := len(labeler.ruleIndex.rules)
 	labeler.RUnlock()
 	re.LessOrEqual(currentRuleLen, 5)
 }

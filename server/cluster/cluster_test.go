@@ -533,6 +533,144 @@ func getTestDeployPath(storeID uint64) string {
 	return fmt.Sprintf("test/store%d", storeID)
 }
 
+func TestReusePeerAddress(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	// Put 4 stores with unique main addresses but the same non-empty peer address pattern per store.
+	for _, store := range newTestStores(4, "2.0.0") {
+		meta := store.GetMeta()
+		meta.PeerAddress = fmt.Sprintf("mock://tiflash-peer-%d:20170", store.GetID())
+		re.NoError(cluster.PutMetaStore(meta))
+	}
+
+	// Empty peer addresses should not conflict with each other.
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:         100,
+		Address:    "mock://tikv-1:20160",
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(100),
+	}))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:         101,
+		Address:    "mock://tikv-2:20160",
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(101),
+	}))
+
+	// Same store ID updating with the same peer address should succeed.
+	store1 := cluster.GetStore(1).GetMeta()
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          store1.GetId(),
+		Address:     store1.GetAddress(),
+		PeerAddress: store1.GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     store1.GetVersion(),
+		DeployPath:  getTestDeployPath(store1.GetId()),
+	}))
+
+	// Different main address with a duplicated peer address should fail when old store is up.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          2001,
+		Address:     "mock://tikv-new-1:20160",
+		PeerAddress: cluster.GetStore(1).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2001),
+	}))
+
+	// store 2: offline — duplicated peer address should still fail.
+	re.NoError(cluster.RemoveStore(2, false))
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          2002,
+		Address:     "mock://tikv-new-2:20160",
+		PeerAddress: cluster.GetStore(2).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2002),
+	}))
+
+	// store 3: offline and physically destroyed — reuse peer address should succeed.
+	re.NoError(cluster.RemoveStore(3, true))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          2003,
+		Address:     "mock://tikv-new-3:20160",
+		PeerAddress: cluster.GetStore(3).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2003),
+	}))
+
+	// store 4: tombstone — reuse peer address should succeed.
+	re.NoError(cluster.RemoveStore(4, true))
+	re.NoError(cluster.BuryStore(4, false))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          2004,
+		Address:     "mock://tikv-new-4:20160",
+		PeerAddress: cluster.GetStore(4).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2004),
+	}))
+
+	// Two stores with different main addresses but the same non-empty peer address.
+	const peerAddress = "mock://tiflash-peer:20170"
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          3001,
+		Address:     "mock://tiflash-a:3930",
+		PeerAddress: peerAddress,
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(3001),
+	}))
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          3002,
+		Address:     "mock://tiflash-b:3930",
+		PeerAddress: peerAddress,
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(3002),
+	}))
+
+	// Cross collision: new peer address equals an existing store address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          4001,
+		Address:     "mock://tiflash-c:3930",
+		PeerAddress: cluster.GetStore(100).GetAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4001),
+	}))
+
+	// Cross collision: new address equals an existing non-empty peer address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:         4002,
+		Address:    cluster.GetStore(1).GetMeta().GetPeerAddress(),
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(4002),
+	}))
+
+	// Cross reuse is allowed after the conflicting store is physically destroyed.
+	re.NoError(cluster.RemoveStore(100, true))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          4003,
+		Address:     "mock://tiflash-d:3930",
+		PeerAddress: "mock://tikv-1:20160",
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4003),
+	}))
+}
+
 func TestUpStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1872,13 +2010,73 @@ func TestCalculateStoreSize1(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr, regionSizes))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+}
+
+func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cfg := opt.GetReplicationConfig()
+	cfg.EnablePlacementRules = true
+	opt.SetReplicationConfig(cfg)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	for _, store := range newTestStores(2, "6.0.0") {
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+	}
+	re.NoError(cluster.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+	}))
+
+	kr := keyutil.NewKeyRange("a", "m")
+	otherKR := keyutil.NewKeyRange("m", "z")
+	re.Len(cluster.ruleManager.GetRulesForApplyRange(kr.StartKey, kr.EndKey), 2)
+	loadCounts := make(map[regionSizeCacheKey]int)
+	loader := func(startKey, endKey []byte) int64 {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		loadCounts[key]++
+		switch key {
+		case regionSizeCacheKey{startKey: "a", endKey: "m"}:
+			return 100
+		case regionSizeCacheKey{startKey: "m", endKey: "z"}:
+			return 200
+		default:
+			re.FailNow("unexpected range", "start-key: %q, end-key: %q", startKey, endKey)
+			return 0
+		}
+	}
+	regionSizes := newRegionSizeCache(loader)
+
+	stores := cluster.GetStores()
+	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
+	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
+	re.Equal(180.0, threshold1)
+	re.Equal(180.0, threshold2)
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+
+	// A different range is loaded separately, then shared by all rules.
+	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
+
+	nextRoundRegionSizes := newRegionSizeCache(loader)
+	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
+	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
 func TestStatsRegions(t *testing.T) {
@@ -1987,8 +2185,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr, regionSizes))
 }
 
 func TestStores(t *testing.T) {
@@ -4183,8 +4382,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re.Equal(int(storeCount), cluster.GetStoreCount())
 
 	upStoreCount := 0
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4203,8 +4403,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 		}
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 	}
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}

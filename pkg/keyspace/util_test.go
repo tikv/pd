@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -291,7 +292,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -306,7 +307,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -320,8 +321,31 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - non-canonical keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:     "keyspaces/01",
+				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "01"}},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - out of valid keyspace range.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: "keyspaces/" + strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
 					},
 				},
 			},
@@ -337,6 +361,20 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 					{
 						Key:   "not-id",
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace zero label rule - missing keyspace ID label.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: getRegionLabelID(0),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "0",
 					},
 				},
 			},

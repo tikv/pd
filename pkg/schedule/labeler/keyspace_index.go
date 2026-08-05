@@ -17,31 +17,30 @@ package labeler
 import (
 	"bytes"
 	"math/bits"
-	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
 const (
-	keyspaceRuleIDPrefix = "keyspaces/"
-	keyspaceIDLabelKey   = "id"
-	keyspaceRawMode      = byte('r')
-	keyspaceTxnMode      = byte('x')
-	keyspaceMaxID        = uint32(1<<24 - 1)
-
 	keyspaceChunkBits  = 10
 	keyspaceChunkSize  = 1 << keyspaceChunkBits
 	keyspaceChunkMask  = keyspaceChunkSize - 1
 	keyspaceChunkWords = keyspaceChunkSize / 64
-	keyspaceSlotWords  = (int(keyspaceMaxID) + 1) / 64
-	keyspaceBoundCount = int(keyspaceMaxID) + 2
+
+	keyspaceChunkCount              = (int(constant.MaxValidKeyspaceID) + 1 + keyspaceChunkSize - 1) / keyspaceChunkSize
+	keyspaceChunkBitmapWords        = (keyspaceChunkCount + 63) / 64
+	keyspaceChunkBitmapSummaryWords = (keyspaceChunkBitmapWords + 63) / 64
+	keyspaceBoundaryCount           = int(constant.MaxValidKeyspaceID) + 2
 )
 
 // A keyspace rule has one fixed-width range per enabled API mode. Keeping
 // these ranges in sparse slots avoids materializing two split points and a
-// segment for every keyspace. Presence bits live with their sparse chunks so
-// small keyspace counts don't allocate a bitset for the entire ID space. The
-// rule remains owned by RegionLabeler's labelRules map.
+// segment for every keyspace. Slot presence bits live with their sparse chunks,
+// while a compact two-level chunk bitmap lets range scans skip unallocated ID
+// spans. The rule remains owned by labelRuleIndex's authoritative map.
 type keyspaceRuleChunk struct {
 	rules [keyspaceChunkSize]*LabelRule
 	bits  [keyspaceChunkWords]uint64
@@ -49,11 +48,13 @@ type keyspaceRuleChunk struct {
 }
 
 type keyspaceRuleSet struct {
-	chunks []*keyspaceRuleChunk
+	chunks                     []*keyspaceRuleChunk
+	nonEmptyChunkBitmap        [keyspaceChunkBitmapWords]uint64
+	nonEmptyChunkBitmapSummary [keyspaceChunkBitmapSummaryWords]uint64
 }
 
 func (s *keyspaceRuleSet) get(id uint32) *LabelRule {
-	if len(s.chunks) == 0 || id > keyspaceMaxID {
+	if len(s.chunks) == 0 || id > constant.MaxValidKeyspaceID {
 		return nil
 	}
 	chunkID := int(id) >> keyspaceChunkBits
@@ -75,6 +76,11 @@ func (s *keyspaceRuleSet) set(id uint32, rule *LabelRule) {
 	}
 	if s.chunks[chunkID] == nil {
 		s.chunks[chunkID] = new(keyspaceRuleChunk)
+		word := chunkID >> 6
+		if s.nonEmptyChunkBitmap[word] == 0 {
+			s.nonEmptyChunkBitmapSummary[word>>6] |= uint64(1) << (word & 63)
+		}
+		s.nonEmptyChunkBitmap[word] |= uint64(1) << (chunkID & 63)
 	}
 	chunk := s.chunks[chunkID]
 	slot := int(id) & keyspaceChunkMask
@@ -90,7 +96,7 @@ func (s *keyspaceRuleSet) replace(id uint32, rule *LabelRule) {
 
 func (s *keyspaceRuleSet) clear(id uint32) {
 	// Remove checks that the target slot is owned before calling clear.
-	if len(s.chunks) == 0 || id > keyspaceMaxID {
+	if len(s.chunks) == 0 || id > constant.MaxValidKeyspaceID {
 		return
 	}
 	chunkID := int(id) >> keyspaceChunkBits
@@ -107,35 +113,80 @@ func (s *keyspaceRuleSet) clear(id uint32) {
 	chunk.count--
 	if chunk.count == 0 {
 		s.chunks[chunkID] = nil
+		word := chunkID >> 6
+		s.nonEmptyChunkBitmap[word] &^= uint64(1) << (chunkID & 63)
+		if s.nonEmptyChunkBitmap[word] == 0 {
+			s.nonEmptyChunkBitmapSummary[word>>6] &^= uint64(1) << (word & 63)
+		}
 		for len(s.chunks) > 0 && s.chunks[len(s.chunks)-1] == nil {
 			s.chunks = s.chunks[:len(s.chunks)-1]
 		}
 	}
 }
 
-func (s *keyspaceRuleSet) slotWord(word int) uint64 {
-	if word < 0 || word >= keyspaceSlotWords {
-		return 0
+// forEachSlot visits populated keyspace IDs in ascending order within [lo, hi),
+// stopping early when fn returns false.
+func (s *keyspaceRuleSet) forEachSlot(lo, hi int, fn func(id uint32) bool) {
+	if len(s.chunks) == 0 || lo >= hi {
+		return
 	}
-	chunkID := word / keyspaceChunkWords
-	if chunkID >= len(s.chunks) || s.chunks[chunkID] == nil {
-		return 0
+	lo = max(lo, 0)
+	hi = min(hi, int(constant.MaxValidKeyspaceID)+1)
+	if lo >= hi {
+		return
 	}
-	return s.chunks[chunkID].bits[word%keyspaceChunkWords]
-}
 
-// boundaryWord returns the boundaries contributed by the slots in word.
-// A slot at ID n contributes both boundary n and boundary n+1.
-func (s *keyspaceRuleSet) boundaryWord(word int) uint64 {
-	if len(s.chunks) == 0 || word < 0 || word > keyspaceSlotWords {
-		return 0
+	firstChunk, lastChunk := lo>>keyspaceChunkBits, (hi-1)>>keyspaceChunkBits
+	firstChunkWord, lastChunkWord := firstChunk>>6, lastChunk>>6
+	firstSummaryWord, lastSummaryWord := firstChunkWord>>6, lastChunkWord>>6
+	for summaryWord := firstSummaryWord; summaryWord <= lastSummaryWord; summaryWord++ {
+		chunkWords := s.nonEmptyChunkBitmapSummary[summaryWord]
+		if offset := firstChunkWord & 63; summaryWord == firstSummaryWord && offset != 0 {
+			chunkWords &= ^uint64(0) << offset
+		}
+		if offset := (lastChunkWord & 63) + 1; summaryWord == lastSummaryWord && offset != 64 {
+			chunkWords &= (uint64(1) << offset) - 1
+		}
+		for chunkWords != 0 {
+			chunkWordBit := bits.TrailingZeros64(chunkWords)
+			chunkWord := (summaryWord << 6) + chunkWordBit
+			chunks := s.nonEmptyChunkBitmap[chunkWord]
+			if offset := firstChunk & 63; chunkWord == firstChunkWord && offset != 0 {
+				chunks &= ^uint64(0) << offset
+			}
+			if offset := (lastChunk & 63) + 1; chunkWord == lastChunkWord && offset != 64 {
+				chunks &= (uint64(1) << offset) - 1
+			}
+			for chunks != 0 {
+				chunkBit := bits.TrailingZeros64(chunks)
+				chunkID := (chunkWord << 6) + chunkBit
+				chunk := s.chunks[chunkID]
+				chunkStart := chunkID << keyspaceChunkBits
+				localLo := max(lo-chunkStart, 0)
+				localHi := min(hi-chunkStart, keyspaceChunkSize)
+				firstWord, lastWord := localLo>>6, (localHi-1)>>6
+				for word := firstWord; word <= lastWord; word++ {
+					slots := chunk.bits[word]
+					if offset := localLo & 63; word == firstWord && offset != 0 {
+						slots &= ^uint64(0) << offset
+					}
+					if offset := localHi & 63; word == lastWord && offset != 0 {
+						slots &= (uint64(1) << offset) - 1
+					}
+					for slots != 0 {
+						bit := bits.TrailingZeros64(slots)
+						id := chunkStart + (word << 6) + bit
+						if !fn(uint32(id)) {
+							return
+						}
+						slots &= slots - 1
+					}
+				}
+				chunks &= chunks - 1
+			}
+			chunkWords &= chunkWords - 1
+		}
 	}
-	current := s.slotWord(word)
-	boundaries := current | current<<1
-	if word > 0 && s.slotWord(word-1)&(uint64(1)<<63) != 0 {
-		boundaries |= 1
-	}
-	return boundaries
 }
 
 func (s *keyspaceRuleSet) forEachBoundary(lo, hi int, fn func(id uint32) bool) {
@@ -143,37 +194,19 @@ func (s *keyspaceRuleSet) forEachBoundary(lo, hi int, fn func(id uint32) bool) {
 		return
 	}
 	lo = max(lo, 0)
-	hi = min(hi, keyspaceBoundCount)
-	firstWord, lastWord := lo>>6, (hi-1)>>6
-	firstChunk := firstWord / keyspaceChunkWords
-	lastChunk := min(lastWord/keyspaceChunkWords, len(s.chunks))
-	for chunkID := firstChunk; chunkID <= lastChunk; chunkID++ {
-		chunkFirstWord := chunkID * keyspaceChunkWords
-		wordStart := max(firstWord, chunkFirstWord)
-		wordEnd := min(lastWord, chunkFirstWord+keyspaceChunkWords-1)
-		var chunk *keyspaceRuleChunk
-		if chunkID < len(s.chunks) {
-			chunk = s.chunks[chunkID]
+	hi = min(hi, keyspaceBoundaryCount)
+	lastBoundary := -1
+	emit := func(boundary int) bool {
+		if boundary < lo || boundary >= hi || boundary == lastBoundary {
+			return true
 		}
-		hasCarry := wordStart == chunkFirstWord && s.slotWord(wordStart-1)&(uint64(1)<<63) != 0
-		if chunk == nil && !hasCarry {
-			continue
-		}
-		for word := wordStart; word <= wordEnd; word++ {
-			boundaries := s.boundaryWord(word)
-			if offset := lo & 63; word == firstWord && offset != 0 {
-				boundaries &= ^uint64(0) << offset
-			}
-			for boundaries != 0 {
-				bit := bits.TrailingZeros64(boundaries)
-				id := word<<6 + bit
-				if id >= hi || !fn(uint32(id)) {
-					return
-				}
-				boundaries &= boundaries - 1
-			}
-		}
+		lastBoundary = boundary
+		return fn(uint32(boundary))
 	}
+	s.forEachSlot(lo-1, hi, func(id uint32) bool {
+		boundary := int(id)
+		return emit(boundary) && emit(boundary+1)
+	})
 }
 
 type keyspaceRuleRange struct {
@@ -189,11 +222,15 @@ type keyspaceRuleIndex struct {
 	txn keyspaceRuleSet
 }
 
+func (i *keyspaceRuleIndex) isEmpty() bool {
+	return len(i.raw.chunks) == 0 && len(i.txn.chunks) == 0
+}
+
 func (i *keyspaceRuleIndex) ruleSet(mode byte) *keyspaceRuleSet {
 	switch mode {
-	case keyspaceRawMode:
+	case codec.RawKeyspaceModePrefix:
 		return &i.raw
-	case keyspaceTxnMode:
+	case codec.TxnKeyspaceModePrefix:
 		return &i.txn
 	default:
 		return nil
@@ -228,7 +265,7 @@ func (i *keyspaceRuleIndex) Replace(old, rule *LabelRule) bool {
 	}
 	id := ranges[0].id
 	owned := false
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		if i.ruleSet(mode).get(id) == old {
 			owned = true
 		}
@@ -242,7 +279,7 @@ func (i *keyspaceRuleIndex) Replace(old, rule *LabelRule) bool {
 		}
 	}
 
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
 		current := set.get(id)
 		wanted := false
@@ -272,7 +309,7 @@ func (i *keyspaceRuleIndex) Remove(ruleID string, rule *LabelRule) bool {
 		return false
 	}
 	removed := false
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
 		if set.get(id) == rule {
 			set.clear(id)
@@ -298,32 +335,39 @@ func (i *keyspaceRuleIndex) Contains(rule *LabelRule) bool {
 
 // GetRule returns the keyspace rule covering the whole range.
 func (i *keyspaceRuleIndex) GetRule(start, end []byte) *LabelRule {
-	if len(start) < 9 || start[8] < 0xfb || len(end) == 0 {
-		return nil
+	rule, _ := i.matchRule(start, end)
+	return rule
+}
+
+func (i *keyspaceRuleIndex) matchRule(start, end []byte) (*LabelRule, bool) {
+	if len(end) == 0 {
+		return nil, false
 	}
-	mode := start[0]
+	mode, id, ok := codec.DecodeKeyspaceKey(start)
+	if !ok {
+		return nil, false
+	}
 	set := i.ruleSet(mode)
 	if set == nil {
-		return nil
+		return nil, false
 	}
-	id := uint32(start[1])<<16 | uint32(start[2])<<8 | uint32(start[3])
 	rule := set.get(id)
-	if rule == nil {
-		return nil
+	if len(end) >= codec.KeyspacePrefixLen && bytes.Equal(start[:codec.KeyspacePrefixLen], end[:codec.KeyspacePrefixLen]) {
+		return rule, true
 	}
-	left := keyspaceBoundary(mode, id)
 	right := keyspaceBoundary(mode, id+1)
-	if bytes.Compare(start, left[:]) < 0 || bytes.Compare(end, right[:]) > 0 {
-		return nil
+	// DecodeKeyspaceKey guarantees that start is not below this ID's boundary.
+	if bytes.Compare(end, right[:]) > 0 {
+		return nil, false
 	}
-	return rule
+	return rule, true
 }
 
 // HasSplitKey reports whether a keyspace boundary exists in (start, end).
 func (i *keyspaceRuleIndex) HasSplitKey(start, end []byte) bool {
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
-		if len(set.chunks) == 0 {
+		if len(set.chunks) == 0 || !keyspaceModeOverlapsRange(mode, start, end) {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
@@ -342,9 +386,9 @@ func (i *keyspaceRuleIndex) HasSplitKey(start, end []byte) bool {
 // GetSplitKeys returns all indexed keyspace boundaries in (start, end).
 func (i *keyspaceRuleIndex) GetSplitKeys(start, end []byte) [][]byte {
 	var keys [][]byte
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		set := i.ruleSet(mode)
-		if len(set.chunks) == 0 {
+		if len(set.chunks) == 0 || !keyspaceModeOverlapsRange(mode, start, end) {
 			continue
 		}
 		lo, hi := keyspaceBoundaryRange(mode, start, end)
@@ -362,7 +406,7 @@ func keyspaceRanges(rule *LabelRule) ([2]keyspaceRuleRange, int, bool) {
 		return ranges, 0, false
 	}
 	label := rule.Labels[0]
-	if label.Key != keyspaceIDLabelKey || label.TTL != "" || label.StartAt != "" || label.expire != nil {
+	if label.Key != constant.RegionLabelKey || label.TTL != "" || label.StartAt != "" || label.expire != nil {
 		return ranges, 0, false
 	}
 	id, idText, ok := parseKeyspaceRuleID(rule.ID)
@@ -381,12 +425,12 @@ func keyspaceRanges(rule *LabelRule) ([2]keyspaceRuleRange, int, bool) {
 			return ranges, 0, false
 		}
 		switch mode {
-		case keyspaceRawMode:
+		case codec.RawKeyspaceModePrefix:
 			if seenRaw {
 				return ranges, 0, false
 			}
 			seenRaw = true
-		case keyspaceTxnMode:
+		case codec.TxnKeyspaceModePrefix:
 			if seenTxn {
 				return ranges, 0, false
 			}
@@ -406,13 +450,13 @@ func keyspaceRanges(rule *LabelRule) ([2]keyspaceRuleRange, int, bool) {
 }
 
 func parseKeyspaceRuleID(ruleID string) (uint32, string, bool) {
-	if !strings.HasPrefix(ruleID, keyspaceRuleIDPrefix) {
+	idText, ok := strings.CutPrefix(ruleID, constant.RegionLabelIDPrefix)
+	if !ok {
 		return 0, "", false
 	}
-	idText := strings.TrimPrefix(ruleID, keyspaceRuleIDPrefix)
 	id64, err := strconv.ParseUint(idText, 10, 32)
 	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
-	if err != nil || id64 > uint64(keyspaceMaxID) || hasLeadingZero {
+	if err != nil || id64 > uint64(constant.MaxValidKeyspaceID) || hasLeadingZero {
 		return 0, "", false
 	}
 	return uint32(id64), idText, true
@@ -422,7 +466,7 @@ func canonicalKeyspaceRange(keyRange *KeyRangeRule, id uint32) (byte, bool) {
 	if keyRange == nil {
 		return 0, false
 	}
-	for _, mode := range []byte{keyspaceRawMode, keyspaceTxnMode} {
+	for _, mode := range codec.KeyspaceModes() {
 		start := keyspaceBoundary(mode, id)
 		end := keyspaceBoundary(mode, id+1)
 		if bytes.Equal(keyRange.StartKey, start[:]) && bytes.Equal(keyRange.EndKey, end[:]) {
@@ -432,22 +476,8 @@ func canonicalKeyspaceRange(keyRange *KeyRangeRule, id uint32) (byte, bool) {
 	return 0, false
 }
 
-// keyspaceBoundary returns codec.EncodeBytes([mode, keyspace-id]). The input is
-// always four bytes, so its memcomparable encoding is a fixed nine-byte value.
-// max-id+1 is the exclusive fencepost in the next mode byte.
 func keyspaceBoundary(mode byte, id uint32) [9]byte {
-	if id > keyspaceMaxID {
-		mode++
-		id = 0
-	}
-	return [9]byte{
-		mode,
-		byte(id >> 16),
-		byte(id >> 8),
-		byte(id),
-		0, 0, 0, 0,
-		0xfb,
-	}
+	return codec.EncodeKeyspaceBoundary(mode, id)
 }
 
 func keyspaceBoundaryBytes(mode byte, id uint32) []byte {
@@ -456,18 +486,80 @@ func keyspaceBoundaryBytes(mode byte, id uint32) []byte {
 }
 
 func keyspaceBoundaryRange(mode byte, start, end []byte) (lo, hi int) {
-	lo = sort.Search(keyspaceBoundCount, func(id int) bool {
-		key := keyspaceBoundary(mode, uint32(id))
-		return bytes.Compare(key[:], start) > 0
-	})
-	hi = keyspaceBoundCount
+	lo = keyspaceBoundaryBound(mode, start, true)
+	hi = keyspaceBoundaryCount
 	if len(end) > 0 {
-		hi = sort.Search(keyspaceBoundCount, func(id int) bool {
-			key := keyspaceBoundary(mode, uint32(id))
-			return bytes.Compare(key[:], end) >= 0
-		})
+		hi = keyspaceBoundaryBound(mode, end, false)
 	}
 	return lo, hi
+}
+
+func keyspaceModeOverlapsRange(mode byte, start, end []byte) bool {
+	first := keyspaceBoundary(mode, 0)
+	if len(end) > 0 && bytes.Compare(end, first[:]) <= 0 {
+		return false
+	}
+	fence := keyspaceBoundary(mode, uint32(keyspaceBoundaryCount-1))
+	return bytes.Compare(start, fence[:]) < 0
+}
+
+func keyspaceModesOverlapRange(start, end []byte) bool {
+	if len(end) > 0 {
+		switch {
+		case end[0] < codec.RawKeyspaceModePrefix:
+			return false
+		case end[0] == codec.RawKeyspaceModePrefix:
+			first := keyspaceBoundary(codec.RawKeyspaceModePrefix, 0)
+			if bytes.Compare(end, first[:]) <= 0 {
+				return false
+			}
+		}
+	}
+	if len(start) == 0 || start[0] < codec.TxnKeyspaceModePrefix+1 {
+		return true
+	}
+	if start[0] > codec.TxnKeyspaceModePrefix+1 {
+		return false
+	}
+	fence := keyspaceBoundary(codec.TxnKeyspaceModePrefix, uint32(keyspaceBoundaryCount-1))
+	return bytes.Compare(start, fence[:]) < 0
+}
+
+func keyspaceBoundaryBound(mode byte, key []byte, upper bool) int {
+	first := keyspaceBoundary(mode, 0)
+	if cmp := bytes.Compare(first[:], key); cmp > 0 || cmp == 0 && !upper {
+		return 0
+	}
+
+	fenceID := uint32(keyspaceBoundaryCount - 1)
+	fence := keyspaceBoundary(mode, fenceID)
+	if cmp := bytes.Compare(fence[:], key); cmp < 0 || cmp == 0 && upper {
+		return keyspaceBoundaryCount
+	} else if cmp == 0 {
+		return int(fenceID)
+	}
+
+	// A key between the last boundary of this mode and its fence belongs at
+	// the fence. This also handles a fence prefix shorter than the boundary.
+	if key[0] != mode {
+		return int(fenceID)
+	}
+
+	var id uint32
+	if len(key) > 1 {
+		id |= uint32(key[1]) << 16
+	}
+	if len(key) > 2 {
+		id |= uint32(key[2]) << 8
+	}
+	if len(key) > 3 {
+		id |= uint32(key[3])
+	}
+	boundary := keyspaceBoundary(mode, id)
+	if cmp := bytes.Compare(boundary[:], key); cmp > 0 || cmp == 0 && !upper {
+		return int(id)
+	}
+	return int(id) + 1
 }
 
 func mergeSplitKeys(left, right [][]byte) [][]byte {
