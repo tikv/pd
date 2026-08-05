@@ -319,8 +319,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 							bs.revertScope = nil
 							bs.revertScope = bs.prepareForRegion(revertRegion, revertFit, dstStore)
 						}
-						if bs.revertScope != nil && (bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
-							bs.destinationStoreFailure(srcStore, bs.revertScope, bs.dstToleranceRatio(srcStore)) != "") {
+						if bs.placementV2Enabled && bs.curScope != bs.revertScope &&
+							(bs.sourceStoreFailure(dstStore, bs.revertScope) != "" ||
+								bs.destinationStoreFailure(srcStore, bs.revertScope, bs.dstToleranceRatio(srcStore)) != "") {
 							continue
 						}
 						bs.cur.revertPeerStat = revertPeerStat
