@@ -251,6 +251,10 @@ func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool 
 	if keyspaceMeta == nil || keyspaceMeta.Config == nil {
 		return false
 	}
-	return keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel ||
-		keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
+	// Treat gc_management_type as authoritative when present, and fall back to safe_point_version
+	// only for compatibility with legacy keyspace metadata.
+	if gcManagementType, ok := keyspaceMeta.Config[KeyspaceConfigGCManagementType]; ok {
+		return gcManagementType == KeyspaceConfigGCManagementTypeKeyspaceLevel
+	}
+	return keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
 }
