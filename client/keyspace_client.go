@@ -248,10 +248,9 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 // Nil value, which may occur for the null keyspace, are considered unified GC and this function returns false for this
 // case.
 func IsKeyspaceUsingKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
-	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel
-}
-
-// IsCSEKeyspaceLevelGC reports whether a keyspace uses the CSE keyspace-level GC metadata format.
-func IsCSEKeyspaceLevelGC(keyspaceMeta *keyspacepb.KeyspaceMeta) bool {
-	return keyspaceMeta != nil && keyspaceMeta.Config != nil && keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
+	if keyspaceMeta == nil || keyspaceMeta.Config == nil {
+		return false
+	}
+	return keyspaceMeta.Config[KeyspaceConfigGCManagementType] == KeyspaceConfigGCManagementTypeKeyspaceLevel ||
+		keyspaceMeta.Config[keyspaceConfigSafePointVersion] == keyspaceConfigSafePointVersionV2
 }
