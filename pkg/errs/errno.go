@@ -67,6 +67,16 @@ var (
 	ErrGRPCRateLimitExceeded            = func(err error) error {
 		return status.Error(codes.ResourceExhausted, err.Error())
 	}
+	// ErrResourceGroupsLoadingGRPC converts the retryable
+	// ErrResourceGroupsLoading into codes.Unavailable, so generic
+	// client-side retry logic can act on it instead of seeing an opaque
+	// codes.Unknown. Other errors pass through unchanged.
+	ErrResourceGroupsLoadingGRPC = func(err error) error {
+		if ErrResourceGroupsLoading.Equal(err) {
+			return status.Error(codes.Unavailable, err.Error())
+		}
+		return err
+	}
 
 	// FailedPrecondition indicates operation was rejected because the
 	// system is not in a state required for the operation's execution.

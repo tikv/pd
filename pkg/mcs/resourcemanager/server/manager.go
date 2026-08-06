@@ -318,11 +318,7 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	// for this keyspace can run concurrently, so whatever's in storage now is
 	// still what this call itself just wrote - safe to mirror unconditionally.
 	m.Lock()
-	cur, ok := m.krgms[keyspaceID]
-	if !ok {
-		cur = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
-		m.krgms[keyspaceID] = cur
-	}
+	cur := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
 	m.Unlock()
 	if cur != krgm {
 		cur.setServiceLimitFromStorage(serviceLimit)
@@ -380,11 +376,7 @@ func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
 // from the cache truly doesn't exist anywhere, so it's synthesized directly.
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
-	krgm, ok := m.krgms[keyspaceID]
-	if !ok {
-		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
-		m.krgms[keyspaceID] = krgm
-	}
+	krgm := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
 	m.Unlock()
 	if initDefault {
 		// In metadata-watcher mode, LoadingStateCompleted only means the
@@ -412,6 +404,18 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 		} else if err := m.loadResourceGroupIfNeeded(keyspaceID, DefaultResourceGroupName); err != nil {
 			log.Debug("failed to load default resource group", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
 		}
+	}
+	return krgm
+}
+
+// getOrCreateKeyspaceResourceGroupManagerLocked is the m.krgms lookup/create
+// step of getOrCreateKeyspaceResourceGroupManager for a caller that already
+// holds m.Lock().
+func (m *Manager) getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID uint32) *keyspaceResourceGroupManager {
+	krgm, ok := m.krgms[keyspaceID]
+	if !ok {
+		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+		m.krgms[keyspaceID] = krgm
 	}
 	return krgm
 }
@@ -663,20 +667,21 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 			group      *ResourceGroup
 		}
 		// Size the slice up front: it holds every loaded group, which is exactly
-		// the scale this loader exists to handle.
+		// the scale this loader exists to handle. tempKrgms is a local map this
+		// goroutine alone constructed and holds - not yet reachable from
+		// m.krgms or any other goroutine - so reading it here needs no locking;
+		// only the individual *ResourceGroup values get published later, into
+		// whichever keyspace manager is current at merge time, not tempKrgm
+		// itself.
 		totalGroups := 0
 		for _, tempKrgm := range tempKrgms {
-			tempKrgm.RLock()
 			totalGroups += len(tempKrgm.groups)
-			tempKrgm.RUnlock()
 		}
 		pending := make([]mergeItem, 0, totalGroups)
 		for keyspaceID, tempKrgm := range tempKrgms {
-			tempKrgm.RLock()
 			for name, group := range tempKrgm.groups {
 				pending = append(pending, mergeItem{keyspaceID: keyspaceID, name: name, group: group})
 			}
-			tempKrgm.RUnlock()
 		}
 
 		const mergeBatchSize = 1024
@@ -699,11 +704,7 @@ func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
 				if m.syncLoadedGroups[key] {
 					continue
 				}
-				krgm := m.krgms[it.keyspaceID]
-				if krgm == nil {
-					krgm = newKeyspaceResourceGroupManager(it.keyspaceID, m.storage, m.writeRole)
-					m.krgms[it.keyspaceID] = krgm
-				}
+				krgm := m.getOrCreateKeyspaceResourceGroupManagerLocked(it.keyspaceID)
 				krgm.Lock()
 				krgm.groups[it.name] = it.group
 				// This group is now confirmed, fully-loaded data (settings
@@ -858,11 +859,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 		// the new bulk merge skip a group its cache doesn't contain.
 		m.Lock()
 		epoch := m.loadEpoch
-		krgm = m.krgms[keyspaceID]
-		if krgm == nil {
-			krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
-			m.krgms[keyspaceID] = krgm
-		}
+		krgm = m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
 		m.Unlock()
 		// Snapshot the delete generation before the lock-free storage read,
 		// so a Delete that lands after the read is detected under the insert
@@ -919,7 +916,6 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			return err
 		}
 		inserted := false
-		markKey := trackerKey{keyspaceID: keyspaceID, groupName: name}
 		m.Lock()
 		if m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm {
 			// The manager was reinitialized for a new term while the storage
@@ -962,9 +958,7 @@ func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) erro
 			krgm.syncBurstabilityWithServiceLimitLocked(group)
 		}
 		krgm.Unlock()
-		if m.syncLoadedGroups != nil {
-			m.syncLoadedGroups[markKey] = true
-		}
+		m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
 		m.Unlock()
 		failpoint.Inject("lazyLoadAfterCachePublish", func() {})
 		syncLoadGroupCounter.Inc()
@@ -984,6 +978,13 @@ func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceR
 	if m.krgms[keyspaceID] != krgm {
 		return
 	}
+	m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
+}
+
+// markResourceGroupSyncLoadedLocked is markResourceGroupSyncLoaded's marker
+// write for a caller that already holds m.Lock() and has already verified
+// krgm is still the live entry for keyspaceID.
+func (m *Manager) markResourceGroupSyncLoadedLocked(keyspaceID uint32, name string) {
 	if m.syncLoadedGroups != nil {
 		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
 	}
@@ -1054,11 +1055,7 @@ func (m *Manager) publishResourceGroupMutation(
 ) {
 	m.Lock()
 	defer m.Unlock()
-	cur, ok := m.krgms[keyspaceID]
-	if !ok {
-		cur = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
-		m.krgms[keyspaceID] = cur
-	}
+	cur := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
 	if cur != krgm && cur.hasConfirmedResourceGroup(name) {
 		log.Info("skip publishing resource group mutation: a newer confirmed write already exists",
 			zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
@@ -1074,8 +1071,8 @@ func (m *Manager) publishResourceGroupMutation(
 	}
 	cur.Unlock()
 	failpoint.InjectCall("publishMutationBeforeMark")
-	if mark && m.syncLoadedGroups != nil {
-		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
+	if mark {
+		m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
 	}
 }
 

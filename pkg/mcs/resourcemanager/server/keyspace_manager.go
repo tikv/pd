@@ -417,11 +417,24 @@ func (krgm *keyspaceResourceGroupManager) isReserved(name string) bool {
 func (krgm *keyspaceResourceGroupManager) hasConfirmedResourceGroup(name string) bool {
 	krgm.RLock()
 	defer krgm.RUnlock()
-	if _, ok := krgm.groups[name]; !ok {
-		return false
+	_, ok := krgm.confirmedResourceGroupLocked(name)
+	return ok
+}
+
+// confirmedResourceGroupLocked is hasConfirmedResourceGroup for a caller that
+// already holds krgm's lock (read or write), returning the group itself too
+// so a caller that needs both the confirmed check and the group (e.g. the
+// state persist loop below) doesn't have to re-derive the same "present and
+// not a reserved placeholder" logic or take a second lock round trip.
+func (krgm *keyspaceResourceGroupManager) confirmedResourceGroupLocked(name string) (*ResourceGroup, bool) {
+	group, ok := krgm.groups[name]
+	if !ok {
+		return nil, false
 	}
-	_, reserved := krgm.reservedGroups[name]
-	return !reserved
+	if _, reserved := krgm.reservedGroups[name]; reserved {
+		return nil, false
+	}
+	return group, true
 }
 
 func (krgm *keyspaceResourceGroupManager) getResourceGroup(name string, withStats bool) *ResourceGroup {
@@ -477,15 +490,11 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 	krgm.RUnlock()
 	for idx := range keys {
 		krgm.RLock()
-		group, ok := krgm.groups[keys[idx]]
-		_, reserved := krgm.reservedGroups[keys[idx]]
-		if ok && reserved {
-			// The entry is still just an unconfirmed placeholder (e.g. the
-			// synthetic default installed before async loading completes);
-			// persisting its fresh state would permanently overwrite any
-			// real persisted state still waiting to be loaded.
-			ok = false
-		}
+		// A reserved placeholder (e.g. the synthetic default installed before
+		// async loading completes) is skipped: persisting its fresh state
+		// would permanently overwrite any real persisted state still waiting
+		// to be loaded.
+		group, ok := krgm.confirmedResourceGroupLocked(keys[idx])
 		if ok {
 			if err := group.persistStates(krgm.keyspaceID, krgm.storage); err != nil {
 				log.Error("persist keyspace resource group state failed",
