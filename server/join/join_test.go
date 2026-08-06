@@ -15,14 +15,25 @@
 package join
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+<<<<<<< HEAD:server/join/join_test.go
 	"github.com/tikv/pd/pkg/utils/assertutil"
+=======
+	"go.uber.org/goleak"
+
+	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+>>>>>>> 51b1226c30 (mcs/scheduling: clean primary resources on exit (#10645)):pkg/mcs/scheduling/server/apis/v1/api_test.go
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
 
+<<<<<<< HEAD:server/join/join_test.go
 // A PD joins itself.
 func TestPDJoinsItself(t *testing.T) {
 	re := require.New(t)
@@ -30,4 +41,23 @@ func TestPDJoinsItself(t *testing.T) {
 	defer testutil.CleanServer(cfg.DataDir)
 	cfg.Join = cfg.AdvertiseClientUrls
 	re.Error(PrepareJoinCluster(cfg))
+=======
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestGetAllStoresReturnsNotBootstrappedWhenBasicClusterMissing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	re := require.New(t)
+	resp := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(resp)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/stores", nil)
+	ctx.Set(multiservicesapi.ServiceContextKey, &scheserver.Server{})
+
+	getAllStores(ctx)
+
+	re.Equal(http.StatusInternalServerError, resp.Code)
+	re.Contains(resp.Body.String(), "not bootstrapped")
+>>>>>>> 51b1226c30 (mcs/scheduling: clean primary resources on exit (#10645)):pkg/mcs/scheduling/server/apis/v1/api_test.go
 }
