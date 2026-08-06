@@ -93,6 +93,14 @@ func TestRegister(t *testing.T) {
 	etcd.Close()
 }
 
+func TestServiceRegisterLongTTLDoesNotDelayRecoveryOperations(t *testing.T) {
+	re := require.New(t)
+	sr := NewServiceRegister(context.Background(), nil, "test_service", "127.0.0.1:1", "127.0.0.1:1", 3600)
+
+	re.Equal(time.Duration(DefaultLeaseInSeconds)*time.Second, sr.keepAliveRetryInterval())
+	re.Equal(etcdutil.DefaultRequestTimeout, deregisterTimeout())
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys

@@ -634,6 +634,11 @@ func (s *Server) GetConfig() *config.Config {
 	return cfg
 }
 
+// GetLeaderLease returns the configured leader lease in seconds.
+func (s *Server) GetLeaderLease() int64 {
+	return s.cfg.LeaderLease
+}
+
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
