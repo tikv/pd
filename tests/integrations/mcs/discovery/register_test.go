@@ -26,7 +26,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -158,11 +157,11 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	re := suite.Require()
 	switch serviceName {
 	case constant.TSOServiceName:
-		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 	case constant.ResourceManagerServiceName:
-		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, "")
 	case constant.RouterServiceName:
-		server, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		server, cleanup, err := tests.StartSingleRouterServerWithoutCheck(suite.ctx, re, suite.backendEndpoints, "")
 		re.NoError(err)
 		return server, cleanup
 	default:

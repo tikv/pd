@@ -41,7 +41,6 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -157,7 +156,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 		}
 	}()
 	for range mcs.DefaultKeyspaceGroupReplicaCount + 1 {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
@@ -213,7 +212,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 		}
 	}()
 	for range mcs.DefaultKeyspaceGroupReplicaCount {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
@@ -266,7 +265,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	re.Equal(http.StatusBadRequest, code)
 
 	// the keyspace group is exist, the new replica is more than the old replica.
-	s2, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	s2, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 	defer cleanup2()
 	nodes[s2.GetAddr()] = s2
 	tests.WaitForPrimaryServing(re, nodes)
@@ -313,7 +312,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 		}
 	}()
 	for range mcs.DefaultKeyspaceGroupReplicaCount {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 		nodesList = append(nodesList, s.GetAddr())
@@ -380,7 +379,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 		}
 	}()
 	for range mcs.DefaultKeyspaceGroupReplicaCount {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
@@ -414,7 +413,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 		}
 	}()
 	for range mcs.DefaultKeyspaceGroupReplicaCount + 1 {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
@@ -456,7 +455,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 	re := suite.Require()
 	// add one tso server
 	nodes := make(map[string]bs.Server)
-	oldTSOServer, cleanupOldTSOserver := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	oldTSOServer, cleanupOldTSOserver := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 	defer cleanupOldTSOserver()
 	nodes[oldTSOServer.GetAddr()] = oldTSOServer
 
@@ -483,7 +482,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 	nodes[stopNode].Close()
 
 	// create a new tso server
-	newTSOServer, cleanupNewTSOServer := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	newTSOServer, cleanupNewTSOServer := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 	defer cleanupNewTSOServer()
 	nodes[newTSOServer.GetAddr()] = newTSOServer
 
@@ -574,7 +573,7 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 
 	// Start TSO servers
 	for range nodeCount {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, "")
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
