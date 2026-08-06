@@ -312,9 +312,10 @@ func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOp
 	ctx, cancel := context.WithTimeout(ctx, c.client.inner.option.Timeout)
 	defer cancel()
 	req := &pdpb.GetGCStateRequest{
-		Header:            c.client.requestHeader(),
-		KeyspaceScope:     wrapKeyspaceScope(c.keyspaceID),
-		ExcludeGcBarriers: options.ExcludeGCBarriers,
+		Header:                  c.client.requestHeader(),
+		KeyspaceScope:           wrapKeyspaceScope(c.keyspaceID),
+		ExcludeGcBarriers:       options.ExcludeGCBarriers,
+		IncludeGlobalGcBarriers: !options.ExcludeGlobalGCBarriers,
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -325,8 +326,12 @@ func (c gcStatesClient) GetGCState(ctx context.Context, opts ...gc.GCStatesAPIOp
 		return gc.GCState{}, err
 	}
 
-	gcState := resp.GetGcState()
-	return pbToGCState(gcState, start, options.ExcludeGCBarriers), nil
+	return pbToGCStateWithGlobalGCBarriers(
+		resp.GetGcState(),
+		resp.GetGlobalGcBarriers(),
+		start,
+		options.ExcludeGCBarriers,
+	), nil
 }
 
 func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time, excludeGCBarriers bool) gc.GCState {
@@ -343,6 +348,24 @@ func pbToGCState(pb *pdpb.GCState, reqStartTime time.Time, excludeGCBarriers boo
 		gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, reqStartTime))
 	}
 	return gc.NewGCStateWithGCBarriers(keyspaceID, pb.GetTxnSafePoint(), pb.GetGcSafePoint(), gcBarriers)
+}
+
+func pbToGCStateWithGlobalGCBarriers(
+	state *pdpb.GCState,
+	globalBarriers *pdpb.GlobalGCBarriersInfo,
+	reqStartTime time.Time,
+	excludeGCBarriers bool,
+) gc.GCState {
+	result := pbToGCState(state, reqStartTime, excludeGCBarriers)
+	if globalBarriers == nil {
+		return result
+	}
+
+	barriers := make([]*gc.GlobalGCBarrierInfo, 0, len(globalBarriers.GetBarriers()))
+	for _, barrier := range globalBarriers.GetBarriers() {
+		barriers = append(barriers, pbToGlobalGCBarrierInfo(barrier, reqStartTime))
+	}
+	return result.WithGlobalGCBarriers(barriers)
 }
 
 // SetGlobalGCBarrier sets (creates or updates) a global GC barrier.
