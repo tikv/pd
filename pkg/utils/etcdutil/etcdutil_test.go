@@ -959,10 +959,20 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	var loadCount atomic.Int64
+	var loadedRevision atomic.Int64
+	watcher.SetLoadHooks(nil, func(revision int64, loadErr error) error {
+		if loadErr == nil {
+			loadedRevision.Store(revision)
+			loadCount.Add(1)
+		}
+		return nil
+	})
 	watcher.SetReconcileDeletedKeys()
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
 	watcher.StartWatchLoop()
 	re.NoError(watcher.WaitLoad())
+	re.Positive(loadedRevision.Load())
 	checkCache(map[string]string{keepKey: "before-compaction", deletedKey: "deleted"})
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/updateClient", "return(true)"))
@@ -982,6 +992,9 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	re.NoError(err)
 	watcher.updateClientCh <- replacementClient
 	checkCache(map[string]string{keepKey: "after-compaction"})
+	testutil.Eventually(re, func() bool {
+		return loadCount.Load() >= 2 && loadedRevision.Load() >= advanceResp.Header.Revision
+	})
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherSkipsCompactionReloadByDefault() {
@@ -1203,6 +1216,61 @@ func (suite *loopWatcherTestSuite) TestWatcherCommitsPartialReconciliationProgre
 	_, err = watcher.load(suite.ctx)
 	re.NoError(err)
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadHooksObserveFinalResult() {
+	re := suite.Require()
+	const key = "TestWatcherLoadHooksObserveFinalResult"
+	suite.put(re, key, "value")
+
+	callbackErr := errors.New("callback failed")
+	failPut := false
+	preLoadCalls := 0
+	postLoadResults := make([]error, 0, 3)
+	loadedRevisions := make([]int64, 0, 3)
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error {
+			if failPut {
+				return callbackErr
+			}
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetLoadHooks(
+		func() { preLoadCalls++ },
+		func(revision int64, loadErr error) error {
+			loadedRevisions = append(loadedRevisions, revision)
+			postLoadResults = append(postLoadResults, loadErr)
+			return nil
+		},
+	)
+
+	_, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	failPut = true
+	_, err = watcher.load(suite.ctx)
+	re.ErrorIs(err, callbackErr)
+	canceledCtx, cancel := context.WithCancel(suite.ctx)
+	cancel()
+	_, err = watcher.load(canceledCtx)
+	re.NoError(err)
+
+	re.Equal(3, preLoadCalls)
+	re.Positive(loadedRevisions[0])
+	re.Zero(loadedRevisions[2])
+	re.Len(postLoadResults, 3)
+	re.NoError(postLoadResults[0])
+	re.ErrorIs(postLoadResults[1], callbackErr)
+	re.ErrorIs(postLoadResults[2], context.Canceled)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbackFailure() {

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -65,6 +68,107 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client, checkerController)
 	}
+}
+
+func TestRegionLabelWatcherReconcilesSnapshotOnReload(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepareEtcd(t)
+	defer clean()
+
+	rules := []*labeler.LabelRule{
+		keyspace.MakeTxnLabelRule(1),
+		keyspace.MakeTxnLabelRule(2),
+	}
+	for _, rule := range rules {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RegionLabelKeyPath(rule.ID), string(value))
+		re.NoError(err)
+	}
+
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
+	re.NoError(err)
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   watchCtx,
+		cancel:                cancel,
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
+		etcdClient:            client,
+		regionLabeler:         regionLabeler,
+		checkerController:     newTestCheckerController(watchCtx),
+	}
+	re.NoError(rw.initializeRegionLabelWatcher())
+	defer rw.Close()
+	re.NotNil(regionLabeler.GetLabelRule(rules[1].ID))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	}()
+	time.Sleep(1100 * time.Millisecond)
+	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(rules[1].ID))
+	re.NoError(err)
+	updatedRule := keyspace.MakeTxnLabelRule(1)
+	updatedRule.Labels[0].Value = "updated"
+	value, err := json.Marshal(updatedRule)
+	re.NoError(err)
+	updateResp, err := client.Put(ctx, keypath.RegionLabelKeyPath(updatedRule.ID), string(value))
+	re.NoError(err)
+	_, err = client.Compact(ctx, updateResp.Header.Revision)
+	re.NoError(err)
+	time.Sleep(100 * time.Millisecond)
+
+	loadStarted := make(chan struct{})
+	releaseLoad := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	releaseSnapshotLoad := func() {
+		releaseOnce.Do(func() { close(releaseLoad) })
+	}
+	re.NoError(failpoint.EnableCall(
+		"github.com/tikv/pd/pkg/mcs/scheduling/server/rule/regionLabelSnapshotRuleLoaded",
+		func() {
+			startOnce.Do(func() { close(loadStarted) })
+			<-releaseLoad
+		},
+	))
+	defer func() {
+		releaseSnapshotLoad()
+		re.NoError(failpoint.Disable(
+			"github.com/tikv/pd/pkg/mcs/scheduling/server/rule/regionLabelSnapshotRuleLoaded"))
+	}()
+
+	rw.labelWatcher.ForceLoad()
+	select {
+	case <-loadStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("snapshot reload did not start")
+	}
+	type snapshotReadResult struct {
+		loadedRule  *labeler.LabelRule
+		deletedRule *labeler.LabelRule
+	}
+	readDone := make(chan snapshotReadResult, 1)
+	go func() {
+		readDone <- snapshotReadResult{
+			loadedRule:  regionLabeler.GetLabelRule(rules[0].ID),
+			deletedRule: regionLabeler.GetLabelRule(rules[1].ID),
+		}
+	}()
+	select {
+	case result := <-readDone:
+		re.NotNil(result.loadedRule)
+		re.Equal(rules[0].Labels[0].Value, result.loadedRule.Labels[0].Value)
+		re.NotNil(result.deletedRule)
+	case <-time.After(3 * time.Second):
+		t.Fatal("region label reads were blocked by snapshot reload")
+	}
+	releaseSnapshotLoad()
+	testutil.Eventually(re, func() bool {
+		loadedRule := regionLabeler.GetLabelRule(rules[0].ID)
+		return regionLabeler.GetLabelRule(rules[1].ID) == nil && loadedRule != nil &&
+			loadedRule.Labels[0].Value == "updated"
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
 }
 
 func newTestCheckerController(ctx context.Context) *checker.Controller {

@@ -286,6 +286,34 @@ func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	return nil
 }
 
+// ReuseLabelRuleForSnapshot returns the cached rule when its content is the
+// same and cannot be changed by TTL GC. This lets snapshot loading defer all
+// visible changes until the complete snapshot is ready without retaining a
+// second copy of every unchanged rule.
+func (l *RegionLabeler) ReuseLabelRuleForSnapshot(rule *LabelRule) *LabelRule {
+	l.RLock()
+	defer l.RUnlock()
+	if current := l.ruleIndex.rules[rule.ID]; current != nil && current.minExpire == nil && current.sameContent(rule) {
+		return current
+	}
+	return rule
+}
+
+// SetLabelRuleForSnapshotLocked applies a rule loaded from a full snapshot and
+// records its generation. It returns whether the rule content changed. The
+// caller must hold the RegionLabeler lock.
+func (l *RegionLabeler) SetLabelRuleForSnapshotLocked(rule *LabelRule, generation uint64) (bool, error) {
+	if current := l.ruleIndex.rules[rule.ID]; current != nil && (current == rule || current.sameContent(rule)) {
+		current.snapshotGeneration = generation
+		return false, nil
+	}
+	if err := l.SetLabelRuleLocked(rule); err != nil {
+		return false, err
+	}
+	rule.snapshotGeneration = generation
+	return true, nil
+}
+
 // DeleteLabelRule removes a LabelRule.
 func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
@@ -316,6 +344,28 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 	}
 	l.ruleIndex.delete(id)
 	return nil
+}
+
+// ReconcileSnapshotLocked removes cached rules that were not observed in the
+// successful snapshot generation. The caller must hold the RegionLabeler lock.
+func (l *RegionLabeler) ReconcileSnapshotLocked(generation uint64) ([]*KeyRangeRule, error) {
+	var (
+		deletedRanges []*KeyRangeRule
+		firstErr      error
+	)
+	for id, rule := range l.ruleIndex.rules {
+		if rule.snapshotGeneration == generation {
+			continue
+		}
+		if err := l.DeleteLabelRuleLocked(id); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		deletedRanges = append(deletedRanges, rule.GetKeyRanges()...)
+	}
+	return deletedRanges, firstErr
 }
 
 // Patch updates multiple region rules in a batch.

@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -351,6 +352,283 @@ func TestMetadataWatcherHandleDelete(t *testing.T) {
 		re.Equal(float64(1), mutableDefault.RUConsumption.RRU)
 		re.Equal(float64(2), mutableDefault.RUConsumption.WRU)
 	})
+}
+
+func TestMetadataSnapshotReconciliation(t *testing.T) {
+	t.Run("removes_entries_missing_from_successful_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+
+		firstGeneration := m.beginMetadataSnapshot()
+		staleGroup := newMetadataWatcherResourceGroup("stale_group", 5, 100, 200)
+		keptGroup := newMetadataWatcherResourceGroup("kept_group", 5, 100, -1)
+		customDefault := newMetadataWatcherResourceGroup(DefaultResourceGroupName, 1, 1000, -1)
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/stale_group",
+			mustMarshalResourceGroup(t, staleGroup),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, keptGroup),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/default",
+			mustMarshalResourceGroup(t, customDefault),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"123.5",
+			firstGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(firstGeneration, nil))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.NotNil(krgm)
+		re.Equal(int64(123), krgm.getMutableResourceGroup("kept_group").getOverrideBurstLimit())
+
+		secondGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, keptGroup),
+			secondGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(secondGeneration, nil))
+
+		re.Nil(krgm.getResourceGroup("stale_group", false))
+		re.NotNil(krgm.getResourceGroup("kept_group", false))
+		re.Zero(m.GetKeyspaceServiceLimiter(10).ServiceLimit)
+		re.Equal(int64(-1), krgm.getMutableResourceGroup("kept_group").getOverrideBurstLimit())
+		defaultGroup := krgm.getResourceGroup(DefaultResourceGroupName, false)
+		re.NotNil(defaultGroup)
+		re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
+		re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
+		re.Equal(uint32(middlePriority), defaultGroup.Priority)
+	})
+
+	t.Run("does_not_remove_entries_after_failed_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("kept_group", 5, 100, 200)
+
+		firstGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/kept_group",
+			mustMarshalResourceGroup(t, group),
+			firstGeneration,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"123.5",
+			firstGeneration,
+		))
+		re.NoError(m.finishMetadataSnapshot(firstGeneration, nil))
+
+		failedGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.finishMetadataSnapshot(failedGeneration, errors.New("load failed")))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.NotNil(krgm.getResourceGroup("kept_group", false))
+		re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+		re.Zero(m.activeMetadataSnapshotGeneration)
+	})
+
+	t.Run("does_not_hold_global_metadata_lock_during_reconciliation", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("stale_group", 5, 100, 200)
+		group.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 10}}
+		re.NoError(m.AddResourceGroup(group))
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.NotNil(krgm)
+		generation := m.beginMetadataSnapshot()
+
+		// Keep an API-read lock held while reconciliation waits on this keyspace.
+		// The scan must still proceed; only the final generation handoff waits for
+		// metadata API writers and readers to finish.
+		m.metadataSnapshotMu.RLock()
+		metadataLockHeld := true
+		krgm.Lock()
+		finishDone := make(chan error, 1)
+		go func() {
+			finishDone <- m.finishMetadataSnapshot(generation, nil)
+		}()
+		krgm.Unlock()
+		defer func() {
+			if metadataLockHeld {
+				m.metadataSnapshotMu.RUnlock()
+			}
+			re.NoError(<-finishDone)
+		}()
+
+		re.Eventually(func() bool {
+			return krgm.getResourceGroup(group.Name, false) == nil
+		}, time.Second, 10*time.Millisecond)
+		m.metadataSnapshotMu.RUnlock()
+		metadataLockHeld = false
+	})
+
+	t.Run("allows_existing_keyspace_api_writes_during_manager_scan", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		m.getOrCreateKeyspaceResourceGroupManager(10, true)
+		generation := m.beginMetadataSnapshot()
+		group := newMetadataWatcherResourceGroup("added_during_scan", 5, 100, 200)
+
+		// finishMetadataSnapshot holds this read lock while walking the keyspace
+		// map. Writes to an existing keyspace must not need the exclusive map lock.
+		m.RLock()
+		managerLockHeld := true
+		defer func() {
+			if managerLockHeld {
+				m.RUnlock()
+			}
+		}()
+		writeDone := make(chan error, 1)
+		go func() {
+			writeDone <- m.AddResourceGroup(group)
+		}()
+		select {
+		case err := <-writeDone:
+			re.NoError(err)
+		case <-time.After(time.Second):
+			t.Fatal("API write to an existing keyspace was blocked by the manager read lock")
+		}
+		m.RUnlock()
+		managerLockHeld = false
+
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+		re.NotNil(m.getKeyspaceResourceGroupManager(10).getResourceGroup(group.Name, false))
+	})
+
+	t.Run("retains_api_writes_overlapping_snapshot", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("api_group", 5, 100, 200)
+		re.NoError(m.AddResourceGroup(group))
+		re.NoError(m.SetKeyspaceServiceLimit(10, 100))
+
+		generation := m.beginMetadataSnapshot()
+		group.Priority = 6
+		re.NoError(m.ModifyResourceGroup(group))
+		re.NoError(m.SetKeyspaceServiceLimit(10, 200))
+		addedGroup := newMetadataWatcherResourceGroup("added_during_snapshot", 7, 200, 300)
+		re.NoError(m.AddResourceGroup(addedGroup))
+		deletedGroup := newMetadataWatcherResourceGroup("deleted_during_snapshot", 8, 300, 400)
+		re.NoError(m.AddResourceGroup(deletedGroup))
+		re.NoError(m.DeleteResourceGroup(10, deletedGroup.Name))
+
+		// Model stale values read at the snapshot revision before the API writes.
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/api_group",
+			mustMarshalResourceGroup(t, newMetadataWatcherResourceGroup("api_group", 5, 100, 200)),
+			generation,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/service_limits/10",
+			"100",
+			generation,
+		))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			"resource_group/keyspace/settings/10/deleted_during_snapshot",
+			mustMarshalResourceGroup(t, deletedGroup),
+			generation,
+		))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+
+		krgm := m.getKeyspaceResourceGroupManager(10)
+		re.Equal(uint32(6), krgm.getResourceGroup("api_group", false).Priority)
+		re.NotNil(krgm.getResourceGroup("added_during_snapshot", false))
+		re.Nil(krgm.getResourceGroup("deleted_during_snapshot", false))
+		re.InDelta(200, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
+	})
+
+	t.Run("does_not_reapply_runtime_state_during_reload", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		group := newMetadataWatcherResourceGroup("group", 5, 100, 200)
+		settingsKey := "resource_group/keyspace/settings/10/group"
+		statesKey := "resource_group/keyspace/states/10/group"
+		checkpointTime := time.Now().Add(-time.Minute)
+		checkpoint := &GroupStates{
+			RU:            &GroupTokenBucketState{Tokens: 321, LastUpdate: &checkpointTime},
+			RUConsumption: &rmpb.Consumption{RRU: 11},
+		}
+		rawCheckpoint, err := json.Marshal(checkpoint)
+		re.NoError(err)
+
+		initialGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			settingsKey, mustMarshalResourceGroup(t, group), initialGeneration))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			statesKey, string(rawCheckpoint), initialGeneration))
+		re.NoError(m.finishMetadataSnapshot(initialGeneration, nil))
+
+		currentTime := time.Now()
+		m.getKeyspaceResourceGroupManager(10).getMutableResourceGroup("group").
+			SetStatesIntoResourceGroup(&GroupStates{
+				RU: &GroupTokenBucketState{Tokens: 654, LastUpdate: &currentTime},
+			})
+		reloadGeneration := m.beginMetadataSnapshot()
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			settingsKey, mustMarshalResourceGroup(t, group), reloadGeneration))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			statesKey, string(rawCheckpoint), reloadGeneration))
+		re.NoError(m.finishMetadataSnapshot(reloadGeneration, nil))
+
+		got := m.getKeyspaceResourceGroupManager(10).getResourceGroup("group", true)
+		re.InDelta(654, got.RUSettings.RU.Tokens, 0.001)
+		re.InDelta(11, got.RUConsumption.RRU, 0.001)
+	})
+
+	t.Run("does_not_overwrite_controller_config_api_writes", func(t *testing.T) {
+		re := require.New(t)
+		m := newMetadataWatcherTestManager(storage.NewStorageWithMemoryBackend())
+		m.controllerConfig.RequestUnit.ReadBaseCost = 1
+		staleSnapshot, err := json.Marshal(m.controllerConfig)
+		re.NoError(err)
+
+		generation := m.beginMetadataSnapshot()
+		re.NoError(m.UpdateControllerConfigItem("request-unit.read-base-cost", 2.0))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+		re.InDelta(2.0, m.GetControllerConfig().RequestUnit.ReadBaseCost, 0.00001)
+
+		staleSnapshot, err = json.Marshal(m.controllerConfig)
+		re.NoError(err)
+		generation = m.beginMetadataSnapshot()
+		re.NoError(m.SetKeyspaceRUVersion(10, 2))
+		re.NoError(m.handleMetadataWatchPutWithGeneration(
+			keypath.ControllerConfigPath(), string(staleSnapshot), generation))
+		re.NoError(m.finishMetadataSnapshot(generation, nil))
+		re.Equal(RUVersion(2), m.GetRUVersionPolicy().Overrides[10])
+	})
+}
+
+func BenchmarkMetadataSnapshotReconciliation1MKeyspaces(b *testing.B) {
+	const generation = uint64(1)
+	manager := newMetadataWatcherTestManager(nil)
+	for keyspaceID := range uint32(1_000_000) {
+		krgm := newKeyspaceResourceGroupManager(keyspaceID, nil)
+		defaultGroup := newDefaultResourceGroup()
+		defaultGroup.metadataSnapshotGeneration = generation
+		krgm.groups[DefaultResourceGroupName] = defaultGroup
+		krgm.serviceLimiter.metadataSnapshotGeneration = generation
+		manager.krgms[keyspaceID] = krgm
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		manager.RLock()
+		for _, krgm := range manager.krgms {
+			krgm.reconcileMetadataSnapshot(generation)
+		}
+		manager.RUnlock()
+	}
 }
 
 func TestInitializeMetadataWatcher(t *testing.T) {

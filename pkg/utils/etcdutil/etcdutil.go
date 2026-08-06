@@ -389,6 +389,11 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
+	// preLoadFn and postLoadFn delimit a full load so consumers can reconcile
+	// their own state without requiring LoopWatcher to retain every loaded key.
+	preLoadFn  func()
+	postLoadFn func(int64, error) error
+
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -721,21 +726,43 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
+	if lw.preLoadFn != nil {
+		lw.preLoadFn()
+	}
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		preErr = err
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
+		callbacksCommitted := false
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Warn("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
 			if err == nil {
 				err = postErr
 			}
-			return
+		} else {
+			callbacksCommitted = true
 		}
-		if preErr != nil || !lw.reconcileDeletedKeys {
+		if lw.postLoadFn != nil {
+			loadErr := err
+			if !loadCompleted && loadErr == nil {
+				// A canceled context is a graceful stop for LoopWatcher, but it is
+				// not a complete snapshot and must not trigger consumer reconciliation.
+				loadErr = ctx.Err()
+				if loadErr == nil {
+					loadErr = errors.New("full load did not complete")
+				}
+			}
+			if postLoadErr := lw.postLoadFn(snapshotRevision, loadErr); postLoadErr != nil {
+				callbacksCommitted = false
+				if err == nil {
+					err = postLoadErr
+				}
+			}
+		}
+		if !callbacksCommitted || preErr != nil || !lw.reconcileDeletedKeys {
 			return
 		}
 		if loadCompleted && callbackErr == nil {
@@ -921,6 +948,15 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 // retaining watched keys or reconciling deletions. It must be called before
 // StartWatchLoop. Callers must be able to safely replay every key in a snapshot.
 func (lw *LoopWatcher) SetReloadOnCompaction() {
+	lw.reloadOnCompaction = true
+}
+
+// SetLoadHooks installs callbacks around every full load and enables full
+// snapshot reload after compaction. postLoadFn receives the snapshot revision
+// and load result after postEventsFn has run. It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetLoadHooks(preLoadFn func(), postLoadFn func(int64, error) error) {
+	lw.preLoadFn = preLoadFn
+	lw.postLoadFn = postLoadFn
 	lw.reloadOnCompaction = true
 }
 

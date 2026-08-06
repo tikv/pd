@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -220,11 +221,30 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
-	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
+	var (
+		suspectKeyRanges         []*labeler.KeyRangeRule
+		snapshotRules            []*labeler.LabelRule
+		snapshotGeneration       uint64
+		activeSnapshotGeneration uint64
+		snapshotInitialized      bool
+	)
+	resetSnapshotRules := func() {
+		clear(snapshotRules)
+		snapshotRules = snapshotRules[:0]
+	}
+	preLoadFn := func() {
+		resetSnapshotRules()
+		snapshotGeneration++
+		activeSnapshotGeneration = snapshotGeneration
+	}
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
-		// It will be locked until the postEventsFn is finished.
-		rw.regionLabeler.Lock()
+		// A watch batch stays atomic under the RegionLabeler lock. A full load is
+		// staged without holding the lock and committed by postLoadFn only after
+		// the complete snapshot has been loaded.
+		if activeSnapshotGeneration == 0 {
+			rw.regionLabeler.Lock()
+		}
 		for i := range suspectKeyRanges {
 			suspectKeyRanges[i] = nil // avoid memory leak
 		}
@@ -237,8 +257,15 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		if err != nil {
 			return err
 		}
-		err = rw.regionLabeler.SetLabelRuleLocked(rule)
-		if err == nil {
+		changed := true
+		if activeSnapshotGeneration == 0 {
+			err = rw.regionLabeler.SetLabelRuleLocked(rule)
+		} else {
+			snapshotRules = append(snapshotRules, rw.regionLabeler.ReuseLabelRuleForSnapshot(rule))
+			failpoint.InjectCall("regionLabelSnapshotRuleLoaded")
+			return nil
+		}
+		if err == nil && changed {
 			krs := rule.GetKeyRanges()
 			if krs != nil {
 				suspectKeyRanges = append(suspectKeyRanges, krs...)
@@ -260,8 +287,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		}
 		return err
 	}
-	postEventsFn := func([]*clientv3.Event) error {
-		defer rw.regionLabeler.Unlock()
+	finishEventsFn := func() error {
 		if rw.checkerController == nil {
 			return errors.New("checker controller is nil")
 		}
@@ -269,6 +295,57 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
 		}
 		return nil
+	}
+	postEventsFn := func([]*clientv3.Event) error {
+		if activeSnapshotGeneration != 0 {
+			return nil
+		}
+		defer rw.regionLabeler.Unlock()
+		return finishEventsFn()
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		generation := activeSnapshotGeneration
+		defer func() {
+			resetSnapshotRules()
+			activeSnapshotGeneration = 0
+		}()
+		if loadErr != nil {
+			return nil
+		}
+
+		rw.regionLabeler.Lock()
+		defer rw.regionLabeler.Unlock()
+		var applyErr error
+		for _, rule := range snapshotRules {
+			changed, err := rw.regionLabeler.SetLabelRuleForSnapshotLocked(rule, generation)
+			if err != nil {
+				if applyErr == nil {
+					applyErr = err
+				}
+				continue
+			}
+			if !snapshotInitialized || changed {
+				suspectKeyRanges = append(suspectKeyRanges, rule.GetKeyRanges()...)
+			}
+		}
+
+		var reconcileErr error
+		if applyErr == nil {
+			var deletedRanges []*labeler.KeyRangeRule
+			deletedRanges, reconcileErr = rw.regionLabeler.ReconcileSnapshotLocked(generation)
+			suspectKeyRanges = append(suspectKeyRanges, deletedRanges...)
+		}
+		finishErr := finishEventsFn()
+		if applyErr == nil && reconcileErr == nil && finishErr == nil {
+			snapshotInitialized = true
+		}
+		if applyErr != nil {
+			return applyErr
+		}
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		return finishErr
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
@@ -281,6 +358,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.labelWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
 }
