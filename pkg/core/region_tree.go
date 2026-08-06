@@ -157,6 +157,17 @@ func (t *regionTree) overlaps(item *regionItem) []*RegionInfo {
 	return overlaps
 }
 
+// updateRef transfers the reference from origin to region when an item is
+// replaced in place, i.e. the tree keeps the same item and only its embedded
+// RegionInfo changes. It is a no-op for trees that do not count references.
+func (t *regionTree) updateRef(origin, region *RegionInfo) {
+	if !t.countRef {
+		return
+	}
+	origin.DecRef()
+	region.IncRef()
+}
+
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
@@ -224,10 +235,7 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	if !origin.LoadedFromStorage() && region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
 	}
-	if t.countRef {
-		origin.DecRef()
-		region.IncRef()
-	}
+	t.updateRef(origin, region)
 }
 
 // remove removes a region if the region is in the tree.

@@ -49,6 +49,7 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 		caseWG.Add(1)
 		cas := tempCas
 		go func() {
+			defer caseWG.Done()
 			var lock syncutil.Mutex
 			successCount, failedCount := 0, 0
 			var wg sync.WaitGroup
@@ -72,7 +73,6 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 				failedCount -= rd.fail
 				successCount -= rd.success
 			}
-			caseWG.Done()
 		}()
 	}
 	caseWG.Wait()
@@ -324,6 +324,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 	re := require.New(t)
 	limiter := NewController(context.Background(), "grpc", nil)
 	defer limiter.Close()
+	slowQPSLimit := rate.Every(time.Hour)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -375,7 +376,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 			label: "test2",
 			round: []changeAndResult{
 				{
-					opt: UpdateQPSLimiter(50, 5),
+					opt: UpdateQPSLimiter(float64(slowQPSLimit), 5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & LimiterUpdated)
@@ -386,7 +387,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 					waitDuration: time.Second,
 					checkStatusFunc: func(label string) {
 						limit, burst := limiter.GetQPSLimiterStatus(label)
-						re.Equal(rate.Limit(50), limit)
+						re.Equal(slowQPSLimit, limit)
 						re.Equal(5, burst)
 					},
 				},

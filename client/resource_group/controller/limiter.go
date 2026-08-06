@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -202,7 +203,7 @@ func (r *Reservation) CancelAt(now time.Time) {
 	tokens += r.tokens
 
 	// update state
-	r.lim.last = now
+	r.lim.updateLast(now)
 	r.lim.tokens = tokens
 }
 
@@ -320,9 +321,27 @@ func (lim *Limiter) RemoveTokens(now time.Time, amount float64) {
 		return
 	}
 	_, tokens := lim.getTokens(now)
-	lim.last = now
+	lim.updateLast(now)
 	lim.tokens = tokens - amount
 	lim.maybeNotify()
+}
+
+// RefundTokens adds tokens back to the limiter.
+//
+// Token overshoot above burst is intentional here: getTokens clamps the
+// value on the next call, so RefundTokens never permanently leaks past
+// the burst cap. maybeNotify is intentionally not called either —
+// refunding can only raise the token count, never push the limiter into
+// the low-token state.
+func (lim *Limiter) RefundTokens(now time.Time, amount float64) {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	if lim.burst < 0 || lim.fillRate == Inf {
+		return
+	}
+	_, tokens := lim.getTokens(now)
+	lim.updateLast(now)
+	lim.tokens = tokens + amount
 }
 
 type tokenBucketReconfigureArgs struct {
@@ -354,11 +373,11 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		zap.Float64("old-notify-threshold", lim.notifyThreshold),
 		zap.Int64("old-burst", lim.burst))
 	if args.newBurst < 0 {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = args.newTokens
 	} else {
 		_, tokens := lim.getTokens(now)
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens + args.newTokens
 	}
 	lim.fillRate = fillRate(args.newFillRate)
@@ -553,6 +572,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	if longestDelayDuration <= 0 {
 		return 0, nil
 	}
+	failpoint.InjectCall("waitReservationsBeforeSelect")
 	t := time.NewTimer(longestDelayDuration)
 	defer t.Stop()
 

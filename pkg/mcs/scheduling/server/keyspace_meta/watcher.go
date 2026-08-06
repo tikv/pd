@@ -97,10 +97,10 @@ func (rw *Watcher) initializeKeyspaceMetaWatcher() error {
 			if err != nil {
 				return err
 			}
-			if meta.Id != keyspaceID {
-				return fmt.Errorf("keyspace ID in meta does not match the one in key, meta Id: %d, keyspace ID: %d", meta.Id, keyspaceID)
+			if meta.GetId() != keyspaceID {
+				return fmt.Errorf("keyspace ID in meta does not match the one in key, meta Id: %d, keyspace ID: %d", meta.GetId(), keyspaceID)
 			}
-			rw.keyspaceCache.Save(meta.Id, meta.Name, meta.State)
+			rw.keyspaceCache.Save(meta.GetId(), meta.GetName(), meta.GetState())
 		}
 		bound := keyspace.MakeRegionBound(keyspaceID)
 		suspectKeyRanges.Append(bound.RawLeftBound, bound.RawRightBound)

@@ -89,7 +89,10 @@ func (se *StorageEndpoint) TryStartMaintenanceTaskAtomic(_ context.Context, task
 	logger := log.L().With(zap.String("component", "maintenance"), zap.String("op", "TryStartMaintenanceTaskAtomic"))
 	logger.Debug("Attempting to start maintenance task", zap.String("type", task.Type), zap.String("id", task.ID))
 	// Use a single atomic transaction with proper etcd pattern
-	rawTxn := se.CreateRawTxn()
+	rawTxn, err := se.createRawTxn()
+	if err != nil {
+		return false, nil, err
+	}
 
 	// Maintenance lock key to enforce single task type constraint
 	lockKey := keypath.MaintenanceTaskPath(MaintenanceLockName)
@@ -188,7 +191,10 @@ func (se *StorageEndpoint) TryDeleteMaintenanceTaskAtomic(_ context.Context, tas
 	logger := log.L().With(zap.String("component", "maintenance"), zap.String("op", "TryDeleteMaintenanceTaskAtomic"))
 	logger.Debug("Attempting to delete maintenance task", zap.String("type", taskType), zap.String("id", taskID))
 	// Use a single atomic transaction
-	rawTxn := se.CreateRawTxn()
+	rawTxn, err := se.createRawTxn()
+	if err != nil {
+		return false, nil, err
+	}
 
 	lockKey := keypath.MaintenanceTaskPath(MaintenanceLockName)
 	taskKey := keypath.MaintenanceTaskPath(taskType)

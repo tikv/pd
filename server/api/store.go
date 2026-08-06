@@ -619,6 +619,11 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stores = urlFilter.Filter(stores)
+	// GetScheduleConfig deep-clones the schedule config (the StoreLimit map and
+	// Schedulers slice, see #3603), so hoist it out of the per-store loop:
+	// BuildStoreInfo only reads scalar fields and never mutates the config, and a
+	// single snapshot keeps all stores consistent within one response.
+	cfg := h.GetScheduleConfig()
 	for _, s := range stores {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
@@ -627,7 +632,7 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(cfg, store)
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)
@@ -669,6 +674,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	cfg := h.GetScheduleConfig()
 	for _, s := range stores {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
@@ -677,7 +683,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(cfg, store)
 		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
 			continue
 		}

@@ -58,6 +58,8 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
+	handlers.RegisterMetaServiceGroup(root)
+	handlers.RegisterSafePoint(root)
 	handlers.RegisterMicroservice(root)
 	handlers.RegisterMaintenance(root)
 	root.Use(middlewares.AffinityMicroserviceRedirector())

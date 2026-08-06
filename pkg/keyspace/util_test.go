@@ -15,9 +15,12 @@
 package keyspace
 
 import (
+	"context"
 	"encoding/hex"
 	"math"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -25,8 +28,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/codec"
+	coreconstant "github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
@@ -60,6 +66,49 @@ func TestValidateID(t *testing.T) {
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateID(testCase.id) != nil)
 	}
+}
+
+func TestMakeRegionBound(t *testing.T) {
+	re := require.New(t)
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+
+	regionBound := MakeRegionBound(0x010203)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x03}), regionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x02, 0x04}), regionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x03}), regionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x02, 0x04}), regionBound.TxnRightBound)
+
+	carryRegionBound := MakeRegionBound(0x0102ff)
+	re.Equal(encodeKey([]byte{'r', 0x01, 0x03, 0x00}), carryRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0x01, 0x03, 0x00}), carryRegionBound.TxnRightBound)
+
+	maxRegionBound := MakeRegionBound(constant.MaxValidKeyspaceID)
+	re.Equal(encodeKey([]byte{'r', 0xff, 0xff, 0xff}), maxRegionBound.RawLeftBound)
+	re.Equal(encodeKey([]byte{'s', 0x00, 0x00, 0x00}), maxRegionBound.RawRightBound)
+	re.Equal(encodeKey([]byte{'x', 0xff, 0xff, 0xff}), maxRegionBound.TxnLeftBound)
+	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
+}
+
+func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	regionLabeler, err := labeler.NewRegionLabeler(ctx, endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), time.Hour)
+	re.NoError(err)
+
+	re.NoError(regionLabeler.SetLabelRule(MakeTxnLabelRule(constant.MaxValidKeyspaceID)))
+	encodeKey := func(key []byte) []byte {
+		return []byte(codec.EncodeBytes(key))
+	}
+	re.Equal(
+		[][]byte{
+			encodeKey([]byte{'x', 0xff, 0xff, 0xff}),
+			encodeKey([]byte{'y', 0x00, 0x00, 0x00}),
+		},
+		regionLabeler.GetSplitKeys(nil, nil),
+	)
 }
 
 func TestValidateName(t *testing.T) {
@@ -145,25 +194,23 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
+		boundType         regionBoundType
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
-			id: 0,
+			id:        0,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(0),
+				ID:    "keyspaces/0",
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   "id",
 						Value: "0",
 					},
 				},
-				RuleType: labeler.KeyRange,
+				RuleType: "key-range",
 				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 0})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0, 1})),
-					},
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
 						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
@@ -172,22 +219,19 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id: 4242,
+			id:        4242,
+			boundType: txnRegionBound,
 			expectedLabelRule: &labeler.LabelRule{
-				ID:    getRegionLabelID(4242),
+				ID:    "keyspaces/4242",
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   "id",
 						Value: "4242",
 					},
 				},
-				RuleType: labeler.KeyRange,
+				RuleType: "key-range",
 				Data: []any{
-					map[string]any{
-						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
-						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
-					},
 					map[string]any{
 						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
 						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
@@ -195,10 +239,38 @@ func TestMakeLabelRule(t *testing.T) {
 				},
 			},
 		},
+		{
+			id:        4242,
+			boundType: rawRegionBound,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'r', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+		re.Equal(testCase.expectedLabelRule, buildLabelRule(testCase.id, testCase.boundType))
 	}
+}
+
+func TestKeyTypeToRegionBoundType(t *testing.T) {
+	re := require.New(t)
+	re.Equal(rawRegionBound, keyTypeToRegionBoundType(coreconstant.Raw))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Table))
+	re.Equal(txnRegionBound, keyTypeToRegionBoundType(coreconstant.Txn))
 }
 
 func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
@@ -210,7 +282,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 	}{
 		// Valid keyspace label rule.
 		{
-			labelRule:  MakeLabelRule(1),
+			labelRule:  MakeTxnLabelRule(1),
 			expectedID: 1,
 			expectedOK: true,
 		},
@@ -221,7 +293,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -236,7 +308,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -250,8 +322,31 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - non-canonical keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:     "keyspaces/01",
+				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "01"}},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - out of valid keyspace range.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: "keyspaces/" + strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
 					},
 				},
 			},
@@ -267,6 +362,20 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 					{
 						Key:   "not-id",
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace zero label rule - missing keyspace ID label.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: getRegionLabelID(0),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "0",
 					},
 				},
 			},

@@ -25,7 +25,6 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -36,24 +35,33 @@ import (
 type RegionLabeler struct {
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
-	labelRules map[string]*LabelRule
-	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
-	ctx        context.Context
-	minExpire  *time.Time
+	ruleIndex labelRuleIndex
+	ctx       context.Context
+}
+
+// Unlock publishes all derived rule-index updates before releasing the write
+// lock. This keeps a dirty index private to the write-side critical section.
+func (l *RegionLabeler) Unlock() {
+	defer l.RWMutex.Unlock()
+	l.ruleIndex.buildRanges()
 }
 
 // NewRegionLabeler creates a Labeler instance.
 func NewRegionLabeler(ctx context.Context, storage endpoint.RuleStorage, gcInterval time.Duration) (*RegionLabeler, error) {
+	start := time.Now()
+	defer func() {
+		newRegionLabelerDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	l := &RegionLabeler{
-		storage:    storage,
-		labelRules: make(map[string]*LabelRule),
-		ctx:        ctx,
-		minExpire:  nil,
+		storage: storage,
+		ctx:     ctx,
 	}
 
 	if err := l.loadRules(); err != nil {
 		return nil, err
 	}
+	log.Info("new region labeler created", zap.Int("label-rules-count", len(l.ruleIndex.rules)))
 	go l.doGC(gcInterval)
 	return l, nil
 }
@@ -80,21 +88,17 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 	l.Lock()
 	defer l.Unlock()
 
-	if l.minExpire == nil || l.minExpire.After(now) {
+	if l.ruleIndex.minExpire == nil || l.ruleIndex.minExpire.After(now) {
 		return
 	}
 	var err error
-	deleted := false
 
-	for key, rule := range l.labelRules {
-		if !rule.checkAndRemoveExpireLabels(now) {
+	for key, rule := range l.ruleIndex.rules {
+		if !l.ruleIndex.removeExpiredLabels(rule, now) {
 			continue
 		}
 		if len(rule.Labels) == 0 {
 			err = l.DeleteLabelRuleLocked(key)
-			if err == nil {
-				deleted = true
-			}
 		} else {
 			err = l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
 				return l.storage.SaveRegionRule(txn, rule.ID, rule)
@@ -104,13 +108,11 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 			log.Error("failed to save rule expired label rule", zap.String("rule-key", key), zap.Error(err))
 		}
 	}
-	if deleted {
-		l.BuildRangeListLocked()
-	}
 }
 
 func (l *RegionLabeler) loadRules() error {
 	var toDelete []string
+	loadedRules := make(map[string]*LabelRule)
 	err := l.storage.LoadRegionRules(func(k, v string) {
 		r, err := NewLabelRuleFromJSON([]byte(v))
 		if err != nil {
@@ -122,7 +124,7 @@ func (l *RegionLabeler) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		l.labelRules[r.ID] = r
+		loadedRules[r.ID] = r
 	})
 	if err != nil {
 		return err
@@ -134,33 +136,21 @@ func (l *RegionLabeler) loadRules() error {
 			return err
 		}
 	}
-	l.BuildRangeListLocked()
+	l.ruleIndex = newLabelRuleIndex(loadedRules)
 	return nil
 }
 
-// BuildRangeListLocked builds the range list.
+// BuildRangeListLocked publishes pending derived rule-index updates.
+// Deprecated: Unlock publishes them automatically.
 func (l *RegionLabeler) BuildRangeListLocked() {
-	builder := rangelist.NewBuilder()
-	l.minExpire = nil
-	for _, rule := range l.labelRules {
-		if l.minExpire == nil || rule.expireBefore(*l.minExpire) {
-			l.minExpire = rule.minExpire
-		}
-		if rule.RuleType == KeyRange {
-			rs := rule.Data.([]*KeyRangeRule)
-			for _, r := range rs {
-				builder.AddItem(r.StartKey, r.EndKey, rule)
-			}
-		}
-	}
-	l.rangeList = builder.Build()
+	l.ruleIndex.buildRanges()
 }
 
 // GetSplitKeys returns all split keys in the range (start, end).
 func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 	l.RLock()
 	defer l.RUnlock()
-	return l.rangeList.GetSplitKeys(start, end)
+	return l.ruleIndex.getSplitKeys(start, end)
 }
 
 func filterExpiredLabels(rule *LabelRule, now time.Time) *LabelRule {
@@ -203,13 +193,30 @@ func (l *RegionLabeler) GetAllLabelRules() []*LabelRule {
 	defer l.RUnlock()
 
 	now := time.Now()
-	rules := make([]*LabelRule, 0, len(l.labelRules))
-	for _, rule := range l.labelRules {
+	rules := make([]*LabelRule, 0, len(l.ruleIndex.rules))
+	for _, rule := range l.ruleIndex.rules {
 		if filteredRule := filterExpiredLabels(rule, now); filteredRule != nil {
 			rules = append(rules, filteredRule)
 		}
 	}
 	return rules
+}
+
+// GetRuleAndKeyRangeCounts returns the number of effective label rules and key ranges.
+func (l *RegionLabeler) GetRuleAndKeyRangeCounts() (ruleCount, keyRangeCount int) {
+	l.RLock()
+	defer l.RUnlock()
+
+	now := time.Now()
+	for _, rule := range l.ruleIndex.rules {
+		filteredRule := filterExpiredLabels(rule, now)
+		if filteredRule == nil {
+			continue
+		}
+		ruleCount++
+		keyRangeCount += len(filteredRule.GetKeyRanges())
+	}
+	return ruleCount, keyRangeCount
 }
 
 // GetLabelRules returns the rules that match the given ids.
@@ -220,7 +227,7 @@ func (l *RegionLabeler) GetLabelRules(ids []string) ([]*LabelRule, error) {
 	now := time.Now()
 	rules := make([]*LabelRule, 0, len(ids))
 	for _, id := range ids {
-		if rule, ok := l.labelRules[id]; ok {
+		if rule, ok := l.ruleIndex.rules[id]; ok {
 			if filteredRule := filterExpiredLabels(rule, now); filteredRule != nil {
 				rules = append(rules, filteredRule)
 			}
@@ -238,7 +245,7 @@ func (l *RegionLabeler) GetLabelRule(id string) *LabelRule {
 
 // GetLabelRuleLocked returns the Rule with the same ID.
 func (l *RegionLabeler) GetLabelRuleLocked(id string) *LabelRule {
-	rule, ok := l.labelRules[id]
+	rule, ok := l.ruleIndex.rules[id]
 	if !ok {
 		return nil
 	}
@@ -259,12 +266,12 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 	// only Lock for in-memory update
 	l.Lock()
 	defer l.Unlock()
-	l.labelRules[rule.ID] = rule
-	l.BuildRangeListLocked()
+	l.ruleIndex.set(rule)
 	return nil
 }
 
-// SetLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
+// SetLabelRuleLocked inserts or updates a LabelRule. The enclosing Unlock
+// publishes derived index updates.
 // It updates the in-memory states and storage at the same time.
 // Callers must have already validated/adjusted the rule (checkAndAdjust or
 // NewLabelRuleFromJSON), because this method does not re-validate.
@@ -275,7 +282,7 @@ func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	}); err != nil {
 		return err
 	}
-	l.labelRules[rule.ID] = rule
+	l.ruleIndex.set(rule)
 	return nil
 }
 
@@ -290,15 +297,15 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	// only Lock for in-memory update
 	l.Lock()
 	defer l.Unlock()
-	if _, ok := l.labelRules[id]; !ok {
+	if _, ok := l.ruleIndex.rules[id]; !ok {
 		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 	}
-	delete(l.labelRules, id)
-	l.BuildRangeListLocked()
+	l.ruleIndex.delete(id)
 	return nil
 }
 
-// DeleteLabelRuleLocked removes a LabelRule but not buildRangeList.
+// DeleteLabelRuleLocked removes a LabelRule. The enclosing Unlock publishes
+// derived index updates.
 // It updates the in-memory states and storage at the same time.
 // It should be used in watcher.
 func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
@@ -307,7 +314,7 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 	}); err != nil {
 		return err
 	}
-	delete(l.labelRules, id)
+	l.ruleIndex.delete(id)
 	return nil
 }
 
@@ -351,12 +358,11 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	defer l.Unlock()
 
 	for _, key := range patch.DeleteRules {
-		delete(l.labelRules, key)
+		l.ruleIndex.delete(key)
 	}
 	for _, rule := range setRulesMap {
-		l.labelRules[rule.ID] = rule
+		l.ruleIndex.set(rule)
 	}
-	l.BuildRangeListLocked()
 	return nil
 }
 
@@ -368,21 +374,28 @@ func (l *RegionLabeler) GetRegionLabel(region *core.RegionInfo, key string) stri
 	now := time.Now()
 	value, index := "", -1
 	// search ranges
-	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
-		for _, rule := range data {
-			r := rule.(*LabelRule)
-			if r.Index <= index && value != "" {
+	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
+	if !ok {
+		return ""
+	}
+	applyRule := func(r *LabelRule) {
+		if r.Index <= index && value != "" {
+			return
+		}
+		for _, label := range r.Labels {
+			if label.expireBefore(now) {
 				continue
 			}
-			for _, l := range r.Labels {
-				if l.expireBefore(now) {
-					continue
-				}
-				if l.Key == key {
-					value, index = l.Value, r.Index
-				}
+			if label.Key == key {
+				value, index = label.Value, r.Index
 			}
 		}
+	}
+	for _, rule := range rules {
+		applyRule(rule.(*LabelRule))
+	}
+	if keyspaceRule != nil {
+		applyRule(keyspaceRule)
 	}
 	return value
 }
@@ -405,17 +418,23 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 	labels := make(map[string]valueIndex)
 	now := time.Now()
 	// search ranges
-	if i, data := l.rangeList.GetData(region.GetStartKey(), region.GetEndKey()); i != -1 {
-		for _, rule := range data {
-			r := rule.(*LabelRule)
-			for _, l := range r.Labels {
-				if l.expireBefore(now) {
+	rules, keyspaceRule, ok := l.ruleIndex.getRangeRules(region.GetStartKey(), region.GetEndKey())
+	if ok {
+		applyRule := func(r *LabelRule) {
+			for _, label := range r.Labels {
+				if label.expireBefore(now) {
 					continue
 				}
-				if old, ok := labels[l.Key]; !ok || old.index < r.Index {
-					labels[l.Key] = valueIndex{l.Value, r.Index}
+				if old, ok := labels[label.Key]; !ok || old.index < r.Index {
+					labels[label.Key] = valueIndex{label.Value, r.Index}
 				}
 			}
+		}
+		for _, rule := range rules {
+			applyRule(rule.(*LabelRule))
+		}
+		if keyspaceRule != nil {
+			applyRule(keyspaceRule)
 		}
 	}
 	result := make([]*RegionLabel, 0, len(labels))
@@ -441,7 +460,7 @@ func MakeKeyRanges(keys ...string) []any {
 func (l *RegionLabeler) IterateLabelRules(iterator func(rule *LabelRule) bool) {
 	l.RLock()
 	defer l.RUnlock()
-	for _, rule := range l.labelRules {
+	for _, rule := range l.ruleIndex.rules {
 		if !iterator(rule) {
 			return
 		}

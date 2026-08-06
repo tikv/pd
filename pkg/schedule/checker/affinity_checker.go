@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -44,6 +45,7 @@ const recentMergeTTL = time.Minute
 type AffinityChecker struct {
 	PauseController
 	cluster          sche.CheckerCluster
+	ruleManager      *placement.RuleManager
 	affinityManager  *affinity.Manager
 	conf             config.CheckerConfigProvider
 	recentMergeCache *cache.TTLUint64
@@ -54,6 +56,7 @@ type AffinityChecker struct {
 func NewAffinityChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *AffinityChecker {
 	return &AffinityChecker{
 		cluster:          cluster,
+		ruleManager:      cluster.GetRuleManager(),
 		affinityManager:  cluster.GetAffinityManager(),
 		conf:             conf,
 		recentMergeCache: cache.NewIDTTL(ctx, gcInterval, recentMergeTTL),
@@ -71,12 +74,20 @@ func (*AffinityChecker) Name() string {
 	return types.AffinityChecker.String()
 }
 
+func (c *AffinityChecker) hasAffinityGroups() bool {
+	return c.affinityManager != nil && c.affinityManager.GetAffinityGroupCount() > 0
+}
+
 // Check verifies a region's replicas according to affinity group constraints, creating an Operator if needed.
 func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 	affinityCheckerCounter.Inc()
 
 	if c.IsPaused() {
 		affinityCheckerPausedCounter.Inc()
+		return nil
+	}
+	if !c.cluster.GetSharedConfig().IsPlacementRulesEnabled() {
+		affinityCheckerPlacementRulesDisabledCounter.Inc()
 		return nil
 	}
 
@@ -89,15 +100,21 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		affinityCheckerUnhealthyRegionCounter.Inc()
 		return nil
 	}
-	if !filter.IsRegionReplicated(c.cluster, region) {
-		affinityCheckerAbnormalReplicaCounter.Inc()
+
+	if !c.hasAffinityGroups() {
 		return nil
 	}
 
-	// Get the affinity group for this region
+	// Check the affinity group before the heavier best-location gate. Most regions
+	// are not affinity regions.
 	group, isAffinity := c.affinityManager.GetAndCacheRegionAffinityGroupState(region)
 	if group == nil {
-		// Region doesn't belong to any affinity group
+		// Region doesn't belong to any affinity group.
+		return nil
+	}
+
+	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(region, true /* isExistingRegion */) {
+		affinityCheckerAbnormalReplicaCounter.Inc()
 		return nil
 	}
 
@@ -111,8 +128,9 @@ func (c *AffinityChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		// so expire the group first, then provide the available Region information and fetch the Group state again.
 		if !isAffinity {
 			targetRegion := cloneRegionWithReplacePeerStores(region, group.LeaderStoreID, group.VoterStoreIDs...)
-			if targetRegion == nil || !filter.IsRegionReplicated(c.cluster, targetRegion) {
+			if targetRegion == nil || !c.isRegionPlacementRuleSatisfiedWithBestLocation(targetRegion, false /* isExistingRegion */) {
 				c.affinityManager.ExpireAffinityGroup(group.ID)
+				group = c.affinityManager.GetAffinityGroupState(group.ID)
 				needRefetch = true
 			}
 		}
@@ -377,7 +395,7 @@ func (c *AffinityChecker) checkAffinityMergeTarget(region, adjacent *core.Region
 		return false
 	}
 
-	if !filter.IsRegionReplicated(c.cluster, adjacent) {
+	if !c.isRegionPlacementRuleSatisfiedWithBestLocation(adjacent, true /* isExistingRegion */) {
 		affinityMergeCheckerAdjAbnormalReplicaCounter.Inc()
 		return false
 	}
@@ -486,4 +504,61 @@ func (c *AffinityChecker) RecordOpSuccess(op *operator.Operator) {
 	}
 	c.recentMergeCache.PutWithTTL(op.RegionID(), nil, recentMergeTTL)
 	c.recentMergeCache.PutWithTTL(relatedID, nil, recentMergeTTL)
+}
+
+// isRegionPlacementRuleSatisfiedWithBestLocation is an affinity-specific
+// scheduling gate. Besides requiring the region to satisfy placement rules, it
+// also requires that affinity scheduling cannot find a strictly better location
+// under the current topology and that the matched rule's isolation level is
+// satisfied. This is intentionally stricter than filter.IsRegionReplicated and
+// should not be used as a general replicated-state check.
+func (c *AffinityChecker) isRegionPlacementRuleSatisfiedWithBestLocation(region *core.RegionInfo, isExistingRegion bool) bool {
+	// Get the RegionFit for the given Region. If the Region is not an existing Region but a virtual target state,
+	// use FitRegionWithoutCache to bypass the cache.
+	var fit *placement.RegionFit
+	if isExistingRegion {
+		fit = c.ruleManager.FitRegion(c.cluster, region)
+	} else {
+		fit = c.ruleManager.FitRegionWithoutCache(c.cluster, region)
+	}
+
+	// Check region is satisfied
+	if fit == nil || !fit.IsSatisfied() {
+		return false
+	}
+
+	// Check whether all peers covered by the rules are at the best isolation level.
+	// This logic is based on `RuleChecker.fixBetterLocation`.
+	for _, rf := range fit.RuleFits {
+		if len(rf.Rule.LocationLabels) == 0 {
+			continue
+		}
+		isWitness := rf.Rule.IsWitness && isWitnessEnabled(c.cluster)
+		// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
+		strategy := c.strategy(region, rf.Rule, isWitness)
+		_, newStoreID, filterByTempState := strategy.getBetterLocation(c.cluster, region, fit, rf)
+		// filterByTempState being true means a better placement exists but is temporarily unschedulable.
+		// This is also considered not satisfied.
+		if newStoreID != 0 || filterByTempState {
+			return false
+		}
+		// If the isolation level does not meet the requirement, it is also considered not to be at the best location.
+		if !statistics.IsRegionLabelIsolationSatisfied(rf.Stores, rf.Rule.LocationLabels, rf.Rule.IsolationLevel) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (c *AffinityChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+	return &ReplicaStrategy{
+		checkerName:    c.Name(),
+		cluster:        c.cluster,
+		isolationLevel: rule.IsolationLevel,
+		locationLabels: rule.LocationLabels,
+		region:         region,
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
+		fastFailover:   fastFailover,
+	}
 }

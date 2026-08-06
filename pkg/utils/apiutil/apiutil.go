@@ -17,6 +17,7 @@ package apiutil
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -55,7 +56,7 @@ const (
 
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
-	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD locally.
 	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle" // #nosec G101
 	// XForwardedForHeader is used to mark the client IP.
 	XForwardedForHeader = "X-Forwarded-For"
@@ -282,6 +283,15 @@ func DoDelete(client *http.Client, url string) (*http.Response, error) {
 	return client.Do(req)
 }
 
+// DoDeleteWithContext is used to send delete request with context and return http response.
+func DoDeleteWithContext(ctx context.Context, client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 func checkResponse(resp *http.Response, err error) error {
 	if err != nil {
 		return errors.WithStack(err)
@@ -335,30 +345,35 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
-	if v, ok := input[option].(string); ok {
-		for _, c := range collectors {
-			c(v)
-		}
-		return nil
+	v, exist := input[option]
+	if !exist {
+		return errs.ErrOptionNotExist.FastGenByArgs(option)
 	}
-	return errs.ErrOptionNotExist.FastGenByArgs(option)
+	str, ok := v.(string)
+	if !ok {
+		return errs.ErrOptionTypeInvalid.FastGenByArgs(option)
+	}
+	for _, c := range collectors {
+		c(str)
+	}
+	return nil
 }
 
-// ParseKey is used to parse interface into []byte and string
+// ParseKey decodes a hex-encoded key string and returns the decoded key with the original hex string.
 func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
 	}
-	rawKey, ok := k.(string)
+	keyHex, ok := k.(string)
 	if !ok {
 		return nil, "", fmt.Errorf("bad format %s", name)
 	}
-	returned, err := hex.DecodeString(rawKey)
+	key, err := hex.DecodeString(keyHex)
 	if err != nil {
 		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
 	}
-	return returned, rawKey, nil
+	return key, keyHex, nil
 }
 
 // ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".

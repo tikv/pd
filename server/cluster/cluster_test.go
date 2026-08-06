@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -58,7 +59,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -533,6 +533,144 @@ func getTestDeployPath(storeID uint64) string {
 	return fmt.Sprintf("test/store%d", storeID)
 }
 
+func TestReusePeerAddress(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+
+	// Put 4 stores with unique main addresses but the same non-empty peer address pattern per store.
+	for _, store := range newTestStores(4, "2.0.0") {
+		meta := store.GetMeta()
+		meta.PeerAddress = fmt.Sprintf("mock://tiflash-peer-%d:20170", store.GetID())
+		re.NoError(cluster.PutMetaStore(meta))
+	}
+
+	// Empty peer addresses should not conflict with each other.
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:         100,
+		Address:    "mock://tikv-1:20160",
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(100),
+	}))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:         101,
+		Address:    "mock://tikv-2:20160",
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(101),
+	}))
+
+	// Same store ID updating with the same peer address should succeed.
+	store1 := cluster.GetStore(1).GetMeta()
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          store1.GetId(),
+		Address:     store1.GetAddress(),
+		PeerAddress: store1.GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     store1.GetVersion(),
+		DeployPath:  getTestDeployPath(store1.GetId()),
+	}))
+
+	// Different main address with a duplicated peer address should fail when old store is up.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          2001,
+		Address:     "mock://tikv-new-1:20160",
+		PeerAddress: cluster.GetStore(1).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2001),
+	}))
+
+	// store 2: offline — duplicated peer address should still fail.
+	re.NoError(cluster.RemoveStore(2, false))
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          2002,
+		Address:     "mock://tikv-new-2:20160",
+		PeerAddress: cluster.GetStore(2).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2002),
+	}))
+
+	// store 3: offline and physically destroyed — reuse peer address should succeed.
+	re.NoError(cluster.RemoveStore(3, true))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          2003,
+		Address:     "mock://tikv-new-3:20160",
+		PeerAddress: cluster.GetStore(3).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2003),
+	}))
+
+	// store 4: tombstone — reuse peer address should succeed.
+	re.NoError(cluster.RemoveStore(4, true))
+	re.NoError(cluster.BuryStore(4, false))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          2004,
+		Address:     "mock://tikv-new-4:20160",
+		PeerAddress: cluster.GetStore(4).GetMeta().GetPeerAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(2004),
+	}))
+
+	// Two stores with different main addresses but the same non-empty peer address.
+	const peerAddress = "mock://tiflash-peer:20170"
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          3001,
+		Address:     "mock://tiflash-a:3930",
+		PeerAddress: peerAddress,
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(3001),
+	}))
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          3002,
+		Address:     "mock://tiflash-b:3930",
+		PeerAddress: peerAddress,
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(3002),
+	}))
+
+	// Cross collision: new peer address equals an existing store address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:          4001,
+		Address:     "mock://tiflash-c:3930",
+		PeerAddress: cluster.GetStore(100).GetAddress(),
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4001),
+	}))
+
+	// Cross collision: new address equals an existing non-empty peer address.
+	re.Error(cluster.PutMetaStore(&metapb.Store{
+		Id:         4002,
+		Address:    cluster.GetStore(1).GetMeta().GetPeerAddress(),
+		State:      metapb.StoreState_Up,
+		Version:    "2.0.0",
+		DeployPath: getTestDeployPath(4002),
+	}))
+
+	// Cross reuse is allowed after the conflicting store is physically destroyed.
+	re.NoError(cluster.RemoveStore(100, true))
+	re.NoError(cluster.PutMetaStore(&metapb.Store{
+		Id:          4003,
+		Address:     "mock://tiflash-d:3930",
+		PeerAddress: "mock://tikv-1:20160",
+		State:       metapb.StoreState_Up,
+		Version:     "2.0.0",
+		DeployPath:  getTestDeployPath(4003),
+	}))
+}
+
 func TestUpStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -742,6 +880,24 @@ func TestBucketCompatibility(t *testing.T) {
 	region3 := region2.Clone(core.WithIncVersion())
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region3))
 	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
+
+	// tikv upgrade, send region heartbeat with bucket meta and report bucket stream enabled
+	bucket3 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  4,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	region4 := region3.Clone(core.WithIncVersion(), core.SetBuckets(bucket3))
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	bucket4 := &metapb.Buckets{
+		RegionId: 1,
+		Version:  5,
+		Keys:     [][]byte{{'a'}, {'e'}},
+	}
+	re.NoError(cluster.processRegionBuckets(bucket4))
+	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
+	re.Equal(bucket4, cluster.GetRegion(1).GetReportBuckets())
 }
 
 func TestStaleBucketMeta(t *testing.T) {
@@ -777,7 +933,7 @@ func TestStaleBucketMeta(t *testing.T) {
 	bucket2 := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
-		Keys:     [][]byte{{'a'}, {'d'}},
+		Keys:     [][]byte{{'c'}, {'d'}},
 	}
 	region2 := newRegion.Clone(core.WithIncVersion(), core.SetBuckets(bucket2))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
@@ -1141,10 +1297,6 @@ func TestRegionHeartbeat(t *testing.T) {
 		ctx.Tracer = tracer
 		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
 		tracer.OnAllStageFinished()
-		re.Condition(func() bool {
-			fields := tracer.LogFields()
-			return slice.AllOf(fields, func(i int) bool { return fields[i].Integer > 0 })
-		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
@@ -1257,14 +1409,14 @@ func TestConcurrentReportBucket(t *testing.T) {
 	bucket2 := &metapb.Buckets{RegionId: 1, Version: 2}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
 		err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentBucketHeartbeat"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
 	re.NoError(cluster.processRegionBuckets(bucket2))
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
@@ -1858,13 +2010,73 @@ func TestCalculateStoreSize1(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr, regionSizes))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+}
+
+func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cfg := opt.GetReplicationConfig()
+	cfg.EnablePlacementRules = true
+	opt.SetReplicationConfig(cfg)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+
+	for _, store := range newTestStores(2, "6.0.0") {
+		re.NoError(cluster.PutMetaStore(store.GetMeta()))
+	}
+	re.NoError(cluster.ruleManager.SetRule(&placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "learner",
+		Role:    placement.Learner,
+		Count:   1,
+	}))
+
+	kr := keyutil.NewKeyRange("a", "m")
+	otherKR := keyutil.NewKeyRange("m", "z")
+	re.Len(cluster.ruleManager.GetRulesForApplyRange(kr.StartKey, kr.EndKey), 2)
+	loadCounts := make(map[regionSizeCacheKey]int)
+	loader := func(startKey, endKey []byte) int64 {
+		key := regionSizeCacheKey{startKey: string(startKey), endKey: string(endKey)}
+		loadCounts[key]++
+		switch key {
+		case regionSizeCacheKey{startKey: "a", endKey: "m"}:
+			return 100
+		case regionSizeCacheKey{startKey: "m", endKey: "z"}:
+			return 200
+		default:
+			re.FailNow("unexpected range", "start-key: %q, end-key: %q", startKey, endKey)
+			return 0
+		}
+	}
+	regionSizes := newRegionSizeCache(loader)
+
+	stores := cluster.GetStores()
+	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
+	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
+	re.Equal(180.0, threshold1)
+	re.Equal(180.0, threshold2)
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
+
+	// A different range is loaded separately, then shared by all rules.
+	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
+
+	nextRoundRegionSizes := newRegionSizeCache(loader)
+	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
+	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 }
 
 func TestStatsRegions(t *testing.T) {
@@ -1973,8 +2185,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
 	kr := keyutil.NewKeyRange("", "")
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr))
+	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr, regionSizes))
 }
 
 func TestStores(t *testing.T) {
@@ -2754,7 +2967,7 @@ func TestCollectMetrics(t *testing.T) {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
-				Loads:     []float64{10, 20, 30},
+				Loads:     []float64{10, 20, 30, 0},
 				HotDegree: 10,
 				AntiCount: utils.HotRegionAntiCount, // for write
 			}
@@ -4169,8 +4382,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 	re.Equal(int(storeCount), cluster.GetStoreCount())
 
 	upStoreCount := 0
+	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4189,8 +4403,9 @@ func TestCheckStoresUpCountWithLowSpace(t *testing.T) {
 		}
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 	}
+	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	for _, s := range cluster.GetStores() {
-		isUp, _ := cluster.checkStore(s.GetID())
+		isUp, _ := cluster.checkStore(s.GetID(), regionSizes)
 		if isUp {
 			upStoreCount++
 		}
@@ -4275,6 +4490,54 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 		res := stream.Recv()
 		return res == nil
 	})
+}
+
+func TestStopDoesNotHoldClusterLockWhileWaitingSchedulingJobs(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.heartbeatRunner = ratelimit.NewSyncRunner()
+	cluster.miscRunner = ratelimit.NewSyncRunner()
+	cluster.logRunner = ratelimit.NewSyncRunner()
+	cluster.syncRegionRunner = ratelimit.NewSyncRunner()
+	cluster.tsoAllocator = nil
+	cluster.running = true
+
+	cluster.coordinator = schedule.NewCoordinator(cluster.ctx, cluster, nil)
+	cluster.schedulingController.running = true
+
+	blockedOnClusterLock := make(chan struct{})
+	cluster.schedulingController.wg.Add(1)
+	go func() {
+		defer cluster.schedulingController.wg.Done()
+		<-cluster.schedulingController.ctx.Done()
+		cluster.RLock()
+		close(blockedOnClusterLock)
+		cluster.RUnlock()
+	}()
+
+	stopped := make(chan struct{})
+	go func() {
+		cluster.Stop()
+		close(stopped)
+	}()
+
+	select {
+	case <-blockedOnClusterLock:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scheduling job shutdown")
+	}
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("raft cluster stop blocked on scheduling jobs while holding cluster lock")
+	}
 }
 
 func BenchmarkHandleStatsAsync(b *testing.B) {

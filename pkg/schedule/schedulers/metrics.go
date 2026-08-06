@@ -163,6 +163,14 @@ var (
 			Help:      "Status of the rule.",
 		}, []string{"type"})
 
+	regionLabelStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "region_label",
+			Name:      "status",
+			Help:      "Status of the region labeler.",
+		}, []string{"type"})
+
 	balanceRangeGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -182,6 +190,7 @@ var (
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
 	prometheus.MustRegister(ruleStatusGauge)
+	prometheus.MustRegister(regionLabelStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
@@ -327,6 +336,7 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = hotRegionCounterWithEvent("write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = hotRegionCounterWithEvent("read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = hotRegionCounterWithEvent("write-skip-query-uniform-store")
+	readSkipCPUDimUniformStoreCounter    = hotRegionCounterWithEvent("read-skip-cpu-uniform-store")
 	pendingOpFailsStoreCounter           = hotRegionCounterWithEvent("pending-op-fails")
 
 	labelCounter            = labelCounterWithEvent("schedule")

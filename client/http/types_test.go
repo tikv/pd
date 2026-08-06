@@ -159,6 +159,24 @@ func TestMergeRegionsInfo(t *testing.T) {
 	}
 }
 
+func TestRegionInfoApproximateKvSizeDecode(t *testing.T) {
+	re := require.New(t)
+
+	var region RegionInfo
+	err := json.Unmarshal([]byte(`{"approximate_kv_size":123}`), &region)
+	re.NoError(err)
+	re.Equal(int64(123), region.ApproximateKvSize)
+}
+
+func TestRegionInfoApproximateKvSizeDefaultZero(t *testing.T) {
+	re := require.New(t)
+
+	var region RegionInfo
+	err := json.Unmarshal([]byte(`{}`), &region)
+	re.NoError(err)
+	re.Zero(region.ApproximateKvSize)
+}
+
 func TestRuleStartEndKey(t *testing.T) {
 	re := require.New(t)
 	// Empty start/end key and key hex.
@@ -298,6 +316,78 @@ func TestRuleOpStartEndKey(t *testing.T) {
 	re.Equal(ruleOpToMarshal.EndKeyHex, ruleOp.EndKeyHex)
 	re.Equal(ruleOpToMarshal.Action, ruleOp.Action)
 	re.Equal(ruleOpToMarshal.DeleteByIDPrefix, ruleOp.DeleteByIDPrefix)
+}
+
+func TestHotRegionStatsCPUFields(t *testing.T) {
+	re := require.New(t)
+	raw := []byte(`{
+		"as_peer": {
+			"1": {
+				"store_bytes": 10,
+				"store_keys": 11,
+				"store_query": 12,
+				"store_cpu": 13,
+				"total_flow_bytes": 20,
+				"total_flow_keys": 21,
+				"total_flow_query": 22,
+				"total_flow_cpu": 23,
+				"regions_count": 1,
+				"statistics": [{
+					"store_id": 1,
+					"stores": [1, 2],
+					"is_leader": true,
+					"is_learner": false,
+					"region_id": 100,
+					"hot_degree": 6,
+					"flow_bytes": 30,
+					"flow_keys": 31,
+					"flow_query": 32,
+					"flow_cpu": 33,
+					"anti_count": 4
+				}]
+			}
+		},
+		"as_leader": {
+			"2": {
+				"store_bytes": 40,
+				"store_keys": 41,
+				"store_query": 42,
+				"store_cpu": 43,
+				"total_flow_bytes": 50,
+				"total_flow_keys": 51,
+				"total_flow_query": 52,
+				"total_flow_cpu": 53,
+				"regions_count": 1,
+				"statistics": [{
+					"store_id": 2,
+					"stores": [2, 3],
+					"is_leader": true,
+					"is_learner": false,
+					"region_id": 200,
+					"hot_degree": 7,
+					"flow_bytes": 60,
+					"flow_keys": 61,
+					"flow_query": 62,
+					"flow_cpu": 63,
+					"anti_count": 5
+				}]
+			}
+		}
+	}`)
+
+	var stats StoreHotPeersInfos
+	err := json.Unmarshal(raw, &stats)
+	re.NoError(err)
+
+	re.Equal(13.0, stats.AsPeer[1].StoreCPURate)
+	re.Equal(23.0, stats.AsPeer[1].TotalCPURate)
+	re.Len(stats.AsPeer[1].Stats, 1)
+	re.Equal(33.0, stats.AsPeer[1].Stats[0].CPURate)
+
+	re.Equal(43.0, stats.AsLeader[2].StoreCPURate)
+	re.Equal(53.0, stats.AsLeader[2].TotalCPURate)
+	re.Len(stats.AsLeader[2].Stats, 1)
+	re.Equal(63.0, stats.AsLeader[2].Stats[0].CPURate)
 }
 
 func mustMarshalAndUnmarshalRuleOp(re *require.Assertions, ruleOp *RuleOp) *RuleOp {

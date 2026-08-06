@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -44,8 +45,14 @@ import (
 type stage int
 
 const (
-	storeRequestInterval = time.Second * 40
+	defaultPlanExecutionTimeout = time.Second * 60
 )
+
+var globalRecoveryStep = uint64(time.Now().UnixNano())
+
+func nextRecoveryStep() uint64 {
+	return atomic.AddUint64(&globalRecoveryStep, 1)
+}
 
 // Stage transition graph: for more details, please check `Controller.HandleStoreHeartbeat()`
 //
@@ -122,10 +129,17 @@ type Controller struct {
 	cluster cluster
 	stage   stage
 	// the round of recovery, which is an increasing number to identify the reports of each round
-	step         uint64
-	failedStores map[uint64]struct{}
-	timeout      time.Time
-	autoDetect   bool
+	step              uint64
+	recoveryStartStep uint64
+	failedStores      map[uint64]struct{}
+	timeout           time.Time
+	autoDetect        bool
+	// planExecutionTimeout is the duration PD waits for a store to execute the recovery plan
+	// before dispatching the same plan again.
+	planExecutionTimeout time.Duration
+	// disableParanoidCheck skips the sanity check that newly created empty regions
+	// don't overlap with any collected peer report.
+	disableParanoidCheck bool
 
 	// collected reports from store, if not reported yet, it would be nil
 	storeReports      map[uint64]*pdpb.StoreReport
@@ -169,6 +183,7 @@ func NewController(cluster cluster) *Controller {
 func (u *Controller) reset() {
 	u.stage = Idle
 	u.step = 0
+	u.recoveryStartStep = 0
 	u.failedStores = make(map[uint64]struct{})
 	u.storeReports = make(map[uint64]*pdpb.StoreReport)
 	u.numStoresReported = 0
@@ -180,6 +195,8 @@ func (u *Controller) reset() {
 	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
 	u.orphanedPeers = make(map[uint64][]*metapb.Peer)
 	u.err = nil
+	u.planExecutionTimeout = defaultPlanExecutionTimeout
+	u.disableParanoidCheck = false
 }
 
 // IsRunning returns whether there is ongoing unsafe recovery process. If yes, further unsafe
@@ -194,8 +211,24 @@ func isRunning(s stage) bool {
 	return s != Idle && s != Finished && s != Failed
 }
 
+// RemoveFailedStoresOptions controls optional unsafe recovery behavior.
+type RemoveFailedStoresOptions struct {
+	PlanExecutionTimeout time.Duration
+	DisableParanoidCheck bool
+}
+
 // RemoveFailedStores removes Failed stores from the cluster.
 func (u *Controller) RemoveFailedStores(failedStores map[uint64]struct{}, timeout uint64, autoDetect bool) error {
+	return u.RemoveFailedStoresWithOptions(failedStores, timeout, autoDetect, RemoveFailedStoresOptions{})
+}
+
+// RemoveFailedStoresWithOptions removes Failed stores from the cluster with options.
+func (u *Controller) RemoveFailedStoresWithOptions(
+	failedStores map[uint64]struct{},
+	timeout uint64,
+	autoDetect bool,
+	options RemoveFailedStoresOptions,
+) error {
 	u.Lock()
 	defer u.Unlock()
 
@@ -237,9 +270,33 @@ func (u *Controller) RemoveFailedStores(failedStores map[uint64]struct{}, timeou
 	}
 
 	u.timeout = time.Now().Add(time.Duration(timeout) * time.Second)
+	u.recoveryStartStep = nextRecoveryStep()
+	u.step = u.recoveryStartStep
 	u.failedStores = failedStores
 	u.autoDetect = autoDetect
+	if options.PlanExecutionTimeout > 0 {
+		u.planExecutionTimeout = options.PlanExecutionTimeout
+	}
+	u.disableParanoidCheck = options.DisableParanoidCheck
 	u.changeStage(CollectReport)
+	return nil
+}
+
+// AbortFailedStoresRemoval aborts the current unsafe recovery process in a best-effort way.
+// It asks TiKV to exit force leader by dispatching empty recovery plans, but any plan that
+// has already been delivered to TiKV may keep running until TiKV finishes or times it out.
+func (u *Controller) AbortFailedStoresRemoval() error {
+	u.Lock()
+	defer u.Unlock()
+
+	if !isRunning(u.stage) {
+		return errs.ErrUnsafeRecoveryInvalidInput.FastGenByArgs("no ongoing unsafe recovery")
+	}
+	if u.stage == ExitForceLeader {
+		return nil
+	}
+
+	u.handleErr(errors.New("aborted by operator"))
 	return nil
 }
 
@@ -321,7 +378,7 @@ func (u *Controller) handleErr(err error) bool {
 	// blocks reads and writes.
 	u.storePlanExpires = make(map[uint64]time.Time)
 	u.storeRecoveryPlans = make(map[uint64]*pdpb.RecoveryPlan)
-	u.timeout = time.Now().Add(storeRequestInterval * 2)
+	u.timeout = time.Now().Add(u.planExecutionTimeout * 2)
 	// empty recovery plan would trigger exit force leader
 	u.changeStage(ExitForceLeader)
 	return false
@@ -463,7 +520,7 @@ func (u *Controller) dispatchPlan(heartbeat *pdpb.StoreHeartbeatRequest, resp *p
 		// Dispatch the recovery plan to the store, and the plan may be empty.
 		resp.RecoveryPlan = u.getRecoveryPlan(storeID)
 		resp.RecoveryPlan.Step = u.step
-		u.storePlanExpires[storeID] = now.Add(storeRequestInterval)
+		u.storePlanExpires[storeID] = now.Add(u.planExecutionTimeout)
 	}
 }
 
@@ -528,6 +585,12 @@ func (u *Controller) changeStage(stage stage) {
 			}
 			output.Details = append(output.Details, fmt.Sprintf("Failed stores %s", strings.Join(ids, ", ")))
 		}
+		if u.disableParanoidCheck {
+			output.Details = append(output.Details, "paranoid check disabled")
+		}
+		if u.planExecutionTimeout != defaultPlanExecutionTimeout {
+			output.Details = append(output.Details, fmt.Sprintf("plan execution timeout %s", u.planExecutionTimeout))
+		}
 
 	case TombstoneTiFlashLearner:
 		output.Info = "Unsafe recovery enters tombstone TiFlash learner stage"
@@ -550,8 +613,9 @@ func (u *Controller) changeStage(stage stage) {
 			output.Details = append(output.Details, fmt.Sprintf("triggered by error: %v", u.err.Error()))
 		}
 	case Finished:
-		if u.step > 1 {
-			// == 1 means no operation has done, no need to invalid cache
+		if u.step > u.recoveryStartStep+1 {
+			// Only CollectReport has finished when step == recoveryStartStep+1,
+			// which means no operation has done and no cache invalidation is needed.
 			u.cluster.ResetRegionCache()
 		}
 		output.Info = "Unsafe recovery Finished"
@@ -584,7 +648,7 @@ func (u *Controller) changeStage(stage stage) {
 	}
 	u.orphanedPeers = map[uint64][]*metapb.Peer{}
 	u.numStoresReported = 0
-	u.step += 1
+	u.step = nextRecoveryStep()
 }
 
 func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
@@ -928,6 +992,68 @@ func (t *regionTree) insert(item *regionItem) (bool, error) {
 	return true, nil
 }
 
+type emptyRegionIndex struct {
+	regions []*metapb.Region
+}
+
+// findOverlap returns an empty region that overlaps with the half-open range of region.
+// An empty end key means positive infinity.
+// The empty regions are generated in ascending key order and don't overlap with each other.
+func (idx *emptyRegionIndex) findOverlap(region *metapb.Region) *metapb.Region {
+	start, end := region.GetStartKey(), region.GetEndKey()
+	i := sort.Search(len(idx.regions), func(i int) bool {
+		return endGreaterThanKey(idx.regions[i].GetEndKey(), start)
+	})
+	if i == len(idx.regions) {
+		return nil
+	}
+	emptyRegion := idx.regions[i]
+	if startBeforeEnd(emptyRegion.GetStartKey(), end) {
+		return emptyRegion
+	}
+	return nil
+}
+
+func endGreaterThanKey(end, key []byte) bool {
+	return len(end) == 0 || bytes.Compare(end, key) > 0
+}
+
+func startBeforeEnd(start, end []byte) bool {
+	return len(end) == 0 || bytes.Compare(start, end) < 0
+}
+
+func sameRangeVersion(left, right *metapb.Region) bool {
+	return left.GetRegionEpoch().GetVersion() == right.GetRegionEpoch().GetVersion() &&
+		bytes.Equal(left.GetStartKey(), right.GetStartKey()) &&
+		bytes.Equal(left.GetEndKey(), right.GetEndKey())
+}
+
+func findOverlapPeerWithEmptyRegions(peersMap map[uint64][]*regionItem, emptyRegions []*metapb.Region) (*regionItem, *metapb.Region) {
+	if len(emptyRegions) == 0 {
+		return nil, nil
+	}
+	index := &emptyRegionIndex{regions: emptyRegions}
+	for _, peers := range peersMap {
+		var checkedNoOverlapRegion *metapb.Region
+		for _, peer := range peers {
+			if !peer.isInitialized() {
+				continue
+			}
+			region := peer.region()
+			// Peers of the same region with the same version and range share the same overlap result,
+			// so no need to check again, just skip.
+			if checkedNoOverlapRegion != nil && sameRangeVersion(region, checkedNoOverlapRegion) {
+				continue
+			}
+			if emptyRegion := index.findOverlap(region); emptyRegion != nil {
+				return peer, emptyRegion
+			}
+			checkedNoOverlapRegion = region
+		}
+	}
+	return nil, nil
+}
+
 func (u *Controller) getRecoveryPlan(storeID uint64) *pdpb.RecoveryPlan {
 	if _, exists := u.storeRecoveryPlans[storeID]; !exists {
 		u.storeRecoveryPlans[storeID] = &pdpb.RecoveryPlan{}
@@ -1215,73 +1341,67 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	var err error
 	// There may be ranges that are covered by no one. Find these empty ranges, create new
 	// regions that cover them and evenly distribute newly created regions among all stores.
+	type createPlan struct {
+		storeID uint64
+		region  *metapb.Region
+	}
+
 	lastEnd := []byte("")
 	var lastStoreID uint64
+	var createPlans []createPlan
+	var emptyRegions []*metapb.Region
+	appendCreatePlan := func(startKey, endKey []byte, storeID uint64) error {
+		store := u.cluster.GetStore(storeID)
+		if storeID == 0 || store == nil || store.IsTiFlashWrite() {
+			storeID = getRandomStoreID()
+			if storeID == 0 {
+				return errors.New("can't find available store(exclude tiflash) to create new region")
+			}
+		}
+		newRegion, createRegionErr := createRegion(startKey, endKey, storeID)
+		if createRegionErr != nil {
+			return createRegionErr
+		}
+		createPlans = append(createPlans, createPlan{storeID: storeID, region: newRegion})
+		emptyRegions = append(emptyRegions, newRegion)
+		return nil
+	}
 	newestRegionTree.tree.Ascend(func(item *regionItem) bool {
 		region := item.region()
-		storeID := item.storeID
 		if !bytes.Equal(region.StartKey, lastEnd) {
-			if u.cluster.GetStore(storeID).IsTiFlashWrite() {
-				storeID = getRandomStoreID()
-				// can't create new region on tiflash store, choose a random one
-				if storeID == 0 {
-					err = errors.New("can't find available store(exclude tiflash) to create new region")
-					return false
-				}
-			}
-			newRegion, createRegionErr := createRegion(lastEnd, region.StartKey, storeID)
-			if createRegionErr != nil {
+			if createRegionErr := appendCreatePlan(lastEnd, region.StartKey, item.storeID); createRegionErr != nil {
 				err = createRegionErr
 				return false
 			}
-			// paranoid check: shouldn't overlap with any of the peers
-			for _, peers := range peersMap {
-				for _, peer := range peers {
-					if !peer.isInitialized() {
-						continue
-					}
-					if (bytes.Compare(newRegion.StartKey, peer.region().StartKey) <= 0 &&
-						(len(newRegion.EndKey) == 0 || bytes.Compare(peer.region().StartKey, newRegion.EndKey) < 0)) ||
-						((len(peer.region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.region().EndKey) < 0) &&
-							(len(newRegion.EndKey) == 0 || (len(peer.region().EndKey) != 0 && bytes.Compare(peer.region().EndKey, newRegion.EndKey) <= 0))) {
-						err = errors.Errorf(
-							"Find overlap peer %v with newly created empty region %v",
-							logutil.RedactStringer(core.RegionToHexMeta(peer.region())),
-							logutil.RedactStringer(core.RegionToHexMeta(newRegion)),
-						)
-						return false
-					}
-				}
-			}
-			storeRecoveryPlan := u.getRecoveryPlan(storeID)
-			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
-			u.recordAffectedRegion(newRegion)
-			u.newlyCreatedRegions[newRegion.GetId()] = struct{}{}
-			hasPlan = true
 		}
 		lastEnd = region.EndKey
-		lastStoreID = storeID
+		lastStoreID = item.storeID
 		return true
 	})
 	if err != nil {
 		return false, err
 	}
-
 	if !bytes.Equal(lastEnd, []byte("")) || newestRegionTree.size() == 0 {
-		if lastStoreID == 0 {
-			// the last store id is invalid, so choose a random one
-			lastStoreID = getRandomStoreID()
-			if lastStoreID == 0 {
-				return false, errors.New("can't find available store(exclude tiflash) to create new region")
-			}
-		}
-		newRegion, err := createRegion(lastEnd, []byte(""), lastStoreID)
-		if err != nil {
+		if err := appendCreatePlan(lastEnd, []byte(""), lastStoreID); err != nil {
 			return false, err
 		}
-		storeRecoveryPlan := u.getRecoveryPlan(lastStoreID)
-		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
-		u.recordAffectedRegion(newRegion)
+	}
+
+	if !u.disableParanoidCheck {
+		// paranoid check: newly created empty regions shouldn't overlap with any of the peers.
+		if peer, emptyRegion := findOverlapPeerWithEmptyRegions(peersMap, emptyRegions); peer != nil {
+			return false, errors.Errorf(
+				"Find overlap peer %v with newly created empty region %v",
+				logutil.RedactStringer(core.RegionToHexMeta(peer.region())),
+				logutil.RedactStringer(core.RegionToHexMeta(emptyRegion)),
+			)
+		}
+	}
+	for _, createPlan := range createPlans {
+		storeRecoveryPlan := u.getRecoveryPlan(createPlan.storeID)
+		storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, createPlan.region)
+		u.recordAffectedRegion(createPlan.region)
+		u.newlyCreatedRegions[createPlan.region.GetId()] = struct{}{}
 		hasPlan = true
 	}
 	return hasPlan, nil

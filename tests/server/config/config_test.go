@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -81,6 +82,41 @@ func TestRateLimitConfigReload(t *testing.T) {
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
 }
 
+func TestMetricStorageValidationAtQueryTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	re.NotNil(leader)
+
+	configURL := leader.GetAddr() + "/pd/api/v1/config"
+	queryURL := leader.GetAddr() + "/pd/api/v1/metric/query"
+	for _, metricStorage := range []string{
+		"file:///tmp/metrics",
+		"http://127.0.0.1:9090",
+		"http://user:pass@metrics.example",
+		"not a URL",
+	} {
+		postData, err := json.Marshal(map[string]any{"metric-storage": metricStorage})
+		re.NoError(err)
+		re.NoError(testutil.CheckPostJSON(tests.TestDialClient, configURL, postData, testutil.StatusOK(re)))
+		re.Equal(metricStorage, leader.GetServer().GetConfig().PDServerCfg.MetricStorage)
+
+		queryResp, err := tests.TestDialClient.Get(queryURL)
+		re.NoError(err)
+		queryBody, err := io.ReadAll(queryResp.Body)
+		re.NoError(err)
+		re.NoError(queryResp.Body.Close())
+		re.Equal(http.StatusBadGateway, queryResp.StatusCode)
+		re.JSONEq(`{"status":"error","errorType":"proxy","error":"metric query failed"}`, string(queryBody))
+	}
+}
+
 type configTestSuite struct {
 	suite.Suite
 	env *tests.SchedulingTestEnvironment
@@ -100,6 +136,32 @@ func (suite *configTestSuite) TearDownSuite() {
 
 func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTest(suite.checkConfigAll)
+}
+
+func (suite *configTestSuite) TestKeyspaceConfigUpdate() {
+	suite.env.RunTest(suite.checkKeyspaceConfigUpdate)
+}
+
+func (suite *configTestSuite) checkKeyspaceConfigUpdate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	addr := fmt.Sprintf("%s/pd/api/v1/config", leaderServer.GetAddr())
+
+	postData, err := json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
+
+	testutil.Eventually(re, func() bool {
+		return !leaderServer.GetServer().GetPersistOptions().GetKeyspaceConfig().ToWaitRegionSplit()
+	})
+
+	postData, err = json.Marshal(map[string]any{
+		"keyspace.wait-region-split": false,
+	})
+	re.NoError(err)
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, addr, postData, testutil.StatusOK(re)))
 }
 
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
@@ -426,6 +488,7 @@ var ttlConfig = map[string]any{
 	"schedule.hot-region-schedule-limit":      999,
 	"schedule.replica-schedule-limit":         999,
 	"schedule.merge-schedule-limit":           999,
+	"schedule.split-scatter-schedule-limit":   999,
 	"schedule.enable-tikv-split-region":       false,
 }
 
@@ -444,6 +507,7 @@ type ttlConfigInterface interface {
 	GetHotRegionScheduleLimit() uint64
 	GetReplicaScheduleLimit() uint64
 	GetMergeScheduleLimit() uint64
+	GetSplitScatterScheduleLimit() uint64
 	IsTikvRegionSplitEnabled() bool
 }
 
@@ -467,6 +531,7 @@ func assertTTLConfig(
 		equality(uint64(999), options.GetHotRegionScheduleLimit())
 		equality(uint64(999), options.GetReplicaScheduleLimit())
 		equality(uint64(999), options.GetMergeScheduleLimit())
+		equality(uint64(999), options.GetSplitScatterScheduleLimit())
 		equality(false, options.IsTikvRegionSplitEnabled())
 	}
 	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())

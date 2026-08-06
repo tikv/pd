@@ -29,10 +29,16 @@ import (
 	"github.com/tikv/pd/client/opt"
 )
 
+// WatchResponse is the response of a watch request.
+type WatchResponse struct {
+	Events          []*meta_storagepb.Event
+	CompactRevision int64
+}
+
 // Client is the interface for meta storage client.
 type Client interface {
 	// Watch watches on a key or prefix.
-	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *WatchResponse, error)
 	// Get gets the value for a key.
 	Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error)
 	// Put puts a key-value pair into meta storage.

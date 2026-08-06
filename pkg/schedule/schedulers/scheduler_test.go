@@ -62,6 +62,19 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	return clean, opt, tc, oc
 }
 
+func TestReloadSchedulerConfigWithoutSchedulerDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	c := NewController(context.Background(), tc, storage.NewStorageWithMemoryBackend(), oc)
+	c.schedulerHandlers["test-scheduler"] = nil
+
+	re.NotPanics(func() {
+		re.Error(c.ReloadSchedulerConfig("test-scheduler"))
+	})
+}
+
 func TestShuffleLeader(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()

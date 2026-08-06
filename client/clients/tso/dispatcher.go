@@ -84,11 +84,10 @@ type tsoDispatcher struct {
 
 func newTSODispatcher(
 	ctx context.Context,
-	maxBatchSize int,
 	provider tsoServiceProvider,
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
-	tsoRequestCh := make(chan *Request, maxBatchSize*2)
+	tsoRequestCh := make(chan *Request, defaultMaxTSOBatchSize*2)
 	failpoint.Inject("shortDispatcherChannel", func() {
 		tsoRequestCh = make(chan *Request, 1)
 	})
@@ -106,7 +105,7 @@ func newTSODispatcher(
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return batch.NewController[*Request](
-					maxBatchSize*2,
+					defaultMaxTSOBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
 					metrics.TSOBestBatchSize,
 				)
@@ -375,13 +374,17 @@ func (td *tsoDispatcher) handleProcessRequestError(
 	conCtxMgr.Release(streamURL)
 	// Update the member list to ensure the latest topology is used before the next batch.
 	svcDiscovery := td.provider.getServiceDiscovery()
-	if errs.IsLeaderChange(err) {
+	switch {
+	case errs.IsCalleeMismatch(err):
+		// If the callee ID mismatches, the existing gRPC connection is stale and must be recreated.
+		svcDiscovery.RemoveClientConn(streamURL)
+	case errs.IsLeaderChange(err):
 		// If the leader changed, we better call `CheckMemberChanged` blockingly to
 		// ensure the next round of TSO requests can be sent to the new leader.
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 			log.Error("[tso] check member changed error after the leader changed", zap.Error(err))
 		}
-	} else {
+	default:
 		// For other errors, we can just schedule a member change check asynchronously.
 		svcDiscovery.ScheduleCheckMemberChanged()
 	}
@@ -403,12 +406,15 @@ func (td *tsoDispatcher) processRequests(
 ) error {
 	// `done` must be guaranteed to be eventually called.
 	var (
-		requests     = tbc.GetCollectedRequests()
-		traceRegions = make([]*trace.Region, 0, len(requests))
-		spans        = make([]opentracing.Span, 0, len(requests))
+		requests = tbc.GetCollectedRequests()
+		spans    = make([]opentracing.Span, 0, len(requests))
 	)
+	traceCtx := context.Background()
+	if len(requests) > 0 {
+		traceCtx = requests[0].requestCtx
+	}
+	traceRegion := trace.StartRegion(traceCtx, "pdclient.tsoReqSendBatch")
 	for _, req := range requests {
-		traceRegions = append(traceRegions, trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend"))
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
 			spans = append(spans, span.Tracer().StartSpan("pdclient.processRequests", opentracing.ChildOf(span.Context())))
 		}
@@ -417,9 +423,7 @@ func (td *tsoDispatcher) processRequests(
 		for i := len(spans) - 1; i >= 0; i-- {
 			spans[i].Finish()
 		}
-		for i := len(traceRegions) - 1; i >= 0; i-- {
-			traceRegions[i].End()
-		}
+		traceRegion.End()
 	}()
 
 	var (

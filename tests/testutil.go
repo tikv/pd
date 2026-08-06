@@ -414,6 +414,17 @@ func (s *SchedulingTestEnvironment) RunFunc(f func(*TestCluster)) {
 	}
 }
 
+// RunFuncInStartedEnvs runs a function against environments that have already
+// been started without lazily creating missing clusters.
+func (s *SchedulingTestEnvironment) RunFuncInStartedEnvs(f func(*TestCluster)) {
+	if cluster, ok := s.clusters[NonMicroserviceEnv]; ok {
+		f(cluster)
+	}
+	if cluster, ok := s.clusters[MicroserviceEnv]; ok {
+		f(cluster)
+	}
+}
+
 // RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in non-microservice environment", getTestName())
@@ -705,7 +716,7 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				Version:  1,
 			}
 			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat), core.SetBuckets(buckets))
-			region.UpdateBuckets(buckets, nil)
+			region.UpdateBuckets(buckets, region.GetBuckets())
 			regions = append(regions, region)
 		} else {
 			region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))

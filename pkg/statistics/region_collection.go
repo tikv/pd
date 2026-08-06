@@ -382,7 +382,7 @@ func NewLabelStatistics() *LabelStatistics {
 // Observe records the current label status.
 func (l *LabelStatistics) Observe(region *core.RegionInfo, stores []*core.StoreInfo, labels []string) {
 	regionID := region.GetID()
-	regionIsolation := GetRegionLabelIsolation(stores, labels)
+	regionIsolation, _ := GetRegionLabelIsolation(stores, labels)
 	l.Lock()
 	defer l.Unlock()
 	if label, ok := l.regionLabelStats[regionID]; ok {
@@ -443,9 +443,9 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 }
 
 // GetRegionLabelIsolation returns the isolation level of the region.
-func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
+func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) (string, int) {
 	if len(stores) == 0 || len(labels) == 0 {
-		return nonIsolation
+		return nonIsolation, -1
 	}
 	queueStores := [][]*core.StoreInfo{stores}
 	for level, label := range labels {
@@ -458,10 +458,27 @@ func GetRegionLabelIsolation(stores []*core.StoreInfo, labels []string) string {
 		}
 		queueStores = newQueueStores
 		if len(queueStores) == 0 {
-			return labels[level]
+			return labels[level], level
 		}
 	}
-	return nonIsolation
+	return nonIsolation, -1
+}
+
+// IsRegionLabelIsolationSatisfied checks whether the isolation level of the region satisfied.
+func IsRegionLabelIsolationSatisfied(stores []*core.StoreInfo, labels []string, isolationLevel string) bool {
+	if isolationLevel == "" || isolationLevel == nonIsolation {
+		return true
+	}
+	_, level := GetRegionLabelIsolation(stores, labels)
+	if level == -1 {
+		return false
+	}
+	for _, key := range labels[level:] {
+		if key == isolationLevel {
+			return true
+		}
+	}
+	return false
 }
 
 func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*core.StoreInfo {

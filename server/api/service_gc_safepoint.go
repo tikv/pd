@@ -59,7 +59,7 @@ type ListServiceGCSafepoint struct {
 //	@Router		/gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
 	gcStateManager := h.svr.GetGCStateManager()
-	gcState, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
+	gcState, err := gcStateManager.GetGCState(constant.NullKeyspaceID, false)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

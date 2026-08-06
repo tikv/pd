@@ -327,6 +327,23 @@ disable-make-up-replica = false
 	re.Error(err)
 }
 
+func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
+	re := require.New(t)
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		err := json.Unmarshal([]byte(`{"keyspace":{"disable-raw-kv-region-split":true}}`), cfg)
+		re.NoError(err)
+	})
+
+	re.NotPanics(func() {
+		cfg := NewConfig()
+		meta, err := toml.Decode("[keyspace]\ndisable-raw-kv-region-split = true\n", cfg)
+		re.NoError(err)
+		re.NoError(cfg.Adjust(&meta, false))
+	})
+}
+
 func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
@@ -582,4 +599,67 @@ func TestRateLimitClone(t *testing.T) {
 	}
 	gdc := gCfg.LimiterConfig["test"]
 	re.Zero(gdc.ConcurrencyLimit)
+}
+
+func TestAdjustMetaServiceGroups(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groups    map[string]string
+		expected  map[string]string
+		expectErr bool
+		errorMsg  string
+	}{
+		{
+			name:     "trim group ID and endpoint",
+			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+		},
+		{
+			name:     "multiple groups",
+			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
+			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+		},
+		{
+			name:      "empty group ID after trim",
+			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
+		},
+		{
+			name:      "empty endpoint after trim",
+			groups:    map[string]string{"group-1": " "},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
+		},
+		{
+			name:      "duplicate group ID after trim",
+			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
+		},
+		{
+			name:      "group ID with slash is rejected",
+			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
+			expectErr: true,
+			errorMsg:  "[keyspace] meta-service group ID cannot contain '/': group/1",
+		},
+		{
+			name:     "group ID with other special characters is allowed",
+			groups:   map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+			expected: map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			err := AdjustMetaServiceGroups(testCase.groups)
+			if testCase.expectErr {
+				re.EqualError(err, testCase.errorMsg)
+				return
+			}
+			re.NoError(err)
+			re.Equal(testCase.expected, testCase.groups)
+		})
+	}
 }

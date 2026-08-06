@@ -1189,6 +1189,38 @@ func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 	}
 }
 
+func (suite *createOperatorTestSuite) TestNonAdminScatterDoesNotForceTargetLeader() {
+	re := suite.Require()
+	peers := []*metapb.Peer{
+		{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
+		{Id: 10, StoreId: 10, Role: metapb.PeerRole_Voter},
+	}
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	targetPeers := map[uint64]*metapb.Peer{
+		1:  peers[0],
+		2:  peers[1],
+		10: peers[2],
+	}
+
+	adminOp, err := CreateScatterRegionOperator("admin-scatter", suite.cluster, region, targetPeers, 10, false)
+	re.NoError(err)
+	re.NotNil(adminOp)
+	re.Equal(OpAdmin, adminOp.SchedulerKind())
+	re.Zero(adminOp.Kind() & OpSplitScatter)
+
+	nonAdminOp, err := CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 2, false)
+	re.NoError(err)
+	re.NotNil(nonAdminOp)
+	re.Equal(OpSplitScatter, nonAdminOp.SchedulerKind())
+	re.NotZero(nonAdminOp.Kind() & OpSplitScatter)
+
+	nonAdminOp, err = CreateNonAdminScatterRegionOperator("internal-scatter", suite.cluster, region, targetPeers, 10, false)
+	re.Error(err)
+	re.Nil(nonAdminOp)
+	re.Contains(err.Error(), "target leader is not allowed")
+}
+
 // Ref https://github.com/tikv/pd/issues/5401
 func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	re := require.New(t)

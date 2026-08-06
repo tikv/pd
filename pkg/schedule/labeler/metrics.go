@@ -16,15 +16,27 @@ package labeler
 
 import "github.com/prometheus/client_golang/prometheus"
 
-// LabelerEventCounter is a counter of the scheduler labeler system.
-var LabelerEventCounter = prometheus.NewCounterVec(
-	prometheus.CounterOpts{
-		Namespace: "pd",
-		Subsystem: "schedule",
-		Name:      "labeler_event_counter",
-		Help:      "Counter of the scheduler label.",
-	}, []string{"type", "event"})
+var (
+	// LabelerEventCounter is a counter of the scheduler labeler system.
+	LabelerEventCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "labeler_event_counter",
+			Help:      "Counter of the scheduler label.",
+		}, []string{"type", "event"})
+
+	newRegionLabelerDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "schedule",
+			Name:      "new_region_labeler_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of creating new region labeler.",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 13), // 1ms ~ 4s
+		})
+)
 
 func init() {
 	prometheus.MustRegister(LabelerEventCounter)
+	prometheus.MustRegister(newRegionLabelerDuration)
 }
