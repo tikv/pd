@@ -107,6 +107,41 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
 }
 
+// TestSyncBurstabilityWithServiceLimitLockedSkipsGroupLockWhenNoServiceLimit
+// guards against syncBurstabilityWithServiceLimitLocked unconditionally
+// taking group's write lock before checking whether the keyspace even has an
+// active service limit. This runs on every group insert/update across the
+// system, including the async bulk merge's up-to-500k-group batches, so
+// escalating to a write lock in the common no-op case (most keyspaces have
+// no service limit set) is needless contention against a concurrent
+// RequestRU call already holding the same group's lock. The fix checks
+// isSet/serviceLimit first (cheap: it only reads krgm's already-locked
+// state) and returns before ever touching group's lock when there is
+// nothing to apply.
+func TestSyncBurstabilityWithServiceLimitLockedSkipsGroupLockWhenNoServiceLimit(t *testing.T) {
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := newDefaultResourceGroup()
+
+	// No service limit has been configured on krgm, so
+	// syncBurstabilityWithServiceLimitLocked has nothing to do here. Hold
+	// group's lock externally to prove it's never contended.
+	group.Lock()
+	defer group.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		krgm.RLock()
+		krgm.syncBurstabilityWithServiceLimitLocked(group)
+		krgm.RUnlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("must not try to take group's lock when the keyspace has no active service limit")
+	}
+}
+
 func TestAddResourceGroup(t *testing.T) {
 	re := require.New(t)
 

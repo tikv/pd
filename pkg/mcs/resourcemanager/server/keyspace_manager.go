@@ -1016,6 +1016,15 @@ func (krgm *keyspaceResourceGroupManager) syncBurstabilityWithServiceLimitLocked
 		return
 	}
 	serviceLimit, isSet := krgm.getServiceLimitLocked()
+	// Cheap short-circuit before taking group's write lock: most keyspaces
+	// have no active service limit at all, and this runs on every group
+	// insert/update across the whole system (including the async bulk
+	// merge's up-to-500k-group batches), so skipping the write lock entirely
+	// in the common no-op case avoids needless contention against concurrent
+	// RequestRU calls on the same, already-live group.
+	if !isSet || serviceLimit <= 0 {
+		return
+	}
 	group.Lock()
 	defer group.Unlock()
 	applyBurstabilitySyncLocked(group, serviceLimit, isSet)
