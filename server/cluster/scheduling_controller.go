@@ -276,12 +276,20 @@ func (sc *schedulingController) GetHotPeerStat(rw utils.RWType, regionID, storeI
 // The result only includes peers that are hot enough.
 func (sc *schedulingController) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
 	// GetHotPeerStats is a thread-safe method
+	return sc.hotStat.GetHotPeerStats(rw, sc.getHotPeerStatsThreshold(rw))
+}
+
+// GetHotPeerStatsForStores returns hot peer stats for the specified stores.
+func (sc *schedulingController) GetHotPeerStatsForStores(rw utils.RWType, storeIDs []uint64) map[uint64][]*statistics.HotPeerStat {
+	return sc.hotStat.GetHotPeerStatsForStores(rw, storeIDs, sc.getHotPeerStatsThreshold(rw))
+}
+
+func (sc *schedulingController) getHotPeerStatsThreshold(rw utils.RWType) int {
 	threshold := sc.opt.GetHotRegionCacheHitsThreshold()
 	if rw == utils.Read {
-		threshold = sc.opt.GetHotRegionCacheHitsThreshold() *
-			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+		threshold *= utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval
 	}
-	return sc.hotStat.GetHotPeerStats(rw, threshold)
+	return threshold
 }
 
 // BucketsStats returns hot region's buckets stats.

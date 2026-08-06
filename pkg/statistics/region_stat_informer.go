@@ -27,4 +27,6 @@ type RegionStatInformer interface {
 	// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 	// The result only includes peers that are hot enough.
 	GetHotPeerStats(rw utils.RWType) map[uint64][]*HotPeerStat
+	// GetHotPeerStatsForStores returns hot peer stats for the specified stores.
+	GetHotPeerStatsForStores(rw utils.RWType, storeIDs []uint64) map[uint64][]*HotPeerStat
 }
