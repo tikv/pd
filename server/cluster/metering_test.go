@@ -51,7 +51,7 @@ func TestCollectStorageSize(t *testing.T) {
 	re.NoError(err)
 	keyspaceGroupManager := keyspace.NewKeyspaceGroupManager(ctx, tc.storage, tc.etcdClient)
 	re.NoError(keyspaceGroupManager.Bootstrap(ctx))
-	keyspaceManager := keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager)
+	keyspaceManager := keyspace.NewKeyspaceManager(ctx, tc.storage, tc, mockid.NewIDAllocator(), &config.KeyspaceConfig{}, keyspaceGroupManager, nil)
 	for i := range 10 {
 		_, err = keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test-keyspace-%d", i),

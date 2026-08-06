@@ -163,18 +163,24 @@ func (stat *HotPeerStat) GetActionType() utils.ActionType {
 
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
-	if stat.rollingLoads != nil {
+	if dim < 0 || dim >= utils.DimLen {
+		return 0
+	}
+	if stat.rollingLoads != nil && dim < len(stat.rollingLoads) && stat.rollingLoads[dim] != nil {
 		return math.Round(stat.rollingLoads[dim].get())
 	}
-	return math.Round(stat.Loads[dim])
+	if dim < len(stat.Loads) {
+		return math.Round(stat.Loads[dim])
+	}
+	return 0
 }
 
 // GetLoads returns denoising loads if possible.
 func (stat *HotPeerStat) GetLoads() []float64 {
 	if stat.rollingLoads != nil {
-		ret := make([]float64, len(stat.rollingLoads))
+		ret := make([]float64, utils.DimLen)
 		for dim := range ret {
-			ret[dim] = math.Round(stat.rollingLoads[dim].get())
+			ret[dim] = stat.GetLoad(dim)
 		}
 		return ret
 	}
@@ -194,13 +200,18 @@ func (stat *HotPeerStat) Clone() *HotPeerStat {
 
 func (stat *HotPeerStat) isHot(thresholds []float64) bool {
 	return slice.AnyOf(stat.rollingLoads, func(i int) bool {
+		if stat.rollingLoads[i] == nil {
+			return false
+		}
 		return stat.rollingLoads[i].isLastAverageHot(thresholds[i])
 	})
 }
 
 func (stat *HotPeerStat) clearLastAverage() {
 	for _, l := range stat.rollingLoads {
-		l.clearLastAverage()
+		if l != nil {
+			l.clearLastAverage()
+		}
 	}
 }
 

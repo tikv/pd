@@ -17,6 +17,7 @@ package utils
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"github.com/stretchr/testify/require"
 
@@ -60,19 +61,31 @@ func WaitForTSOServiceAvailable(
 	})
 }
 
+// WaitForAllTSOServiceAvailable waits for all clients to be served by the tso server side.
+func WaitForAllTSOServiceAvailable(
+	ctx context.Context, re *require.Assertions, clients []pd.Client,
+) {
+	for _, client := range clients {
+		WaitForTSOServiceAvailable(ctx, re, client)
+	}
+}
+
 // CheckMultiKeyspacesTSO checks the correctness of TSO for multiple keyspaces.
 func CheckMultiKeyspacesTSO(
 	ctx context.Context, re *require.Assertions,
 	clients []pd.Client, parallelAct func(),
 ) {
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	wg := sync.WaitGroup{}
 	wg.Add(len(clients))
+	var readyClients atomic.Int64
 
 	for _, client := range clients {
 		go func(cli pd.Client) {
 			defer wg.Done()
 			var ts, lastTS uint64
+			ready := false
 			for {
 				select {
 				case <-ctx.Done():
@@ -89,9 +102,17 @@ func CheckMultiKeyspacesTSO(
 				ts = tsoutil.ComposeTS(physical, logical)
 				re.Less(lastTS, ts)
 				lastTS = ts
+				if !ready {
+					readyClients.Add(1)
+					ready = true
+				}
 			}
 		}(client)
 	}
+
+	testutil.Eventually(re, func() bool {
+		return readyClients.Load() == int64(len(clients))
+	})
 
 	wg.Add(1)
 	go func() {

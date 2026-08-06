@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 func TestFilterUnhealthyStore(t *testing.T) {
@@ -45,4 +46,28 @@ func TestFilterUnhealthyStore(t *testing.T) {
 	re.Len(loads, 2)
 	re.NotNil(loads[4])
 	re.NotNil(loads[5])
+}
+
+func TestStoreReadCPUUsesTimeMedian(t *testing.T) {
+	re := require.New(t)
+	stats := newRollingStoreStats()
+
+	intervals := []uint64{5, 10, 20, 10, 5}
+	for _, secs := range intervals {
+		stats.Observe(&pdpb.StoreStats{
+			Interval: &pdpb.TimeInterval{
+				StartTimestamp: 0,
+				EndTimestamp:   secs,
+			},
+			CpuUsages: []*pdpb.RecordPair{
+				{
+					Key:   "unified-read-pool-0",
+					Value: 100,
+				},
+			},
+		})
+	}
+
+	re.Equal(100.0, stats.GetLoad(utils.StoreReadCPU))
+	re.Equal(100.0, stats.GetInstantLoad(utils.StoreReadCPU))
 }

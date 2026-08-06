@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -96,4 +97,65 @@ max-gap-reset-ts = "1h"
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
+}
+
+func TestGetAdvertiseListenHost(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+
+	tests := []struct {
+		name          string
+		advertiseAddr string
+		expectedHost  string
+		panic         bool
+	}{
+		{
+			name:          "valid http address",
+			advertiseAddr: "http://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+		{
+			name:          "valid https address",
+			advertiseAddr: "https://127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+		{
+			name:          "valid address without scheme",
+			advertiseAddr: "localhost:2379",
+			expectedHost:  "localhost:2379",
+			panic:         false,
+		},
+		{
+			name:          "empty address",
+			advertiseAddr: "",
+			expectedHost:  "",
+			panic:         false,
+		},
+		{
+			name:          "valid IPv4 address without scheme",
+			advertiseAddr: "127.0.0.1:2379",
+			expectedHost:  "127.0.0.1:2379",
+			panic:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(*testing.T) {
+			cfg := &Config{
+				AdvertiseListenAddr: tt.advertiseAddr,
+			}
+			if tt.panic {
+				re.Panics(func() {
+					CreateServer(ctx, cfg)
+				}, "expected panic for invalid advertise listen address")
+			} else {
+				svr := CreateServer(ctx, cfg)
+				re.Equal(tt.expectedHost, svr.advertiseListenHost)
+			}
+		})
+	}
 }

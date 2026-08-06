@@ -19,6 +19,8 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
+	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -45,6 +47,14 @@ func NewStorageEndpoint(
 		encryptionKeyManager,
 		0,
 	}
+}
+
+func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
+	rawTxnCapable, ok := se.Base.(kv.RawTxnCapable)
+	if !ok {
+		return nil, errors.New("storage endpoint does not support raw transaction")
+	}
+	return rawTxnCapable.CreateRawTxn(), nil
 }
 
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.

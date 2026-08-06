@@ -209,8 +209,11 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 	case "cluster-version":
 		return h.updateClusterVersion(value)
 	case "label-property": // TODO: support changing label-property
+		// todo:  use apiv2 handlers instead to update keyspace related config,
+		// since the logic is more complex and may involve multiple config items update in one request,
+		// e.g. add/remove meta-service group.
 	case "keyspace":
-		return h.updateKeyspaceConfig(cfg, kp[len(kp)-1], value)
+		return h.updateKeyspaceConfig(kp[len(kp)-1], value)
 	case "micro-service":
 		return h.updateMicroserviceConfig(cfg, kp[len(kp)-1], value)
 	case "controller":
@@ -219,8 +222,10 @@ func (h *confHandler) updateConfig(cfg *config.Config, key string, value any) er
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, value any) error {
-	updated, found, err := jsonutil.AddKeyValue(&config.Keyspace, key, value)
+func (h *confHandler) updateKeyspaceConfig(key string, value any) error {
+	oldCfg := h.svr.GetPersistOptions().GetKeyspaceConfig()
+	newCfg := oldCfg.Clone()
+	updated, found, err := jsonutil.AddKeyValue(newCfg, key, value)
 	if err != nil {
 		return err
 	}
@@ -229,10 +234,47 @@ func (h *confHandler) updateKeyspaceConfig(config *config.Config, key string, va
 		return errors.Errorf("config item %s not found", key)
 	}
 
-	if updated {
-		err = h.svr.SetKeyspaceConfig(config.Keyspace)
+	if !updated {
+		return nil
 	}
-	return err
+	// Meta-service group changes must go through the same safe update path as the
+	// dedicated /meta-service-groups endpoint, which holds the manager lock and
+	// rejects removing a group that still has assigned keyspaces. Updating them
+	// via the plain config path would bypass that guard.
+	if key == "meta-service-groups" {
+		return h.updateMetaServiceGroups(oldCfg, newCfg)
+	}
+	return h.svr.SetKeyspaceConfig(oldCfg, newCfg)
+}
+
+func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceConfig) error {
+	manager := h.svr.GetMetaServiceGroupManager()
+	if manager == nil {
+		return errors.New("meta-service groups manager is not initialized")
+	}
+	// Use newCfg.MetaServiceGroups directly (not a GetMetaServiceGroups copy) so
+	// the map persisted via newCfg and the map applied to the manager are the
+	// same reference. newCfg is a locally owned clone, so there is no aliasing
+	// with the live config.
+	newGroups := newCfg.MetaServiceGroups
+	// Normalize (trim/dedup) before computing deletedGroups. Otherwise a
+	// whitespace-padded ID (e.g. " g ") for an existing group g would not match
+	// the already-normalized key in oldCfg, so g would be wrongly classified as a
+	// deletion and rejected by UpdateGroupsSafely when it still has keyspaces.
+	if err := config.AdjustMetaServiceGroups(newGroups); err != nil {
+		return err
+	}
+	deletedGroups := make([]string, 0)
+	for id := range oldCfg.GetMetaServiceGroups() {
+		if _, ok := newGroups[id]; !ok {
+			deletedGroups = append(deletedGroups, id)
+		}
+	}
+	return manager.UpdateGroupsSafely(h.svr.Context(), newGroups, deletedGroups, func() error {
+		return h.svr.SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg)
+	}, func() {
+		h.svr.UpdateKeyspaceConfig(newCfg)
+	})
 }
 
 func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string, value any) error {

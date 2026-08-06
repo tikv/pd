@@ -718,6 +718,7 @@ var hiddenHotConfig = []string{
 	"byte-rate-rank-step-ratio",
 	"key-rate-rank-step-ratio",
 	"query-rate-rank-step-ratio",
+	"cpu-rate-rank-step-ratio",
 	"count-rank-step-ratio",
 	"great-dec-ratio",
 	"minor-dec-ratio",

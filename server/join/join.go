@@ -97,14 +97,19 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	initialCluster := ""
-	// Cases with data directory.
+	// Cases with data directory: the local etcd reads its configuration from the
+	// data directory, so return immediately without any remote call. A restart is
+	// therefore never delayed or blocked (e.g. during a quorum outage). As a
+	// result the advertise-client-urls uniqueness check below only covers fresh
+	// joins; enforcing it authoritatively on restart is a follow-up (it needs the
+	// persisted member ID and a pre-publish check point).
 	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
 	}
 
-	// Below are cases without data directory.
+	// Below are cases without a data directory (a fresh join or a re-join).
 	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
@@ -122,6 +127,9 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 	defer client.Close()
 
+	// A non-linearizable list is enough to determine this member's own state
+	// (existed / joinedFailedToStart / abnormal); it must not require quorum so a
+	// member re-joining after a failed start can still recover.
 	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
 		return err
@@ -151,6 +159,31 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	// - A failed PD re-joins the previous cluster.
 	if existed {
 		return errors.New("missing data or join a duplicated pd")
+	}
+
+	// Reject a member whose advertised client URL is already used by another
+	// member, before MemberAdd and before the local etcd publishes its
+	// attributes, so a duplicate never enters the member list. See issue #10999.
+	advertiseClientURLs := strings.Split(cfg.AdvertiseClientUrls, ",")
+	if joinedFailedToStart {
+		// Recovery re-join: this member's peer was already added but never
+		// started, so the cluster may be at 1/2 quorum. Reuse the
+		// non-linearizable list already fetched instead of issuing a
+		// quorum-dependent linearizable read, so recovery is never blocked.
+		if cerr := checkClientURLConflict(advertiseClientURLs, advertisePeerURLs, listResp.Members); cerr != nil {
+			return cerr
+		}
+	} else {
+		// Genuinely new member: use a linearizable list so a stale/lagging local
+		// view cannot miss a conflict that has already been published; a genuine
+		// join needs quorum for MemberAdd anyway.
+		linResp, lerr := etcdutil.ListEtcdMembersLinearizable(client.Ctx(), client)
+		if lerr != nil {
+			return lerr
+		}
+		if cerr := checkClientURLConflict(advertiseClientURLs, advertisePeerURLs, linResp.Members); cerr != nil {
+			return cerr
+		}
 	}
 
 	var addResp *clientv3.MemberAddResponse

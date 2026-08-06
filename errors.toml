@@ -56,6 +56,11 @@ error = '''
 the option %s does not exist
 '''
 
+["PD:apiutil:ErrOptionTypeInvalid"]
+error = '''
+the type of option %s is invalid
+'''
+
 ["PD:apiutil:ErrRedirect"]
 error = '''
 redirect failed
@@ -423,7 +428,7 @@ internal etcd transaction error occurred
 
 ["PD:etcd:ErrEtcdTxnResponse"]
 error = '''
-etcd transaction returned invalid response: %v
+etcd transaction returned unexpected response: %v
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]

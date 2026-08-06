@@ -301,6 +301,28 @@ func TestStoreStateFilter(t *testing.T) {
 	check(store, testCases)
 }
 
+func TestHotRegionEvictedTargetFilter(t *testing.T) {
+	re := require.New(t)
+	filter := NewHotRegionEvictedTargetFilter("")
+	opt := mockconfig.NewTestOptions()
+
+	testCases := []struct {
+		name      string
+		store     *core.StoreInfo
+		targetRes plan.StatusCode
+	}{
+		{name: "normal", store: core.NewStoreInfoWithLabel(1, map[string]string{}), targetRes: plan.StatusOK},
+		{name: "slow-store", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SlowStoreEvicted()), targetRes: plan.StatusStoreRejectLeader},
+		{name: "stopping-store", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.StoppingStoreEvicted()), targetRes: plan.StatusStoreRejectLeader},
+		{name: "slow-trend", store: core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SlowTrendEvicted()), targetRes: plan.StatusStoreRejectLeader},
+	}
+
+	for _, testCase := range testCases {
+		re.Equal(plan.StatusOK, filter.Source(opt, testCase.store).StatusCode, testCase.name)
+		re.Equal(testCase.targetRes, filter.Target(opt, testCase.store).StatusCode, testCase.name)
+	}
+}
+
 func TestStoreStateFilterReason(t *testing.T) {
 	re := require.New(t)
 	filters := []Filter{

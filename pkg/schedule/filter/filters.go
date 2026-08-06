@@ -569,6 +569,37 @@ func (f *StoreStateFilter) Target(conf config.SharedConfigProvider, store *core.
 	return statusOK
 }
 
+type hotRegionEvictedTargetFilter struct{ scope string }
+
+// NewHotRegionEvictedTargetFilter creates a filter that rejects stores already
+// marked as unsuitable hot-region targets.
+func NewHotRegionEvictedTargetFilter(scope string) Filter {
+	return &hotRegionEvictedTargetFilter{scope: scope}
+}
+
+// Scope returns the scheduler or the checker which the filter acts on.
+func (f *hotRegionEvictedTargetFilter) Scope() string {
+	return f.scope
+}
+
+// Type returns the type of the filter.
+func (*hotRegionEvictedTargetFilter) Type() filterType {
+	return leaderEvicted
+}
+
+// Source filters stores when select them as schedule source.
+func (*hotRegionEvictedTargetFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
+	return statusOK
+}
+
+// Target filters stores when select them as schedule target.
+func (*hotRegionEvictedTargetFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if store.EvictedAsSlowStore() || store.EvictedAsStoppingStore() || store.IsEvictedAsSlowTrend() {
+		return statusStoreRejectLeader
+	}
+	return statusOK
+}
+
 // labelConstraintFilter is a filter that selects stores satisfy the constraints.
 type labelConstraintFilter struct {
 	scope       string

@@ -189,7 +189,12 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		}
 		storeIDs = append(storeIDs, id)
 	}
-	leaderID, err := strconv.ParseUint(input["store-leader-id"].(string), 10, 64)
+	leaderStr, ok := input["store-leader-id"].(string)
+	if !ok {
+		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
+		return
+	}
+	leaderID, err := strconv.ParseUint(leaderStr, 10, 64)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
@@ -295,6 +300,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		candidate = []uint64{s.conf.getStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
+			filter.NewHotRegionEvictedTargetFilter(s.GetName()),
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = storeIDs
 	}

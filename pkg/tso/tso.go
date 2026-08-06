@@ -223,10 +223,13 @@ func (t *timestampOracle) syncTimestamp() error {
 	t.metrics.syncSaveDuration.Observe(time.Since(start).Seconds())
 
 	t.metrics.syncOKEvent.Inc()
+	// "last" is the etcd value, "last-saved" is the in-memory window, "save" is the
+	// newly persisted window, and "next" is the physical time loaded into memory
 	log.Info("sync and save timestamp",
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
-		zap.Time("save", save), zap.Time("next", next))
+		zap.Time("save", save), zap.Time("next", next),
+		zap.String("member-name", t.member.Name()))
 	// save into memory
 	t.setTSOPhysical(next)
 	return nil
@@ -292,6 +295,11 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.resetSaveDuration.Observe(time.Since(start).Seconds())
+		log.Info("persisted tso window to etcd (user-reset)",
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("save", save), zap.Time("next", nextPhysical),
+			zap.String("member-name", t.member.Name()),
+		)
 	}
 	// save into memory only if nextPhysical or nextLogical is greater.
 	t.tsoMux.physical = nextPhysical
@@ -399,6 +407,11 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 		}
 		t.lastSavedTime.Store(save)
 		t.metrics.updateSaveDuration.Observe(time.Since(start).Seconds())
+		log.Debug("persisted tso window to etcd (update)",
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("save", save), zap.Time("next", next),
+			zap.String("member-name", t.member.Name()),
+		)
 	}
 	// If it's an IntervalUpdate, we don't need to check logical overflow, just update physical time directly.
 	// Otherwise, the caller met logical overflow, so it will allocate physical time to alloc more timestamp in concurrent.

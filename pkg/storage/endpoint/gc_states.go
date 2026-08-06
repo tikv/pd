@@ -474,7 +474,10 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 		})
 	}
 
-	txn := p.storage.CreateRawTxn()
+	txn, err := p.storage.createRawTxn()
+	if err != nil {
+		return errors.AddStack(err)
+	}
 	result, err := txn.If(condition).Then(ops...).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()

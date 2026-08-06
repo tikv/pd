@@ -51,6 +51,226 @@ func newStoreHeartbeat(storeID uint64, report *pdpb.StoreReport) *pdpb.StoreHear
 	}
 }
 
+func newTestRegionItemWithEpoch(id uint64, start, end string, confVer, version uint64, initialized bool) *regionItem {
+	region := &metapb.Region{
+		Id:          id,
+		StartKey:    []byte(start),
+		EndKey:      []byte(end),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: confVer, Version: version},
+	}
+	if initialized {
+		region.Peers = []*metapb.Peer{{Id: id + 1000, StoreId: 1}}
+	}
+	return &regionItem{
+		report: &pdpb.PeerReport{
+			RegionState: &raft_serverpb.RegionLocalState{Region: region},
+		},
+		storeID: 1,
+	}
+}
+
+func newTestRegionItem(id uint64, start, end string, initialized bool) *regionItem {
+	return newTestRegionItemWithEpoch(id, start, end, 1, 1, initialized)
+}
+
+func TestEmptyRegionIndex(t *testing.T) {
+	re := require.New(t)
+
+	index := &emptyRegionIndex{regions: []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).region(),
+		newTestRegionItem(2, "f", "h", true).region(),
+		newTestRegionItem(3, "z", "", true).region(),
+	}}
+
+	re.Equal(uint64(1), index.findOverlap(newTestRegionItem(4, "a", "c", true).region()).GetId())
+	re.Equal(uint64(2), index.findOverlap(newTestRegionItem(5, "g", "i", true).region()).GetId())
+	re.Equal(uint64(3), index.findOverlap(newTestRegionItem(6, "z", "", true).region()).GetId())
+	re.Nil(index.findOverlap(newTestRegionItem(7, "d", "f", true).region()))
+}
+
+func TestFindOverlapPeerWithEmptyRegions(t *testing.T) {
+	re := require.New(t)
+
+	emptyRegions := []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).region(),
+	}
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "a", "z", true)},
+		2: {newTestRegionItem(3, "b", "y", false)},
+	}
+	peer, emptyRegion := findOverlapPeerWithEmptyRegions(peersMap, emptyRegions)
+	re.Equal(uint64(2), peer.region().GetId())
+	re.Equal(uint64(1), emptyRegion.GetId())
+
+	peer, emptyRegion = findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {newTestRegionItem(3, "b", "y", false)},
+	}, emptyRegions)
+	re.Nil(peer)
+	re.Nil(emptyRegion)
+}
+
+func TestFindOverlapPeerWithEmptyRegionsFastPath(t *testing.T) {
+	re := require.New(t)
+
+	emptyRegions := []*metapb.Region{
+		newTestRegionItem(1, "b", "d", true).region(),
+	}
+	peer, emptyRegion := findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {
+			newTestRegionItemWithEpoch(2, "x", "z", 1, 10, true),
+			newTestRegionItemWithEpoch(3, "x", "z", 2, 10, true),
+		},
+	}, emptyRegions)
+	re.Nil(peer)
+	re.Nil(emptyRegion)
+
+	peer, emptyRegion = findOverlapPeerWithEmptyRegions(map[uint64][]*regionItem{
+		1: {
+			newTestRegionItemWithEpoch(2, "x", "z", 1, 10, true),
+			newTestRegionItemWithEpoch(3, "a", "z", 1, 10, true),
+		},
+	}, emptyRegions)
+	re.Equal(uint64(3), peer.region().GetId())
+	re.Equal(uint64(1), emptyRegion.GetId())
+}
+
+func TestRemoveFailedStoresWithOptions(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	recoveryController := NewController(cluster)
+	err := recoveryController.RemoveFailedStoresWithOptions(nil, 60, true, RemoveFailedStoresOptions{
+		PlanExecutionTimeout: 5 * time.Minute,
+		DisableParanoidCheck: true,
+	})
+	re.NoError(err)
+	re.Equal(5*time.Minute, recoveryController.planExecutionTimeout)
+	re.True(recoveryController.disableParanoidCheck)
+	re.Contains(recoveryController.output[0].Details, "paranoid check disabled")
+	re.Contains(recoveryController.output[0].Details, "plan execution timeout 5m0s")
+
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.dispatchPlan(newStoreHeartbeat(1, nil), resp)
+	re.NotNil(resp.GetRecoveryPlan())
+	re.WithinDuration(time.Now().Add(5*time.Minute), recoveryController.storePlanExpires[1], time.Second)
+}
+
+func TestCreateEmptyRegionDisableParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "m", "", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	peersMap := map[uint64][]*regionItem{
+		2: {newTestRegionItem(2, "a", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+
+	recoveryController = NewController(cluster)
+	recoveryController.disableParanoidCheck = true
+	hasPlan, err = recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.True(hasPlan)
+	re.NoError(err)
+	re.Len(recoveryController.storeRecoveryPlans[1].GetCreates(), 1)
+}
+
+func TestCreateEmptyRegionTailParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "a", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "x", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionFullRangeParanoidCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+
+	peersMap := map[uint64][]*regionItem{
+		1: {newTestRegionItem(2, "a", "z", true)},
+	}
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newRegionTree(), peersMap)
+	re.False(hasPlan)
+	re.ErrorContains(err, "Find overlap peer")
+}
+
+func TestCreateEmptyRegionTailUsesTiKVStore(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	for _, store := range newTestStores(2, "6.0.0") {
+		if store.GetID() == 1 {
+			store.GetMeta().Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		cluster.PutStore(store)
+	}
+	newestRegionTree := newRegionTree()
+	inserted, err := newestRegionTree.insert(newTestRegionItem(1, "", "m", true))
+	re.True(inserted)
+	re.NoError(err)
+
+	recoveryController := NewController(cluster)
+	recoveryController.storeReports = map[uint64]*pdpb.StoreReport{1: nil, 2: nil}
+	hasPlan, err := recoveryController.generateCreateEmptyRegionPlan(newestRegionTree, nil)
+	re.True(hasPlan)
+	re.NoError(err)
+	re.Nil(recoveryController.storeRecoveryPlans[1])
+	re.Len(recoveryController.storeRecoveryPlans[2].GetCreates(), 1)
+	re.Equal([]byte("m"), recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetStartKey())
+	re.Empty(recoveryController.storeRecoveryPlans[2].GetCreates()[0].GetEndKey())
+}
+
 func hasQuorum(region *metapb.Region, failedStores []uint64) bool {
 	hasQuorum := func(voters []*metapb.Peer) bool {
 		numFailedVoters := 0
@@ -242,7 +462,7 @@ func TestFinished(t *testing.T) {
 		re.Empty(resp.RecoveryPlan.Creates)
 		re.Empty(resp.RecoveryPlan.Demotes)
 		re.Nil(resp.RecoveryPlan.ForceLeader)
-		re.Equal(uint64(1), resp.RecoveryPlan.Step)
+		re.Equal(recoveryController.step, resp.RecoveryPlan.Step)
 		applyRecoveryPlan(re, storeID, reports, resp)
 	}
 
@@ -426,11 +646,11 @@ func TestForceLeaderFail(t *testing.T) {
 
 	req1 := newStoreHeartbeat(1, reports[1])
 	resp1 := &pdpb.StoreHeartbeatResponse{}
-	req1.StoreReport.Step = 1
+	req1.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
 	req2 := newStoreHeartbeat(2, reports[2])
 	resp2 := &pdpb.StoreHeartbeatResponse{}
-	req2.StoreReport.Step = 1
+	req2.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req2, resp2)
 	re.Equal(ForceLeader, recoveryController.GetStage())
 	recoveryController.HandleStoreHeartbeat(req1, resp1)
@@ -545,7 +765,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 
 	req := newStoreHeartbeat(1, reports[1])
 	resp := &pdpb.StoreHeartbeatResponse{}
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ForceLeaderForCommitMerge, recoveryController.GetStage())
 
@@ -653,7 +873,7 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 		},
 	}
 	req := newStoreHeartbeat(1, &storeReport)
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	hasStore3AsFailedStore := false
@@ -1167,7 +1387,7 @@ func TestExecutionTimeout(t *testing.T) {
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ExitForceLeader, recoveryController.GetStage())
-	req.StoreReport = &pdpb.StoreReport{Step: 2}
+	req.StoreReport = &pdpb.StoreReport{Step: recoveryController.step}
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(Failed, recoveryController.GetStage())
 
@@ -1231,7 +1451,7 @@ func TestExitForceLeader(t *testing.T) {
 					IsForceLeader: true,
 				},
 			},
-			Step: 1,
+			Step: recoveryController.step,
 		},
 	}
 
@@ -1317,7 +1537,7 @@ func TestStep(t *testing.T) {
 	re.Equal(CollectReport, recoveryController.GetStage())
 
 	// valid store report
-	req.StoreReport.Step = 1
+	req.StoreReport.Step = recoveryController.step
 	recoveryController.HandleStoreHeartbeat(req, resp)
 	re.Equal(ForceLeader, recoveryController.GetStage())
 
@@ -1547,7 +1767,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 7, Version: 10},
 						Peers: []*metapb.Peer{
 							{Id: 11, StoreId: 1}, {Id: 12, StoreId: 4}, {Id: 13, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 		2: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1559,7 +1779,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 5, Version: 8},
 						Peers: []*metapb.Peer{
 							{Id: 21, StoreId: 2}, {Id: 22, StoreId: 4}, {Id: 23, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 		3: {PeerReports: []*pdpb.PeerReport{
 			{
 				RaftState: &raft_serverpb.RaftLocalState{LastIndex: 10, HardState: &eraftpb.HardState{Term: 1, Commit: 10}},
@@ -1571,7 +1791,7 @@ func TestRangeOverlap1(t *testing.T) {
 						RegionEpoch: &metapb.RegionEpoch{ConfVer: 4, Version: 6},
 						Peers: []*metapb.Peer{
 							{Id: 31, StoreId: 3}, {Id: 32, StoreId: 4}, {Id: 33, StoreId: 5}}}}},
-		}, Step: 1},
+		}, Step: recoveryController.step},
 	}
 
 	advanceUntilFinished(re, recoveryController, reports)
@@ -1745,6 +1965,75 @@ func TestRemoveFailedStores(t *testing.T) {
 		map[uint64]struct{}{
 			2: {},
 		}, 60, false))
+}
+
+func TestAbortFailedStoresRemoval(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(2, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.Error(recoveryController.AbortFailedStoresRemoval())
+
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+		1: {},
+	}, 60, false))
+	re.NoError(recoveryController.AbortFailedStoresRemoval())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+	re.Contains(recoveryController.output[1].Details[0], "aborted by operator")
+	re.NoError(recoveryController.AbortFailedStoresRemoval())
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+
+	resp := &pdpb.StoreHeartbeatResponse{}
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(2, nil), resp)
+	re.NotNil(resp.GetRecoveryPlan())
+	re.Empty(resp.GetRecoveryPlan().GetForceLeader().GetEnterForceLeaders())
+	re.Empty(resp.GetRecoveryPlan().GetCreates())
+	re.Empty(resp.GetRecoveryPlan().GetDemotes())
+	re.Empty(resp.GetRecoveryPlan().GetTombstones())
+
+	report := &pdpb.StoreReport{Step: resp.GetRecoveryPlan().GetStep()}
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(2, report), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(Failed, recoveryController.GetStage())
+}
+
+func TestUnsafeRecoveryStepIsUniqueAcrossRuns(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
+	coordinator.Run()
+	for _, store := range newTestStores(1, "6.0.0") {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+	oldStep := recoveryController.step
+	recoveryController.changeStage(ExitForceLeader)
+	exitForceLeaderStep := recoveryController.step
+	re.NotEqual(oldStep, exitForceLeaderStep)
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(1, &pdpb.StoreReport{Step: oldStep}), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(ExitForceLeader, recoveryController.GetStage())
+	re.Nil(recoveryController.storeReports[1])
+	recoveryController.changeStage(Failed)
+
+	re.NoError(recoveryController.RemoveFailedStores(nil, 60, true))
+	newStep := recoveryController.step
+	re.NotEqual(oldStep, newStep)
+
+	recoveryController.HandleStoreHeartbeat(newStoreHeartbeat(1, &pdpb.StoreReport{Step: oldStep}), &pdpb.StoreHeartbeatResponse{})
+	re.Equal(CollectReport, recoveryController.GetStage())
+	re.Nil(recoveryController.storeReports[1])
 }
 
 func TestRunning(t *testing.T) {

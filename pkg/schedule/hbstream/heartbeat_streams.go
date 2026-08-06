@@ -126,6 +126,14 @@ func (s *HeartbeatStreams) run() {
 	}
 
 	for {
+		// We need to check the context in each loop to make sure we can exit timely when the stream is closed.
+		select {
+		case <-s.hbStreamCtx.Done():
+			log.Info("heartbeat stream is closed, stop running")
+			return
+		default:
+		}
+
 		select {
 		case update := <-s.streamCh:
 			s.streams[update.storeID] = update.stream
@@ -177,6 +185,7 @@ func (s *HeartbeatStreams) run() {
 				}
 			}
 		case <-s.hbStreamCtx.Done():
+			log.Info("heartbeat stream is closed, stop running")
 			return
 		}
 	}

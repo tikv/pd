@@ -62,6 +62,8 @@ type healthChecker struct {
 	// the checked healthy endpoints dynamically and periodically.
 	client *clientv3.Client
 
+	clientOpts []CreateEtcdClientOpt
+
 	endpointCountState prometheus.Gauge
 }
 
@@ -71,12 +73,14 @@ func initHealthChecker(
 	tlsConfig *tls.Config,
 	client *clientv3.Client,
 	purpose EtcdClientPurpose,
+	opts ...CreateEtcdClientOpt,
 ) {
 	healthChecker := &healthChecker{
 		source:             string(purpose),
 		tickerInterval:     tickerInterval,
 		tlsConfig:          tlsConfig,
 		client:             client,
+		clientOpts:         opts,
 		endpointCountState: etcdStateGauge.WithLabelValues(string(purpose), endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
@@ -362,7 +366,7 @@ func (checker *healthChecker) update() {
 	for ep := range epMap {
 		client := checker.loadClient(ep)
 		if client == nil {
-			checker.initClient(ep)
+			checker.initClient(ep, checker.clientOpts...)
 			continue
 		}
 		since := time.Since(client.lastHealth)
@@ -413,8 +417,8 @@ func (checker *healthChecker) loadClient(ep string) *healthyClient {
 	return nil
 }
 
-func (checker *healthChecker) initClient(ep string) {
-	client, err := newClient(checker.tlsConfig, ep)
+func (checker *healthChecker) initClient(ep string, opts ...CreateEtcdClientOpt) {
+	client, err := newClient(checker.tlsConfig, []string{ep}, opts...)
 	if err != nil {
 		log.Error("failed to create etcd healthy client",
 			zap.String("endpoint", ep),

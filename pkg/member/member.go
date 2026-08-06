@@ -249,7 +249,7 @@ func (m *Member) CheckLeader() (*Leader, bool) {
 		// in previous Campaign. We should delete the leadership and campaign again.
 		log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
 		// Delete the leader itself and let others start a new election again.
-		if err = m.leadership.DeleteLeaderKey(); err != nil {
+		if err = m.leadership.DeleteLeaderKeyByRevision(revision); err != nil {
 			log.Error("deleting pd leader key meets error", errs.ZapError(err))
 			time.Sleep(checkFailBackoffDuration)
 			return nil, true
@@ -281,13 +281,16 @@ func (m *Member) Resign() {
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
 func (m *Member) CheckPriority(ctx context.Context) {
-	etcdLeader := m.GetEtcdLeader()
-	if etcdLeader == m.ID() || etcdLeader == 0 {
-		return
-	}
 	myPriority, err := m.GetMemberLeaderPriority(m.ID())
 	if err != nil {
 		log.Error("failed to load leader priority", errs.ZapError(err))
+		return
+	}
+	// Record leader priority for current instance.
+	memberLeaderPriorityGauge.WithLabelValues().Set(float64(myPriority))
+
+	etcdLeader := m.GetEtcdLeader()
+	if etcdLeader == m.ID() || etcdLeader == 0 {
 		return
 	}
 	leaderPriority, err := m.GetMemberLeaderPriority(etcdLeader)

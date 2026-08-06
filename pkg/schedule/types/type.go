@@ -39,6 +39,8 @@ const (
 	SplitChecker CheckerSchedulerType = "split-checker"
 	// AffinityChecker is the name for affinity checker.
 	AffinityChecker CheckerSchedulerType = "affinity-checker"
+	// SplitScatterChecker is the name for internal split-scatter dispatch.
+	SplitScatterChecker CheckerSchedulerType = "split-scatter-checker"
 
 	// BalanceLeaderScheduler is balance leader scheduler name.
 	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"

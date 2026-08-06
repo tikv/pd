@@ -269,18 +269,21 @@ func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) b
 		if cluster.GetSharedConfig().IsCrossTableMergeEnabled() {
 			return true
 		}
-		return isTableIDSame(region, adjacent)
+		return isSameTableIdentity(region, adjacent)
 	case constant.Raw:
 		return true
 	case constant.Txn:
 		return true
 	default:
-		return isTableIDSame(region, adjacent)
+		return isSameTableIdentity(region, adjacent)
 	}
 }
 
-func isTableIDSame(region, adjacent *core.RegionInfo) bool {
-	return codec.Key(region.GetStartKey()).TableID() == codec.Key(adjacent.GetStartKey()).TableID()
+// isSameTableIdentity reports whether two regions belong to the same logical
+// table, i.e. the same table ID within the same keyspace (if any).
+func isSameTableIdentity(region, adjacent *core.RegionInfo) bool {
+	return codec.Key(region.GetStartKey()).TableIdentity() ==
+		codec.Key(adjacent.GetStartKey()).TableIdentity()
 }
 
 // Check whether there is a peer of the adjacent region on an offline store,

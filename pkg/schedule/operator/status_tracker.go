@@ -179,10 +179,10 @@ func (o *Operator) LogAdditionalInfo() string {
 // HasRelatedMergeRegion checks if the operator has a related merge region.
 // All merge operators (OpMerge and OpAffinity) have this info set.
 func (o *Operator) HasRelatedMergeRegion() bool {
-	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
 	if o == nil {
 		return false
 	}
+	val, exist := o.GetAdditionalInfo(string(RelatedMergeRegion))
 	return exist && val != ""
 }
 

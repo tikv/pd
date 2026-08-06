@@ -23,10 +23,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -62,7 +62,7 @@ type ResourceManagerClient interface {
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan *metastorage.WatchResponse, error)
 }
 
 // GetResourceGroupOp represents available options when getting resource group.
@@ -119,9 +119,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:  &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -149,15 +147,22 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
 		c.inner.gRPCErrorHandler(err)
 		c.inner.resourceManagerErrorHandler(err)
-		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+		causeErr := err
+		switch ctxErr := ctx.Err(); ctxErr {
+		case context.Canceled, context.DeadlineExceeded:
+			causeErr = ctxErr
+		}
+		return nil, &errs.ErrClientGetResourceGroup{
+			ResourceGroupName: resourceGroupName,
+			Cause:             err.Error(),
+			Err:               causeErr,
+		}
 	}
 	resErr := resp.GetError()
 	if resErr != nil {
@@ -183,12 +188,10 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 	}
 	// ensure to use the keyspace ID of the inner client
 	if metaGroup.KeyspaceId == nil {
-		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		}
-	} else if metaGroup.KeyspaceId.Value != c.inner.keyspaceID {
+		metaGroup.KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}}
+	} else if metaGroup.KeyspaceId.GetValue() != c.inner.keyspaceID {
 		return "", errs.ErrClientPutResourceGroupMismatchKeyspaceID.FastGenByArgs(
-			metaGroup.KeyspaceId.Value, c.inner.keyspaceID)
+			metaGroup.KeyspaceId.GetValue(), c.inner.keyspaceID)
 	}
 	req := &rmpb.PutResourceGroupRequest{
 		Group: metaGroup,
@@ -219,9 +222,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-		KeyspaceId: &rmpb.KeyspaceIDValue{
-			Value: c.inner.keyspaceID,
-		},
+		KeyspaceId:        &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: c.inner.keyspaceID}},
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {

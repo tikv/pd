@@ -31,7 +31,8 @@ var (
 			Subsystem: "txn",
 			Name:      "handle_txns_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled txns.",
-			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+			// 1ms ~ 65s， according to the latency distribution of Txn in production
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 17),
 		}, []string{"result"})
 )
 

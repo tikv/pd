@@ -166,6 +166,17 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	return b
 }
 
+// IsAllowedLeaderTarget checks whether the peer can be selected as a
+// non-forced target leader by the operator builder.
+func IsAllowedLeaderTarget(ci sche.SharedCluster, region *core.RegionInfo, peer *metapb.Peer) bool {
+	b := NewBuilder("check-target-leader", ci, region)
+	if b.err != nil {
+		return false
+	}
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
+	return b.allowLeader(peer, false)
+}
+
 // AddPeer records an add Peer operation in Builder. If peer.Id is 0, the builder
 // will allocate a new peer ID later.
 func (b *Builder) AddPeer(peer *metapb.Peer) *Builder {

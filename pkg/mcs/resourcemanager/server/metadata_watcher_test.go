@@ -64,7 +64,7 @@ func newMetadataWatcherResourceGroup(name string, priority uint32, fillRate uint
 				},
 			},
 		},
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 10},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: 10}},
 	}
 }
 

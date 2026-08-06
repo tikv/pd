@@ -114,8 +114,22 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 	return addResp, errors.WithStack(err)
 }
 
-// ListEtcdMembers returns a list of internal etcd members.
+// ListEtcdMembers returns a list of internal etcd members. It is served from the
+// contacted server's local data (not linearizable), so an isolated or lagging
+// endpoint may return a stale view.
 func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	return queryEtcdMembers(ctx, client, false)
+}
+
+// ListEtcdMembersLinearizable returns a list of internal etcd members with a
+// linearizable guarantee (served through quorum). It fails if the contacted
+// server is disconnected from quorum. Use it when the membership view must
+// reflect the latest committed state, e.g. join admission decisions.
+func ListEtcdMembersLinearizable(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+	return queryEtcdMembers(ctx, client, true)
+}
+
+func queryEtcdMembers(ctx context.Context, client *clientv3.Client, linearizable bool) (*clientv3.MemberListResponse, error) {
 	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
@@ -126,7 +140,7 @@ func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.Me
 	// If Linearizable is set to false, the member list will be returned with server's local data.
 	// If Linearizable is set to true, it is served with linearizable guarantee. If the server is disconnected from quorum, `MemberList` call will fail.
 	c := clientv3.RetryClusterClient(client)
-	resp, err := c.MemberList(newCtx, &etcdserverpb.MemberListRequest{Linearizable: false})
+	resp, err := c.MemberList(newCtx, &etcdserverpb.MemberListRequest{Linearizable: linearizable})
 	cancel()
 	if err != nil {
 		return (*clientv3.MemberListResponse)(resp), errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
@@ -277,30 +291,37 @@ const (
 	McsEtcdClientPurpose EtcdClientPurpose = "mcs-etcd-client"
 )
 
-func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, error) {
+// CreateEtcdClientOpt is an alias of the function that edits clientv3.Config.
+type CreateEtcdClientOpt func(*clientv3.Config)
+
+func newClient(tlsConfig *tls.Config, endpoints []string, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	if len(endpoints) == 0 {
 		return nil, errs.ErrNewEtcdClient.FastGenByArgs("empty etcd endpoints")
 	}
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	client, err := clientv3.New(clientv3.Config{
+	cfg := clientv3.Config{
 		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,
 		TLS:                  tlsConfig,
 		LogConfig:            &lgc,
 		DialKeepAliveTime:    defaultDialKeepAliveTime,
 		DialKeepAliveTimeout: defaultDialKeepAliveTimeout,
-	})
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	client, err := clientv3.New(cfg)
 	return client, err
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClientPurpose, enableChecker bool, opts ...CreateEtcdClientOpt) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
 	}
-	client, err := newClient(tlsConfig, urls...)
+	client, err := newClient(tlsConfig, urls, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +331,7 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, purpose EtcdClien
 		tickerInterval = 100 * time.Millisecond
 	})
 	if enableChecker {
-		initHealthChecker(tickerInterval, tlsConfig, client, purpose)
+		initHealthChecker(tickerInterval, tlsConfig, client, purpose, opts...)
 	}
 
 	return client, err

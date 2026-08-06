@@ -51,7 +51,7 @@ func (p *Plan) SetLabelRule(rule *LabelRule) error {
 		return p.labeler.storage.SaveRegionRule(txn, rule.ID, rule)
 	})
 	p.applyLockedOps = append(p.applyLockedOps, func() {
-		p.labeler.labelRules[rule.ID] = rule
+		p.labeler.ruleIndex.set(rule)
 	})
 	return nil
 }
@@ -66,10 +66,7 @@ func (p *Plan) DeleteLabelRule(id string) error {
 		return p.labeler.storage.DeleteRegionRule(txn, id)
 	})
 	p.applyLockedOps = append(p.applyLockedOps, func() {
-		if _, ok := p.labeler.labelRules[id]; !ok {
-			return
-		}
-		delete(p.labeler.labelRules, id)
+		p.labeler.ruleIndex.delete(id)
 	})
 	return nil
 }
@@ -93,5 +90,4 @@ func (p *Plan) Apply() {
 	for _, op := range p.applyLockedOps {
 		op()
 	}
-	p.labeler.BuildRangeListLocked()
 }

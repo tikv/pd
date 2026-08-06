@@ -17,6 +17,7 @@ package grpcutil
 import (
 	"context"
 	"crypto/tls"
+	"net"
 	"net/url"
 	"sync"
 	"time"
@@ -223,4 +224,25 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 	cc = conn.(*grpc.ClientConn)
 	log.Debug("use existing connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
 	return cc, nil
+}
+
+// GetCalleeID returns the callee ID extracted from the given advertise address.
+// The callee ID is used to identify the callee in gRPC communication, and it is usually the host:port of the advertise address. If the advertise address is invalid, it will panic.
+func GetCalleeID(addr string) string {
+	parsed, err := url.Parse(addr)
+	callerID := ""
+	if err != nil {
+		if _, _, splitErr := net.SplitHostPort(addr); splitErr != nil {
+			return ""
+		}
+		callerID = addr
+	} else {
+		callerID = parsed.Host
+		if callerID == "" {
+			if _, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+				callerID = addr
+			}
+		}
+	}
+	return callerID
 }

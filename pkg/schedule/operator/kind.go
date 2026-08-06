@@ -54,6 +54,8 @@ const (
 	OpWitnessLeader
 	// Include witness transfer.
 	OpWitness
+	// Initiated by internal split-scatter dispatcher.
+	OpSplitScatter
 	opMax
 )
 
@@ -69,6 +71,7 @@ var flagToName = map[OpKind]string{
 	OpWitness:       "witness",
 	OpWitnessLeader: "witness-leader",
 	OpAffinity:      "affinity",
+	OpSplitScatter:  "split-scatter",
 }
 
 var nameToFlag = map[string]OpKind{
@@ -82,6 +85,7 @@ var nameToFlag = map[string]OpKind{
 	"range":          OpRange,
 	"witness-leader": OpWitnessLeader,
 	"affinity":       OpAffinity,
+	"split-scatter":  OpSplitScatter,
 }
 
 func (k OpKind) String() string {

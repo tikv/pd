@@ -88,7 +88,8 @@ func (s *tsoTestSuite) checkRequestFollower(cluster *tests.TestCluster) {
 		Header: testutil.NewRequestHeader(clusterID),
 		Count:  1,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, followerServer.GetAddr())
+	// Connect directly without forwarding metadata to verify the original
+	// follower request behavior.
 	tsoClient, err := grpcPDClient.Tso(ctx)
 	re.NoError(err)
 	defer func() {
