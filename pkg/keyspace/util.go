@@ -16,7 +16,6 @@ package keyspace
 
 import (
 	"container/heap"
-	"encoding/binary"
 	"encoding/hex"
 	"regexp"
 	"strconv"
@@ -40,15 +39,6 @@ const (
 	// numbers (0-9), hyphens (-), and underscores (_).
 	// currently, we enforce this rule to keyspace_name.
 	namePattern = "^[-A-Za-z0-9_]{1,20}$"
-)
-
-const (
-	// RawKeyspaceModePrefix is the raw keyspace prefix mode byte.
-	RawKeyspaceModePrefix = byte('r')
-	// TxnKeyspaceModePrefix is the txn keyspace prefix mode byte.
-	TxnKeyspaceModePrefix = byte('x')
-	// KeyspacePrefixLen is the raw keyspace prefix length before memcomparable encoding.
-	KeyspacePrefixLen = 4
 )
 
 var (
@@ -117,30 +107,6 @@ func MaskKeyspaceID(id uint32) uint32 {
 	return id & 0xFF
 }
 
-// MakeKeyspacePrefix constructs the raw keyspace prefix for the given mode and keyspace ID.
-// Keyspace keys encode the lower 24 bits of the keyspace ID after the mode byte.
-func MakeKeyspacePrefix(mode byte, id uint32) []byte {
-	prefix := make([]byte, KeyspacePrefixLen)
-	binary.BigEndian.PutUint32(prefix, id)
-	prefix[0] = mode
-	return prefix
-}
-
-// ParseKeyspacePrefix parses a raw keyspace prefix from key.
-// It returns false for keys that do not start with a known keyspace mode byte.
-func ParseKeyspacePrefix(key []byte) (mode byte, id uint32, ok bool) {
-	if len(key) < KeyspacePrefixLen {
-		return 0, 0, false
-	}
-	mode = key[0]
-	if mode != RawKeyspaceModePrefix && mode != TxnKeyspaceModePrefix {
-		return 0, 0, false
-	}
-	idBytes := [KeyspacePrefixLen]byte{0, key[1], key[2], key[3]}
-	id = binary.BigEndian.Uint32(idBytes[:])
-	return mode, id, true
-}
-
 // RegionBound represents the region boundary of the given keyspace.
 // For a keyspace with id ['a', 'b', 'c'], it has four boundaries:
 //
@@ -194,20 +160,15 @@ func keyTypeStringToRegionBoundType(keyType string) regionBoundType {
 
 // MakeRegionBound constructs the correct region boundaries of the given keyspace.
 func MakeRegionBound(id uint32) *RegionBound {
-	rawLeftBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id)
-	rawRightBound := MakeKeyspacePrefix(RawKeyspaceModePrefix, id+1)
-	txnLeftBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id)
-	txnRightBound := MakeKeyspacePrefix(TxnKeyspaceModePrefix, id+1)
-	if id == constant.MaxValidKeyspaceID {
-		// The right bound is an exclusive fencepost, not a real keyspace prefix.
-		rawRightBound = []byte{'s', 0, 0, 0}
-		txnRightBound = []byte{'y', 0, 0, 0}
-	}
+	rawLeftBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id)
+	rawRightBound := codec.EncodeKeyspaceBoundary(codec.RawKeyspaceModePrefix, id+1)
+	txnLeftBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id)
+	txnRightBound := codec.EncodeKeyspaceBoundary(codec.TxnKeyspaceModePrefix, id+1)
 	return &RegionBound{
-		RawLeftBound:  codec.EncodeBytes(rawLeftBound),
-		RawRightBound: codec.EncodeBytes(rawRightBound),
-		TxnLeftBound:  codec.EncodeBytes(txnLeftBound),
-		TxnRightBound: codec.EncodeBytes(txnRightBound),
+		RawLeftBound:  rawLeftBound[:],
+		RawRightBound: rawRightBound[:],
+		TxnLeftBound:  txnLeftBound[:],
+		TxnRightBound: txnRightBound[:],
 	}
 }
 
@@ -240,7 +201,7 @@ func buildKeyRanges(id uint32, boundType regionBoundType) []any {
 
 // getRegionLabelID returns the region label id of the target keyspace.
 func getRegionLabelID(id uint32) string {
-	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
+	return constant.RegionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
 // MakeTxnLabelRule makes the label rule for the given keyspace id, only for test
@@ -254,7 +215,7 @@ func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 		Index: 0,
 		Labels: []labeler.RegionLabel{
 			{
-				Key:   regionLabelKey,
+				Key:   constant.RegionLabelKey,
 				Value: strconv.FormatUint(uint64(id), endpoint.SpaceIDBase),
 			},
 		},
@@ -268,21 +229,30 @@ func buildLabelRule(id uint32, boundType regionBoundType) *labeler.LabelRule {
 // rule is a keyspace label rule.
 func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 	// Validate the ID matches the expected format "keyspaces/<id>".
-	if rule == nil || !strings.HasPrefix(rule.ID, regionLabelIDPrefix) {
+	if rule == nil {
+		return 0, false
+	}
+	idText, ok := strings.CutPrefix(rule.ID, constant.RegionLabelIDPrefix)
+	if !ok {
 		return 0, false
 	}
 	// Retrieve the keyspace ID.
 	keyspaceID, err := strconv.ParseUint(
-		strings.TrimPrefix(rule.ID, regionLabelIDPrefix),
+		idText,
 		endpoint.SpaceIDBase, 32,
 	)
-	if err != nil {
+	hasLeadingZero := len(idText) > 1 && idText[0] == '0'
+	if err != nil || keyspaceID > uint64(constant.MaxValidKeyspaceID) || hasLeadingZero {
 		return 0, false
 	}
 	// Double check the keyspace ID from the label rule.
-	var idFromLabel uint64
+	var (
+		idFromLabel  uint64
+		foundIDLabel bool
+	)
 	for _, label := range rule.Labels {
-		if label.Key == regionLabelKey {
+		if label.Key == constant.RegionLabelKey {
+			foundIDLabel = true
 			idFromLabel, err = strconv.ParseUint(label.Value, endpoint.SpaceIDBase, 32)
 			if err != nil {
 				return 0, false
@@ -290,7 +260,7 @@ func ParseKeyspaceIDFromLabelRule(rule *labeler.LabelRule) (uint32, bool) {
 			break
 		}
 	}
-	if keyspaceID != idFromLabel {
+	if !foundIDLabel || keyspaceID != idFromLabel {
 		return 0, false
 	}
 	return uint32(keyspaceID), true

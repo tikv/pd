@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -71,7 +72,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 	}
 	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
-	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
+	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2, newRequestSourceMetricsState(group.Name))
 	re.NoError(err)
 	return gc
 }
@@ -86,6 +87,31 @@ func TestGroupControlBurstable(t *testing.T) {
 	gc.run.requestUnitTokens.limiter.Reconfigure(time.Now(), args)
 	gc.updateAvgRequestResourcePerSec()
 	re.True(gc.burstable.Load())
+}
+
+func TestCalcAvgSkipsNonPositiveDeltaDuration(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	counter := gc.run.requestUnitTokens
+	// Simulate a controller that is published between the `updateRunState` and
+	// `updateAvgRequestResourcePerSec` passes of the same tick: `gc.run.now`
+	// still equals the `avgLastTime` set by `initRunState`, so the elapsed
+	// duration is exactly zero and the sample must be skipped instead of
+	// computing 0/0 = NaN.
+	re.Equal(gc.run.now, counter.avgLastTime)
+	gc.updateAvgRequestResourcePerSec()
+	re.False(math.IsNaN(counter.avgRUPerSec))
+	re.Zero(counter.avgRUPerSec)
+	// The skipped sample must not advance the accounting state.
+	re.Equal(gc.run.now, counter.avgLastTime)
+	re.Zero(counter.avgRUPerSecLastRU)
+
+	// Once the run state advances, sampling resumes as usual.
+	gc.run.consumption.RRU = 100
+	gc.run.now = gc.run.now.Add(time.Second)
+	gc.updateAvgRequestResourcePerSec()
+	re.False(math.IsNaN(counter.avgRUPerSec))
+	re.Positive(counter.avgRUPerSec)
 }
 
 func TestSmallPositiveConsumptionDoesNotBypassThreshold(t *testing.T) {
@@ -784,7 +810,7 @@ func TestDeletePagingLabelsResetsSeries(t *testing.T) {
 	// Use a name no other test reuses so we measure only our own series.
 	name := "test-paging-cleanup-rg"
 
-	gmc := initMetrics(name, name)
+	gmc := initMetrics(name, name, newRequestSourceMetricsState(name))
 	// Push a sample through every paging counter / histogram so each label
 	// series actually exists in the underlying Vec.
 	gmc.observePagingRequest(100)
@@ -1042,7 +1068,7 @@ func TestAcquireTokensSignalAwareWait(t *testing.T) {
 	cfg := DefaultRUConfig()
 	cfg.WaitRetryInterval = 5 * time.Second
 	cfg.WaitRetryTimes = 3
-	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1))
+	gc, err := newGroupCostController(group, cfg, notifyCh, make(chan *groupCostController, 1), newRequestSourceMetricsState(group.Name))
 	re.NoError(err)
 
 	// Set fillRate=0 so reservation always fails with InfDuration,

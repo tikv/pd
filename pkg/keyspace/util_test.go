@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/hex"
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -89,36 +90,6 @@ func TestMakeRegionBound(t *testing.T) {
 	re.Equal(encodeKey([]byte{'y', 0x00, 0x00, 0x00}), maxRegionBound.TxnRightBound)
 }
 
-func TestMakeKeyspacePrefix(t *testing.T) {
-	re := require.New(t)
-
-	testCases := []struct {
-		name       string
-		mode       byte
-		id         uint32
-		wantPrefix []byte
-	}{
-		{
-			name:       "raw",
-			mode:       RawKeyspaceModePrefix,
-			id:         0x010203,
-			wantPrefix: []byte{'r', 0x01, 0x02, 0x03},
-		},
-		{
-			name:       "txn",
-			mode:       TxnKeyspaceModePrefix,
-			id:         constant.MaxValidKeyspaceID,
-			wantPrefix: []byte{'x', 0xff, 0xff, 0xff},
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(_ *testing.T) {
-			re.Equal(testCase.wantPrefix, MakeKeyspacePrefix(testCase.mode, testCase.id))
-		})
-	}
-}
-
 func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -137,44 +108,6 @@ func TestMaxKeyspaceLabelRuleSplitKeys(t *testing.T) {
 		},
 		regionLabeler.GetSplitKeys(nil, nil),
 	)
-}
-
-func TestParseKeyspacePrefix(t *testing.T) {
-	re := require.New(t)
-
-	testCases := []struct {
-		name string
-		key  []byte
-		mode byte
-		id   uint32
-	}{
-		{
-			name: "raw",
-			key:  []byte{'r', 0x01, 0x02, 0x03},
-			mode: RawKeyspaceModePrefix,
-			id:   0x010203,
-		},
-		{
-			name: "txn with suffix",
-			key:  []byte{'x', 0xff, 0xff, 0xff, 't'},
-			mode: TxnKeyspaceModePrefix,
-			id:   constant.MaxValidKeyspaceID,
-		},
-	}
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(_ *testing.T) {
-			mode, id, ok := ParseKeyspacePrefix(testCase.key)
-			re.True(ok)
-			re.Equal(testCase.mode, mode)
-			re.Equal(testCase.id, id)
-		})
-	}
-
-	_, _, ok := ParseKeyspacePrefix([]byte{'x', 0x01, 0x02})
-	re.False(ok)
-	_, _, ok = ParseKeyspacePrefix([]byte{'t', 0x01, 0x02, 0x03})
-	re.False(ok)
 }
 
 func TestValidateName(t *testing.T) {
@@ -359,7 +292,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -374,7 +307,7 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
 					},
 				},
@@ -388,8 +321,31 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 				Index: 0,
 				Labels: []labeler.RegionLabel{
 					{
-						Key:   regionLabelKey,
+						Key:   constant.RegionLabelKey,
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - non-canonical keyspace ID.
+		{
+			labelRule: &labeler.LabelRule{
+				ID:     "keyspaces/01",
+				Labels: []labeler.RegionLabel{{Key: constant.RegionLabelKey, Value: "01"}},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace label ID - out of valid keyspace range.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: "keyspaces/" + strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   constant.RegionLabelKey,
+						Value: strconv.FormatUint(uint64(constant.MaxValidKeyspaceID)+1, 10),
 					},
 				},
 			},
@@ -405,6 +361,20 @@ func TestParseKeyspaceIDFromLabelRule(t *testing.T) {
 					{
 						Key:   "not-id",
 						Value: "1",
+					},
+				},
+			},
+			expectedID: 0,
+			expectedOK: false,
+		},
+		// Invalid keyspace zero label rule - missing keyspace ID label.
+		{
+			labelRule: &labeler.LabelRule{
+				ID: getRegionLabelID(0),
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "not-id",
+						Value: "0",
 					},
 				},
 			},

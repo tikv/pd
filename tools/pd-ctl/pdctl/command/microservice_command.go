@@ -17,6 +17,7 @@ package command
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/spf13/cobra"
 )
@@ -24,6 +25,11 @@ import (
 var (
 	msPrimaryPrefix = "/pd/api/v2/ms/primary/%s"
 	msMembersPrefix = "/pd/api/v2/ms/members/%s"
+	// msTSOEvictPrimaryPrefix is the PD endpoint that forwards an eviction of all
+	// keyspace group primaries to the given tso node. It intentionally has no
+	// leading slash: doRequest joins it to the endpoint with a "/", and a POST to
+	// the resulting double-slash path would not be redirected the way GETs are.
+	msTSOEvictPrimaryPrefix = "pd/api/v2/ms/tso/primary/evict?node=%s"
 )
 
 // NewMicroServicesCommand return a microservice subcommand of rootCmd
@@ -40,7 +46,7 @@ func NewMicroServicesCommand() *cobra.Command {
 
 func newMSTsoCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "tso <primary|members>",
+		Use:   "tso <primary|members|evict-primary>",
 		Short: "tso microservice commands",
 	}
 	d.AddCommand(&cobra.Command{
@@ -53,7 +59,16 @@ func newMSTsoCommand() *cobra.Command {
 		Short: "show the tso members status",
 		Run:   getMembersCommandFunc,
 	})
+	d.AddCommand(newEvictTSOPrimaryCommand())
 	return d
+}
+
+func newEvictTSOPrimaryCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "evict-primary <tso_node_address>",
+		Short: "evict all keyspace group primaries held by the given tso node",
+		Run:   evictTSOPrimaryCommandFunc,
+	}
 }
 
 func newMSSchedulingCommand() *cobra.Command {
@@ -93,6 +108,22 @@ func getMembersCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, uri, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the %s microservice members: %s\n", parent, err)
+		return
+	}
+	cmd.Println(r)
+}
+
+func evictTSOPrimaryCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	// The request goes to PD, which forwards it to the given tso node. The
+	// eviction only drains the primaries held by that node.
+	uri := fmt.Sprintf(msTSOEvictPrimaryPrefix, url.QueryEscape(args[0]))
+	r, err := doRequest(cmd, uri, http.MethodPost, http.Header{})
+	if err != nil {
+		cmd.Printf("Failed to evict the tso primaries on %s: %s\n", args[0], err)
 		return
 	}
 	cmd.Println(r)

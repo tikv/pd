@@ -1863,6 +1863,23 @@ func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) erro
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
+func memberFailpointEnabled(val failpoint.Value, memberID uint64) bool {
+	if enabled, ok := val.(bool); ok {
+		return enabled
+	}
+	memberString, ok := val.(string)
+	if !ok {
+		return false
+	}
+	for _, memberIDString := range strings.Split(memberString, ",") {
+		id, err := strconv.ParseUint(strings.TrimSpace(memberIDString), 10, 64)
+		if err == nil && id == memberID {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) leaderLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
@@ -1876,9 +1893,7 @@ func (s *Server) leaderLoop() {
 		leader, checkAgain := s.member.CheckLeader()
 		// add failpoint to test leader check go to stuck.
 		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
-			memberString := val.(string)
-			memberID, _ := strconv.ParseUint(memberString, 10, 64)
-			if s.member.ID() == memberID {
+			if memberFailpointEnabled(val, s.member.ID()) {
 				checkAgain = true
 			}
 		})
@@ -1914,9 +1929,11 @@ func (s *Server) leaderLoop() {
 				// use random timeout to avoid leader campaigning storm.
 				randomTimeout := time.Duration(rand.IntN(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
-				failpoint.Inject("timeoutWaitPDLeader", func() {
-					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
-					randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+				failpoint.Inject("timeoutWaitPDLeader", func(val failpoint.Value) {
+					if memberFailpointEnabled(val, s.member.ID()) {
+						log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
+						randomTimeout = time.Duration(rand.IntN(10))*time.Millisecond + 100*time.Millisecond
+					}
 				})
 				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
@@ -2020,8 +2037,10 @@ func (s *Server) campaignLeader() {
 	createRaftClusterDuration := time.Since(createRaftClusterStart)
 	log.Info("create raft cluster completed", zap.Duration("cost", createRaftClusterDuration))
 	defer s.stopRaftCluster()
-	failpoint.Inject("rebaseErr", func() {
-		failpoint.Return()
+	failpoint.Inject("rebaseErr", func(val failpoint.Value) {
+		if memberFailpointEnabled(val, s.member.ID()) {
+			failpoint.Return()
+		}
 	})
 	rebaseStart := time.Now()
 	if err := s.idAllocator.Rebase(); err != nil {
@@ -2061,9 +2080,7 @@ func (s *Server) campaignLeader() {
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
 			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
-				memberString := val.(string)
-				memberID, _ := strconv.ParseUint(memberString, 10, 64)
-				if s.member.ID() == memberID {
+				if memberFailpointEnabled(val, s.member.ID()) {
 					log.Info("exit PD leader")
 					failpoint.Return()
 				}

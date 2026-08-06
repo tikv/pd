@@ -45,10 +45,6 @@ const (
 	// AllocStep set idAllocator's step when write persistent window boundary.
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
-	// regionLabelIDPrefix is used to prefix the keyspace region label.
-	regionLabelIDPrefix = "keyspaces/"
-	// regionLabelKey is the key for keyspace id in keyspace region label.
-	regionLabelKey = "id"
 	// UserKindKey is the key for user kind in keyspace config.
 	UserKindKey = "user_kind"
 	// TSOKeyspaceGroupIDKey is the key for tso keyspace group id in keyspace config.
@@ -338,7 +334,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	config[WaitRegionSplitKey] = strconv.FormatBool(tracer.waitSplit)
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
 	keyspace := &keyspacepb.KeyspaceMeta{
-		Id:             tracer.keyspaceID,
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: tracer.keyspaceID},
 		Name:           tracer.keyspaceName,
 		State:          keyspacepb.KeyspaceState_DISABLED,
 		CreatedAt:      createTime,
@@ -531,10 +527,10 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		if err != nil {
 			return
 		}
-		manager.metaLock.Lock(keyspace.Id)
-		defer manager.metaLock.Unlock(keyspace.Id)
-		manager.keyspaceNameLookup.Store(keyspace.Id, keyspace.Name)
-		manager.keyspaceStateLookup.Store(keyspace.Id, keyspace.State)
+		manager.metaLock.Lock(keyspace.GetId())
+		defer manager.metaLock.Unlock(keyspace.GetId())
+		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
+		manager.keyspaceStateLookup.Store(keyspace.GetId(), keyspace.State)
 	}
 	return func(txn kv.Txn) error {
 		// Save keyspace ID.
@@ -546,13 +542,13 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		if nameExists {
 			return errs.ErrKeyspaceExists
 		}
-		err = manager.store.SaveKeyspaceID(txn, keyspace.Id, keyspace.Name)
+		err = manager.store.SaveKeyspaceID(txn, keyspace.GetId(), keyspace.Name)
 		if err != nil {
 			return err
 		}
 		// Save keyspace meta.
 		// Check if keyspace with that id already exists.
-		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.Id)
+		loadedMeta, err := manager.store.LoadKeyspaceMeta(txn, keyspace.GetId())
 		if err != nil {
 			return err
 		}
@@ -565,7 +561,7 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 
 func (manager *Manager) rollbackSavekeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
 	manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		err := manager.store.RemoveKeyspace(txn, keyspace.Id, keyspace.Name)
+		err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.Name)
 		if err != nil {
 			return err
 		}
@@ -573,7 +569,7 @@ func (manager *Manager) rollbackSavekeyspace(keyspace *keyspacepb.KeyspaceMeta) 
 		if !ok {
 			return errors.New("cluster does not support region label")
 		}
-		ruleID := getRegionLabelID(keyspace.Id)
+		ruleID := getRegionLabelID(keyspace.GetId())
 		regionLabeler := cl.GetRegionLabeler()
 		err = regionLabeler.DeleteLabelRule(ruleID)
 		if err != nil {
@@ -1375,24 +1371,24 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 				if ks == nil {
 					continue
 				}
-				if endKeyspaceID != 0 && ks.Id > endKeyspaceID {
+				if endKeyspaceID != 0 && ks.GetId() > endKeyspaceID {
 					moreToPatrol = false
 					break
 				}
 				patrolledKeyspaceCount++
-				manager.metaLock.Lock(ks.Id)
+				manager.metaLock.Lock(ks.GetId())
 				if ks.Config == nil {
 					ks.Config = make(map[string]string, 1)
 				} else if _, ok := ks.Config[TSOKeyspaceGroupIDKey]; ok {
 					// If the keyspace already has a group ID, skip it.
-					manager.metaLock.Unlock(ks.Id)
+					manager.metaLock.Unlock(ks.GetId())
 					continue
 				}
 				// Unlock the keyspace meta lock after the whole txn.
-				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.Id)
+				keyspaceIDsToUnlock = append(keyspaceIDsToUnlock, ks.GetId())
 				// If the keyspace doesn't have a group ID, assign it to the default keyspace group.
-				if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.Id) {
-					defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.Id)
+				if !slice.Contains(defaultKeyspaceGroup.Keyspaces, ks.GetId()) {
+					defaultKeyspaceGroup.Keyspaces = append(defaultKeyspaceGroup.Keyspaces, ks.GetId())
 					// Only save the keyspace group meta if any keyspace is assigned to it.
 					assigned = true
 				}
@@ -1405,7 +1401,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 						zap.Uint32("end-keyspace-id", endKeyspaceID),
 						zap.Uint32("current-start-id", currentStartID),
 						zap.Uint32("next-start-id", nextStartID),
-						zap.Uint32("keyspace-id", ks.Id), zap.Error(err))
+						zap.Uint32("keyspace-id", ks.GetId()), zap.Error(err))
 					return err
 				}
 				assignedKeyspaceCount++
