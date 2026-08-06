@@ -1196,6 +1196,7 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
+	cfg.LeaderLease = s.persistOptions.GetLeaderLease()
 	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
 	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
@@ -1555,6 +1556,25 @@ func (s *Server) SetPDServerConfig(cfg config.PDServerConfig) error {
 		return err
 	}
 	log.Info("PD server config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// SetLeaderLease sets the PD leader lease timeout.
+func (s *Server) SetLeaderLease(lease int64) error {
+	if err := config.ValidateLeaderLease(lease); err != nil {
+		return err
+	}
+	old := s.persistOptions.GetLeaderLease()
+	s.persistOptions.SetLeaderLease(lease)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetLeaderLease(old)
+		log.Error("failed to update leader lease",
+			zap.Int64("new", lease),
+			zap.Int64("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("leader lease is updated", zap.Int64("new", lease), zap.Int64("old", old))
 	return nil
 }
 
@@ -1960,7 +1980,25 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
-	if err := s.member.Campaign(s.ctx, s.cfg.LeaderLease); err != nil {
+	// Only the leader lease has to be refreshed from storage before campaigning,
+	// so that an online update done on a previous leader takes effect on the
+	// next election. The rest of the configuration is still reloaded after the
+	// leadership is kept (reloadConfigFromKV below). A storage error here must
+	// not abort the campaign, otherwise leader election availability would
+	// regress whenever etcd is briefly degraded; fall back to the current
+	// in-memory value.
+	lease, err := s.persistOptions.LoadPersistedLeaderLease(s.storage)
+	if err != nil {
+		lease = s.persistOptions.GetLeaderLease()
+		log.Warn("failed to load persisted leader lease before campaign, fall back to in-memory value",
+			errs.ZapError(err),
+			zap.Int64("leader-lease", lease),
+			zap.String("campaign-leader-name", s.Name()))
+	}
+	// Keep the in-memory value consistent with the lease this server is about
+	// to campaign with, so GetLease()/GetConfig() reflect the effective value.
+	s.persistOptions.SetLeaderLease(lease)
+	if err := s.member.Campaign(s.ctx, lease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign PD leader meets error due to txn conflict, another PD may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))
@@ -1993,12 +2031,12 @@ func (s *Server) campaignLeader() {
 	keepLeaderDuration := time.Since(keepLeaderStart)
 	log.Info("keep leader lease completed", zap.Duration("cost", keepLeaderDuration), zap.String("campaign-leader-name", s.Name()))
 
-	reloadConfigStart := time.Now()
+	postKeepReloadStart := time.Now()
 	if err := s.reloadConfigFromKV(); err != nil {
-		log.Warn("failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(reloadConfigStart)))
+		log.Warn("failed to reload configuration", errs.ZapError(err), zap.Duration("cost", time.Since(postKeepReloadStart)))
 		return
 	}
-	reloadConfigDuration := time.Since(reloadConfigStart)
+	reloadConfigDuration := time.Since(postKeepReloadStart)
 	log.Info("reload config from KV completed", zap.Duration("cost", reloadConfigDuration))
 
 	loadTTLStart := time.Now()
@@ -2453,7 +2491,7 @@ func (s *Server) GetTSOProxyRecvFromClientTimeout() time.Duration {
 
 // GetLease returns the leader lease.
 func (s *Server) GetLease() int64 {
-	return s.cfg.GetLease()
+	return s.persistOptions.GetLeaderLease()
 }
 
 // GetTSOSaveInterval returns TSO save interval.
