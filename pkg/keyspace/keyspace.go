@@ -417,27 +417,21 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
 			err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
 		}
-
+		if err != nil {
+			// The keyspace metadata, meta-service group assignment, and TSO
+			// keyspace-group membership are already committed atomically above, so
+			// creation is still considered successful: leave the keyspace disabled
+			// rather than rolling it back. A later patrol or split-recovery path can
+			// enable it once the region is actually split.
+			log.Warn("[create-keyspace] failed to enable keyspace after split, keyspace left disabled",
+				zap.Uint32("keyspace-id", tracer.keyspaceID),
+				zap.String("keyspace-name", tracer.keyspaceName),
+				zap.Error(err),
+			)
+		}
 	}
 
 	tracer.OnSplitRegionFinished()
-	if err != nil {
-		log.Warn("[create-keyspace] failed to enable keyspace after split",
-			zap.Uint32("keyspace-id", tracer.keyspaceID),
-			zap.String("keyspace-name", tracer.keyspaceName),
-			zap.Error(err),
-		)
-		tracer.OnCreateKeyspaceComplete()
-
-		if err := manager.rollbackSavekeyspace(keyspace); err != nil {
-			log.Warn("[keyspace] failed to rollback keyspace",
-				zap.Uint32("keyspace-id", tracer.keyspaceID),
-				zap.String("keyspace-name", tracer.keyspaceName),
-				errs.ZapError(err),
-			)
-		}
-		return nil, err
-	}
 	tracer.OnCreateKeyspaceComplete()
 
 	log.Info("[create-keyspace] keyspace created",
@@ -557,27 +551,6 @@ func (manager *Manager) saveNewKeyspaceTxnOp(keyspace *keyspacepb.KeyspaceMeta) 
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	}, cb
-}
-
-func (manager *Manager) rollbackSavekeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
-	manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.Name)
-		if err != nil {
-			return err
-		}
-		cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
-		if !ok {
-			return errors.New("cluster does not support region label")
-		}
-		ruleID := getRegionLabelID(keyspace.GetId())
-		regionLabeler := cl.GetRegionLabeler()
-		err = regionLabeler.DeleteLabelRule(ruleID)
-		if err != nil {
-			return err
-		}
-		return nil
-	})
-	return nil
 }
 
 // saveKeyspaceRegionLabelerTxnOp returns a txn op that adds the keyspace's
@@ -1052,23 +1025,21 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 
 func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
 	var meta *keyspacepb.KeyspaceMeta
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	var err error
+	err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
-		var err error
-		meta, err := manager.store.LoadKeyspaceMeta(txn, id)
+		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
 		if meta == nil {
 			return errs.ErrKeyspaceNotFound
 		}
-		err = manager.store.SaveKeyspaceMeta(txn, meta)
-		if err == nil {
-			err = manager.transformKeyspaceState(txn, meta, keyspacepb.KeyspaceState_ENABLED, now)
+		if err = manager.transformKeyspaceState(txn, meta, keyspacepb.KeyspaceState_ENABLED, now); err != nil {
+			return err
 		}
-
-		return err
+		return manager.store.SaveKeyspaceMeta(txn, meta)
 	})
 	if err != nil {
 		return err

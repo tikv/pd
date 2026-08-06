@@ -146,7 +146,19 @@ func (suite *keyspaceTestSuite) TestInitTwice() {
 
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re := suite.Require()
-	manager := suite.manager
+	// A manager that waits for the region split during creation, so the
+	// waitSplitKeyspaceFailed failpoint below is actually exercised (suite.manager
+	// uses a mockConfig with WaitRegionSplit false, which would skip that branch
+	// entirely and make the failpoint a no-op).
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
+	re.NoError(kgm.Bootstrap(suite.ctx))
+	manager := NewKeyspaceManager(suite.ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
 	requests := makeCreateKeyspaceRequests(2)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed", `return(true)`))
 
@@ -157,12 +169,15 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed"))
 
+	// A wait-split failure after a previously failed attempt must still allow the
+	// same name to be reused: the keyspace is created and left disabled rather
+	// than blocked or rolled back.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
 	ks, err := manager.CreateKeyspace(requests[0])
 	re.NoError(err)
 	km, err := manager.LoadKeyspace(ks.Name)
 	re.NoError(err)
-	re.Equal(keyspacepb.KeyspaceState_ENABLED, km.State)
+	re.Equal(keyspacepb.KeyspaceState_DISABLED, km.State)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
 	ks, err = manager.CreateKeyspace(requests[1])
@@ -209,6 +224,40 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureStillCreatesKeyspace() {
 	re.NoError(err)
 	re.Equal(ks.GetId(), loaded.GetId())
 	re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.State)
+}
+
+// TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the
+// post-commit wait-for-split succeeds, the keyspace's ENABLED state is actually
+// persisted to storage, not just reflected in the in-memory state cache.
+func (suite *keyspaceTestSuite) TestWaitSplitSuccessEnablesKeyspacePersistently() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	// A manager that waits for the region split during creation. skipSplitRegion
+	// is enabled suite-wide (see SetupSuite), which makes the wait succeed
+	// immediately, so this exercises the enable-after-split path without an
+	// injected failure.
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	ks, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "waitsplitsuccess",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.NotNil(ks)
+
+	// Bypass the in-memory state cache: read directly from storage.
+	loaded, err := manager.LoadKeyspace("waitsplitsuccess")
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.State)
 }
 
 func (suite *keyspaceTestSuite) TestCreateKeyspace() {
