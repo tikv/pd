@@ -590,6 +590,20 @@ func TestRegionSpansMultipleKeyspaces(t *testing.T) {
 			expectedResult: false,
 		},
 		{
+			name:           "start key is classical, end key has a valid keyspace id - ambiguous, should span",
+			startKey:       codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			endKey:         MakeRegionBound(100).TxnLeftBound,
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
+			name:           "start key has a valid keyspace id, end key is classical - ambiguous, should span",
+			startKey:       MakeRegionBound(100).TxnLeftBound,
+			endKey:         codec.EncodeBytes([]byte{'t', 1, 2, 3}),
+			checker:        allExistChecker,
+			expectedResult: true,
+		},
+		{
 			name:           "span deleted keyspace but still cross two existing keyspaces - should span",
 			startKey:       MakeRegionBound(100).TxnLeftBound,
 			endKey:         MakeRegionBound(102).TxnRightBound,
