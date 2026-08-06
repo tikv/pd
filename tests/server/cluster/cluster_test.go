@@ -2251,13 +2251,15 @@ func TestPutStoreValidateStoreAddress(t *testing.T) {
 	re.NoError(err)
 	re.Nil(resp.GetHeader().GetError())
 
+	// An unreachable address is only logged as a warning, not rejected, since
+	// TiKV puts the store before it starts listening on its store address.
 	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
 		Id:      102,
 		Address: "unreachable-host.test.invalid:12345",
 		Version: "2.0.1",
 	})
 	re.NoError(err)
-	re.Equal(pdpb.ErrorType_INVALID_VALUE, resp.GetHeader().GetError().GetType())
+	re.Nil(resp.GetHeader().GetError())
 
 	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
 		Id:      103,

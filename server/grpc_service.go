@@ -921,14 +921,17 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
-	// TiKV puts the store before listening on its store address, so PD can only
-	// validate the configured address by checking whether it is dialable.
-	if err := validateStoreAddress(ctx, store); err != nil {
-		return &pdpb.PutStoreResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_INVALID_VALUE,
-				fmt.Sprintf("invalid store address %s: %s", store.GetAddress(), err)),
-		}, nil
-	}
+	// TiKV puts the store before listening on its store address, so a dial
+	// failure does not necessarily mean the address is invalid. Validate
+	// asynchronously and only log a warning, without blocking or rejecting
+	// the PutStore request. s.ctx (not the request ctx) is used so the check
+	// outlives the RPC and is only cancelled on server shutdown.
+	go func() {
+		defer logutil.LogPanic()
+		if err := validateStoreAddress(s.ctx, store); err != nil {
+			log.Warn("failed to dial store address", zap.Stringer("store", store), zap.Error(err))
+		}
+	}()
 
 	if err := rc.PutMetaStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
