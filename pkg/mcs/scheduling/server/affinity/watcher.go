@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -82,6 +83,18 @@ func NewWatcher(
 
 // initializeGroupWatcher initializes the watcher for affinity group changes.
 func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
+	var (
+		snapshotGroups []*affinity.Group
+		snapshotActive bool
+	)
+	resetSnapshot := func() {
+		clear(snapshotGroups)
+		snapshotGroups = snapshotGroups[:0]
+	}
+	preLoadFn := func() {
+		resetSnapshot()
+		snapshotActive = true
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update affinity group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		group := &affinity.Group{}
@@ -89,7 +102,23 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 			log.Warn("failed to unmarshal affinity group", zap.String("key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		if snapshotActive {
+			snapshotGroups = append(snapshotGroups, group)
+			failpoint.InjectCall("affinityGroupSnapshotItemLoaded")
+			return nil
+		}
 		w.affinityManager.SyncGroupFromEtcd(group)
+		return nil
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		defer func() {
+			resetSnapshot()
+			snapshotActive = false
+		}()
+		if loadErr != nil {
+			return nil
+		}
+		w.affinityManager.ApplyGroupSnapshotFromEtcd(snapshotGroups)
 		return nil
 	}
 
@@ -111,6 +140,7 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.groupWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	w.groupWatcher.StartWatchLoop()
 	return w.groupWatcher.WaitLoad()
 }
@@ -120,6 +150,18 @@ func (w *Watcher) initializeGroupWatcher(ctx context.Context) error {
 func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 	// Note: labelWatcher does not need preEventsFn/postEventsFn locking
 	// because the sync methods will handle locking internally
+	var (
+		snapshotRules  []*labeler.LabelRule
+		snapshotActive bool
+	)
+	resetSnapshot := func() {
+		clear(snapshotRules)
+		snapshotRules = snapshotRules[:0]
+	}
+	preLoadFn := func() {
+		resetSnapshot()
+		snapshotActive = true
+	}
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -128,6 +170,11 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		if err != nil {
 			log.Warn("failed to unmarshal affinity label rule", zap.String("key", key), zap.Error(err))
 			return err
+		}
+		if snapshotActive {
+			snapshotRules = append(snapshotRules, rule)
+			failpoint.InjectCall("affinityLabelSnapshotItemLoaded")
+			return nil
 		}
 		return w.affinityManager.SyncKeyRangesFromEtcd(rule)
 	}
@@ -138,6 +185,16 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		ruleID := strings.TrimPrefix(key, keypath.RegionLabelPathPrefix())
 		w.affinityManager.SyncKeyRangesDeleteFromEtcd(ruleID)
 		return nil
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		defer func() {
+			resetSnapshot()
+			snapshotActive = false
+		}()
+		if loadErr != nil {
+			return nil
+		}
+		return w.affinityManager.ApplyKeyRangeSnapshotFromEtcd(snapshotRules)
 	}
 
 	w.labelWatcher = etcdutil.NewLoopWatcher(
@@ -150,6 +207,7 @@ func (w *Watcher) initializeAffinityLabelWatcher(ctx context.Context) error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.labelWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	w.labelWatcher.StartWatchLoop()
 	return w.labelWatcher.WaitLoad()
 }

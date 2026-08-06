@@ -558,7 +558,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	mutableGroup := krgm.getMutableResourceGroup(group.GetName())
 	mutableGroup.RUSettings.RU.Tokens = 100.0
 	// Persist the running state.
-	krgm.persistResourceGroupRunningState()
+	krgm.persistResourceGroupRunningState(context.Background())
 
 	// Verify state was persisted.
 	err = storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
@@ -568,6 +568,18 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		err := json.Unmarshal([]byte(rawValue), states)
 		re.NoError(err)
 		re.Equal(mutableGroup.RUSettings.RU.Tokens, states.RU.Tokens)
+	})
+	re.NoError(err)
+
+	// A canceled lifecycle must not start another state write.
+	mutableGroup.RUSettings.RU.Tokens = 200
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	krgm.persistResourceGroupRunningState(canceledCtx)
+	err = storage.LoadResourceGroupStates(func(_ uint32, _ string, rawValue string) {
+		states := &GroupStates{}
+		re.NoError(json.Unmarshal([]byte(rawValue), states))
+		re.Equal(100.0, states.RU.Tokens)
 	})
 	re.NoError(err)
 }
@@ -661,7 +673,7 @@ func TestPersistAndReloadIntegrity(t *testing.T) {
 	mutableGroup.RUConsumption = &rmpb.Consumption{RRU: 100, WRU: 200}
 
 	// Persist the resource group running state
-	krgm.persistResourceGroupRunningState()
+	krgm.persistResourceGroupRunningState(context.Background())
 
 	// Load the resource group settings and states from storage
 	foundSettings := false

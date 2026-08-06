@@ -59,3 +59,41 @@ func TestRegionLabelTTL(t *testing.T) {
 	// The `expire` should be the same with minor inaccuracies.
 	re.Less(math.Abs(label2.expire.Sub(*label.expire).Seconds()), 1.0)
 }
+
+func TestLabelRuleSameContent(t *testing.T) {
+	re := require.New(t)
+	expireAt := time.Date(2099, time.January, 2, 16, 4, 5, 0, time.UTC)
+	newRule := func() *LabelRule {
+		expire, minExpire := expireAt, expireAt
+		return &LabelRule{
+			ID: "rule", Index: 1, RuleType: KeyRange,
+			Labels: []RegionLabel{{
+				Key: "key", Value: "value", TTL: "1h",
+				StartAt: expireAt.Add(-time.Hour).Format(time.UnixDate), expire: &expire,
+			}},
+			Data: []*KeyRangeRule{{
+				StartKey: []byte{1}, StartKeyHex: "01", EndKey: []byte{2}, EndKeyHex: "02",
+			}},
+			minExpire: &minExpire,
+		}
+	}
+
+	rule := newRule()
+	same := newRule()
+	rule.snapshotGeneration = 1
+	same.snapshotGeneration = 2
+	re.True(rule.sameContent(same))
+
+	tests := []func(*LabelRule){
+		func(rule *LabelRule) { rule.Index++ },
+		func(rule *LabelRule) { rule.Labels[0].Value = "changed" },
+		func(rule *LabelRule) { *rule.Labels[0].expire = rule.Labels[0].expire.Add(time.Second) },
+		func(rule *LabelRule) { rule.GetKeyRanges()[0].StartKey[0]++ },
+		func(rule *LabelRule) { rule.GetKeyRanges()[0].EndKeyHex = "03" },
+	}
+	for _, mutate := range tests {
+		changed := newRule()
+		mutate(changed)
+		re.False(rule.sameContent(changed))
+	}
+}

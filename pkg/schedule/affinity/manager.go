@@ -15,6 +15,7 @@
 package affinity
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"slices"
@@ -622,4 +623,183 @@ func (m *Manager) SyncKeyRangesDeleteFromEtcd(ruleID string) {
 	if _, exists := m.groups[groupID]; exists {
 		m.updateGroupLabelRuleLocked(groupID, nil, true)
 	}
+}
+
+// ApplyGroupSnapshotFromEtcd atomically reconciles affinity groups with a
+// complete etcd snapshot. Snapshot parsing is intentionally done by the
+// watcher before this method takes the manager locks.
+func (m *Manager) ApplyGroupSnapshotFromEtcd(groups []*Group) {
+	type snapshotEntry struct {
+		group  *Group
+		rule   *labeler.LabelRule
+		ranges GroupKeyRanges
+		err    error
+	}
+	snapshot := make(map[string]snapshotEntry, len(groups))
+	for _, group := range groups {
+		snapshot[group.ID] = snapshotEntry{group: group}
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+
+	m.RLock()
+	for id, entry := range snapshot {
+		if _, exists := m.groups[id]; exists {
+			continue
+		}
+		entry.rule = m.regionLabeler.GetLabelRule(GetLabelRuleID(id))
+		if entry.rule == nil {
+			entry.rule = m.labelRuleBuffer[id]
+		}
+		if entry.rule != nil {
+			entry.ranges, entry.err = extractKeyRangesFromLabelRule(entry.rule)
+		}
+		snapshot[id] = entry
+	}
+	m.RUnlock()
+
+	m.Lock()
+	defer m.Unlock()
+	for id := range m.groups {
+		if _, ok := snapshot[id]; ok {
+			continue
+		}
+		delete(m.keyRanges, id)
+		delete(m.labelRuleBuffer, id)
+		m.deleteGroupLocked(id)
+	}
+	for id, entry := range snapshot {
+		group := entry.group
+		groupInfo, exists := m.groups[id]
+		if exists {
+			changed := false
+			if groupInfo.LeaderStoreID != group.LeaderStoreID {
+				groupInfo.LeaderStoreID = group.LeaderStoreID
+				changed = true
+			}
+			if !slices.Equal(groupInfo.VoterStoreIDs, group.VoterStoreIDs) {
+				groupInfo.VoterStoreIDs = slices.Clone(group.VoterStoreIDs)
+				changed = true
+			}
+			if changed {
+				m.resetCountLocked(groupInfo)
+			}
+			continue
+		}
+
+		m.initGroupLocked(group)
+		if entry.err != nil {
+			log.Warn("failed to attach existing label rule to new affinity group",
+				zap.String("group-id", id), zap.Error(entry.err))
+			delete(m.labelRuleBuffer, id)
+			continue
+		}
+		if entry.rule != nil && len(entry.ranges.KeyRanges) > 0 {
+			m.keyRanges[id] = entry.ranges
+			m.updateGroupLabelRuleLockedWithCount(
+				id, entry.rule, len(entry.ranges.KeyRanges), false)
+		}
+		delete(m.labelRuleBuffer, id)
+	}
+}
+
+// ApplyKeyRangeSnapshotFromEtcd atomically reconciles the affinity label-rule
+// subset with a complete etcd snapshot. Unchanged entries keep their runtime
+// caches and affinity versions.
+func (m *Manager) ApplyKeyRangeSnapshotFromEtcd(rules []*labeler.LabelRule) error {
+	type snapshotEntry struct {
+		rule   *labeler.LabelRule
+		ranges GroupKeyRanges
+	}
+	snapshot := make(map[string]snapshotEntry, len(rules))
+	for _, rule := range rules {
+		groupID, isAffinity := parseAffinityGroupIDFromLabelRule(rule)
+		if !isAffinity {
+			continue
+		}
+		ranges, err := extractKeyRangesFromLabelRule(rule)
+		if err != nil {
+			return err
+		}
+		snapshot[groupID] = snapshotEntry{rule: rule, ranges: ranges}
+	}
+
+	m.metaMutex.Lock()
+	defer m.metaMutex.Unlock()
+	m.Lock()
+	defer m.Unlock()
+
+	for groupID, groupInfo := range m.groups {
+		if _, ok := snapshot[groupID]; ok {
+			continue
+		}
+		delete(m.keyRanges, groupID)
+		delete(m.labelRuleBuffer, groupID)
+		if groupInfo.LabelRule != nil || groupInfo.RangeCount != 0 {
+			m.updateGroupLabelRuleLocked(groupID, nil, true)
+		}
+	}
+	for groupID := range m.labelRuleBuffer {
+		if _, ok := snapshot[groupID]; !ok {
+			delete(m.labelRuleBuffer, groupID)
+		}
+	}
+
+	for groupID, entry := range snapshot {
+		groupInfo, exists := m.groups[groupID]
+		if !exists {
+			if len(entry.ranges.KeyRanges) == 0 {
+				delete(m.labelRuleBuffer, groupID)
+			} else {
+				m.labelRuleBuffer[groupID] = entry.rule
+			}
+			continue
+		}
+
+		delete(m.labelRuleBuffer, groupID)
+		currentRanges := m.keyRanges[groupID]
+		if sameAffinityLabel(groupInfo.LabelRule, entry.rule) &&
+			sameKeyRanges(currentRanges, entry.ranges) {
+			continue
+		}
+		if len(entry.ranges.KeyRanges) > 0 {
+			m.keyRanges[groupID] = entry.ranges
+		} else {
+			delete(m.keyRanges, groupID)
+		}
+		m.updateGroupLabelRuleLockedWithCount(
+			groupID, entry.rule, len(entry.ranges.KeyRanges), false)
+	}
+	return nil
+}
+
+func sameAffinityLabel(left, right *labeler.LabelRule) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	if left.ID != right.ID || left.Index != right.Index || left.RuleType != right.RuleType ||
+		len(left.Labels) != len(right.Labels) {
+		return false
+	}
+	for i := range left.Labels {
+		l, r := left.Labels[i], right.Labels[i]
+		if l.Key != r.Key || l.Value != r.Value || l.TTL != r.TTL || l.StartAt != r.StartAt {
+			return false
+		}
+	}
+	return true
+}
+
+func sameKeyRanges(left, right GroupKeyRanges) bool {
+	if len(left.KeyRanges) != len(right.KeyRanges) {
+		return false
+	}
+	for i := range left.KeyRanges {
+		if !bytes.Equal(left.KeyRanges[i].StartKey, right.KeyRanges[i].StartKey) ||
+			!bytes.Equal(left.KeyRanges[i].EndKey, right.KeyRanges[i].EndKey) {
+			return false
+		}
+	}
+	return true
 }

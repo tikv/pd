@@ -48,12 +48,60 @@ func (l *RegionLabel) String() string {
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
-	ID        string        `json:"id"`
-	Index     int           `json:"index"`
-	Labels    []RegionLabel `json:"labels"`
-	RuleType  string        `json:"rule_type"`
-	Data      any           `json:"data"`
-	minExpire *time.Time
+	ID                 string        `json:"id"`
+	Index              int           `json:"index"`
+	Labels             []RegionLabel `json:"labels"`
+	RuleType           string        `json:"rule_type"`
+	Data               any           `json:"data"`
+	minExpire          *time.Time
+	snapshotGeneration uint64
+}
+
+func (rule *LabelRule) sameContent(other *LabelRule) bool {
+	if rule == nil || other == nil {
+		return rule == other
+	}
+	if rule.ID != other.ID || rule.Index != other.Index || rule.RuleType != other.RuleType ||
+		!sameTime(rule.minExpire, other.minExpire) || len(rule.Labels) != len(other.Labels) {
+		return false
+	}
+	for i := range rule.Labels {
+		left, right := &rule.Labels[i], &other.Labels[i]
+		if left.Key != right.Key || left.Value != right.Value || left.TTL != right.TTL ||
+			left.StartAt != right.StartAt || !sameTime(left.expire, right.expire) {
+			return false
+		}
+	}
+
+	leftRanges, leftOK := rule.Data.([]*KeyRangeRule)
+	rightRanges, rightOK := other.Data.([]*KeyRangeRule)
+	if !leftOK || !rightOK {
+		return reflect.DeepEqual(rule.Data, other.Data)
+	}
+	if len(leftRanges) != len(rightRanges) {
+		return false
+	}
+	for i := range leftRanges {
+		left, right := leftRanges[i], rightRanges[i]
+		if left == nil || right == nil {
+			if left != right {
+				return false
+			}
+			continue
+		}
+		if left.StartKeyHex != right.StartKeyHex || left.EndKeyHex != right.EndKeyHex ||
+			!bytes.Equal(left.StartKey, right.StartKey) || !bytes.Equal(left.EndKey, right.EndKey) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Equal(*right)
 }
 
 func (rule *LabelRule) String() string {

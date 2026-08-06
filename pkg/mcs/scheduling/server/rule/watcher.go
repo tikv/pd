@@ -24,6 +24,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -107,13 +108,29 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	var suspectKeyRanges *keyutil.KeyRanges
+	var (
+		suspectKeyRanges     *keyutil.KeyRanges
+		hasRuleConfigChanges bool
+		snapshot             *placement.RuleConfigSnapshot
+		snapshotActive       bool
+	)
+	resetSnapshot := func() {
+		snapshot = nil
+	}
+	preLoadFn := func() {
+		snapshot = placement.NewRuleConfigSnapshot()
+		snapshotActive = true
+	}
 
 	preEventsFn := func([]*clientv3.Event) error {
+		suspectKeyRanges = &keyutil.KeyRanges{}
+		hasRuleConfigChanges = false
+		if snapshotActive {
+			return nil
+		}
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
-		suspectKeyRanges = &keyutil.KeyRanges{}
 		return nil
 	}
 
@@ -129,7 +146,13 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
 				return err
 			}
+			if snapshotActive {
+				snapshot.SetRule(rule)
+				failpoint.InjectCall("placementRuleSnapshotItemLoaded")
+				return nil
+			}
 			rw.patch.SetRule(rule)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges in lock.
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			if oldRule := rw.ruleManager.GetRuleLocked(rule.GroupID, rule.ID); oldRule != nil {
@@ -142,8 +165,14 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			if err != nil {
 				return err
 			}
+			if snapshotActive {
+				snapshot.SetGroup(ruleGroup)
+				failpoint.InjectCall("placementRuleSnapshotItemLoaded")
+				return nil
+			}
 			// Try to add the rule group change to the patch.
 			rw.patch.SetGroup(ruleGroup)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(ruleGroup.ID) {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
@@ -167,6 +196,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			// Try to add the rule change to the patch.
 			rw.patch.DeleteRule(rule.GroupID, rule.ID)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
@@ -175,6 +205,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
+			hasRuleConfigChanges = true
 			// Update the suspect key ranges
 			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(trimmedKey) {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
@@ -185,10 +216,36 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		return nil
 	}
 	postEventsFn := func([]*clientv3.Event) error {
+		if snapshotActive {
+			return nil
+		}
 		defer rw.ruleManager.Unlock()
+		if !hasRuleConfigChanges {
+			return nil
+		}
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
+		}
+		for _, kr := range suspectKeyRanges.Ranges() {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
+		return nil
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		defer func() {
+			resetSnapshot()
+			snapshotActive = false
+		}()
+		if loadErr != nil {
+			return nil
+		}
+		suspectKeyRanges, err := rw.ruleManager.ApplyRuleConfigSnapshot(snapshot)
+		if err != nil {
+			return err
+		}
+		if rw.checkerController == nil {
+			return errors.New("checker controller is nil")
 		}
 		for _, kr := range suspectKeyRanges.Ranges() {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
@@ -206,16 +263,36 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.ruleWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
-	suspectKeyRanges := make([]*labeler.KeyRangeRule, 0)
+	var (
+		suspectKeyRanges         []*labeler.KeyRangeRule
+		snapshotRules            []*labeler.LabelRule
+		snapshotGeneration       uint64
+		activeSnapshotGeneration uint64
+		snapshotInitialized      bool
+	)
+	resetSnapshotRules := func() {
+		clear(snapshotRules)
+		snapshotRules = snapshotRules[:0]
+	}
+	preLoadFn := func() {
+		resetSnapshotRules()
+		snapshotGeneration++
+		activeSnapshotGeneration = snapshotGeneration
+	}
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
-		// It will be locked until the postEventsFn is finished.
-		rw.regionLabeler.Lock()
+		// A watch batch stays atomic under the RegionLabeler lock. A full load is
+		// staged without holding the lock and committed by postLoadFn only after
+		// the complete snapshot has been loaded.
+		if activeSnapshotGeneration == 0 {
+			rw.regionLabeler.Lock()
+		}
 		for i := range suspectKeyRanges {
 			suspectKeyRanges[i] = nil // avoid memory leak
 		}
@@ -228,8 +305,15 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		if err != nil {
 			return err
 		}
-		err = rw.regionLabeler.SetLabelRuleLocked(rule)
-		if err == nil {
+		changed := true
+		if activeSnapshotGeneration == 0 {
+			err = rw.regionLabeler.SetLabelRuleLocked(rule)
+		} else {
+			snapshotRules = append(snapshotRules, rw.regionLabeler.ReuseLabelRuleForSnapshot(rule))
+			failpoint.InjectCall("regionLabelSnapshotRuleLoaded")
+			return nil
+		}
+		if err == nil && changed {
 			krs := rule.GetKeyRanges()
 			if krs != nil {
 				suspectKeyRanges = append(suspectKeyRanges, krs...)
@@ -251,8 +335,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		}
 		return err
 	}
-	postEventsFn := func([]*clientv3.Event) error {
-		defer rw.regionLabeler.Unlock()
+	finishEventsFn := func() error {
 		if rw.checkerController == nil {
 			return errors.New("checker controller is nil")
 		}
@@ -260,6 +343,57 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
 		}
 		return nil
+	}
+	postEventsFn := func([]*clientv3.Event) error {
+		if activeSnapshotGeneration != 0 {
+			return nil
+		}
+		defer rw.regionLabeler.Unlock()
+		return finishEventsFn()
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		generation := activeSnapshotGeneration
+		defer func() {
+			resetSnapshotRules()
+			activeSnapshotGeneration = 0
+		}()
+		if loadErr != nil {
+			return nil
+		}
+
+		rw.regionLabeler.Lock()
+		defer rw.regionLabeler.Unlock()
+		var applyErr error
+		for _, rule := range snapshotRules {
+			changed, err := rw.regionLabeler.SetLabelRuleForSnapshotLocked(rule, generation)
+			if err != nil {
+				if applyErr == nil {
+					applyErr = err
+				}
+				continue
+			}
+			if !snapshotInitialized || changed {
+				suspectKeyRanges = append(suspectKeyRanges, rule.GetKeyRanges()...)
+			}
+		}
+
+		var reconcileErr error
+		if applyErr == nil {
+			var deletedRanges []*labeler.KeyRangeRule
+			deletedRanges, reconcileErr = rw.regionLabeler.ReconcileSnapshotLocked(generation)
+			suspectKeyRanges = append(suspectKeyRanges, deletedRanges...)
+		}
+		finishErr := finishEventsFn()
+		if applyErr == nil && reconcileErr == nil && finishErr == nil {
+			snapshotInitialized = true
+		}
+		if applyErr != nil {
+			return applyErr
+		}
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		return finishErr
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
@@ -272,6 +406,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.labelWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
 }
