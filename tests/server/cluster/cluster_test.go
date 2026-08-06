@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -2218,4 +2219,69 @@ func TestPutStoreInvalidEngineLabel(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPutStoreValidateStoreAddress(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient, conn := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	defer conn.Close()
+	clusterID := leaderServer.GetClusterID()
+
+	bootstrapCluster(re, clusterID, grpcPDClient)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	defer re.NoError(listener.Close())
+
+	resp, err := putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      101,
+		Address: listener.Addr().String(),
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+
+	// An unreachable address is only logged as a warning, not rejected, since
+	// TiKV puts the store before it starts listening on its store address.
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      102,
+		Address: "unreachable-host.test.invalid:12345",
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      103,
+		Address: "mock://tikv-103:103",
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+
+	// TiKV registers its store address before it starts listening on it, so an
+	// address whose host is reachable but whose port refuses the connection
+	// must still be accepted.
+	notYetListening, err := net.Listen("tcp", "127.0.0.1:0")
+	re.NoError(err)
+	notYetListeningAddr := notYetListening.Addr().String()
+	re.NoError(notYetListening.Close())
+
+	resp, err = putStore(grpcPDClient, clusterID, &metapb.Store{
+		Id:      104,
+		Address: notYetListeningAddr,
+		Version: "2.0.1",
+	})
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
 }
