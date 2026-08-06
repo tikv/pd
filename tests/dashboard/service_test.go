@@ -105,6 +105,9 @@ func (suite *dashboardTestSuite) checkServiceIsStarted(re *require.Assertions, i
 	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
 	hasServiceNode := false
 	for _, srv := range servers {
+		if srv.GetServer().IsClosed() {
+			continue
+		}
 		re.Equal(dashboardAddress, srv.GetPersistOptions().GetDashboardAddress())
 		addr := srv.GetAddr()
 		if addr == dashboardAddress || internalProxy {
@@ -183,4 +186,35 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	re.NoError(err)
 	resp.Body.Close()
 	suite.checkServiceIsStopped(re, servers)
+}
+
+func (suite *dashboardTestSuite) TestAutoFailover() {
+	re := suite.Require()
+
+	cluster, err := tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, _ string) {
+		conf.Dashboard.InternalProxy = true
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	re.NotEmpty(cluster.WaitLeader())
+	servers := cluster.GetServers()
+	leader := cluster.GetLeaderServer()
+	leaderAddr := leader.GetAddr()
+
+	// auto select node
+	dashboardAddress1 := suite.checkServiceIsStarted(re, true, servers, leader)
+	re.NotEqual(dashboardAddress1, leaderAddr)
+
+	for _, srv := range servers {
+		if srv.GetAddr() == dashboardAddress1 {
+			re.NoError(srv.Stop())
+		}
+	}
+
+	dashboardAddress2 := suite.checkServiceIsStarted(re, true, servers, leader)
+	re.NotEqual(dashboardAddress2, leaderAddr)
+	re.NotEqual(dashboardAddress2, dashboardAddress1)
 }
