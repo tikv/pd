@@ -826,6 +826,12 @@ func (suite *httpClientTestSuite) TestSetStoreLabelsRejectEngineKey() {
 }
 
 func (suite *httpClientTestSuite) transferLeader(ctx context.Context, re *require.Assertions) {
+	oldVersion := versioninfo.PDReleaseVersion
+	versioninfo.PDReleaseVersion = "v8.5.2"
+	defer func() {
+		versioninfo.PDReleaseVersion = oldVersion
+	}()
+
 	client := suite.client
 	members, err := client.GetMembers(ctx)
 	re.NoError(err)
