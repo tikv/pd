@@ -164,10 +164,16 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-190000), 1e-7)
 	re.Zero(trickle)
+	// Non-trickle response must carry the slot's FillRate so the client limiter
+	// can refill tokens locally and avoid InfDuration waits.
+	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
 	// need to lend token
 	tb, trickle = gtb.request(time1, 11000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-11000), 1e-7)
 	re.Equal(int64(time.Second)*11000./4000./int64(time.Millisecond), trickle)
+	// Trickle response must NOT carry FillRate to avoid double-counting with
+	// the client's own trickle-based fill rate calculation.
+	re.Zero(tb.Settings.FillRate)
 	tb, trickle = gtb.request(time1, 35000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-35000), 1e-7)
 	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
