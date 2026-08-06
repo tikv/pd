@@ -422,6 +422,66 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 			return len(served) == len(groupIDs)
 		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 	}
+
+	// Verify that eviction with an explicit new_primary transfers all groups to
+	// the designated node instead of picking a random member.
+	src := nodeList[0]
+	dst := nodeList[1]
+	for _, id := range groupIDs {
+		transferData, err := json.Marshal(map[string]any{
+			"new_primary":       src.Name(),
+			"keyspace_group_id": id,
+		})
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/transfer",
+				"application/json", bytes.NewBuffer(transferData))
+			if err != nil {
+				return false
+			}
+			defer resp.Body.Close()
+			return resp.StatusCode == http.StatusOK
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}
+	testutil.Eventually(re, func() bool {
+		serving := mustGetKeyspaceGroupMembers(re, src.(*tso.Server))
+		for _, id := range groupIDs {
+			if serving[id] == nil || !serving[id].IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	evictData, err := json.Marshal(map[string]any{
+		"new_primary": dst.Name(),
+	})
+	re.NoError(err)
+	resp, _ := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+		"application/json", bytes.NewBuffer(evictData))
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	results := make(map[uint32]string)
+	re.NoError(json.Unmarshal(body, &results), string(body))
+	re.Equal(http.StatusOK, resp.StatusCode)
+	for _, id := range groupIDs {
+		re.Equalf("success", results[id], "group %d result: %q", id, results[id])
+	}
+	// All primaries must have moved to the designated node.
+	testutil.Eventually(re, func() bool {
+		serving := mustGetKeyspaceGroupMembers(re, dst.(*tso.Server))
+		for _, id := range groupIDs {
+			if serving[id] == nil || !serving[id].IsPrimary {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	serving := mustGetKeyspaceGroupMembers(re, nodeList[2].(*tso.Server))
+	for _, m := range serving {
+		re.False(m.IsPrimary, "node %s should not hold any primary", nodeList[2].GetAddr())
+	}
 }
 
 // TestEvictPrimaryRejectedWhileSplitting verifies that /primary/evict refuses to
