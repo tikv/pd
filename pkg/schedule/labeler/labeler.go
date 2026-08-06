@@ -252,9 +252,23 @@ func (l *RegionLabeler) GetLabelRuleLocked(id string) *LabelRule {
 	return filterExpiredLabels(rule, time.Now())
 }
 
+// GetRuleStorage returns the RuleStorage of the RegionLabeler.
+func (l *RegionLabeler) GetRuleStorage() endpoint.RuleStorage {
+	return l.storage
+}
+
+// SaveRuleWithoutTxn updates the in-memory state for a LabelRule that has
+// already been durably persisted by the caller (e.g. as part of a larger
+// transaction), without writing to storage itself.
+func (l *RegionLabeler) SaveRuleWithoutTxn(rule *LabelRule) {
+	l.Lock()
+	defer l.Unlock()
+	l.ruleIndex.set(rule)
+}
+
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
-	if err := rule.checkAndAdjust(); err != nil {
+	if err := rule.CheckAndAdjust(); err != nil {
 		return err
 	}
 	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
@@ -326,7 +340,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	setRulesMap := make(map[string]*LabelRule)
 
 	for _, rule := range patch.SetRules {
-		if err := rule.checkAndAdjust(); err != nil {
+		if err := rule.CheckAndAdjust(); err != nil {
 			return err
 		}
 		setRulesMap[rule.ID] = rule
