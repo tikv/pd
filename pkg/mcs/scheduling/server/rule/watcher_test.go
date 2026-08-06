@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -68,6 +69,117 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client, checkerController)
 	}
+}
+
+func TestRuleWatcherReconcilesSnapshotOnReload(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepareEtcd(t)
+	defer clean()
+
+	defaultRule := &placement.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    placement.Voter,
+		Count:   3,
+	}
+	deletedRule := &placement.Rule{
+		GroupID: "test",
+		ID:      "deleted",
+		Role:    placement.Learner,
+		Count:   1,
+	}
+	for _, rule := range []*placement.Rule{defaultRule, deletedRule} {
+		value, err := json.Marshal(rule)
+		re.NoError(err)
+		_, err = client.Put(ctx, keypath.RuleKeyPath(rule.StoreKey()), string(value))
+		re.NoError(err)
+	}
+
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	ruleManager := placement.NewRuleManager(ctx, storage, nil, mockconfig.NewTestOptions())
+	re.NoError(ruleManager.Initialize(3, nil, "", true))
+	watchCtx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                 watchCtx,
+		cancel:              cancel,
+		rulesPathPrefix:     keypath.RulesPathPrefix(),
+		ruleGroupPathPrefix: keypath.RuleGroupPathPrefix(),
+		etcdClient:          client,
+		ruleStorage:         storage,
+		checkerController:   newTestCheckerController(watchCtx),
+		ruleManager:         ruleManager,
+	}
+	re.NoError(rw.initializeRuleWatcher())
+	defer rw.Close()
+	re.NotNil(ruleManager.GetRule(deletedRule.GroupID, deletedRule.ID))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	}()
+	time.Sleep(1100 * time.Millisecond)
+	_, err := client.Delete(ctx, keypath.RuleKeyPath(deletedRule.StoreKey()))
+	re.NoError(err)
+	updatedRule := defaultRule.Clone()
+	updatedRule.Count = 5
+	value, err := json.Marshal(updatedRule)
+	re.NoError(err)
+	updateResp, err := client.Put(ctx, keypath.RuleKeyPath(updatedRule.StoreKey()), string(value))
+	re.NoError(err)
+	_, err = client.Compact(ctx, updateResp.Header.Revision)
+	re.NoError(err)
+	time.Sleep(100 * time.Millisecond)
+
+	loadStarted := make(chan struct{})
+	releaseLoad := make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	releaseSnapshotLoad := func() {
+		releaseOnce.Do(func() { close(releaseLoad) })
+	}
+	re.NoError(failpoint.EnableCall(
+		"github.com/tikv/pd/pkg/mcs/scheduling/server/rule/placementRuleSnapshotItemLoaded",
+		func() {
+			startOnce.Do(func() { close(loadStarted) })
+			<-releaseLoad
+		},
+	))
+	defer func() {
+		releaseSnapshotLoad()
+		re.NoError(failpoint.Disable(
+			"github.com/tikv/pd/pkg/mcs/scheduling/server/rule/placementRuleSnapshotItemLoaded"))
+	}()
+
+	rw.ruleWatcher.ForceLoad()
+	select {
+	case <-loadStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("placement rule snapshot reload did not start")
+	}
+	type snapshotReadResult struct {
+		loadedRule  *placement.Rule
+		deletedRule *placement.Rule
+	}
+	readDone := make(chan snapshotReadResult, 1)
+	go func() {
+		readDone <- snapshotReadResult{
+			loadedRule:  ruleManager.GetRule(defaultRule.GroupID, defaultRule.ID),
+			deletedRule: ruleManager.GetRule(deletedRule.GroupID, deletedRule.ID),
+		}
+	}()
+	select {
+	case result := <-readDone:
+		re.NotNil(result.loadedRule)
+		re.Equal(3, result.loadedRule.Count)
+		re.NotNil(result.deletedRule)
+	case <-time.After(3 * time.Second):
+		t.Fatal("placement rule reads were blocked by snapshot reload")
+	}
+	releaseSnapshotLoad()
+	testutil.Eventually(re, func() bool {
+		loadedRule := ruleManager.GetRule(defaultRule.GroupID, defaultRule.ID)
+		return ruleManager.GetRule(deletedRule.GroupID, deletedRule.ID) == nil &&
+			loadedRule != nil && loadedRule.Count == updatedRule.Count
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
 }
 
 func TestRegionLabelWatcherReconcilesSnapshotOnReload(t *testing.T) {

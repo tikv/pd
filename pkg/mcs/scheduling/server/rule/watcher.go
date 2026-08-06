@@ -108,15 +108,29 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	var suspectKeyRanges *keyutil.KeyRanges
-	var hasRuleConfigChanges bool
+	var (
+		suspectKeyRanges     *keyutil.KeyRanges
+		hasRuleConfigChanges bool
+		snapshot             *placement.RuleConfigSnapshot
+		snapshotActive       bool
+	)
+	resetSnapshot := func() {
+		snapshot = nil
+	}
+	preLoadFn := func() {
+		snapshot = placement.NewRuleConfigSnapshot()
+		snapshotActive = true
+	}
 
 	preEventsFn := func([]*clientv3.Event) error {
+		suspectKeyRanges = &keyutil.KeyRanges{}
+		hasRuleConfigChanges = false
+		if snapshotActive {
+			return nil
+		}
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
-		suspectKeyRanges = &keyutil.KeyRanges{}
-		hasRuleConfigChanges = false
 		return nil
 	}
 
@@ -132,6 +146,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
 				return err
 			}
+			if snapshotActive {
+				snapshot.SetRule(rule)
+				failpoint.InjectCall("placementRuleSnapshotItemLoaded")
+				return nil
+			}
 			rw.patch.SetRule(rule)
 			hasRuleConfigChanges = true
 			// Update the suspect key ranges in lock.
@@ -145,6 +164,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 			if err != nil {
 				return err
+			}
+			if snapshotActive {
+				snapshot.SetGroup(ruleGroup)
+				failpoint.InjectCall("placementRuleSnapshotItemLoaded")
+				return nil
 			}
 			// Try to add the rule group change to the patch.
 			rw.patch.SetGroup(ruleGroup)
@@ -192,6 +216,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		return nil
 	}
 	postEventsFn := func([]*clientv3.Event) error {
+		if snapshotActive {
+			return nil
+		}
 		defer rw.ruleManager.Unlock()
 		if !hasRuleConfigChanges {
 			return nil
@@ -199,6 +226,26 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
+		}
+		for _, kr := range suspectKeyRanges.Ranges() {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
+		return nil
+	}
+	postLoadFn := func(_ int64, loadErr error) error {
+		defer func() {
+			resetSnapshot()
+			snapshotActive = false
+		}()
+		if loadErr != nil {
+			return nil
+		}
+		suspectKeyRanges, err := rw.ruleManager.ApplyRuleConfigSnapshot(snapshot)
+		if err != nil {
+			return err
+		}
+		if rw.checkerController == nil {
+			return errors.New("checker controller is nil")
 		}
 		for _, kr := range suspectKeyRanges.Ranges() {
 			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
@@ -216,6 +263,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	rw.ruleWatcher.SetLoadHooks(preLoadFn, postLoadFn)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }

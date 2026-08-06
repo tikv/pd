@@ -92,6 +92,27 @@ type RuleConfigPatch struct {
 	mut *ruleConfig // record all to-commit rules and groups
 }
 
+// RuleConfigSnapshot stages a complete placement-rule snapshot without
+// retaining etcd key strings. Its maps are reused as the commit patch.
+type RuleConfigSnapshot struct {
+	config *ruleConfig
+}
+
+// NewRuleConfigSnapshot creates an empty placement-rule snapshot.
+func NewRuleConfigSnapshot() *RuleConfigSnapshot {
+	return &RuleConfigSnapshot{config: newRuleConfig()}
+}
+
+// SetRule stages a rule in the snapshot.
+func (s *RuleConfigSnapshot) SetRule(rule *Rule) {
+	s.config.setRule(rule)
+}
+
+// SetGroup stages a rule group in the snapshot.
+func (s *RuleConfigSnapshot) SetGroup(group *RuleGroup) {
+	s.config.setGroup(group)
+}
+
 // SetRule sets a rule to the patch.
 func (p *RuleConfigPatch) SetRule(r *Rule) {
 	p.mut.rules[r.Key()] = r

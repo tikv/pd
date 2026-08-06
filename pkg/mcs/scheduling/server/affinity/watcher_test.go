@@ -27,6 +27,8 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -302,6 +304,139 @@ func TestLabelRuleBeforeGroup(t *testing.T) {
 		groupState := affinityManager.GetAffinityGroupState(testGroup.ID)
 		return groupState != nil && groupState.RangeCount > 0
 	})
+}
+
+func TestAffinityWatchersReconcileSnapshotsOnReload(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t)
+	defer clean()
+
+	groups := []*affinity.Group{
+		makeTestGroup("snapshot-updated", 1, []uint64{1, 2, 3}),
+		makeTestGroup("snapshot-label-deleted", 1, []uint64{1, 2, 3}),
+		makeTestGroup("snapshot-group-deleted", 1, []uint64{1, 2, 3}),
+	}
+	labels := make(map[string]*labeler.LabelRule, len(groups))
+	for _, group := range groups {
+		re.NoError(putGroup(ctx, client, group))
+		labels[group.ID] = makeTestLabelRule(group.ID,
+			"7480000000000000ff0000000000000000f8",
+			"7480000000000000ff1000000000000000f8")
+		re.NoError(putLabelRule(ctx, client, labels[group.ID]))
+	}
+
+	affinityManager, watcher, err := setupAffinityManager(ctx, client)
+	re.NoError(err)
+	defer watcher.Close()
+	for _, group := range groups {
+		state := affinityManager.GetAffinityGroupState(group.ID)
+		re.NotNil(state)
+		re.Equal(1, state.RangeCount)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	}()
+	time.Sleep(1100 * time.Millisecond)
+	updatedGroup := makeTestGroup(groups[0].ID, 2, []uint64{2, 3, 4})
+	re.NoError(putGroup(ctx, client, updatedGroup))
+	_, err = client.Delete(ctx, keypath.AffinityGroupPath(groups[2].ID))
+	re.NoError(err)
+	updatedLabel := makeTestLabelRule(groups[0].ID,
+		"7480000000000000ff0000000000000000f8",
+		"7480000000000000ff1000000000000000f8",
+		"7480000000000000ff2000000000000000f8",
+		"7480000000000000ff3000000000000000f8")
+	re.NoError(putLabelRule(ctx, client, updatedLabel))
+	_, err = client.Delete(ctx, keypath.RegionLabelKeyPath(labels[groups[1].ID].ID))
+	re.NoError(err)
+	deleteResp, err := client.Delete(ctx, keypath.RegionLabelKeyPath(labels[groups[2].ID].ID))
+	re.NoError(err)
+	_, err = client.Compact(ctx, deleteResp.Header.Revision)
+	re.NoError(err)
+	time.Sleep(100 * time.Millisecond)
+
+	pauseSnapshot := func(failpointName string, forceLoad func(), checkWhilePaused func()) {
+		loadStarted := make(chan struct{})
+		releaseLoad := make(chan struct{})
+		var startOnce, releaseOnce sync.Once
+		releaseSnapshotLoad := func() {
+			releaseOnce.Do(func() { close(releaseLoad) })
+		}
+		re.NoError(failpoint.EnableCall(failpointName, func() {
+			startOnce.Do(func() { close(loadStarted) })
+			<-releaseLoad
+		}))
+		defer func() {
+			releaseSnapshotLoad()
+			re.NoError(failpoint.Disable(failpointName))
+		}()
+
+		forceLoad()
+		select {
+		case <-loadStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("snapshot reload did not start for %s", failpointName)
+		}
+		checkWhilePaused()
+		releaseSnapshotLoad()
+	}
+
+	pauseSnapshot(
+		"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity/affinityGroupSnapshotItemLoaded",
+		watcher.groupWatcher.ForceLoad,
+		func() {
+			readDone := make(chan []*affinity.GroupState, 1)
+			go func() {
+				readDone <- []*affinity.GroupState{
+					affinityManager.GetAffinityGroupState(groups[0].ID),
+					affinityManager.GetAffinityGroupState(groups[2].ID),
+				}
+			}()
+			select {
+			case states := <-readDone:
+				re.NotNil(states[0])
+				re.Equal(uint64(1), states[0].LeaderStoreID)
+				re.NotNil(states[1])
+			case <-time.After(3 * time.Second):
+				t.Fatal("affinity group reads were blocked by snapshot reload")
+			}
+		},
+	)
+	testutil.Eventually(re, func() bool {
+		updated := affinityManager.GetAffinityGroupState(groups[0].ID)
+		return updated != nil && updated.LeaderStoreID == updatedGroup.LeaderStoreID &&
+			affinityManager.GetAffinityGroupState(groups[2].ID) == nil
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+
+	pauseSnapshot(
+		"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity/affinityLabelSnapshotItemLoaded",
+		watcher.labelWatcher.ForceLoad,
+		func() {
+			readDone := make(chan []*affinity.GroupState, 1)
+			go func() {
+				readDone <- []*affinity.GroupState{
+					affinityManager.GetAffinityGroupState(groups[0].ID),
+					affinityManager.GetAffinityGroupState(groups[1].ID),
+				}
+			}()
+			select {
+			case states := <-readDone:
+				re.NotNil(states[0])
+				re.Equal(1, states[0].RangeCount)
+				re.NotNil(states[1])
+				re.Equal(1, states[1].RangeCount)
+			case <-time.After(3 * time.Second):
+				t.Fatal("affinity label reads were blocked by snapshot reload")
+			}
+		},
+	)
+	testutil.Eventually(re, func() bool {
+		updated := affinityManager.GetAffinityGroupState(groups[0].ID)
+		deleted := affinityManager.GetAffinityGroupState(groups[1].ID)
+		return updated != nil && updated.RangeCount == 2 && deleted != nil && deleted.RangeCount == 0
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(10*time.Millisecond))
 }
 
 func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {

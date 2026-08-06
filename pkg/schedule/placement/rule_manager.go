@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -512,6 +513,69 @@ func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.commit()
 	m.ruleList = ruleList
 	return nil
+}
+
+// ApplyRuleConfigSnapshot atomically replaces the watched placement-rule
+// state with a complete etcd snapshot. Rules must have been adjusted before
+// calling this method. It returns only the key ranges affected by actual
+// changes, so an unchanged compaction reload does not rescan all regions.
+func (m *RuleManager) ApplyRuleConfigSnapshot(
+	snapshot *RuleConfigSnapshot,
+) (*keyutil.KeyRanges, error) {
+	m.Lock()
+	defer m.Unlock()
+
+	patch := &RuleConfigPatch{c: m.ruleConfig, mut: snapshot.config}
+	for key := range m.ruleConfig.rules {
+		if _, ok := patch.mut.rules[key]; !ok {
+			patch.DeleteRule(key[0], key[1])
+		}
+	}
+	for id := range m.ruleConfig.groups {
+		if _, ok := patch.mut.groups[id]; !ok {
+			patch.DeleteGroup(id)
+		}
+	}
+
+	patch.adjust()
+	patch.trim()
+	if len(patch.mut.rules) == 0 && len(patch.mut.groups) == 0 {
+		return keyutil.NewKeyRangesWithSize(0), nil
+	}
+
+	ruleList, err := buildRuleList(patch)
+	if err != nil {
+		return nil, err
+	}
+
+	suspectKeyRanges := keyutil.NewKeyRangesWithSize(2 * len(patch.mut.rules))
+	for key, rule := range patch.mut.rules {
+		if oldRule := patch.c.rules[key]; oldRule != nil {
+			suspectKeyRanges.Append(oldRule.StartKey, oldRule.EndKey)
+		}
+		if rule != nil {
+			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+		}
+	}
+	if len(patch.mut.groups) > 0 {
+		for _, rule := range patch.c.rules {
+			if _, ok := patch.mut.groups[rule.GroupID]; ok {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+		}
+		patch.iterateRules(func(rule *Rule) {
+			if _, ok := patch.mut.groups[rule.GroupID]; ok {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+		})
+	}
+
+	if err := m.savePatch(patch.mut); err != nil {
+		return nil, err
+	}
+	patch.commit()
+	m.ruleList = ruleList
+	return suspectKeyRanges, nil
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {
