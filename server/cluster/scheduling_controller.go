@@ -261,6 +261,11 @@ func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreKind
 	return sc.hotStat.GetStoresLoads()
 }
 
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (sc *schedulingController) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return sc.hotStat.GetStoreReadCPURecentMax(storeID)
+}
+
 // IsRegionHot checks if a region is in hot state.
 func (sc *schedulingController) IsRegionHot(region *core.RegionInfo) bool {
 	return sc.hotStat.IsRegionHot(region, sc.opt.GetHotRegionCacheHitsThreshold())

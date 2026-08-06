@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sort"
 	"time"
@@ -25,6 +26,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -39,19 +41,23 @@ const (
 	// The actual retry cadence is also bounded by the checker dispatch loop. This
 	// is only the minimum interval to avoid retrying the same pending item too
 	// frequently when checker ticks are fast.
-	splitScatterRetryBackoff = time.Second
-	// Keep the pending TTL aligned with PD's slow operator step threshold so a
-	// scatter blocked by slow AddLearner/store limits still has time to retry.
-	splitScatterPendingTTL = 10 * time.Minute
+	splitScatterRetryBackoff = 10 * time.Second
+	// Keep the pending TTL longer than a single slow operator step. Split-scatter
+	// can be blocked by several consecutive gates, including running operators,
+	// store limits, replication, scheduling labels, and balanced read CPU.
+	splitScatterPendingTTL = 3 * operator.SlowStepWaitTime
 )
 
 type splitScatterPendingItem struct {
-	regionID          uint64
-	group             string
-	sourceRegionID    uint64
-	sourceWaitVersion uint64
-	retryAt           time.Time
-	expireAt          time.Time
+	regionID       uint64
+	group          string
+	sourceRegionID uint64
+	// splitVersion is the RegionEpoch.Version produced by this split batch.
+	// The pending source/child region itself must stay at this exact version;
+	// a higher version means it changed again and this pending scatter is stale.
+	splitVersion uint64
+	retryAt      time.Time
+	expireAt     time.Time
 	// attempted means this item has been selected by the dispatcher at least once.
 	attempted bool
 }
@@ -102,6 +108,36 @@ func (c *splitScatterController) hasRegionStartKey(key []byte) bool {
 	return region != nil && bytes.Equal(region.GetStartKey(), key)
 }
 
+func splitScatterRegionVersion(region *core.RegionInfo) uint64 {
+	if region == nil || region.GetRegionEpoch() == nil {
+		return 0
+	}
+	return region.GetRegionEpoch().GetVersion()
+}
+
+func splitScatterResultReady(region *core.RegionInfo, splitVersion uint64) (ready bool, stale bool) {
+	version := splitScatterRegionVersion(region)
+	if version < splitVersion {
+		return false, false
+	}
+	if version > splitVersion {
+		return false, true
+	}
+	return true, false
+}
+
+func splitScatterSourceObserved(source *core.RegionInfo, splitVersion uint64) bool {
+	return splitScatterRegionVersion(source) >= splitVersion
+}
+
+func samePendingSplitScatter(pending, expected splitScatterPendingItem) bool {
+	return pending.regionID == expected.regionID &&
+		pending.group == expected.group &&
+		pending.sourceRegionID == expected.sourceRegionID &&
+		pending.splitVersion == expected.splitVersion &&
+		pending.expireAt.Equal(expected.expireAt)
+}
+
 func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []splitScatterPendingItem {
 	if limit <= 0 {
 		return nil
@@ -125,6 +161,7 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 
 	candidates := make([]splitScatterPendingItem, 0, len(pendingSnapshot))
 	missingSnapshot := make([]splitScatterPendingItem, 0)
+	staleSnapshot := make([]splitScatterPendingItem, 0)
 	for _, pending := range pendingSnapshot {
 		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
 			continue
@@ -135,16 +172,26 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 			missingSnapshot = append(missingSnapshot, pending)
 			continue
 		}
+		ready, stale := splitScatterResultReady(region, pending.splitVersion)
+		if stale {
+			staleSnapshot = append(staleSnapshot, pending)
+			continue
+		}
+		if !ready {
+			continue
+		}
+		if op := c.opController.GetOperator(regionID); op != nil && op.Desc() == scatter.InternalScatterOperatorDesc {
+			c.delayPendingSplitScatter(pending)
+			continue
+		}
 		sourceRegion := c.cluster.GetRegion(pending.sourceRegionID)
 		if sourceRegion == nil {
 			missingSnapshot = append(missingSnapshot, pending)
 			continue
 		}
-		sourceVersion := uint64(0)
-		if sourceRegion.GetRegionEpoch() != nil {
-			sourceVersion = sourceRegion.GetRegionEpoch().GetVersion()
-		}
-		if pending.sourceWaitVersion > 0 && sourceVersion < pending.sourceWaitVersion {
+		// The source can be newer than splitVersion because later splits on the
+		// source should not block scattering siblings that still match this batch.
+		if !splitScatterSourceObserved(sourceRegion, pending.splitVersion) {
 			continue
 		}
 		candidates = append(candidates, pending)
@@ -167,7 +214,7 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		selected := candidates[:0]
 		for _, candidate := range candidates {
 			pending, ok := c.pending[candidate.regionID]
-			if !ok || pending.group != candidate.group || !pending.expireAt.Equal(candidate.expireAt) {
+			if !ok || !samePendingSplitScatter(pending, candidate) {
 				continue
 			}
 			pending.attempted = true
@@ -178,6 +225,7 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		candidates = selected
 		c.pendingMu.Unlock()
 	}
+	c.deleteStalePendingSplitScatter(staleSnapshot)
 	c.delayMissingPendingSplitScatter(missingSnapshot, now)
 
 	if len(expiredSnapshot) > 0 {
@@ -186,7 +234,7 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 		c.pendingMu.Lock()
 		for _, expired := range expiredSnapshot {
 			pending, ok := c.pending[expired.regionID]
-			if ok && pending.group == expired.group && pending.expireAt.Equal(expired.expireAt) &&
+			if ok && samePendingSplitScatter(pending, expired) &&
 				!pending.expireAt.IsZero() && !now.Before(pending.expireAt) {
 				delete(c.pending, expired.regionID)
 				if pending.attempted {
@@ -205,6 +253,12 @@ func (c *splitScatterController) collectTopPendingSplitScatter(limit int) []spli
 	return candidates
 }
 
+func (c *splitScatterController) deleteStalePendingSplitScatter(stale []splitScatterPendingItem) {
+	for _, pending := range stale {
+		c.deletePendingSplitScatter(pending)
+	}
+}
+
 func (c *splitScatterController) delayMissingPendingSplitScatter(missing []splitScatterPendingItem, now time.Time) {
 	if len(missing) == 0 {
 		return
@@ -213,7 +267,7 @@ func (c *splitScatterController) delayMissingPendingSplitScatter(missing []split
 	c.pendingMu.Lock()
 	for _, expected := range missing {
 		pending, ok := c.pending[expected.regionID]
-		if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
+		if !ok || !samePendingSplitScatter(pending, expected) {
 			continue
 		}
 		if !pending.retryAt.IsZero() && now.Before(pending.retryAt) {
@@ -233,7 +287,7 @@ func (c *splitScatterController) delayPendingSplitScatter(expected splitScatterP
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	pending, ok := c.pending[expected.regionID]
-	if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
+	if !ok || !samePendingSplitScatter(pending, expected) {
 		return
 	}
 	pending.retryAt = time.Now().Add(splitScatterRetryBackoff)
@@ -244,11 +298,18 @@ func (c *splitScatterController) deletePendingSplitScatter(expected splitScatter
 	c.pendingMu.Lock()
 	defer c.pendingMu.Unlock()
 	pending, ok := c.pending[expected.regionID]
-	if !ok || pending.group != expected.group || !pending.expireAt.Equal(expected.expireAt) {
+	if !ok || !samePendingSplitScatter(pending, expected) {
 		return
 	}
 	delete(c.pending, expected.regionID)
 	c.updatePendingGaugeLocked()
+}
+
+func (c *splitScatterController) isCurrentPendingSplitScatter(expected splitScatterPendingItem) bool {
+	c.pendingMu.RLock()
+	defer c.pendingMu.RUnlock()
+	pending, ok := c.pending[expected.regionID]
+	return ok && samePendingSplitScatter(pending, expected)
 }
 
 func (c *splitScatterController) updatePendingGaugeLocked() {
@@ -316,11 +377,12 @@ func makeSplitScatterGroup(sourceRegionID, firstNewRegionID uint64) string {
 }
 
 // RecordSplitScatterBatch records a newly split batch for later scatter.
-func (c *Controller) RecordSplitScatterBatch(sourceRegionID, sourceWaitVersion uint64, newRegionIDs []uint64) {
-	c.splitScatter.recordSplitScatterBatch(sourceRegionID, sourceWaitVersion, newRegionIDs)
+// splitVersion is the RegionEpoch.Version expected after this split batch.
+func (c *Controller) RecordSplitScatterBatch(sourceRegionID, splitVersion uint64, newRegionIDs []uint64) {
+	c.splitScatter.recordSplitScatterBatch(sourceRegionID, splitVersion, newRegionIDs)
 }
 
-func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceWaitVersion uint64, newRegionIDs []uint64) {
+func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, splitVersion uint64, newRegionIDs []uint64) {
 	if len(newRegionIDs) == 0 {
 		return
 	}
@@ -329,13 +391,13 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceW
 	}
 	group := makeSplitScatterGroup(sourceRegionID, newRegionIDs[0])
 	expireAt := time.Now().Add(splitScatterPendingTTL)
-	if sourceWaitVersion == 0 {
-		sourceWaitVersion = 1
+	if splitVersion == 0 {
+		splitVersion = 1
 	}
-	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil && sourceRegion.GetRegionEpoch() != nil {
-		cachedWaitVersion := sourceRegion.GetRegionEpoch().GetVersion() + 1
-		if cachedWaitVersion > sourceWaitVersion {
-			sourceWaitVersion = cachedWaitVersion
+	if sourceRegion := c.cluster.GetRegion(sourceRegionID); sourceRegion != nil {
+		cachedSplitVersion := splitScatterRegionVersion(sourceRegion) + 1
+		if cachedSplitVersion > splitVersion {
+			splitVersion = cachedSplitVersion
 		}
 	}
 	c.pendingMu.Lock()
@@ -366,19 +428,19 @@ func (c *splitScatterController) recordSplitScatterBatch(sourceRegionID, sourceW
 	}
 	for _, regionID := range newRegionIDs {
 		c.pending[regionID] = splitScatterPendingItem{
-			regionID:          regionID,
-			group:             group,
-			sourceRegionID:    sourceRegionID,
-			sourceWaitVersion: sourceWaitVersion,
-			expireAt:          expireAt,
+			regionID:       regionID,
+			group:          group,
+			sourceRegionID: sourceRegionID,
+			splitVersion:   splitVersion,
+			expireAt:       expireAt,
 		}
 	}
 	c.pending[sourceRegionID] = splitScatterPendingItem{
-		regionID:          sourceRegionID,
-		group:             group,
-		sourceRegionID:    sourceRegionID,
-		sourceWaitVersion: sourceWaitVersion,
-		expireAt:          expireAt,
+		regionID:       sourceRegionID,
+		group:          group,
+		sourceRegionID: sourceRegionID,
+		splitVersion:   splitVersion,
+		expireAt:       expireAt,
 	}
 	c.updatePendingGaugeLocked()
 	c.nextDispatchAt = time.Time{}
@@ -417,6 +479,25 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		region := c.cluster.GetRegion(pending.regionID)
 		if region == nil {
 			splitScatterDispatchRegionMissingCounter.Inc()
+			c.delayPendingSplitScatter(pending)
+			continue
+		}
+		ready, stale := splitScatterResultReady(region, pending.splitVersion)
+		if stale {
+			c.deletePendingSplitScatter(pending)
+			continue
+		}
+		if !ready {
+			continue
+		}
+		sourceRegion := c.cluster.GetRegion(pending.sourceRegionID)
+		if sourceRegion == nil {
+			splitScatterDispatchRegionMissingCounter.Inc()
+			c.delayPendingSplitScatter(pending)
+			continue
+		}
+		if !splitScatterSourceObserved(sourceRegion, pending.splitVersion) ||
+			!c.isCurrentPendingSplitScatter(pending) {
 			continue
 		}
 		rangeHint := resolveSplitScatterRangeHintWithKeyspaceValidator(region, c.hasSplitScatterTxnKeyspaceBounds)
@@ -441,6 +522,16 @@ func (c *splitScatterController) dispatchSplitScatterRegions() {
 		}
 		op, err := c.regionScatterer.ScatterInternal(region, scatterGroup, rangeHint.startKey, rangeHint.endKey)
 		if err != nil {
+			if stderrors.Is(err, scatter.ErrInternalScatterBalancedReadCPU) {
+				splitScatterDispatchBalancedReadCPUCounter.Inc()
+				c.delayPendingSplitScatter(pending)
+				log.Info("dispatch internal split scatter delayed",
+					zap.Uint64("region-id", pending.regionID),
+					zap.String("batch-group", pending.group),
+					zap.String("scatter-group", scatterGroup),
+					zap.String("reason", "balanced-read-cpu"))
+				continue
+			}
 			splitScatterDispatchScatterFailedCounter.Inc()
 			c.delayPendingSplitScatter(pending)
 			log.Info("dispatch internal split scatter failed",
