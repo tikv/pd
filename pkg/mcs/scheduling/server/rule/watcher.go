@@ -215,7 +215,6 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	rw.ruleWatcher.SetReconcileDeletedKeys()
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }
