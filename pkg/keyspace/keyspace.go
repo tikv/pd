@@ -1449,7 +1449,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 			return err
 		}
 		manager.kgm.Lock()
-		manager.kgm.groups[endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)].Put(defaultKeyspaceGroup)
+		manager.kgm.putKeyspaceGroupLocked(defaultKeyspaceGroup)
 		manager.kgm.Unlock()
 		// If all keyspaces in the current batch are assigned, update the next start ID.
 		manager.nextPatrolStartID = nextStartID
