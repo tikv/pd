@@ -211,8 +211,35 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 
 // SendMsg sends a message to related store.
 func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
-	if region.GetLeader() == nil {
+	resp := s.prepareMessage(region, op)
+	if resp == nil {
 		return
+	}
+	select {
+	case s.msgCh <- resp:
+	case <-s.hbStreamCtx.Done():
+	}
+}
+
+// SendScheduleCommand tries to enqueue an operator schedule command without blocking.
+func (s *HeartbeatStreams) SendScheduleCommand(region *core.RegionInfo, op *Operation) bool {
+	resp := s.prepareMessage(region, op)
+	if resp == nil {
+		return false
+	}
+	select {
+	case s.msgCh <- resp:
+		return true
+	case <-s.hbStreamCtx.Done():
+		return false
+	default:
+		return false
+	}
+}
+
+func (s *HeartbeatStreams) prepareMessage(region *core.RegionInfo, op *Operation) core.RegionHeartbeatResponse {
+	if region.GetLeader() == nil {
+		return nil
 	}
 
 	// TODO: use generic
@@ -248,10 +275,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 		}
 	}
 
-	select {
-	case s.msgCh <- resp:
-	case <-s.hbStreamCtx.Done():
-	}
+	return resp
 }
 
 // SendErr sends a error message to related store.

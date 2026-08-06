@@ -953,6 +953,252 @@ func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Oper
 	re.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)
 }
 
+func (suite *operatorControllerTestSuite) TestCancelAllOperators() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	for i := uint64(1); i <= 3; i++ {
+		region := suite.newRegionInfo(i, fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 1, 1, []uint64{100 + i, 1}, []uint64{100 + i, 1})
+		cluster.PutRegion(region)
+	}
+
+	newTransferLeaderOp := func(regionID uint64) *Operator {
+		return NewTestOperator(regionID, cluster.GetRegion(regionID).GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	}
+
+	runningOp := newTransferLeaderOp(1)
+	re.True(controller.AddOperator(runningOp))
+	re.NotNil(controller.GetOperator(runningOp.RegionID()))
+	re.Equal(uint64(1), controller.OperatorCount(OpLeader))
+	re.Equal(1, controller.opNotifierQueue.len())
+
+	waitingOp1 := newTransferLeaderOp(2)
+	waitingOp2 := newTransferLeaderOp(3)
+	controller.wop.PutOperator(waitingOp1)
+	controller.wop.PutOperator(waitingOp2)
+	controller.wopStatus.incCount(waitingOp1.Desc())
+	controller.wopStatus.incCount(waitingOp2.Desc())
+	re.Len(controller.GetWaitingOperators(), 2)
+	re.Equal(uint64(2), controller.wopStatus.getCount(waitingOp1.Desc()))
+
+	controller.CancelAllOperators(AdminStop)
+
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.GetWaitingOperators())
+	re.Equal(uint64(0), controller.OperatorCount(OpLeader))
+	re.Equal(uint64(0), controller.wopStatus.getCount(waitingOp1.Desc()))
+	for _, op := range []*Operator{runningOp, waitingOp1, waitingOp2} {
+		re.True(op.IsEnd())
+		re.Equal(CANCELED, op.Status())
+		re.NotNil(controller.GetOperatorStatus(op.RegionID()))
+		reason, ok := op.GetAdditionalInfo(cancelReason)
+		re.True(ok)
+		re.Equal(string(AdminStop), reason)
+	}
+	re.Equal(0, controller.opNotifierQueue.len())
+	region, next := controller.pollNeedDispatchRegion()
+	re.Nil(region)
+	re.False(next)
+
+	newWaitingOp := newTransferLeaderOp(2)
+	added := controller.AddWaitingOperator(newWaitingOp)
+	re.Equal(1, added)
+	re.NotNil(controller.GetOperator(newWaitingOp.RegionID()))
+	re.Equal(1, controller.opNotifierQueue.len())
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsPreventsStaleDispatch() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 0)
+	region := cluster.AddLeaderRegion(1, 1, 2)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(op.Start())
+	controller.SetOperator(op)
+
+	dispatchReady := make(chan struct{})
+	continueDispatch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/schedule/operator/cancelOperatorBeforeDispatch", func() {
+		close(dispatchReady)
+		<-continueDispatch
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/cancelOperatorBeforeDispatch"))
+	}()
+
+	dispatchFinished := make(chan struct{})
+	go func() {
+		defer close(dispatchFinished)
+		controller.Dispatch(region, DispatchFromHeartBeat, nil)
+	}()
+
+	select {
+	case <-dispatchReady:
+	case <-time.After(time.Second):
+		re.FailNow("dispatch did not reach the pre-send failpoint")
+	}
+	controller.CancelAllOperators(AdminStop)
+	close(continueDispatch)
+	select {
+	case <-dispatchFinished:
+	case <-time.After(time.Second):
+		re.FailNow("dispatch did not finish")
+	}
+	re.Equal(CANCELED, op.Status())
+	re.Zero(stream.MsgLength())
+}
+
+func (suite *operatorControllerTestSuite) TestPollNeedDispatchRegionDropsStaleNotifierEntry() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 0)
+	region := cluster.AddLeaderRegion(1, 1, 2)
+
+	oldOp := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	newOp := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	re.True(newOp.Start())
+	controller.SetOperator(newOp)
+	controller.opNotifierQueue.push(&operatorWithTime{op: oldOp, time: time.Now()})
+
+	region, next := controller.pollNeedDispatchRegion()
+	re.Nil(region)
+	re.True(next)
+	re.Equal(0, controller.opNotifierQueue.len())
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsRejectsStaleGeneration() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 3)
+	cluster.AddLeaderStore(2, 0)
+	for i := uint64(1); i <= 3; i++ {
+		cluster.AddLeaderRegion(i, 1, 2)
+	}
+
+	newTransferLeaderOp := func(regionID uint64) *Operator {
+		region := cluster.GetRegion(regionID)
+		return NewTestOperator(regionID, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	}
+
+	generation := controller.GetOperatorGeneration()
+	controller.CancelAllOperators(AdminStop)
+
+	waitingOp := newTransferLeaderOp(1)
+	re.Zero(controller.AddWaitingOperatorWithGeneration(generation, SchedulingHalted, waitingOp))
+	directOp := newTransferLeaderOp(2)
+	re.False(controller.AddOperatorWithGeneration(generation, SchedulingHalted, directOp))
+	for _, op := range []*Operator{waitingOp, directOp} {
+		re.Equal(CANCELED, op.Status())
+		reason, ok := op.GetAdditionalInfo(cancelReason)
+		re.True(ok)
+		re.Equal(string(SchedulingHalted), reason)
+	}
+
+	freshOp := newTransferLeaderOp(3)
+	re.True(controller.AddOperatorWithGeneration(controller.GetOperatorGeneration(), SchedulingHalted, freshOp))
+	re.Equal(freshOp, controller.GetOperator(freshOp.RegionID()))
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsReturnsWhenScheduleQueueIsFull() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLeaderStore(1, 1)
+	cluster.AddLeaderStore(2, 0)
+	region := cluster.AddLeaderRegion(1, 1, 2)
+	cmd := TransferLeader{FromStore: 1, ToStore: 2}.GetCmd(region, false)
+	for range 1024 {
+		re.True(stream.SendScheduleCommand(region, cmd))
+	}
+	re.Equal(1024, stream.MsgLength())
+
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	addFinished := make(chan bool)
+	go func() {
+		addFinished <- controller.AddOperator(op)
+	}()
+	select {
+	case added := <-addFinished:
+		re.True(added)
+	case <-time.After(time.Second):
+		re.FailNow("add operator did not return")
+	}
+
+	cancelFinished := make(chan struct{})
+	go func() {
+		defer close(cancelFinished)
+		controller.CancelAllOperators(AdminStop)
+	}()
+	select {
+	case <-cancelFinished:
+	case <-time.After(time.Second):
+		re.FailNow("cancel all operators did not return")
+	}
+	re.Equal(CANCELED, op.Status())
+	re.Equal(1024, stream.MsgLength())
+}
+
+func (suite *operatorControllerTestSuite) TestCancelAllOperatorsWaitsPromotingOperator() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	region := suite.newRegionInfo(1, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	cluster.PutRegion(region)
+	op := NewTestOperator(1, region.GetRegionEpoch(), OpLeader, TransferLeader{FromStore: 1, ToStore: 2})
+	controller.wop.PutOperator(op)
+	controller.wopStatus.incCount(op.Desc())
+
+	promoteStarted := make(chan struct{})
+	promoteFinished := make(chan struct{})
+	controller.operatorLock.Lock()
+	go func() {
+		defer close(promoteFinished)
+		ops := controller.wop.GetOperator()
+		re.Len(ops, 1)
+		controller.wopStatus.decCount(ops[0].Desc())
+		close(promoteStarted)
+		time.Sleep(20 * time.Millisecond)
+		re.True(controller.addOperatorLocked(ops...))
+		controller.operatorLock.Unlock()
+	}()
+
+	<-promoteStarted
+	cancelFinished := make(chan struct{})
+	go func() {
+		defer close(cancelFinished)
+		controller.CancelAllOperators(AdminStop)
+	}()
+
+	<-promoteFinished
+	<-cancelFinished
+	re.Empty(controller.GetOperators())
+	re.Equal(CANCELED, op.Status())
+	re.NotNil(controller.GetOperatorStatus(op.RegionID()))
+}
+
 func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
