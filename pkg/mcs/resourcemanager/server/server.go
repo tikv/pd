@@ -214,10 +214,7 @@ func (s *Server) primaryElectionLoop() {
 // transfer target atomically and is cleaned up once this server wins.
 func (s *Server) campaignLeader(expectedPrimary string) bool {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-	var cmps []clientv3.Cmp
-	if cmp := utils.ExpectedPrimaryCmp(&s.participant.MsParam, expectedPrimary); cmp != nil {
-		cmps = append(cmps, *cmp)
-	}
+	cmps := []clientv3.Cmp{utils.ExpectedPrimaryCmp(&s.participant.MsParam, expectedPrimary)}
 	if err := s.participant.CampaignWithCmps(s.Context(), s.cfg.LeaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
@@ -245,8 +242,14 @@ func (s *Server) campaignLeader(expectedPrimary string) bool {
 
 	// We have won the campaign, so the expected primary flag (if any) has served its
 	// purpose as the affinity guard. Delete it so steady state is clean and a later
-	// failure re-elects immediately instead of waiting for the flag's TTL.
-	utils.DeleteExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam, expectedPrimary)
+	// failure re-elects immediately instead of waiting for the flag's TTL. If a newer
+	// transfer rewrote the flag to another member while we were winning, step down so
+	// the re-election routes leadership to that target.
+	if utils.DeleteExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam, expectedPrimary, s.participant) {
+		log.Info("the expected primary has been changed to another member, stepping down",
+			zap.String("server-name", s.Name()))
+		return false
+	}
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {

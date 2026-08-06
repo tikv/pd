@@ -279,10 +279,7 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 		GroupID:     a.keyspaceGroupID,
 	}
 	m := a.member.(*member.Participant)
-	var cmps []clientv3.Cmp
-	if cmp := mcsutils.ExpectedPrimaryCmp(msParam, expectedPrimary); cmp != nil {
-		cmps = append(cmps, *cmp)
-	}
+	cmps := []clientv3.Cmp{mcsutils.ExpectedPrimaryCmp(msParam, expectedPrimary)}
 	if err := m.CampaignWithCmps(a.ctx, lease, cmps...); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
@@ -313,8 +310,13 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 
 	// We have won the campaign, so the expected primary flag (if any) has served its
 	// purpose as the affinity guard. Delete it so steady state is clean and a later
-	// failure re-elects immediately instead of waiting for the flag's TTL.
-	mcsutils.DeleteExpectedPrimaryFlag(a.member.Client(), msParam, expectedPrimary)
+	// failure re-elects immediately instead of waiting for the flag's TTL. If a newer
+	// transfer rewrote the flag to another member while we were winning, step down so
+	// the re-election routes leadership to that target.
+	if mcsutils.DeleteExpectedPrimaryFlag(a.member.Client(), msParam, expectedPrimary, m) {
+		log.Info("the expected primary has been changed to another member, stepping down", a.logFields...)
+		return
+	}
 
 	log.Info("initializing the tso allocator")
 	if err := a.Initialize(); err != nil {
