@@ -24,15 +24,117 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
 const mockStreamURL = "mock:///"
+
+type legacyPDTSOClient struct {
+	grpc.ClientStream
+	sent     *pdpb.TsoRequest
+	response *pdpb.TsoResponse
+}
+
+func (c *legacyPDTSOClient) Send(request *pdpb.TsoRequest) error {
+	c.sent = request
+	return nil
+}
+
+func (c *legacyPDTSOClient) Recv() (*pdpb.TsoResponse, error) {
+	return c.response, nil
+}
+
+type legacyTSOClient struct {
+	grpc.ClientStream
+	sent     *tsopb.TsoRequest
+	response *tsopb.TsoResponse
+}
+
+func (c *legacyTSOClient) Send(request *tsopb.TsoRequest) error {
+	c.sent = request
+	return nil
+}
+
+func (c *legacyTSOClient) Recv() (*tsopb.TsoResponse, error) {
+	return c.response, nil
+}
+
+func TestPDTSOStreamAdapterLegacyProtocol(t *testing.T) {
+	re := require.New(t)
+	client := &legacyPDTSOClient{
+		response: &pdpb.TsoResponse{
+			Timestamp: &pdpb.Timestamp{Physical: 10, Logical: 20},
+			Count:     3,
+		},
+	}
+	adapter := pdTSOStreamAdapter{stream: client}
+
+	re.NoError(adapter.Send(tsoRequestMetadata{
+		clusterID:       1,
+		keyspaceID:      2,
+		keyspaceGroupID: 3,
+	}, 4))
+	re.Equal(&pdpb.TsoRequest{
+		Header: &pdpb.RequestHeader{ClusterId: 1},
+		Count:  4,
+	}, client.sent)
+
+	result, err := adapter.Recv()
+	re.NoError(err)
+	re.Equal(tsoRequestResult{
+		physical:            10,
+		logical:             20,
+		count:               3,
+		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
+	}, result)
+}
+
+func TestTSOStreamAdapterLegacyProtocol(t *testing.T) {
+	re := require.New(t)
+	client := &legacyTSOClient{
+		response: &tsopb.TsoResponse{
+			Header:    &tsopb.ResponseHeader{KeyspaceGroupId: 3},
+			Timestamp: &pdpb.Timestamp{Physical: 10, Logical: 20},
+			Count:     4,
+		},
+	}
+	adapter := tsoTSOStreamAdapter{stream: client, calleeID: "tso-1"}
+
+	re.NoError(adapter.Send(tsoRequestMetadata{
+		clusterID:       1,
+		keyspaceID:      2,
+		keyspaceGroupID: 3,
+	}, 4))
+	re.Equal(&tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId: 1,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: 2,
+			},
+			KeyspaceGroupId: 3,
+			CalleeId:        "tso-1",
+		},
+		Count: 4,
+	}, client.sent)
+
+	result, err := adapter.Recv()
+	re.NoError(err)
+	re.Equal(tsoRequestResult{
+		physical:            10,
+		logical:             20,
+		count:               4,
+		respKeyspaceGroupID: 3,
+	}, result)
+}
 
 type requestMsg struct {
 	clusterID       uint64
@@ -79,15 +181,15 @@ func newMockTSOStreamImpl(ctx context.Context, resultMode resultMode) *mockTSOSt
 	}
 }
 
-func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID uint32, count int64) error {
+func (s *mockTSOStreamImpl) Send(metadata tsoRequestMetadata, count int64) error {
 	select {
 	case <-s.ctx.Done():
 		return s.ctx.Err()
 	default:
 	}
 	s.requestCh <- requestMsg{
-		clusterID:       clusterID,
-		keyspaceGroupID: keyspaceGroupID,
+		clusterID:       metadata.clusterID,
+		keyspaceGroupID: metadata.keyspaceGroupID,
 		count:           count,
 	}
 	return nil
@@ -306,7 +408,11 @@ func (s *testTSOStreamSuite) getResult(ch <-chan callbackInvocation) callbackInv
 
 func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan callbackInvocation, error) {
 	ch := make(chan callbackInvocation, 1)
-	err := s.stream.processRequests(1, 2, 3, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+	err := s.stream.processRequests(tsoRequestMetadata{
+		clusterID:       1,
+		keyspaceID:      2,
+		keyspaceGroupID: 3,
+	}, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
 			s.re.Equal(uint32(3), reqKeyspaceGroupID)
 		}
@@ -358,7 +464,11 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
 	testutil.Eventually(s.re, func() bool {
-		return s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
+		return s.stream.processRequests(tsoRequestMetadata{
+			clusterID:       1,
+			keyspaceID:      2,
+			keyspaceGroupID: 3,
+		}, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, err error) {
 			s.re.Error(err)
 		}) != nil
 	})
@@ -622,7 +732,11 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 
 	b.ResetTimer()
 	for range b.N {
-		err := stream.processRequests(1, 1, 1, 1, now, func(result tsoRequestResult, _ uint32, err error) {
+		err := stream.processRequests(tsoRequestMetadata{
+			clusterID:       1,
+			keyspaceID:      1,
+			keyspaceGroupID: 1,
+		}, 1, now, func(result tsoRequestResult, _ uint32, err error) {
 			if err != nil {
 				panic(err)
 			}
