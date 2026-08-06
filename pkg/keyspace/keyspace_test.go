@@ -1117,6 +1117,67 @@ func (suite *keyspaceTestSuite) TestChecker() {
 	re.Empty(arr)
 }
 
+// TestRemoveKeyspaceCleansCache verifies that RemoveKeyspace deletes the
+// keyspace's entry from the in-memory cache, not just from the legacy
+// keyspaceNameLookup/keyspaceStateLookup maps, so a fully removed keyspace
+// does not leak a stale cache entry forever.
+func (suite *keyspaceTestSuite) TestRemoveKeyspaceCleansCache() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 20000},
+		Name:           "to-be-removed",
+		State:          keyspacepb.KeyspaceState_TOMBSTONE,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.saveNewKeyspace(meta))
+	_, found := suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.True(found)
+
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return suite.manager.RemoveKeyspace(txn, meta.GetId())
+	}))
+	_, found = suite.manager.cache.getKeyspaceByID(meta.GetId())
+	re.False(found)
+}
+
+// TestLoadCacheWarmsUpFromStorage verifies that loadCache (invoked from
+// Bootstrap) populates the cache for keyspaces that were already persisted in
+// storage before the Manager was constructed, i.e. keyspaces the cache never
+// observed via saveNewKeyspace/transformKeyspaceState/Get*ByID.
+func (suite *keyspaceTestSuite) TestLoadCacheWarmsUpFromStorage() {
+	re := suite.Require()
+	meta := &keyspacepb.KeyspaceMeta{
+		Keyspace:       &keyspacepb.KeyspaceMeta_Id{Id: 30000},
+		Name:           "pre-existing",
+		State:          keyspacepb.KeyspaceState_ENABLED,
+		CreatedAt:      time.Now().Unix(),
+		StateChangedAt: time.Now().Unix(),
+	}
+	re.NoError(suite.manager.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		if err := suite.manager.store.SaveKeyspaceID(txn, meta.GetId(), meta.GetName()); err != nil {
+			return err
+		}
+		return suite.manager.store.SaveKeyspaceMeta(txn, meta)
+	}))
+
+	// A fresh cache, as if a new Manager had just been constructed, has not
+	// observed this keyspace yet.
+	freshCache := NewCache()
+	_, found := freshCache.getKeyspaceByID(meta.GetId())
+	re.False(found)
+
+	manager := &Manager{
+		ctx:   suite.ctx,
+		store: suite.manager.store,
+		cache: freshCache,
+	}
+	re.NoError(manager.loadCache())
+	_, found = freshCache.getKeyspaceByID(meta.GetId())
+	re.True(found)
+	re.True(manager.KeyspaceExist(meta.GetId()))
+}
+
 // TestAssignGroupAndSaveKeyspace verifies that keyspace creation tolerates a
 // stale pre-lock group check: if all meta-service groups are gone by the time
 // the lock is held, the keyspace is created without an assignment instead of
