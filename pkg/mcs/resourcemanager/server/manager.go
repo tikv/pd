@@ -543,8 +543,12 @@ func (m *Manager) initMetadata(ctx context.Context) error {
 	return nil
 }
 
+// maxServiceLimitReloadAttempts bounds the point re-read retries in
+// loadServiceLimits below before it falls back to the bulk-scanned value.
+const maxServiceLimitReloadAttempts = 3
+
 func (m *Manager) loadServiceLimits() error {
-	return m.storage.LoadServiceLimits(func(keyspaceID uint32, _ float64) {
+	return m.storage.LoadServiceLimits(func(keyspaceID uint32, bulkScannedLimit float64) {
 		failpoint.InjectCall("loadServiceLimitsBeforeApply", keyspaceID)
 		// Serialize against SetKeyspaceServiceLimit for this keyspace, and
 		// re-read the value from storage instead of trusting the one the
@@ -559,10 +563,29 @@ func (m *Manager) loadServiceLimits() error {
 		// completes before SetKeyspaceServiceLimit releases this lock.
 		m.serviceLimitLocks.Lock(keyspaceID)
 		defer m.serviceLimitLocks.Unlock(keyspaceID)
-		serviceLimit, err := m.storage.LoadServiceLimit(keyspaceID)
+		var (
+			serviceLimit float64
+			err          error
+		)
+		for attempt := 1; attempt <= maxServiceLimitReloadAttempts; attempt++ {
+			serviceLimit, err = m.storage.LoadServiceLimit(keyspaceID)
+			if err == nil {
+				break
+			}
+			log.Warn("failed to reload service limit, retrying",
+				zap.Uint32("keyspace-id", keyspaceID), zap.Int("attempt", attempt), zap.Error(err))
+		}
 		if err != nil {
-			log.Warn("failed to reload service limit", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
-			return
+			// Retries exhausted, e.g. a persistent storage failure: fall back
+			// to the bulk-scanned value instead of dropping the update
+			// entirely. This re-admits the narrow staleness window the point
+			// re-read above exists to close, but only in this rare failure
+			// case - strictly better than leaving the keyspace with no
+			// service limit cached at all (silently allowing burstable
+			// groups to bypass it) until the next Init.
+			log.Error("giving up reloading service limit, falling back to the bulk-scanned value",
+				zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+			serviceLimit = bulkScannedLimit
 		}
 		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
 	})

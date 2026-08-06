@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1215,6 +1216,88 @@ func TestLoadServiceLimitsDoesNotClobberConcurrentSet(t *testing.T) {
 	re.NotNil(limiter)
 	re.Equal(float64(200), limiter.ServiceLimit,
 		"the replay must not overwrite a concurrently-set newer value with its own stale snapshot")
+}
+
+// failingServiceLimitLoadStorage makes LoadServiceLimit (the point re-read
+// loadServiceLimits performs under serviceLimitLocks) fail a controlled
+// number of times for one keyspace, to exercise its retry-then-fallback
+// behavior. LoadServiceLimits (the bulk scan) is left untouched.
+type failingServiceLimitLoadStorage struct {
+	storage.Storage
+	keyspaceID   uint32
+	failuresLeft atomic.Int32
+	calls        atomic.Int32
+}
+
+func (s *failingServiceLimitLoadStorage) LoadServiceLimit(keyspaceID uint32) (float64, error) {
+	if keyspaceID == s.keyspaceID {
+		s.calls.Add(1)
+		if s.failuresLeft.Add(-1) >= 0 {
+			return 0, errors.New("injected service limit load failure")
+		}
+	}
+	return s.Storage.LoadServiceLimit(keyspaceID)
+}
+
+// TestLoadServiceLimitsRetriesPointReadBeforeFallingBack guards against
+// loadServiceLimits treating a single point-read failure as fatal. The point
+// re-read added to close the race in TestLoadServiceLimitsDoesNotClobberConcurrentSet
+// above can itself fail transiently (e.g. a storage blip), so it must retry a
+// few times and apply the value once a retry succeeds, instead of giving up
+// and falling back to the (potentially stale) bulk-scanned value on the very
+// first failure.
+func TestLoadServiceLimitsRetriesPointReadBeforeFallingBack(t *testing.T) {
+	re := require.New(t)
+	const keyspaceID = 1
+	base := storage.NewStorageWithMemoryBackend()
+	re.NoError(base.SaveServiceLimit(keyspaceID, 100))
+	store := &failingServiceLimitLoadStorage{Storage: base, keyspaceID: keyspaceID}
+	// Fail once, then succeed on the second attempt - strictly fewer calls
+	// than the retry budget, to prove it stops retrying once a read succeeds
+	// instead of always spending the full budget.
+	store.failuresLeft.Store(1)
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+
+	re.NoError(m.loadServiceLimits())
+
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(100), limiter.ServiceLimit,
+		"a point read that succeeds within the retry budget must be applied")
+	re.EqualValues(2, store.calls.Load(),
+		"must retry the point read instead of falling back after only one failure, and stop once it succeeds")
+}
+
+// TestLoadServiceLimitsFallsBackToBulkValueOnPersistentFailure guards against
+// loadServiceLimits silently dropping a keyspace's service limit entirely
+// when its point re-read keeps failing (e.g. a persistent storage issue).
+// Without a fallback, the keyspace would run with no service limit cached at
+// all - letting burstable groups bypass the configured cap indefinitely,
+// since nothing else retries this load until the next Init - which is worse
+// than falling back to the bulk-scanned value and re-admitting its narrow,
+// already-covered staleness window.
+func TestLoadServiceLimitsFallsBackToBulkValueOnPersistentFailure(t *testing.T) {
+	re := require.New(t)
+	const keyspaceID = 1
+	base := storage.NewStorageWithMemoryBackend()
+	re.NoError(base.SaveServiceLimit(keyspaceID, 100))
+	store := &failingServiceLimitLoadStorage{Storage: base, keyspaceID: keyspaceID}
+	// Always fail the point read, however many times it's retried.
+	store.failuresLeft.Store(math.MaxInt32)
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+
+	re.NoError(m.loadServiceLimits())
+
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(100), limiter.ServiceLimit,
+		"must fall back to the bulk-scanned value rather than leaving the service limit uncached")
+	re.EqualValues(maxServiceLimitReloadAttempts, store.calls.Load(),
+		"must exhaust the retry budget before falling back")
 }
 
 // TestAsyncLoadResourceGroupsMergeGroupNeverVisibleUnsynced guards against a
