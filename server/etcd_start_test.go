@@ -45,12 +45,18 @@ func advancingApplied() func() uint64 {
 	return func() uint64 { return idx.Add(1) }
 }
 
+// constSnapshotting returns a snapshotting getter that always reports v,
+// simulating whether etcd is currently receiving or applying a raft snapshot.
+func constSnapshotting(v bool) func() bool {
+	return func() bool { return v }
+}
+
 func TestWaitEtcdReadyProgress(t *testing.T) {
 	t.Run("ready immediately", func(t *testing.T) {
 		re := require.New(t)
 		ready := make(chan struct{})
 		close(ready)
-		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, constApplied(0), constSnapshotting(false),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
 	})
@@ -61,7 +67,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		errCh := make(chan error, 1)
 		errCh <- errors.New("boom")
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, errCh, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, errCh, constApplied(0), constSnapshotting(false),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		// The real cause is wrapped in ErrStartEtcd, not swallowed by a timeout.
@@ -78,7 +84,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		stopped := make(chan struct{})
 		close(stopped)
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), stopped, nil, constApplied(0),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), stopped, nil, constApplied(0), constSnapshotting(false),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.ErrorContains(err, "PD:etcd:ErrStartEtcd")
@@ -96,7 +102,25 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 			close(ready)
 		}()
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, advancingApplied(),
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, advancingApplied(), constSnapshotting(false),
+			testCheckInterval, testNoProgressTimeout)
+		re.NoError(err)
+		// It must have outlived the no-progress window instead of bailing at it.
+		re.GreaterOrEqual(time.Since(start), 3*testNoProgressTimeout)
+	})
+
+	t.Run("keeps waiting while a raft snapshot is in progress", func(t *testing.T) {
+		re := require.New(t)
+		// applied index is stuck, as it would be while etcd is receiving or
+		// applying an incoming raft snapshot; ready only fires well after the
+		// no-progress timeout would have elapsed on applied index alone.
+		ready := make(chan struct{})
+		go func() {
+			time.Sleep(4 * testNoProgressTimeout)
+			close(ready)
+		}()
+		start := time.Now()
+		err := waitEtcdReadyProgress(context.Background(), ready, nil, nil, constApplied(0), constSnapshotting(true),
 			testCheckInterval, testNoProgressTimeout)
 		re.NoError(err)
 		// It must have outlived the no-progress window instead of bailing at it.
@@ -107,7 +131,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 		re := require.New(t)
 		// ready never fires and applied index is stuck: a genuine hang.
 		start := time.Now()
-		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, nil, constApplied(7),
+		err := waitEtcdReadyProgress(context.Background(), make(chan struct{}), nil, nil, constApplied(7), constSnapshotting(false),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))
@@ -124,7 +148,7 @@ func TestWaitEtcdReadyProgress(t *testing.T) {
 			cancel()
 		}()
 		// applied index advances, so only ctx cancellation can end the wait.
-		err := waitEtcdReadyProgress(ctx, make(chan struct{}), nil, nil, advancingApplied(),
+		err := waitEtcdReadyProgress(ctx, make(chan struct{}), nil, nil, advancingApplied(), constSnapshotting(false),
 			testCheckInterval, testNoProgressTimeout)
 		re.Error(err)
 		re.True(errors.ErrorEqual(err, errs.ErrCancelStartEtcd))

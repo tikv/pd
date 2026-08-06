@@ -33,6 +33,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -427,6 +428,40 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 	return nil
 }
 
+// etcdSnapshotMetrics are the etcd-owned Prometheus gauges that track whether
+// this member is currently receiving or applying an incoming raft snapshot:
+//   - etcd_network_snapshot_receive_inflights_total is set while the snapshot
+//     file is being downloaded from the leader, before raft ever surfaces it.
+//   - etcd_server_snapshot_apply_in_progress_total is set while the downloaded
+//     snapshot is being applied to the storage backend.
+//
+// AppliedIndex does not move during either phase even though the member is
+// healthy, so waitEtcdReadyProgress treats a nonzero reading as progress too.
+// Both gauges are registered by etcd itself on the process-wide default
+// registerer; there is no typed API for this on *embed.Etcd.
+var etcdSnapshotMetrics = map[string]struct{}{
+	"etcd_network_snapshot_receive_inflights_total": {},
+	"etcd_server_snapshot_apply_in_progress_total":  {},
+}
+
+func isEtcdSnapshotting() bool {
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		return false
+	}
+	for _, mf := range mfs {
+		if _, ok := etcdSnapshotMetrics[mf.GetName()]; !ok {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			if m.GetGauge().GetValue() > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // waitEtcdReady blocks until the embedded etcd is ready to serve requests.
 //
 // Rather than bounding the wait by a fixed deadline, it treats the etcd applied
@@ -439,13 +474,15 @@ func (s *Server) startEtcd(ctx context.Context) (retErr error) {
 // becoming ready, and honors ctx cancellation for normal shutdown.
 func waitEtcdReady(ctx context.Context, etcd *embed.Etcd) error {
 	return waitEtcdReadyProgress(ctx, etcd.Server.ReadyNotify(), etcd.Server.StopNotify(),
-		etcd.Err(), etcd.Server.AppliedIndex, etcdStartProgressCheckInterval, EtcdStartTimeout)
+		etcd.Err(), etcd.Server.AppliedIndex, isEtcdSnapshotting, etcdStartProgressCheckInterval, EtcdStartTimeout)
 }
 
 // waitEtcdReadyProgress is the testable core of waitEtcdReady, decoupled from
 // *embed.Etcd so it can be driven without a real server. It keeps waiting while
-// appliedIndex advances and reports a no-progress failure only when appliedIndex
-// does not advance for noProgressTimeout. It fails fast when:
+// appliedIndex advances, or while snapshotting reports that etcd is receiving
+// or applying a raft snapshot (during which appliedIndex cannot advance), and
+// reports a no-progress failure only when neither signal shows progress for
+// noProgressTimeout. It fails fast when:
 //   - etcd reports an asynchronous startup error on errCh (e.g. listener or
 //     serving failures);
 //   - the etcd server stops before becoming ready (stopped), e.g. an internal
@@ -457,6 +494,7 @@ func waitEtcdReadyProgress(
 	ready, stopped <-chan struct{},
 	errCh <-chan error,
 	appliedIndex func() uint64,
+	snapshotting func() bool,
 	checkInterval, noProgressTimeout time.Duration,
 ) error {
 	ticker := time.NewTicker(checkInterval)
@@ -496,6 +534,15 @@ func waitEtcdReadyProgress(
 				// recovery, so avoid logging on every poll.
 				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
 					log.Info("etcd is not ready yet but still making apply progress, keep waiting",
+						zap.Uint64("applied-index", applied))
+					lastLog = now
+				}
+				continue
+			}
+			if snapshotting() {
+				lastProgress = now
+				if now.Sub(lastLog) >= etcdStartProgressLogInterval {
+					log.Info("etcd is not ready yet but is installing a raft snapshot, keep waiting",
 						zap.Uint64("applied-index", applied))
 					lastLog = now
 				}
