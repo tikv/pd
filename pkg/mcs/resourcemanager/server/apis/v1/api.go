@@ -249,6 +249,8 @@ func (s *Service) getControllerConfig(c *gin.Context) {
 //	@Param		config	body	object	true	"json params, rmserver.ControllerConfig"
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	400 	{string}	error
+//	@Failure	403 	{string}	error
+//	@Failure	500 	{string}	error
 //	@Router		/config/controller [post]
 func (s *Service) setControllerConfig(c *gin.Context) {
 	s.configService.SetControllerConfig(c)
