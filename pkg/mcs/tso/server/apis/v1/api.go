@@ -406,11 +406,30 @@ func transferPrimary(c *gin.Context) {
 // @Tags     primary
 // @Summary  Evict all keyspace group primaries held by this node.
 // @Produce  json
-// @Success  200  {object}  map[string]string
-// @Failure  500  {object}  map[string]string
+// @Param    new_primary  body  string  false  "new primary name"
+// @Success  200          {object}  map[string]string
+// @Failure  500          {object}  map[string]string
 // @Router   /primary/evict [post]
 func evictPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	var input struct {
+		NewPrimary string `json:"new_primary"`
+	}
+	newPrimary := ""
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		newPrimary = input.NewPrimary
+	}
+
 	kgm := svr.GetKeyspaceGroupManager()
 
 	// Collect the keyspace groups this node is currently the primary of. There is
@@ -471,9 +490,8 @@ func evictPrimary(c *gin.Context) {
 		// has a higher priority for the group, the priority checker will move the
 		// primary back to it, so the eviction does not durably drain the node.
 		// Priority handling is being reworked, so revisit this when needed.
-		// An empty new primary lets TransferPrimary pick a random other member.
 		if err := utils.TransferPrimary(svr.GetClient(), participant,
-			mcs.TSOServiceName, svr.Name(), "", keyspaceGroupID, memberMap); err != nil {
+			mcs.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 			log.Warn("failed to evict keyspace group primary",
 				zap.Uint32("keyspace-group-id", keyspaceGroupID), errs.ZapError(err))
 			results[keyspaceGroupID] = err.Error()
