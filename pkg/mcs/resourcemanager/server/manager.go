@@ -563,6 +563,7 @@ func (m *Manager) loadServiceLimits() error {
 		// completes before SetKeyspaceServiceLimit releases this lock.
 		m.serviceLimitLocks.Lock(keyspaceID)
 		defer m.serviceLimitLocks.Unlock(keyspaceID)
+		krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
 		var (
 			serviceLimit float64
 			err          error
@@ -576,18 +577,43 @@ func (m *Manager) loadServiceLimits() error {
 				zap.Uint32("keyspace-id", keyspaceID), zap.Int("attempt", attempt), zap.Error(err))
 		}
 		if err != nil {
-			// Retries exhausted, e.g. a persistent storage failure: fall back
-			// to the bulk-scanned value instead of dropping the update
-			// entirely. This re-admits the narrow staleness window the point
-			// re-read above exists to close, but only in this rare failure
-			// case - strictly better than leaving the keyspace with no
-			// service limit cached at all (silently allowing burstable
-			// groups to bypass it) until the next Init.
+			// Retries exhausted, e.g. a persistent storage failure. A
+			// concurrent SetKeyspaceServiceLimit call for this keyspace holds
+			// this same serviceLimitLocks entry across both its storage write
+			// and its cache mirror step, so there is no partially-applied
+			// state it could leave behind: by the time we hold the lock, it
+			// has either fully landed (cache already reflects a write that is
+			// strictly newer than the bulk scan's pre-lock snapshot) or has
+			// not started yet (nothing to race with the fallback below). If
+			// the cache already carries such a value, leave it untouched
+			// instead of clobbering it with the stale bulk-scanned one.
+			//
+			// Known gap: a service limit has no separate "has this ever been
+			// explicitly configured" flag - getServiceLimit's isSet also
+			// reads as false for a limit explicitly set to 0 (unlimited), the
+			// same as a never-configured one. So a concurrent
+			// SetKeyspaceServiceLimit(keyspaceID, 0) that lands in this same
+			// window is indistinguishable here from "nothing set yet", and
+			// the fallback below would incorrectly reapply the stale
+			// bulk-scanned (pre-clear) value over the just-cleared limit.
+			// Narrower than the gap this whole retry/fallback exists to
+			// close - it additionally requires the point read to keep
+			// failing for the full retry budget - and not closed here.
+			if _, alreadySet := krgm.getServiceLimit(); alreadySet {
+				log.Warn("giving up reloading service limit; a newer value is already cached, leaving it untouched",
+					zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+				return
+			}
+			// Nothing newer is cached yet: fall back to the bulk-scanned
+			// value instead of dropping the update entirely - strictly
+			// better than leaving the keyspace with no service limit cached
+			// at all (silently allowing burstable groups to bypass it) until
+			// the next Init.
 			log.Error("giving up reloading service limit, falling back to the bulk-scanned value",
 				zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
 			serviceLimit = bulkScannedLimit
 		}
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+		krgm.setServiceLimitFromStorage(serviceLimit)
 	})
 }
 

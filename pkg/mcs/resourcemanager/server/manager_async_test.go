@@ -1300,6 +1300,67 @@ func TestLoadServiceLimitsFallsBackToBulkValueOnPersistentFailure(t *testing.T) 
 		"must exhaust the retry budget before falling back")
 }
 
+// TestLoadServiceLimitsDoesNotClobberConcurrentSetOnPersistentPointReadFailure
+// guards against the bulk-scanned fallback above overwriting a newer value
+// that a concurrent SetKeyspaceServiceLimit call already fully committed - to
+// storage and the live cache - before loadServiceLimits' callback for this
+// keyspace ever acquired serviceLimitLocks. SetKeyspaceServiceLimit holds
+// that same per-keyspace lock across both its storage write and its cache
+// mirror, so there is no partially-applied state the callback can observe:
+// by the time it holds the lock, a concurrent call has either fully landed
+// (cache already reflects a value strictly newer than the bulk scan's
+// pre-lock snapshot) or has not started at all. The fix checks the cache
+// before falling back and leaves an already-newer value untouched.
+func TestLoadServiceLimitsDoesNotClobberConcurrentSetOnPersistentPointReadFailure(t *testing.T) {
+	re := require.New(t)
+	const keyspaceID = 1
+	base := storage.NewStorageWithMemoryBackend()
+	re.NoError(base.SaveServiceLimit(keyspaceID, 100))
+	store := &failingServiceLimitLoadStorage{Storage: base, keyspaceID: keyspaceID}
+	// Always fail the point read, however many times it's retried.
+	store.failuresLeft.Store(math.MaxInt32)
+
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = store
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/loadServiceLimitsBeforeApply", func(gotKeyspaceID uint32) {
+		if gotKeyspaceID != keyspaceID {
+			return
+		}
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/loadServiceLimitsBeforeApply"))
+	}()
+
+	loadDone := make(chan struct{})
+	go func() {
+		defer close(loadDone)
+		re.NoError(m.loadServiceLimits())
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for loadServiceLimits to reach its replay callback")
+	}
+
+	// While the replay is parked before ever acquiring serviceLimitLocks, a
+	// concurrent SetKeyspaceServiceLimit call fully completes - both its
+	// storage write and its cache mirror - for the same keyspace.
+	re.NoError(m.SetKeyspaceServiceLimit(keyspaceID, 200))
+
+	close(release)
+	<-loadDone
+
+	limiter := m.GetKeyspaceServiceLimiter(keyspaceID)
+	re.NotNil(limiter)
+	re.Equal(float64(200), limiter.ServiceLimit,
+		"a concurrently-completed newer write must not be overwritten by the stale bulk-scanned value even when the point read keeps failing")
+}
+
 // TestAsyncLoadResourceGroupsMergeGroupNeverVisibleUnsynced guards against a
 // window in the bulk merge where a newly-loaded group became visible in
 // krgm.groups (readable by any concurrent GetResourceGroup/token request)
