@@ -893,12 +893,12 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		keyspace1ID = ks.Id
+		keyspace1ID = ks.GetId()
 		ks, err = leaderServer.GetServer().GetKeyspaceManager().LoadKeyspace("keyspace_b")
 		if err != nil {
 			return false
 		}
-		keyspace2ID = ks.Id
+		keyspace2ID = ks.GetId()
 		return true
 	})
 	testutil.Eventually(re, func() bool {
@@ -1114,12 +1114,12 @@ func TestGetTSOImmediately(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		keyspace1ID = ks.Id
+		keyspace1ID = ks.GetId()
 		ks, err = leaderServer.GetServer().GetKeyspaceManager().LoadKeyspace(keyspaces[1])
 		if err != nil {
 			return false
 		}
-		keyspace2ID = ks.Id
+		keyspace2ID = ks.GetId()
 		return true
 	})
 	testutil.Eventually(re, func() bool {

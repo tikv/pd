@@ -174,7 +174,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 		if err != nil {
 			return false
 		}
-		keyspace2ID = ks.Id
+		keyspace2ID = ks.GetId()
 		return true
 	})
 	time.Sleep(time.Second * 1)
