@@ -513,6 +513,13 @@ func (*ConfigService) respondStoreReadError(c *gin.Context, err error) {
 		c.String(http.StatusNotFound, err.Error())
 		return
 	}
+	// Resource groups are still being loaded asynchronously: the request can
+	// succeed once loading completes, so report it as retryable rather than as
+	// an internal error.
+	if errs.ErrResourceGroupsLoading.Equal(err) {
+		c.String(http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	c.String(http.StatusInternalServerError, err.Error())
 }
 
@@ -523,6 +530,10 @@ func (*ConfigService) respondStoreWriteError(c *gin.Context, err error) {
 	}
 	if errs.ErrResourceGroupNotExists.Equal(err) || errs.ErrKeyspaceNotExists.Equal(err) {
 		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	if errs.ErrResourceGroupsLoading.Equal(err) {
+		c.String(http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	c.String(http.StatusInternalServerError, err.Error())

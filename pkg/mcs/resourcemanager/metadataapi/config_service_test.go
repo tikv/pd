@@ -226,6 +226,26 @@ func TestConfigServiceGroupCRUDAndErrorCodes(t *testing.T) {
 	}
 }
 
+// TestConfigServiceLoadingReturns503 asserts the "resource groups are still
+// being loaded" error is reported as retryable. It is a transient startup state,
+// not an internal error, so callers and load balancers must be able to tell the
+// difference and retry.
+func TestConfigServiceLoadingReturns503(t *testing.T) {
+	t.Parallel()
+
+	re := require.New(t)
+	store := newTestStore()
+	handler := newTestHTTPHandler(store)
+
+	store.listErr = pderrors.ErrResourceGroupsLoading
+	resp := doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/groups", nil)
+	re.Equal(http.StatusServiceUnavailable, resp.Code)
+
+	store.listErr = errors.New("boom")
+	resp = doJSONRequest(re, handler, http.MethodGet, "/resource-manager/api/v1/config/groups", nil)
+	re.Equal(http.StatusInternalServerError, resp.Code)
+}
+
 func TestConfigServiceControllerAllOrNothing(t *testing.T) {
 	t.Parallel()
 
@@ -351,6 +371,7 @@ type testStore struct {
 	serviceLimits                map[uint32]float64
 	addErr                       error
 	setServiceLimitErr           error
+	listErr                      error
 	updatedControllerConfigItems []string
 }
 
@@ -406,7 +427,10 @@ func (s *testStore) GetResourceGroup(keyspaceID uint32, name string, withStats b
 	return group.Clone(withStats), nil
 }
 
-func (*testStore) GetResourceGroupList(_ uint32, _ bool) ([]*rmserver.ResourceGroup, error) {
+func (s *testStore) GetResourceGroupList(_ uint32, _ bool) ([]*rmserver.ResourceGroup, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	return []*rmserver.ResourceGroup{}, nil
 }
 

@@ -216,6 +216,47 @@ var (
 			Help:      "The duration of pushing RU metrics to Prometheus.",
 			Buckets:   prometheus.DefBuckets,
 		})
+
+	syncLoadGroupCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "sync_load_groups_total",
+			Help:      "Total number of resource groups loaded synchronously.",
+		})
+
+	asyncLoadGroupDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "async_load_group_duration_seconds",
+			Help:      "Duration of asynchronous resource group loading in seconds.",
+			// The whole point of the async loading is that a cluster with many
+			// resource groups can take far longer than the default buckets' 10s
+			// ceiling, so use a coarse but wide exponential range instead: it
+			// spans sub-second up to ~27min, which keeps the slow loads this
+			// metric exists to observe out of the +Inf bucket.
+			Buckets: prometheus.ExponentialBuckets(0.1, 4, 8),
+		})
+
+	asyncLoadGroupFailureCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "async_load_group_failures_total",
+			Help:      "Total number of failed attempts to load resource groups asynchronously.",
+		})
+
+	// resourceGroupLoadingStateGauge exposes the loading state so a load that
+	// keeps failing is alertable: the loader retries indefinitely, so without
+	// this the only symptom is a stuck state plus a periodic warning log.
+	resourceGroupLoadingStateGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "resource_group_loading_state",
+			Help:      "Current resource group loading state: 0 - not started, 1 - in progress, 2 - completed.",
+		})
 )
 
 type metrics struct {
@@ -269,6 +310,10 @@ func init() {
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
 	prometheus.MustRegister(pushRUMetricsDuration)
+	prometheus.MustRegister(syncLoadGroupCounter)
+	prometheus.MustRegister(asyncLoadGroupDuration)
+	prometheus.MustRegister(asyncLoadGroupFailureCounter)
+	prometheus.MustRegister(resourceGroupLoadingStateGauge)
 }
 
 func newMetrics() *metrics {

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type countingServiceLimitLoadStorage struct {
@@ -45,9 +46,10 @@ func (s *countingServiceLimitLoadStorage) LoadServiceLimits(f func(keyspaceID ui
 
 func newMetadataWatcherTestManager(store storage.Storage) *Manager {
 	return &Manager{
-		storage:          store,
-		krgms:            make(map[uint32]*keyspaceResourceGroupManager),
-		controllerConfig: &ControllerConfig{},
+		storage:           store,
+		krgms:             make(map[uint32]*keyspaceResourceGroupManager),
+		controllerConfig:  &ControllerConfig{},
+		serviceLimitLocks: syncutil.NewLockGroup(),
 	}
 }
 
@@ -387,4 +389,90 @@ func TestInitializeMetadataWatcher(t *testing.T) {
 		re.Zero(memStorage.loadServiceLimitsCount)
 		re.InDelta(123.5, m.GetKeyspaceServiceLimiter(10).ServiceLimit, 0.00001)
 	})
+}
+
+// TestMetadataWatcherModeReleasesSyncLoadedGroups guards against the
+// sync-loaded markers accumulating for the process lifetime in metadata watcher
+// mode: no async loader runs there, so nothing ever consumes them, and every
+// watch event would otherwise add an entry that is never removed.
+func TestMetadataWatcherModeReleasesSyncLoadedGroups(t *testing.T) {
+	re := require.New(t)
+
+	m := newManagerBase(&ControllerConfig{}, ResourceGroupWriteRoleLegacyAll)
+	m.storage = storage.NewStorageWithMemoryBackend()
+	m.srv = &testBasicServer{}
+	m.enableMetadataWatcher = true
+	re.NotNil(m.syncLoadedGroups)
+
+	originalFactory := newMetadataLoopWatcher
+	defer func() { newMetadataLoopWatcher = originalFactory }()
+	newMetadataLoopWatcher = func(
+		_ context.Context,
+		_ *sync.WaitGroup,
+		_ *clientv3.Client,
+		_, _ string,
+		_ func([]*clientv3.Event) error,
+		_, _ func(*mvccpb.KeyValue) error,
+		_ func([]*clientv3.Event) error,
+		_ bool,
+	) metadataLoopWatcher {
+		return &fakeMetadataLoopWatcher{waitLoadFn: func() error { return nil }}
+	}
+
+	re.NoError(m.Init(context.Background()))
+	defer m.close()
+
+	re.Equal(LoadingStateCompleted, m.getLoadingState())
+	m.RLock()
+	syncLoadedGroups := m.syncLoadedGroups
+	m.RUnlock()
+	re.Nil(syncLoadedGroups, "watcher mode must not retain sync-loaded markers")
+
+	// A watch event after initialization must stay a no-op for the markers.
+	group := newMetadataWatcherResourceGroup("watched", middlePriority, 100, 100)
+	rawValue, err := proto.Marshal(group)
+	re.NoError(err)
+	re.NoError(m.applyResourceGroupSettingFromRaw(10, "watched", string(rawValue)))
+	m.RLock()
+	syncLoadedGroups = m.syncLoadedGroups
+	m.RUnlock()
+	re.Nil(syncLoadedGroups)
+	re.NotNil(m.getKeyspaceResourceGroupManager(10).getResourceGroup("watched", false))
+}
+
+// TestGetOrCreateKeyspaceResourceGroupManagerWatcherModeDoesNotClobberPendingDefault
+// guards against trusting LoadingStateCompleted as "cache is authoritative" in
+// metadata-watcher mode. There it only means the initial bootstrap finished,
+// not that every write already in storage has had its watch event delivered
+// to this replica's cache yet. If getOrCreateKeyspaceResourceGroupManager
+// synthesized directly on that signal, a request landing after a customized
+// default was persisted but before its watch event arrived would find
+// nothing cached and persist the built-in default over it.
+func TestGetOrCreateKeyspaceResourceGroupManagerWatcherModeDoesNotClobberPendingDefault(t *testing.T) {
+	re := require.New(t)
+
+	store := storage.NewStorageWithMemoryBackend()
+	// A customized default is already persisted - e.g. by PD - but its watch
+	// event has not been delivered to this replica's cache yet.
+	customized := newMetadataWatcherResourceGroup(DefaultResourceGroupName, middlePriority, 555, 555)
+	re.NoError(store.SaveResourceGroupSetting(1, DefaultResourceGroupName, customized))
+
+	m := newMetadataWatcherTestManager(store)
+	m.enableMetadataWatcher = true
+	m.setLoadingState(LoadingStateCompleted)
+
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(1, true)
+	re.NotNil(krgm)
+
+	group := krgm.getResourceGroup(DefaultResourceGroupName, false)
+	re.NotNil(group)
+	re.Equal(float64(555), group.getFillRate(),
+		"the customized default already in storage must be picked up by a point load, not overwritten by a synthesized built-in default")
+
+	raw, err := store.LoadResourceGroupSetting(1, DefaultResourceGroupName)
+	re.NoError(err)
+	loaded := &rmpb.ResourceGroup{}
+	re.NoError(proto.Unmarshal([]byte(raw), loaded))
+	re.Equal(uint64(555), loaded.RUSettings.RU.Settings.FillRate,
+		"the customized default persisted before the watcher delivered its event must survive in storage")
 }

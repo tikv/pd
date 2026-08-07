@@ -110,7 +110,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	rg, err := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	if rg == nil {
 		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(req.ResourceGroupName)
@@ -129,7 +129,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	groups, err := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	resps := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
@@ -151,7 +151,7 @@ func (s *Service) AddResourceGroup(_ context.Context, req *rmpb.PutResourceGroup
 	}
 	err := s.manager.AddResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -166,7 +166,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	}
 	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &rmpb.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -181,7 +181,7 @@ func (s *Service) ModifyResourceGroup(_ context.Context, req *rmpb.PutResourceGr
 	}
 	err := s.manager.ModifyResourceGroup(req.GetGroup())
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &rmpb.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -230,16 +230,23 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				zap.Uint32("keyspace-id", keyspaceID),
 				zap.String("resource-group", resourceGroupName),
 			)
+			// Get the resource group from manager to acquire token buckets. This also
+			// triggers lazy loading of the group if async loading hasn't completed yet,
+			// so it must happen before accessKeyspaceResourceGroupManager below.
+			// Lazy loading can fail transiently (a storage read error, or retries
+			// exhausted while async loading is still in progress). Skip just this
+			// request instead of returning: the error belongs to one resource group,
+			// while returning would tear down the whole stream and force every
+			// client multiplexed on it to reconnect.
+			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
+			if rg == nil {
+				log.Warn("resource group is unavailable", append(requestFields, zap.Error(err))...)
+				continue
+			}
 			// Get keyspace resource group manager to apply service limit later.
 			krgm, err := s.manager.accessKeyspaceResourceGroupManager(keyspaceID, resourceGroupName)
 			if krgm == nil {
 				log.Warn("keyspace resource group manager not found", append(requestFields, zap.Error(err))...)
-				continue
-			}
-			// Get the resource group from manager to acquire token buckets.
-			rg, err := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
-			if rg == nil {
-				log.Warn("resource group not found", append(requestFields, zap.Error(err))...)
 				continue
 			}
 			// Send the consumption to update the metrics.

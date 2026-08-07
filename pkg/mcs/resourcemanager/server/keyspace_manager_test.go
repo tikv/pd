@@ -86,8 +86,14 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	_, exists := krgm.groups[DefaultResourceGroupName]
 	re.False(exists)
 
-	// Initialize the default resource group.
-	krgm.initDefaultResourceGroup()
+	// Initialize the default resource group. initDefaultResourceGroup now
+	// publishes through Manager.publishResourceGroupMutation, so it needs a
+	// Manager with krgm registered as the live entry for keyspace 1.
+	m := prepareManager()
+	m.krgms[1] = krgm
+	created, err := m.initDefaultResourceGroup(1, krgm, nil)
+	re.NoError(err)
+	re.True(created)
 
 	// Verify the default resource group is created.
 	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
@@ -99,6 +105,41 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	// Verify the default resource group has unlimited rate and burst limit.
 	re.Equal(float64(UnlimitedRate), defaultGroup.getFillRate())
 	re.Equal(int64(UnlimitedBurstLimit), defaultGroup.getBurstLimit())
+}
+
+// TestSyncBurstabilityWithServiceLimitLockedSkipsGroupLockWhenNoServiceLimit
+// guards against syncBurstabilityWithServiceLimitLocked unconditionally
+// taking group's write lock before checking whether the keyspace even has an
+// active service limit. This runs on every group insert/update across the
+// system, including the async bulk merge's up-to-500k-group batches, so
+// escalating to a write lock in the common no-op case (most keyspaces have
+// no service limit set) is needless contention against a concurrent
+// RequestRU call already holding the same group's lock. The fix checks
+// isSet/serviceLimit first (cheap: it only reads krgm's already-locked
+// state) and returns before ever touching group's lock when there is
+// nothing to apply.
+func TestSyncBurstabilityWithServiceLimitLockedSkipsGroupLockWhenNoServiceLimit(t *testing.T) {
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	group := newDefaultResourceGroup()
+
+	// No service limit has been configured on krgm, so
+	// syncBurstabilityWithServiceLimitLocked has nothing to do here. Hold
+	// group's lock externally to prove it's never contended.
+	group.Lock()
+	defer group.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		krgm.RLock()
+		krgm.syncBurstabilityWithServiceLimitLocked(group)
+		krgm.RUnlock()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("must not try to take group's lock when the keyspace has no active service limit")
+	}
 }
 
 func TestAddResourceGroup(t *testing.T) {
@@ -187,7 +228,7 @@ func TestModifyResourceGroup(t *testing.T) {
 			},
 		},
 	}
-	err = krgm.modifyResourceGroup(modifiedGroup)
+	_, err = krgm.modifyResourceGroup(modifiedGroup)
 	re.NoError(err)
 
 	// Verify the group was modified.
@@ -206,7 +247,7 @@ func TestModifyResourceGroup(t *testing.T) {
 		Name: "non_existent",
 		Mode: rmpb.GroupMode_RUMode,
 	}
-	err = krgm.modifyResourceGroup(nonExistentGroup)
+	_, err = krgm.modifyResourceGroup(nonExistentGroup)
 	re.Error(err)
 }
 
@@ -225,7 +266,10 @@ func TestDeleteResourceGroupBehavior(t *testing.T) {
 		_, ok := krgm.groupRUTrackers[group.GetName()]
 		re.False(ok)
 
-		krgm.initDefaultResourceGroup()
+		m := prepareManager()
+		m.krgms[1] = krgm
+		_, err := m.initDefaultResourceGroup(1, krgm, nil)
+		re.NoError(err)
 		re.Error(krgm.deleteResourceGroup(DefaultResourceGroupName))
 		re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
 	})
@@ -361,7 +405,10 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Equal("group2", groups[1].Name)
 	re.Equal("group3", groups[2].Name)
 
-	krgm.initDefaultResourceGroup()
+	m := prepareManager()
+	m.krgms[1] = krgm
+	_, err := m.initDefaultResourceGroup(1, krgm, nil)
+	re.NoError(err)
 	groups = krgm.getResourceGroupList(false, true)
 	re.Len(groups, 4)
 	groups = krgm.getResourceGroupList(false, false)

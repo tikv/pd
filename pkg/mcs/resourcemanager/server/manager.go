@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/push"
@@ -114,7 +115,39 @@ type Manager struct {
 	metrics *metrics
 	// ruCollector is used to collect the RU metering data.
 	ruCollector *ruCollector
+	// async loading state management
+	loadingState atomic.Int32
+	// syncLoadedGroups records groups that were loaded synchronously (e.g., by lazy loading)
+	syncLoadedGroups map[trackerKey]bool
+	// loadEpoch is bumped (under the manager lock) every time initMetadata
+	// resets the loading state for a new term. The async loader captures it at
+	// start and re-checks it before every shared-state mutation, so a loader
+	// from a previous term that was blocked in a storage scan can never merge
+	// stale data into, or publish completion for, a newer term.
+	loadEpoch uint64
+	// serviceLimitLocks serializes SetKeyspaceServiceLimit calls per keyspace
+	// ID. Unlike krgm-scoped locks (e.g. defaultGroupMu), this lives on the
+	// Manager itself and is never reset by Init, so it keeps serializing a
+	// call parked mid-persist in an old term against a competing call in a
+	// new term for the same keyspace - without it, the old call's eventual
+	// publish could overwrite a newer value the new-term call already both
+	// persisted and published. Entries are intentionally never removed: the
+	// keyspace ID space is bounded, matching krgms/keyspaceNameLookup's own
+	// grow-only lifetime, so there's no working-set pressure to justify the
+	// extra bookkeeping (and its own subtleties - see LockGroup's Unlock)
+	// that WithRemoveEntryOnUnlock would add.
+	serviceLimitLocks *syncutil.LockGroup
 }
+
+// LoadingState represents the current loading state of resource groups
+const (
+	// LoadingStateNotStarted means resource groups haven't started loading
+	LoadingStateNotStarted int32 = iota
+	// LoadingStateInProgress means resource groups are being loaded asynchronously
+	LoadingStateInProgress
+	// LoadingStateCompleted means all resource groups have been loaded
+	LoadingStateCompleted
+)
 
 // factoryProvider is a factory provider for the manager, which injects some specialized functions
 // that need to be retrieved from the `bs.Server` instance without interacting with its interface.
@@ -140,7 +173,7 @@ type metadataWatcherProvider interface {
 }
 
 func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupWriteRole) *Manager {
-	return &Manager{
+	m := &Manager{
 		writeRole:             writeRole,
 		controllerConfig:      controllerConfig,
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
@@ -149,7 +182,22 @@ func newManagerBase(controllerConfig *ControllerConfig, writeRole ResourceGroupW
 		keyspaceIDLookup:      make(map[string]uint32),
 		metrics:               newMetrics(),
 		ruCollector:           newRUCollector(),
+		syncLoadedGroups:      make(map[trackerKey]bool),
+		serviceLimitLocks:     syncutil.NewLockGroup(),
 	}
+	m.setLoadingState(LoadingStateNotStarted)
+	return m
+}
+
+// setLoadingState publishes the loading state both to the atomic field the
+// serving paths read and to the gauge operators alert on.
+func (m *Manager) setLoadingState(state int32) {
+	m.loadingState.Store(state)
+	resourceGroupLoadingStateGauge.Set(float64(state))
+}
+
+func (m *Manager) getLoadingState() int32 {
+	return m.loadingState.Load()
 }
 
 // NewManager returns a new manager base on the given server,
@@ -194,7 +242,10 @@ func NewMetadataOnlyManager[T metadataFactoryProvider](srv bs.Server) (*Manager,
 		nil,
 	)
 	m.srv = srv
-	if err := m.initMetadata(); err != nil {
+	if err := m.initControllerConfig(); err != nil {
+		return nil, err
+	}
+	if err := m.loadKeyspaceResourceGroups(); err != nil {
 		return nil, err
 	}
 	return m, nil
@@ -237,8 +288,41 @@ func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float6
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	// Serialize against every other SetKeyspaceServiceLimit call for this
+	// keyspace, including ones that started in a different term: krgm
+	// identity resets on every Init, but this lock doesn't, so it's what
+	// keeps a call parked mid-persist in an old term from clobbering a
+	// competing new-term call's result once it resumes. See the
+	// serviceLimitLocks field doc for why a krgm-scoped lock (like
+	// defaultGroupMu) can't provide this guarantee on its own.
+	m.serviceLimitLocks.Lock(keyspaceID)
+	defer m.serviceLimitLocks.Unlock(keyspaceID)
+
 	// If the keyspace is not found, create a new keyspace resource group manager.
-	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true).setServiceLimit(serviceLimit)
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+	failpoint.InjectCall("setServiceLimitBeforeStorage")
+	// Storage phase: this persists synchronously inside setServiceLimit.
+	krgm.setServiceLimit(serviceLimit)
+	// Publish phase: mirror the persisted value into whichever keyspace
+	// manager is current now, in case Init replaced the whole krgms map for
+	// a new term while the storage write above was in flight - without
+	// this, the write still lands in storage but only updates the detached
+	// krgm's in-memory limiter, leaving the live serving cache (and
+	// GetKeyspaceServiceLimiter) showing the stale pre-write value until
+	// the next full reload. This mirrors the storage-then-publish shape of
+	// publishResourceGroupMutation, but there's no reserved/confirmed
+	// distinction to protect here: a service limit is a single scalar with
+	// no CAS at the storage layer, so nothing short of the serviceLimitLocks
+	// guard above tells this call whether cur already holds a newer value.
+	// With that guard held for the whole call, no other SetKeyspaceServiceLimit
+	// for this keyspace can run concurrently, so whatever's in storage now is
+	// still what this call itself just wrote - safe to mirror unconditionally.
+	m.Lock()
+	cur := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
+	m.Unlock()
+	if cur != krgm {
+		cur.setServiceLimitFromStorage(serviceLimit)
+	}
 	return nil
 }
 
@@ -263,8 +347,16 @@ func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error
 	} else {
 		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
 	}
+	// Capture the config object to save while still holding the lock, instead
+	// of re-reading the m.controllerConfig field after unlocking below:
+	// initControllerConfig can reassign that field wholesale (under the same
+	// lock) on a leadership change, so an unlocked re-read races with it and
+	// can end up saving a different config object than the one just mutated
+	// above. Matches the pattern initControllerConfig itself already uses -
+	// save a locally captured reference, never the field.
+	controllerConfig := m.controllerConfig
 	m.Unlock()
-	return m.storage.SaveControllerConfig(m.controllerConfig)
+	return m.storage.SaveControllerConfig(controllerConfig)
 }
 
 // GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
@@ -275,17 +367,53 @@ func (m *Manager) GetRUVersionPolicy() *RUVersionPolicy {
 	return m.controllerConfig.RUVersionPolicy.Clone()
 }
 
+// getOrCreateKeyspaceResourceGroupManager returns the keyspace resource group
+// manager for keyspaceID, creating it if needed. When initDefault is true, it
+// also ensures the default resource group is present. While async loading is
+// still in progress this goes through loadResourceGroupIfNeeded, which tries
+// a storage point load first so a customized default is never clobbered by a
+// blindly synthesized one. Once loading has completed, any default missing
+// from the cache truly doesn't exist anywhere, so it's synthesized directly.
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
+	krgm := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
+	m.Unlock()
+	if initDefault {
+		// In metadata-watcher mode, LoadingStateCompleted only means the
+		// initial watcher bootstrap finished, not that every subsequent PD
+		// write has been observed yet - same caveat loadResourceGroupIfNeeded
+		// documents at its own entry point. Without this guard, a request
+		// landing right after bootstrap but before the watcher delivers a
+		// just-written customized default would see nothing cached, take
+		// this branch, and persist the built-in default over it. Always fall
+		// through to loadResourceGroupIfNeeded in that mode, which does a
+		// storage point load first instead of trusting the cache.
+		if !m.enableMetadataWatcher && m.getLoadingState() == LoadingStateCompleted {
+			// Async loading has already finished, so if the default group
+			// isn't cached yet it truly doesn't exist anywhere; it's safe to
+			// synthesize and persist it directly. This is a best-effort
+			// pre-warm: any failure (stale term or a real storage error) is
+			// already logged inside initDefaultResourceGroup, and a later
+			// request for the default group will retry through
+			// loadResourceGroupIfNeeded, which does surface such errors.
+			_, _ = m.initDefaultResourceGroup(keyspaceID, krgm, func() bool {
+				return m.isKeyspaceManagerCurrent(keyspaceID, krgm)
+			})
+		} else if err := m.loadResourceGroupIfNeeded(keyspaceID, DefaultResourceGroupName); err != nil {
+			log.Debug("failed to load default resource group", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+		}
+	}
+	return krgm
+}
+
+// getOrCreateKeyspaceResourceGroupManagerLocked is the m.krgms lookup/create
+// step of getOrCreateKeyspaceResourceGroupManager for a caller that already
+// holds m.Lock().
+func (m *Manager) getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID uint32) *keyspaceResourceGroupManager {
 	krgm, ok := m.krgms[keyspaceID]
 	if !ok {
 		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
 		m.krgms[keyspaceID] = krgm
-	}
-	m.Unlock()
-	// Init the default resource group if needed.
-	if initDefault {
-		krgm.initDefaultResourceGroup()
 	}
 	return krgm
 }
@@ -325,13 +453,22 @@ func (m *Manager) Init(ctx context.Context) error {
 			m.wg.Wait()
 			return err
 		}
+		// No async loader runs in this mode, so nothing will ever consume the
+		// sync-loaded markers. Drop the map: otherwise every watcher event keeps
+		// adding entries that are never removed, including for deleted groups.
+		m.Lock()
+		m.syncLoadedGroups = nil
+		m.Unlock()
+		m.setLoadingState(LoadingStateCompleted)
 	} else {
-		if err := m.initMetadata(); err != nil {
-			return err
-		}
 		// This context is derived from the leader/primary context, it will be canceled
 		// from the outside loop when the leader/primary step down.
 		ctx, m.cancel = context.WithCancel(ctx)
+		if err := m.initMetadata(ctx); err != nil {
+			m.cancel()
+			m.wg.Wait()
+			return err
+		}
 	}
 	m.wg.Add(1)
 	// Start the background metrics flusher.
@@ -356,47 +493,340 @@ func (m *Manager) initControllerConfig() error {
 		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
 		return err
 	}
-	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+	// Unmarshal into a clone and publish it under the lock: on a
+	// re-initialization after a leadership change, the previous term's
+	// background goroutines may still be reading the current config.
+	m.RLock()
+	controllerConfig := cloneControllerConfig(m.controllerConfig)
+	m.RUnlock()
+	if err = json.Unmarshal([]byte(v), &controllerConfig); err != nil {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
-
-	// re-save the config to make sure the config has been persisted.
+	// re-save the config to make sure the config has been persisted. This
+	// must run before controllerConfig is published into m.controllerConfig
+	// below: once published, it's reachable (and mutable) by any concurrent
+	// caller holding m.Lock() - e.g. SetKeyspaceRUVersion - which would race
+	// with this unlocked marshal-and-save if it ran after instead.
 	if m.writeRole.AllowsMetadataWrite() {
-		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
 			return err
 		}
 	}
+	m.Lock()
+	m.controllerConfig = controllerConfig
+	m.Unlock()
 	return nil
 }
 
-func (m *Manager) initMetadata() error {
+func (m *Manager) initMetadata(ctx context.Context) error {
 	if err := m.initControllerConfig(); err != nil {
 		return err
 	}
 
-	// Load keyspace resource groups from the storage.
-	return m.loadKeyspaceResourceGroups()
+	m.Lock()
+	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.syncLoadedGroups = make(map[trackerKey]bool)
+	m.loadEpoch++
+	epoch := m.loadEpoch
+	m.setLoadingState(LoadingStateNotStarted)
+	m.Unlock()
+
+	m.initReservedInCache()
+	if err := m.loadServiceLimits(); err != nil {
+		return err
+	}
+
+	m.wg.Add(1)
+	go m.asyncLoadResourceGroups(ctx, epoch)
+	return nil
+}
+
+// maxServiceLimitReloadAttempts bounds the point re-read retries in
+// loadServiceLimits below before it falls back to the bulk-scanned value.
+const maxServiceLimitReloadAttempts = 3
+
+func (m *Manager) loadServiceLimits() error {
+	return m.storage.LoadServiceLimits(func(keyspaceID uint32, bulkScannedLimit float64) {
+		failpoint.InjectCall("loadServiceLimitsBeforeApply", keyspaceID)
+		// Serialize against SetKeyspaceServiceLimit for this keyspace, and
+		// re-read the value from storage instead of trusting the one the
+		// bulk scan above already fetched: that value was read before this
+		// lock was acquired, so a concurrent SetKeyspaceServiceLimit call
+		// (from either this term or a still-in-flight previous one) can
+		// persist and mirror a newer value in between, which this callback
+		// would otherwise silently clobber with its now-stale snapshot. A
+		// fresh point read taken under the same lock SetKeyspaceServiceLimit
+		// itself uses is guaranteed to observe whichever write actually
+		// landed last, since setServiceLimit's storage write always
+		// completes before SetKeyspaceServiceLimit releases this lock.
+		m.serviceLimitLocks.Lock(keyspaceID)
+		defer m.serviceLimitLocks.Unlock(keyspaceID)
+		krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false)
+		var (
+			serviceLimit float64
+			err          error
+		)
+		for attempt := 1; attempt <= maxServiceLimitReloadAttempts; attempt++ {
+			serviceLimit, err = m.storage.LoadServiceLimit(keyspaceID)
+			if err == nil {
+				break
+			}
+			log.Warn("failed to reload service limit, retrying",
+				zap.Uint32("keyspace-id", keyspaceID), zap.Int("attempt", attempt), zap.Error(err))
+		}
+		if err != nil {
+			// Retries exhausted, e.g. a persistent storage failure. A
+			// concurrent SetKeyspaceServiceLimit call for this keyspace holds
+			// this same serviceLimitLocks entry across both its storage write
+			// and its cache mirror step, so there is no partially-applied
+			// state it could leave behind: by the time we hold the lock, it
+			// has either fully landed (cache already reflects a write that is
+			// strictly newer than the bulk scan's pre-lock snapshot) or has
+			// not started yet (nothing to race with the fallback below). If
+			// the cache already carries such a value, leave it untouched
+			// instead of clobbering it with the stale bulk-scanned one.
+			//
+			// Known gap: a service limit has no separate "has this ever been
+			// explicitly configured" flag - getServiceLimit's isSet also
+			// reads as false for a limit explicitly set to 0 (unlimited), the
+			// same as a never-configured one. So a concurrent
+			// SetKeyspaceServiceLimit(keyspaceID, 0) that lands in this same
+			// window is indistinguishable here from "nothing set yet", and
+			// the fallback below would incorrectly reapply the stale
+			// bulk-scanned (pre-clear) value over the just-cleared limit.
+			// Narrower than the gap this whole retry/fallback exists to
+			// close - it additionally requires the point read to keep
+			// failing for the full retry budget - and not closed here.
+			if _, alreadySet := krgm.getServiceLimit(); alreadySet {
+				log.Warn("giving up reloading service limit; a newer value is already cached, leaving it untouched",
+					zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+				return
+			}
+			// Nothing newer is cached yet: fall back to the bulk-scanned
+			// value instead of dropping the update entirely - strictly
+			// better than leaving the keyspace with no service limit cached
+			// at all (silently allowing burstable groups to bypass it) until
+			// the next Init.
+			log.Error("giving up reloading service limit, falling back to the bulk-scanned value",
+				zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
+			serviceLimit = bulkScannedLimit
+		}
+		krgm.setServiceLimitFromStorage(serviceLimit)
+	})
 }
 
 func (m *Manager) loadKeyspaceResourceGroups() error {
-	// Empty the keyspace resource group manager map before the loading.
+	tempKrgms, err := m.loadKeyspaceResourceGroupsFromStorage()
+	if err != nil {
+		return err
+	}
 	m.Lock()
-	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.krgms = tempKrgms
+	m.syncLoadedGroups = nil
+	m.setLoadingState(LoadingStateCompleted)
+	epoch := m.loadEpoch
 	m.Unlock()
-	// Load keyspace resource group meta info from the storage.
+	// This runs to completion before the manager is exposed to any request
+	// (NewMetadataOnlyManager's caller has not returned yet), so there is no
+	// live writer to race against; eagerly confirming every loaded keyspace's
+	// default here is safe, unlike the same backfill from the async loader.
+	m.initReserved(epoch)
+	return m.loadServiceLimits()
+}
+
+// storeLoadingStateIfCurrent stores the loading state only if the manager has
+// not been reinitialized since the loader with the given epoch started. It
+// returns false when the loader is stale and must exit without touching any
+// further shared state.
+func (m *Manager) storeLoadingStateIfCurrent(epoch uint64, state int32) bool {
+	m.Lock()
+	defer m.Unlock()
+	if m.loadEpoch != epoch {
+		return false
+	}
+	m.setLoadingState(state)
+	return true
+}
+
+func (m *Manager) asyncLoadResourceGroups(ctx context.Context, epoch uint64) {
+	defer logutil.LogPanic()
+	defer m.wg.Done()
+
+	const retryInterval = 10 * time.Second
+	retry := 0
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("async loading resource groups cancelled")
+			return
+		default:
+		}
+		if retry > 0 {
+			log.Info("retrying async loading resource groups", zap.Int("retry", retry))
+			timer := time.NewTimer(retryInterval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				log.Info("async loading resource groups cancelled")
+				return
+			case <-timer.C:
+			}
+		}
+
+		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateInProgress) {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
+		startTime := time.Now()
+		tempKrgms, err := m.loadKeyspaceResourceGroupsFromStorage()
+		// The storage scans above can block for a long time; re-check for
+		// cancellation before touching any shared state, so a loader whose
+		// term already ended doesn't pollute a newer term's state.
+		select {
+		case <-ctx.Done():
+			log.Info("async loading resource groups cancelled")
+			return
+		default:
+		}
+		if err != nil {
+			// Use warn level since the loader retries indefinitely until it succeeds.
+			// The failure counter and the loading state gauge are what make a load
+			// that never succeeds alertable, since it no longer fails `Init` loudly.
+			asyncLoadGroupFailureCounter.Inc()
+			log.Warn("failed to load resource groups", zap.Error(err), zap.Int("retry", retry))
+			if !m.storeLoadingStateIfCurrent(epoch, LoadingStateNotStarted) {
+				log.Info("async loading resource groups aborted: manager was reinitialized")
+				return
+			}
+			retry++
+			continue
+		}
+
+		// Flatten the loaded groups so the merge below can run in bounded
+		// batches. Holding m.Lock across the whole O(total groups) merge would
+		// block every concurrent point/token request (they need the lock to
+		// resolve a keyspace manager) for the entire merge, causing a large
+		// latency spike right when async loading completes on a cluster with
+		// many resource groups.
+		type mergeItem struct {
+			keyspaceID uint32
+			name       string
+			group      *ResourceGroup
+		}
+		// Size the slice up front: it holds every loaded group, which is exactly
+		// the scale this loader exists to handle. tempKrgms is a local map this
+		// goroutine alone constructed and holds - not yet reachable from
+		// m.krgms or any other goroutine - so reading it here needs no locking;
+		// only the individual *ResourceGroup values get published later, into
+		// whichever keyspace manager is current at merge time, not tempKrgm
+		// itself.
+		totalGroups := 0
+		for _, tempKrgm := range tempKrgms {
+			totalGroups += len(tempKrgm.groups)
+		}
+		pending := make([]mergeItem, 0, totalGroups)
+		for keyspaceID, tempKrgm := range tempKrgms {
+			for name, group := range tempKrgm.groups {
+				pending = append(pending, mergeItem{keyspaceID: keyspaceID, name: name, group: group})
+			}
+		}
+
+		const mergeBatchSize = 1024
+		loaded := 0
+		aborted := false
+		for start := 0; start < len(pending); start += mergeBatchSize {
+			end := min(start+mergeBatchSize, len(pending))
+			m.Lock()
+			if m.loadEpoch != epoch {
+				// The manager was reinitialized for a new term while this
+				// loader was scanning; its result is stale and must not be
+				// merged. Re-checked every batch since a term change can land
+				// between batches.
+				m.Unlock()
+				aborted = true
+				break
+			}
+			for _, it := range pending[start:end] {
+				key := trackerKey{keyspaceID: it.keyspaceID, groupName: it.name}
+				if m.syncLoadedGroups[key] {
+					continue
+				}
+				krgm := m.getOrCreateKeyspaceResourceGroupManagerLocked(it.keyspaceID)
+				krgm.Lock()
+				krgm.groups[it.name] = it.group
+				// This group is now confirmed, fully-loaded data (settings
+				// and state); it must no longer be treated as an unconfirmed
+				// placeholder by loadResourceGroupIfNeeded or skipped by the
+				// state persist loop.
+				delete(krgm.reservedGroups, it.name)
+				failpoint.InjectCall("mergeBeforeBurstSync", it.keyspaceID, it.name)
+				// Sync burstability while still holding krgm's lock, so the
+				// group never becomes visible to a concurrent reader with an
+				// unsynced burst setting - see syncBurstabilityWithServiceLimitLocked.
+				krgm.syncBurstabilityWithServiceLimitLocked(it.group)
+				krgm.Unlock()
+				loaded++
+			}
+			m.Unlock()
+		}
+		if aborted {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
+		m.Lock()
+		if m.loadEpoch != epoch {
+			m.Unlock()
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
+		m.syncLoadedGroups = nil
+		m.Unlock()
+
+		// No eager reserved-default backfill runs here. An eager pass would
+		// re-resolve every keyspace manager and persist a synthetic default
+		// concurrently with live requests: once completion is published below,
+		// a request for a keyspace whose default was never customized can
+		// synthesize and publish it (via getOrCreateKeyspaceResourceGroupManager
+		// or loadResourceGroupIfNeeded's confirmed-not-found path) in the same
+		// goroutine as its own subsequent write, with no independent writer
+		// racing it. An out-of-band backfill loop has no such ordering guarantee
+		// against those on-demand writers, so it can persist a synthetic default
+		// after a concurrent customized write and silently discard it. A
+		// keyspace nobody ever queries needs no persisted default: the persist
+		// loop already skips unconfirmed reserved placeholders, so leaving one
+		// reserved indefinitely is a normal, accepted state, not a leak.
+		if !m.storeLoadingStateIfCurrent(epoch, LoadingStateCompleted) {
+			log.Info("async loading resource groups aborted: manager was reinitialized")
+			return
+		}
+		duration := time.Since(startTime)
+		asyncLoadGroupDuration.Observe(duration.Seconds())
+		log.Info("async loading resource groups completed", zap.Int("loaded-groups", loaded), zap.Duration("duration", duration))
+		return
+	}
+}
+
+func (m *Manager) loadKeyspaceResourceGroupsFromStorage() (map[uint32]*keyspaceResourceGroupManager, error) {
+	tempKrgms := make(map[uint32]*keyspaceResourceGroupManager)
+	getOrCreateTempKrgm := func(keyspaceID uint32) *keyspaceResourceGroupManager {
+		krgm, ok := tempKrgms[keyspaceID]
+		if !ok {
+			krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+			tempKrgms[keyspaceID] = krgm
+		}
+		return krgm
+	}
 	if err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
-		// Since the default resource group might be loaded from the storage, we don't need to initialize it here.
-		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).addResourceGroupFromRaw(name, rawValue)
+		err := getOrCreateTempKrgm(keyspaceID).addResourceGroupFromRaw(name, rawValue)
 		if err != nil {
 			log.Error("failed to add resource group to the keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
 		}
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	// Load keyspace resource group states from the storage.
 	if err := m.storage.LoadResourceGroupStates(func(keyspaceID uint32, name string, rawValue string) {
-		krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+		krgm := tempKrgms[keyspaceID]
 		if krgm == nil {
 			log.Warn("failed to get the corresponding keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
@@ -408,18 +838,406 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
 		}
 	}); err != nil {
-		return err
+		return nil, err
 	}
-	// Initialize the reserved keyspace resource group manager and default resource groups.
-	m.initReserved()
-	// Load service limits from the storage after all resource groups are loaded.
-	return m.loadServiceLimits()
+	return tempKrgms, nil
 }
 
-func (m *Manager) loadServiceLimits() error {
-	return m.storage.LoadServiceLimits(func(keyspaceID uint32, serviceLimit float64) {
-		m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).setServiceLimitFromStorage(serviceLimit)
+// loadResourceGroup loads a single resource group from storage.
+func (m *Manager) loadResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+	rawValue, err := m.storage.LoadResourceGroupSetting(keyspaceID, name)
+	if err != nil {
+		return nil, err
+	}
+	if rawValue == "" {
+		return nil, errs.ErrResourceGroupNotExists.FastGenByArgs(name)
+	}
+	krgm := newKeyspaceResourceGroupManager(keyspaceID, m.storage, m.writeRole)
+	if err := krgm.addResourceGroupFromRaw(name, rawValue); err != nil {
+		return nil, err
+	}
+	state, err := m.storage.LoadResourceGroupState(keyspaceID, name)
+	if err != nil {
+		log.Warn("failed to load resource group state",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", name),
+			zap.Error(err))
+		return nil, err
+	}
+	if state != "" {
+		if err := krgm.setRawStatesIntoResourceGroup(name, state); err != nil {
+			return nil, err
+		}
+	}
+	return krgm.getMutableResourceGroup(name), nil
+}
+
+func (m *Manager) loadResourceGroupIfNeeded(keyspaceID uint32, name string) error {
+	// In metadata-watcher mode the cache is only eventually consistent with
+	// storage: PD writes metadata directly and the watcher applies it
+	// asynchronously, so LoadingStateCompleted here only means the initial
+	// watcher bootstrap finished, not that every subsequent write has been
+	// observed yet. Always fall through to a point load in that mode so a
+	// write that outraces its own watcher event is still visible.
+	if !m.enableMetadataWatcher && m.getLoadingState() == LoadingStateCompleted {
+		return nil
+	}
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm != nil {
+		// A cached entry only satisfies this call if it's confirmed data, not
+		// just a synthetic placeholder (e.g. from ensureReservedDefaultGroupInCache)
+		// installed before async loading had a chance to run.
+		if krgm.hasConfirmedResourceGroup(name) {
+			return nil
+		}
+	}
+	// The lock-free storage read below can be invalidated while it runs: a
+	// concurrent Delete of any group in the keyspace bumps deleteGen, and a
+	// leadership change replaces m.krgms and m.syncLoadedGroups (bumping
+	// loadEpoch). Both are rare: retry the read a few times against freshly
+	// captured state so neither makes this request spuriously fail or publish
+	// into a detached manager; if it keeps racing, give up without inserting
+	// and let a later request or the async bulk merge reload the group.
+	const maxLoadAttempts = 3
+	for attempt := 1; ; attempt++ {
+		// Capture the load epoch and the current keyspace manager atomically,
+		// and re-capture them on every retry: publishing into a previous
+		// term's detached manager while marking the new term's map would make
+		// the new bulk merge skip a group its cache doesn't contain.
+		m.Lock()
+		epoch := m.loadEpoch
+		krgm = m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
+		m.Unlock()
+		// Snapshot the delete generation before the lock-free storage read,
+		// so a Delete that lands after the read is detected under the insert
+		// lock and can't be undone by the now-stale result.
+		deleteGen := krgm.loadDeleteGen()
+		group, err := m.loadResourceGroup(keyspaceID, name)
+		if err != nil {
+			if name == DefaultResourceGroupName && errs.ErrResourceGroupNotExists.Equal(err) {
+				m.RLock()
+				stale := m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm
+				m.RUnlock()
+				if stale {
+					if attempt >= maxLoadAttempts {
+						// Exhausted retries without confirming absence; report
+						// a retryable loading error rather than a bogus
+						// success the caller would mistake for a load.
+						return errs.ErrResourceGroupsLoading
+					}
+					continue
+				}
+				// No persisted default group settings exist yet (e.g. a brand-new
+				// keyspace), so it's safe to synthesize the reserved default group.
+				// This calls initDefaultResourceGroup directly instead of going
+				// through getOrCreateKeyspaceResourceGroupManager(id, true), which
+				// now routes back into this same function and would recurse.
+				stillCurrent := func() bool {
+					m.RLock()
+					defer m.RUnlock()
+					return m.loadEpoch == epoch && m.krgms[keyspaceID] == krgm
+				}
+				// initDefaultResourceGroup publishes through
+				// publishResourceGroupMutation, which sets the sync-loaded
+				// marker itself atomically with the cache effect - no
+				// separate marker-setting step is needed here.
+				_, initErr := m.initDefaultResourceGroup(keyspaceID, krgm, stillCurrent)
+				if initErr != nil {
+					if errs.ErrResourceGroupsLoading.Equal(initErr) {
+						// stillCurrent caught a term change that landed after the
+						// stale check above but before the persist started; the
+						// group was not created anywhere, so retry against the
+						// fresh term instead of reporting a bogus success.
+						if attempt >= maxLoadAttempts {
+							return errs.ErrResourceGroupsLoading
+						}
+						continue
+					}
+					// A real failure persisting the default group (e.g. a storage
+					// write error): propagate it rather than silently reporting
+					// success for a group that was never actually created.
+					return initErr
+				}
+				return nil
+			}
+			return err
+		}
+		inserted := false
+		m.Lock()
+		if m.loadEpoch != epoch || m.krgms[keyspaceID] != krgm {
+			// The manager was reinitialized for a new term while the storage
+			// read was in flight; retry against the new term's state.
+			m.Unlock()
+			if attempt >= maxLoadAttempts {
+				// Exhausted retries without publishing the group; report a
+				// retryable loading error rather than a bogus success that
+				// would surface an existing group as nonexistent.
+				return errs.ErrResourceGroupsLoading
+			}
+			continue
+		}
+		krgm.Lock()
+		if krgm.deleteGen != deleteGen {
+			krgm.Unlock()
+			m.Unlock()
+			if attempt >= maxLoadAttempts {
+				// Exhausted retries without publishing the group; report a
+				// retryable loading error rather than a bogus success that
+				// would surface an existing group as nonexistent.
+				return errs.ErrResourceGroupsLoading
+			}
+			continue
+		}
+		if _, exists := krgm.groups[name]; !exists {
+			krgm.groups[name] = group
+			inserted = true
+		} else if _, reserved := krgm.reservedGroups[name]; reserved {
+			// The existing entry is just an unconfirmed placeholder; the freshly
+			// loaded group is the real, confirmed data, so replacing it is safe.
+			krgm.groups[name] = group
+			inserted = true
+		}
+		delete(krgm.reservedGroups, name)
+		if inserted {
+			// Sync burstability while krgm's lock is still held, so the group
+			// never becomes visible to a concurrent reader with an unsynced
+			// burst setting - see syncBurstabilityWithServiceLimitLocked.
+			krgm.syncBurstabilityWithServiceLimitLocked(group)
+		}
+		krgm.Unlock()
+		m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
+		m.Unlock()
+		failpoint.Inject("lazyLoadAfterCachePublish", func() {})
+		syncLoadGroupCounter.Inc()
+		return nil
+	}
+}
+
+// markResourceGroupSyncLoaded records that the group in krgm was written or
+// fully loaded synchronously. The caller passes the keyspace manager it
+// actually mutated: if that manager is no longer the live one (the manager was
+// reinitialized for a new term while the caller was blocked on storage I/O),
+// the marker is skipped, since marking the new term's map for a group its
+// cache doesn't contain would make the bulk merge skip loading it.
+func (m *Manager) markResourceGroupSyncLoaded(keyspaceID uint32, krgm *keyspaceResourceGroupManager, name string) {
+	m.Lock()
+	defer m.Unlock()
+	if m.krgms[keyspaceID] != krgm {
+		return
+	}
+	m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
+}
+
+// markResourceGroupSyncLoadedLocked is markResourceGroupSyncLoaded's marker
+// write for a caller that already holds m.Lock() and has already verified
+// krgm is still the live entry for keyspaceID.
+func (m *Manager) markResourceGroupSyncLoadedLocked(keyspaceID uint32, name string) {
+	if m.syncLoadedGroups != nil {
+		m.syncLoadedGroups[trackerKey{keyspaceID: keyspaceID, groupName: name}] = true
+	}
+}
+
+// publishResourceGroupMutation applies a metadata mutation's cache effect and
+// its sync-loaded marker atomically with respect to the async bulk merge,
+// against whichever keyspace manager is current at publish time. The merge
+// holds the manager lock across its whole merge step, so the two can only be
+// fully ordered: publish first and the merge skips the marked group; merge
+// first and the publish overrides its stale snapshot.
+//
+// krgm is the keyspace manager the caller actually persisted the mutation's
+// storage phase against. If it's no longer the live manager for keyspaceID
+// (Init replaced the whole krgms map for a new term while the caller was
+// blocked on storage I/O) AND the new term already has confirmed data for
+// this group - installed by its own bulk merge, lazy load, or a live
+// Add/Modify/Delete that raced ahead of this delayed one - fn's result was
+// computed from data read in the old term and is stale relative to that
+// confirmed data; applying it here would silently overwrite it in the cache
+// and, via the sync-loaded marker, hide the group from the new term's bulk
+// merge too, so the mutation is dropped instead. If the new term hasn't
+// confirmed this group yet (missing, or still a reserved placeholder), there
+// is nothing newer to protect, so fn's result is applied into the new term's
+// manager - the two async-load tests exercise exactly this case (a mutation
+// straddling a leadership change with no competing new-term write) and
+// require it to still take effect.
+//
+// fn runs with the keyspace manager write lock held and must not do I/O; it
+// returns whether to record the sync-loaded marker and, when a group was
+// (re)installed, the group to sync burstability for.
+//
+// Known gap: this "skip if the new term already confirmed the group" rule
+// assumes the confirming write's storage effect is genuinely the latest one.
+// That assumption can fail for any mutation kind, not just Delete:
+//
+//   - Delete can be parked before its storage phase (deleteResourceGroupBeforeStorage).
+//     If an old-term Delete is parked there, a new-term Add for the same group
+//     persists and publishes (getting confirmed), and only then does the old
+//     Delete's storage removal finally run, it deletes that newer write in
+//     storage - making Delete genuinely the last writer - but this function
+//     skips its publish because the group is already "confirmed", leaving the
+//     cache showing the deleted group as present.
+//   - Add/Modify's own storage write always completes before either of them can
+//     be parked (see addResourceGroupBeforePublish/modifyResourceGroupBeforePublish,
+//     both placed after the storage write) - but that only rules out being
+//     parked *after* persisting, not the storage write itself taking real
+//     wall-clock time to land. A new-term bulk merge or lazy load can read and
+//     confirm an older snapshot while an old-term Add/Modify's storage write is
+//     still in flight; when that write then completes, it's the latest value in
+//     storage, but this function still sees "already confirmed" for the older
+//     snapshot and drops the publish, leaving the cache stale relative to
+//     storage indefinitely.
+//
+// In both cases nothing re-syncs the cache afterward, since it reads as
+// confirmed to every other path too. The Delete case also mirrors, in the
+// opposite direction, a gap the old unconditional-apply code had (a delayed
+// Delete publish could instead wipe a newer confirmed Add). None of this is
+// fully closed without a storage-side revision to tell which write actually
+// landed last; that's the same class of gap tracked for
+// initDefaultResourceGroup's stillCurrent check. No regression test exercises
+// either interleaving yet.
+//
+// TODO(#11105): close this gap with a storage-side revision/CAS check.
+func (m *Manager) publishResourceGroupMutation(
+	keyspaceID uint32, name string, krgm *keyspaceResourceGroupManager,
+	fn func(krgm *keyspaceResourceGroupManager) (mark bool, synced *ResourceGroup),
+) {
+	m.Lock()
+	defer m.Unlock()
+	cur := m.getOrCreateKeyspaceResourceGroupManagerLocked(keyspaceID)
+	if cur != krgm && cur.hasConfirmedResourceGroup(name) {
+		log.Info("skip publishing resource group mutation: a newer confirmed write already exists",
+			zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name))
+		return
+	}
+	cur.Lock()
+	mark, synced := fn(cur)
+	if synced != nil {
+		// Sync burstability while cur's lock is still held, so the group
+		// never becomes visible to a concurrent reader with an unsynced
+		// burst setting - see syncBurstabilityWithServiceLimitLocked.
+		cur.syncBurstabilityWithServiceLimitLocked(synced)
+	}
+	cur.Unlock()
+	failpoint.InjectCall("publishMutationBeforeMark")
+	if mark {
+		m.markResourceGroupSyncLoadedLocked(keyspaceID, name)
+	}
+}
+
+// initDefaultResourceGroup synthesizes and persists the built-in default
+// group for keyspaceID into krgm if nothing confirmed exists yet, publishing
+// it through publishResourceGroupMutation - the same path a real
+// Add/ModifyResourceGroup uses - so the cache effect and the sync-loaded
+// marker land atomically with respect to the async bulk merge. This used to
+// publish through krgm's own lock only, with the caller setting the marker
+// afterward in a separate critical section; that left a window where the
+// bulk merge could run in between and replace the synthesized group - along
+// with any live consumption/token update applied to it in that window - with
+// its own possibly-stale scanned copy, since it had no way yet to know the
+// group was confirmed. Routing through publishResourceGroupMutation closes
+// that window the same way it already does for Add/Modify/Delete.
+//
+// created reports whether it actually performed a synthesis. The three
+// (created, err) outcomes need different handling and must not be collapsed
+// into a single bool by the caller: (false, nil) means confirmed data
+// already existed - nothing to do, safe to treat as success; (false,
+// errs.ErrResourceGroupsLoading) means stillCurrent caught a term change
+// before the persist started - the group was not created anywhere, so the
+// caller must retry against the fresh term rather than treat this as
+// success; (false, any other non-nil error) means the persist itself failed
+// (e.g. a storage write error) - the caller must propagate it rather than
+// silently swallow a real failure as success.
+//
+// defaultGroupMu only serializes callers that share the krgm instance; it
+// does nothing across a term change, since Init gives the new term an
+// entirely new krgm object with its own, separate defaultGroupMu.
+// stillCurrent, when non-nil, is checked immediately before the persist
+// (right after defaultGroupMu is acquired) to fail fast and avoid a wasted
+// storage write when the caller already knows krgm is stale - typically by
+// comparing it against the manager's live entry for its keyspace ID. It is
+// no longer the only guard against a term change landing while the persist's
+// storage write is in flight: publishResourceGroupMutation's own
+// cur != krgm && cur.hasConfirmedResourceGroup(name) check now also protects
+// that window (and, if the new term hasn't confirmed a default yet, still
+// applies this call's result into the new term's live krgm instead of
+// silently dropping it into a detached one). Pass nil when no such
+// fail-fast check is needed or available (e.g. in tests that exercise a
+// krgm/Manager pair with no concurrent writer to race against).
+func (m *Manager) initDefaultResourceGroup(keyspaceID uint32, krgm *keyspaceResourceGroupManager, stillCurrent func() bool) (created bool, err error) {
+	// A confirmed cached entry means initialization is unnecessary; a missing
+	// or reserved-placeholder entry means nothing is persisted for the
+	// default group (e.g. a fresh store), so it must still be created and
+	// persisted, otherwise its settings are never stored and state
+	// persistence stays skipped.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false, nil
+	}
+	// Serialize against every other synthesis or real Add/ModifyResourceGroup
+	// targeting "default" that shares this krgm instance: see the
+	// defaultGroupMu doc comment on the struct.
+	krgm.defaultGroupMu.Lock()
+	defer krgm.defaultGroupMu.Unlock()
+	// Re-check under defaultGroupMu: while this goroutine waited for the
+	// lock, a real write may have already confirmed the default group, in
+	// which case synthesizing here would silently clobber it.
+	if krgm.hasConfirmedResourceGroup(DefaultResourceGroupName) {
+		return false, nil
+	}
+	if stillCurrent != nil && !stillCurrent() {
+		return false, errs.ErrResourceGroupsLoading
+	}
+	defaultGroup := newDefaultResourceGroup()
+	group, err := krgm.persistResourceGroup(defaultGroup.IntoProtoResourceGroup(krgm.keyspaceID))
+	if err != nil {
+		log.Warn("init default group failed", zap.Uint32("keyspace-id", krgm.keyspaceID), zap.Error(err))
+		return false, err
+	}
+	m.publishResourceGroupMutation(keyspaceID, DefaultResourceGroupName, krgm, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.groups[group.Name] = group
+		delete(cur.reservedGroups, group.Name)
+		return true, group
 	})
+	return true, nil
+}
+
+// isKeyspaceManagerCurrent reports whether krgm is still the live keyspace
+// manager for keyspaceID. Used where any term change - confirmed or not - is
+// reason enough to bail out, e.g. initDefaultResourceGroup's best-effort,
+// no-caller-waiting synthesis: publishResourceGroupMutation would apply it
+// into the new term anyway if nothing there has confirmed a default yet, so
+// aborting a harmless case here just costs a later retry, not correctness.
+func (m *Manager) isKeyspaceManagerCurrent(keyspaceID uint32, krgm *keyspaceResourceGroupManager) bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.krgms[keyspaceID] == krgm
+}
+
+// hasNewerConfirmedWrite reports whether the current keyspace manager for
+// keyspaceID is no longer krgm and already has confirmed data for name -
+// i.e. whether a mutation resolved against krgm is racing a leadership
+// change that already landed a newer, competing write for the same group.
+// Mirrors the guard publishResourceGroupMutation applies at publish time.
+// AddResourceGroup/ModifyResourceGroup/DeleteResourceGroup check this
+// immediately before their storage-write phase to fail fast with a
+// retryable error in that specific case, instead of writing to storage on
+// behalf of a term whose result is going to be silently dropped at publish
+// time anyway. Deliberately narrower than isKeyspaceManagerCurrent: a term
+// change with nothing yet confirmed for this group in the new term is
+// harmless and already handled gracefully - publishResourceGroupMutation
+// re-resolves the current manager and applies the result there - so it must
+// not raise the same reject here that only the confirmed-collision case
+// warrants.
+// This only catches a collision that completes before the storage write
+// starts; one that lands while the write is already in flight needs the
+// storage-side revision/CAS check tracked in #11105.
+func (m *Manager) hasNewerConfirmedWrite(keyspaceID uint32, name string, krgm *keyspaceResourceGroupManager) bool {
+	m.RLock()
+	defer m.RUnlock()
+	cur, ok := m.krgms[keyspaceID]
+	return ok && cur != krgm && cur.hasConfirmedResourceGroup(name)
+}
+
+func (m *Manager) isResourceGroupLoadingComplete() bool {
+	return m.getLoadingState() == LoadingStateCompleted
 }
 
 func cloneControllerConfig(cfg *ControllerConfig) *ControllerConfig {
@@ -456,6 +1274,7 @@ func (m *Manager) applyResourceGroupSettingFromRaw(keyspaceID uint32, name, rawV
 			zap.Error(err))
 		return err
 	}
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
 	return nil
 }
 
@@ -492,15 +1311,55 @@ func (m *Manager) applyResourceGroupStatesFromRaw(keyspaceID uint32, name, rawVa
 			zap.Error(err))
 		return err
 	}
+	m.markResourceGroupSyncLoaded(keyspaceID, krgm, name)
 	return nil
 }
 
-func (m *Manager) initReserved() {
+// initReserved backfills the default resource group for every keyspace whose
+// default wasn't confirmed by loading. The caller must have just verified
+// epoch via storeLoadingStateIfCurrent; re-verify it here under the manager
+// lock immediately before touching krgms, since that earlier check alone
+// does not cover this call once its lock is released.
+//
+// Only call this from a path that runs before the manager serves any
+// request (construction-time full loads), not from the async loader: once
+// requests are flowing, a concurrent Add/ModifyResourceGroup can confirm a
+// keyspace's default between this function's existence check and its
+// unconditional persist, and this backfill's synthetic write would then
+// silently clobber that write in both storage and the live cache. Live
+// requests already synthesize a missing default on demand (via
+// getOrCreateKeyspaceResourceGroupManager or loadResourceGroupIfNeeded's
+// confirmed-not-found path) sequenced with their own subsequent write, so no
+// out-of-band backfill is needed once serving has started.
+func (m *Manager) initReserved(epoch uint64) {
+	m.Lock()
+	if m.loadEpoch != epoch {
+		m.Unlock()
+		log.Info("skip initReserved: manager was reinitialized")
+		return
+	}
+	m.Unlock()
 	// Initialize the null keyspace resource group manager if it doesn't exist.
 	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, true)
 	// Initialize the default resource group respectively for each keyspace if it doesn't exist.
+	// No stillCurrent check is needed: this whole function only runs before
+	// the manager serves any request (see the doc comment above), so there is
+	// no concurrent Add/ModifyResourceGroup or other initDefaultResourceGroup
+	// call to race against.
 	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-		krgm.initDefaultResourceGroup()
+		// Any failure is already logged inside initDefaultResourceGroup; a
+		// later request for the default group retries through
+		// loadResourceGroupIfNeeded once serving starts.
+		_, _ = m.initDefaultResourceGroup(krgm.keyspaceID, krgm, nil)
+	}
+}
+
+func (m *Manager) initReservedInCache() {
+	// Initialize the reserved default group in memory before async loading
+	// without overwriting persisted default group settings.
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, false).ensureReservedDefaultGroupInCache()
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
+		krgm.ensureReservedDefaultGroupInCache()
 	}
 }
 
@@ -574,7 +1433,46 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.addResourceGroup(grouppb)
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil &&
+		!errs.ErrResourceGroupNotExists.Equal(err) {
+		log.Warn("failed to load resource group before add", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+		return err
+	}
+	if grouppb.Name == DefaultResourceGroupName {
+		// Serialize against a concurrent on-demand synthesis of the same
+		// default group (initDefaultResourceGroup, e.g. from another
+		// request's getOrCreateKeyspaceResourceGroupManager/
+		// loadResourceGroupIfNeeded call): without this, the synthetic
+		// write's storage/cache commit can land after this real write's,
+		// silently discarding these customized settings.
+		krgm.defaultGroupMu.Lock()
+		defer krgm.defaultGroupMu.Unlock()
+	}
+	failpoint.InjectCall("addResourceGroupBeforeStorage")
+	// Fail fast only if a leadership change already replaced krgm AND the new
+	// term already has confirmed data for this group - i.e. persisting here
+	// would be racing a write that's already won and would just get silently
+	// dropped by publishResourceGroupMutation's own matching guard below. A
+	// harmless term change with nothing yet confirmed in the new term is not
+	// rejected: publishResourceGroupMutation already applies the result there
+	// gracefully in that case. See hasNewerConfirmedWrite.
+	if m.hasNewerConfirmedWrite(keyspaceID, grouppb.Name, krgm) {
+		return errs.ErrResourceGroupsLoading
+	}
+	// Storage phase: validate and persist. Publishing the cache effect is done
+	// separately below, against krgm if it's still the live manager for
+	// keyspaceID by then, or dropped otherwise - see publishResourceGroupMutation.
+	group, err := krgm.persistResourceGroup(grouppb)
+	if err != nil {
+		return err
+	}
+	failpoint.InjectCall("addResourceGroupBeforePublish")
+	m.publishResourceGroupMutation(keyspaceID, grouppb.Name, krgm, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.groups[group.Name] = group
+		delete(cur.reservedGroups, group.Name)
+		return true, group
+	})
+	return nil
 }
 
 // ModifyResourceGroup modifies an existing resource group.
@@ -583,11 +1481,58 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		return errMetadataWriteDisabled
 	}
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, grouppb.Name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", grouppb.Name), zap.Error(err))
+		return err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
 	if err != nil {
 		return err
 	}
-	return krgm.modifyResourceGroup(grouppb)
+	if grouppb.Name == DefaultResourceGroupName {
+		// Serialize against a concurrent on-demand synthesis of the same
+		// default group; see the matching guard in AddResourceGroup.
+		krgm.defaultGroupMu.Lock()
+		defer krgm.defaultGroupMu.Unlock()
+	}
+	failpoint.InjectCall("modifyResourceGroupBeforeStorage")
+	// Fail fast only on a newer confirmed collision; see the matching guard
+	// in AddResourceGroup.
+	if m.hasNewerConfirmedWrite(keyspaceID, grouppb.Name, krgm) {
+		return errs.ErrResourceGroupsLoading
+	}
+	patched, err := krgm.modifyResourceGroup(grouppb)
+	if err != nil {
+		return err
+	}
+	failpoint.InjectCall("modifyResourceGroupBeforePublish")
+	m.publishResourceGroupMutation(keyspaceID, grouppb.Name, krgm, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		var synced *ResourceGroup
+		if existing := cur.groups[grouppb.Name]; existing != patched {
+			// A different object sits in the current term's cache: either the
+			// group is missing, a reserved default placeholder (with synthetic
+			// token/consumption state), or a pre-modification bulk-merge
+			// snapshot. Install `patched` wholesale rather than only patching
+			// settings onto it. `patched` was loaded/confirmed before it was
+			// modified, so it carries both the modified settings and the
+			// group's confirmed running state - patching the placeholder in
+			// place would keep its synthetic state, which the marker below
+			// would then freeze as confirmed and the persist loop would write
+			// back over the real state.
+			cur.groups[grouppb.Name] = patched
+			synced = patched
+		}
+		// The settings and state are now confirmed data, even if the entry
+		// started as a reserved default placeholder (the only thing
+		// reservedGroups ever holds). Clear the marker and record it as
+		// sync-loaded: otherwise the bulk merge could revert it to a
+		// pre-modification snapshot, or initReserved could re-synthesize a
+		// fresh default over it, silently dropping the just-modified settings
+		// from the serving cache while storage keeps the new value.
+		delete(cur.reservedGroups, grouppb.Name)
+		return true, synced
+	})
+	return nil
 }
 
 // DeleteResourceGroup deletes a resource group.
@@ -595,16 +1540,46 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 	if !m.writeRole.AllowsMetadataWrite() {
 		return errMetadataWriteDisabled
 	}
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return err
+	}
 	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.deleteResourceGroup(name)
+	failpoint.InjectCall("deleteResourceGroupBeforeStorage")
+	// Fail fast only on a newer confirmed collision; see the matching guard
+	// in AddResourceGroup. A harmless term change alone (nothing yet
+	// confirmed in the new term) must still let the delete proceed, storage
+	// removal is independent of which term's krgm initiated it, and
+	// publishResourceGroupMutation republishes the result against whichever
+	// term is current at publish time.
+	if m.hasNewerConfirmedWrite(keyspaceID, name, krgm) {
+		return errs.ErrResourceGroupsLoading
+	}
+	// Storage phase: validate and remove from storage. Publishing the cache
+	// effect is done separately below, against krgm if it's still the live
+	// manager for keyspaceID by then, or dropped otherwise (a delete
+	// straddling a leadership change) - see publishResourceGroupMutation. The
+	// storage removal above already took effect regardless.
+	if err := krgm.deleteResourceGroupFromStorage(name); err != nil {
+		return err
+	}
+	m.publishResourceGroupMutation(keyspaceID, name, krgm, func(cur *keyspaceResourceGroupManager) (bool, *ResourceGroup) {
+		cur.removeResourceGroupLocked(name)
+		return true, nil
+	})
+	return nil
 }
 
 // GetResourceGroup returns a copy of a resource group.
 func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) (*ResourceGroup, error) {
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return nil, err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
 		return nil, err
@@ -614,6 +1589,10 @@ func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats boo
 
 // GetMutableResourceGroup returns a mutable resource group.
 func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
+	if err := m.loadResourceGroupIfNeeded(keyspaceID, name); err != nil {
+		log.Debug("failed to load resource group", zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.Error(err))
+		return nil, err
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
 		return nil, err
@@ -622,7 +1601,12 @@ func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*Reso
 }
 
 // GetResourceGroupList returns copies of resource group list.
+// Returns error if resource groups are still being loaded asynchronously.
 func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*ResourceGroup, error) {
+	if !m.isResourceGroupLoadingComplete() {
+		log.Debug("resource groups are still being loaded, cannot return list")
+		return nil, errs.ErrResourceGroupsLoading
+	}
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
 	if err != nil {
 		return nil, err

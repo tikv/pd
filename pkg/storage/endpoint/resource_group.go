@@ -30,9 +30,11 @@ import (
 // ResourceGroupStorage defines the storage operations on the resource group.
 type ResourceGroupStorage interface {
 	LoadResourceGroupSettings(f func(keyspaceID uint32, name, rawValue string)) error
+	LoadResourceGroupSetting(keyspaceID uint32, name string) (string, error)
 	SaveResourceGroupSetting(keyspaceID uint32, name string, msg proto.Message) error
 	DeleteResourceGroupSetting(keyspaceID uint32, name string) error
 	LoadResourceGroupStates(f func(keyspaceID uint32, name, rawValue string)) error
+	LoadResourceGroupState(keyspaceID uint32, name string) (string, error)
 	SaveResourceGroupStates(keyspaceID uint32, name string, obj any) error
 	DeleteResourceGroupStates(keyspaceID uint32, name string) error
 	SaveControllerConfig(config any) error
@@ -73,6 +75,11 @@ func (se *StorageEndpoint) LoadResourceGroupSettings(f func(keyspaceID uint32, n
 	})
 }
 
+// LoadResourceGroupSetting loads a specific resource group from storage.
+func (se *StorageEndpoint) LoadResourceGroupSetting(keyspaceID uint32, name string) (string, error) {
+	return se.Load(keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name))
+}
+
 // SaveResourceGroupStates stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupStates(keyspaceID uint32, name string, obj any) error {
 	return se.saveJSON(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name), obj)
@@ -100,6 +107,11 @@ func (se *StorageEndpoint) LoadResourceGroupStates(f func(keyspaceID uint32, nam
 		}
 		f(keyspaceID, name, value)
 	})
+}
+
+// LoadResourceGroupState loads a specific resource group state from storage.
+func (se *StorageEndpoint) LoadResourceGroupState(keyspaceID uint32, name string) (string, error) {
+	return se.Load(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name))
 }
 
 // SaveControllerConfig stores the resource controller config to storage.

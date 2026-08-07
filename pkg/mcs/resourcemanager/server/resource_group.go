@@ -178,6 +178,10 @@ func (rg *ResourceGroup) getBurstLimitLocked(ignoreOverride ...bool) int64 {
 func (rg *ResourceGroup) getOverrideBurstLimit() int64 {
 	rg.RLock()
 	defer rg.RUnlock()
+	return rg.getOverrideBurstLimitLocked()
+}
+
+func (rg *ResourceGroup) getOverrideBurstLimitLocked() int64 {
 	return rg.RUSettings.RU.overrideBurstLimit
 }
 
@@ -379,7 +383,13 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode:
 		if state := states.RU; state != nil {
+			// The group may already be serving requests: setState writes the
+			// token bucket fields directly, so guard it with the group lock
+			// the same way RequestRU does. UpdateRUConsumption below locks
+			// internally.
+			rg.Lock()
 			rg.RUSettings.RU.setState(state)
+			rg.Unlock()
 			log.Debug("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
 		}
 		if states.RUConsumption != nil {

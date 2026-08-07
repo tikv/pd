@@ -179,8 +179,14 @@ func (m *Manager) initializeMetadataWatcher(ctx context.Context) error {
 	if err := watcher.WaitLoad(); err != nil {
 		return err
 	}
-	// Ensure reserved default groups exist even if settings were missing in storage.
-	m.initReserved()
+	// This runs synchronously before Init() returns and before
+	// LoadingStateCompleted is published, so no request can be in flight yet
+	// to race against; ensure reserved default groups exist even if settings
+	// were missing in storage.
+	m.RLock()
+	epoch := m.loadEpoch
+	m.RUnlock()
+	m.initReserved(epoch)
 	return nil
 }
 

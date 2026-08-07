@@ -921,6 +921,11 @@ error = '''
 keyspace not found with name: %s
 '''
 
+["PD:resourcemanager:ErrResourceGroupsLoading"]
+error = '''
+resource groups are still being loaded, please try again later
+'''
+
 ["PD:scatter:ErrEmptyRegion"]
 error = '''
 empty region

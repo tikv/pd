@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -138,7 +139,7 @@ func (s *resourceGroupProxyServer) AddResourceGroup(ctx context.Context, req *re
 		return nil, status.Error(codes.Internal, "resource group metadata manager is not initialized")
 	}
 	if err := s.metadataManager.AddResourceGroup(req.GetGroup()); err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -166,7 +167,7 @@ func (s *resourceGroupProxyServer) ModifyResourceGroup(ctx context.Context, req 
 		return nil, status.Error(codes.Internal, "resource group metadata manager is not initialized")
 	}
 	if err := s.metadataManager.ModifyResourceGroup(req.GetGroup()); err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &resource_manager.PutResourceGroupResponse{Body: "Success!"}, nil
 }
@@ -197,7 +198,7 @@ func (s *resourceGroupProxyServer) DeleteResourceGroup(ctx context.Context, req 
 		rm_server.ExtractKeyspaceID(req.GetKeyspaceId()),
 		req.GetResourceGroupName(),
 	); err != nil {
-		return nil, err
+		return nil, errs.ErrResourceGroupsLoadingGRPC(err)
 	}
 	return &resource_manager.DeleteResourceGroupResponse{Body: "Success!"}, nil
 }
