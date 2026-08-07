@@ -17,6 +17,8 @@ package utils
 import (
 	"context"
 	"math/rand/v2"
+	"slices"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -190,7 +192,11 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3
 //
 // keyspaceGroupID is optional, only used for TSO service. p must be the participant
 // of the current serving primary (the API ensures the request runs on the primary).
-func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName,
+// ctx bounds the post-transfer verification below (see waitForPrimaryTransfer):
+// callers driven by an HTTP request should pass the request's context so a client
+// that gives up does not leave the verification polling for the full timeout
+// regardless.
+func TransferPrimary(ctx context.Context, client *clientv3.Client, p *member.Participant, serviceName,
 	oldPrimary, newPrimary string, keyspaceGroupID uint32, tsoMembersMap map[string]bool) error {
 	if p == nil || !p.IsServing() {
 		return errors.New("current member is not serving as primary, please check leadership")
@@ -295,7 +301,79 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	// IsServing() flip to false immediately, so the primary election loop steps down
 	// and re-campaigns, where the affinity guard routes the leadership to the target.
 	p.Resign()
+
+	// Verify the transfer actually landed on newPrimary before reporting success. A
+	// member that predates this marker mechanism (e.g. a not-yet-upgraded replica
+	// during a rolling upgrade) does not read the marker and can win the now-vacated
+	// leader key through its own unguarded campaign, so a caller-specified target is
+	// not otherwise guaranteed. newPrimary == "" (pick any valid secondary) has no
+	// fixed target to verify against, so it is skipped.
+	//
+	// The timeout matches the marker's own TTL (expectedLease), not a short fixed
+	// value: such a pre-marker member never cleans the marker up on winning, so if it
+	// is itself cycled out again within this window - e.g. as the rolling upgrade
+	// continues - the still-valid marker lets newPrimary's own guarded campaign
+	// recover the transfer. Failure is only reported once that whole recovery window
+	// has actually elapsed.
+	if newPrimary != "" {
+		verifyCtx, cancel := context.WithTimeout(ctx, time.Duration(expectedLease)*time.Second)
+		defer cancel()
+		return waitForPrimaryTransfer(verifyCtx, client, leaderKeyPath, serviceName, newPrimary)
+	}
 	return nil
+}
+
+// primaryTransferStableChecks is the number of consecutive polls that must observe
+// newPrimary holding the leader key before waitForPrimaryTransfer reports success.
+// A single matching read is not enough: the winner of a campaign still runs its own
+// post-campaign steps (reconciling the expected-primary marker, running
+// primaryCallbacks) before it is durably promoted, and any of those can make it step
+// back down again. Requiring the match to hold across a second poll narrows - it
+// cannot eliminate - the window where a transient, soon-to-be-reverted win would
+// otherwise be reported as a confirmed success.
+const primaryTransferStableChecks = 2
+
+// waitForPrimaryTransfer polls the leader key until its holder's identity (name or
+// listen URL) matches newPrimary on primaryTransferStableChecks consecutive polls, or
+// ctx is done. It reports success purely by identity, with no notion of which member
+// version won: the leader key's value is the same participant proto regardless of
+// which binary wrote it, so a pre-marker member's win is read exactly like any other
+// and simply fails to match unless it happens to be newPrimary itself - which is a
+// legitimate outcome, not a special case to detect.
+//
+// ctx bounds when this returns: it carries the caller's own timeout (see
+// TransferPrimary) and, when derived from an HTTP request's context, also lets an
+// abandoned request stop this from polling for the rest of that timeout regardless.
+func waitForPrimaryTransfer(ctx context.Context, client *clientv3.Client, leaderKeyPath, serviceName, newPrimary string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var currentPrimary string
+	matchStreak := 0
+	for {
+		target := member.NewParticipantByService(serviceName)
+		if ok, _, err := etcdutil.GetProtoMsgWithModRev(client, leaderKeyPath, target); err == nil && ok {
+			if target.GetName() == newPrimary || slices.Contains(target.GetListenUrls(), newPrimary) {
+				matchStreak++
+				if matchStreak >= primaryTransferStableChecks {
+					return nil
+				}
+			} else {
+				matchStreak = 0
+			}
+			currentPrimary = target.GetName()
+		} else {
+			matchStreak = 0
+			currentPrimary = ""
+		}
+		select {
+		case <-ctx.Done():
+			if currentPrimary == "" {
+				return errors.Errorf("transfer requested to %s, but no primary was elected: %v", newPrimary, ctx.Err())
+			}
+			return errors.Errorf("transfer requested to %s, but %s is currently primary: %v", newPrimary, currentPrimary, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // revokeExpectedPrimaryLease revokes a lease granted for an expected-primary

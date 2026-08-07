@@ -632,7 +632,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
-		re.Equal(http.StatusOK, resp.StatusCode)
+		// skipGrantLeader is still enabled for the whole duration of this call, so
+		// newPrimary cannot win and TransferPrimary's post-transfer verification times
+		// out - this call reports failure here, even though the cluster does recover
+		// once skipGrantLeader is disabled below.
+		re.Equal(http.StatusInternalServerError, resp.StatusCode)
 		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
@@ -693,7 +697,14 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
-		re.Equal(http.StatusOK, resp.StatusCode)
+		// skipGrantLeader keeps newPrimary from ever winning for as long as this call
+		// runs, so TransferPrimary's post-transfer verification (which polls for
+		// newPrimary to actually take over, bounded by the expected-primary marker's
+		// own TTL) can never observe it and must time out. This call therefore reports
+		// failure here - it genuinely could not confirm the transfer took effect - even
+		// though the marker itself is still written and the cluster does recover once
+		// the old primary steps down below; that recovery is verified separately.
+		re.Equal(http.StatusInternalServerError, resp.StatusCode)
 		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
@@ -962,7 +973,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDownW
 		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
 		"application/json", bytes.NewBuffer(data))
 	re.NoError(err)
-	re.Equal(http.StatusOK, resp.StatusCode)
+	// target can never win while skipGrantLeader is enabled, so TransferPrimary's
+	// post-transfer verification times out and this call reports failure - it
+	// genuinely could not confirm the transfer took effect. The group does still
+	// recover afterwards, verified separately below.
+	re.Equal(http.StatusInternalServerError, resp.StatusCode)
 	resp.Body.Close()
 
 	// Wait until the old group primary steps down (group temporarily has no primary).
