@@ -27,7 +27,11 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -47,22 +51,34 @@ func TestLoadLargeRules(t *testing.T) {
 	re := require.New(t)
 	ctx, client, clean := prepare(t)
 	defer clean()
-	runWatcherLoadLabelRule(ctx, re, client)
+	runWatcherLoadLabelRule(ctx, re, client, newTestCheckerController(ctx))
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
 	ctx, client, clean := prepare(b)
 	defer clean()
+	checkerController := newTestCheckerController(ctx)
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
 	for range b.N {
-		runWatcherLoadLabelRule(ctx, re, client)
+		runWatcherLoadLabelRule(ctx, re, client, checkerController)
 	}
 }
 
-func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
+func newTestCheckerController(ctx context.Context) *checker.Controller {
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
+	return checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
+}
+
+func runWatcherLoadLabelRule(
+	ctx context.Context,
+	re *require.Assertions,
+	client *clientv3.Client,
+	checkerController *checker.Controller,
+) {
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
 	re.NoError(err)
@@ -76,14 +92,15 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		etcdClient:            client,
 		ruleStorage:           storage,
 		regionLabeler:         labelerManager,
+		checkerController:     checkerController,
 	}
 	err = rw.initializeRegionLabelWatcher()
 	re.NoError(err)
+	defer rw.Close()
 	re.Len(labelerManager.GetAllLabelRules(), rulesNum)
-	cancel()
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+func prepareEtcd(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestEtcdConfig()
@@ -96,6 +113,18 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	client, err := etcdutil.CreateEtcdClient(nil, cfg.ListenClientUrls, etcdutil.TestEtcdClientPurpose, true)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
+
+	return ctx, client, func() {
+		cancel()
+		client.Close()
+		etcd.Close()
+		os.RemoveAll(cfg.Dir)
+	}
+}
+
+func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
+	re := require.New(t)
+	ctx, client, clean := prepareEtcd(t)
 
 	ops := make([]clientv3.Op, 0, etcdutil.MaxEtcdTxnOps)
 	for i := 1; i < rulesNum+1; i++ {
@@ -111,14 +140,9 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 	}
 	if len(ops) > 0 {
-		_, err = client.Txn(ctx).Then(ops...).Commit()
+		_, err := client.Txn(ctx).Then(ops...).Commit()
 		re.NoError(err)
 	}
 
-	return ctx, client, func() {
-		cancel()
-		client.Close()
-		etcd.Close()
-		os.RemoveAll(cfg.Dir)
-	}
+	return ctx, client, clean
 }
