@@ -397,9 +397,7 @@ func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, ini
 			// request for the default group will retry through
 			// loadResourceGroupIfNeeded, which does surface such errors.
 			_, _ = m.initDefaultResourceGroup(keyspaceID, krgm, func() bool {
-				m.RLock()
-				defer m.RUnlock()
-				return m.krgms[keyspaceID] == krgm
+				return m.isKeyspaceManagerCurrent(keyspaceID, krgm)
 			})
 		} else if err := m.loadResourceGroupIfNeeded(keyspaceID, DefaultResourceGroupName); err != nil {
 			log.Debug("failed to load default resource group", zap.Uint32("keyspace-id", keyspaceID), zap.Error(err))
@@ -1201,6 +1199,43 @@ func (m *Manager) initDefaultResourceGroup(keyspaceID uint32, krgm *keyspaceReso
 	return true, nil
 }
 
+// isKeyspaceManagerCurrent reports whether krgm is still the live keyspace
+// manager for keyspaceID. Used where any term change - confirmed or not - is
+// reason enough to bail out, e.g. initDefaultResourceGroup's best-effort,
+// no-caller-waiting synthesis: publishResourceGroupMutation would apply it
+// into the new term anyway if nothing there has confirmed a default yet, so
+// aborting a harmless case here just costs a later retry, not correctness.
+func (m *Manager) isKeyspaceManagerCurrent(keyspaceID uint32, krgm *keyspaceResourceGroupManager) bool {
+	m.RLock()
+	defer m.RUnlock()
+	return m.krgms[keyspaceID] == krgm
+}
+
+// hasNewerConfirmedWrite reports whether the current keyspace manager for
+// keyspaceID is no longer krgm and already has confirmed data for name -
+// i.e. whether a mutation resolved against krgm is racing a leadership
+// change that already landed a newer, competing write for the same group.
+// Mirrors the guard publishResourceGroupMutation applies at publish time.
+// AddResourceGroup/ModifyResourceGroup/DeleteResourceGroup check this
+// immediately before their storage-write phase to fail fast with a
+// retryable error in that specific case, instead of writing to storage on
+// behalf of a term whose result is going to be silently dropped at publish
+// time anyway. Deliberately narrower than isKeyspaceManagerCurrent: a term
+// change with nothing yet confirmed for this group in the new term is
+// harmless and already handled gracefully - publishResourceGroupMutation
+// re-resolves the current manager and applies the result there - so it must
+// not raise the same reject here that only the confirmed-collision case
+// warrants.
+// This only catches a collision that completes before the storage write
+// starts; one that lands while the write is already in flight needs the
+// storage-side revision/CAS check tracked in #11105.
+func (m *Manager) hasNewerConfirmedWrite(keyspaceID uint32, name string, krgm *keyspaceResourceGroupManager) bool {
+	m.RLock()
+	defer m.RUnlock()
+	cur, ok := m.krgms[keyspaceID]
+	return ok && cur != krgm && cur.hasConfirmedResourceGroup(name)
+}
+
 func (m *Manager) isResourceGroupLoadingComplete() bool {
 	return m.getLoadingState() == LoadingStateCompleted
 }
@@ -1413,6 +1448,17 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		krgm.defaultGroupMu.Lock()
 		defer krgm.defaultGroupMu.Unlock()
 	}
+	failpoint.InjectCall("addResourceGroupBeforeStorage")
+	// Fail fast only if a leadership change already replaced krgm AND the new
+	// term already has confirmed data for this group - i.e. persisting here
+	// would be racing a write that's already won and would just get silently
+	// dropped by publishResourceGroupMutation's own matching guard below. A
+	// harmless term change with nothing yet confirmed in the new term is not
+	// rejected: publishResourceGroupMutation already applies the result there
+	// gracefully in that case. See hasNewerConfirmedWrite.
+	if m.hasNewerConfirmedWrite(keyspaceID, grouppb.Name, krgm) {
+		return errs.ErrResourceGroupsLoading
+	}
 	// Storage phase: validate and persist. Publishing the cache effect is done
 	// separately below, against krgm if it's still the live manager for
 	// keyspaceID by then, or dropped otherwise - see publishResourceGroupMutation.
@@ -1448,6 +1494,12 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 		// default group; see the matching guard in AddResourceGroup.
 		krgm.defaultGroupMu.Lock()
 		defer krgm.defaultGroupMu.Unlock()
+	}
+	failpoint.InjectCall("modifyResourceGroupBeforeStorage")
+	// Fail fast only on a newer confirmed collision; see the matching guard
+	// in AddResourceGroup.
+	if m.hasNewerConfirmedWrite(keyspaceID, grouppb.Name, krgm) {
+		return errs.ErrResourceGroupsLoading
 	}
 	patched, err := krgm.modifyResourceGroup(grouppb)
 	if err != nil {
@@ -1498,6 +1550,15 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
 	failpoint.InjectCall("deleteResourceGroupBeforeStorage")
+	// Fail fast only on a newer confirmed collision; see the matching guard
+	// in AddResourceGroup. A harmless term change alone (nothing yet
+	// confirmed in the new term) must still let the delete proceed, storage
+	// removal is independent of which term's krgm initiated it, and
+	// publishResourceGroupMutation republishes the result against whichever
+	// term is current at publish time.
+	if m.hasNewerConfirmedWrite(keyspaceID, name, krgm) {
+		return errs.ErrResourceGroupsLoading
+	}
 	// Storage phase: validate and remove from storage. Publishing the cache
 	// effect is done separately below, against krgm if it's still the live
 	// manager for keyspaceID by then, or dropped otherwise (a delete
