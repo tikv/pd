@@ -17,6 +17,8 @@ package utils
 import (
 	"context"
 	"math/rand/v2"
+	"slices"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -56,12 +58,19 @@ type primaryData struct {
 	output string
 }
 
-// markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID) error {
+// markExpectedPrimaryFlag marks the expected primary flag when the primary is
+// specified. Extra cmps are folded into the same transaction as the Put, so a
+// leader-key ownership guard built by the caller makes the marker write atomic
+// with still holding leadership: if the caller lost leadership between its own
+// IsServing() check and this call, the guard no longer holds and the Put is
+// rejected instead of silently publishing a marker that the new, already-serving
+// primary will never look at.
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, primary *primaryData, leaseID clientv3.LeaseID, cmps ...clientv3.Cmp) error {
 	path := keypath.ExpectedPrimaryPath(msParam)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("primary", primary.output))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
+		If(cmps...).
 		Then(clientv3.OpPut(path, primary.raw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil {
@@ -75,71 +84,101 @@ func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, 
 	return nil
 }
 
-// DeleteExpectedPrimaryFlag deletes the expected primary flag once the target has
-// won the campaign, so that in steady state the flag is absent and a subsequent
-// failure of the new primary triggers a free re-election immediately instead of
-// waiting for the flag's TTL to expire.
-//
-// The delete is conditional on the flag still holding `expectedValue` (the value
-// the winner campaigned with). This prevents clobbering a newer transfer that may
-// have already rewritten the flag to a different target while this primary was
-// winning. It is best-effort: the flag's TTL is the backstop, so a failure here is
-// only logged and never blocks serving.
-//
-// The flag is bound to an etcd lease, so after deleting the key we also revoke that
-// lease. Otherwise we would leave the key gone but the lease alive — exactly the
-// inconsistent state that issue #10875 is about — and leak a lease until its TTL
-// expires.
-func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, expectedValue string) {
-	if expectedValue == "" {
-		// Normal election without a transfer in progress, nothing to clean up.
-		return
-	}
+// DeleteExpectedPrimaryFlag reconciles the expected primary flag after this member
+// has won the campaign. In the common case the flag still holds expectedValue (or
+// is already gone) and is deleted together with its lease, so steady state has no
+// marker and later failures re-elect immediately instead of waiting for the marker
+// TTL. The flag can also have been rewritten by a newer transfer while this member
+// was winning; since a serving primary no longer watches the marker, that transfer
+// would otherwise return success without ever taking effect. In that case:
+//   - if the newer marker still targets this member, it is deleted as well and the
+//     member keeps serving;
+//   - if it targets another member, DeleteExpectedPrimaryFlag returns true and the
+//     caller must step down so the re-election routes leadership to that target.
+func DeleteExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, expectedValue string, p *member.Participant) (superseded bool) {
 	path := keypath.ExpectedPrimaryPath(msParam)
-	// Read the key (to capture its lease) and delete it in the same conditional txn.
+	current, deleted := deleteMarkerIfEquals(client, path, expectedValue)
+	if deleted {
+		log.Info("delete expected primary flag", zap.String("primary-path", path))
+		return false
+	}
+	if current == "" {
+		// The marker is already gone (deleted, expired, or it never existed), or the
+		// transaction failed; in the latter case the marker TTL bounds the staleness.
+		return false
+	}
+	// The marker was rewritten by a newer transfer while this member was winning.
+	if p != nil && p.IsExpectedPrimary(current) {
+		// The newer transfer also targets this member, which is already serving.
+		// Clean the marker up so it does not linger until its TTL. Best effort:
+		// on failure the TTL applies.
+		if _, deleted := deleteMarkerIfEquals(client, path, current); deleted {
+			log.Info("delete expected primary flag rewritten by a newer transfer to this member",
+				zap.String("primary-path", path))
+		}
+		return false
+	}
+	log.Info("expected primary flag was rewritten by a newer transfer while campaigning, step down",
+		zap.String("primary-path", path), zap.String("expected-value", expectedValue),
+		zap.String("current-value", current))
+	return true
+}
+
+// deleteMarkerIfEquals atomically deletes the expected primary marker and revokes
+// its lease when its value equals want. It returns the marker value observed by the
+// transaction ("" when the marker does not exist or the transaction failed) and
+// whether the marker was deleted. Note that etcd value comparisons always fail on a
+// missing key, so want == "" never deletes anything and reports the current value.
+func deleteMarkerIfEquals(client *clientv3.Client, path, want string) (current string, deleted bool) {
 	resp, err := kv.NewSlowLogTxn(client).
-		If(clientv3.Compare(clientv3.Value(path), "=", expectedValue)).
+		If(clientv3.Compare(clientv3.Value(path), "=", want)).
 		Then(clientv3.OpGet(path), clientv3.OpDelete(path)).
+		Else(clientv3.OpGet(path)).
 		Commit()
 	if err != nil {
 		log.Warn("failed to delete expected primary flag", zap.String("primary-path", path), errs.ZapError(err))
-		return
+		return "", false
 	}
-	if !resp.Succeeded {
-		log.Info("skip deleting expected primary flag, it has been changed or already gone",
-			zap.String("primary-path", path), zap.String("expected-value", expectedValue))
-		return
-	}
-	log.Info("delete expected primary flag", zap.String("primary-path", path))
-	// Revoke the lease the flag was bound to, if any, so no lease is leaked.
 	kvs := resp.Responses[0].GetResponseRange().GetKvs()
-	if len(kvs) == 0 || kvs[0].Lease == 0 {
-		return
+	if !resp.Succeeded {
+		if len(kvs) == 0 {
+			return "", false
+		}
+		return string(kvs[0].Value), false
 	}
-	leaseID := clientv3.LeaseID(kvs[0].Lease)
-	// Bound the revoke: this runs on the campaign path before the primary is promoted
-	// to serving, and the cleanup is best-effort, so a hung RPC must not block serving.
-	ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
-	defer cancel()
-	if _, err := client.Revoke(ctx, leaseID); err != nil {
-		log.Warn("failed to revoke expected primary flag lease",
-			zap.String("primary-path", path), zap.Int64("lease-id", int64(leaseID)), errs.ZapError(err))
+	// Deleted. Revoke the lease the marker was bound to, so the "key deleted but
+	// lease persists" state can never exist (#10875).
+	if len(kvs) > 0 && kvs[0].Lease != 0 {
+		leaseID := clientv3.LeaseID(kvs[0].Lease)
+		// Bound the revoke: this runs on the campaign path before the primary is
+		// promoted to serving, and the cleanup is best-effort, so a hung RPC must not
+		// block serving.
+		ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+		defer cancel()
+		if _, err := client.Revoke(ctx, leaseID); err != nil {
+			log.Warn("failed to revoke expected primary flag lease",
+				zap.String("primary-path", path), zap.Int64("lease-id", int64(leaseID)), errs.ZapError(err))
+		}
 	}
+	return want, true
 }
 
-// ExpectedPrimaryCmp returns an etcd comparison asserting the expected primary flag
-// still equals `expectedValue`. The caller appends it to the campaign transaction so
-// that winning the leader key and "I am still the expected primary" become atomic:
-// if a concurrent transfer rewrote the flag after it was read, the campaign txn
-// fails and this member does not become primary. It returns nil when expectedValue
-// is empty (normal election, no transfer in progress), in which case the campaign
-// must not be constrained.
-func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) *clientv3.Cmp {
+// ExpectedPrimaryCmp returns an etcd comparison that guards a primary campaign
+// against a concurrent transfer.
+//   - When expectedValue is non-empty, a transfer installed a marker naming this
+//     member as the target; the comparison asserts the marker still holds that
+//     value.
+//   - When expectedValue is empty, the campaigner observed no transfer in
+//     progress; the comparison asserts the marker is still absent. Without this
+//     a campaigner that paused after the read could resume after a transfer
+//     installed a target marker and released the leader key, then win the
+//     campaign and bypass the transfer affinity guard.
+func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) clientv3.Cmp {
+	path := keypath.ExpectedPrimaryPath(msParam)
 	if expectedValue == "" {
-		return nil
+		return clientv3.Compare(clientv3.CreateRevision(path), "=", 0)
 	}
-	cmp := clientv3.Compare(clientv3.Value(keypath.ExpectedPrimaryPath(msParam)), "=", expectedValue)
-	return &cmp
+	return clientv3.Compare(clientv3.Value(path), "=", expectedValue)
 }
 
 // TransferPrimary transfers the primary of the specified service to a target member.
@@ -153,11 +192,35 @@ func ExpectedPrimaryCmp(msParam *keypath.MsParam, expectedValue string) *clientv
 //
 // keyspaceGroupID is optional, only used for TSO service. p must be the participant
 // of the current serving primary (the API ensures the request runs on the primary).
-func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName,
+// ctx bounds the post-transfer verification below (see waitForPrimaryTransfer):
+// callers driven by an HTTP request should pass the request's context so a client
+// that gives up does not leave the verification polling for the full timeout
+// regardless.
+func TransferPrimary(ctx context.Context, client *clientv3.Client, p *member.Participant, serviceName,
 	oldPrimary, newPrimary string, keyspaceGroupID uint32, tsoMembersMap map[string]bool) error {
 	if p == nil || !p.IsServing() {
 		return errors.New("current member is not serving as primary, please check leadership")
 	}
+
+	// Capture the leader key's CreateRevision right after the IsServing() check, before
+	// discovery or the lease grant below - both are network round trips during which p
+	// could lose its lease and win a fresh campaign with the same MemberValue() (which
+	// never changes for the lifetime of the participant). CreateRevision changes on
+	// every fresh campaign (Leadership.Campaign requires CreateRevision(leaderKey) == 0
+	// to win), so fencing the eventual marker write on the revision observed here - not
+	// on a value comparison, and not on a revision re-read later, closer to the write -
+	// ties the write to the exact leadership session IsServing() just checked for the
+	// whole duration of this function, not just its tail end.
+	leaderKeyPath := p.GetLeadership().GetLeaderKey()
+	leaderResp, err := client.Get(client.Ctx(), leaderKeyPath)
+	if err != nil {
+		return errors.Annotate(err, "failed to read leader key for transfer guard")
+	}
+	if len(leaderResp.Kvs) == 0 || string(leaderResp.Kvs[0].Value) != p.MemberValue() {
+		return errors.New("current member is not serving as primary, please check leadership")
+	}
+	leaderKeyGuard := clientv3.Compare(clientv3.CreateRevision(leaderKeyPath), "=", leaderResp.Kvs[0].CreateRevision)
+
 	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
 	entries, err := discovery.GetMSMembers(serviceName, client)
 	if err != nil {
@@ -222,8 +285,15 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 		output: primaryIDs[nextPrimaryID],
 	}
 	// Mark the expected primary first so the affinity guard is in place before the
-	// current primary releases the leader key below.
-	if err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID); err != nil {
+	// current primary releases the leader key below. leaderKeyGuard was built from the
+	// CreateRevision captured right after the IsServing() check above, before discovery
+	// and this lease grant, so it fences the write to that exact leadership session for
+	// the whole function, not just the gap between here and the commit. It is evaluated
+	// atomically with the Put inside the same etcd transaction, so anything that
+	// changed the leader key since - a fresh campaign included, even by this same
+	// participant with the same MemberValue() - is caught at commit time.
+	if err = markExpectedPrimaryFlag(client, msParam, primary, grantResp.ID, leaderKeyGuard); err != nil {
+		revokeExpectedPrimaryLease(client, grantResp.ID)
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}
 
@@ -231,7 +301,93 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	// IsServing() flip to false immediately, so the primary election loop steps down
 	// and re-campaigns, where the affinity guard routes the leadership to the target.
 	p.Resign()
+
+	// Verify the transfer actually landed on newPrimary before reporting success. A
+	// member that predates this marker mechanism (e.g. a not-yet-upgraded replica
+	// during a rolling upgrade) does not read the marker and can win the now-vacated
+	// leader key through its own unguarded campaign, so a caller-specified target is
+	// not otherwise guaranteed. newPrimary == "" (pick any valid secondary) has no
+	// fixed target to verify against, so it is skipped.
+	//
+	// The timeout matches the marker's own TTL (expectedLease), not a short fixed
+	// value: such a pre-marker member never cleans the marker up on winning, so if it
+	// is itself cycled out again within this window - e.g. as the rolling upgrade
+	// continues - the still-valid marker lets newPrimary's own guarded campaign
+	// recover the transfer. Failure is only reported once that whole recovery window
+	// has actually elapsed.
+	if newPrimary != "" {
+		verifyCtx, cancel := context.WithTimeout(ctx, time.Duration(expectedLease)*time.Second)
+		defer cancel()
+		return waitForPrimaryTransfer(verifyCtx, client, leaderKeyPath, serviceName, newPrimary)
+	}
 	return nil
+}
+
+// primaryTransferStableChecks is the number of consecutive polls that must observe
+// newPrimary holding the leader key before waitForPrimaryTransfer reports success.
+// A single matching read is not enough: the winner of a campaign still runs its own
+// post-campaign steps (reconciling the expected-primary marker, running
+// primaryCallbacks) before it is durably promoted, and any of those can make it step
+// back down again. Requiring the match to hold across a second poll narrows - it
+// cannot eliminate - the window where a transient, soon-to-be-reverted win would
+// otherwise be reported as a confirmed success.
+const primaryTransferStableChecks = 2
+
+// waitForPrimaryTransfer polls the leader key until its holder's identity (name or
+// listen URL) matches newPrimary on primaryTransferStableChecks consecutive polls, or
+// ctx is done. It reports success purely by identity, with no notion of which member
+// version won: the leader key's value is the same participant proto regardless of
+// which binary wrote it, so a pre-marker member's win is read exactly like any other
+// and simply fails to match unless it happens to be newPrimary itself - which is a
+// legitimate outcome, not a special case to detect.
+//
+// ctx bounds when this returns: it carries the caller's own timeout (see
+// TransferPrimary) and, when derived from an HTTP request's context, also lets an
+// abandoned request stop this from polling for the rest of that timeout regardless.
+func waitForPrimaryTransfer(ctx context.Context, client *clientv3.Client, leaderKeyPath, serviceName, newPrimary string) error {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var currentPrimary string
+	matchStreak := 0
+	for {
+		target := member.NewParticipantByService(serviceName)
+		if ok, _, err := etcdutil.GetProtoMsgWithModRev(client, leaderKeyPath, target); err == nil && ok {
+			if target.GetName() == newPrimary || slices.Contains(target.GetListenUrls(), newPrimary) {
+				matchStreak++
+				if matchStreak >= primaryTransferStableChecks {
+					return nil
+				}
+			} else {
+				matchStreak = 0
+			}
+			currentPrimary = target.GetName()
+		} else {
+			matchStreak = 0
+			currentPrimary = ""
+		}
+		select {
+		case <-ctx.Done():
+			if currentPrimary == "" {
+				return errors.Errorf("transfer requested to %s, but no primary was elected: %v", newPrimary, ctx.Err())
+			}
+			return errors.Errorf("transfer requested to %s, but %s is currently primary: %v", newPrimary, currentPrimary, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// revokeExpectedPrimaryLease revokes a lease granted for an expected-primary
+// marker whose write failed or was rejected by the leadership guard, so a
+// failed/aborted transfer never leaks a lease. Best effort: a failure here is
+// logged, not propagated - the caller already has the original error to report,
+// and the lease's own TTL bounds the residual leak if revoke also fails.
+func revokeExpectedPrimaryLease(client *clientv3.Client, leaseID clientv3.LeaseID) {
+	ctx, cancel := context.WithTimeout(client.Ctx(), etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	if _, err := client.Revoke(ctx, leaseID); err != nil {
+		log.Warn("failed to revoke expected primary lease after failed marker write",
+			zap.Int64("lease-id", int64(leaseID)), errs.ZapError(err))
+	}
 }
 
 func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {

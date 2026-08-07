@@ -380,7 +380,7 @@ func transferPrimary(c *gin.Context) {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), participant,
+	if err := utils.TransferPrimary(c.Request.Context(), svr.GetClient(), participant,
 		mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -472,7 +472,7 @@ func evictPrimary(c *gin.Context) {
 		// primary back to it, so the eviction does not durably drain the node.
 		// Priority handling is being reworked, so revisit this when needed.
 		// An empty new primary lets TransferPrimary pick a random other member.
-		if err := utils.TransferPrimary(svr.GetClient(), participant,
+		if err := utils.TransferPrimary(c.Request.Context(), svr.GetClient(), participant,
 			mcs.TSOServiceName, svr.Name(), "", keyspaceGroupID, memberMap); err != nil {
 			log.Warn("failed to evict keyspace group primary",
 				zap.Uint32("keyspace-group-id", keyspaceGroupID), errs.ZapError(err))
