@@ -598,9 +598,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	// Keep modRevision tied to keyspace-group watch events. Snapshot revisions
-	// are global to etcd and are not comparable across TSO nodes.
-	kgm.groupWatcher.SetReconcileDeletedKeys()
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}

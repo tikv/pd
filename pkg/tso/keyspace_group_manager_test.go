@@ -821,44 +821,6 @@ func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, suite.cfg)
 }
 
-func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadDoesNotUseGlobalRevision() {
-	re := suite.Require()
-	mgr := suite.newUniqueKeyspaceGroupManager(0)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	err := addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		1,
-		[]string{mgr.tsoServiceID.ServiceAddr},
-		[]int{0},
-		[]uint32{1},
-	)
-	re.NoError(err)
-	groupResp, err := suite.etcdClient.Get(
-		suite.ctx,
-		keypath.KeyspaceGroupIDPath(1),
-	)
-	re.NoError(err)
-	re.Len(groupResp.Kvs, 1)
-	groupRevision := uint64(groupResp.Kvs[0].ModRevision)
-
-	advanceResp, err := suite.etcdClient.Put(
-		suite.ctx,
-		fmt.Sprintf("/tso-test-revision/%d", rand.Uint64()),
-		"advance snapshot revision",
-	)
-	re.NoError(err)
-
-	re.NoError(mgr.Initialize())
-	mgr.RLock()
-	modRevision := mgr.modRevision
-	mgr.RUnlock()
-	re.Greater(uint64(advanceResp.Header.Revision), groupRevision)
-	re.LessOrEqual(modRevision, groupRevision)
-}
-
 func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 	cfg *TestServiceConfig,
