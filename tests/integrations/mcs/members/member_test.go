@@ -424,9 +424,22 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 	}
 
 	// Verify that eviction with an explicit new_primary transfers all groups to
-	// the designated node instead of picking a random member.
-	src := nodeList[0]
-	dst := nodeList[1]
+	// the designated node instead of picking a random member. src and dst are
+	// both picked from the default keyspace group's members (tsoAvailMembers) so
+	// dst is guaranteed a valid transfer target even if src also happens to be
+	// the default group's primary: unlike the 12 groups created above, the
+	// default group only replicates on DefaultKeyspaceGroupReplicaCount (2) of
+	// the 3 tso nodes, so an arbitrary dst could otherwise get rejected as "not a
+	// member" for it.
+	var defaultGroupNodes []bs.Server
+	for _, node := range nodeList {
+		if suite.tsoAvailMembers[node.GetAddr()] {
+			defaultGroupNodes = append(defaultGroupNodes, node)
+		}
+	}
+	re.Len(defaultGroupNodes, 2)
+	src := defaultGroupNodes[0]
+	dst := defaultGroupNodes[1]
 	for _, id := range groupIDs {
 		transferData, err := json.Marshal(map[string]any{
 			"new_primary":       src.Name(),
@@ -457,9 +470,11 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 		"new_primary": dst.Name(),
 	})
 	re.NoError(err)
-	resp, _ := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+	resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
 		"application/json", bytes.NewBuffer(evictData))
-	body, _ := io.ReadAll(resp.Body)
+	re.NoError(err)
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
 	resp.Body.Close()
 	results := make(map[uint32]string)
 	re.NoError(json.Unmarshal(body, &results), string(body))
@@ -478,9 +493,23 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 		return true
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-	serving := mustGetKeyspaceGroupMembers(re, nodeList[2].(*tso.Server))
-	for _, m := range serving {
-		re.False(m.IsPrimary, "node %s should not hold any primary", nodeList[2].GetAddr())
+	// The remaining node (neither src nor dst) must not hold the primary of any of
+	// the groups this eviction covers. Restricted to groupIDs rather than every
+	// group the node serves: it may independently be the primary of the default
+	// keyspace group (untouched by this eviction, since src was never its
+	// primary), and that must not fail this assertion.
+	var other bs.Server
+	for _, node := range nodeList {
+		if node.GetAddr() != src.GetAddr() && node.GetAddr() != dst.GetAddr() {
+			other = node
+			break
+		}
+	}
+	re.NotNil(other)
+	serving := mustGetKeyspaceGroupMembers(re, other.(*tso.Server))
+	for _, id := range groupIDs {
+		m := serving[id]
+		re.False(m != nil && m.IsPrimary, "node %s should not hold primary of group %d", other.GetAddr(), id)
 	}
 }
 

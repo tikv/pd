@@ -35,6 +35,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace/constant"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -408,6 +409,7 @@ func transferPrimary(c *gin.Context) {
 // @Produce  json
 // @Param    new_primary  body  string  false  "new primary name"
 // @Success  200          {object}  map[string]string
+// @Failure  400          {string}  string  "invalid request"
 // @Failure  500          {object}  map[string]string
 // @Router   /primary/evict [post]
 func evictPrimary(c *gin.Context) {
@@ -421,13 +423,18 @@ func evictPrimary(c *gin.Context) {
 	var input struct {
 		NewPrimary string `json:"new_primary"`
 	}
-	newPrimary := ""
 	if len(body) > 0 {
 		if err := json.Unmarshal(body, &input); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-		newPrimary = input.NewPrimary
+	}
+	// The node being evicted cannot also be its own replacement: TransferPrimary
+	// treats a target equal to the current primary as a self-transfer and silently
+	// no-ops, which would report "success" while leaving the node undrained.
+	if input.NewPrimary != "" && input.NewPrimary == svr.Name() {
+		c.String(http.StatusBadRequest, "new_primary must not be the node being evicted")
+		return
 	}
 
 	kgm := svr.GetKeyspaceGroupManager()
@@ -443,13 +450,34 @@ func evictPrimary(c *gin.Context) {
 		primaryGroupIDs = append(primaryGroupIDs, keyspaceGroupID)
 	}
 
+	// Resolve the service registry once and reuse it for every candidate group
+	// below, instead of re-fetching per group.
+	var entries []discovery.ServiceRegistryEntry
+	if input.NewPrimary != "" {
+		entries, err = discovery.GetMSMembers(mcs.TSOServiceName, svr.GetClient())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
 	// Pre-check every candidate group before transferring anything so the
 	// operation is all-or-nothing: reject the whole request if any of them is
-	// splitting, instead of moving some groups first and only then aborting.
+	// splitting or new_primary is not one of its members, instead of moving some
+	// groups first and only then aborting.
 	for _, keyspaceGroupID := range primaryGroupIDs {
-		if group := kgm.GetKeyspaceGroupByID(keyspaceGroupID); group != nil && group.IsSplitting() {
+		group := kgm.GetKeyspaceGroupByID(keyspaceGroupID)
+		if group == nil {
+			continue
+		}
+		if group.IsSplitting() {
 			c.AbortWithStatusJSON(http.StatusInternalServerError,
 				errs.ErrKeyspaceGroupInSplit.FastGenByArgs(keyspaceGroupID).Error())
+			return
+		}
+		if !utils.IsValidPrimaryCandidate(entries, input.NewPrimary, keyspaceGroupMemberMap(group)) {
+			c.String(http.StatusBadRequest,
+				fmt.Sprintf("new_primary %q is not a member of keyspace group %d", input.NewPrimary, keyspaceGroupID))
 			return
 		}
 	}
@@ -477,10 +505,7 @@ func evictPrimary(c *gin.Context) {
 		}
 
 		// only members of the specific group are valid primary candidates.
-		memberMap := make(map[string]bool, len(group.Members))
-		for _, member := range group.Members {
-			memberMap[member.Address] = true
-		}
+		memberMap := keyspaceGroupMemberMap(group)
 
 		participant, ok := allocator.GetMember().(*member.Participant)
 		if !ok {
@@ -491,7 +516,7 @@ func evictPrimary(c *gin.Context) {
 		// primary back to it, so the eviction does not durably drain the node.
 		// Priority handling is being reworked, so revisit this when needed.
 		if err := utils.TransferPrimary(svr.GetClient(), participant,
-			mcs.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
+			mcs.TSOServiceName, svr.Name(), input.NewPrimary, keyspaceGroupID, memberMap); err != nil {
 			log.Warn("failed to evict keyspace group primary",
 				zap.Uint32("keyspace-group-id", keyspaceGroupID), errs.ZapError(err))
 			results[keyspaceGroupID] = err.Error()
@@ -506,6 +531,16 @@ func evictPrimary(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, results)
+}
+
+// keyspaceGroupMemberMap returns the set of service addresses that are members of
+// the group, so callers can filter transfer candidates down to that group.
+func keyspaceGroupMemberMap(group *endpoint.KeyspaceGroup) map[string]bool {
+	memberMap := make(map[string]bool, len(group.Members))
+	for _, member := range group.Members {
+		memberMap[member.Address] = true
+	}
+	return memberMap
 }
 
 // forwardToGroupPrimary forwards the transfer primary request to the primary of
