@@ -37,6 +37,13 @@ const DefaultLeaseInSeconds = 5
 // registry key is occupied by a stale entry that has not expired yet.
 const registerRetryInterval = time.Second
 
+// registerRetryMargin is added on top of the lease TTL when computing the
+// retry deadline. An etcd leader change extends every lease's expiry by up
+// to the cluster's election timeout (see (*lessor).Promote and Lease.refresh
+// in etcd's lease package), so a stale entry can outlive its raw TTL; retry
+// long enough to cover that instead of giving up early.
+const registerRetryMargin = 5 * time.Second
+
 // errServiceAddrOccupied indicates that the registry key of the advertised
 // address is already claimed by another live instance.
 var errServiceAddrOccupied = errors.New("service registry key is occupied by another live instance")
@@ -49,6 +56,11 @@ type ServiceRegister struct {
 	key    string
 	value  string
 	ttl    int64
+	// leaseID is the lease this instance most recently registered the key
+	// with, used to prove ownership of an existing entry on re-registration.
+	// Zero (clientv3.NoLease) until the first successful put, so a freshly
+	// started process can never match an existing key's lease by accident.
+	leaseID clientv3.LeaseID
 }
 
 // NewServiceRegister creates a new ServiceRegister.
@@ -74,7 +86,7 @@ func (sr *ServiceRegister) Register() error {
 	// A stale registry entry left by a crashed instance with the same advertised
 	// address will be removed automatically once its lease expires, so retry
 	// within the lease TTL before giving up.
-	deadline := time.Now().Add(time.Duration(sr.ttl+1) * time.Second)
+	deadline := time.Now().Add(time.Duration(sr.ttl)*time.Second + registerRetryMargin)
 	for {
 		id, err = sr.putWithTTL()
 		if err == nil || !errors.Is(err, errServiceAddrOccupied) || time.Now().After(deadline) {
@@ -145,7 +157,8 @@ func (sr *ServiceRegister) renewKeepalive() <-chan *clientv3.LeaseKeepAliveRespo
 // that advertises a duplicate address from overwriting the registry entry of
 // another live instance (and further joining the primary election with the
 // same identity), the key is only claimed when it does not exist yet, or when
-// it still holds this instance's own value.
+// it is still backed by the lease this instance previously registered it
+// with.
 func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(sr.ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
@@ -165,21 +178,30 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 		return 0, err
 	}
 	if resp.Succeeded {
+		sr.leaseID = leaseID
 		return leaseID, nil
 	}
-	// The key already exists. If it holds a different value, it is claimed by
-	// another live instance, so reject the registration instead of overwriting
-	// the entry.
+	// The key already exists. Its value alone cannot prove it is this
+	// instance's own prior registration: ServiceRegistryEntry.StartTimestamp
+	// only has second precision, so two distinct instances started within
+	// the same second at the same address can serialize identically. Only
+	// take the key over when it is still backed by the lease this instance
+	// itself previously registered; otherwise treat it as claimed by another
+	// live instance (or a not-yet-expired entry from a prior process) and
+	// let the caller's retry loop wait for it to expire.
 	kvs := resp.Responses[0].GetResponseRange().Kvs
-	if len(kvs) > 0 && string(kvs[0].Value) != sr.value {
+	if len(kvs) == 0 || clientv3.LeaseID(kvs[0].Lease) != sr.leaseID {
+		existingValue := ""
+		if len(kvs) > 0 {
+			existingValue = string(kvs[0].Value)
+		}
 		sr.revokeLease(ctx, leaseID)
-		return 0, fmt.Errorf("key %s, existing value %s: %w", sr.key, string(kvs[0].Value), errServiceAddrOccupied)
+		return 0, fmt.Errorf("key %s, existing value %s: %w", sr.key, existingValue, errServiceAddrOccupied)
 	}
-	// The key still holds this instance's own value (e.g. re-registering after
-	// a keepalive failure while the previous lease has not expired yet), take
-	// it over with the new lease.
+	// Re-registering after a keepalive failure while the previous lease has
+	// not expired yet: take it over with the new lease.
 	takeoverResp, err := sr.cli.Txn(ctx).
-		If(clientv3.Compare(clientv3.Value(sr.key), "=", sr.value)).
+		If(clientv3.Compare(clientv3.LeaseValue(sr.key), "=", sr.leaseID)).
 		Then(put).
 		Commit()
 	if err != nil {
@@ -191,6 +213,7 @@ func (sr *ServiceRegister) putWithTTL() (clientv3.LeaseID, error) {
 		sr.revokeLease(ctx, leaseID)
 		return 0, fmt.Errorf("key %s changed during the takeover: %w", sr.key, errServiceAddrOccupied)
 	}
+	sr.leaseID = leaseID
 	return leaseID, nil
 }
 
