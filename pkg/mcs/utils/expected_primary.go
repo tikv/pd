@@ -237,3 +237,26 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
 	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
 }
+
+// IsValidPrimaryCandidate reports whether newPrimary identifies a member of the
+// group represented by tsoMembersMap, given the already-fetched registry entries
+// for the service, so a caller can reject an invalid target up front instead of
+// discovering it only when TransferPrimary itself fails. Callers checking multiple
+// groups for one request should fetch entries once (e.g. via discovery.GetMSMembers)
+// and reuse them here, rather than re-fetching per group. An empty newPrimary
+// always matches: it means "let TransferPrimary pick any member", which is valid
+// for every group.
+func IsValidPrimaryCandidate(entries []discovery.ServiceRegistryEntry, newPrimary string, tsoMembersMap map[string]bool) bool {
+	if newPrimary == "" {
+		return true
+	}
+	for _, member := range entries {
+		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+			continue
+		}
+		if isSamePrimary(member, newPrimary) {
+			return true
+		}
+	}
+	return false
+}

@@ -117,3 +117,23 @@ func TestIsSamePrimary(t *testing.T) {
 	re.False(isSamePrimary(entry, "http://127.0.0.1:2380")) // different address
 	re.False(isSamePrimary(entry, ""))                      // empty target never matches
 }
+
+// TestIsValidPrimaryCandidate covers the pre-check evictPrimary uses to reject an
+// out-of-group new_primary before transferring anything, instead of discovering it
+// mid-loop after other groups have already been moved.
+func TestIsValidPrimaryCandidate(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "http://127.0.0.1:1"},
+		{Name: "tso-2", ServiceAddr: "http://127.0.0.1:2"},
+		{Name: "tso-3", ServiceAddr: "http://127.0.0.1:3"},
+	}
+	// Only tso-1 and tso-2 belong to the group under evaluation.
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true, "http://127.0.0.1:2": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "", groupMembers), "an empty target always matches")
+	re.True(IsValidPrimaryCandidate(entries, "tso-2", groupMembers), "tso-2 is a group member")
+	re.True(IsValidPrimaryCandidate(entries, "http://127.0.0.1:2", groupMembers), "matching by service address must also work")
+	re.False(IsValidPrimaryCandidate(entries, "tso-3", groupMembers), "tso-3 is registered but not a member of this group")
+	re.False(IsValidPrimaryCandidate(entries, "tso-unknown", groupMembers), "an unregistered name never matches")
+}
