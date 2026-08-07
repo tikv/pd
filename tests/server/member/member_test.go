@@ -21,11 +21,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
@@ -425,4 +427,126 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+// TestElectionClientStaysOnLocalMember pins down the property that the PD
+// leader's ability to notice its own failure rests on: the election client must
+// only ever talk to this member's own etcd server.
+//
+// It is built from the local advertise client URLs, and only the health checker
+// ever rewrites that list, so the property holds exactly as long as the checker
+// stays disabled for this client. If it were enabled - as it is for the general
+// server client, which this test also exercises so that a checker that never ran
+// cannot make the assertion pass by accident - the client would follow the
+// healthy members, and a member whose own etcd had stopped making progress would
+// keep renewing its leader lease through a peer. See tikv/pd#7780, tikv/pd#10671
+// and tikv/pd#10746.
+func TestElectionClientStaysOnLocalMember(t *testing.T) {
+	re := require.New(t)
+	// Without this the health checker only ticks every 10s, which is longer than
+	// the test is willing to wait for the contrast assertion below.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	for name, svr := range cluster.GetServers() {
+		s := svr.GetServer()
+		localURLs := strings.Split(s.GetConfig().AdvertiseClientUrls, ",")
+		// The general server client is health checked, so it discovers its peers
+		// and ends up with more endpoints than the member started with.
+		testutil.Eventually(re, func() bool {
+			return len(s.GetClient().Endpoints()) > len(localURLs)
+		})
+		// The election client must not have moved.
+		re.Equal(localURLs, s.GetMember().Client().Endpoints(), name)
+	}
+}
+
+// TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView reproduces the
+// shape of tikv/pd#10671 and pins down the property that keeps tikv/pd#7780 from
+// being a correctness bug: a PD leader that has lost etcd leadership gives up
+// because its lease is gone, not because it noticed the change.
+//
+// The test runs in two phases. First it blinds the member with the
+// `staleEtcdLeaderView` failpoint - which freezes its cached etcd leader ID on
+// itself, the defect tikv/pd#7780 describes - and moves etcd leadership away for
+// real. That is the incident: a member holding a PD leadership it can no longer
+// justify, with the colocation check in `campaignLeader` unable to notice. It
+// must keep serving, which is what makes the second phase meaningful. Then the
+// leader lease is taken away, standing in for the renewals a member with stuck
+// storage can no longer complete, and the member must step down and let the new
+// etcd leader take over.
+//
+// Several lease derived paths can be the proximate trigger, and the test
+// deliberately does not care which: what is guarded is that losing the lease is
+// sufficient on its own, with the etcd leader view offering no help at all.
+func TestPDLeaderStepsDownWhenLeaseIsLostWithStaleEtcdLeaderView(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	oldLeaderName := cluster.WaitLeader()
+	re.NotEmpty(oldLeaderName)
+	oldLeaderServer := cluster.GetServer(oldLeaderName)
+	oldLeader := oldLeaderServer.GetServer()
+	var peer *tests.TestServer
+	for name, svr := range cluster.GetServers() {
+		if name != oldLeaderName {
+			peer = svr
+			break
+		}
+	}
+	re.NotNil(peer)
+
+	// Blind the member before anything else changes, so that its own colocation
+	// check cannot be what makes it step down later.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView",
+		fmt.Sprintf("return(\"%s\")", oldLeaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/staleEtcdLeaderView"))
+	}()
+	re.Equal(oldLeader.GetMember().ID(), oldLeader.GetMember().GetEtcdLeader())
+
+	// Now really move etcd leadership away. The member cannot see this, exactly
+	// as it could not in the incident, and it also has to be true for a peer to
+	// be allowed to campaign at all.
+	testutil.Eventually(re, func() bool {
+		return oldLeaderServer.MoveEtcdLeader(oldLeaderServer.GetServerID(), peer.GetServerID()) == nil
+	})
+
+	// Control: while the lease is alive and the view is blinded, nothing makes
+	// the member give up, however wrong holding on has become. This is the state
+	// tikv/pd#10671 was stuck in, and it is what the lease has to break out of -
+	// without it the assertions below would pass for the wrong reason.
+	time.Sleep(2 * time.Second)
+	re.True(oldLeader.IsServing())
+	re.Equal(oldLeaderName, cluster.GetLeader())
+
+	// Take the lease away through the peer's client, leaving the old leader's own
+	// code path untouched.
+	lease := oldLeader.GetMember().GetLeadership().GetLease()
+	re.NotNil(lease)
+	leaseID := lease.GetID()
+	re.NotEqual(clientv3.NoLease, leaseID)
+	_, err = peer.GetServer().GetClient().Revoke(ctx, leaseID)
+	re.NoError(err)
+
+	// The lease is the only signal left, and it must be enough.
+	testutil.Eventually(re, func() bool {
+		return !oldLeader.IsServing() && oldLeader.GetRaftCluster() == nil
+	}, testutil.WithWaitFor(30*time.Second))
+	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
 }
