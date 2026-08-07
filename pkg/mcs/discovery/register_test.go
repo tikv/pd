@@ -127,6 +127,34 @@ func TestRegisterConflict(t *testing.T) {
 	re.NoError(sr3.Deregister())
 }
 
+func TestRegisterConflictSameSerializedValue(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Two distinct instances that happen to serialize an identical registry
+	// entry (e.g. same address, started within the same StartTimestamp
+	// second) must not be able to take over each other's live registration:
+	// ownership must be proven by the lease actually held, not by value
+	// equality alone.
+	sr1 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "same-value", 2)
+	re.NoError(sr1.Register())
+	sr2 := NewServiceRegister(ctx, client, "test_service", "127.0.0.1:1", "same-value", 2)
+	err := sr2.Register()
+	re.Error(err)
+	re.Contains(err.Error(), "occupied")
+
+	resp, err := client.Get(ctx, sr1.key)
+	re.NoError(err)
+	re.Len(resp.Kvs, 1)
+	re.Equal("same-value", string(resp.Kvs[0].Value))
+	re.Equal(int64(sr1.leaseID), resp.Kvs[0].Lease)
+
+	re.NoError(sr1.Deregister())
+}
+
 func getKeyAfterLeaseExpired(ctx context.Context, re *require.Assertions, client *clientv3.Client, key string) string {
 	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
 	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
