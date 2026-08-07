@@ -390,20 +390,23 @@ func transferPrimary(c *gin.Context) {
 }
 
 // evictPrimary transfers away every keyspace group primary currently held by this
-// node, moving each to another member of the same group. It is a best-effort,
-// node-local operation: groups that this node is not serving as primary are
-// skipped, and a failure on one group does not stop the others.
+// node, moving each to another member of the same group. Groups that this node is
+// not serving as primary are skipped.
 //
-// The request is rejected as a whole if this node is the primary of any
-// splitting keyspace group: a split target must campaign on the same TSO node as
-// its split source, but eviction transfers each group to an independently chosen
-// member, which could break that invariant and leave the target keyspaces
-// without a primary. A single TransferPrimary is not atomic and the groups are
-// iterated in no particular order, so the split state is checked for every
-// candidate group up front before transferring anything; otherwise a normal
-// group could be moved before a later splitting group aborts the loop, leaving
-// partial side effects. Since splitting is transient, the caller should retry
-// once it finishes.
+// The request is rejected as a whole, before any group is touched, if this node
+// is the primary of any splitting keyspace group or if new_primary does not
+// identify a member of every candidate group: a split target must campaign on
+// the same TSO node as its split source, but eviction transfers each group to an
+// independently chosen member, which could break that invariant and leave the
+// target keyspaces without a primary; an invalid new_primary would otherwise only
+// be discovered mid-loop, after other groups had already been moved. A single
+// TransferPrimary is not atomic and the groups are iterated in no particular
+// order, so both conditions are checked for every candidate group up front;
+// otherwise a normal group could be moved before a later group aborts the loop,
+// leaving partial side effects. Since splitting is transient, the caller should
+// retry once it finishes. Once past this pre-check, a transfer failure for an
+// individual group (e.g. a transient etcd error) is best-effort and does not stop
+// the others.
 // @Tags     primary
 // @Summary  Evict all keyspace group primaries held by this node.
 // @Produce  json
@@ -431,8 +434,10 @@ func evictPrimary(c *gin.Context) {
 	}
 	// The node being evicted cannot also be its own replacement: TransferPrimary
 	// treats a target equal to the current primary as a self-transfer and silently
-	// no-ops, which would report "success" while leaving the node undrained.
-	if input.NewPrimary != "" && input.NewPrimary == svr.Name() {
+	// no-ops, which would report "success" while leaving the node undrained. Match
+	// on both name and service address since IsValidPrimaryCandidate and
+	// TransferPrimary accept either as an identifier for new_primary.
+	if input.NewPrimary != "" && (input.NewPrimary == svr.Name() || input.NewPrimary == svr.GetAdvertiseListenAddr()) {
 		c.String(http.StatusBadRequest, "new_primary must not be the node being evicted")
 		return
 	}

@@ -440,6 +440,20 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 	re.Len(defaultGroupNodes, 2)
 	src := defaultGroupNodes[0]
 	dst := defaultGroupNodes[1]
+
+	// A new_primary that identifies the node being evicted, whether by name or by
+	// service address, must be rejected outright instead of silently no-oping
+	// while reporting success.
+	for _, self := range []string{src.Name(), src.(*tso.Server).GetAdvertiseListenAddr()} {
+		selfEvictData, err := json.Marshal(map[string]any{"new_primary": self})
+		re.NoError(err)
+		resp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+			"application/json", bytes.NewBuffer(selfEvictData))
+		re.NoError(err)
+		re.Equal(http.StatusBadRequest, resp.StatusCode, "new_primary=%q should be rejected", self)
+		resp.Body.Close()
+	}
+
 	for _, id := range groupIDs {
 		transferData, err := json.Marshal(map[string]any{
 			"new_primary":       src.Name(),
