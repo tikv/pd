@@ -1355,7 +1355,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 	}()
 	for moreToPatrol {
 		var defaultKeyspaceGroup *endpoint.KeyspaceGroup
-		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		err = manager.kgm.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			var err error
 			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
 			if err != nil {

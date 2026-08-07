@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
@@ -855,9 +856,23 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(111))
+	// Remove the bootstrap marker so the patrol must recreate it together with
+	// the default keyspace group update.
+	err = suite.manager.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return txn.Remove(keypath.KeyspaceGroupRevisionPath())
+	})
+	re.NoError(err)
 	// Patrol the keyspace assignment.
 	err = suite.manager.PatrolKeyspaceAssignment(0, 0)
 	re.NoError(err)
+	var marker string
+	err = suite.manager.kgm.store.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		var loadErr error
+		marker, loadErr = txn.Load(keypath.KeyspaceGroupRevisionPath())
+		return loadErr
+	})
+	re.NoError(err)
+	re.NotEmpty(marker)
 	// Check if the keyspace is attached to the default group.
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
