@@ -400,8 +400,6 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
-	// compactionReloadRetryInterval is the additional backoff before retrying a failed compaction reload.
-	compactionReloadRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
 	// snapshot without changing their externally visible event contract.
 	reloadOnCompaction bool
@@ -581,7 +579,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("force load key failed in watch loop",
 					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(loadErr))
 			} else {
-				lw.compactionReloadRetryInterval = 0
 				revision = loadedRevision
 				log.Info("force load key successfully in watch loop",
 					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
@@ -622,26 +619,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				if lw.compactionReloadRetryInterval > 0 {
-					retryTimer := time.NewTimer(lw.compactionReloadRetryInterval)
-					select {
-					case <-ctx.Done():
-						retryTimer.Stop()
-						return revision, nil
-					case <-retryTimer.C:
-					}
+				loadedRevision, ok := lw.reloadAfterCompaction(ctx)
+				if !ok {
+					return revision, nil
 				}
-				loadedRevision, loadErr := lw.load(ctx)
-				if loadErr != nil {
-					lw.compactionReloadRetryInterval *= 2
-					if lw.compactionReloadRetryInterval == 0 {
-						lw.compactionReloadRetryInterval = lw.watchChangeRetryInterval
-					}
-					lw.compactionReloadRetryInterval = min(
-						lw.compactionReloadRetryInterval, maxCompactionReloadRetryInterval)
-					return revision, loadErr
-				}
-				lw.compactionReloadRetryInterval = 0
 				revision = loadedRevision
 				continue
 			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
@@ -703,6 +684,35 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			revision = wresp.Header.Revision + 1
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
+	}
+}
+
+// reloadAfterCompaction rebuilds the watched state before a new watch is
+// created. A compacted watch cannot resume from its previous revision, so keep
+// the retry state local to this resync attempt and retry until it succeeds or
+// the watcher is stopped. The boolean reports whether the resync completed.
+func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
+	retryInterval := lw.watchChangeRetryInterval
+	for {
+		loadedRevision, err := lw.load(ctx)
+		if err == nil {
+			return loadedRevision, true
+		}
+		if ctx.Err() != nil {
+			return 0, false
+		}
+
+		log.Warn("failed to reload compacted watcher state, retrying",
+			zap.String("name", lw.name), zap.String("key", lw.key),
+			zap.Duration("retry-interval", retryInterval), zap.Error(err))
+		retryTimer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			retryTimer.Stop()
+			return 0, false
+		case <-retryTimer.C:
+		}
+		retryInterval = min(retryInterval*2, maxCompactionReloadRetryInterval)
 	}
 }
 

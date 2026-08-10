@@ -1417,12 +1417,12 @@ func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbac
 	re.Empty(cache)
 }
 
-func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
+func (suite *loopWatcherTestSuite) TestWatcherRetriesFailedCompactionReloadWithBackoff() {
 	re := suite.Require()
 	ctx, cancel := context.WithTimeout(suite.ctx, 3*time.Second)
 	defer cancel()
 
-	const key = "TestWatcherBacksOffFailedCompactionReload"
+	const key = "TestWatcherRetriesFailedCompactionReloadWithBackoff"
 	suite.put(re, key, "invalid")
 	resp, err := EtcdKVGet(suite.client, key)
 	re.NoError(err)
@@ -1433,7 +1433,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 	re.NoError(err)
 
 	callbackErr := errors.New("callback failed")
-	failCallback := true
+	var callbackTimes []time.Time
 	watcher := NewLoopWatcher(
 		ctx,
 		&sync.WaitGroup{},
@@ -1442,7 +1442,8 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 		key,
 		func([]*clientv3.Event) error { return nil },
 		func(*mvccpb.KeyValue) error {
-			if failCallback {
+			callbackTimes = append(callbackTimes, time.Now())
+			if len(callbackTimes) < 3 {
 				return callbackErr
 			}
 			cancel()
@@ -1456,20 +1457,10 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 	watcher.watchChangeRetryInterval = 50 * time.Millisecond
 
 	_, err = watcher.watch(ctx, watchRevision)
-	re.ErrorIs(err, callbackErr)
-	re.Equal(50*time.Millisecond, watcher.compactionReloadRetryInterval)
-
-	retryStart := time.Now()
-	_, err = watcher.watch(ctx, watchRevision)
-	re.ErrorIs(err, callbackErr)
-	re.GreaterOrEqual(time.Since(retryStart), 45*time.Millisecond)
-	re.Equal(100*time.Millisecond, watcher.compactionReloadRetryInterval)
-
-	failCallback = false
-	watcher.forceLoadCh <- struct{}{}
-	_, err = watcher.watch(ctx, advanceResp.Header.Revision+1)
 	re.NoError(err)
-	re.Zero(watcher.compactionReloadRetryInterval)
+	re.Len(callbackTimes, 3)
+	re.GreaterOrEqual(callbackTimes[1].Sub(callbackTimes[0]), 45*time.Millisecond)
+	re.GreaterOrEqual(callbackTimes[2].Sub(callbackTimes[1]), 95*time.Millisecond)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
