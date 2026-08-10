@@ -160,9 +160,6 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	// Keyspace metadata updates are idempotent, so replaying the current
-	// snapshot closes a compaction gap without changing the stream format.
-	watcher.SetReloadOnCompaction()
 	watcher.StartWatchLoop()
 	if err := watcher.WaitLoad(); err != nil {
 		cancel() // cancel context to stop watcher
