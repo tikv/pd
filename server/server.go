@@ -246,6 +246,16 @@ type Server struct {
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
+
+	// cleanedRemovedStoreMetrics tracks store IDs whose per-store heartbeat/bucket
+	// report metrics (defined in server/metrics.go) have already been deleted by
+	// cleanupRemovedStoreMetrics after the store was tombstoned. Only that method,
+	// driven by serverMetricsLoop's own single-goroutine ticker, touches this map,
+	// so it needs no lock. Without it, DeleteStoreMetrics would DeletePartialMatch-
+	// scan every per-store metric vector on every tick for as long as the store
+	// stays tombstoned-but-not-yet-removed (up to the tombstone GC interval), even
+	// though there is nothing left to delete after the first pass.
+	cleanedRemovedStoreMetrics map[uint64]struct{}
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -761,11 +771,27 @@ func (s *Server) cleanupRemovedStoreMetrics() {
 	if rc == nil {
 		return
 	}
+	if s.cleanedRemovedStoreMetrics == nil {
+		s.cleanedRemovedStoreMetrics = make(map[uint64]struct{})
+	}
+	// Stores still tombstoned this tick; anything in cleanedRemovedStoreMetrics but
+	// not in this set has been fully removed, so its tracking entry can be dropped.
+	removed := make(map[uint64]struct{})
 	for _, store := range rc.GetStores() {
 		if !store.IsRemoved() {
 			continue
 		}
-		DeleteStoreMetrics(store.GetAddress(), strconv.FormatUint(store.GetID(), 10))
+		storeID := store.GetID()
+		removed[storeID] = struct{}{}
+		if _, cleaned := s.cleanedRemovedStoreMetrics[storeID]; !cleaned {
+			DeleteStoreMetrics(store.GetAddress(), strconv.FormatUint(storeID, 10))
+			s.cleanedRemovedStoreMetrics[storeID] = struct{}{}
+		}
+	}
+	for storeID := range s.cleanedRemovedStoreMetrics {
+		if _, stillTombstoned := removed[storeID]; !stillTombstoned {
+			delete(s.cleanedRemovedStoreMetrics, storeID)
+		}
 	}
 }
 
