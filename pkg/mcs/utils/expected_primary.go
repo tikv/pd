@@ -276,13 +276,14 @@ func TransferPrimary(ctx context.Context, client *clientv3.Client, p *member.Par
 		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
 
+	primaryID := primaryIDs[nextPrimaryID]
 	msParam := &keypath.MsParam{
 		ServiceName: serviceName,
 		GroupID:     keyspaceGroupID,
 	}
 	primary := &primaryData{
-		raw:    primaryIDs[nextPrimaryID],
-		output: primaryIDs[nextPrimaryID],
+		raw:    primaryID,
+		output: primaryID,
 	}
 	// Mark the expected primary first so the affinity guard is in place before the
 	// current primary releases the leader key below. leaderKeyGuard was built from the
@@ -302,75 +303,97 @@ func TransferPrimary(ctx context.Context, client *clientv3.Client, p *member.Par
 	// and re-campaigns, where the affinity guard routes the leadership to the target.
 	p.Resign()
 
-	// Verify the transfer actually landed on newPrimary before reporting success. A
+	// Verify the transfer actually landed on primaryID before reporting success. A
 	// member that predates this marker mechanism (e.g. a not-yet-upgraded replica
 	// during a rolling upgrade) does not read the marker and can win the now-vacated
 	// leader key through its own unguarded campaign, so a caller-specified target is
 	// not otherwise guaranteed. newPrimary == "" (pick any valid secondary) has no
 	// fixed target to verify against, so it is skipped.
 	//
+	// primaryID - not newPrimary - is what gets compared: newPrimary is whatever the
+	// caller passed (registry name or address; the default config gives services a
+	// name distinct from their advertise address), but primaryID is always the
+	// resolved ServiceAddr, the one identity the marker mechanism itself already
+	// relies on (Participant.IsExpectedPrimary matches a marker value against this
+	// same member's ListenUrls). Comparing against newPrimary directly would silently
+	// never match whenever it was supplied as a name, since a target's own proto Name
+	// (e.g. TSO's "address-groupID") isn't the registry name either.
+	//
 	// The timeout matches the marker's own TTL (expectedLease), not a short fixed
 	// value: such a pre-marker member never cleans the marker up on winning, so if it
 	// is itself cycled out again within this window - e.g. as the rolling upgrade
-	// continues - the still-valid marker lets newPrimary's own guarded campaign
+	// continues - the still-valid marker lets primaryID's own guarded campaign
 	// recover the transfer. Failure is only reported once that whole recovery window
 	// has actually elapsed.
 	if newPrimary != "" {
 		verifyCtx, cancel := context.WithTimeout(ctx, time.Duration(expectedLease)*time.Second)
 		defer cancel()
-		return waitForPrimaryTransfer(verifyCtx, client, leaderKeyPath, serviceName, newPrimary)
+		return waitForPrimaryTransfer(verifyCtx, client, leaderKeyPath, serviceName, newPrimary, primaryID)
 	}
 	return nil
 }
 
-// primaryTransferStableChecks is the number of consecutive polls that must observe
-// newPrimary holding the leader key before waitForPrimaryTransfer reports success.
-// A single matching read is not enough: the winner of a campaign still runs its own
-// post-campaign steps (reconciling the expected-primary marker, running
-// primaryCallbacks) before it is durably promoted, and any of those can make it step
-// back down again. Requiring the match to hold across a second poll narrows - it
-// cannot eliminate - the window where a transient, soon-to-be-reverted win would
-// otherwise be reported as a confirmed success.
-const primaryTransferStableChecks = 2
+// primaryTransferStableWindow is how long the leader key must continuously show the
+// target's identity before waitForPrimaryTransfer reports success. A single matching
+// read - or even a couple of them a few hundred milliseconds apart - is not enough:
+// the leader key is written as soon as the campaign transaction commits, well before
+// the winner is durably promoted. Between those two points it still runs its own
+// post-campaign steps - reconciling the expected-primary marker, running
+// primaryCallbacks, and for TSO initializing the allocator (which syncs the
+// timestamp oracle and does real I/O) - and a failure in any of them makes it step
+// back down again. Requiring the match to hold continuously for this long narrows -
+// it cannot eliminate - the window where a transient, soon-to-be-reverted win would
+// otherwise be reported as a confirmed success: it only helps if the failure surfaces
+// (and is reflected back to the leader key via the loser's own cleanup) within this
+// window. There's no empirical measurement behind this specific value; it's a
+// judgment call sized to comfortably outlast the post-campaign steps above under
+// normal conditions, not a proof they always finish by then.
+const primaryTransferStableWindow = 2 * time.Second
 
-// waitForPrimaryTransfer polls the leader key until its holder's identity (name or
-// listen URL) matches newPrimary on primaryTransferStableChecks consecutive polls, or
-// ctx is done. It reports success purely by identity, with no notion of which member
-// version won: the leader key's value is the same participant proto regardless of
-// which binary wrote it, so a pre-marker member's win is read exactly like any other
-// and simply fails to match unless it happens to be newPrimary itself - which is a
+// waitForPrimaryTransfer polls the leader key until its holder's identity has
+// continuously matched expectedIdentity for at least primaryTransferStableWindow, or
+// ctx is done. requestedPrimary is only used for the error messages below - it's
+// whatever identity form the caller originally supplied (registry name or address),
+// kept around purely so a failure message reads naturally to whoever issued the
+// request; expectedIdentity (see TransferPrimary) is what's actually compared.
+//
+// This reports success purely by identity, with no notion of which member version
+// won: the leader key's value is the same participant proto regardless of which
+// binary wrote it, so a pre-marker member's win is read exactly like any other and
+// simply fails to match unless it happens to be expectedIdentity itself - which is a
 // legitimate outcome, not a special case to detect.
 //
 // ctx bounds when this returns: it carries the caller's own timeout (see
 // TransferPrimary) and, when derived from an HTTP request's context, also lets an
 // abandoned request stop this from polling for the rest of that timeout regardless.
-func waitForPrimaryTransfer(ctx context.Context, client *clientv3.Client, leaderKeyPath, serviceName, newPrimary string) error {
+func waitForPrimaryTransfer(ctx context.Context, client *clientv3.Client, leaderKeyPath, serviceName, requestedPrimary, expectedIdentity string) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	var currentPrimary string
-	matchStreak := 0
+	var matchSince time.Time
 	for {
 		target := member.NewParticipantByService(serviceName)
 		if ok, _, err := etcdutil.GetProtoMsgWithModRev(client, leaderKeyPath, target); err == nil && ok {
-			if target.GetName() == newPrimary || slices.Contains(target.GetListenUrls(), newPrimary) {
-				matchStreak++
-				if matchStreak >= primaryTransferStableChecks {
+			if slices.Contains(target.GetListenUrls(), expectedIdentity) {
+				if matchSince.IsZero() {
+					matchSince = time.Now()
+				} else if time.Since(matchSince) >= primaryTransferStableWindow {
 					return nil
 				}
 			} else {
-				matchStreak = 0
+				matchSince = time.Time{}
 			}
 			currentPrimary = target.GetName()
 		} else {
-			matchStreak = 0
+			matchSince = time.Time{}
 			currentPrimary = ""
 		}
 		select {
 		case <-ctx.Done():
 			if currentPrimary == "" {
-				return errors.Errorf("transfer requested to %s, but no primary was elected: %v", newPrimary, ctx.Err())
+				return errors.Errorf("transfer requested to %s, but no primary was elected: %v", requestedPrimary, ctx.Err())
 			}
-			return errors.Errorf("transfer requested to %s, but %s is currently primary: %v", newPrimary, currentPrimary, ctx.Err())
+			return errors.Errorf("transfer requested to %s, but %s is currently primary: %v", requestedPrimary, currentPrimary, ctx.Err())
 		case <-ticker.C:
 		}
 	}
