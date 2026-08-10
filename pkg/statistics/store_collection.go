@@ -19,6 +19,7 @@ import (
 	"strconv"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -291,36 +292,7 @@ func (s *storeStatistics) collect() {
 
 // ResetStoreStatistics resets the metrics of store.
 func ResetStoreStatistics(storeAddress string, id string) {
-	metrics := []string{
-		"region_score",
-		"leader_score",
-		"region_size",
-		"region_count",
-		"leader_size",
-		"leader_count",
-		"witness_count",
-		"learner_count",
-		"store_available",
-		"store_used",
-		"store_capacity",
-		"store_write_rate_bytes",
-		"store_read_rate_bytes",
-		"store_write_rate_keys",
-		"store_read_rate_keys",
-		"store_write_query_rate",
-		"store_read_query_rate",
-		"store_read_cpu_usage",
-		"store_read_cpu_usage_instant",
-		"store_regions_write_rate_bytes",
-		"store_regions_write_rate_keys",
-		"store_slow_trend_cause_value",
-		"store_slow_trend_cause_rate",
-		"store_slow_trend_result_value",
-		"store_slow_trend_result_rate",
-	}
-	for _, m := range metrics {
-		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
-	}
+	storeStatusGauge.DeletePartialMatch(prometheus.Labels{"address": storeAddress, "store": id})
 	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 

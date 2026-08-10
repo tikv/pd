@@ -560,6 +560,7 @@ func (f *HotPeerCache) gc() {
 			delete(f.regionsOfStore, storeID)
 			delete(f.thresholdsOfStore, storeID)
 			delete(f.metrics, storeID)
+			hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 		}
 	}
 	// remove expired items

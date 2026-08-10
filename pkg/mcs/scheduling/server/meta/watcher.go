@@ -28,6 +28,9 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -82,7 +85,11 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
-			statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetId(), 10))
+			storeIDStr := strconv.FormatUint(store.GetId(), 10)
+			statistics.ResetStoreStatistics(store.GetAddress(), storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+			schedulers.DeleteStoreMetrics(storeIDStr)
 			// TODO: remove hot stats
 		}
 

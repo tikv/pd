@@ -30,3 +30,8 @@ var (
 func init() {
 	prometheus.MustRegister(heartbeatStreamCounter)
 }
+
+// DeleteStoreMetrics deletes the heartbeat stream metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	heartbeatStreamCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
+}

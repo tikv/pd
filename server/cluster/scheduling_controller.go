@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -202,6 +203,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
 	sc.hotStat.RemoveRollingStoreStats(storeID)
 	sc.slowStat.RemoveSlowStoreStatus(storeID)
+	schedulers.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 }
 
 func (sc *schedulingController) updateStoreStatistics(storeID uint64, isSlow bool) {

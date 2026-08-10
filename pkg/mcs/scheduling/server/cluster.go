@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -725,6 +726,9 @@ func (c *Cluster) collectMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
+		if s.IsRemoved() {
+			DeleteStoreMetrics(s.GetAddress(), strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
 

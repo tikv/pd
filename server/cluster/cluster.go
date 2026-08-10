@@ -1771,6 +1771,8 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		addr := store.GetAddress()
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
+		filter.DeleteStoreMetrics(storeIDStr)
+		hbstream.DeleteStoreMetrics(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}

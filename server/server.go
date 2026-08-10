@@ -744,10 +744,28 @@ func (s *Server) serverMetricsLoop() {
 		select {
 		case <-ticker.C:
 			s.collectEtcdStateMetrics()
+			s.cleanupRemovedStoreMetrics()
 		case <-ctx.Done():
 			log.Info("server is closed, exit metrics loop")
 			return
 		}
+	}
+}
+
+// cleanupRemovedStoreMetrics deletes the per-store heartbeat/bucket-report metrics
+// of stores that have been tombstoned. These metrics are recorded directly in this
+// package (not in pkg/statistics or pkg/schedule), so they cannot be cleaned up from
+// within RaftCluster's bury path and are instead swept periodically here.
+func (s *Server) cleanupRemovedStoreMetrics() {
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return
+	}
+	for _, store := range rc.GetStores() {
+		if !store.IsRemoved() {
+			continue
+		}
+		DeleteStoreMetrics(store.GetAddress(), strconv.FormatUint(store.GetID(), 10))
 	}
 }
 

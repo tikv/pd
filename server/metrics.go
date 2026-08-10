@@ -238,3 +238,15 @@ func init() {
 	prometheus.MustRegister(forwardTsoDuration)
 	prometheus.MustRegister(regionRequestCounter)
 }
+
+// DeleteStoreMetrics deletes the per-store heartbeat/bucket-report metrics of a store.
+func DeleteStoreMetrics(storeAddress, id string) {
+	labels := prometheus.Labels{"address": storeAddress, "store": id}
+	regionHeartbeatCounter.DeletePartialMatch(labels)
+	regionHeartbeatLatency.DeletePartialMatch(labels)
+	regionHeartbeatHandleDuration.DeletePartialMatch(labels)
+	storeHeartbeatHandleDuration.DeletePartialMatch(labels)
+	bucketReportCounter.DeletePartialMatch(labels)
+	bucketReportLatency.DeletePartialMatch(labels)
+	bucketReportInterval.DeletePartialMatch(labels)
+}
