@@ -475,6 +475,29 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re.Empty(cache)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherLoadInitializesEmptyReconciliationSnapshot() {
+	re := suite.Require()
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherLoadInitializesEmptyReconciliationSnapshot",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+
+	revision, err := watcher.load(suite.ctx)
+	re.NoError(err)
+	re.Positive(revision)
+	re.NotNil(watcher.loadedKeys)
+	re.Empty(watcher.loadedKeys)
+}
+
 func (suite *loopWatcherTestSuite) TestInitialLoadFailsWhenContextCanceled() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
@@ -1246,6 +1269,53 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	result := <-watchDone
 	re.NoError(result.err)
 	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
+	re := suite.Require()
+	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"
+	putResp, err := suite.client.Put(suite.ctx, key, "value")
+	re.NoError(err)
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	putCalls := 0
+	postCalls := 0
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		key,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			putCalls++
+			re.Equal(key, string(kv.Key))
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			// Make the load succeed just as the watcher is stopped.
+			postCalls++
+			cancel()
+			return nil
+		},
+		false, /* withPrefix */
+	)
+	watcher.SetReloadOnCompaction()
+
+	revision, shouldContinue := watcher.reloadAfterCompaction(ctx)
+	re.False(shouldContinue)
+	re.GreaterOrEqual(revision, putResp.Header.Revision+1)
+	re.Equal(1, putCalls)
+	re.Equal(1, postCalls)
+
+	revision, shouldContinue = watcher.reloadAfterCompaction(ctx)
+	re.False(shouldContinue)
+	re.Zero(revision)
+	re.Equal(1, putCalls)
+	re.Equal(2, postCalls)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRetriesReconciliationAfterPostCallbackFailure() {

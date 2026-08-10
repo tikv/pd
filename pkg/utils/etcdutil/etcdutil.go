@@ -619,9 +619,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				loadedRevision, ok := lw.reloadAfterCompaction(ctx)
-				if !ok {
-					return revision, nil
+				loadedRevision, shouldContinue := lw.reloadAfterCompaction(ctx)
+				if !shouldContinue {
+					return max(revision, loadedRevision), nil
 				}
 				revision = loadedRevision
 				continue
@@ -690,13 +690,15 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 // reloadAfterCompaction rebuilds the watched state before a new watch is
 // created. A compacted watch cannot resume from its previous revision, so keep
 // the retry state local to this resync attempt and retry until it succeeds or
-// the watcher is stopped. The boolean reports whether the resync completed.
+// the watcher is stopped. The returned revision is the next revision after a
+// successful reload, even when the boolean is false; zero means no reload
+// completed. The boolean reports whether watching should continue.
 func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
 	retryInterval := lw.watchChangeRetryInterval
 	for {
 		loadedRevision, err := lw.load(ctx)
 		if err == nil {
-			return loadedRevision, true
+			return loadedRevision, ctx.Err() == nil
 		}
 		if ctx.Err() != nil {
 			return 0, false
@@ -728,9 +730,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		reconciledDeletedKeys []string
 		loadCompleted         bool
 	)
-	if lw.reconcileDeletedKeys {
-		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
-	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
@@ -801,63 +800,73 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			return 0, err
 		}
-		page := resp.Kvs
-		if resp.More && len(page) > 0 {
-			// WithLimit requests one extra key to use as the next page's cursor.
-			startKey = string(page[len(page)-1].Key)
-			page = page[:len(page)-1]
-		}
-		// Keep the legacy per-page loading semantics for consumers that do not
-		// opt in to compaction reload. Their callbacks may publish each load
-		// attempt, so pinning a revision could expose a partial snapshot if that
-		// revision is compacted before a later page is read. Keep their hot loop
-		// free of reconciliation bookkeeping as well.
-		if !consistentReload {
+		if consistentReload {
+			page := resp.Kvs
+			if resp.More && len(page) > 0 {
+				// WithLimit requests one extra key to use as the next page's cursor.
+				startKey = string(page[len(page)-1].Key)
+				page = page[:len(page)-1]
+			}
+			if snapshotRevision == 0 {
+				snapshotRevision = resp.Header.Revision
+				opts = lw.buildLoadingOpts(limit, snapshotRevision)
+				if lw.reconcileDeletedKeys {
+					snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
+				}
+			}
 			for _, item := range page {
-				err = lw.putFn(item)
-				if err != nil {
-					log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
+				putErr := lw.putFn(item)
+				if putErr != nil {
+					if callbackErr == nil {
+						callbackErr = putErr
+					}
+					log.Warn("put failed in watch loop when loading consistent snapshot", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
 				} else {
+					if lw.reconcileDeletedKeys {
+						snapshotKeys[string(item.Key)] = struct{}{}
+					}
 					log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 				}
 			}
 			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 			if !resp.More {
-				return resp.Header.Revision + 1, err
+				if callbackErr == nil {
+					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+				}
+				loadCompleted = true
+				return snapshotRevision + 1, callbackErr
 			}
 			continue
 		}
 
-		if snapshotRevision == 0 {
-			snapshotRevision = resp.Header.Revision
-			opts = lw.buildLoadingOpts(limit, snapshotRevision)
-		}
-		for _, item := range page {
-			putErr := lw.putFn(item)
-			err = putErr
-			if putErr != nil {
-				if callbackErr == nil {
-					callbackErr = putErr
-				}
+		// Keep the legacy per-page loading semantics for consumers that do not
+		// opt in to compaction reload. Their callbacks may publish each load
+		// attempt, so pinning a revision could expose a partial snapshot if that
+		// revision is compacted before a later page is read. Keep their hot loop
+		// free of reconciliation bookkeeping as well.
+		for i, item := range resp.Kvs {
+			if i == len(resp.Kvs)-1 && resp.More {
+				// If there are more keys, we need to load the next batch.
+				// The last key in current batch is the start key of the next batch.
+				startKey = string(item.Key)
+				// To avoid to get the same key in the next batch,
+				// we need to skip the last key for the current batch.
+				continue
+			}
+			err = lw.putFn(item)
+			if err != nil {
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
 			} else {
-				if lw.reconcileDeletedKeys {
-					snapshotKeys[string(item.Key)] = struct{}{}
-				}
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			if callbackErr == nil {
-				reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
-			}
-			loadCompleted = true
-			return snapshotRevision + 1, callbackErr
+			return resp.Header.Revision + 1, err
 		}
 	}
 }
@@ -877,7 +886,7 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]
 			if firstErr == nil {
 				firstErr = err
 			}
-			log.Error("delete failed in watch loop when reconciling loaded keys",
+			log.Warn("delete failed in watch loop when reconciling loaded keys",
 				zap.String("name", lw.name), zap.String("watch-key", lw.key),
 				zap.String("key", key), zap.Error(err))
 			continue
