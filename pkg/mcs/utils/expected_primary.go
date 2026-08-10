@@ -351,8 +351,9 @@ func TransferPrimary(ctx context.Context, client *clientv3.Client, p *member.Par
 const primaryTransferStableWindow = 2 * time.Second
 
 // waitForPrimaryTransfer polls the leader key until its holder's identity has
-// continuously matched expectedIdentity for at least primaryTransferStableWindow, or
-// ctx is done. requestedPrimary is only used for the error messages below - it's
+// continuously matched expectedIdentity, on the same election term, for at least
+// primaryTransferStableWindow, or ctx is done. requestedPrimary is only used for the
+// error messages below - it's
 // whatever identity form the caller originally supplied (registry name or address),
 // kept around purely so a failure message reads naturally to whoever issued the
 // request; expectedIdentity (see TransferPrimary) is what's actually compared.
@@ -371,12 +372,22 @@ func waitForPrimaryTransfer(ctx context.Context, client *clientv3.Client, leader
 	defer ticker.Stop()
 	var currentPrimary string
 	var matchSince time.Time
+	// matchedRevision pins the stability window to a single election term. The
+	// leader key is deleted on every step-down/expiry and recreated on the next
+	// win (Leadership.Campaign requires CreateRevision(leaderKey) == 0), so its
+	// ModRevision changes on every fresh term. Without this, a target that loses
+	// and re-wins the key between two polls - invisible to us if both polls land
+	// on a "matched" state - would keep the timer running across that gap and
+	// could report success on a term that has barely started, still mid
+	// primaryCallbacks/TSO initialization.
+	var matchedRevision int64
 	for {
 		target := member.NewParticipantByService(serviceName)
-		if ok, _, err := etcdutil.GetProtoMsgWithModRev(client, leaderKeyPath, target); err == nil && ok {
+		if ok, modRevision, err := etcdutil.GetProtoMsgWithModRev(client, leaderKeyPath, target); err == nil && ok {
 			if slices.Contains(target.GetListenUrls(), expectedIdentity) {
-				if matchSince.IsZero() {
+				if matchSince.IsZero() || modRevision != matchedRevision {
 					matchSince = time.Now()
+					matchedRevision = modRevision
 				} else if time.Since(matchSince) >= primaryTransferStableWindow {
 					return nil
 				}
