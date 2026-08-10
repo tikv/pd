@@ -518,6 +518,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 			},
 			true, /* withPrefix */
 		)
+		watcher.SetReloadOnCompaction()
 
 		_, err := watcher.load(suite.ctx)
 		re.ErrorIs(err, preErr)
@@ -539,10 +540,82 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadReturnsLifecycleErrors() {
 			func([]*clientv3.Event) error { return postErr },
 			true, /* withPrefix */
 		)
+		watcher.SetReloadOnCompaction()
 
 		_, err := watcher.load(suite.ctx)
 		re.ErrorIs(err, postErr)
 	})
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultCallbackSemantics() {
+	preErr := errors.New("pre callback failed")
+	firstPutErr := errors.New("first put callback failed")
+	lastPutErr := errors.New("last put callback failed")
+	postErr := errors.New("post callback failed")
+	tests := []struct {
+		name                            string
+		preErr, firstPutErr, lastPutErr error
+		postErr, expectedErr            error
+	}{
+		{
+			name:        "overwritten-errors",
+			preErr:      preErr,
+			firstPutErr: firstPutErr,
+			postErr:     postErr,
+		},
+		{
+			name:        "final-put-error",
+			lastPutErr:  lastPutErr,
+			expectedErr: lastPutErr,
+		},
+	}
+	for _, test := range tests {
+		suite.Run(test.name, func() {
+			re := suite.Require()
+			prefix := "TestWatcherLoadKeepsDefaultCallbackSemantics/" + test.name + "/"
+			for _, suffix := range []string{"a", "b", "c"} {
+				suite.put(re, prefix+suffix, "value")
+			}
+
+			processed := make([]string, 0, 3)
+			postCalls := 0
+			watcher := NewLoopWatcher(
+				suite.ctx,
+				&suite.wg,
+				suite.client,
+				"test",
+				prefix,
+				func([]*clientv3.Event) error { return test.preErr },
+				func(kv *mvccpb.KeyValue) error {
+					key := string(kv.Key)
+					processed = append(processed, key)
+					switch key {
+					case prefix + "a":
+						return test.firstPutErr
+					case prefix + "c":
+						return test.lastPutErr
+					}
+					return nil
+				},
+				func(*mvccpb.KeyValue) error { return nil },
+				func([]*clientv3.Event) error {
+					postCalls++
+					return test.postErr
+				},
+				true, /* withPrefix */
+			)
+			watcher.SetLoadBatchSize(1)
+
+			_, err := watcher.load(suite.ctx)
+			if test.expectedErr == nil {
+				re.NoError(err)
+			} else {
+				re.ErrorIs(err, test.expectedErr)
+			}
+			re.Equal([]string{prefix + "a", prefix + "b", prefix + "c"}, processed)
+			re.Equal(1, postCalls)
+		})
+	}
 }
 
 func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
@@ -760,6 +833,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() 
 				func([]*clientv3.Event) error { return nil },
 				true, /* withPrefix */
 			)
+			watcher.SetReloadOnCompaction()
 			watcher.SetLoadBatchSize(test.batchSize)
 			_, err := watcher.load(suite.ctx)
 			re.ErrorIs(err, firstErr)
@@ -774,6 +848,14 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadUsesSingleRevision() {
 	for _, suffix := range []string{"a", "b", "c"} {
 		suite.put(re, prefix+suffix, "old")
 	}
+	snapshotResp, err := suite.client.Get(
+		suite.ctx,
+		prefix,
+		clientv3.WithPrefix(),
+		clientv3.WithLimit(1),
+	)
+	re.NoError(err)
+	snapshotRevision := snapshotResp.Header.Revision
 
 	values := make(map[string]string)
 	updated := false
@@ -797,12 +879,84 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadUsesSingleRevision() {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	watcher.SetReloadOnCompaction()
 	watcher.SetLoadBatchSize(1)
-	_, err := watcher.load(suite.ctx)
+	revision, err := watcher.load(suite.ctx)
 	re.NoError(err)
+	re.Equal(snapshotRevision+1, revision)
 	re.Equal("old", values[prefix+"a"])
 	re.Equal("old", values[prefix+"b"])
 	re.Equal("old", values[prefix+"c"])
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCompaction() {
+	re := suite.Require()
+	const prefix = "TestWatcherLoadKeepsDefaultPaginationAcrossCompaction/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "value")
+	}
+
+	loaded := make(map[string]string)
+	var published map[string]string
+	var advanceRevision int64
+	var triggerErr error
+	postCalls := 0
+	triggered := false
+	compacted := false
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			loaded[string(kv.Key)] = string(kv.Value)
+			if triggered {
+				return nil
+			}
+			triggered = true
+			advanceResp, err := suite.client.Put(
+				suite.ctx,
+				strings.TrimSuffix(prefix, "/")+"-advance-revision",
+				"",
+			)
+			if err != nil {
+				triggerErr = err
+				return err
+			}
+			advanceRevision = advanceResp.Header.Revision
+			_, err = suite.etcd.Server.Compact(
+				suite.ctx,
+				&etcdserverpb.CompactionRequest{Revision: advanceRevision},
+			)
+			triggerErr = err
+			compacted = err == nil
+			return err
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			postCalls++
+			published = maps.Clone(loaded)
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetLoadBatchSize(1)
+
+	revision, err := watcher.load(suite.ctx)
+	re.True(triggered)
+	re.NoError(triggerErr)
+	re.True(compacted)
+	re.Equal(1, postCalls)
+	re.Len(published, 3)
+	re.Equal(map[string]string{
+		prefix + "a": "value",
+		prefix + "b": "value",
+		prefix + "c": "value",
+	}, published)
+	re.NoError(err)
+	re.Equal(advanceRevision+1, revision)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
@@ -1279,6 +1433,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 	re.NoError(err)
 
 	callbackErr := errors.New("callback failed")
+	failCallback := true
 	watcher := NewLoopWatcher(
 		ctx,
 		&sync.WaitGroup{},
@@ -1286,7 +1441,13 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 		"test",
 		key,
 		func([]*clientv3.Event) error { return nil },
-		func(*mvccpb.KeyValue) error { return callbackErr },
+		func(*mvccpb.KeyValue) error {
+			if failCallback {
+				return callbackErr
+			}
+			cancel()
+			return nil
+		},
 		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
@@ -1303,6 +1464,12 @@ func (suite *loopWatcherTestSuite) TestWatcherBacksOffFailedCompactionReload() {
 	re.ErrorIs(err, callbackErr)
 	re.GreaterOrEqual(time.Since(retryStart), 45*time.Millisecond)
 	re.Equal(100*time.Millisecond, watcher.compactionReloadRetryInterval)
+
+	failCallback = false
+	watcher.forceLoadCh <- struct{}{}
+	_, err = watcher.watch(ctx, advanceResp.Header.Revision+1)
+	re.NoError(err)
+	re.Zero(watcher.compactionReloadRetryInterval)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
