@@ -37,6 +37,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -581,7 +582,20 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	c.PutStore(store, core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	limit := store.GetStoreLimit()
+	version := c.persistConfig.GetScheduleConfig().StoreLimitVersion
+	opts := []core.StoreCreateOption{core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now())}
+	if limit == nil || limit.Version() != version {
+		if version == storelimit.VersionV2 {
+			limit = storelimit.NewSlidingWindowsWithSize(c.persistConfig.GetStoreLimitV2WindowSize())
+		} else {
+			limit = storelimit.NewStoreRateLimit(0)
+		}
+		opts = append(opts, core.SetStoreLimit(limit))
+	} else if slidingWindows, ok := limit.(*storelimit.SlidingWindows); ok {
+		slidingWindows.SetWindowSize(c.persistConfig.GetStoreLimitV2WindowSize())
+	}
+	c.PutStore(store, opts...)
 	c.hotStat.Observe(storeID, stats)
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()

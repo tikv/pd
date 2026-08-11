@@ -83,6 +83,7 @@ func TestStoreHeartbeat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	opt.GetScheduleConfig().StoreLimitVersion = "v2"
+	opt.GetScheduleConfig().StoreLimitV2WindowSize = 4096
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 
@@ -118,12 +119,24 @@ func TestStoreHeartbeat(t *testing.T) {
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
 		re.Equal(req.GetStats(), s.GetStoreStats())
 		re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
+		limit, ok := s.GetStoreLimit().(*storelimit.SlidingWindows)
+		re.True(ok)
+		re.EqualValues(4096, limit.GetCap())
 		re.Equal(s.GetMeta().GetNodeState(), resp.GetState())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
 
 	re.Equal(int(n), cluster.GetStoreCount())
+
+	// An updated v2 window is applied to existing stores without changing versions.
+	scheCfg := cluster.opt.GetScheduleConfig().Clone()
+	scheCfg.StoreLimitV2WindowSize = 8192
+	cluster.opt.SetScheduleConfig(scheCfg)
+	re.NoError(cluster.HandleStoreHeartbeat(&pdpb.StoreHeartbeatRequest{Stats: &pdpb.StoreStats{StoreId: 1}}, &pdpb.StoreHeartbeatResponse{}))
+	limit, ok := cluster.GetStore(1).GetStoreLimit().(*storelimit.SlidingWindows)
+	re.True(ok)
+	re.EqualValues(8192, limit.GetCap())
 
 	for i, store := range stores {
 		tmp := &metapb.Store{}
@@ -164,7 +177,7 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
-	scheCfg := cluster.opt.GetScheduleConfig().Clone()
+	scheCfg = cluster.opt.GetScheduleConfig().Clone()
 	scheCfg.StoreLimitVersion = "v1"
 	cluster.opt.SetScheduleConfig(scheCfg)
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))

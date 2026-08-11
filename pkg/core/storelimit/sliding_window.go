@@ -23,7 +23,7 @@ const (
 	// minSnapSize is the min value to check the windows has enough size.
 	minSnapSize = 10
 	// defaultWindowSize is the default window size.
-	defaultWindowSize = 100
+	defaultWindowSize int64 = 100
 
 	defaultProportion = 20
 	defaultIntegral   = 10
@@ -33,20 +33,36 @@ var _ StoreLimit = &SlidingWindows{}
 
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
-	mu      syncutil.RWMutex
-	windows []*window
-	lastSum float64
+	mu             syncutil.RWMutex
+	windows        []*window
+	baseWindowSize int64
+	lastSum        float64
 }
 
 // NewSlidingWindows is the construct of SlidingWindows.
 func NewSlidingWindows() *SlidingWindows {
+	return NewSlidingWindowsWithSize(defaultWindowSize)
+}
+
+// NewSlidingWindowsWithSize constructs SlidingWindows with the specified base
+// window size in MiB.
+func NewSlidingWindowsWithSize(windowSize int64) *SlidingWindows {
+	windowSize = normalizeWindowSize(windowSize)
 	windows := make([]*window, constant.PriorityLevelLen)
 	for i := range constant.PriorityLevelLen {
-		windows[i] = newWindow(int64(defaultWindowSize) >> i)
+		windows[i] = newWindow(windowSize >> i)
 	}
 	return &SlidingWindows{
-		windows: windows,
+		windows:        windows,
+		baseWindowSize: windowSize,
 	}
+}
+
+func normalizeWindowSize(windowSize int64) int64 {
+	if windowSize < minSnapSize {
+		return minSnapSize
+	}
+	return windowSize
 }
 
 // Version returns v2
@@ -68,16 +84,39 @@ func (s *SlidingWindows) Feedback(e float64) {
 	// In the final scene, the sum of the error should be stable and the current error should be zero.
 	cap := defaultProportion*e + defaultIntegral*s.lastSum
 	// The capacity should be at least the default window size.
-	if cap < defaultWindowSize {
-		cap = defaultWindowSize
+	if cap < float64(s.baseWindowSize) {
+		cap = float64(s.baseWindowSize)
 	}
-	s.set(cap, SendSnapshot)
+	s.setLocked(cap, SendSnapshot)
 }
 
-// Reset does nothing because the capacity depends on the feedback.
-func (*SlidingWindows) Reset(_ float64, _ Type) {}
+// Reset updates the configured base window for SendSnapshot.
+func (s *SlidingWindows) Reset(rate float64, typ Type) {
+	if typ == SendSnapshot {
+		s.SetWindowSize(int64(rate))
+	}
+}
+
+// SetWindowSize updates the base window size while preserving in-flight usage.
+func (s *SlidingWindows) SetWindowSize(windowSize int64) {
+	windowSize = normalizeWindowSize(windowSize)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.baseWindowSize == windowSize {
+		return
+	}
+	s.baseWindowSize = windowSize
+	s.lastSum = 0
+	s.setLocked(float64(windowSize), SendSnapshot)
+}
 
 func (s *SlidingWindows) set(cap float64, typ Type) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setLocked(cap, typ)
+}
+
+func (s *SlidingWindows) setLocked(cap float64, typ Type) {
 	if typ != SendSnapshot {
 		return
 	}

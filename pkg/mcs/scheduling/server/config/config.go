@@ -518,8 +518,8 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 	}
 	cfg := o.GetScheduleConfig().Clone()
 	limitCfg := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    cfg.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: cfg.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
@@ -540,6 +540,11 @@ func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type)
 	default:
 		panic("no such limit type")
 	}
+}
+
+// GetStoreLimitV2WindowSize returns the configured v2 base window size in MiB.
+func (o *PersistConfig) GetStoreLimitV2WindowSize() int64 {
+	return o.GetScheduleConfig().GetStoreLimitV2WindowSize()
 }
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
@@ -597,13 +602,13 @@ func (o *PersistConfig) SetAllStoresLimit(typ storelimit.Type, ratePerMin float6
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		v.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		v.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
 			v.StoreLimit[storeID] = sc

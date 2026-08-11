@@ -1155,11 +1155,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	opts := make([]core.StoreCreateOption, 0)
 	if limit == nil || limit.Version() != version {
 		if version == storelimit.VersionV2 {
-			limit = storelimit.NewSlidingWindows()
+			limit = storelimit.NewSlidingWindowsWithSize(c.opt.GetScheduleConfig().GetStoreLimitV2WindowSize())
 		} else {
 			limit = storelimit.NewStoreRateLimit(0.0)
 		}
 		opts = append(opts, core.SetStoreLimit(limit))
+	} else if slidingWindows, ok := limit.(*storelimit.SlidingWindows); ok {
+		slidingWindows.SetWindowSize(c.opt.GetScheduleConfig().GetStoreLimitV2WindowSize())
 	}
 
 	nowTime := time.Now()
@@ -2390,8 +2392,8 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	}
 
 	slc := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    cfg.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: cfg.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	if core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		slc = sc.StoreLimitConfig{
@@ -2591,14 +2593,10 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
 	old := c.opt.GetScheduleConfig().Clone()
-	oldAdd := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
-	oldRemove := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {
 		// roll back the store limit
 		c.opt.SetScheduleConfig(old)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAdd)
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemove)
 		log.Error("persist store limit meet error", errs.ZapError(err))
 		return err
 	}

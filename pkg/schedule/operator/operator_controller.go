@@ -1058,9 +1058,13 @@ func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit
 		log.Error("invalid store ID", zap.Uint64("store-id", storeID))
 		return nil
 	}
-	// The other limits do not need to update by config exclude StoreRateLimit.
-	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
-		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+	switch limit := s.GetStoreLimit().(type) {
+	case *storelimit.StoreRateLimit:
+		if limit.Rate(limitType) != ratePerSec {
+			oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
+		}
+	case *storelimit.SlidingWindows:
+		limit.SetWindowSize(oc.config.GetStoreLimitV2WindowSize())
 	}
 	return s.GetStoreLimit()
 }

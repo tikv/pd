@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
@@ -143,6 +144,13 @@ func TestValidation(t *testing.T) {
 	cfg.Schedule.LowSpaceRatio = 0.4
 	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.8
+	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimitV2WindowSize = 9
+	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimitV2WindowSize = 100
+	cfg.Schedule.StoreLimitDefault.AddPeer = 0
+	re.Error(cfg.Schedule.Validate())
+	cfg.Schedule.StoreLimitDefault.AddPeer = 15
 	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
@@ -574,6 +582,32 @@ func newTestScheduleOption() (*PersistOptions, error) {
 	}
 	opt := NewPersistOptions(cfg)
 	return opt, nil
+}
+
+func TestStoreLimitConfigPersistence(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.Equal(float64(15), opt.GetScheduleConfig().GetDefaultStoreLimit(storelimit.AddPeer))
+	re.Equal(float64(15), opt.GetScheduleConfig().GetDefaultStoreLimit(storelimit.RemovePeer))
+	re.EqualValues(100, opt.GetScheduleConfig().GetStoreLimitV2WindowSize())
+
+	opt.SetAllStoresLimit(storelimit.AddPeer, 2000)
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 1500)
+	cfg := opt.GetScheduleConfig().Clone()
+	cfg.StoreLimitV2WindowSize = 32768
+	opt.SetScheduleConfig(cfg)
+	re.Equal(float64(2000), opt.GetStoreLimit(100).AddPeer)
+	re.Equal(float64(1500), opt.GetStoreLimit(100).RemovePeer)
+
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(opt.Persist(storage))
+	reloaded, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloaded.Reload(storage))
+	re.Equal(float64(2000), reloaded.GetStoreLimit(101).AddPeer)
+	re.Equal(float64(1500), reloaded.GetStoreLimit(101).RemovePeer)
+	re.EqualValues(32768, reloaded.GetScheduleConfig().GetStoreLimitV2WindowSize())
 }
 
 func TestRateLimitClone(t *testing.T) {

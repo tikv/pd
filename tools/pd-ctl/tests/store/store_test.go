@@ -288,6 +288,8 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
 	re.Equal(float64(20), storesLimit[1].AddPeer)
 	re.Equal(float64(20), storesLimit[1].RemovePeer)
+	re.Equal(float64(20), leaderServer.GetPersistOptions().GetScheduleConfig().StoreLimitDefault.AddPeer)
+	re.Equal(float64(20), leaderServer.GetPersistOptions().GetScheduleConfig().StoreLimitDefault.RemovePeer)
 
 	// store limit all <rate> <type>
 	args = []string{"-u", pdAddr, "store", "limit", "all", "25", "remove-peer"}
@@ -491,14 +493,22 @@ func (s *storeTestSuite) checkStore(cluster *pdTests.TestCluster) {
 	re.NoError(err)
 	re.NotContains(string(output), "PANIC")
 
-	// store limit all 201 is invalid for all
-	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}
+	// store limit all 2000 is valid for all
+	args = []string{"-u", pdAddr, "store", "limit", "all", "2000", "add-peer"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.AddPeer)
+	re.Equal(float64(2000), limit)
+	re.Equal(float64(2000), leaderServer.GetPersistOptions().GetScheduleConfig().StoreLimitDefault.AddPeer)
+
+	// store limit all 2001 is invalid for all
+	args = []string{"-u", pdAddr, "store", "limit", "all", "2001"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "rate should be less than")
 
-	// store limit all 201 is invalid for label
-	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
+	// store limit all 2001 is invalid for label
+	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "2001", "add-peer"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "rate should be less than")

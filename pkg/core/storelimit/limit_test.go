@@ -94,6 +94,31 @@ func TestSlidingWindow(t *testing.T) {
 	}
 }
 
+func TestSlidingWindowConfigurableSize(t *testing.T) {
+	re := require.New(t)
+	s := NewSlidingWindowsWithSize(1000)
+	re.EqualValues(1000, s.GetCap())
+	re.True(s.Take(900, SendSnapshot, constant.Low))
+	re.Equal([]int64{900, 0, 0, 0}, s.GetUsed())
+
+	// Growing or shrinking the configured window must preserve in-flight usage.
+	s.SetWindowSize(2000)
+	re.EqualValues(2000, s.GetCap())
+	re.Equal([]int64{900, 0, 0, 0}, s.GetUsed())
+	s.SetWindowSize(500)
+	re.EqualValues(500, s.GetCap())
+	re.Equal([]int64{900, 0, 0, 0}, s.GetUsed())
+	re.False(s.Available(100, SendSnapshot, constant.Low))
+	s.Ack(900, SendSnapshot)
+	re.True(s.Available(100, SendSnapshot, constant.Low))
+
+	// Reset is the generic StoreLimit hook for hot-reloading SendSnapshot.
+	s.Reset(3000, SendSnapshot)
+	re.EqualValues(3000, s.GetCap())
+	s.Reset(100, AddPeer)
+	re.EqualValues(3000, s.GetCap())
+}
+
 func TestWindow(t *testing.T) {
 	re := require.New(t)
 	capacity := int64(100 * 10)
