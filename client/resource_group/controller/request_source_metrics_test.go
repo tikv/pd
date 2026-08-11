@@ -192,6 +192,9 @@ func TestCleanupResourceGroupRemovesRequestSourceMetrics(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-cleanup",
@@ -246,6 +249,9 @@ func TestCleanupDoesNotReexportExistingCachedHandle(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-cleanup-cached-handle",
@@ -306,6 +312,9 @@ func TestCleanupPreventsRecreateRequestSourceMetrics(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-cleanup-prevent-recreate",
@@ -365,6 +374,9 @@ func TestTombstoneCleanupRemovesExistingRequestSourceMetrics(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-tombstone-cleanup",
@@ -426,6 +438,9 @@ func TestRevivedResourceGroupCleanupRemovesExistingRequestSourceMetrics(t *testi
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-revive-cleanup",
@@ -506,6 +521,9 @@ func TestGetOrCreateAfterCleanupReturnsFreshState(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-create-after-cleanup",
@@ -592,6 +610,9 @@ func TestCleanupThenRecreateViaFullPath(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	controller, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-full-recreate",
@@ -663,6 +684,9 @@ func TestStopCleansUpRequestSourceMetricsState(t *testing.T) {
 	mockProvider := newMockResourceGroupProvider()
 	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, 0)
 	re.NoError(err)
+	defer func() {
+		re.NoError(c.Stop())
+	}()
 
 	group := &rmpb.ResourceGroup{
 		Name: "request-source-stop-cleanup",

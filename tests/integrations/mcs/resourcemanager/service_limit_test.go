@@ -87,6 +87,8 @@ func (suite *serviceLimitTestSuite) SetupTest() {
 }
 
 func (suite *serviceLimitTestSuite) TearDownTest() {
+	// Release the controller ownership so the next test can acquire it.
+	suite.Require().NoError(suite.controller.Stop())
 	suite.cancel()
 	suite.cluster.Destroy()
 }

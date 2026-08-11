@@ -186,10 +186,21 @@ type ResourceGroupsController struct {
 	// 0 means not loaded or not configured (treated as v1).
 	ruVersion atomic.Int32
 
+	// stopOnce makes Stop idempotent and guarantees the process-wide
+	// ownership slot is released exactly once. stopped keeps a stopped
+	// controller from being started afterwards, which would leak an
+	// unowned run loop.
+	stopOnce sync.Once
+	stopped  atomic.Bool
+
 	wg sync.WaitGroup
 }
 
-// NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
+// NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor.
+// At most one controller acquired through this constructor may exist in a
+// process at a time; a second acquisition fails with
+// ErrClientResourceGroupControllerAlreadyExists until the previous controller
+// has released ownership via Stop.
 func NewResourceGroupController(
 	ctx context.Context,
 	clientUniqueID uint64,
@@ -198,8 +209,14 @@ func NewResourceGroupController(
 	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
+	// Reserve the process-wide ownership slot before any side effect: the
+	// steps below perform network I/O and update process-global state.
+	if err := ownership.reserve(); err != nil {
+		return nil, err
+	}
 	config, err := loadServerConfig(ctx, provider)
 	if err != nil {
+		ownership.unreserve()
 		return nil, err
 	}
 	if requestUnitConfig != nil {
@@ -226,6 +243,7 @@ func NewResourceGroupController(
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	// Extract initial ruVersion from the controller config's RUVersionPolicy.
 	controller.updateRUVersionFromConfig(config)
+	ownership.bind(controller)
 	return controller, nil
 }
 
@@ -299,7 +317,13 @@ const (
 )
 
 // Start starts ResourceGroupController service.
+// Canceling ctx stops the run loop but does not release the process-wide
+// ownership slot; call Stop to release it.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
+	if c.stopped.Load() {
+		log.Error("resource group controller is already stopped, cannot be started again")
+		return
+	}
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
 	go func() {
@@ -514,13 +538,19 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 	}()
 }
 
-// Stop stops ResourceGroupController service.
+// Stop stops ResourceGroupController service and releases the process-wide
+// ownership slot, allowing a replacement controller to be constructed. It is
+// idempotent and also valid on a controller that was never started. A stopped
+// controller cannot be started again.
 func (c *ResourceGroupsController) Stop() error {
-	if c.loopCancel == nil {
-		return errors.Errorf("resource groups controller does not start")
-	}
-	c.loopCancel()
-	c.wg.Wait()
+	c.stopOnce.Do(func() {
+		c.stopped.Store(true)
+		if c.loopCancel != nil {
+			c.loopCancel()
+			c.wg.Wait()
+		}
+		ownership.release(c)
+	})
 	return nil
 }
 
