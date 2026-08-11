@@ -201,14 +201,35 @@ func TestCheckPDMemberReadyTriesNextURLAfterTimeout(t *testing.T) {
 	cmd.SetContext(context.Background())
 
 	found, err := checkPDMemberReady(cmd, targetPDName)
-	re.True(found)
 	re.NoError(err)
+	re.True(found)
 	re.Equal([]string{"target-pd-1:2379", "target-pd-2:2379"}, rt.readyHosts)
 	re.Len(rt.readyTimeouts, 2)
 	for _, timeout := range rt.readyTimeouts {
 		re.Greater(timeout, readyRequestTimeout-time.Second)
 		re.LessOrEqual(timeout, readyRequestTimeout)
 	}
+}
+
+func TestCheckPDMemberReadyTriesNextURLAfterInvalidURL(t *testing.T) {
+	re := require.New(t)
+	rt := &transferLeaderRoundTripper{
+		memberName:      targetPDName,
+		clientURLs:      []string{"http://[::1", "http://target-pd-2:2379"},
+		readyStatusCode: http.StatusOK,
+	}
+	oldClient := dialClient
+	dialClient = &http.Client{Transport: rt}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewMemberCommand()
+	cmd.Flags().String("pd", mockPDURL, "")
+	cmd.SetContext(context.Background())
+
+	found, err := checkPDMemberReady(cmd, targetPDName)
+	re.NoError(err)
+	re.True(found)
+	re.Equal([]string{"target-pd-2:2379"}, rt.readyHosts)
 }
 
 func TestTransferPDLeaderForceSkipsReadinessPreflight(t *testing.T) {

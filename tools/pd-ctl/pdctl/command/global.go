@@ -190,7 +190,7 @@ func doRequestSingleEndpointWithContext(ctx context.Context, cmd *cobra.Command,
 	var resp string
 	header := buildNoProxyHeader(cmd, customHeader)
 
-	err := requestURL(cmd, endpoint, func(endpoint string) error {
+	err := requestURL(endpoint, func(endpoint string) error {
 		return doWithContext(ctx, endpoint, prefix, method, &resp, header, b)
 	})
 	return resp, err
@@ -262,11 +262,10 @@ func tryURLs(cmd *cobra.Command, endpoints []string, f DoFunc) error {
 	return err
 }
 
-func requestURL(cmd *cobra.Command, endpoint string, f DoFunc) error {
+func requestURL(endpoint string, f DoFunc) error {
 	endpoint, err := checkURL(endpoint)
 	if err != nil {
-		cmd.Println(err.Error())
-		os.Exit(1)
+		return err
 	}
 	return f(endpoint)
 }
