@@ -94,16 +94,6 @@ type Cluster struct {
 	pdLeader          atomic.Value
 	running           atomic.Bool
 
-	// cleanedRemovedStoreMetrics tracks store IDs whose per-store heartbeat/bucket
-	// metrics (defined in this package, see metrics.go) have already been deleted by
-	// collectMetrics after the store was tombstoned. Only collectMetrics's own
-	// goroutine (via runMetricsCollectionJob's ticker) touches this map, so it needs
-	// no lock. Without it, DeleteStoreMetrics would DeletePartialMatch-scan every
-	// per-store metric vector on every tick for as long as the store stays
-	// tombstoned-but-not-yet-removed (up to the tombstone GC interval), even though
-	// there is nothing left to delete after the first pass.
-	cleanedRemovedStoreMetrics map[uint64]struct{}
-
 	backendAddress string
 	httpClient     *http.Client
 
@@ -156,23 +146,22 @@ func NewCluster(
 		return nil, err
 	}
 	c := &Cluster{
-		ctx:                        ctx,
-		cancel:                     cancel,
-		BasicCluster:               basicCluster,
-		ruleManager:                ruleManager,
-		keyRangeManager:            keyrange.NewManager(),
-		labelerManager:             labelerManager,
-		affinityManager:            affinityManager,
-		persistConfig:              persistConfig,
-		hotStat:                    statistics.NewHotStat(ctx, basicCluster),
-		labelStats:                 statistics.NewLabelStatistics(),
-		regionStats:                statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
-		storage:                    storage,
-		hbStreams:                  hbStreams,
-		checkMembershipCh:          checkMembershipCh,
-		httpClient:                 httpClient,
-		backendAddress:             backendAddress,
-		cleanedRemovedStoreMetrics: make(map[uint64]struct{}),
+		ctx:               ctx,
+		cancel:            cancel,
+		BasicCluster:      basicCluster,
+		ruleManager:       ruleManager,
+		keyRangeManager:   keyrange.NewManager(),
+		labelerManager:    labelerManager,
+		affinityManager:   affinityManager,
+		persistConfig:     persistConfig,
+		hotStat:           statistics.NewHotStat(ctx, basicCluster),
+		labelStats:        statistics.NewLabelStatistics(),
+		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
+		storage:           storage,
+		hbStreams:         hbStreams,
+		checkMembershipCh: checkMembershipCh,
+		httpClient:        httpClient,
+		backendAddress:    backendAddress,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -734,24 +723,19 @@ func (c *Cluster) runMetricsCollectionJob() {
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
 	stores := c.GetStores()
-	// Stores still tombstoned this tick; anything in cleanedRemovedStoreMetrics but
-	// not in this set has been fully removed, so its tracking entry can be dropped.
-	removed := make(map[uint64]struct{})
+	// Delete unconditionally on every tick rather than tracking which stores were
+	// already cleaned: a region heartbeat for an already-tombstoned store can still
+	// land here and recreate a series. RegionHeartbeat (grpc_service.go) only checks
+	// store == nil, not store.IsRemoved(), before recording regionHeartbeat* metrics.
+	// If cleanup only ran once per store, such a late write would never get swept
+	// again for as long as the store stays tombstoned-but-not-yet-removed.
+	// DeletePartialMatch on labels that no longer exist is a cheap no-op, so
+	// repeating it every tick is safe.
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
 		if s.IsRemoved() {
-			storeID := s.GetID()
-			removed[storeID] = struct{}{}
-			if _, cleaned := c.cleanedRemovedStoreMetrics[storeID]; !cleaned {
-				DeleteStoreMetrics(s.GetAddress(), strconv.FormatUint(storeID, 10))
-				c.cleanedRemovedStoreMetrics[storeID] = struct{}{}
-			}
-		}
-	}
-	for storeID := range c.cleanedRemovedStoreMetrics {
-		if _, stillTombstoned := removed[storeID]; !stillTombstoned {
-			delete(c.cleanedRemovedStoreMetrics, storeID)
+			DeleteStoreMetrics(s.GetAddress(), strconv.FormatUint(s.GetID(), 10))
 		}
 	}
 	statsMap.Collect()

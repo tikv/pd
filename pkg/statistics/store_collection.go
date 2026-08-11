@@ -18,8 +18,9 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"

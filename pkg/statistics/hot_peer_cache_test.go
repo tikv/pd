@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 
@@ -838,9 +839,13 @@ func TestRemoveExpireItems(t *testing.T) {
 	re.Nil(cache.peersOfStore[store1ID])
 	re.Nil(cache.peersOfStore[store2ID])
 	re.NotEmpty(cache.regionsOfStore[region3.GetLeader().GetStoreId()])
-	// gc should also delete the hotcache status gauge series of the removed stores, not just the in-memory map entries.
-	re.Zero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store1ID), cache.kind.String())))
-	re.Zero(testutil.ToFloat64(hotCacheStatusGauge.WithLabelValues("add_item", storeTag(store2ID), cache.kind.String())))
+	// gc should also delete the hotcache status gauge series of the removed stores, not
+	// just the in-memory map entries. DeletePartialMatch returns how many series it
+	// found and removed, so a zero return proves nothing is left -- unlike checking
+	// WithLabelValues' value, which would recreate a fresh (zero-valued) series on
+	// every call regardless of whether gc() actually deleted the old one.
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store1ID), "type": cache.kind.String()}))
+	re.Zero(hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(store2ID), "type": cache.kind.String()}))
 }
 
 func TestDifferentReportInterval(t *testing.T) {
