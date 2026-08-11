@@ -35,67 +35,57 @@ import (
 )
 
 type gcStateReader interface {
-	getGCState(context.Context, uint32) (gc.GCState, error)
-	getGlobalGCState(context.Context) (gc.ClusterGCStates, error)
-	getAllKeyspacesGCStates(context.Context) (gc.ClusterGCStates, error)
+	getGCState(
+		ctx context.Context,
+		keyspaceID uint32,
+		includeGlobalGCBarriers bool,
+	) (gc.GCState, error)
+	getAllKeyspacesGCStates(
+		ctx context.Context,
+		includeGlobalGCBarriers bool,
+	) (gc.ClusterGCStates, error)
 	close()
 }
 
 type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
 
-const gcStateIncludeExpiredFlag = "include-expired"
+const (
+	gcStateIncludeExpiredFlag        = "include-expired"
+	gcStateExcludeGlobalBarriersFlag = "exclude-global-barriers"
+)
 
 type pdGCStateReader struct {
 	client pd.Client
 }
 
-type clusterGCStatesClient interface {
-	GetAllKeyspacesGCStates(
-		context.Context,
-		...gc.GCStatesAPIOption,
-	) (gc.ClusterGCStates, error)
-}
-
 func (r *pdGCStateReader) getGCState(
 	ctx context.Context,
 	keyspaceID uint32,
+	includeGlobalGCBarriers bool,
 ) (gc.GCState, error) {
 	return r.client.GetGCStatesClient(keyspaceID).GetGCState(
 		ctx,
-		gc.ExcludeGCBarriers(false),
+		gcStateAPIOptions(includeGlobalGCBarriers)...,
 	)
 }
 
 func (r *pdGCStateReader) getAllKeyspacesGCStates(
 	ctx context.Context,
+	includeGlobalGCBarriers bool,
 ) (gc.ClusterGCStates, error) {
-	return readClusterGCStates(
+	return r.client.GetGCStatesClient(constant.NullKeyspaceID).GetAllKeyspacesGCStates(
 		ctx,
-		r.client.GetGCStatesClient(constant.NullKeyspaceID),
-		false,
+		gcStateAPIOptions(includeGlobalGCBarriers)...,
 	)
 }
 
-func (r *pdGCStateReader) getGlobalGCState(
-	ctx context.Context,
-) (gc.ClusterGCStates, error) {
-	return readClusterGCStates(
-		ctx,
-		r.client.GetGCStatesClient(constant.NullKeyspaceID),
-		true,
-	)
-}
-
-func readClusterGCStates(
-	ctx context.Context,
-	client clusterGCStatesClient,
-	excludeGCBarriers bool,
-) (gc.ClusterGCStates, error) {
-	return client.GetAllKeyspacesGCStates(
-		ctx,
-		gc.ExcludeGCBarriers(excludeGCBarriers),
-		gc.ExcludeGlobalGCBarriers(false),
-	)
+func gcStateAPIOptions(
+	includeGlobalGCBarriers bool,
+) []gc.GCStatesAPIOption {
+	return []gc.GCStatesAPIOption{
+		gc.ExcludeGCBarriers(false),
+		gc.ExcludeGlobalGCBarriers(!includeGlobalGCBarriers),
+	}
 }
 
 func (r *pdGCStateReader) close() {
@@ -146,21 +136,18 @@ type gcStateOutput struct {
 }
 
 type keyspaceGCStateOutput struct {
-	RequestedKeyspaceID uint32            `json:"requested_keyspace_id"`
-	EffectiveKeyspaceID uint32            `json:"effective_keyspace_id"`
-	IsKeyspaceLevelGC   bool              `json:"is_keyspace_level_gc"`
-	TxnSafePoint        uint64            `json:"txn_safe_point"`
-	GCSafePoint         uint64            `json:"gc_safe_point"`
-	GCBarriers          []gcBarrierOutput `json:"gc_barriers"`
+	RequestedKeyspaceID uint32             `json:"requested_keyspace_id"`
+	EffectiveKeyspaceID uint32             `json:"effective_keyspace_id"`
+	IsKeyspaceLevelGC   bool               `json:"is_keyspace_level_gc"`
+	TxnSafePoint        uint64             `json:"txn_safe_point"`
+	GCSafePoint         uint64             `json:"gc_safe_point"`
+	GCBarriers          []gcBarrierOutput  `json:"gc_barriers"`
+	GlobalGCBarriers    *[]gcBarrierOutput `json:"global_gc_barriers,omitempty"`
 }
 
 type allGCStatesOutput struct {
-	GCStates         []gcStateOutput   `json:"gc_states"`
-	GlobalGCBarriers []gcBarrierOutput `json:"global_gc_barriers"`
-}
-
-type globalGCStateOutput struct {
-	GlobalGCBarriers []gcBarrierOutput `json:"global_gc_barriers"`
+	GCStates         []gcStateOutput    `json:"gc_states"`
+	GlobalGCBarriers *[]gcBarrierOutput `json:"global_gc_barriers,omitempty"`
 }
 
 func parseGCStateKeyspaceID(value string) (uint32, error) {
@@ -239,6 +226,7 @@ func newKeyspaceGCStateOutput(
 	requestedKeyspaceID uint32,
 	state gc.GCState,
 	includeExpired bool,
+	includeGlobalGCBarriers bool,
 ) (keyspaceGCStateOutput, error) {
 	barriers, err := state.GetGCBarriers()
 	if err != nil {
@@ -248,13 +236,38 @@ func newKeyspaceGCStateOutput(
 			requestedKeyspaceID,
 		)
 	}
+
+	var globalOutput *[]gcBarrierOutput
+	if includeGlobalGCBarriers {
+		if !state.HasGlobalGCBarriers() {
+			return keyspaceGCStateOutput{}, errors.Errorf(
+				"gc-state keyspace requires a PD server whose GetGCState " +
+					"supports global GC barriers; retry with " +
+					"--exclude-global-barriers",
+			)
+		}
+		globalBarriers, err := state.GetGlobalGCBarriers()
+		if err != nil {
+			return keyspaceGCStateOutput{}, errors.WithStack(err)
+		}
+		converted := newGlobalGCBarrierOutputs(
+			globalBarriers,
+			includeExpired,
+		)
+		globalOutput = &converted
+	}
+
 	return keyspaceGCStateOutput{
 		RequestedKeyspaceID: requestedKeyspaceID,
 		EffectiveKeyspaceID: state.KeyspaceID,
 		IsKeyspaceLevelGC:   state.IsKeyspaceLevelGC,
 		TxnSafePoint:        state.TxnSafePoint,
 		GCSafePoint:         state.GCSafePoint,
-		GCBarriers:          newLocalGCBarrierOutputs(barriers, includeExpired),
+		GCBarriers: newLocalGCBarrierOutputs(
+			barriers,
+			includeExpired,
+		),
+		GlobalGCBarriers: globalOutput,
 	}, nil
 }
 
@@ -276,7 +289,11 @@ func newGCStateOutput(state gc.GCState, includeExpired bool) (gcStateOutput, err
 	}, nil
 }
 
-func newAllGCStatesOutput(clusterState gc.ClusterGCStates, includeExpired bool) (allGCStatesOutput, error) {
+func newAllGCStatesOutput(
+	clusterState gc.ClusterGCStates,
+	includeExpired bool,
+	includeGlobalGCBarriers bool,
+) (allGCStatesOutput, error) {
 	states := make([]gcStateOutput, 0, len(clusterState.GCStates))
 	for _, state := range clusterState.GCStates {
 		// Unified-GC keyspaces have marker entries, but their GC state is owned by
@@ -294,23 +311,25 @@ func newAllGCStatesOutput(clusterState gc.ClusterGCStates, includeExpired bool) 
 		return states[i].KeyspaceID < states[j].KeyspaceID
 	})
 
-	globalOutput, err := newGlobalGCStateOutput(clusterState, includeExpired)
-	if err != nil {
-		return allGCStatesOutput{}, err
+	var globalOutput *[]gcBarrierOutput
+	if includeGlobalGCBarriers {
+		if !clusterState.HasGlobalGCBarriers() {
+			return allGCStatesOutput{}, errors.New(
+				"gc-state all response does not include global GC barriers; " +
+					"retry with --exclude-global-barriers",
+			)
+		}
+		globalBarriers, err := clusterState.GetGlobalGCBarriers()
+		if err != nil {
+			return allGCStatesOutput{}, errors.WithStack(err)
+		}
+		converted := newGlobalGCBarrierOutputs(globalBarriers, includeExpired)
+		globalOutput = &converted
 	}
+
 	return allGCStatesOutput{
 		GCStates:         states,
-		GlobalGCBarriers: globalOutput.GlobalGCBarriers,
-	}, nil
-}
-
-func newGlobalGCStateOutput(clusterState gc.ClusterGCStates, includeExpired bool) (globalGCStateOutput, error) {
-	globalBarriers, err := clusterState.GetGlobalGCBarriers()
-	if err != nil {
-		return globalGCStateOutput{}, errors.Annotate(err, "failed to read global GC barriers")
-	}
-	return globalGCStateOutput{
-		GlobalGCBarriers: newGlobalGCBarrierOutputs(globalBarriers, includeExpired),
+		GlobalGCBarriers: globalOutput,
 	}, nil
 }
 
@@ -322,6 +341,18 @@ func getGCStateIncludeExpired(cmd *cobra.Command) (bool, error) {
 	return includeExpired, nil
 }
 
+func getGCStateIncludeGlobalGCBarriers(
+	cmd *cobra.Command,
+) (bool, error) {
+	excludeGlobalGCBarriers, err := cmd.Flags().GetBool(
+		gcStateExcludeGlobalBarriersFlag,
+	)
+	if err != nil {
+		return false, errors.WithStack(err)
+	}
+	return !excludeGlobalGCBarriers, nil
+}
+
 // NewGCStateCommand returns the read-only GC state command.
 func NewGCStateCommand() *cobra.Command {
 	return buildGCStateCommand(newPDGCStateReader)
@@ -331,11 +362,11 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "gc-state",
 		Short: "show keyspace and cluster-wide GC state",
-		Long: "Show effective per-keyspace GC safe points and local barriers, " +
-			"and cluster-wide GC state. Expired barriers awaiting lazy deletion " +
-			"are hidden by default; use --include-expired to include zero-TTL " +
-			"barriers returned by PD. Use keyspace for one effective GC " +
-			"scope, global for cluster-wide state, or all for a combined view.",
+		Long: "Show effective per-keyspace GC safe points and local and global " +
+			"barriers. Expired barriers awaiting lazy deletion are hidden by " +
+			"default; use --include-expired to include zero-TTL barriers returned " +
+			"by PD. Use keyspace for one effective GC scope or all for every " +
+			"effective GC scope.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -346,9 +377,13 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 		false,
 		"include zero-TTL barriers returned by PD, which normally represent expired barriers awaiting lazy deletion",
 	)
+	command.PersistentFlags().Bool(
+		gcStateExcludeGlobalBarriersFlag,
+		false,
+		"exclude global GC barriers from the PD request and JSON output",
+	)
 	command.AddCommand(
 		newGCStateKeyspaceCommand(factory),
-		newGCStateGlobalCommand(factory),
 		newGCStateAllCommand(factory),
 	)
 	return command
@@ -359,9 +394,9 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "keyspace <keyspace-id>",
 		Short: "show one keyspace's effective GC state",
-		Long: "Show one keyspace's effective GC safe points and local barriers. " +
-			"Use gc-state global to inspect only cluster-wide state, or " +
-			"gc-state all for a combined view. " +
+		Long: "Show one keyspace's effective GC safe points and local and global barriers. " +
+			"Use --exclude-global-barriers to omit cluster-wide barriers. " +
+			"Use gc-state all to inspect every effective GC scope. " +
 			"The decimal NullKeyspace ID is " + nullKeyspaceID + ".",
 		Example: "  pd-ctl gc-state keyspace 42\n" +
 			"  pd-ctl gc-state keyspace " + nullKeyspaceID,
@@ -375,13 +410,21 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			includeGlobalGCBarriers, err := getGCStateIncludeGlobalGCBarriers(cmd)
+			if err != nil {
+				return err
+			}
 			reader, err := factory(cmd)
 			if err != nil {
 				return errors.Annotate(err, "failed to create PD RPC client")
 			}
 			defer reader.close()
 
-			state, err := reader.getGCState(cmd.Context(), keyspaceID)
+			state, err := reader.getGCState(
+				cmd.Context(),
+				keyspaceID,
+				includeGlobalGCBarriers,
+			)
 			if err != nil {
 				if status.Code(err) == codes.Unimplemented {
 					return errors.Annotate(err,
@@ -390,43 +433,12 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 				return errors.Annotatef(err,
 					"failed to get GC state for keyspace %d", keyspaceID)
 			}
-			output, err := newKeyspaceGCStateOutput(keyspaceID, state, includeExpired)
-			if err != nil {
-				return err
-			}
-			return writeGCStateJSON(cmd, output)
-		},
-	}
-}
-
-func newGCStateGlobalCommand(factory gcStateReaderFactory) *cobra.Command {
-	return &cobra.Command{
-		Use:     "global",
-		Short:   "show cluster-wide GC state",
-		Long:    "Show cluster-wide GC state without per-keyspace states. The current output contains global GC barriers.",
-		Example: "  pd-ctl gc-state global",
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			includeExpired, err := getGCStateIncludeExpired(cmd)
-			if err != nil {
-				return err
-			}
-			reader, err := factory(cmd)
-			if err != nil {
-				return errors.Annotate(err, "failed to create PD RPC client")
-			}
-			defer reader.close()
-
-			clusterState, err := reader.getGlobalGCState(cmd.Context())
-			if err != nil {
-				if status.Code(err) == codes.Unimplemented {
-					return errors.Annotate(err,
-						"gc-state global requires a PD server that supports "+
-							"GetAllKeyspacesGCStates")
-				}
-				return errors.Annotate(err, "failed to get global GC state")
-			}
-			output, err := newGlobalGCStateOutput(clusterState, includeExpired)
+			output, err := newKeyspaceGCStateOutput(
+				keyspaceID,
+				state,
+				includeExpired,
+				includeGlobalGCBarriers,
+			)
 			if err != nil {
 				return err
 			}
@@ -439,13 +451,17 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 	return &cobra.Command{
 		Use:   "all",
 		Short: "show effective GC scopes and cluster-wide GC state",
-		Long: "Show all effective GC scopes and local barriers, with " +
-			"cluster-wide global barriers once at the top level. Use " +
-			"gc-state global to inspect only cluster-wide state.",
+		Long: "Show all effective GC scopes and local barriers, with global " +
+			"barriers once at the top level. Use --exclude-global-barriers to " +
+			"omit cluster-wide barriers.",
 		Example: "  pd-ctl gc-state all",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			includeExpired, err := getGCStateIncludeExpired(cmd)
+			if err != nil {
+				return err
+			}
+			includeGlobalGCBarriers, err := getGCStateIncludeGlobalGCBarriers(cmd)
 			if err != nil {
 				return err
 			}
@@ -455,7 +471,10 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 			}
 			defer reader.close()
 
-			clusterState, err := reader.getAllKeyspacesGCStates(cmd.Context())
+			clusterState, err := reader.getAllKeyspacesGCStates(
+				cmd.Context(),
+				includeGlobalGCBarriers,
+			)
 			if err != nil {
 				if status.Code(err) == codes.Unimplemented {
 					return errors.Annotate(err,
@@ -464,7 +483,11 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 				}
 				return errors.Annotate(err, "failed to get all keyspaces GC states")
 			}
-			output, err := newAllGCStatesOutput(clusterState, includeExpired)
+			output, err := newAllGCStatesOutput(
+				clusterState,
+				includeExpired,
+				includeGlobalGCBarriers,
+			)
 			if err != nil {
 				return err
 			}

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -36,35 +37,32 @@ import (
 )
 
 type fakeGCStateReader struct {
-	state          gc.GCState
-	clusterState   gc.ClusterGCStates
-	err            error
-	requestedID    uint32
-	getStateCalls  int
-	getAllCalls    int
-	getGlobalCalls int
-	closed         bool
-}
-
-func (r *fakeGCStateReader) getGlobalGCState(
-	_ context.Context,
-) (gc.ClusterGCStates, error) {
-	r.getGlobalCalls++
-	return r.clusterState, r.err
+	state                   gc.GCState
+	clusterState            gc.ClusterGCStates
+	err                     error
+	requestedID             uint32
+	includeGlobalGCBarriers bool
+	getStateCalls           int
+	getAllCalls             int
+	closed                  bool
 }
 
 func (r *fakeGCStateReader) getGCState(
 	_ context.Context,
 	keyspaceID uint32,
+	includeGlobalGCBarriers bool,
 ) (gc.GCState, error) {
 	r.requestedID = keyspaceID
+	r.includeGlobalGCBarriers = includeGlobalGCBarriers
 	r.getStateCalls++
 	return r.state, r.err
 }
 
 func (r *fakeGCStateReader) getAllKeyspacesGCStates(
 	_ context.Context,
+	includeGlobalGCBarriers bool,
 ) (gc.ClusterGCStates, error) {
+	r.includeGlobalGCBarriers = includeGlobalGCBarriers
 	r.getAllCalls++
 	return r.clusterState, r.err
 }
@@ -113,10 +111,10 @@ func TestNewKeyspaceGCStateOutput(t *testing.T) {
 			gc.NewGCBarrierInfo("b-backup", 105, gc.TTLNeverExpire, time.Time{}),
 			gc.NewGCBarrierInfo("a-backup", 110, 30*time.Second, time.Time{}),
 		},
-	)
+	).WithGlobalGCBarriers(nil)
 	state.IsKeyspaceLevelGC = false
 
-	got, err := newKeyspaceGCStateOutput(42, state, false)
+	got, err := newKeyspaceGCStateOutput(42, state, false, true)
 	require.NoError(t, err)
 	require.Equal(t, uint32(42), got.RequestedKeyspaceID)
 	require.Equal(t, constant.NullKeyspaceID, got.EffectiveKeyspaceID)
@@ -128,6 +126,39 @@ func TestNewKeyspaceGCStateOutput(t *testing.T) {
 		{BarrierID: "a-backup", BarrierTS: 110, TTLSeconds: 30},
 		{BarrierID: "z-backup", BarrierTS: 110, TTLSeconds: 3600},
 	}, got.GCBarriers)
+	require.NotNil(t, got.GlobalGCBarriers)
+	require.Empty(t, *got.GlobalGCBarriers)
+}
+
+func TestNewKeyspaceGCStateOutputGlobalBarrierPresence(t *testing.T) {
+	t.Run("requested-empty", func(t *testing.T) {
+		state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
+			WithGlobalGCBarriers(nil)
+		got, err := newKeyspaceGCStateOutput(42, state, false, true)
+		require.NoError(t, err)
+		require.NotNil(t, got.GlobalGCBarriers)
+		require.Empty(t, *got.GlobalGCBarriers)
+		encoded, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"global_gc_barriers":[]`)
+	})
+
+	t.Run("excluded", func(t *testing.T) {
+		state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+		got, err := newKeyspaceGCStateOutput(42, state, false, false)
+		require.NoError(t, err)
+		require.Nil(t, got.GlobalGCBarriers)
+		encoded, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "global_gc_barriers")
+	})
+
+	t.Run("requested-missing", func(t *testing.T) {
+		state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+		_, err := newKeyspaceGCStateOutput(42, state, false, true)
+		require.ErrorContains(t, err,
+			"retry with --exclude-global-barriers")
+	})
 }
 
 func TestNewLocalGCBarrierOutputsSkipNilEntries(t *testing.T) {
@@ -176,7 +207,7 @@ func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
 		},
 	)
 
-	got, err := newAllGCStatesOutput(clusterState, false)
+	got, err := newAllGCStatesOutput(clusterState, false, true)
 	require.NoError(t, err)
 	require.Equal(t, []uint32{1, constant.NullKeyspaceID}, []uint32{
 		got.GCStates[0].KeyspaceID,
@@ -184,10 +215,11 @@ func TestNewAllGCStatesOutputSortsAndKeepsEmptyArrays(t *testing.T) {
 	})
 	require.NotNil(t, got.GCStates[0].GCBarriers)
 	require.Empty(t, got.GCStates[0].GCBarriers)
+	require.NotNil(t, got.GlobalGCBarriers)
 	require.Equal(t, []string{"first-global", "a-global", "z-global"}, []string{
-		got.GlobalGCBarriers[0].BarrierID,
-		got.GlobalGCBarriers[1].BarrierID,
-		got.GlobalGCBarriers[2].BarrierID,
+		(*got.GlobalGCBarriers)[0].BarrierID,
+		(*got.GlobalGCBarriers)[1].BarrierID,
+		(*got.GlobalGCBarriers)[2].BarrierID,
 	})
 
 	encoded, err := json.Marshal(got)
@@ -229,7 +261,7 @@ func TestNewAllGCStatesOutputFiltersUnifiedGCPlaceholders(t *testing.T) {
 		nil,
 	)
 
-	got, err := newAllGCStatesOutput(clusterState, false)
+	got, err := newAllGCStatesOutput(clusterState, false, true)
 	require.NoError(t, err)
 	require.Equal(t, []gcStateOutput{
 		{
@@ -257,111 +289,176 @@ func TestNewAllGCStatesOutputKeepsEmptyGlobalBarrierArray(t *testing.T) {
 		nil,
 	)
 
-	got, err := newAllGCStatesOutput(clusterState, false)
+	got, err := newAllGCStatesOutput(clusterState, false, true)
 	require.NoError(t, err)
 	require.NotNil(t, got.GlobalGCBarriers)
-	require.Empty(t, got.GlobalGCBarriers)
+	require.Empty(t, *got.GlobalGCBarriers)
 
 	encoded, err := json.Marshal(got)
 	require.NoError(t, err)
 	require.Contains(t, string(encoded), `"global_gc_barriers":[]`)
 }
 
-func TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray(t *testing.T) {
-	t.Run("sorted", func(t *testing.T) {
-		clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
-			map[uint32]gc.GCState{42: gc.NewGCStateWithoutGCBarriers(42, 100, 90)},
-			[]*gc.GlobalGCBarrierInfo{
-				gc.NewGlobalGCBarrierInfo("z-global", 60, time.Minute, time.Time{}),
-				gc.NewGlobalGCBarrierInfo("a-global", 60, gc.TTLNeverExpire, time.Time{}),
-				gc.NewGlobalGCBarrierInfo("first-global", 50, time.Second, time.Time{}),
-			},
+func TestNewAllGCStatesOutputGlobalBarrierPresence(t *testing.T) {
+	t.Run("requested-empty", func(t *testing.T) {
+		state := gc.NewClusterGCStatesWithGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+			nil,
 		)
-
-		got, err := newGlobalGCStateOutput(clusterState, false)
-		require.NoError(t, err)
-		require.Equal(t, []gcBarrierOutput{
-			{BarrierID: "first-global", BarrierTS: 50, TTLSeconds: 1},
-			{BarrierID: "a-global", BarrierTS: 60, TTLSeconds: math.MaxInt64},
-			{BarrierID: "z-global", BarrierTS: 60, TTLSeconds: 60},
-		}, got.GlobalGCBarriers)
-
-		encoded, err := json.Marshal(got)
-		require.NoError(t, err)
-		require.JSONEq(t, `{
-			"global_gc_barriers": [
-				{"barrier_id":"first-global","barrier_ts":50,"ttl_seconds":1},
-				{"barrier_id":"a-global","barrier_ts":60,"ttl_seconds":9223372036854775807},
-				{"barrier_id":"z-global","barrier_ts":60,"ttl_seconds":60}
-			]
-		}`, string(encoded))
-	})
-
-	t.Run("empty", func(t *testing.T) {
-		clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(map[uint32]gc.GCState{}, nil)
-		got, err := newGlobalGCStateOutput(clusterState, false)
+		got, err := newAllGCStatesOutput(state, false, true)
 		require.NoError(t, err)
 		require.NotNil(t, got.GlobalGCBarriers)
-		require.Empty(t, got.GlobalGCBarriers)
-
+		require.Empty(t, *got.GlobalGCBarriers)
 		encoded, err := json.Marshal(got)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"global_gc_barriers":[]}`, string(encoded))
+		require.Contains(t, string(encoded), `"global_gc_barriers":[]`)
+	})
+
+	t.Run("excluded", func(t *testing.T) {
+		state := gc.NewClusterGCStatesWithoutGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+		)
+		got, err := newAllGCStatesOutput(state, false, false)
+		require.NoError(t, err)
+		require.Nil(t, got.GlobalGCBarriers)
+		encoded, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "global_gc_barriers")
+	})
+
+	t.Run("requested-missing", func(t *testing.T) {
+		state := gc.NewClusterGCStatesWithoutGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+		)
+		_, err := newAllGCStatesOutput(state, false, true)
+		require.ErrorContains(t, err,
+			"retry with --exclude-global-barriers")
 	})
 }
 
 func TestGCStateOutputRejectsExcludedBarriers(t *testing.T) {
-	state := gc.NewGCStateWithoutGCBarriers(42, 100, 90)
-	_, err := newKeyspaceGCStateOutput(42, state, false)
-	require.ErrorContains(t, err, "failed to read GC barriers for keyspace 42")
+	t.Run("missing-local", func(t *testing.T) {
+		state := gc.NewGCStateWithoutGCBarriers(42, 100, 90)
+		_, err := newKeyspaceGCStateOutput(42, state, false, false)
+		require.ErrorContains(t, err, "failed to read GC barriers for keyspace 42")
+	})
 
-	clusterState := gc.NewClusterGCStatesWithoutGlobalGCBarriers(map[uint32]gc.GCState{})
-	_, err = newAllGCStatesOutput(clusterState, false)
-	require.ErrorContains(t, err, "failed to read global GC barriers")
+	t.Run("keyspace-requested-missing-global", func(t *testing.T) {
+		state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+		_, err := newKeyspaceGCStateOutput(42, state, false, true)
+		require.EqualError(t, err,
+			"gc-state keyspace requires a PD server whose GetGCState supports global GC barriers; "+
+				"retry with --exclude-global-barriers")
+	})
 
-	_, err = newGlobalGCStateOutput(clusterState, false)
-	require.ErrorContains(t, err, "failed to read global GC barriers")
+	t.Run("keyspace-excluded-global", func(t *testing.T) {
+		state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+		got, err := newKeyspaceGCStateOutput(42, state, false, false)
+		require.NoError(t, err)
+		require.Nil(t, got.GlobalGCBarriers)
+		encoded, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "global_gc_barriers")
+	})
+
+	t.Run("all-requested-missing-global", func(t *testing.T) {
+		clusterState := gc.NewClusterGCStatesWithoutGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+		)
+		_, err := newAllGCStatesOutput(clusterState, false, true)
+		require.EqualError(t, err,
+			"gc-state all response does not include global GC barriers; "+
+				"retry with --exclude-global-barriers")
+	})
+
+	t.Run("all-excluded-global", func(t *testing.T) {
+		clusterState := gc.NewClusterGCStatesWithoutGlobalGCBarriers(
+			map[uint32]gc.GCState{},
+		)
+		got, err := newAllGCStatesOutput(clusterState, false, false)
+		require.NoError(t, err)
+		require.Nil(t, got.GlobalGCBarriers)
+		encoded, err := json.Marshal(got)
+		require.NoError(t, err)
+		require.NotContains(t, string(encoded), "global_gc_barriers")
+	})
+
 }
 
-type fakeClusterGCStatesClient struct {
-	options gc.GCStatesAPIOptions
-	calls   int
-}
-
-func (c *fakeClusterGCStatesClient) GetAllKeyspacesGCStates(
-	_ context.Context,
-	opts ...gc.GCStatesAPIOption,
-) (gc.ClusterGCStates, error) {
-	c.options = gc.DefaultGCStatesAPIOptions()
-	for _, opt := range opts {
-		opt(&c.options)
-	}
-	c.calls++
-	return gc.NewClusterGCStatesWithGlobalGCBarriers(map[uint32]gc.GCState{}, nil), nil
-}
-
-func TestReadClusterGCStatesOptions(t *testing.T) {
-	for _, testCase := range []struct {
-		name                  string
-		excludeGCBarriers     bool
-		wantExcludeGCBarriers bool
-	}{
-		{name: "all", excludeGCBarriers: false, wantExcludeGCBarriers: false},
-		{name: "global", excludeGCBarriers: true, wantExcludeGCBarriers: true},
-	} {
-		t.Run(testCase.name, func(t *testing.T) {
-			client := &fakeClusterGCStatesClient{}
-			_, err := readClusterGCStates(t.Context(), client, testCase.excludeGCBarriers)
-			require.NoError(t, err)
-			require.Equal(t, 1, client.calls)
-			require.Equal(t, testCase.wantExcludeGCBarriers, client.options.ExcludeGCBarriers)
-			require.False(t, client.options.ExcludeGlobalGCBarriers)
+func TestGCStateAPIOptions(t *testing.T) {
+	for _, includeGlobalGCBarriers := range []bool{false, true} {
+		t.Run(strconv.FormatBool(includeGlobalGCBarriers), func(t *testing.T) {
+			options := gc.DefaultGCStatesAPIOptions()
+			for _, option := range gcStateAPIOptions(
+				includeGlobalGCBarriers,
+			) {
+				option(&options)
+			}
+			require.False(t, options.ExcludeGCBarriers)
+			require.Equal(t, !includeGlobalGCBarriers,
+				options.ExcludeGlobalGCBarriers)
 		})
 	}
 }
 
+func TestGCStateCommandGlobalBarrierFlag(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		args        []string
+		wantInclude bool
+	}{
+		{name: "keyspace-default", args: []string{"keyspace", "42"}, wantInclude: true},
+		{name: "keyspace-excluded", args: []string{"keyspace", "42", "--exclude-global-barriers"}},
+		{name: "all-default", args: []string{"all"}, wantInclude: true},
+		{name: "all-excluded", args: []string{"all", "--exclude-global-barriers"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			reader := &fakeGCStateReader{
+				state: gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
+					WithGlobalGCBarriers(nil),
+				clusterState: gc.NewClusterGCStatesWithGlobalGCBarriers(
+					map[uint32]gc.GCState{},
+					nil,
+				),
+			}
+			cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+				return reader, nil
+			})
+			output := new(bytes.Buffer)
+			cmd.SetOut(output)
+			cmd.SetErr(output)
+			cmd.SetArgs(testCase.args)
+
+			require.NoError(t, cmd.Execute())
+			require.Equal(t, testCase.wantInclude,
+				reader.includeGlobalGCBarriers)
+			if testCase.wantInclude {
+				require.Contains(t, output.String(), "global_gc_barriers")
+			} else {
+				require.NotContains(t, output.String(), "global_gc_barriers")
+			}
+		})
+	}
+}
+
+func TestGCStateGlobalCommandIsRemoved(t *testing.T) {
+	factoryCalled := false
+	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+		factoryCalled = true
+		return nil, errors.New("factory must not run")
+	})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"global"})
+
+	err := cmd.Execute()
+	require.ErrorContains(t, err, `unknown command "global"`)
+	require.False(t, factoryCalled)
+}
+
 func TestGCStateKeyspaceCommand(t *testing.T) {
-	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
+		WithGlobalGCBarriers(nil)
 	state.IsKeyspaceLevelGC = true
 	reader := &fakeGCStateReader{state: state}
 	factoryCalls := 0
@@ -377,6 +474,7 @@ func TestGCStateKeyspaceCommand(t *testing.T) {
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, 1, factoryCalls)
 	require.Equal(t, 1, reader.getStateCalls)
+	require.Zero(t, reader.getAllCalls)
 	require.Equal(t, uint32(42), reader.requestedID)
 	require.True(t, reader.closed)
 
@@ -385,7 +483,7 @@ func TestGCStateKeyspaceCommand(t *testing.T) {
 	require.Contains(t, decoded, "requested_keyspace_id")
 	require.Contains(t, decoded, "effective_keyspace_id")
 	require.Contains(t, decoded, "gc_barriers")
-	require.NotContains(t, decoded, "global_gc_barriers")
+	require.Contains(t, decoded, "global_gc_barriers")
 }
 
 func TestGCStateAllCommand(t *testing.T) {
@@ -405,38 +503,17 @@ func TestGCStateAllCommand(t *testing.T) {
 
 	require.NoError(t, cmd.Execute())
 	require.Equal(t, 1, reader.getAllCalls)
+	require.Zero(t, reader.getStateCalls)
 	require.True(t, reader.closed)
 	require.Contains(t, output.String(), `"gc_states": []`)
 	require.Contains(t, output.String(), `"global_gc_barriers": []`)
 }
 
-func TestGCStateGlobalCommand(t *testing.T) {
-	reader := &fakeGCStateReader{clusterState: gc.NewClusterGCStatesWithGlobalGCBarriers(
-		map[uint32]gc.GCState{42: gc.NewGCStateWithoutGCBarriers(42, 100, 90)}, nil,
-	)}
-	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) { return reader, nil })
-	output := new(bytes.Buffer)
-	cmd.SetOut(output)
-	cmd.SetErr(output)
-	cmd.SetArgs([]string{"global"})
-
-	require.NoError(t, cmd.Execute())
-	require.Equal(t, 1, reader.getGlobalCalls)
-	require.Zero(t, reader.getAllCalls)
-	require.Zero(t, reader.getStateCalls)
-	require.True(t, reader.closed)
-
-	var decoded map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
-	require.Len(t, decoded, 1)
-	require.Contains(t, decoded, "global_gc_barriers")
-	require.NotContains(t, decoded, "gc_states")
-	require.NotContains(t, decoded, "txn_safe_point")
-	require.NotContains(t, decoded, "gc_safe_point")
-	require.JSONEq(t, `{"global_gc_barriers":[]}`, output.String())
-}
-
 func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
+	globalBarriers := []*gc.GlobalGCBarrierInfo{
+		gc.NewGlobalGCBarrierInfo("active-global", 70, gc.TTLNeverExpire, time.Time{}),
+		gc.NewGlobalGCBarrierInfo("expired-global", 60, 0, time.Time{}),
+	}
 	state := gc.NewGCStateWithGCBarriers(
 		42,
 		100,
@@ -445,14 +522,11 @@ func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
 			gc.NewGCBarrierInfo("active-local", 50, gc.TTLNeverExpire, time.Time{}),
 			gc.NewGCBarrierInfo("expired-local", 40, 0, time.Time{}),
 		},
-	)
+	).WithGlobalGCBarriers(globalBarriers)
 	state.IsKeyspaceLevelGC = true
 	clusterState := gc.NewClusterGCStatesWithGlobalGCBarriers(
 		map[uint32]gc.GCState{42: state},
-		[]*gc.GlobalGCBarrierInfo{
-			gc.NewGlobalGCBarrierInfo("active-global", 70, gc.TTLNeverExpire, time.Time{}),
-			gc.NewGlobalGCBarrierInfo("expired-global", 60, 0, time.Time{}),
-		},
+		globalBarriers,
 	)
 
 	for _, testCase := range []struct {
@@ -467,6 +541,9 @@ func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
 			wantLocal: []gcBarrierOutput{
 				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
 			},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
+			},
 		},
 		{
 			name: "keyspace-include-expired",
@@ -474,6 +551,10 @@ func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
 			wantLocal: []gcBarrierOutput{
 				{BarrierID: "expired-local", BarrierTS: 40, TTLSeconds: 0},
 				{BarrierID: "active-local", BarrierTS: 50, TTLSeconds: math.MaxInt64},
+			},
+			wantGlobal: []gcBarrierOutput{
+				{BarrierID: "expired-global", BarrierTS: 60, TTLSeconds: 0},
+				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
 			},
 		},
 		{
@@ -498,21 +579,6 @@ func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
 				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
 			},
 		},
-		{
-			name: "global-default",
-			args: []string{"global"},
-			wantGlobal: []gcBarrierOutput{
-				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
-			},
-		},
-		{
-			name: "global-include-expired",
-			args: []string{"global", "--include-expired"},
-			wantGlobal: []gcBarrierOutput{
-				{BarrierID: "expired-global", BarrierTS: 60, TTLSeconds: 0},
-				{BarrierID: "active-global", BarrierTS: 70, TTLSeconds: math.MaxInt64},
-			},
-		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			reader := &fakeGCStateReader{state: state, clusterState: clusterState}
@@ -530,16 +596,15 @@ func TestGCStateCommandExpiredBarrierVisibility(t *testing.T) {
 				var decoded keyspaceGCStateOutput
 				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
 				require.Equal(t, testCase.wantLocal, decoded.GCBarriers)
+				require.NotNil(t, decoded.GlobalGCBarriers)
+				require.Equal(t, testCase.wantGlobal, *decoded.GlobalGCBarriers)
 			case "all":
 				var decoded allGCStatesOutput
 				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
 				require.Len(t, decoded.GCStates, 1)
 				require.Equal(t, testCase.wantLocal, decoded.GCStates[0].GCBarriers)
-				require.Equal(t, testCase.wantGlobal, decoded.GlobalGCBarriers)
-			case "global":
-				var decoded globalGCStateOutput
-				require.NoError(t, json.Unmarshal(output.Bytes(), &decoded))
-				require.Equal(t, testCase.wantGlobal, decoded.GlobalGCBarriers)
+				require.NotNil(t, decoded.GlobalGCBarriers)
+				require.Equal(t, testCase.wantGlobal, *decoded.GlobalGCBarriers)
 			default:
 				require.Fail(t, "unexpected subcommand", testCase.args[0])
 			}
@@ -560,7 +625,6 @@ func TestGCStateCommandValidatesBeforeCreatingClient(t *testing.T) {
 		{"keyspace", "4294967294"},
 		{"keyspace", "4294967296"},
 		{"all", "extra"},
-		{"global", "extra"},
 	} {
 		t.Run(strings.Join(args, "-"), func(t *testing.T) {
 			factoryCalled := false
@@ -629,6 +693,16 @@ func TestGCStateCommandErrors(t *testing.T) {
 			wantMessage: "failed to read GC barriers for keyspace 42",
 		},
 		{
+			name: "single-missing-global-barriers",
+			args: []string{"keyspace", "42"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					state: gc.NewGCStateWithGCBarriers(42, 100, 90, nil),
+				}, nil
+			},
+			wantMessage: "retry with --exclude-global-barriers",
+		},
+		{
 			name: "all-rpc-error",
 			args: []string{"all"},
 			factory: func(*cobra.Command) (gcStateReader, error) {
@@ -658,32 +732,7 @@ func TestGCStateCommandErrors(t *testing.T) {
 					),
 				}, nil
 			},
-			wantMessage: "failed to read global GC barriers",
-		},
-		{
-			name: "global-rpc-error",
-			args: []string{"global"},
-			factory: func(*cobra.Command) (gcStateReader, error) {
-				return &fakeGCStateReader{err: errors.New("rpc rejected")}, nil
-			},
-			wantMessage: "failed to get global GC state",
-		},
-		{
-			name: "global-wrapped-unimplemented",
-			args: []string{"global"},
-			factory: func(*cobra.Command) (gcStateReader, error) {
-				return &fakeGCStateReader{err: fmt.Errorf("wrapped: %w",
-					status.Error(codes.Unimplemented, "method unavailable"))}, nil
-			},
-			wantMessage: "gc-state global requires a PD server that supports GetAllKeyspacesGCStates",
-		},
-		{
-			name: "global-missing-global-barriers",
-			args: []string{"global"},
-			factory: func(*cobra.Command) (gcStateReader, error) {
-				return &fakeGCStateReader{clusterState: gc.NewClusterGCStatesWithoutGlobalGCBarriers(map[uint32]gc.GCState{})}, nil
-			},
-			wantMessage: "failed to read global GC barriers",
+			wantMessage: "retry with --exclude-global-barriers",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -702,31 +751,35 @@ func TestGCStateCommandHelpContract(t *testing.T) {
 		return nil, errors.New("help must not create a reader")
 	})
 	require.Equal(t, "show keyspace and cluster-wide GC state", cmd.Short)
-	require.Equal(t, "Show effective per-keyspace GC safe points and local barriers, and cluster-wide GC state. Expired barriers awaiting lazy deletion are hidden by default; use --include-expired to include zero-TTL barriers returned by PD. Use keyspace for one effective GC scope, global for cluster-wide state, or all for a combined view.", cmd.Long)
+	require.Equal(t, "Show effective per-keyspace GC safe points and local and global barriers. Expired barriers awaiting lazy deletion are hidden by default; use --include-expired to include zero-TTL barriers returned by PD. Use keyspace for one effective GC scope or all for every effective GC scope.", cmd.Long)
 	includeExpired := cmd.PersistentFlags().Lookup("include-expired")
 	require.NotNil(t, includeExpired)
 	require.Equal(t, "false", includeExpired.DefValue)
 	require.Equal(t, "include zero-TTL barriers returned by PD, which normally represent expired barriers awaiting lazy deletion", includeExpired.Usage)
+	excludeGlobalBarriers := cmd.PersistentFlags().Lookup("exclude-global-barriers")
+	require.NotNil(t, excludeGlobalBarriers)
+	require.Equal(t, "false", excludeGlobalBarriers.DefValue)
+	require.Equal(t, "exclude global GC barriers from the PD request and JSON output", excludeGlobalBarriers.Usage)
+
+	commands := cmd.Commands()
+	require.Len(t, commands, 2)
+	require.Equal(t, []string{"all", "keyspace"}, []string{
+		commands[0].Name(),
+		commands[1].Name(),
+	})
 
 	keyspace, _, err := cmd.Find([]string{"keyspace"})
 	require.NoError(t, err)
 	require.Equal(t, "keyspace <keyspace-id>", keyspace.Use)
 	require.Equal(t, "show one keyspace's effective GC state", keyspace.Short)
-	require.Equal(t, "Show one keyspace's effective GC safe points and local barriers. Use gc-state global to inspect only cluster-wide state, or gc-state all for a combined view. The decimal NullKeyspace ID is 4294967295.", keyspace.Long)
+	require.Equal(t, "Show one keyspace's effective GC safe points and local and global barriers. Use --exclude-global-barriers to omit cluster-wide barriers. Use gc-state all to inspect every effective GC scope. The decimal NullKeyspace ID is 4294967295.", keyspace.Long)
 	require.Equal(t, "  pd-ctl gc-state keyspace 42\n  pd-ctl gc-state keyspace 4294967295", keyspace.Example)
-
-	global, _, err := cmd.Find([]string{"global"})
-	require.NoError(t, err)
-	require.Equal(t, "global", global.Use)
-	require.Equal(t, "show cluster-wide GC state", global.Short)
-	require.Equal(t, "Show cluster-wide GC state without per-keyspace states. The current output contains global GC barriers.", global.Long)
-	require.Equal(t, "  pd-ctl gc-state global", global.Example)
 
 	all, _, err := cmd.Find([]string{"all"})
 	require.NoError(t, err)
 	require.Equal(t, "all", all.Use)
 	require.Equal(t, "show effective GC scopes and cluster-wide GC state", all.Short)
-	require.Equal(t, "Show all effective GC scopes and local barriers, with cluster-wide global barriers once at the top level. Use gc-state global to inspect only cluster-wide state.", all.Long)
+	require.Equal(t, "Show all effective GC scopes and local barriers, with global barriers once at the top level. Use --exclude-global-barriers to omit cluster-wide barriers.", all.Long)
 	require.Equal(t, "  pd-ctl gc-state all", all.Example)
 }
 
@@ -737,7 +790,8 @@ func (failingWriter) Write([]byte) (int, error) {
 }
 
 func TestGCStateCommandReturnsOutputError(t *testing.T) {
-	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil)
+	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
+		WithGlobalGCBarriers(nil)
 	reader := &fakeGCStateReader{state: state}
 	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
 		return reader, nil
