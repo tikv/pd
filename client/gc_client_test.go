@@ -69,3 +69,30 @@ func TestPBToGCStatePreservesKeyspaceLevelGC(t *testing.T) {
 		})
 	}
 }
+
+func TestPBToGCStateWithGlobalBarriersPreservesKeyspaceLevelGC(t *testing.T) {
+	requestStart := time.Unix(100, 0)
+	state := pbToGCStateWithGlobalGCBarriers(
+		&pdpb.GCState{
+			KeyspaceScope:     wrapKeyspaceScope(42),
+			IsKeyspaceLevelGc: true,
+			TxnSafePoint:      100,
+			GcSafePoint:       90,
+		},
+		&pdpb.GlobalGCBarriersInfo{
+			Barriers: []*pdpb.GlobalGCBarrierInfo{
+				{BarrierId: "snapshot", BarrierTs: 95, TtlSeconds: 60},
+			},
+		},
+		requestStart,
+		true,
+	)
+
+	require.True(t, state.IsKeyspaceLevelGC)
+	require.False(t, state.HasGCBarriers())
+	require.True(t, state.HasGlobalGCBarriers())
+	barriers, err := state.GetGlobalGCBarriers()
+	require.NoError(t, err)
+	require.Len(t, barriers, 1)
+	require.Equal(t, "snapshot", barriers[0].BarrierID)
+}
