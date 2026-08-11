@@ -16,10 +16,12 @@ The details about how to use `pd-ctl` can be found in [PD Control User Guide](ht
 Use `gc-state` to inspect the safe points and barriers that can block GC. The
 command is read-only and emits deterministic JSON for scripts and diffs.
 
-By default, it omits barriers that PD returns with a zero TTL because they
-normally represent expired barriers awaiting lazy deletion. Add
-`--include-expired` to any subcommand to include those barriers in the existing
-`gc_barriers` or `global_gc_barriers` array with `ttl_seconds` set to `0`.
+The default `keyspace` and `all` views request global barriers. They omit
+barriers that PD returns with a zero TTL because those barriers normally
+represent expired barriers awaiting lazy deletion. Add `--include-expired` to
+include those barriers in the existing `gc_barriers` or `global_gc_barriers`
+array with `ttl_seconds` set to `0`. An empty `global_gc_barriers` array means
+PD returned no global barriers.
 
 For example, inspect one keyspace and include zero-TTL barriers:
 
@@ -27,7 +29,8 @@ For example, inspect one keyspace and include zero-TTL barriers:
 pd-ctl gc-state keyspace 42 --include-expired
 ```
 
-Inspect one keyspace by its decimal ID:
+Use `keyspace` when diagnosing one GC scope. Inspect a keyspace by its decimal
+ID:
 
 ```bash
 pd-ctl gc-state keyspace 42
@@ -46,24 +49,7 @@ pd-ctl gc-state keyspace 42
       "barrier_ts": 464950000000000000,
       "ttl_seconds": 3600
     }
-  ]
-}
-```
-
-The response contains both `requested_keyspace_id` and
-`effective_keyspace_id`. They are equal for keyspace-level GC. A keyspace that
-uses unified GC returns `4294967295`, the NullKeyspace ID, as its effective
-scope. The response contains local `gc_barriers` only.
-
-Inspect cluster-wide state when the local barriers do not explain the
-effective safe point:
-
-```bash
-pd-ctl gc-state global
-```
-
-```json
-{
+  ],
   "global_gc_barriers": [
     {
       "barrier_id": "native_br",
@@ -74,11 +60,14 @@ pd-ctl gc-state global
 }
 ```
 
-The global response does not contain per-keyspace safe points or local
-barriers. Its current field is `global_gc_barriers`; other cluster-wide GC
-state can be added to the same object in the future.
+The response contains both `requested_keyspace_id` and
+`effective_keyspace_id`. They are equal for keyspace-level GC. A keyspace that
+uses unified GC returns `4294967295`, the NullKeyspace ID, as its effective
+scope. The local and global barriers come from one `GetGCState` read. The same
+global list applies to every keyspace.
 
-Inspect every effective GC scope together with cluster-wide state:
+Use `all` only when you need every effective GC scope because it enumerates all
+keyspaces. Inspect every effective GC scope together with cluster-wide state:
 
 ```bash
 pd-ctl gc-state all
@@ -120,3 +109,15 @@ corresponding arrays are encoded as `[]`. Barrier TTLs use remaining seconds,
 and `9223372036854775807` means that a barrier never expires. Because PD rounds
 remaining TTLs down to whole seconds, a zero TTL can also represent a barrier
 with less than one second remaining.
+
+Use `--exclude-global-barriers` to skip the global-barrier read and remove the
+`global_gc_barriers` field from the JSON output. The flag applies to both
+remaining subcommands:
+
+```bash
+pd-ctl gc-state keyspace 42 --exclude-global-barriers
+pd-ctl gc-state all --exclude-global-barriers --include-expired
+```
+
+When combined with `--include-expired`, exclusion wins for global barriers,
+while expired local barriers remain visible.
