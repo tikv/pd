@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1818,4 +1819,77 @@ func TestAcquireTokenBucketsSurvivesLazyLoadFailure(t *testing.T) {
 	re.Len(stream.sent, 1)
 	re.Len(stream.sent[0].Responses, 1, "only the loadable group should be answered")
 	re.Equal("good-group", stream.sent[0].Responses[0].ResourceGroupName)
+}
+
+// TestSetKeyspaceRUVersionSerializesAgainstUpdateControllerConfigItem guards
+// against SetKeyspaceRUVersion mutating RUVersionPolicy.Overrides and saving
+// it to storage outside its lock. That used to capture a reference to the
+// live (not cloned) controller config, unlock, and only then call
+// storage.SaveControllerConfig - leaving Overrides, a plain map, both
+// mutable by a concurrent SetKeyspaceRUVersion call and readable by this
+// call's own unlocked marshal (an unsynchronized concurrent map read/write),
+// and letting this call's save land after UpdateControllerConfigItem's own
+// clone-save-publish (which runs fully inside its lock), silently
+// overwriting UpdateControllerConfigItem's newer write. The fix clones
+// before mutating and holds the lock across the whole
+// mutate-save-publish sequence, so a concurrent config mutator can't even
+// start until this call is done - proven here by asserting
+// UpdateControllerConfigItem blocks while SetKeyspaceRUVersion is parked
+// right before its save, and that neither call's change is lost once both
+// complete.
+func TestSetKeyspaceRUVersionSerializesAgainstUpdateControllerConfigItem(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setKeyspaceRUVersionBeforeSave", func() {
+		close(reached)
+		<-release
+	}))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/setKeyspaceRUVersionBeforeSave"))
+	}()
+
+	setDone := make(chan error, 1)
+	go func() {
+		setDone <- m.SetKeyspaceRUVersion(1, 2)
+	}()
+	select {
+	case <-reached:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for SetKeyspaceRUVersion to reach its pre-save failpoint")
+	}
+
+	// While SetKeyspaceRUVersion is parked holding the lock, a concurrent
+	// UpdateControllerConfigItem call must block rather than run - proving
+	// the two are mutually exclusive across the whole save, not just the
+	// in-memory mutation step.
+	updateDone := make(chan error, 1)
+	go func() {
+		updateDone <- m.UpdateControllerConfigItem("request-unit.read-base-cost", 1.5)
+	}()
+	select {
+	case err := <-updateDone:
+		t.Fatalf("UpdateControllerConfigItem completed (err=%v) while SetKeyspaceRUVersion still held the lock", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	re.NoError(<-setDone)
+	re.NoError(<-updateDone)
+
+	re.InDelta(1.5, m.controllerConfig.RequestUnit.ReadBaseCost, 0.00001,
+		"UpdateControllerConfigItem's change must survive")
+	re.Equal(RUVersion(2), m.controllerConfig.RUVersionPolicy.Overrides[1],
+		"SetKeyspaceRUVersion's change must not be lost to a later save landing out of order")
+
+	raw, err := m.storage.LoadControllerConfig()
+	re.NoError(err)
+	persisted := &ControllerConfig{}
+	re.NoError(json.Unmarshal([]byte(raw), persisted))
+	re.InDelta(1.5, persisted.RequestUnit.ReadBaseCost, 0.00001,
+		"UpdateControllerConfigItem's change must be persisted")
+	re.Equal(RUVersion(2), persisted.RUVersionPolicy.Overrides[1],
+		"SetKeyspaceRUVersion's change must be persisted, not clobbered by an out-of-order save")
 }

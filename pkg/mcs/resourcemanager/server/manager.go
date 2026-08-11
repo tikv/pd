@@ -332,31 +332,42 @@ func (m *Manager) SetKeyspaceRUVersion(keyspaceID uint32, ruVersion int32) error
 		return errMetadataWriteDisabled
 	}
 	m.Lock()
-	if m.controllerConfig.RUVersionPolicy == nil {
+	defer m.Unlock()
+	// Mutate a clone, not m.controllerConfig directly, and save it before
+	// publishing it to the field - matching UpdateControllerConfigItem's
+	// pattern below. Mutating the live object in place and saving it after
+	// unlocking (the previous approach here) left RUVersionPolicy.Overrides,
+	// a plain map, both mutable by a concurrent call to this same function and
+	// readable by this call's own unlocked marshal - an unsynchronized
+	// concurrent map read/write. It also let this call's save land out of
+	// order relative to UpdateControllerConfigItem's, which clones, saves,
+	// and publishes fully inside its own lock: a save delayed past unlock
+	// here could persist a stale snapshot over a newer config
+	// UpdateControllerConfigItem had already committed. Holding the lock
+	// across the storage write closes both: no other config mutator can run
+	// until this call's save and publish are done.
+	controllerConfig := cloneControllerConfig(m.controllerConfig)
+	if controllerConfig.RUVersionPolicy == nil {
 		// DefaultRUVersion (v1) means no RU model change.
 		// There is currently no API to modify this global default; it is
 		// intentionally fixed so that only per-keyspace overrides drive version bumps.
-		m.controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
+		controllerConfig.RUVersionPolicy = &RUVersionPolicy{Default: DefaultRUVersion}
 	}
-	if m.controllerConfig.RUVersionPolicy.Overrides == nil {
-		m.controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
+	if controllerConfig.RUVersionPolicy.Overrides == nil {
+		controllerConfig.RUVersionPolicy.Overrides = make(map[uint32]RUVersion)
 	}
-	defaultVersion := m.controllerConfig.RUVersionPolicy.Default
+	defaultVersion := controllerConfig.RUVersionPolicy.Default
 	if ruVersion == defaultVersion {
-		delete(m.controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
+		delete(controllerConfig.RUVersionPolicy.Overrides, keyspaceID)
 	} else {
-		m.controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
+		controllerConfig.RUVersionPolicy.Overrides[keyspaceID] = ruVersion
 	}
-	// Capture the config object to save while still holding the lock, instead
-	// of re-reading the m.controllerConfig field after unlocking below:
-	// initControllerConfig can reassign that field wholesale (under the same
-	// lock) on a leadership change, so an unlocked re-read races with it and
-	// can end up saving a different config object than the one just mutated
-	// above. Matches the pattern initControllerConfig itself already uses -
-	// save a locally captured reference, never the field.
-	controllerConfig := m.controllerConfig
-	m.Unlock()
-	return m.storage.SaveControllerConfig(controllerConfig)
+	failpoint.InjectCall("setKeyspaceRUVersionBeforeSave")
+	if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
+		return err
+	}
+	m.controllerConfig = controllerConfig
+	return nil
 }
 
 // GetRUVersionPolicy returns a deep copy of the current RU version policy from the controller config.
