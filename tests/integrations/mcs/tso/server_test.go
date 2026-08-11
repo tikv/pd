@@ -48,6 +48,7 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -798,9 +799,25 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	})
 	re.NoError(err)
 	userKeyspaceID := userKeyspace.GetId()
+	cleanupReached := make(chan struct{})
+	cleanupRelease := make(chan struct{})
+	var cleanupReachedOnce, cleanupReleaseOnce sync.Once
+	const cleanupBlockerName = "github.com/tikv/pd/server/beforeClearDefaultTSOKeyspaceGroupMembersCommit"
+	re.NoError(failpoint.EnableCall(cleanupBlockerName, func() {
+		cleanupReachedOnce.Do(func() {
+			close(cleanupReached)
+		})
+		<-cleanupRelease
+	}))
+	t.Cleanup(func() {
+		cleanupReleaseOnce.Do(func() {
+			close(cleanupRelease)
+		})
+		re.NoError(failpoint.Disable(cleanupBlockerName))
+	})
 
 	const switchRounds = 2
-	for range switchRounds {
+	for round := range switchRounds {
 		waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 		re.NoError(err)
@@ -809,13 +826,35 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
 		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 		tsoCluster.Destroy()
+		seedDefaultKeyspaceGroupMembers(ctx, re, pdServer, []endpoint.KeyspaceGroupMember{{
+			Address:  "http://127.0.0.1:1",
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		}})
 
-		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, nil)
+		if round == 0 {
+			pdServer, err = startPDForServiceMode(ctx, tc, pdServer, nil)
+			re.NoError(err)
+			select {
+			case <-cleanupReached:
+			case <-time.After(10 * time.Second):
+				t.Fatal("normal-mode PD did not reach the cleanup commit hook")
+			}
+
+			readyBeforeCleanup := pdServer.GetServer().GetMember().IsServing()
+			cleanupReleaseOnce.Do(func() {
+				close(cleanupRelease)
+			})
+			re.False(readyBeforeCleanup, "normal-mode PD became ready before stale metadata was cleaned")
+			re.True(pdServer.WaitLeader())
+		} else {
+			pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, nil)
+			re.NoError(err)
+		}
 		checkPDTSOAvailable(ctx, re, pdServer)
 		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
-		waitDefaultKeyspaceGroupCleaned(re, pdServer, userKeyspaceID)
 
-		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
+		pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, []string{mcs.PDServiceName})
+		re.NoError(err)
 	}
 
 	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
@@ -830,21 +869,41 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 
 func restartPDForServiceMode(
 	ctx context.Context,
-	re *require.Assertions,
 	tc *tests.TestCluster,
 	oldServer *tests.TestServer,
 	services []string,
-) *tests.TestServer {
+) (*tests.TestServer, error) {
+	newServer, err := startPDForServiceMode(ctx, tc, oldServer, services)
+	if err != nil {
+		return nil, err
+	}
+	if !newServer.WaitLeader() {
+		return nil, fmt.Errorf("PD server %s did not become ready", newServer.GetConfig().Name)
+	}
+	return newServer, nil
+}
+
+func startPDForServiceMode(
+	ctx context.Context,
+	tc *tests.TestCluster,
+	oldServer *tests.TestServer,
+	services []string,
+) (*tests.TestServer, error) {
 	cfg := oldServer.GetConfig()
 	serverName := cfg.Name
-	re.NoError(oldServer.Stop())
+	if err := oldServer.Stop(); err != nil {
+		return nil, err
+	}
 
 	newServer, err := tests.NewTestServer(ctx, cfg, services)
-	re.NoError(err)
+	if err != nil {
+		return nil, err
+	}
 	tc.GetServers()[serverName] = newServer
-	re.NoError(newServer.Run())
-	re.True(newServer.WaitLeader())
-	return newServer
+	if err := newServer.Run(); err != nil {
+		return nil, err
+	}
+	return newServer, nil
 }
 
 func waitDefaultKeyspaceGroupReady(
@@ -858,17 +917,21 @@ func waitDefaultKeyspaceGroupReady(
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
-func waitDefaultKeyspaceGroupCleaned(
+func seedDefaultKeyspaceGroupMembers(
+	ctx context.Context,
 	re *require.Assertions,
 	pdServer *tests.TestServer,
-	userKeyspaceID uint32,
+	members []endpoint.KeyspaceGroupMember,
 ) {
-	testutil.Eventually(re, func() bool {
-		group, err := loadDefaultKeyspaceGroup(pdServer)
-		return err == nil &&
-			len(group.Members) == 0 &&
-			slices.Contains(group.Keyspaces, userKeyspaceID)
-	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	store := pdServer.GetServer().GetStorage()
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		group, err := store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		group.Members = members
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
 }
 
 func waitDefaultKeyspaceGroupMembers(

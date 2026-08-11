@@ -63,8 +63,8 @@ func TestCleanupMicroserviceMetadataInPDMode(t *testing.T) {
 			return err
 		}
 		return store.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
-			Id:   1,
-			Name: "keyspace-1",
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1},
+			Name:     "keyspace-1",
 			Config: map[string]string{
 				keyspace.TSOKeyspaceGroupIDKey: strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10),
 				"gc_life_time":                 "10m",
@@ -158,7 +158,7 @@ func TestCleanupMicroserviceMetadataIgnoresLeasedRegistryKeys(t *testing.T) {
 	re.Equal(leaseID, clientv3.LeaseID(resp.Kvs[0].Lease))
 }
 
-func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
+func TestPrepareMicroserviceMetadataCleanupBlocksUntilCommitted(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -180,16 +180,28 @@ func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 	}))
 	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 
-	start := time.Now()
-	svr.scheduleMicroserviceMetadataCleanup(ctx)
-	re.Less(time.Since(start), 200*time.Millisecond)
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
+	}()
 	blocker.wait(t)
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+		t.Fatal("PD leader preparation completed before microservice metadata cleanup committed")
+	default:
+	}
 	blocker.releaseCleanup()
 	blocker.disable(t)
-	svr.serverLoopWg.Wait()
+	select {
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("microservice metadata cleanup did not return")
+	}
 }
 
-func TestScheduleMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
+func TestPrepareMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -217,18 +229,17 @@ func TestScheduleMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 		})
 	}))
 
-	svr.scheduleMicroserviceMetadataCleanup(ctx)
-	done := make(chan struct{})
+	resultCh := make(chan error, 1)
 	go func() {
-		svr.serverLoopWg.Wait()
-		close(done)
+		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
 	}()
 	select {
-	case <-done:
-	case <-time.After(time.Second):
+	case err := <-resultCh:
+		re.NoError(err)
+	case <-time.After(10 * time.Second):
 		cancel()
-		<-done
-		t.Fatal("cleanup task kept retrying a rejected metadata state")
+		<-resultCh
+		t.Fatal("cleanup kept retrying a rejected metadata state")
 	}
 }
 
@@ -242,15 +253,15 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 
 	store := storage.NewStorageWithEtcdBackend(client)
 	svr := &Server{storage: store, client: client}
-	needsCleanup, err := svr.validateMicroserviceMetadataCleanup()
+	candidate, err := svr.loadMicroserviceMetadataCleanupCandidate(ctx)
 	re.NoError(err)
-	re.False(needsCleanup)
+	re.Nil(candidate)
 
 	_, err = client.Put(ctx, keypath.RegistryPath(mcs.TSOServiceName, "127.0.0.1:3379"), "tso")
 	re.NoError(err)
-	needsCleanup, err = svr.validateMicroserviceMetadataCleanup()
+	candidate, err = svr.loadMicroserviceMetadataCleanupCandidate(ctx)
 	re.NoError(err)
-	re.False(needsCleanup)
+	re.Nil(candidate)
 
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
@@ -258,9 +269,9 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 			UserKind: endpoint.Basic.String(),
 		})
 	}))
-	needsCleanup, err = svr.validateMicroserviceMetadataCleanup()
+	candidate, err = svr.loadMicroserviceMetadataCleanupCandidate(ctx)
 	re.NoError(err)
-	re.False(needsCleanup)
+	re.Nil(candidate)
 
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		group, err := store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
@@ -273,9 +284,43 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 		}}
 		return store.SaveKeyspaceGroup(txn, group)
 	}))
-	needsCleanup, err = svr.validateMicroserviceMetadataCleanup()
+	candidate, err = svr.loadMicroserviceMetadataCleanupCandidate(ctx)
 	re.NoError(err)
-	re.True(needsCleanup)
+	re.NotNil(candidate)
+}
+
+func TestPrepareMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	keypath.SetClusterID(12356)
+	t.Cleanup(keypath.ResetClusterID)
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr, _ := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
+		})
+	}))
+	cancel()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
+	}()
+	select {
+	case err := <-resultCh:
+		re.ErrorIs(err, context.Canceled)
+	case <-time.After(10 * time.Second):
+		t.Fatal("cleanup did not stop after its context was canceled")
+	}
 }
 
 func TestCleanupMicroserviceMetadataInPDModeRejectsNonDefaultGroup(t *testing.T) {
@@ -430,10 +475,13 @@ func TestClearDefaultTSOKeyspaceGroupMembersIsFencedByLeadershipTerm(t *testing.
 		})
 	}))
 
+	candidate, err := svr.loadMicroserviceMetadataCleanupCandidate(ctx)
+	re.NoError(err)
+	re.NotNil(candidate)
 	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 	resultCh := make(chan clearDefaultTSOKeyspaceGroupMembersResult, 1)
 	go func() {
-		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, oldTerm)
+		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, oldTerm, candidate)
 		resultCh <- clearDefaultTSOKeyspaceGroupMembersResult{cleared: cleared, err: err}
 	}()
 	blocker.wait(t)
@@ -485,10 +533,13 @@ func TestClearDefaultTSOKeyspaceGroupMembersPreservesConcurrentUpdate(t *testing
 		})
 	}))
 
+	candidate, err := svr.loadMicroserviceMetadataCleanupCandidate(ctx)
+	re.NoError(err)
+	re.NotNil(candidate)
 	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 	resultCh := make(chan clearDefaultTSOKeyspaceGroupMembersResult, 1)
 	go func() {
-		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, term)
+		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, term, candidate)
 		resultCh <- clearDefaultTSOKeyspaceGroupMembersResult{cleared: cleared, err: err}
 	}()
 	blocker.wait(t)
@@ -613,8 +664,8 @@ func waitClearDefaultTSOKeyspaceGroupMembersResult(
 
 func newKeyspaceMetaWithTSOGroup(id uint32, groupID string) *keyspacepb.KeyspaceMeta {
 	return &keyspacepb.KeyspaceMeta{
-		Id:   id,
-		Name: "keyspace-" + strconv.FormatUint(uint64(id), 10),
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: id},
+		Name:     "keyspace-" + strconv.FormatUint(uint64(id), 10),
 		Config: map[string]string{
 			keyspace.TSOKeyspaceGroupIDKey: groupID,
 		},

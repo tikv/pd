@@ -20,6 +20,7 @@ import (
 	goerrors "errors"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -33,10 +34,12 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-const microserviceMetadataCleanupRetryInterval = 5 * time.Second
+const (
+	microserviceMetadataCleanupInitialRetryInterval = time.Second
+	microserviceMetadataCleanupMaxRetryInterval     = 30 * time.Second
+)
 
 var errMicroserviceMetadataCleanupRejected = errors.New("microservice metadata cleanup rejected")
 
@@ -50,42 +53,69 @@ func rejectMicroserviceMetadataCleanup(format string, args ...any) error {
 	return errors.Wrapf(errMicroserviceMetadataCleanupRejected, format, args...)
 }
 
-func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
+// prepareMicroserviceMetadataCleanup makes the supported API-service-to-PD-mode
+// transition durable before the PD leader becomes ready. Unsafe metadata states
+// are left untouched and do not prevent PD mode from serving.
+func (s *Server) prepareMicroserviceMetadataCleanup(ctx context.Context) error {
 	if s.IsKeyspaceGroupEnabled() {
-		return
+		return nil
 	}
 	term, ok := s.captureMicroserviceMetadataCleanupTerm()
 	if !ok {
-		return
+		return errors.New("cannot capture the PD leadership term for microservice metadata cleanup")
 	}
-	s.serverLoopWg.Add(1)
-	go func() {
-		defer logutil.LogPanic()
-		defer s.serverLoopWg.Done()
-		for {
-			if s.member != nil && !s.member.IsServing() {
-				return
-			}
-			err := s.cleanupMicroserviceMetadataInPDMode(ctx, term)
-			if err == nil {
-				return
-			}
-			if goerrors.Is(err, errMicroserviceMetadataCleanupRejected) {
-				log.Warn("cannot safely clean up microservice metadata in PD mode",
-					errs.ZapError(err))
-				return
-			}
-			log.Warn("failed to clean up microservice metadata in PD mode, retry later",
+
+	retryInterval := microserviceMetadataCleanupInitialRetryInterval
+	for {
+		if !s.isMicroserviceMetadataCleanupTermCurrent(term) {
+			return errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		err := s.cleanupMicroserviceMetadataInPDMode(ctx, term)
+		if err == nil {
+			return nil
+		}
+		if goerrors.Is(err, errMicroserviceMetadataCleanupRejected) {
+			microserviceMetadataCleanupCounter.WithLabelValues("rejected").Inc()
+			log.Warn("cannot safely clean up microservice metadata in PD mode",
 				errs.ZapError(err))
-			timer := time.NewTimer(microserviceMetadataCleanupRetryInterval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		microserviceMetadataCleanupCounter.WithLabelValues("retry").Inc()
+		log.Warn("failed to clean up microservice metadata in PD mode, retry later",
+			zap.Duration("retry-interval", retryInterval),
+			errs.ZapError(err))
+		if err := s.waitMicroserviceMetadataCleanupRetry(ctx, term, retryInterval); err != nil {
+			return err
+		}
+		retryInterval = min(retryInterval*2, microserviceMetadataCleanupMaxRetryInterval)
+	}
+}
+
+func (s *Server) waitMicroserviceMetadataCleanupRetry(
+	ctx context.Context,
+	term microserviceMetadataCleanupTerm,
+	retryInterval time.Duration,
+) error {
+	retryTimer := time.NewTimer(retryInterval)
+	defer retryTimer.Stop()
+	leadershipTicker := time.NewTicker(time.Second)
+	defer leadershipTicker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-retryTimer.C:
+			return nil
+		case <-leadershipTicker.C:
+			if !s.isMicroserviceMetadataCleanupTermCurrent(term) {
+				return errs.ErrEtcdTxnConflict.FastGenByArgs()
 			}
 		}
-	}()
+	}
 }
 
 func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataCleanupTerm, bool) {
@@ -108,6 +138,14 @@ func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataC
 	return term, term.leaderKey != "" && term.leaderValue != "" && term.leaseID != 0
 }
 
+func (s *Server) isMicroserviceMetadataCleanupTermCurrent(term microserviceMetadataCleanupTerm) bool {
+	if s.member == nil || s.member.GetLeadership() == nil || !s.member.GetLeadership().Check() {
+		return false
+	}
+	current, ok := s.captureMicroserviceMetadataCleanupTerm()
+	return ok && current == term
+}
+
 func (s *Server) cleanupMicroserviceMetadataInPDMode(
 	ctx context.Context,
 	term microserviceMetadataCleanupTerm,
@@ -119,64 +157,78 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 	// The persisted keyspace group contains the stale TSO member addresses that
 	// block a later switch back to API service mode. Keyspace assignment markers
 	// and the rest of the keyspace group metadata are intentionally left untouched.
-	needsCleanup, err := s.validateMicroserviceMetadataCleanup()
-	if err != nil || !needsCleanup {
+	groupKV, err := s.loadMicroserviceMetadataCleanupCandidate(ctx)
+	if err != nil {
 		return err
 	}
-	cleared, err := s.clearDefaultTSOKeyspaceGroupMembers(ctx, term)
+	if groupKV == nil {
+		microserviceMetadataCleanupCounter.WithLabelValues("skipped").Inc()
+		return nil
+	}
+	cleared, err := s.clearDefaultTSOKeyspaceGroupMembers(ctx, term, groupKV)
 	if err != nil {
 		return err
 	}
 	if cleared {
+		microserviceMetadataCleanupCounter.WithLabelValues("success").Inc()
 		log.Info("cleaned up microservice metadata in PD mode",
 			zap.Bool("cleared-default-keyspace-group-members", true))
 	}
 	return nil
 }
 
-func (s *Server) validateMicroserviceMetadataCleanup() (bool, error) {
+func (s *Server) loadMicroserviceMetadataCleanupCandidate(ctx context.Context) (*mvccpb.KeyValue, error) {
 	// At most two records are needed: the default group and the first unsupported
 	// non-default group, if one exists.
-	groups, err := s.storage.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 2)
+	groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
+	resp, err := etcdutil.EtcdKVGetWithContext(
+		ctx,
+		s.client,
+		groupKey,
+		clientv3.WithRange(clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())),
+		clientv3.WithLimit(2),
+	)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	needsCleanup := false
-	for _, group := range groups {
-		if group == nil {
-			continue
+	var candidate *mvccpb.KeyValue
+	for _, groupKV := range resp.Kvs {
+		group := &endpoint.KeyspaceGroup{}
+		if err := json.Unmarshal(groupKV.Value, group); err != nil {
+			return nil, rejectMicroserviceMetadataCleanup(
+				"cannot decode TSO keyspace group metadata when cleaning up PD mode microservice metadata: %v", err)
+		}
+		if string(groupKV.Key) != groupKey {
+			return nil, rejectMicroserviceMetadataCleanup(
+				"found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", group.ID)
 		}
 		if group.ID != constant.DefaultKeyspaceGroupID {
-			return false, rejectMicroserviceMetadataCleanup("found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", group.ID)
+			return nil, rejectMicroserviceMetadataCleanup("found TSO keyspace group %d at the default group path when cleaning up PD mode microservice metadata", group.ID)
 		}
 		if group.IsSplitting() {
-			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
+			return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
 		}
 		if group.IsMerging() {
-			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
+			return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
 		}
-		needsCleanup = len(group.Members) > 0
+		if len(group.Members) > 0 {
+			candidate = groupKV
+		}
 	}
-	return needsCleanup, nil
+	return candidate, nil
 }
 
 func (s *Server) clearDefaultTSOKeyspaceGroupMembers(
 	ctx context.Context,
 	term microserviceMetadataCleanupTerm,
+	groupKV *mvccpb.KeyValue,
 ) (bool, error) {
 	groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
-	resp, err := etcdutil.EtcdKVGet(s.client, groupKey)
-	if err != nil {
-		return false, err
-	}
-	if len(resp.Kvs) == 0 {
-		return false, nil
-	}
-	if len(resp.Kvs) != 1 {
-		return false, errs.ErrEtcdKVGetResponse.FastGenByArgs(resp.Kvs)
+	if groupKV == nil || string(groupKV.Key) != groupKey {
+		return false, rejectMicroserviceMetadataCleanup(
+			"default TSO keyspace group cleanup candidate does not match its persisted path")
 	}
 
-	groupKV := resp.Kvs[0]
 	group := &endpoint.KeyspaceGroup{}
 	if err := json.Unmarshal(groupKV.Value, group); err != nil {
 		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
