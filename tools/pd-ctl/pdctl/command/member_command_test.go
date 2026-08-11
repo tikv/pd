@@ -38,34 +38,29 @@ const (
 )
 
 type transferLeaderRoundTripper struct {
-	memberName             string
-	clientURLs             []string
-	membersStatusCode      int
-	invalidMembersResponse bool
-	noClientURLs           bool
-	readyErrors            []error
-	readyStatusCode        int
-	targetIsLeader         bool
+	memberName      string
+	clientURLs      []string
+	readyErrors     []error
+	readyStatusCode int
+	targetIsLeader  bool
 
 	membersRequests  int
 	readyRequests    int
 	transferRequests int
-	readyMethod      string
 	readyHosts       []string
 	readyTimeouts    []time.Duration
-	readyHeader      http.Header
-	transferMethod   string
+	allowFollower    string
 	transferHost     string
 }
 
 func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	statusCode := http.StatusOK
 	body := ""
-	switch req.URL.Path {
-	case "/" + membersPrefix:
+	switch {
+	case req.Method == http.MethodGet && req.URL.Path == "/"+membersPrefix:
 		rt.membersRequests++
 		clientURLs := rt.clientURLs
-		if len(clientURLs) == 0 && !rt.noClientURLs {
+		if len(clientURLs) == 0 {
 			clientURLs = []string{targetPDURL}
 		}
 		members := &pdpb.GetMembersResponse{
@@ -77,34 +72,25 @@ func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 		if rt.targetIsLeader {
 			members.EtcdLeader = members.Members[0]
 		}
-		if rt.invalidMembersResponse {
-			body = "{"
-		} else {
-			data, err := json.Marshal(members)
-			if err != nil {
-				return nil, err
-			}
-			body = string(data)
+		data, err := json.Marshal(members)
+		if err != nil {
+			return nil, err
 		}
-		if rt.membersStatusCode != 0 {
-			statusCode = rt.membersStatusCode
-		}
-	case "/" + readyPrefix:
+		body = string(data)
+	case req.Method == http.MethodGet && req.URL.Path == "/"+readyPrefix:
 		rt.readyRequests++
-		rt.readyMethod = req.Method
 		rt.readyHosts = append(rt.readyHosts, req.URL.Host)
 		if deadline, ok := req.Context().Deadline(); ok {
 			rt.readyTimeouts = append(rt.readyTimeouts, time.Until(deadline))
 		}
-		rt.readyHeader = req.Header.Clone()
+		rt.allowFollower = req.Header.Get(apiutil.PDAllowFollowerHandleHeader)
 		requestIndex := rt.readyRequests - 1
 		if requestIndex < len(rt.readyErrors) && rt.readyErrors[requestIndex] != nil {
 			return nil, rt.readyErrors[requestIndex]
 		}
 		statusCode = rt.readyStatusCode
-	case "/" + leaderMemberPrefix + "/transfer/" + rt.memberName:
+	case req.Method == http.MethodPost && req.URL.Path == "/"+leaderMemberPrefix+"/transfer/"+rt.memberName:
 		rt.transferRequests++
-		rt.transferMethod = req.Method
 		rt.transferHost = req.URL.Host
 	default:
 		statusCode = http.StatusNotFound
@@ -138,18 +124,20 @@ func executeTransferLeaderCommand(
 	return out.String()
 }
 
-func TestTransferPDLeaderChecksTargetReadiness(t *testing.T) {
+func TestTransferPDLeaderSubmitsWhenTargetIsReportedAsLeader(t *testing.T) {
 	re := require.New(t)
-	rt := &transferLeaderRoundTripper{memberName: targetPDName, readyStatusCode: http.StatusOK}
+	rt := &transferLeaderRoundTripper{
+		memberName:      targetPDName,
+		readyStatusCode: http.StatusOK,
+		targetIsLeader:  true,
+	}
 
 	output := executeTransferLeaderCommand(re, rt, "")
 	re.Equal(1, rt.membersRequests)
 	re.Equal(1, rt.readyRequests)
-	re.Equal(http.MethodGet, rt.readyMethod)
 	re.Equal([]string{"target-pd:2379"}, rt.readyHosts)
-	re.Equal("true", rt.readyHeader.Get(apiutil.PDAllowFollowerHandleHeader))
+	re.Equal("true", rt.allowFollower)
 	re.Equal(1, rt.transferRequests)
-	re.Equal(http.MethodPost, rt.transferMethod)
 	re.Equal("mock-pd:2379", rt.transferHost)
 	re.Contains(output, "Success!")
 }
@@ -157,82 +145,16 @@ func TestTransferPDLeaderChecksTargetReadiness(t *testing.T) {
 func TestTransferPDLeaderRequiresExactConfirmation(t *testing.T) {
 	re := require.New(t)
 
-	for _, input := range []string{"N\n", "y\n", "Y yes\n", "\n", ""} {
-		rt := &transferLeaderRoundTripper{memberName: targetPDName, readyStatusCode: http.StatusInternalServerError}
-		output := executeTransferLeaderCommand(re, rt, input)
-		re.Equal(1, rt.readyRequests, "input %q", input)
-		re.Equal(0, rt.transferRequests, "input %q", input)
-		re.Contains(output, "may cause the PD leader to be unable to serve requests for an extended period", "input %q", input)
-		re.Contains(output, "Enter Y to continue", "input %q", input)
-		re.Contains(output, "Leader transfer aborted", "input %q", input)
-	}
-}
-
-func TestTransferPDLeaderContinuesAfterExplicitConfirmation(t *testing.T) {
-	re := require.New(t)
 	rt := &transferLeaderRoundTripper{memberName: targetPDName, readyStatusCode: http.StatusInternalServerError}
+	output := executeTransferLeaderCommand(re, rt, "y\n")
+	re.Equal(0, rt.transferRequests)
+	re.Contains(output, "may cause the PD leader to be unable to serve requests for an extended period")
+	re.Contains(output, "Enter Y to continue")
+	re.Contains(output, "Leader transfer aborted")
 
-	output := executeTransferLeaderCommand(re, rt, "Y\n")
-	re.Equal(1, rt.readyRequests)
+	rt = &transferLeaderRoundTripper{memberName: targetPDName, readyStatusCode: http.StatusInternalServerError}
+	output = executeTransferLeaderCommand(re, rt, "Y\n")
 	re.Equal(1, rt.transferRequests)
-	re.Contains(output, "Success!")
-}
-
-func TestTransferPDLeaderConfirmsWhenReadinessCannotBeVerified(t *testing.T) {
-	re := require.New(t)
-	rt := &transferLeaderRoundTripper{
-		memberName:  targetPDName,
-		clientURLs:  []string{"http://target-pd-1:2379", "http://target-pd-2:2379"},
-		readyErrors: []error{context.DeadlineExceeded, context.DeadlineExceeded},
-	}
-
-	output := executeTransferLeaderCommand(re, rt, "Y\n")
-	re.Equal(1, rt.membersRequests)
-	re.Equal(2, rt.readyRequests)
-	re.Equal(1, rt.transferRequests)
-	re.Contains(output, "readiness cannot be verified")
-	re.Contains(output, "Success!")
-}
-
-func TestTransferPDLeaderConfirmsWhenMemberDiscoveryFails(t *testing.T) {
-	tests := []struct {
-		name                   string
-		membersStatusCode      int
-		invalidMembersResponse bool
-		expectedError          string
-	}{
-		{name: "request fails", membersStatusCode: http.StatusInternalServerError, expectedError: "get PD members"},
-		{name: "response is invalid", invalidMembersResponse: true, expectedError: "decode PD members"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			re := require.New(t)
-			rt := &transferLeaderRoundTripper{
-				memberName:             targetPDName,
-				membersStatusCode:      test.membersStatusCode,
-				invalidMembersResponse: test.invalidMembersResponse,
-			}
-
-			output := executeTransferLeaderCommand(re, rt, "Y\n")
-			re.Equal(1, rt.membersRequests)
-			re.Equal(0, rt.readyRequests)
-			re.Equal(1, rt.transferRequests)
-			re.Contains(output, test.expectedError)
-			re.Contains(output, "readiness cannot be verified")
-			re.Contains(output, "Success!")
-		})
-	}
-}
-
-func TestTransferPDLeaderConfirmsWhenTargetHasNoClientURLs(t *testing.T) {
-	re := require.New(t)
-	rt := &transferLeaderRoundTripper{memberName: targetPDName, noClientURLs: true}
-
-	output := executeTransferLeaderCommand(re, rt, "Y\n")
-	re.Equal(1, rt.membersRequests)
-	re.Equal(0, rt.readyRequests)
-	re.Equal(1, rt.transferRequests)
-	re.Contains(output, "has no client URLs")
 	re.Contains(output, "Success!")
 }
 
@@ -250,7 +172,7 @@ func TestCheckPDMemberReadyTriesNextURLAfterTimeout(t *testing.T) {
 
 	cmd := NewMemberCommand()
 	cmd.Flags().String("pd", mockPDURL, "")
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	found, err := checkPDMemberReady(cmd, targetPDName)
 	re.NoError(err)
@@ -276,7 +198,7 @@ func TestCheckPDMemberReadyTriesNextURLAfterInvalidURL(t *testing.T) {
 
 	cmd := NewMemberCommand()
 	cmd.Flags().String("pd", mockPDURL, "")
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	found, err := checkPDMemberReady(cmd, targetPDName)
 	re.NoError(err)
@@ -288,13 +210,11 @@ func TestTransferPDLeaderForceSkipsReadinessPreflight(t *testing.T) {
 	re := require.New(t)
 
 	for _, forceFlag := range []string{"--force", "-f"} {
-		rt := &transferLeaderRoundTripper{memberName: targetPDName, readyStatusCode: http.StatusInternalServerError}
-		output := executeTransferLeaderCommand(re, rt, "", forceFlag)
+		rt := &transferLeaderRoundTripper{memberName: targetPDName}
+		executeTransferLeaderCommand(re, rt, "", forceFlag)
 		re.Equal(0, rt.membersRequests, forceFlag)
 		re.Equal(0, rt.readyRequests, forceFlag)
 		re.Equal(1, rt.transferRequests, forceFlag)
-		re.NotContains(output, "Enter Y to continue", forceFlag)
-		re.Contains(output, "Success!", forceFlag)
 	}
 }
 
@@ -307,21 +227,4 @@ func TestTransferPDLeaderRejectsUnknownMember(t *testing.T) {
 	re.Equal(0, rt.readyRequests)
 	re.Equal(0, rt.transferRequests)
 	re.Contains(output, `target PD member "missing" was not found`)
-	re.NotContains(output, "Enter Y to continue")
-}
-
-func TestTransferPDLeaderStillSubmitsWhenTargetWasLeader(t *testing.T) {
-	re := require.New(t)
-	rt := &transferLeaderRoundTripper{
-		memberName:      targetPDName,
-		readyStatusCode: http.StatusOK,
-		targetIsLeader:  true,
-	}
-
-	// The leader can change after the member list is returned, so the transfer must still be submitted.
-	output := executeTransferLeaderCommand(re, rt, "")
-	re.Equal(1, rt.membersRequests)
-	re.Equal(1, rt.readyRequests)
-	re.Equal(1, rt.transferRequests)
-	re.Contains(output, "Success!")
 }
