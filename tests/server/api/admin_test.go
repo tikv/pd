@@ -31,7 +31,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	keyspaceconstant "github.com/tikv/pd/pkg/keyspace/constant"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -350,6 +354,71 @@ func (suite *adminTestSuite) checkMarkPitrRestoreMode(cluster *tests.TestCluster
 	re.NoError(err)
 	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
 		testutil.StatusOK(re), testutil.StringContain(re, "false")))
+}
+
+func (suite *adminTestSuite) TestCleanupMicroserviceMetadata() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkCleanupMicroserviceMetadata)
+}
+
+func (suite *adminTestSuite) checkCleanupMicroserviceMetadata(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	storage := leader.GetServer().GetStorage()
+	ctx := context.Background()
+
+	groups, err := storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
+	re.NoError(err)
+	var previousDefaultGroup *endpoint.KeyspaceGroup
+	if len(groups) > 0 && groups[0].ID == keyspaceconstant.DefaultKeyspaceGroupID {
+		previousDefaultGroup = groups[0]
+	}
+	defer func() {
+		re.NoError(storage.RunInTxn(ctx, func(txn kv.Txn) error {
+			if previousDefaultGroup == nil {
+				return storage.DeleteKeyspaceGroup(txn, keyspaceconstant.DefaultKeyspaceGroupID)
+			}
+			return storage.SaveKeyspaceGroup(txn, previousDefaultGroup)
+		}))
+	}()
+
+	group := &endpoint.KeyspaceGroup{
+		ID:       keyspaceconstant.DefaultKeyspaceGroupID,
+		UserKind: endpoint.Basic.String(),
+		Members: []endpoint.KeyspaceGroupMember{
+			{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcsconstant.DefaultKeyspaceGroupReplicaPriority,
+			},
+		},
+		Keyspaces: []uint32{keyspaceconstant.DefaultKeyspaceID, 42},
+	}
+	re.NoError(storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceGroup(txn, group)
+	}))
+
+	url := leader.GetAddr() + "/pd/api/v1/admin/microservice/metadata/cleanup"
+	// Only POST is allowed. A rejected method must not mutate the metadata.
+	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+		testutil.Status(re, http.StatusMethodNotAllowed)))
+	storedGroups, err := storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
+	re.NoError(err)
+	re.Len(storedGroups, 1)
+	re.Equal(group.Members, storedGroups[0].Members)
+
+	response := &api.CleanupMicroserviceMetadataResponse{}
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re), testutil.ExtractJSON(re, response)))
+	re.True(response.Changed)
+	storedGroups, err = storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
+	re.NoError(err)
+	re.Len(storedGroups, 1)
+	re.Empty(storedGroups[0].Members)
+	re.Equal(group.Keyspaces, storedGroups[0].Keyspaces)
+
+	response.Changed = true
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,
+		testutil.StatusOK(re), testutil.ExtractJSON(re, response)))
+	re.False(response.Changed)
 }
 
 func (suite *adminTestSuite) TestRecoverAllocID() {

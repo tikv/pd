@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -767,6 +769,220 @@ func TestTSOServiceSwitch(t *testing.T) {
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+}
+
+func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/skipKeyspaceRegionCheck", "return"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/skipKeyspaceRegionCheck"))
+	})
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", "return(true)"))
+	t.Cleanup(func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+	})
+
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableTSODynamicSwitching = false
+		conf.Keyspace.WaitRegionSplit = false
+	})
+	re.NoError(err)
+	defer tc.Destroy()
+
+	re.NoError(tc.RunInitialServers())
+	pdServer := tc.GetServer(tc.WaitLeader())
+	re.NotNil(pdServer)
+	re.NoError(pdServer.BootstrapCluster())
+
+	const userKeyspaceName = "metadata_cleanup_user_keyspace"
+	userKeyspace, err := pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name: userKeyspaceName,
+	})
+	re.NoError(err)
+	userKeyspaceID := userKeyspace.GetId()
+	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+
+	oldTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+	re.NoError(err)
+	defer oldTSOCluster.Destroy()
+	oldTSOPrimary := waitForTSOServiceReady(re, oldTSOCluster)
+	oldMembers := oldTSOCluster.GetKeyspaceGroupMember()
+	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
+
+	defaultClient := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), []string{pdServer.GetAddr()})
+	defer defaultClient.Close()
+	userClient := utils.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(userKeyspaceName), []string{pdServer.GetAddr()})
+	defer userClient.Close()
+	globalLastTS := tsoutil.ComposeTS(time.Now().Add(5*time.Minute).UnixMilli(), 0)
+	re.NoError(oldTSOPrimary.ResetTS(
+		globalLastTS,
+		true,
+		true,
+		constant.DefaultKeyspaceGroupID,
+	))
+	re.NoError(checkTSOMonotonic(ctx, defaultClient, &globalLastTS, 10))
+	re.NoError(checkTSOMonotonic(ctx, userClient, &globalLastTS, 10))
+
+	oldTSOCluster.Destroy()
+	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+
+	pdServer = restartPDWithServices(ctx, re, tc, pdServer, nil)
+	waitForTSOMonotonic(re, ctx, defaultClient, &globalLastTS)
+	waitForTSOMonotonic(re, ctx, userClient, &globalLastTS)
+	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+
+	re.True(cleanupMicroserviceMetadataViaHTTP(re, pdServer))
+	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	re.NoError(checkTSOMonotonic(ctx, defaultClient, &globalLastTS, 10))
+	re.NoError(checkTSOMonotonic(ctx, userClient, &globalLastTS, 10))
+
+	pdServer = restartPDWithServices(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
+	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+
+	newTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+	re.NoError(err)
+	defer newTSOCluster.Destroy()
+	waitForTSOServiceReady(re, newTSOCluster)
+	newMembers := newTSOCluster.GetKeyspaceGroupMember()
+	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, newMembers)
+	waitForTSOMonotonic(re, ctx, defaultClient, &globalLastTS)
+	waitForTSOMonotonic(re, ctx, userClient, &globalLastTS)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+}
+
+func restartPDWithServices(
+	ctx context.Context,
+	re *require.Assertions,
+	tc *tests.TestCluster,
+	oldServer *tests.TestServer,
+	services []string,
+) *tests.TestServer {
+	cfg := oldServer.GetConfig()
+	serverName := cfg.Name
+	re.NoError(oldServer.Stop())
+
+	newServer, err := tests.NewTestServer(ctx, cfg, services)
+	re.NoError(err)
+	tc.GetServers()[serverName] = newServer
+	re.NoError(newServer.Run())
+	re.True(newServer.WaitLeader())
+	return newServer
+}
+
+func cleanupMicroserviceMetadataViaHTTP(re *require.Assertions, pdServer *tests.TestServer) bool {
+	const cleanupPath = "/pd/api/v1/admin/microservice/metadata/cleanup"
+	req, err := http.NewRequest(http.MethodPost, pdServer.GetAddr()+cleanupPath, http.NoBody)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(body))
+
+	result := struct {
+		Changed bool `json:"changed"`
+	}{}
+	re.NoError(json.Unmarshal(body, &result))
+	return result.Changed
+}
+
+func waitForDefaultKeyspaceGroup(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceID uint32,
+	expectedMembers []endpoint.KeyspaceGroupMember,
+) {
+	testutil.Eventually(re, func() bool {
+		group, err := loadOnlyDefaultKeyspaceGroup(pdServer)
+		return err == nil &&
+			slices.Contains(group.Keyspaces, constant.DefaultKeyspaceID) &&
+			slices.Contains(group.Keyspaces, userKeyspaceID) &&
+			keyspaceGroupMembersEqual(group.Members, expectedMembers)
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func assertDefaultKeyspaceGroup(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceID uint32,
+	expectedMembers []endpoint.KeyspaceGroupMember,
+) {
+	group, err := loadOnlyDefaultKeyspaceGroup(pdServer)
+	re.NoError(err)
+	re.Contains(group.Keyspaces, constant.DefaultKeyspaceID)
+	re.Contains(group.Keyspaces, userKeyspaceID)
+	re.True(keyspaceGroupMembersEqual(group.Members, expectedMembers),
+		"unexpected keyspace group members, expected %v, got %v", expectedMembers, group.Members)
+}
+
+func loadOnlyDefaultKeyspaceGroup(pdServer *tests.TestServer) (*endpoint.KeyspaceGroup, error) {
+	groups, err := pdServer.GetServer().GetStorage().LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 2)
+	if err != nil {
+		return nil, err
+	}
+	if len(groups) != 1 || groups[0] == nil || groups[0].ID != constant.DefaultKeyspaceGroupID {
+		return nil, fmt.Errorf("expected only default keyspace group %d, got %v", constant.DefaultKeyspaceGroupID, groups)
+	}
+	return groups[0], nil
+}
+
+func keyspaceGroupMembersEqual(actual, expected []endpoint.KeyspaceGroupMember) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for _, expectedMember := range expected {
+		if !slices.ContainsFunc(actual, func(member endpoint.KeyspaceGroupMember) bool {
+			return member.IsAddressEquivalent(expectedMember.Address) && member.Priority == expectedMember.Priority
+		}) {
+			return false
+		}
+	}
+	return true
+}
+
+func assertUserKeyspaceInDefaultGroup(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceName string,
+) {
+	meta, err := pdServer.GetServer().GetKeyspaceManager().LoadKeyspace(userKeyspaceName)
+	re.NoError(err)
+	re.Equal("0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
+}
+
+func waitForTSOServiceReady(re *require.Assertions, tsoCluster *tests.TestTSOCluster) *tso.Server {
+	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Get(primary.GetAddr() + tsoapi.APIPathPrefix + "/health")
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == http.StatusOK
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+	return primary
+}
+
+func waitForTSOMonotonic(re *require.Assertions, ctx context.Context, client pd.Client, globalLastTS *uint64) {
+	for range 10 {
+		var physical, logical int64
+		testutil.Eventually(re, func() bool {
+			var err error
+			physical, logical, err = client.GetTS(ctx)
+			return err == nil
+		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+		ts := (uint64(physical) << 18) + uint64(logical)
+		re.Greater(ts, *globalLastTS)
+		*globalLastTS = ts
+	}
 }
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {
