@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -185,6 +186,19 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
+		if s.IsRemoved() {
+			// Unlike the other per-store cleanup called once from BuryStoreLocked, filter
+			// and heartbeat-stream metrics for a tombstoned store keep getting rewritten by
+			// unrelated, ongoing activity for as long as the store stays known: every
+			// scheduler's Schedule() still runs StoreStateFilter against it every cycle
+			// (that rejection is what increments the filter counters), and the heartbeat
+			// stream keepalive ticker keeps touching it as long as its stream is still
+			// bound. A one-shot delete at bury time gets undone almost immediately, so
+			// delete unconditionally here on every tick instead.
+			storeIDStr := strconv.FormatUint(s.GetID(), 10)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+		}
 	}
 	statsMap.Collect()
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()

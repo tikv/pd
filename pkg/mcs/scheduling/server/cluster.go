@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -727,15 +728,22 @@ func (c *Cluster) collectMetrics() {
 	// already cleaned: a region heartbeat for an already-tombstoned store can still
 	// land here and recreate a series. RegionHeartbeat (grpc_service.go) only checks
 	// store == nil, not store.IsRemoved(), before recording regionHeartbeat* metrics.
-	// If cleanup only ran once per store, such a late write would never get swept
-	// again for as long as the store stays tombstoned-but-not-yet-removed.
-	// DeletePartialMatch on labels that no longer exist is a cheap no-op, so
-	// repeating it every tick is safe.
+	// The same is true of filter and heartbeat-stream metrics: every scheduler's
+	// Schedule() still runs StoreStateFilter against every known store each cycle
+	// (that rejection is what increments the filter counters), and the heartbeat
+	// stream keepalive ticker keeps touching a tombstoned store as long as its
+	// stream is still bound. If cleanup only ran once per store, such late writes
+	// would never get swept again for as long as the store stays
+	// tombstoned-but-not-yet-removed. DeletePartialMatch on labels that no longer
+	// exist is a cheap no-op, so repeating it every tick is safe.
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
 		if s.IsRemoved() {
-			DeleteStoreMetrics(s.GetAddress(), strconv.FormatUint(s.GetID(), 10))
+			storeIDStr := strconv.FormatUint(s.GetID(), 10)
+			DeleteStoreMetrics(s.GetAddress(), storeIDStr)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
 		}
 	}
 	statsMap.Collect()
