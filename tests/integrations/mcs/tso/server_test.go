@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -48,7 +49,6 @@ import (
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -793,36 +793,39 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re.NotNil(pdServer)
 	re.NoError(pdServer.BootstrapCluster())
 	const userKeyspaceName = "mode_switch_user_ks"
-	_, err = pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+	userKeyspace, err := pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name: userKeyspaceName,
 	})
 	re.NoError(err)
+	userKeyspaceID := userKeyspace.GetId()
 
 	const switchRounds = 2
 	for range switchRounds {
-		waitDefaultKeyspaceGroupReady(re, pdServer)
+		waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
 		tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 		re.NoError(err)
 		waitTSOServiceReady(re, tsoCluster)
 		checkMicroserviceTSOAvailable(ctx, re, pdServer)
 		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
+		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 		tsoCluster.Destroy()
 
 		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, nil)
 		checkPDTSOAvailable(ctx, re, pdServer)
 		checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
-		waitDefaultKeyspaceGroupCleaned(re, pdServer)
+		waitDefaultKeyspaceGroupCleaned(re, pdServer, userKeyspaceID)
 
 		pdServer = restartPDForServiceMode(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
 	}
 
-	waitDefaultKeyspaceGroupReady(re, pdServer)
+	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	waitTSOServiceReady(re, tsoCluster)
 	checkMicroserviceTSOAvailable(ctx, re, pdServer)
 	checkKeyspaceTSOAvailable(ctx, re, pdServer, userKeyspaceName)
+	waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 }
 
 func restartPDForServiceMode(
@@ -844,11 +847,60 @@ func restartPDForServiceMode(
 	return newServer
 }
 
-func waitDefaultKeyspaceGroupReady(re *require.Assertions, pdServer *tests.TestServer) {
+func waitDefaultKeyspaceGroupReady(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceID uint32,
+) {
 	testutil.Eventually(re, func() bool {
-		resp, err := etcdutil.EtcdKVGet(pdServer.GetEtcdClient(), keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
-		return err == nil && len(resp.Kvs) == 1
+		group, err := loadDefaultKeyspaceGroup(pdServer)
+		return err == nil && slices.Contains(group.Keyspaces, userKeyspaceID)
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func waitDefaultKeyspaceGroupCleaned(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	userKeyspaceID uint32,
+) {
+	testutil.Eventually(re, func() bool {
+		group, err := loadDefaultKeyspaceGroup(pdServer)
+		return err == nil &&
+			len(group.Members) == 0 &&
+			slices.Contains(group.Keyspaces, userKeyspaceID)
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func waitDefaultKeyspaceGroupMembers(
+	re *require.Assertions,
+	pdServer *tests.TestServer,
+	expected []endpoint.KeyspaceGroupMember,
+) {
+	testutil.Eventually(re, func() bool {
+		group, err := loadDefaultKeyspaceGroup(pdServer)
+		if err != nil || len(group.Members) != len(expected) {
+			return false
+		}
+		for _, expectedMember := range expected {
+			if !slices.ContainsFunc(group.Members, func(member endpoint.KeyspaceGroupMember) bool {
+				return member.IsAddressEquivalent(expectedMember.Address)
+			}) {
+				return false
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func loadDefaultKeyspaceGroup(pdServer *tests.TestServer) (*endpoint.KeyspaceGroup, error) {
+	groups, err := pdServer.GetServer().GetStorage().LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(groups) != 1 || groups[0] == nil || groups[0].ID != constant.DefaultKeyspaceGroupID {
+		return nil, fmt.Errorf("default keyspace group %d does not exist", constant.DefaultKeyspaceGroupID)
+	}
+	return groups[0], nil
 }
 
 func waitTSOServiceReady(re *require.Assertions, tsoCluster *tests.TestTSOCluster) {
@@ -901,15 +953,6 @@ func checkKeyspaceTSOAvailable(
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	re.NotZero(tsoutil.ComposeTS(physical, logical))
-}
-
-func waitDefaultKeyspaceGroupCleaned(re *require.Assertions, pdServer *tests.TestServer) {
-	testutil.Eventually(re, func() bool {
-		resp, err := etcdutil.EtcdKVGet(
-			pdServer.GetEtcdClient(),
-			keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
-		return err == nil && len(resp.Kvs) == 0
-	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {

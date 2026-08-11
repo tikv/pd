@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,9 +27,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -40,16 +43,21 @@ func TestCleanupMicroserviceMetadataInPDMode(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12345)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	staleMembers := []endpoint.KeyspaceGroupMember{{
+		Address:  "http://127.0.0.1:3379",
+		Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+	}}
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:        constant.DefaultKeyspaceGroupID,
 			UserKind:  endpoint.Basic.String(),
+			Members:   staleMembers,
 			Keyspaces: []uint32{1},
 		}); err != nil {
 			return err
@@ -79,12 +87,16 @@ func TestCleanupMicroserviceMetadataInPDMode(t *testing.T) {
 		re.NoError(err)
 	}
 
-	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
-	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
 
 	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	re.NoError(err)
-	re.Empty(groups)
+	re.Len(groups, 1)
+	re.Equal(constant.DefaultKeyspaceGroupID, groups[0].ID)
+	re.Equal(endpoint.Basic.String(), groups[0].UserKind)
+	re.Empty(groups[0].Members)
+	re.Equal([]uint32{1}, groups[0].Keyspaces)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		meta, err := store.LoadKeyspaceMeta(txn, 1)
 		re.NoError(err)
@@ -109,16 +121,20 @@ func TestCleanupMicroserviceMetadataIgnoresLeasedRegistryKeys(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12351)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
-			ID:        constant.DefaultKeyspaceGroupID,
-			UserKind:  endpoint.Basic.String(),
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
 			Keyspaces: []uint32{1},
 		})
 	}))
@@ -131,10 +147,11 @@ func TestCleanupMicroserviceMetadataIgnoresLeasedRegistryKeys(t *testing.T) {
 		_, _ = client.Revoke(ctx, leaseID)
 	}()
 
-	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
 	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	re.NoError(err)
-	re.Empty(groups)
+	re.Len(groups, 1)
+	re.Empty(groups[0].Members)
 	resp, err := etcdutil.EtcdKVGet(client, registryPath)
 	re.NoError(err)
 	re.Len(resp.Kvs, 1)
@@ -145,27 +162,30 @@ func TestScheduleMicroserviceMetadataCleanupReturnsImmediately(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12348)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, _ := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
 			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
 		})
 	}))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet", "return(1)"))
-	t.Cleanup(func() {
-		_ = failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet")
-	})
+	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 
 	start := time.Now()
 	svr.scheduleMicroserviceMetadataCleanup(ctx)
 	re.Less(time.Since(start), 200*time.Millisecond)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/SlowEtcdKVGet"))
+	blocker.wait(t)
+	blocker.releaseCleanup()
+	blocker.disable(t)
 	svr.serverLoopWg.Wait()
 }
 
@@ -174,16 +194,20 @@ func TestScheduleMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12353)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, _ := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
 			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
 		}); err != nil {
 			return err
 		}
@@ -212,7 +236,7 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12350)
 	defer keypath.ResetClusterID()
 
@@ -236,6 +260,21 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 	}))
 	needsCleanup, err = svr.validateMicroserviceMetadataCleanup()
 	re.NoError(err)
+	re.False(needsCleanup)
+
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		group, err := store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		group.Members = []endpoint.KeyspaceGroupMember{{
+			Address:  "http://127.0.0.1:3379",
+			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+		}}
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+	needsCleanup, err = svr.validateMicroserviceMetadataCleanup()
+	re.NoError(err)
 	re.True(needsCleanup)
 }
 
@@ -243,16 +282,21 @@ func TestCleanupMicroserviceMetadataInPDModeRejectsNonDefaultGroup(t *testing.T)
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12346)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	staleMembers := []endpoint.KeyspaceGroupMember{{
+		Address:  "http://127.0.0.1:3379",
+		Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+	}}
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
 			UserKind: endpoint.Basic.String(),
+			Members:  staleMembers,
 		}); err != nil {
 			return err
 		}
@@ -262,40 +306,49 @@ func TestCleanupMicroserviceMetadataInPDModeRejectsNonDefaultGroup(t *testing.T)
 		})
 	}))
 
-	err := svr.cleanupMicroserviceMetadataInPDMode(ctx)
+	err := svr.cleanupMicroserviceMetadataInPDMode(ctx, term)
 	re.ErrorContains(err, "non-default TSO keyspace group 1")
 	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	re.NoError(err)
 	re.Len(groups, 2)
+	re.Equal(staleMembers, groups[0].Members)
 }
 
 func TestCleanupMicroserviceMetadataInPDModePreservesAssignmentMarkers(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	defer clean()
+	t.Cleanup(clean)
 	keypath.SetClusterID(12347)
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr := &Server{storage: store, client: client}
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
 			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
 		}); err != nil {
 			return err
 		}
-		return store.SaveKeyspaceMeta(txn, newKeyspaceMetaWithTSOGroup(1, "1"))
+		return store.SaveKeyspaceMeta(txn, newKeyspaceMetaWithTSOGroup(1, "0"))
 	}))
 
-	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx))
+	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		meta, err := store.LoadKeyspaceMeta(txn, 1)
 		re.NoError(err)
-		re.Equal("1", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
+		re.Equal("0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
 		return nil
 	}))
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.Empty(groups[0].Members)
 }
 
 func TestCleanupMicroserviceMetadataInPDModeRejectsGroupTransition(t *testing.T) {
@@ -325,27 +378,236 @@ func TestCleanupMicroserviceMetadataInPDModeRejectsGroupTransition(t *testing.T)
 			re := require.New(t)
 			ctx := context.Background()
 			_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-			defer clean()
+			t.Cleanup(clean)
 			keypath.SetClusterID(uint64(12400 + i))
 			defer keypath.ResetClusterID()
 
 			store := storage.NewStorageWithEtcdBackend(client)
-			svr := &Server{storage: store, client: client}
+			svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
 			group := &endpoint.KeyspaceGroup{
 				ID:       constant.DefaultKeyspaceGroupID,
 				UserKind: endpoint.Basic.String(),
+				Members: []endpoint.KeyspaceGroupMember{{
+					Address:  "http://127.0.0.1:3379",
+					Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+				}},
 			}
 			testCase.transition(group)
 			re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 				return store.SaveKeyspaceGroup(txn, group)
 			}))
 
-			err := svr.cleanupMicroserviceMetadataInPDMode(ctx)
+			err := svr.cleanupMicroserviceMetadataInPDMode(ctx, term)
 			re.ErrorContains(err, testCase.errText)
 			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 			re.NoError(err)
 			re.Len(groups, 1)
+			re.Equal(group, groups[0])
 		})
+	}
+}
+
+func TestClearDefaultTSOKeyspaceGroupMembersIsFencedByLeadershipTerm(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	keypath.SetClusterID(12354)
+	t.Cleanup(keypath.ResetClusterID)
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr, oldTerm := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	staleMembers := []endpoint.KeyspaceGroupMember{{
+		Address:  "http://127.0.0.1:3379",
+		Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+	}}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:        constant.DefaultKeyspaceGroupID,
+			UserKind:  endpoint.Basic.String(),
+			Members:   staleMembers,
+			Keyspaces: []uint32{1},
+		})
+	}))
+
+	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
+	resultCh := make(chan clearDefaultTSOKeyspaceGroupMembersResult, 1)
+	go func() {
+		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, oldTerm)
+		resultCh <- clearDefaultTSOKeyspaceGroupMembersResult{cleared: cleared, err: err}
+	}()
+	blocker.wait(t)
+
+	// Campaign again with the same member value to prove that comparing only the
+	// leader value would allow an old-term cleanup to pass.
+	svr.member.Resign()
+	re.NoError(svr.member.GetLeadership().Campaign(
+		testMicroserviceMetadataCleanupLeaseTimeout,
+		svr.member.MemberValue(),
+	))
+	svr.member.PromoteSelf()
+	newTerm, ok := svr.captureMicroserviceMetadataCleanupTerm()
+	re.True(ok)
+	re.Equal(oldTerm.leaderValue, newTerm.leaderValue)
+	re.NotEqual(oldTerm.leaseID, newTerm.leaseID)
+
+	blocker.releaseCleanup()
+	blocker.disable(t)
+	result := waitClearDefaultTSOKeyspaceGroupMembersResult(t, resultCh)
+	re.False(result.cleared)
+	re.ErrorIs(result.err, errs.ErrEtcdTxnConflict)
+
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.Equal(staleMembers, groups[0].Members)
+}
+
+func TestClearDefaultTSOKeyspaceGroupMembersPreservesConcurrentUpdate(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	keypath.SetClusterID(12355)
+	t.Cleanup(keypath.ResetClusterID)
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+			Members: []endpoint.KeyspaceGroupMember{{
+				Address:  "http://127.0.0.1:3379",
+				Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+			}},
+			Keyspaces: []uint32{1},
+		})
+	}))
+
+	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
+	resultCh := make(chan clearDefaultTSOKeyspaceGroupMembersResult, 1)
+	go func() {
+		cleared, err := svr.clearDefaultTSOKeyspaceGroupMembers(ctx, term)
+		resultCh <- clearDefaultTSOKeyspaceGroupMembersResult{cleared: cleared, err: err}
+	}()
+	blocker.wait(t)
+
+	newMembers := []endpoint.KeyspaceGroupMember{{
+		Address:  "http://127.0.0.1:3380",
+		Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
+	}}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		group, err := store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		group.Members = newMembers
+		group.Keyspaces = append(group.Keyspaces, 2)
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+
+	blocker.releaseCleanup()
+	blocker.disable(t)
+	result := waitClearDefaultTSOKeyspaceGroupMembersResult(t, resultCh)
+	re.False(result.cleared)
+	re.ErrorIs(result.err, errs.ErrEtcdTxnConflict)
+
+	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
+	re.NoError(err)
+	re.Len(groups, 1)
+	re.Equal(newMembers, groups[0].Members)
+	re.Equal([]uint32{1, 2}, groups[0].Keyspaces)
+}
+
+const testMicroserviceMetadataCleanupLeaseTimeout = 60
+
+type clearDefaultTSOKeyspaceGroupMembersResult struct {
+	cleared bool
+	err     error
+}
+
+type microserviceMetadataCleanupCommitBlocker struct {
+	name        string
+	reached     chan struct{}
+	release     chan struct{}
+	reachedOnce sync.Once
+	releaseOnce sync.Once
+	disableOnce sync.Once
+}
+
+func newMicroserviceMetadataCleanupTestServer(
+	t *testing.T,
+	client *clientv3.Client,
+	store storage.Storage,
+) (*Server, microserviceMetadataCleanupTerm) {
+	t.Helper()
+	pdMember := member.NewMember(nil, client, 1)
+	pdMember.InitMemberInfo("http://127.0.0.1:2379", "http://127.0.0.1:2380", "pd-test")
+	re := require.New(t)
+	re.NoError(pdMember.GetLeadership().Campaign(testMicroserviceMetadataCleanupLeaseTimeout, pdMember.MemberValue()))
+	pdMember.PromoteSelf()
+	t.Cleanup(pdMember.Resign)
+
+	svr := &Server{storage: store, client: client, member: pdMember}
+	term, ok := svr.captureMicroserviceMetadataCleanupTerm()
+	re.True(ok)
+	return svr, term
+}
+
+func enableMicroserviceMetadataCleanupCommitBlocker(t *testing.T) *microserviceMetadataCleanupCommitBlocker {
+	t.Helper()
+	blocker := &microserviceMetadataCleanupCommitBlocker{
+		name:    "github.com/tikv/pd/server/beforeClearDefaultTSOKeyspaceGroupMembersCommit",
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	require.NoError(t, failpoint.EnableCall(blocker.name, func() {
+		blocker.reachedOnce.Do(func() {
+			close(blocker.reached)
+		})
+		<-blocker.release
+	}))
+	t.Cleanup(func() {
+		blocker.releaseCleanup()
+		blocker.disable(t)
+	})
+	return blocker
+}
+
+func (b *microserviceMetadataCleanupCommitBlocker) wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-b.reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("microservice metadata cleanup did not reach the commit hook")
+	}
+}
+
+func (b *microserviceMetadataCleanupCommitBlocker) releaseCleanup() {
+	b.releaseOnce.Do(func() {
+		close(b.release)
+	})
+}
+
+func (b *microserviceMetadataCleanupCommitBlocker) disable(t *testing.T) {
+	t.Helper()
+	b.disableOnce.Do(func() {
+		require.NoError(t, failpoint.Disable(b.name))
+	})
+}
+
+func waitClearDefaultTSOKeyspaceGroupMembersResult(
+	t *testing.T,
+	resultCh <-chan clearDefaultTSOKeyspaceGroupMembersResult,
+) clearDefaultTSOKeyspaceGroupMembersResult {
+	t.Helper()
+	select {
+	case result := <-resultCh:
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("microservice metadata cleanup did not return")
+		return clearDefaultTSOKeyspaceGroupMembersResult{}
 	}
 }
 
