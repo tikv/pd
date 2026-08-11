@@ -44,7 +44,15 @@ const (
 	// campaign; if the target never comes up within this window the flag expires and
 	// the cluster falls back to a free election. Tying it to the leader lease keeps the
 	// window proportional to how fast leadership turns over.
-	TransferPrimaryLeaseMultiplier = int64(3)
+	//
+	// Kept at 1 (rather than a larger margin) on purpose: this multiplier directly
+	// bounds the cluster's worst-case unavailable window after a transfer whose target
+	// never wins a single campaign (down, unreachable, or stuck) - see TransferPrimary's
+	// doc comment. A bigger multiplier buys the target more slack but linearly extends
+	// that worst case; 1 lease already matches how long the cluster tolerates a primary
+	// being unreachable everywhere else (losing its own leader lease), so there is no
+	// reason for a transfer-induced outage to be allowed to run longer than that.
+	TransferPrimaryLeaseMultiplier = int64(1)
 	// PrimaryTickInterval is the interval to check primary
 	PrimaryTickInterval = 50 * time.Millisecond
 	// LeaderTickInterval is the interval to check leader

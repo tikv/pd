@@ -632,11 +632,12 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
-		// skipGrantLeader is still enabled for the whole duration of this call, so
-		// newPrimary cannot win and TransferPrimary's post-transfer verification times
-		// out - this call reports failure here, even though the cluster does recover
-		// once skipGrantLeader is disabled below.
-		re.Equal(http.StatusInternalServerError, resp.StatusCode)
+		// TransferPrimary reports success as soon as the marker is written and the
+		// old primary resigns - it does not wait for newPrimary to actually win, so
+		// this call succeeds here even though skipGrantLeader keeps newPrimary from
+		// winning for the whole duration of this call. The cluster does recover once
+		// skipGrantLeader is disabled below.
+		re.Equal(http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
@@ -697,14 +698,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, strings.ReplaceAll(service, "_", "-")),
 			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
-		// skipGrantLeader keeps newPrimary from ever winning for as long as this call
-		// runs, so TransferPrimary's post-transfer verification (which polls for
-		// newPrimary to actually take over, bounded by the expected-primary marker's
-		// own TTL) can never observe it and must time out. This call therefore reports
-		// failure here - it genuinely could not confirm the transfer took effect - even
-		// though the marker itself is still written and the cluster does recover once
-		// the old primary steps down below; that recovery is verified separately.
-		re.Equal(http.StatusInternalServerError, resp.StatusCode)
+		// TransferPrimary reports success as soon as the marker is written and the
+		// old primary resigns, regardless of whether newPrimary ever actually wins -
+		// skipGrantLeader keeps it from winning for as long as this call runs, but
+		// that only affects whether the cluster later recovers, not this response.
+		re.Equal(http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
@@ -719,9 +717,9 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 
 		// The transfer target (which we just closed) is the one named in the expected
-		// primary flag, so the other replicas back off until the flag's TTL (a few
-		// leader leases) expires, after which a free re-election elects a live primary.
-		// Wait long enough to cover that worst case.
+		// primary flag, so the other replicas back off until the flag's TTL (one leader
+		// lease) expires, after which a free re-election elects a live primary. Wait
+		// long enough to cover that worst case.
 		recoverWait := time.Duration(mcs.TransferPrimaryLeaseMultiplier*mcs.DefaultLease)*time.Second + 10*time.Second
 		serving := make([]string, 0, len(nodes))
 		testutil.Eventually(re, func() bool {
@@ -973,11 +971,11 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDownW
 		fmt.Sprintf("%s/tso/api/v1/primary/transfer", groupPrimary),
 		"application/json", bytes.NewBuffer(data))
 	re.NoError(err)
-	// target can never win while skipGrantLeader is enabled, so TransferPrimary's
-	// post-transfer verification times out and this call reports failure - it
-	// genuinely could not confirm the transfer took effect. The group does still
-	// recover afterwards, verified separately below.
-	re.Equal(http.StatusInternalServerError, resp.StatusCode)
+	// TransferPrimary reports success as soon as the marker is written and the old
+	// primary resigns, regardless of whether target ever actually wins - target can
+	// never win while skipGrantLeader is enabled, but that only affects whether the
+	// group later recovers, verified separately below.
+	re.Equal(http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
 	// Wait until the old group primary steps down (group temporarily has no primary).

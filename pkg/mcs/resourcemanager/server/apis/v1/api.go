@@ -361,7 +361,7 @@ func transferPrimary(c *gin.Context) {
 		newPrimary = v
 	}
 
-	if err := utils.TransferPrimary(c.Request.Context(), svr.GetClient(), svr.GetParticipant(),
+	if err := utils.TransferPrimary(svr.GetClient(), svr.GetParticipant(),
 		constant.ResourceManagerServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

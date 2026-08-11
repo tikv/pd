@@ -688,7 +688,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 								zap.Uint32("keyspace-group-id", kg.ID))
 							continue
 						}
-						if err := utils.TransferPrimary(ctx, kgm.etcdClient, participant,
+						if err := utils.TransferPrimary(kgm.etcdClient, participant,
 							mcs.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
