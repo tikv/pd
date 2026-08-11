@@ -46,6 +46,7 @@ type gcStateCommandSingle struct {
 	TxnSafePoint        uint64                  `json:"txn_safe_point"`
 	GCSafePoint         uint64                  `json:"gc_safe_point"`
 	GCBarriers          []gcStateCommandBarrier `json:"gc_barriers"`
+	GlobalGCBarriers    []gcStateCommandBarrier `json:"global_gc_barriers"`
 }
 
 type gcStateCommandState struct {
@@ -58,10 +59,6 @@ type gcStateCommandState struct {
 
 type gcStateCommandAll struct {
 	GCStates         []gcStateCommandState   `json:"gc_states"`
-	GlobalGCBarriers []gcStateCommandBarrier `json:"global_gc_barriers"`
-}
-
-type gcStateCommandGlobal struct {
 	GlobalGCBarriers []gcStateCommandBarrier `json:"global_gc_barriers"`
 }
 
@@ -221,7 +218,7 @@ func TestGCState(t *testing.T) {
 	re.NoError(err)
 	var singleProperties map[string]json.RawMessage
 	re.NoError(json.Unmarshal(output, &singleProperties), string(output))
-	re.NotContains(singleProperties, "global_gc_barriers")
+	re.Contains(singleProperties, "global_gc_barriers")
 	var keyspaceLevelResponse gcStateCommandSingle
 	re.NoError(json.Unmarshal(output, &keyspaceLevelResponse), string(output))
 	re.Equal(keyspaceLevelID, keyspaceLevelResponse.RequestedKeyspaceID)
@@ -233,6 +230,14 @@ func TestGCState(t *testing.T) {
 		{barrierID: "a-local", barrierTS: 210},
 		{barrierID: "z-local", barrierTS: 220, expires: true},
 	})
+	requireGCStateCommandBarriers(
+		re,
+		keyspaceLevelResponse.GlobalGCBarriers,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-global", barrierTS: 310},
+			{barrierID: "z-global", barrierTS: 320},
+		},
+	)
 
 	output, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", keyspaceLevelIDString,
@@ -246,6 +251,65 @@ func TestGCState(t *testing.T) {
 		{barrierID: "z-local", barrierTS: 220, expires: true},
 		{barrierID: "expired-local", barrierTS: 230, expired: true},
 	})
+	requireGCStateCommandBarriers(
+		re,
+		keyspaceLevelWithExpired.GlobalGCBarriers,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-global", barrierTS: 310},
+			{barrierID: "z-global", barrierTS: 320},
+			{barrierID: "expired-global", barrierTS: 330, expired: true},
+		},
+	)
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(),
+		"-u",
+		pdAddr,
+		"gc-state",
+		"keyspace",
+		keyspaceLevelIDString,
+		"--exclude-global-barriers",
+	)
+	re.NoError(err)
+	var excludedKeyspaceProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &excludedKeyspaceProperties), string(output))
+	re.NotContains(excludedKeyspaceProperties, "global_gc_barriers")
+	var excludedKeyspace gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &excludedKeyspace), string(output))
+	requireGCStateCommandBarriers(
+		re,
+		excludedKeyspace.GCBarriers,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-local", barrierTS: 210},
+			{barrierID: "z-local", barrierTS: 220, expires: true},
+		},
+	)
+
+	output, err = tests.ExecuteCommand(
+		ctl.GetRootCmd(),
+		"-u",
+		pdAddr,
+		"gc-state",
+		"keyspace",
+		keyspaceLevelIDString,
+		"--include-expired",
+		"--exclude-global-barriers",
+	)
+	re.NoError(err)
+	var excludedKeyspaceWithExpiredProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &excludedKeyspaceWithExpiredProperties), string(output))
+	re.NotContains(excludedKeyspaceWithExpiredProperties, "global_gc_barriers")
+	var excludedKeyspaceWithExpired gcStateCommandSingle
+	re.NoError(json.Unmarshal(output, &excludedKeyspaceWithExpired), string(output))
+	requireGCStateCommandBarriers(
+		re,
+		excludedKeyspaceWithExpired.GCBarriers,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-local", barrierTS: 210},
+			{barrierID: "z-local", barrierTS: 220, expires: true},
+			{barrierID: "expired-local", barrierTS: 230, expired: true},
+		},
+	)
 
 	output, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "4294967295",
@@ -262,6 +326,14 @@ func TestGCState(t *testing.T) {
 		{barrierID: "a-null", barrierTS: 110},
 		{barrierID: "z-null", barrierTS: 120, expires: true},
 	})
+	requireGCStateCommandBarriers(
+		re,
+		nullKeyspaceResponse.GlobalGCBarriers,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-global", barrierTS: 310},
+			{barrierID: "z-global", barrierTS: 320},
+		},
+	)
 
 	_, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "keyspace", "16770000",
@@ -334,33 +406,56 @@ func TestGCState(t *testing.T) {
 		"-u",
 		pdAddr,
 		"gc-state",
-		"global",
+		"all",
+		"--exclude-global-barriers",
 	)
 	re.NoError(err)
-	var globalProperties map[string]json.RawMessage
-	re.NoError(json.Unmarshal(output, &globalProperties), string(output))
-	re.Len(globalProperties, 1)
-	re.Contains(globalProperties, "global_gc_barriers")
-	re.NotContains(globalProperties, "gc_states")
-	re.NotContains(globalProperties, "txn_safe_point")
-	re.NotContains(globalProperties, "gc_safe_point")
-
-	var global gcStateCommandGlobal
-	re.NoError(json.Unmarshal(output, &global), string(output))
-	re.NotNil(global.GlobalGCBarriers)
-	re.Equal(all.GlobalGCBarriers, global.GlobalGCBarriers)
+	var excludedAllProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &excludedAllProperties), string(output))
+	re.Contains(excludedAllProperties, "gc_states")
+	re.NotContains(excludedAllProperties, "global_gc_barriers")
+	var excludedAll gcStateCommandAll
+	re.NoError(json.Unmarshal(output, &excludedAll), string(output))
+	excludedStatesByID := make(map[uint32]gcStateCommandState, len(excludedAll.GCStates))
+	for _, state := range excludedAll.GCStates {
+		excludedStatesByID[state.KeyspaceID] = state
+	}
+	excludedNullState, ok := excludedStatesByID[constant.NullKeyspaceID]
+	re.True(ok)
+	re.Equal(nullState, excludedNullState)
+	excludedKeyspaceLevelState, ok := excludedStatesByID[keyspaceLevelID]
+	re.True(ok)
+	re.Equal(keyspaceLevelState, excludedKeyspaceLevelState)
 
 	output, err = tests.ExecuteCommand(
-		ctl.GetRootCmd(), "-u", pdAddr, "gc-state", "global", "--include-expired",
+		ctl.GetRootCmd(),
+		"-u",
+		pdAddr,
+		"gc-state",
+		"all",
+		"--include-expired",
+		"--exclude-global-barriers",
 	)
 	re.NoError(err)
-	var globalWithExpired gcStateCommandGlobal
-	re.NoError(json.Unmarshal(output, &globalWithExpired), string(output))
-	requireGCStateCommandBarriers(re, globalWithExpired.GlobalGCBarriers, []expectedGCStateCommandBarrier{
-		{barrierID: "a-global", barrierTS: 310},
-		{barrierID: "z-global", barrierTS: 320},
-		{barrierID: "expired-global", barrierTS: 330, expired: true},
-	})
+	var excludedAllWithExpiredProperties map[string]json.RawMessage
+	re.NoError(json.Unmarshal(output, &excludedAllWithExpiredProperties), string(output))
+	re.Contains(excludedAllWithExpiredProperties, "gc_states")
+	re.NotContains(excludedAllWithExpiredProperties, "global_gc_barriers")
+	var excludedAllWithExpired gcStateCommandAll
+	re.NoError(json.Unmarshal(output, &excludedAllWithExpired), string(output))
+	excludedStatesByIDWithExpired := make(
+		map[uint32]gcStateCommandState,
+		len(excludedAllWithExpired.GCStates),
+	)
+	for _, state := range excludedAllWithExpired.GCStates {
+		excludedStatesByIDWithExpired[state.KeyspaceID] = state
+	}
+	excludedNullStateWithExpired, ok := excludedStatesByIDWithExpired[constant.NullKeyspaceID]
+	re.True(ok)
+	re.Equal(nullState, excludedNullStateWithExpired)
+	excludedKeyspaceLevelStateWithExpired, ok := excludedStatesByIDWithExpired[keyspaceLevelID]
+	re.True(ok)
+	re.Equal(keyspaceLevelStateWithExpired, excludedKeyspaceLevelStateWithExpired)
 
 	if kerneltype.IsNextGen() {
 		systemState, ok := statesByID[constant.SystemKeyspaceID]
@@ -383,6 +478,14 @@ func TestGCState(t *testing.T) {
 			{barrierID: "a-null", barrierTS: 110},
 			{barrierID: "z-null", barrierTS: 120, expires: true},
 		})
+		requireGCStateCommandBarriers(
+			re,
+			unifiedKeyspaceResponse.GlobalGCBarriers,
+			[]expectedGCStateCommandBarrier{
+				{barrierID: "a-global", barrierTS: 310},
+				{barrierID: "z-global", barrierTS: 320},
+			},
+		)
 
 		re.NotContains(statesByID, unifiedKeyspaceID)
 	}
