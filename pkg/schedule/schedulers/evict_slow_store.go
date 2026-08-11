@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -35,6 +34,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -89,11 +89,12 @@ type evictSlowStoreSchedulerConfig struct {
 	RecoverySec uint64 `json:"recovery-duration"`
 	// EvictedStores is only used by disk slow store scheduler
 	EvictedStores []uint64 `json:"evict-stores"`
-	// GroupEvictionLabels are the location labels (e.g. ["zone"] or ["zone","rack"]) that
-	// define a drainable failure domain. When set, the disk slow store scheduler evicts
-	// leaders from all slow stores that share these label values. Empty disables grouping
-	// and falls back to single-store eviction.
-	GroupEvictionLabels      []string `json:"group-eviction-labels"`
+	// EnableGroupEviction allows the disk slow store scheduler to evict leaders from every
+	// slow store that shares one isolation domain, instead of only a single store. The
+	// domain is derived from the placement rules (see groupIsolationLabels), so this switch
+	// only turns the behavior off; it never widens what counts as one domain. Enabled by
+	// default.
+	EnableGroupEviction      bool     `json:"enable-group-eviction"`
 	EnableNetworkSlowStore   bool     `json:"enable-network-slow-store"`
 	PausedNetworkSlowStores  []uint64 `json:"paused-network-slow-stores"`
 	EvictedNetworkSlowStores []uint64 `json:"evicted-network-slow-stores"`
@@ -108,7 +109,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:          time.Time{},
 		RecoverySec:                     defaultRecoverySec,
 		EvictedStores:                   make([]uint64, 0),
-		GroupEvictionLabels:             make([]string, 0),
+		EnableGroupEviction:             true,
 		Batch:                           EvictLeaderBatchSize,
 		EnableNetworkSlowStore:          false,
 		PausedNetworkSlowStores:         make([]uint64, 0),
@@ -123,7 +124,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		oldNetworkSlowStoreRecoverStartAts = make(map[uint64]*time.Time)
 		oldIsRecovered                     = conf.isRecovered
 		oldEvictedStores                   = conf.EvictedStores
-		oldGroupEvictionLabels             = conf.GroupEvictionLabels
+		oldEnableGroupEviction             = conf.EnableGroupEviction
 		oldPausedNetworkSlowStores         = conf.PausedNetworkSlowStores
 		oldEvictedNetworkSlowStores        = conf.EvictedNetworkSlowStores
 		oldRecoverySec                     = conf.RecoverySec
@@ -138,7 +139,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked(updateFn func()) error 
 		conf.networkSlowStoreRecoverStartAts = oldNetworkSlowStoreRecoverStartAts
 		conf.isRecovered = oldIsRecovered
 		conf.EvictedStores = oldEvictedStores
-		conf.GroupEvictionLabels = oldGroupEvictionLabels
+		conf.EnableGroupEviction = oldEnableGroupEviction
 		conf.PausedNetworkSlowStores = oldPausedNetworkSlowStores
 		conf.EvictedNetworkSlowStores = oldEvictedNetworkSlowStores
 		conf.RecoverySec = oldRecoverySec
@@ -181,11 +182,11 @@ func (conf *evictSlowStoreSchedulerConfig) isEvictingDiskSlowStore() bool {
 	return len(conf.EvictedStores) > 0
 }
 
-// getGroupEvictionLabels returns a copy of the configured failure-domain labels.
-func (conf *evictSlowStoreSchedulerConfig) getGroupEvictionLabels() []string {
+// isGroupEvictionEnabled reports whether same-domain group eviction is turned on.
+func (conf *evictSlowStoreSchedulerConfig) isGroupEvictionEnabled() bool {
 	conf.RLock()
 	defer conf.RUnlock()
-	return slices.Clone(conf.GroupEvictionLabels)
+	return conf.EnableGroupEviction
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getPausedNetworkSlowStores() []uint64 {
@@ -356,18 +357,6 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 	return router
 }
 
-// parseGroupEvictionLabels splits a comma-separated label string (e.g. "zone,rack") into a
-// trimmed, non-empty label slice. An empty/blank string yields an empty slice (disabled).
-func parseGroupEvictionLabels(s string) []string {
-	labels := make([]string, 0)
-	for _, part := range strings.Split(s, ",") {
-		if part = strings.TrimSpace(part); part != "" {
-			labels = append(labels, part)
-		}
-	}
-	return labels
-}
-
 func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
@@ -397,12 +386,11 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 
-	groupEvictionLabelsStr, inputGroupEvictionLabels := input["group-eviction-labels"].(string)
-	if input["group-eviction-labels"] != nil && !inputGroupEvictionLabels {
-		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'group-eviction-labels'").Error())
+	enableGroupEviction, inputEnableGroupEviction := input["enable-group-eviction"].(bool)
+	if input["enable-group-eviction"] != nil && !inputEnableGroupEviction {
+		handler.rd.JSON(w, http.StatusBadRequest, perrors.New("invalid argument for 'enable-group-eviction'").Error())
 		return
 	}
-	groupEvictionLabels := parseGroupEvictionLabels(groupEvictionLabelsStr)
 
 	handler.config.Lock()
 	defer handler.config.Unlock()
@@ -418,8 +406,8 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		if inputEnableNetworkSlowStore {
 			handler.config.EnableNetworkSlowStore = enableNetworkSlowStore
 		}
-		if inputGroupEvictionLabels {
-			handler.config.GroupEvictionLabels = groupEvictionLabels
+		if inputEnableGroupEviction {
+			handler.config.EnableGroupEviction = enableGroupEviction
 		}
 	}); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -429,7 +417,7 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		zap.Uint64("cur-recovery-duration", recoverySec),
 		zap.Float64("cur-batch", batchFloat),
 		zap.Bool("cur-enable-network-slow-store", enableNetworkSlowStore),
-		zap.Strings("cur-group-eviction-labels", groupEvictionLabels),
+		zap.Bool("cur-enable-group-eviction", enableGroupEviction),
 	)
 
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
@@ -442,7 +430,7 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 		RecoverySec:              handler.config.RecoverySec,
 		Batch:                    handler.config.Batch,
 		EvictedStores:            handler.config.EvictedStores,
-		GroupEvictionLabels:      handler.config.GroupEvictionLabels,
+		EnableGroupEviction:      handler.config.EnableGroupEviction,
 		EnableNetworkSlowStore:   handler.config.EnableNetworkSlowStore,
 		PausedNetworkSlowStores:  handler.config.PausedNetworkSlowStores,
 		EvictedNetworkSlowStores: handler.config.EvictedNetworkSlowStores,
@@ -471,7 +459,9 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &evictSlowStoreSchedulerConfig{}
+	// Seed the defaults that differ from the zero value so a persisted config written
+	// before the field existed keeps the default instead of silently reading as false.
+	newCfg := &evictSlowStoreSchedulerConfig{EnableGroupEviction: true}
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
@@ -495,7 +485,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoverySec = newCfg.RecoverySec
 	s.conf.EvictedStores = newCfg.EvictedStores
-	s.conf.GroupEvictionLabels = newCfg.GroupEvictionLabels
+	s.conf.EnableGroupEviction = newCfg.EnableGroupEviction
 	s.conf.PausedNetworkSlowStores = newCfg.PausedNetworkSlowStores
 	s.conf.EvictedNetworkSlowStores = newCfg.EvictedNetworkSlowStores
 	s.conf.EnableNetworkSlowStore = newCfg.EnableNetworkSlowStore
@@ -868,11 +858,49 @@ func filterNetworkSlowScores(
 	return filteredScores
 }
 
-// minRemainingHealthyDomains is the number of distinct failure domains (by the broadest
-// configured label, besides the one being drained) that must still be able to host leaders
-// before PD will group-evict. It prevents draining a domain on a too-small topology where
-// all leaders would pile onto a single survivor.
+// minRemainingHealthyDomains is the number of distinct isolation domains (besides the one
+// being drained) that must still be able to host leaders before PD will group-evict. It
+// prevents draining a domain on a too-small topology where all leaders would pile onto a
+// single survivor.
 const minRemainingHealthyDomains = 2
+
+// isolationPrefix returns the rule's location labels up to and including its isolation
+// level, which is the granularity PD actually isolates replicas at (see NewIsolationFilter):
+// with location-labels ["zone","rack","host"] and isolation-level "rack", replicas are forced
+// into distinct "zone,rack" domains, so that prefix names one drainable domain.
+// It reports false when the rule enforces no isolation level, or when the isolation level is
+// not one of the rule's location labels (then the domain is undefined and we must not group).
+func isolationPrefix(rule *placement.Rule) ([]string, bool) {
+	if rule.IsolationLevel == "" {
+		return nil, false
+	}
+	idx := slices.Index(rule.LocationLabels, rule.IsolationLevel)
+	if idx < 0 {
+		return nil, false
+	}
+	return rule.LocationLabels[:idx+1], true
+}
+
+// groupIsolationLabels returns the labels that identify a drainable failure domain. Group
+// eviction is only allowed when every placement rule enforces the same non-empty isolation
+// prefix, so draining a single domain is known to be safe for every region.
+func groupIsolationLabels(cluster sche.SchedulerCluster) ([]string, bool) {
+	rules := cluster.GetRuleManager().GetAllRules() // includes default one
+	if len(rules) == 0 {
+		return nil, false
+	}
+	labels, ok := isolationPrefix(rules[0])
+	if !ok {
+		return nil, false
+	}
+	for _, r := range rules[1:] {
+		other, ok := isolationPrefix(r)
+		if !ok || !slices.Equal(labels, other) {
+			return nil, false
+		}
+	}
+	return labels, true
+}
 
 // collectDiskSlowStores returns the serving/preparing stores that are currently slow.
 func collectDiskSlowStores(cluster sche.SchedulerCluster) []*core.StoreInfo {
@@ -907,7 +935,7 @@ func hasAllLabels(store *core.StoreInfo, labels []string) bool {
 }
 
 // sameLocation reports whether store is in the same failure domain as ref for the
-// configured labels. It requires store to have all labels set, so an unlabeled store is
+// isolation labels. It requires store to have all labels set, so an unlabeled store is
 // never treated as co-located (CompareLocation alone would treat a missing label as a
 // wildcard match).
 func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
@@ -943,7 +971,7 @@ func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.
 }
 
 // hasEnoughHealthyDomains reports whether at least minRemainingHealthyDomains distinct
-// failure domains (by all configured labels) other than the drained store's domain still
+// failure domains (by all isolation labels) other than the drained store's domain still
 // have a store able to host leaders. Domains are deduplicated with CompareLocation so the
 // counting stays consistent with the grouping decision.
 func hasEnoughHealthyDomains(cluster sche.SchedulerCluster, labels []string, drained *core.StoreInfo) bool {
@@ -1003,16 +1031,21 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 		return
 	}
 
-	// Multiple slow stores: group eviction only when group-eviction-labels is configured and
-	// every slow store shares that failure domain.
-	labels := s.conf.getGroupEvictionLabels()
-	if len(labels) == 0 {
+	// Multiple slow stores: group eviction only when it is enabled, the placement rules
+	// define one isolation domain, and every slow store shares that domain.
+	if !s.conf.isGroupEvictionEnabled() {
 		// Grouping disabled; keep the conservative behavior (do nothing for 2+ slow stores).
+		return
+	}
+	labels, ok := groupIsolationLabels(cluster)
+	if !ok {
+		// Placement rules do not uniformly enforce an isolation level; fall back to the
+		// conservative behavior (do nothing for more than one slow store).
 		return
 	}
 	ref := slowStores[0]
 	if !hasAllLabels(ref, labels) {
-		// Reference store is missing a configured label; cannot determine its domain.
+		// Reference store is missing an isolation label; cannot determine its domain.
 		return
 	}
 	for _, store := range slowStores[1:] {
@@ -1036,8 +1069,8 @@ func (s *evictSlowStoreScheduler) scheduleDiskSlowStore(cluster sche.SchedulerCl
 		// All same-domain slow stores are still below the evict threshold; wait.
 		return
 	}
-	log.Info("detected slow stores in a single failure domain, start to evict leaders",
-		zap.Strings("group-eviction-labels", labels),
+	log.Info("detected slow stores in a single isolation domain, start to evict leaders",
+		zap.Strings("isolation-labels", labels),
 		zap.Uint64s("store-ids", storeIDs(toEvict)))
 	s.startEvictDiskSlowStores(cluster, toEvict)
 }
@@ -1104,12 +1137,16 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 		return
 	}
 
-	// Expansion is config-driven. If group-eviction-labels was cleared (or the locked store no
-	// longer carries the labels), keep draining the current group but do not expand.
+	// Resolve the locked domain from a surviving evicted store. If grouping was turned off,
+	// the isolation prefix is no longer well-defined (rules changed), or the locked store no
+	// longer carries the labels, keep draining the current group but do not expand.
 	// survivorID is always set here because isEvictingDiskSlowStore returned true and
 	// every surviving store was visited in the loop above.
-	labels := s.conf.getGroupEvictionLabels()
-	if len(labels) == 0 {
+	if !s.conf.isGroupEvictionEnabled() {
+		return
+	}
+	labels, ok := groupIsolationLabels(cluster)
+	if !ok {
 		return
 	}
 	lockedRef := cluster.GetStore(survivorID)
@@ -1145,7 +1182,7 @@ func (s *evictSlowStoreScheduler) reconcileDiskSlowStoreGroup(cluster sche.Sched
 	}
 	if len(toAdd) > 0 {
 		log.Info("adding newly-slow stores in the locked domain to eviction",
-			zap.Strings("group-eviction-labels", labels), zap.Uint64s("store-ids", storeIDs(toAdd)))
+			zap.Strings("isolation-labels", labels), zap.Uint64s("store-ids", storeIDs(toAdd)))
 		s.startEvictDiskSlowStores(cluster, toAdd)
 	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -823,9 +824,17 @@ func createTestEvictSlowStoreScheduler(re *require.Assertions, oc *operator.Cont
 	return es
 }
 
-// setGroupEvictionLabels configures the failure-domain labels that enable group eviction.
-func setGroupEvictionLabels(es Scheduler, labels ...string) {
-	es.(*evictSlowStoreScheduler).conf.GroupEvictionLabels = labels
+// setIsolationRule overwrites the default placement rule so every rule enforces the given
+// isolation level over the given location labels, which is what enables group eviction.
+func setIsolationRule(re *require.Assertions, tc *mockcluster.Cluster, isolationLevel string, locationLabels ...string) {
+	re.NoError(tc.SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: locationLabels,
+		IsolationLevel: isolationLevel,
+	}))
 }
 
 // TestEvictSlowStoreSameZoneGroup: two slow stores sharing a zone are both evicted.
@@ -846,7 +855,7 @@ func TestEvictSlowStoreSameZoneGroup(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -873,7 +882,7 @@ func TestEvictSlowStoreCrossZoneNoEvict(t *testing.T) {
 	tc.AddLeaderRegion(2, 3, 1, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	// One slow store in z1, another in z2.
@@ -887,9 +896,9 @@ func TestEvictSlowStoreCrossZoneNoEvict(t *testing.T) {
 	re.False(tc.GetStore(3).EvictedAsSlowStore())
 }
 
-// TestEvictSlowStoreDefaultNoGroup: with no group-eviction-labels configured, 2+ slow stores
+// TestEvictSlowStoreNoIsolationRule: without uniform rule isolation, 2+ slow stores
 // fall back to the conservative do-nothing behavior.
-func TestEvictSlowStoreDefaultNoGroup(t *testing.T) {
+func TestEvictSlowStoreNoIsolationRule(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -900,7 +909,7 @@ func TestEvictSlowStoreDefaultNoGroup(t *testing.T) {
 	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
 	tc.AddLeaderRegion(1, 1, 3, 4)
 	tc.AddLeaderRegion(2, 2, 3, 4)
-	// group-eviction-labels left at its default (empty).
+	// Note: no isolation rule set; the default rule has an empty isolation level.
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
 	conf := es.(*evictSlowStoreScheduler).conf
@@ -913,8 +922,61 @@ func TestEvictSlowStoreDefaultNoGroup(t *testing.T) {
 	re.Empty(conf.evictedStores())
 }
 
-// TestEvictSlowStoreMultiLevelMatch: group-eviction-labels "zone,rack"; two stores sharing both
-// zone and rack are evicted together.
+// TestEvictSlowStoreGroupEvictionDisabled: even with uniform zone isolation, turning
+// enable-group-eviction off restores the single-store behavior.
+func TestEvictSlowStoreGroupEvictionDisabled(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setIsolationRule(re, tc, "zone", "zone", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+	re.True(conf.isGroupEvictionEnabled()) // enabled by default
+	conf.EnableGroupEviction = false
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestEvictSlowStoreGroupEvictionDefault: a config persisted before enable-group-eviction
+// existed must keep the enabled default instead of reading back as the false zero value,
+// both when the scheduler is created and when its config is reloaded.
+func TestEvictSlowStoreGroupEvictionDefault(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	legacyConfig := []byte(`{"recovery-duration":600,"batch":5}`)
+	st := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, st, ConfigJSONDecoder(legacyConfig), nil)
+	re.NoError(err)
+	conf := es.(*evictSlowStoreScheduler).conf
+	re.True(conf.isGroupEvictionEnabled())
+
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), legacyConfig))
+	re.NoError(es.ReloadConfig())
+	re.True(conf.isGroupEvictionEnabled())
+
+	// An explicitly persisted false still wins.
+	re.NoError(st.SaveSchedulerConfig(es.GetName(), []byte(`{"enable-group-eviction":false}`)))
+	re.NoError(es.ReloadConfig())
+	re.False(conf.isGroupEvictionEnabled())
+}
+
+// TestEvictSlowStoreMultiLevelMatch: isolation-level "rack" over location-labels
+// "zone,rack,host" makes "zone,rack" the domain; two stores sharing both are evicted together.
 func TestEvictSlowStoreMultiLevelMatch(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -932,7 +994,7 @@ func TestEvictSlowStoreMultiLevelMatch(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone", "rack")
+	setIsolationRule(re, tc, "rack", "zone", "rack", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -942,7 +1004,7 @@ func TestEvictSlowStoreMultiLevelMatch(t *testing.T) {
 	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
 }
 
-// TestEvictSlowStoreMultiLevelDiffer: group-eviction-labels "zone,rack"; stores in the same zone
+// TestEvictSlowStoreMultiLevelDiffer: with the "zone,rack" domain, stores in the same zone
 // but different racks are NOT a single domain, so no group eviction.
 func TestEvictSlowStoreMultiLevelDiffer(t *testing.T) {
 	re := require.New(t)
@@ -957,7 +1019,7 @@ func TestEvictSlowStoreMultiLevelDiffer(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone", "rack")
+	setIsolationRule(re, tc, "rack", "zone", "rack", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -968,7 +1030,108 @@ func TestEvictSlowStoreMultiLevelDiffer(t *testing.T) {
 	re.Empty(conf.evictedStores())
 }
 
-// TestEvictSlowStoreMissingLabel: a slow store missing a configured label is never grouped.
+// TestEvictSlowStoreSameIsolationValueDifferentPrefix: with isolation-level "rack" over
+// location-labels "zone,rack,host", two stores that share the rack *value* but sit in
+// different zones are different domains, because PD isolates on the whole "zone,rack"
+// prefix. Comparing only the isolation-level label would wrongly group them.
+func TestEvictSlowStoreSameIsolationValueDifferentPrefix(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Stores 1 and 2 both have rack=r1 but live in different zones.
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z2", "rack": "r1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z3", "rack": "r2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z4", "rack": "r3", "host": "h4"})
+	tc.AddLeaderRegion(1, 1, 3, 4)
+	tc.AddLeaderRegion(2, 2, 3, 4)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	setIsolationRule(re, tc, "rack", "zone", "rack", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+}
+
+// TestGroupIsolationLabels covers how the drainable domain is derived from placement rules.
+func TestGroupIsolationLabels(t *testing.T) {
+	re := require.New(t)
+
+	rule := func(id, isolationLevel string, locationLabels ...string) *placement.Rule {
+		return &placement.Rule{
+			GroupID:        placement.DefaultGroupID,
+			ID:             id,
+			Role:           placement.Voter,
+			Count:          3,
+			LocationLabels: locationLabels,
+			IsolationLevel: isolationLevel,
+		}
+	}
+
+	testCases := []struct {
+		name     string
+		rules    []*placement.Rule
+		expected []string
+		ok       bool
+	}{
+		{
+			name:  "no isolation level",
+			rules: []*placement.Rule{rule(placement.DefaultRuleID, "", "zone", "host")},
+		},
+		{
+			name:  "isolation level not in location labels",
+			rules: []*placement.Rule{rule(placement.DefaultRuleID, "zone", "rack", "host")},
+		},
+		{
+			name:     "prefix up to the isolation level",
+			rules:    []*placement.Rule{rule(placement.DefaultRuleID, "rack", "zone", "rack", "host")},
+			expected: []string{"zone", "rack"},
+			ok:       true,
+		},
+		{
+			name: "all rules agree",
+			rules: []*placement.Rule{
+				rule(placement.DefaultRuleID, "zone", "zone", "host"),
+				rule("extra", "zone", "zone", "host"),
+			},
+			expected: []string{"zone"},
+			ok:       true,
+		},
+		{
+			name: "one rule enforces no isolation",
+			rules: []*placement.Rule{
+				rule(placement.DefaultRuleID, "zone", "zone", "host"),
+				rule("extra", "", "zone", "host"),
+			},
+		},
+		{
+			name: "rules disagree on the prefix",
+			rules: []*placement.Rule{
+				rule(placement.DefaultRuleID, "zone", "zone", "host"),
+				rule("extra", "rack", "zone", "rack", "host"),
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		cancel, _, tc, _ := prepareSchedulersTest()
+		for _, r := range testCase.rules {
+			re.NoError(tc.SetRule(r), testCase.name)
+		}
+		labels, ok := groupIsolationLabels(tc)
+		re.Equal(testCase.ok, ok, testCase.name)
+		re.Equal(testCase.expected, labels, testCase.name)
+		cancel()
+	}
+}
+
+// TestEvictSlowStoreMissingLabel: a slow store missing an isolation label is never grouped.
 func TestEvictSlowStoreMissingLabel(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -982,7 +1145,7 @@ func TestEvictSlowStoreMissingLabel(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -1008,7 +1171,7 @@ func TestEvictSlowStoreInsufficientHealthyZones(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -1040,7 +1203,7 @@ func TestEvictSlowStoreReconcileAndFreeze(t *testing.T) {
 	tc.AddLeaderRegion(5, 5, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	// Step 1: only store 1 slow → single-store eviction.
@@ -1080,7 +1243,7 @@ func TestEvictSlowStoreGroupRecovery(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -1122,7 +1285,7 @@ func TestEvictSlowStoreReconcileInsufficientZones(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	// Store 1 slow → single-store path evicts it (no domain guard on single-store path,
@@ -1158,7 +1321,7 @@ func TestEvictSlowStoreRemovedMidDrain(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)
@@ -1197,7 +1360,7 @@ func TestEvictSlowStoreGroupIdempotent(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 3, 4)
 
 	es := createTestEvictSlowStoreScheduler(re, oc)
-	setGroupEvictionLabels(es, "zone")
+	setIsolationRule(re, tc, "zone", "zone", "host")
 	conf := es.(*evictSlowStoreScheduler).conf
 
 	setStoreSlowScore(tc, 1, 100)

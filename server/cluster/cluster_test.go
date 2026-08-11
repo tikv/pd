@@ -3517,9 +3517,9 @@ func updateSchedulerConfig(re *require.Assertions, controller *schedulers.Contro
 }
 
 // TestEvictSlowStoreGroupEviction is an end-to-end test driving the real coordinator:
-// when several stores in the same failure domain (zone) report a high disk slow score and
-// evict-slow-store is configured with group-eviction-labels, the scheduler evicts leaders
-// from all of them, leaves other zones untouched, and releases the whole group on recovery.
+// when several stores in the same isolation domain (zone) report a high disk slow score and
+// the placement rules uniformly enforce zone isolation, the scheduler evicts leaders from all
+// of them, leaves other zones untouched, and releases the whole group on recovery.
 func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	re := require.New(t)
 
@@ -3527,9 +3527,21 @@ func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 
-	// Reconfigure the already-running evict-slow-store scheduler in place
-	// with instant recovery (recovery-duration:0) so the test need not wait out the window.
-	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(), `{"recovery-duration":0}`)
+	// Reconfigure the already-running evict-slow-store scheduler in place with instant
+	// recovery (recovery-duration:0) so the test need not wait out the window, and with
+	// group eviction off so the single-store behavior can be observed first.
+	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
+		`{"recovery-duration":0, "enable-group-eviction":false}`)
+
+	// Every rule enforces zone isolation, so a whole zone is a drainable domain.
+	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
+		GroupID:        placement.DefaultGroupID,
+		ID:             placement.DefaultRuleID,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+		IsolationLevel: "zone",
+	}))
 
 	// Topology: zone z1 = {1,2,3}, z2 = {4,5}, z3 = {6}. Leaders on the z1 stores.
 	re.NoError(tc.addLabelsStore(1, map[string]string{"zone": "z1"}))
@@ -3562,13 +3574,13 @@ func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	})
 	// second node in zone 1 becomes slow
 	markSlow(2, 100)
-	re.Never(func() bool { // default behavior
+	re.Never(func() bool { // group eviction is disabled
 		return tc.GetStore(2).EvictedAsSlowStore()
 	}, time.Second, time.Millisecond*100)
 
-	// enabling group-eviction
+	// enabling group eviction
 	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
-		`{"group-eviction-labels":"zone", "recovery-duration":0}`)
+		`{"enable-group-eviction":true, "recovery-duration":0}`)
 	// now second store gets evicted as well
 	testutil.Eventually(re, func() bool {
 		return tc.GetStore(1).EvictedAsSlowStore() && tc.GetStore(2).EvictedAsSlowStore()
