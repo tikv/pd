@@ -382,7 +382,6 @@ func TestGCStateOutputRejectsExcludedBarriers(t *testing.T) {
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "global_gc_barriers")
 	})
-
 }
 
 func TestGCStateAPIOptions(t *testing.T) {
