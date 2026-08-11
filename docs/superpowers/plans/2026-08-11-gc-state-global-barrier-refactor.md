@@ -268,15 +268,17 @@ git commit -s -m "client: preserve GC mode with global barriers"
 Expected: the commit contains the composed model/converter and focused
 regression only. Replayed rebase commits remain separate history.
 
-## Task 2: Add optional global barriers to JSON projections
+## Task 2: Refactor command output, options, and routing
 
-This task changes only output construction. It keeps the existing command tree
-temporarily so projection behavior can be reviewed independently from routing.
+This task changes JSON projection and command routing as one independently
+testable unit. It locks the three-state output contract first, then connects
+the shared option to both RPC paths and removes the standalone global command
+before creating a commit.
 
 **Files:**
 
-- Modify: `tools/pd-ctl/pdctl/command/gc_state_command.go:148-315`
-- Test: `tools/pd-ctl/pdctl/command/gc_state_command_test.go:106-325`
+- Modify: `tools/pd-ctl/pdctl/command/gc_state_command.go:37-474`
+- Test: `tools/pd-ctl/pdctl/command/gc_state_command_test.go:38-731`
 
 **Interfaces:**
 
@@ -288,6 +290,10 @@ temporarily so projection behavior can be reviewed independently from routing.
   (allGCStatesOutput, error)`.
 - Produces: optional `GlobalGCBarriers *[]gcBarrierOutput` fields on both
   top-level output types.
+- Produces: `gcStateAPIOptions(bool) []gc.GCStatesAPIOption`.
+- Produces: `gcStateReader.getGCState(context.Context, uint32, bool)`.
+- Produces: `gcStateReader.getAllKeyspacesGCStates(context.Context, bool)`.
+- Produces: parent flag `--exclude-global-barriers`, default `false`.
 
 - [ ] **Step 1: Write failing keyspace projection tests**
 
@@ -487,15 +493,17 @@ return allGCStatesOutput{
 }, nil
 ```
 
-Add `includeGlobalGCBarriers bool` as the third parameter. Until Task 3 removes
-the global subcommand and adds the flag, pass `true` from the existing
-`keyspace` and `all` command call sites so the package compiles.
+Add `includeGlobalGCBarriers bool` as the third parameter. During the focused
+projection cycle in Steps 4 through 8, pass `true` from the existing `keyspace`
+and `all` call sites so the package compiles. Do not commit that intermediate
+state; Steps 9 through 16 replace those temporary calls with flag-driven
+routing and remove the global subcommand.
 
 - [ ] **Step 7: Update existing projection assertions**
 
 Update existing calls to the converters with the new boolean. Dereference
 `GlobalGCBarriers` only after `require.NotNil`. Delete
-`TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray` only in Task 3, when its
+`TestNewGlobalGCStateOutputSortsAndKeepsEmptyArray` only in Step 16, when its
 production converter is removed. For existing included keyspace cases, attach
 the expected globals with `state.WithGlobalGCBarriers(...)`; for excluded
 cases, deliberately use a state without global data and pass `false`.
@@ -517,41 +525,10 @@ cd tools && go test ./pd-ctl/pdctl/command -run '^(TestNew(Keyspace|All)GCStates
 Expected: PASS. The encoded present-empty cases contain `[]`, and excluded
 cases omit the field.
 
-- [ ] **Step 9: Commit the projection change**
+The remaining steps connect the tested projection to the command reader and
+finish the command-tree refactor before the task-level review and commit.
 
-Run:
-
-```bash
-git add tools/pd-ctl/pdctl/command/gc_state_command.go tools/pd-ctl/pdctl/command/gc_state_command_test.go
-git diff --cached --check
-git diff --cached
-git commit -s -m "pd-ctl: project optional global GC barriers"
-```
-
-Expected: the commit changes projection types and converters but does not yet
-remove command routing.
-
-## Task 3: Add the shared flag and remove the global command
-
-This task changes command routing and reader options after projection behavior
-is independently covered.
-
-**Files:**
-
-- Modify: `tools/pd-ctl/pdctl/command/gc_state_command.go:37-103`
-- Modify: `tools/pd-ctl/pdctl/command/gc_state_command.go:317-474`
-- Test: `tools/pd-ctl/pdctl/command/gc_state_command_test.go:38-72`
-- Test: `tools/pd-ctl/pdctl/command/gc_state_command_test.go:326-731`
-
-**Interfaces:**
-
-- Consumes: both optional projection signatures from Task 2.
-- Produces: `gcStateAPIOptions(bool) []gc.GCStatesAPIOption`.
-- Produces: `gcStateReader.getGCState(context.Context, uint32, bool)`.
-- Produces: `gcStateReader.getAllKeyspacesGCStates(context.Context, bool)`.
-- Produces: parent flag `--exclude-global-barriers`, default `false`.
-
-- [ ] **Step 1: Refactor the fake reader for failing routing tests**
+- [ ] **Step 9: Refactor the fake reader for failing routing tests**
 
 Replace its global call counter with one inclusion field, delete
 `getGlobalGCState`, and use these signatures:
@@ -592,7 +569,7 @@ func (r *fakeGCStateReader) getAllKeyspacesGCStates(
 The production package now fails to compile until its interface and call sites
 match.
 
-- [ ] **Step 2: Write a failing client option test**
+- [ ] **Step 10: Write a failing client option test**
 
 Replace `TestReadClusterGCStatesOptions` and its fake client with:
 
@@ -616,7 +593,7 @@ func TestGCStateAPIOptions(t *testing.T) {
 
 Add `strconv` to the standard-library import block before adding this test.
 
-- [ ] **Step 3: Write failing flag and command-tree tests**
+- [ ] **Step 11: Write failing flag and command-tree tests**
 
 Add a table test that executes both subcommands with and without the flag:
 
@@ -681,7 +658,7 @@ func TestGCStateGlobalCommandIsRemoved(t *testing.T) {
 }
 ```
 
-- [ ] **Step 4: Run the routing tests to verify they fail**
+- [ ] **Step 12: Run the routing tests to verify they fail**
 
 Run:
 
@@ -692,7 +669,7 @@ cd tools && go test ./pd-ctl/pdctl/command -run '^(TestGCStateAPIOptions|TestGCS
 Expected: FAIL because `gcStateAPIOptions` and the exclusion flag do not exist,
 the production reader uses old signatures, and `global` remains registered.
 
-- [ ] **Step 5: Replace the reader interface and option construction**
+- [ ] **Step 13: Replace the reader interface and option construction**
 
 Use this interface and helper in `gc_state_command.go`:
 
@@ -724,7 +701,7 @@ Update both concrete reader methods to accept the boolean and call the bound
 client with `gcStateAPIOptions(includeGlobalGCBarriers)...`. Delete
 `clusterGCStatesClient`, `readClusterGCStates`, and `getGlobalGCState`.
 
-- [ ] **Step 6: Add and read the persistent flag**
+- [ ] **Step 14: Add and read the persistent flag**
 
 Define the flag next to `gcStateIncludeExpiredFlag`:
 
@@ -761,7 +738,7 @@ command.PersistentFlags().Bool(
 )
 ```
 
-- [ ] **Step 7: Route the boolean through both remaining commands**
+- [ ] **Step 15: Route the boolean through both remaining commands**
 
 In both `RunE` functions, read `includeExpired` and then
 `includeGlobalGCBarriers` before creating the reader. Use these exact call
@@ -801,7 +778,7 @@ output, err := newAllGCStatesOutput(
 
 Keep existing RPC error annotations and original-error `status.Code` checks.
 
-- [ ] **Step 8: Remove the standalone global command**
+- [ ] **Step 16: Remove the standalone global command**
 
 Delete `newGCStateGlobalCommand`, `globalGCStateOutput`, and
 `newGlobalGCStateOutput`. Register only:
@@ -833,7 +810,7 @@ Update the remaining command tests as follows:
 - `TestGCStateCommandReturnsOutputError` supplies requested-empty globals so
   execution reaches the failing writer.
 
-- [ ] **Step 9: Update the help contract**
+- [ ] **Step 17: Update the help contract**
 
 Use help copy that states the final behavior:
 
@@ -855,7 +832,7 @@ In `TestGCStateCommandHelpContract`, assert both persistent flags have default
 `false`, assert the exact exclusion usage string, and assert that the command's
 children are exactly `all` and `keyspace` after Cobra sorts them.
 
-- [ ] **Step 10: Run the complete command unit suite**
+- [ ] **Step 18: Run the complete command unit suite**
 
 Run:
 
@@ -866,7 +843,7 @@ cd tools && go test ./pd-ctl/pdctl/command -run 'GCState' -count=1
 Expected: PASS. The default cases include an empty global array, exclusion
 cases omit it, and `global` is rejected before client creation.
 
-- [ ] **Step 11: Commit command routing and flag behavior**
+- [ ] **Step 19: Commit the complete command refactor**
 
 Run:
 
@@ -877,10 +854,10 @@ git diff --cached
 git commit -s -m "pd-ctl: use GetGCState for global barriers"
 ```
 
-Expected: this commit contains the reader refactor, shared flag, command
-removal, compatibility paths, and command tests.
+Expected: this commit contains optional output projection, reader refactoring,
+the shared flag, command removal, compatibility paths, and all command tests.
 
-## Task 4: Update real PD command coverage
+## Task 3: Update real PD command coverage
 
 This task verifies the complete behavior against a real Classic or NextGen PD
 server without duplicating PR #11117's server failpoint tests.
@@ -893,7 +870,7 @@ server without duplicating PR #11117's server failpoint tests.
 **Interfaces:**
 
 - Consumes: the final `keyspace`, `all`, `--include-expired`, and
-  `--exclude-global-barriers` command contracts from Task 3.
+  `--exclude-global-barriers` command contracts from Task 2.
 - Produces: end-to-end coverage for default, expired, excluded, Classic, and
   NextGen output.
 
@@ -1054,7 +1031,7 @@ git commit -s -m "test: cover optional global GC state output"
 Expected: the commit changes only the real PD test and removes all standalone
 global command coverage.
 
-## Task 5: Update the user workflow documentation
+## Task 4: Update the user workflow documentation
 
 This task updates user-facing documentation after the executable behavior and
 integration tests are stable. Use the `docs-writer` skill for this task.
@@ -1065,7 +1042,7 @@ integration tests are stable. Use the `docs-writer` skill for this task.
 
 **Interfaces:**
 
-- Consumes: final command and JSON contracts from Tasks 2 through 4.
+- Consumes: final command and JSON contracts from Tasks 2 and 3.
 - Produces: one documented workflow for a selected keyspace and one for all
   effective scopes.
 
@@ -1140,14 +1117,14 @@ git commit -s -m "docs: update GC state troubleshooting workflow"
 Expected: the commit contains only user documentation that matches the tested
 command behavior.
 
-## Task 6: Run final verification and update PR metadata
+## Task 5: Run final verification and update PR metadata
 
 This task proves the refactor across modules and updates PR #11054 only after
 the user authorizes the external GitHub change.
 
 **Files:**
 
-- Verify: all files modified by Tasks 1 through 5
+- Verify: all files modified by Tasks 1 through 4
 - External update after authorization: PR #11054 body
 
 **Interfaces:**
