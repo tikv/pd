@@ -26,6 +26,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
@@ -104,27 +105,84 @@ func TestSaturatingStdDurationFromSeconds(t *testing.T) {
 	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(math.MaxInt64))
 }
 
+func TestPBToGCStateWithGlobalGCBarriers(t *testing.T) {
+	reqStartTime := time.Now()
+	base := &pdpb.GCState{
+		TxnSafePoint: 10,
+		GcSafePoint:  9,
+	}
+
+	absent := pbToGCStateWithGlobalGCBarriers(
+		base,
+		nil,
+		reqStartTime,
+		true,
+	)
+	require.False(t, absent.HasGlobalGCBarriers())
+	_, err := absent.GetGlobalGCBarriers()
+	require.Error(t, err)
+
+	empty := pbToGCStateWithGlobalGCBarriers(
+		base,
+		&pdpb.GlobalGCBarriersInfo{},
+		reqStartTime,
+		true,
+	)
+	require.True(t, empty.HasGlobalGCBarriers())
+	barriers, err := empty.GetGlobalGCBarriers()
+	require.NoError(t, err)
+	require.Empty(t, barriers)
+
+	nonEmpty := pbToGCStateWithGlobalGCBarriers(
+		base,
+		&pdpb.GlobalGCBarriersInfo{
+			Barriers: []*pdpb.GlobalGCBarrierInfo{
+				{
+					BarrierId:  "backup",
+					BarrierTs:  20,
+					TtlSeconds: 60,
+				},
+			},
+		},
+		reqStartTime,
+		true,
+	)
+	require.True(t, nonEmpty.HasGlobalGCBarriers())
+	barriers, err = nonEmpty.GetGlobalGCBarriers()
+	require.NoError(t, err)
+	require.Equal(t, "backup", barriers[0].BarrierID)
+	require.Equal(t, uint64(20), barriers[0].BarrierTS)
+	require.Equal(t, time.Minute, barriers[0].TTL)
+}
+
 func TestIsKeyspaceUsingKeyspaceLevelGC(t *testing.T) {
-	re := require.New(t)
-
-	// Default to false when the meta or the config map is nil.
-	re.False(IsKeyspaceUsingKeyspaceLevelGC(nil))
-	meta := &keyspacepb.KeyspaceMeta{}
-	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
-
-	meta = &keyspacepb.KeyspaceMeta{
-		Config: map[string]string{"gc_management_type": "keyspace_level"},
+	tests := []struct {
+		name string
+		meta *keyspacepb.KeyspaceMeta
+		want bool
+	}{
+		{name: "nil metadata", meta: nil, want: false},
+		{name: "nil config", meta: &keyspacepb.KeyspaceMeta{}, want: false},
+		{name: "empty config", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{}}, want: false},
+		{name: "native keyspace level GC", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"gc_management_type": "keyspace_level"}}, want: true},
+		{name: "unified GC", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"gc_management_type": "unified"}}, want: false},
+		{name: "unified GC overrides safe point version v2", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"gc_management_type": "unified", "safe_point_version": "v2"}}, want: false},
+		{name: "invalid GC management type", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"gc_management_type": "111111"}}, want: false},
+		{name: "safe point version v2", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": "v2"}}, want: true},
+		{name: "uppercase safe point version", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": "V2"}}, want: false},
+		{name: "padded safe point version", meta: &keyspacepb.KeyspaceMeta{Config: map[string]string{"safe_point_version": " v2 "}}, want: false},
 	}
-	re.True(IsKeyspaceUsingKeyspaceLevelGC(meta))
 
-	meta = &keyspacepb.KeyspaceMeta{
-		Config: map[string]string{"gc_management_type": "unified"},
-	}
-	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Given
+			meta := test.meta
 
-	// Invalid values interpreted as false.
-	meta = &keyspacepb.KeyspaceMeta{
-		Config: map[string]string{"gc_management_type": "111111"},
+			// When
+			got := IsKeyspaceUsingKeyspaceLevelGC(meta)
+
+			// Then
+			require.Equal(t, test.want, got)
+		})
 	}
-	re.False(IsKeyspaceUsingKeyspaceLevelGC(meta))
 }

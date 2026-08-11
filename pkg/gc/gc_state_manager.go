@@ -907,6 +907,52 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32, excludeGCBarriers bool) (
 	return gcState, err
 }
 
+// GetGCStateWithGlobalGCBarriers gets one keyspace's GC state and every global
+// GC barrier from one revision-validated storage transaction.
+func (m *GCStateManager) GetGCStateWithGlobalGCBarriers(keyspaceID uint32, excludeGCBarriers bool) (GCState, []*endpoint.GlobalGCBarrier, error) {
+	keyspaceID, keyspaceName, err := m.redirectKeyspace(keyspaceID, true)
+	if err != nil {
+		return GCState{}, nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var (
+		state          GCState
+		globalBarriers []*endpoint.GlobalGCBarrier
+	)
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		state, err1 = m.getGCStateInTransaction(keyspaceID, excludeGCBarriers, wb)
+		if err1 != nil {
+			return err1
+		}
+		globalBarriers, err1 = m.gcMetaStorage.LoadAllGlobalGCBarriers()
+		if err1 != nil {
+			return err1
+		}
+		failpoint.InjectCall("getGCStateWithGlobalGCBarriersAfterRead")
+		return nil
+	})
+	if err != nil {
+		log.Error("failed to get GC state with global GC barriers",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("keyspace-name", keyspaceName),
+			zap.Bool("exclude-gc-barriers", excludeGCBarriers),
+			zap.Error(err))
+		return GCState{}, nil, err
+	}
+
+	if excludeGCBarriers {
+		m.gcStateCache.store(keyspaceID, gcStateCacheEntry{
+			TxnSafePoint: state.TxnSafePoint,
+			GCSafePoint:  state.GCSafePoint,
+		})
+	}
+	return state, globalBarriers, nil
+}
+
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
 // Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
 // The result contains only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state,
@@ -1033,7 +1079,7 @@ func (m *GCStateManager) iterateAllKeyspacesGCStates(
 
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 			gcState := GCState{
-				KeyspaceID:      keyspaceMeta.Id,
+				KeyspaceID:      keyspaceMeta.GetId(),
 				IsKeyspaceLevel: false,
 			}
 			cb(gcState)
@@ -1262,7 +1308,7 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
 			continue
 		}
-		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.Id)
+		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceMeta.GetId())
 		if err2 != nil {
 			err = err2
 			return
@@ -1270,7 +1316,7 @@ func (m *GCStateManager) getMaxTxnSafePointAmongAllKeyspaces(_ *endpoint.GCState
 		if txnSafePoint > maxTxnSafePoint {
 			maxTxnSafePoint = txnSafePoint
 			keyspaceName = keyspaceMeta.Name
-			keyspaceID = keyspaceMeta.Id
+			keyspaceID = keyspaceMeta.GetId()
 		}
 	}
 	// NOTE, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!
