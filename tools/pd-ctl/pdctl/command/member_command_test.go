@@ -16,11 +16,13 @@ package command
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -37,6 +39,8 @@ const (
 
 type transferLeaderRoundTripper struct {
 	memberName      string
+	clientURLs      []string
+	readyErrors     []error
 	readyStatusCode int
 	targetIsLeader  bool
 
@@ -44,7 +48,8 @@ type transferLeaderRoundTripper struct {
 	readyRequests    int
 	transferRequests int
 	readyMethod      string
-	readyHost        string
+	readyHosts       []string
+	readyTimeouts    []time.Duration
 	readyHeader      http.Header
 	transferMethod   string
 	transferHost     string
@@ -56,10 +61,14 @@ func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 	switch req.URL.Path {
 	case "/" + membersPrefix:
 		rt.membersRequests++
+		clientURLs := rt.clientURLs
+		if len(clientURLs) == 0 {
+			clientURLs = []string{targetPDURL}
+		}
 		members := &pdpb.GetMembersResponse{
 			Members: []*pdpb.Member{{
 				Name:       targetPDName,
-				ClientUrls: []string{targetPDURL},
+				ClientUrls: clientURLs,
 			}},
 		}
 		if rt.targetIsLeader {
@@ -73,8 +82,15 @@ func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 	case "/" + readyPrefix:
 		rt.readyRequests++
 		rt.readyMethod = req.Method
-		rt.readyHost = req.URL.Host
+		rt.readyHosts = append(rt.readyHosts, req.URL.Host)
+		if deadline, ok := req.Context().Deadline(); ok {
+			rt.readyTimeouts = append(rt.readyTimeouts, time.Until(deadline))
+		}
 		rt.readyHeader = req.Header.Clone()
+		requestIndex := rt.readyRequests - 1
+		if requestIndex < len(rt.readyErrors) && rt.readyErrors[requestIndex] != nil {
+			return nil, rt.readyErrors[requestIndex]
+		}
 		statusCode = rt.readyStatusCode
 	case "/" + leaderMemberPrefix + "/transfer/" + rt.memberName:
 		rt.transferRequests++
@@ -120,7 +136,7 @@ func TestTransferPDLeaderChecksTargetReadiness(t *testing.T) {
 	re.Equal(1, rt.membersRequests)
 	re.Equal(1, rt.readyRequests)
 	re.Equal(http.MethodGet, rt.readyMethod)
-	re.Equal("target-pd:2379", rt.readyHost)
+	re.Equal([]string{"target-pd:2379"}, rt.readyHosts)
 	re.Equal("true", rt.readyHeader.Get(apiutil.PDAllowFollowerHandleHeader))
 	re.Equal(1, rt.transferRequests)
 	re.Equal(http.MethodPost, rt.transferMethod)
@@ -150,6 +166,49 @@ func TestTransferPDLeaderContinuesAfterExplicitConfirmation(t *testing.T) {
 	re.Equal(1, rt.readyRequests)
 	re.Equal(1, rt.transferRequests)
 	re.Contains(output, "Success!")
+}
+
+func TestTransferPDLeaderConfirmsWhenReadinessCannotBeVerified(t *testing.T) {
+	re := require.New(t)
+	rt := &transferLeaderRoundTripper{
+		memberName:  targetPDName,
+		clientURLs:  []string{"http://target-pd-1:2379", "http://target-pd-2:2379"},
+		readyErrors: []error{context.DeadlineExceeded, context.DeadlineExceeded},
+	}
+
+	output := executeTransferLeaderCommand(re, rt, "Y\n")
+	re.Equal(1, rt.membersRequests)
+	re.Equal(2, rt.readyRequests)
+	re.Equal(1, rt.transferRequests)
+	re.Contains(output, "readiness cannot be verified")
+	re.Contains(output, "Success!")
+}
+
+func TestCheckPDMemberReadyTriesNextURLAfterTimeout(t *testing.T) {
+	re := require.New(t)
+	rt := &transferLeaderRoundTripper{
+		memberName:      targetPDName,
+		clientURLs:      []string{"http://target-pd-1:2379", "http://target-pd-2:2379"},
+		readyErrors:     []error{context.DeadlineExceeded},
+		readyStatusCode: http.StatusOK,
+	}
+	oldClient := dialClient
+	dialClient = &http.Client{Transport: rt}
+	defer func() { dialClient = oldClient }()
+
+	cmd := NewMemberCommand()
+	cmd.Flags().String("pd", mockPDURL, "")
+	cmd.SetContext(context.Background())
+
+	found, err := checkPDMemberReady(cmd, targetPDName)
+	re.True(found)
+	re.NoError(err)
+	re.Equal([]string{"target-pd-1:2379", "target-pd-2:2379"}, rt.readyHosts)
+	re.Len(rt.readyTimeouts, 2)
+	for _, timeout := range rt.readyTimeouts {
+		re.Greater(timeout, readyRequestTimeout-time.Second)
+		re.LessOrEqual(timeout, readyRequestTimeout)
+	}
 }
 
 func TestTransferPDLeaderForceSkipsReadinessPreflight(t *testing.T) {

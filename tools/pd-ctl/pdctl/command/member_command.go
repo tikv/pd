@@ -17,10 +17,12 @@ package command
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -33,6 +35,8 @@ var (
 	leaderMemberPrefix = "pd/api/v1/leader"
 	readyPrefix        = "pd/api/v2/ready"
 )
+
+const readyRequestTimeout = 5 * time.Second
 
 // NewMemberCommand return a member subcommand of rootCmd
 func NewMemberCommand() *cobra.Command {
@@ -205,7 +209,9 @@ func checkPDMemberReady(cmd *cobra.Command, memberName string) (found bool, err 
 		var lastErr error
 		header := http.Header{apiutil.PDAllowFollowerHandleHeader: {"true"}}
 		for _, endpoint := range member.GetClientUrls() {
-			_, err := doRequestSingleEndpoint(cmd, endpoint, readyPrefix, http.MethodGet, header)
+			ctx, cancel := context.WithTimeout(cmd.Context(), readyRequestTimeout)
+			_, err := doRequestSingleEndpointWithContext(ctx, cmd, endpoint, readyPrefix, http.MethodGet, header)
+			cancel()
 			if err == nil {
 				return true, nil
 			}
