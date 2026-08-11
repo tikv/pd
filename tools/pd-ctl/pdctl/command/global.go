@@ -203,6 +203,8 @@ func buildNoProxyHeader(cmd *cobra.Command, customHeader http.Header) http.Heade
 }
 
 func dial(req *http.Request) (string, error) {
+	// pd-ctl sends requests only to operator-configured endpoints or client URLs advertised by PD.
+	// #nosec G704
 	resp, err := dialClient.Do(req)
 	if err != nil {
 		return "", err

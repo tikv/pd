@@ -15,17 +15,23 @@
 package command
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/spf13/cobra"
+
+	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 var (
 	membersPrefix      = "pd/api/v1/members"
 	leaderMemberPrefix = "pd/api/v1/leader"
+	readyPrefix        = "pd/api/v2/ready"
 )
 
 // NewMemberCommand return a member subcommand of rootCmd
@@ -81,11 +87,13 @@ func NewLeaderMemberCommand() *cobra.Command {
 		Short: "resign current leader pd's leadership",
 		Run:   resignLeaderCommandFunc,
 	})
-	d.AddCommand(&cobra.Command{
+	transfer := &cobra.Command{
 		Use:   "transfer <member_name>",
 		Short: "transfer leadership to another pd",
 		Run:   transferPDLeaderCommandFunc,
-	})
+	}
+	transfer.Flags().BoolP("force", "f", false, "transfer leadership without checking target PD readiness")
+	d.AddCommand(transfer)
 	return d
 }
 
@@ -150,13 +158,79 @@ func transferPDLeaderCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Usage: leader transfer <member_name>")
 		return
 	}
+	force, err := cmd.Flags().GetBool("force")
+	if err != nil {
+		cmd.Printf("Failed to read force flag: %s\n", err)
+		return
+	}
+	if !force {
+		found, err := checkPDMemberReady(cmd, args[0])
+		if err != nil {
+			if !confirmTransferToUnreadyPD(cmd, args[0], err) {
+				return
+			}
+		} else if !found {
+			cmd.Printf("Failed to transfer leadership: target PD member %q was not found\n", args[0])
+			return
+		}
+	}
 	prefix := leaderMemberPrefix + "/transfer/" + args[0]
-	_, err := doRequest(cmd, prefix, http.MethodPost, http.Header{})
+	_, err = doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to transfer leadership: %s\n", err)
 		return
 	}
 	cmd.Println("Success!")
+}
+
+func checkPDMemberReady(cmd *cobra.Command, memberName string) (found bool, err error) {
+	resp, err := doRequest(cmd, membersPrefix, http.MethodGet, http.Header{})
+	if err != nil {
+		return false, fmt.Errorf("get PD members: %w", err)
+	}
+
+	members := &pd.MembersInfo{}
+	if err := json.Unmarshal([]byte(resp), members); err != nil {
+		return false, fmt.Errorf("decode PD members: %w", err)
+	}
+
+	for _, member := range members.Members {
+		if member.GetName() != memberName {
+			continue
+		}
+		if len(member.GetClientUrls()) == 0 {
+			return true, fmt.Errorf("target PD member %q has no client URLs", memberName)
+		}
+
+		var lastErr error
+		header := http.Header{apiutil.PDAllowFollowerHandleHeader: {"true"}}
+		for _, endpoint := range member.GetClientUrls() {
+			_, err := doRequestSingleEndpoint(cmd, endpoint, readyPrefix, http.MethodGet, header)
+			if err == nil {
+				return true, nil
+			}
+			lastErr = err
+		}
+		return true, fmt.Errorf("target PD member %q is not ready: %w", memberName, lastErr)
+	}
+
+	return false, nil
+}
+
+func confirmTransferToUnreadyPD(cmd *cobra.Command, memberName string, readyErr error) bool {
+	cmd.Printf("Warning: target PD member %q is not ready or its readiness cannot be verified: %s\n", memberName, readyErr)
+	cmd.Println("Transferring leadership may cause the PD leader to be unable to serve requests for an extended period.")
+	cmd.Print("Enter Y to continue: ")
+
+	scanner := bufio.NewScanner(cmd.InOrStdin())
+	if !scanner.Scan() || scanner.Text() != "Y" {
+		if err := scanner.Err(); err != nil {
+			cmd.Printf("Failed to read confirmation: %s\n", err)
+		}
+		cmd.Println("Leader transfer aborted.")
+		return false
+	}
+	return true
 }
 
 func setLeaderPriorityFunc(cmd *cobra.Command, args []string) {
