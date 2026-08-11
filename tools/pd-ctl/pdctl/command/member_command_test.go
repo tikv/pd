@@ -38,11 +38,14 @@ const (
 )
 
 type transferLeaderRoundTripper struct {
-	memberName      string
-	clientURLs      []string
-	readyErrors     []error
-	readyStatusCode int
-	targetIsLeader  bool
+	memberName             string
+	clientURLs             []string
+	membersStatusCode      int
+	invalidMembersResponse bool
+	noClientURLs           bool
+	readyErrors            []error
+	readyStatusCode        int
+	targetIsLeader         bool
 
 	membersRequests  int
 	readyRequests    int
@@ -62,7 +65,7 @@ func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 	case "/" + membersPrefix:
 		rt.membersRequests++
 		clientURLs := rt.clientURLs
-		if len(clientURLs) == 0 {
+		if len(clientURLs) == 0 && !rt.noClientURLs {
 			clientURLs = []string{targetPDURL}
 		}
 		members := &pdpb.GetMembersResponse{
@@ -74,11 +77,18 @@ func (rt *transferLeaderRoundTripper) RoundTrip(req *http.Request) (*http.Respon
 		if rt.targetIsLeader {
 			members.EtcdLeader = members.Members[0]
 		}
-		data, err := json.Marshal(members)
-		if err != nil {
-			return nil, err
+		if rt.invalidMembersResponse {
+			body = "{"
+		} else {
+			data, err := json.Marshal(members)
+			if err != nil {
+				return nil, err
+			}
+			body = string(data)
 		}
-		body = string(data)
+		if rt.membersStatusCode != 0 {
+			statusCode = rt.membersStatusCode
+		}
 	case "/" + readyPrefix:
 		rt.readyRequests++
 		rt.readyMethod = req.Method
@@ -181,6 +191,48 @@ func TestTransferPDLeaderConfirmsWhenReadinessCannotBeVerified(t *testing.T) {
 	re.Equal(2, rt.readyRequests)
 	re.Equal(1, rt.transferRequests)
 	re.Contains(output, "readiness cannot be verified")
+	re.Contains(output, "Success!")
+}
+
+func TestTransferPDLeaderConfirmsWhenMemberDiscoveryFails(t *testing.T) {
+	tests := []struct {
+		name                   string
+		membersStatusCode      int
+		invalidMembersResponse bool
+		expectedError          string
+	}{
+		{name: "request fails", membersStatusCode: http.StatusInternalServerError, expectedError: "get PD members"},
+		{name: "response is invalid", invalidMembersResponse: true, expectedError: "decode PD members"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			re := require.New(t)
+			rt := &transferLeaderRoundTripper{
+				memberName:             targetPDName,
+				membersStatusCode:      test.membersStatusCode,
+				invalidMembersResponse: test.invalidMembersResponse,
+			}
+
+			output := executeTransferLeaderCommand(re, rt, "Y\n")
+			re.Equal(1, rt.membersRequests)
+			re.Equal(0, rt.readyRequests)
+			re.Equal(1, rt.transferRequests)
+			re.Contains(output, test.expectedError)
+			re.Contains(output, "readiness cannot be verified")
+			re.Contains(output, "Success!")
+		})
+	}
+}
+
+func TestTransferPDLeaderConfirmsWhenTargetHasNoClientURLs(t *testing.T) {
+	re := require.New(t)
+	rt := &transferLeaderRoundTripper{memberName: targetPDName, noClientURLs: true}
+
+	output := executeTransferLeaderCommand(re, rt, "Y\n")
+	re.Equal(1, rt.membersRequests)
+	re.Equal(0, rt.readyRequests)
+	re.Equal(1, rt.transferRequests)
+	re.Contains(output, "has no client URLs")
 	re.Contains(output, "Success!")
 }
 
