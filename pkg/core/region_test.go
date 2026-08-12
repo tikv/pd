@@ -15,6 +15,7 @@
 package core
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	mrand "math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,6 +37,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -846,14 +849,35 @@ func TestGetRegionSizeByRange(t *testing.T) {
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
+	re := require.New(t)
 	totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(""))
-	require.Equal(t, int64(nums*10), totalSize)
+	re.Equal(int64(nums*10), totalSize)
 	for i := 1; i < 10; i++ {
 		verifyNum := nums / i
 		endKey := fmt.Sprintf("%20d", verifyNum)
 		totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(endKey))
-		require.Equal(t, int64(verifyNum*10), totalSize)
+		re.Equal(int64(verifyNum*10), totalSize)
 	}
+
+	// A range starting part-way through the keyspace, still on region boundaries.
+	re.Equal(int64(100*10), regions.GetRegionSizeByRange(
+		[]byte(fmt.Sprintf("%20d", 500)), []byte(fmt.Sprintf("%20d", 600))))
+
+	// Boundaries that fall *inside* a region rather than on its edges. scanRange
+	// starts at the region containing the start key, and stops at the first region
+	// whose start key is at or past the end key, so both partial regions count in
+	// full: [500, 501) through [600, 601) is 101 regions.
+	re.Equal(int64(101*10), regions.GetRegionSizeByRange(
+		[]byte(fmt.Sprintf("%20d", 500)+"x"), []byte(fmt.Sprintf("%20d", 600)+"x")))
+
+	// A range extending past the last region's start key. The last region has an
+	// empty end key, so it is the final one counted.
+	re.Equal(int64(2*10), regions.GetRegionSizeByRange(
+		[]byte(fmt.Sprintf("%20d", nums-2)), []byte("")))
+
+	// An empty range in the middle of one region contributes that region.
+	re.Equal(int64(10), regions.GetRegionSizeByRange(
+		[]byte(fmt.Sprintf("%20d", 500)+"a"), []byte(fmt.Sprintf("%20d", 500)+"b")))
 }
 
 func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
@@ -999,6 +1023,85 @@ func BenchmarkSetRegionSameRange(b *testing.B) {
 		region := versions[idx][(i/len(versions))%2]
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	}
+}
+
+// liveBenchSnapshot keeps a snapshot reachable for the duration of a benchmark.
+// It is a package-level variable so the compiler cannot decide the snapshot is
+// dead and let it be collected.
+var liveBenchSnapshot *rootRangeSnapshot
+
+// BenchmarkSetRegionSameRangeWithSnapshot is BenchmarkSetRegionSameRange with a
+// snapshot outstanding.
+//
+// The point is that it should cost the same. A same-range update never calls
+// ReplaceOrInsert or Delete, so it never reaches btree's copy-on-write node copy,
+// and an outstanding snapshot cannot make the region-heartbeat path pay anything.
+func BenchmarkSetRegionSameRangeWithSnapshot(b *testing.B) {
+	regions, items := buildBenchRegions(1000000)
+	versions := make([][2]*RegionInfo, len(items))
+	for i, item := range items {
+		versions[i] = [2]*RegionInfo{
+			item.Clone(SetApproximateSize(11), SetWrittenBytes(1000)),
+			item.Clone(SetApproximateSize(12), SetWrittenBytes(2000)),
+		}
+	}
+	liveBenchSnapshot = regions.snapshotRootTree()
+	b.Cleanup(func() { liveBenchSnapshot = nil })
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		idx := i % len(versions)
+		region := versions[idx][(i/len(versions))%2]
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	}
+}
+
+// BenchmarkSetRegionRangeChangedWithSnapshot is BenchmarkSetRegionRangeChanged
+// with a snapshot re-taken periodically.
+//
+// This is the path that does pay for copy-on-write. Every clone makes the whole
+// live tree foreign to its own write context, so the next write to each root-to-
+// leaf path has to copy the nodes on it. Re-cloning often keeps the tree in that
+// state instead of letting it converge back.
+func BenchmarkSetRegionRangeChangedWithSnapshot(b *testing.B) {
+	for _, clonePeriod := range []int{100000, 1000} {
+		b.Run(fmt.Sprintf("clone_every=%d", clonePeriod), func(b *testing.B) {
+			regions, items := buildBenchRegions(1000000)
+			shapes := benchRegionShapes(items)
+			liveBenchSnapshot = regions.snapshotRootTree()
+			b.Cleanup(func() { liveBenchSnapshot = nil })
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := range b.N {
+				if i%clonePeriod == 0 {
+					liveBenchSnapshot = regions.snapshotRootTree()
+				}
+				idx := i % len(shapes)
+				region := shapes[idx][(i/len(shapes)+1)%2]
+				origin, overlaps, rangeChanged := regions.SetRegion(region)
+				regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+			}
+		})
+	}
+}
+
+// BenchmarkSnapshotRootTree checks that taking a snapshot is O(1): the cost must
+// not grow with the number of regions. That is what justifies taking the write
+// lock to do it.
+func BenchmarkSnapshotRootTree(b *testing.B) {
+	for _, size := range []int{100000, 1000000, 4000000} {
+		b.Run(fmt.Sprintf("regions=%d", size), func(b *testing.B) {
+			regions, _ := buildBenchRegions(size)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				liveBenchSnapshot = regions.snapshotRootTree()
+			}
+			b.StopTimer()
+			liveBenchSnapshot = nil
+		})
 	}
 }
 
@@ -1270,6 +1373,260 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 	updateRegion(itemA)
 	updateRegion(itemB)
 	checksEquivalence()
+}
+
+// TestRootRangeSnapshotEquivalence checks that a snapshot of a quiescent tree
+// agrees with the live tree, and that taking one changes nothing observable --
+// in particular that it takes no reference on any region, which is both what
+// keeps it O(1) and what keeps RegionInfo.ref meaning "present in a tree".
+func TestRootRangeSnapshotEquivalence(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	items := generateTestRegions(1000, 5)
+	for _, item := range items {
+		origin, overlaps, rangeChanged := regions.SetRegion(item)
+		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
+	}
+
+	refsBefore := make(map[uint64]int32, len(items))
+	for _, item := range items {
+		refsBefore[item.GetID()] = item.GetRef()
+	}
+	lenBefore := regions.tree.length()
+
+	snap := regions.snapshotRootTree()
+
+	// Same regions, same order, same count.
+	re.Equal(lenBefore, snap.length())
+	re.Equal(lenBefore, regions.tree.length())
+	var fromSnap []uint64
+	snap.scanRange([]byte(""), func(r *RegionInfo) bool {
+		fromSnap = append(fromSnap, r.GetID())
+		return true
+	})
+	var fromTree []uint64
+	regions.tree.scanRange([]byte(""), func(r *RegionInfo) bool {
+		fromTree = append(fromTree, r.GetID())
+		return true
+	})
+	re.Equal(fromTree, fromSnap)
+
+	// GetRegionSizeByRange, which now walks a snapshot, agrees with a brute-force
+	// sum over ScanRegions for arbitrary ranges, including keys that fall inside a
+	// region rather than on a boundary.
+	for range 200 {
+		i, j := mrand.IntN(len(items)*10), mrand.IntN(len(items)*10)
+		if i > j {
+			i, j = j, i
+		}
+		startKey := []byte(fmt.Sprintf("%20d", i))
+		endKey := []byte(fmt.Sprintf("%20d", j))
+		var want int64
+		for _, r := range regions.ScanRegions(startKey, endKey, -1) {
+			want += r.GetApproximateSize()
+		}
+		re.Equal(want, regions.GetRegionSizeByRange(startKey, endKey),
+			"range [%s, %s)", startKey, endKey)
+	}
+
+	// Taking and dropping a snapshot must not touch any reference count.
+	for _, item := range items {
+		re.Equal(refsBefore[item.GetID()], item.GetRef(), "region %d", item.GetID())
+	}
+}
+
+// TestGetRegionSizeByRangeConcurrent exercises the lock-free snapshot walk in
+// GetRegionSizeByRange against concurrent writers of every shape. Run with -race.
+//
+// This guards the new code rather than reproducing an old bug: before the walk
+// moved onto a snapshot, every scan held r.t, so there was no unsynchronised
+// reader to race with.
+func TestGetRegionSizeByRangeConcurrent(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	const count = 500
+	items := generateTestRegions(count, 5)
+	for _, item := range items {
+		origin, overlaps, rangeChanged := regions.SetRegion(item)
+		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
+	}
+	total := int64(count * 10)
+
+	var readers, writers sync.WaitGroup
+	done := make(chan struct{})
+
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for range 300 {
+				startKey := []byte(fmt.Sprintf("%20d", 0))
+				endKey := []byte(fmt.Sprintf("%20d", count*10))
+				size := regions.GetRegionSizeByRange(startKey, endKey)
+				if size < 0 || size > total*2 {
+					t.Errorf("implausible size %d", size)
+					return
+				}
+			}
+		}()
+	}
+
+	// Writers: same-range flow updates, splits, and merges back.
+	for w := range 3 {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				idx := (i*7 + w) % count
+				base := items[idx]
+				switch i % 3 {
+				case 0: // same range, fresher stats
+					n := base.Clone(SetApproximateSize(11), SetWrittenBytes(uint64(i)))
+					origin, overlaps, rangeChanged := regions.SetRegion(n)
+					regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
+				case 1: // shrink: range change
+					n := base.Clone(
+						WithEndKey([]byte(fmt.Sprintf("%20d", idx*10)+"x")),
+						WithIncVersion())
+					origin, overlaps, rangeChanged := regions.SetRegion(n)
+					regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
+				default: // restore: range change back
+					n := base.Clone(WithIncVersion())
+					origin, overlaps, rangeChanged := regions.SetRegion(n)
+					regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
+				}
+			}
+		}()
+	}
+
+	readers.Wait()
+	close(done)
+	writers.Wait()
+
+	// Restore every region so the subtree bookkeeping can be cross-checked.
+	for _, item := range items {
+		n := item.Clone(WithIncVersion())
+		origin, overlaps, rangeChanged := regions.SetRegion(n)
+		regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
+	}
+	checkRegions(re, regions)
+}
+
+// TestRootRangeSnapshotAdjacencyUnderMerges checks the property that makes a
+// snapshot a valid replacement for a scan under one read lock: the key ranges it
+// reports are exactly those that existed when it was taken, so an adjacency check
+// over a snapshot cannot see a hole that was not already there.
+//
+// Merges are used rather than splits on purpose. A split reaches PD as two
+// independent updates -- the shrunk parent, then the new child -- so between them
+// the key space really does have a hole, and a scanner would be right to report
+// one even while holding the lock for its whole scan.
+func TestRootRangeSnapshotAdjacencyUnderMerges(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	const count = 200
+	items := generateTestRegions(count, 5)
+	for _, item := range items {
+		origin, overlaps, rangeChanged := regions.SetRegion(item)
+		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
+	}
+
+	// scanAdjacent walks the snapshot and fails if two successive regions do not
+	// meet, or if the covered range stops short of endKey.
+	scanAdjacent := func(snap *rootRangeSnapshot, startKey, endKey []byte) error {
+		var lastEnd []byte
+		var err error
+		first := true
+		snap.scanRange(startKey, func(r *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(r.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if !first && !bytes.Equal(lastEnd, r.GetStartKey()) {
+				err = errs.ErrRegionNotAdjacent.FastGen(
+					"hole between %s and %s", lastEnd, r.GetStartKey())
+				return false
+			}
+			first = false
+			lastEnd = r.GetEndKey()
+			return true
+		})
+		if err == nil && bytes.Compare(lastEnd, endKey) < 0 {
+			err = errs.ErrRegionNotAdjacent.FastGen("short of %s, reached %s", endKey, lastEnd)
+		}
+		return err
+	}
+
+	var readers, writers sync.WaitGroup
+	done := make(chan struct{})
+	// A merge is one tree update and never leaves a hole. Undoing it is a split,
+	// which is inherently two updates -- shrink the parent, then insert the child
+	// -- and between them the key space really is missing a range. That is true of
+	// PD itself, where the two halves arrive as separate heartbeats, so a scanner
+	// is right to report a hole there whatever locking it uses.
+	//
+	// pairMu makes each such pair atomic with respect to taking a snapshot, which
+	// is the only way to ask the question this test is about: given a snapshot of a
+	// contiguous key space, does it stay contiguous while the tree changes
+	// underneath it?
+	var pairMu syncutil.Mutex
+	writers.Add(1)
+	go func() {
+		defer writers.Done()
+		for i := 1; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			idx := 1 + i%(count-1)
+			// Merge idx into idx-1. One update, no hole.
+			merged := items[idx-1].Clone(
+				WithEndKey(items[idx].GetEndKey()), WithIncVersion())
+			origin, overlaps, rangeChanged := regions.SetRegion(merged)
+			regions.UpdateSubTree(merged, origin, overlaps, rangeChanged)
+
+			// Split them apart again. Two updates, so hold pairMu across both.
+			pairMu.Lock()
+			restored := items[idx-1].Clone(WithIncVersion())
+			origin, overlaps, rangeChanged = regions.SetRegion(restored)
+			regions.UpdateSubTree(restored, origin, overlaps, rangeChanged)
+			back := items[idx].Clone(WithIncVersion())
+			origin, overlaps, rangeChanged = regions.SetRegion(back)
+			regions.UpdateSubTree(back, origin, overlaps, rangeChanged)
+			pairMu.Unlock()
+		}
+	}()
+
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for range 300 {
+				// Only taking the snapshot is serialised against a split pair. The
+				// scan itself runs with nothing held, concurrently with the writer.
+				pairMu.Lock()
+				snap := regions.snapshotRootTree()
+				pairMu.Unlock()
+
+				startKey := []byte(fmt.Sprintf("%20d", 0))
+				endKey := []byte(fmt.Sprintf("%20d", count*10))
+				if err := scanAdjacent(snap, startKey, endKey); err != nil {
+					t.Errorf("snapshot reported a hole: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	readers.Wait()
+	close(done)
+	writers.Wait()
+	re.NotNil(regions)
 }
 
 func generateTestRegions(count int, storeNum int) []*RegionInfo {

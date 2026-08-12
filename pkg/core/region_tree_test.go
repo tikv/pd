@@ -15,6 +15,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/rand/v2"
 	"testing"
@@ -313,6 +314,81 @@ func TestRootRangeSnapshotIsolation(t *testing.T) {
 
 	// The live tree has moved on.
 	re.Equal([][2]string{{"b", "c"}, {"c", "cc"}, {"cc", "d"}}, treeRanges(regions))
+}
+
+// TestRegionItemRangeImmutability is the direct guard for the invariant
+// documented on regionItem: an item that is in the root tree never changes its
+// key range.
+//
+// It holds one snapshot for the whole test and, after every update, checks the
+// ordering of both the live tree and that snapshot. An in-place range change
+// anywhere on the root path shows up here as a snapshot whose start keys stop
+// increasing, which is the state that makes a clone return wrong answers.
+func TestRegionItemRangeImmutability(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	const count = 50
+	for i := range count {
+		region := NewTestRegionInfo(uint64(i+1), 1,
+			[]byte(fmt.Sprintf("%04d", i*10)), []byte(fmt.Sprintf("%04d", (i+1)*10)))
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+	}
+
+	snap := regions.snapshotRootTree()
+	snapLen := snap.length()
+
+	checkOrdered := func(desc string, scan func(func(*RegionInfo) bool)) int {
+		var prev []byte
+		n := 0
+		scan(func(r *RegionInfo) bool {
+			if n > 0 {
+				re.Negative(bytes.Compare(prev, r.GetStartKey()),
+					"%s: start keys not increasing at %q after %q", desc, r.GetStartKey(), prev)
+			}
+			prev = r.GetStartKey()
+			n++
+			return true
+		})
+		return n
+	}
+
+	version := uint64(1)
+	for i := range 1000 {
+		id := uint64(i%count + 1)
+		origin := regions.GetRegion(id)
+		re.NotNil(origin)
+		version++
+		var region *RegionInfo
+		if i%2 == 0 {
+			// Same range, new value.
+			region = origin.Clone(SetApproximateSize(int64(i)), SetRegionVersion(version))
+		} else {
+			// Range change: toggle the end key between its original value and a
+			// shorter one. Appending to the start key keeps the new end key strictly
+			// inside the region, so this never overlaps a neighbour and never
+			// deletes one.
+			fullEnd := []byte(fmt.Sprintf("%04d", int(id)*10))
+			shrunkEnd := append(append([]byte{}, origin.GetStartKey()...), '5')
+			endKey := shrunkEnd
+			if !bytes.Equal(origin.GetEndKey(), fullEnd) {
+				endKey = fullEnd
+			}
+			region = origin.Clone(WithEndKey(endKey), SetRegionVersion(version))
+		}
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+
+		checkOrdered("live tree", func(f func(*RegionInfo) bool) {
+			regions.tree.scanRange([]byte(""), f)
+		})
+		n := checkOrdered("snapshot", func(f func(*RegionInfo) bool) {
+			snap.scanRange([]byte(""), f)
+		})
+		// The snapshot's shape is frozen, so its length cannot drift either.
+		re.Equal(snapLen, n)
+		re.Equal(snapLen, snap.length())
+	}
 }
 
 func TestRegionTreeSplitAndMerge(t *testing.T) {
