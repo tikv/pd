@@ -768,6 +768,9 @@ func BenchmarkRandomRegion(b *testing.B) {
 	}
 }
 
+// BenchmarkRandomSetRegion re-reports the same *RegionInfo after mutating it in
+// place, so origin == region and updateStat adds and subtracts the same values.
+// It does not model a region heartbeat; use BenchmarkSetRegionSameRange for that.
 func BenchmarkRandomSetRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	var items []*RegionInfo
@@ -836,18 +839,21 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
 	}
+	// Scan a partial range: an empty range is answered from regionTree.totalSize
+	// in O(1) and never reaches the range scan we want to measure against.
+	scanStart, scanEnd := benchScanRange(len(items))
 	b.ResetTimer()
-	go func() {
-		for {
-			regions.GetRegionSizeByRange([]byte(""), []byte(""))
-			time.Sleep(time.Millisecond)
-		}
-	}()
+	stopBackgroundScan(b, func() {
+		regions.GetRegionSizeByRange(scanStart, scanEnd)
+		time.Sleep(time.Millisecond)
+	})
 	for i := range b.N {
 		item := items[i%len(items)]
-		item.approximateKeys = int64(200000)
-		origin, overlaps, rangeChanged := regions.SetRegion(item)
-		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
+		// Publish a new version instead of mutating the region already stored in
+		// the tree: a stored *RegionInfo is immutable, see regionItem.
+		n := item.Clone(SetApproximateKeys(int64(200000)))
+		origin, overlaps, rangeChanged := regions.SetRegion(n)
+		regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
 	}
 }
 
@@ -866,13 +872,14 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
 	}
+	// Scan a partial range: an empty range is answered from regionTree.totalSize
+	// in O(1) and never reaches the range scan we want to measure against.
+	scanStart, scanEnd := benchScanRange(len(items))
 	b.ResetTimer()
-	go func() {
-		for {
-			regions.GetRegionSizeByRange([]byte(""), []byte(""))
-			time.Sleep(time.Millisecond)
-		}
-	}()
+	stopBackgroundScan(b, func() {
+		regions.GetRegionSizeByRange(scanStart, scanEnd)
+		time.Sleep(time.Millisecond)
+	})
 
 	b.RunParallel(
 		func(pb *testing.PB) {
@@ -880,10 +887,158 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 				item := items[mrand.IntN(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegion(n)
-				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
+				regions.UpdateSubTree(n, origin, overlaps, rangeChanged)
 			}
 		},
 	)
+}
+
+// benchScanRange returns a key range covering the first half of a benchmark
+// region set built with sequential `fmt.Sprintf("%20d", i)` keys.
+func benchScanRange(count int) (startKey, endKey []byte) {
+	return []byte(fmt.Sprintf("%20d", 0)), []byte(fmt.Sprintf("%20d", count/2))
+}
+
+// stopBackgroundScan runs f in a loop on a background goroutine and stops it when
+// the benchmark ends. Benchmarks in one binary share a process, so a background
+// loop that outlives its benchmark perturbs every later one.
+func stopBackgroundScan(b *testing.B, f func()) {
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			f()
+		}
+	}()
+	b.Cleanup(func() {
+		close(done)
+		<-stopped
+	})
+}
+
+// buildBenchRegions returns a RegionsInfo holding count adjacent regions with
+// sequential keys, together with the regions themselves.
+func buildBenchRegions(count int) (*RegionsInfo, []*RegionInfo) {
+	regions := NewRegionsInfo()
+	items := make([]*RegionInfo, 0, count)
+	for i := range count {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:          uint64(i + 1),
+			Peers:       []*metapb.Peer{peer},
+			StartKey:    []byte(fmt.Sprintf("%20d", i)),
+			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		}, peer, SetApproximateSize(10))
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+		items = append(items, region)
+	}
+	return regions, items
+}
+
+// BenchmarkSetRegionSameRange measures the dominant region-heartbeat write path:
+// a region is re-reported with an unchanged key range and fresher statistics.
+//
+// Unlike BenchmarkRandomSetRegion, this alternates between two pre-built
+// immutable versions of every region, so origin != region on every iteration and
+// no already-published *RegionInfo is mutated. That matters twice over: it is what
+// production does, and mutating a stored region in place would break the
+// immutability that regionItem relies on.
+func BenchmarkSetRegionSameRange(b *testing.B) {
+	regions, items := buildBenchRegions(1000000)
+	versions := make([][2]*RegionInfo, len(items))
+	for i, item := range items {
+		versions[i] = [2]*RegionInfo{
+			item.Clone(SetApproximateSize(11), SetWrittenBytes(1000)),
+			item.Clone(SetApproximateSize(12), SetWrittenBytes(2000)),
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		idx := i % len(versions)
+		region := versions[idx][(i/len(versions))%2]
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	}
+}
+
+// benchRegionShapes returns, for every region, two versions that differ in end
+// key, so alternating between them always changes the region's range.
+func benchRegionShapes(items []*RegionInfo) [][2]*RegionInfo {
+	shapes := make([][2]*RegionInfo, len(items))
+	for i, item := range items {
+		// "<start>x" sorts after the start key and before the original end key.
+		shrunk := item.Clone(WithEndKey([]byte(fmt.Sprintf("%20d", i) + "x")))
+		shapes[i] = [2]*RegionInfo{item, shrunk}
+	}
+	return shapes
+}
+
+// BenchmarkSetRegionRangeChanged measures the structural write path: a region is
+// re-reported with a different end key, so its tree item has to be removed and
+// re-inserted. This is the only heartbeat shape that touches the btree structure.
+func BenchmarkSetRegionRangeChanged(b *testing.B) {
+	regions, items := buildBenchRegions(1000000)
+	shapes := benchRegionShapes(items)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := range b.N {
+		idx := i % len(shapes)
+		region := shapes[idx][(i/len(shapes)+1)%2]
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	}
+}
+
+// BenchmarkBatchScanRegionsHighConcurrency measures many short scans at high
+// concurrency, mixed with heartbeat writers and point readers. A short scan is
+// the realistic client shape, and it is the case where per-call snapshot overhead
+// would show up; a single wide scan would amortise it away and hide the cost.
+func BenchmarkBatchScanRegionsHighConcurrency(b *testing.B) {
+	const count = 1000000
+	regions, items := buildBenchRegions(count)
+	versions := make([]*RegionInfo, len(items))
+	for i, item := range items {
+		versions[i] = item.Clone(SetApproximateSize(11))
+	}
+
+	// Background heartbeat writers and point readers, so the scan contends the
+	// same lock it does in production.
+	stopBackgroundScan(b, func() {
+		i := mrand.IntN(len(versions))
+		region := versions[i]
+		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	})
+	stopBackgroundScan(b, func() {
+		regions.GetRegion(uint64(mrand.IntN(count) + 1))
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			// Roughly 8 regions per scan.
+			start := mrand.IntN(count - 8)
+			krs := keyutil.NewKeyRanges([]keyutil.KeyRange{
+				keyutil.NewKeyRange(
+					fmt.Sprintf("%20d", start),
+					fmt.Sprintf("%20d", start+8),
+				),
+			})
+			if _, err := regions.BatchScanRegions(krs); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 const (
