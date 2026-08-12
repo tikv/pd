@@ -2049,15 +2049,6 @@ func (s *Server) campaignLeader() {
 	}
 	rebaseDuration := time.Since(rebaseStart)
 	log.Info("sync id from etcd completed", zap.Duration("cost", rebaseDuration))
-	cleanupStart := time.Now()
-	if err := s.prepareMicroserviceMetadataCleanup(ctx); err != nil {
-		log.Warn("failed to prepare microservice metadata before serving as PD leader",
-			errs.ZapError(err),
-			zap.Duration("cost", time.Since(cleanupStart)))
-		return
-	}
-	cleanupDuration := time.Since(cleanupStart)
-	log.Info("prepare microservice metadata completed", zap.Duration("cost", cleanupDuration))
 	// PromoteSelf to accept the remaining service, such as GetStore, GetRegion.
 	enableLeaderStart := time.Now()
 	s.member.PromoteSelf()
@@ -2077,6 +2068,7 @@ func (s *Server) campaignLeader() {
 		zap.String("leader-name", s.Name()),
 		zap.Duration("total-cost", totalDuration),
 		zap.Duration("cost", enableLeaderDuration))
+	s.scheduleMicroserviceMetadataCleanup(ctx)
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
 	defer leaderTicker.Stop()
 

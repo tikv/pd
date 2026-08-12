@@ -158,7 +158,7 @@ func TestCleanupMicroserviceMetadataIgnoresLeasedRegistryKeys(t *testing.T) {
 	re.Equal(leaseID, clientv3.LeaseID(resp.Kvs[0].Lease))
 }
 
-func TestPrepareMicroserviceMetadataCleanupBlocksUntilCommitted(t *testing.T) {
+func TestScheduleMicroserviceMetadataCleanupDoesNotBlockServing(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -180,28 +180,18 @@ func TestPrepareMicroserviceMetadataCleanupBlocksUntilCommitted(t *testing.T) {
 	}))
 	blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 
-	resultCh := make(chan error, 1)
-	go func() {
-		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
-	}()
+	svr.scheduleMicroserviceMetadataCleanup(ctx)
 	blocker.wait(t)
-	select {
-	case err := <-resultCh:
-		re.NoError(err)
-		t.Fatal("PD leader preparation completed before microservice metadata cleanup committed")
-	default:
-	}
+	re.True(svr.member.IsServing())
 	blocker.releaseCleanup()
 	blocker.disable(t)
-	select {
-	case err := <-resultCh:
-		re.NoError(err)
-	case <-time.After(10 * time.Second):
-		t.Fatal("microservice metadata cleanup did not return")
-	}
+	re.Eventually(func() bool {
+		groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 1)
+		return err == nil && len(groups) == 1 && len(groups[0].Members) == 0
+	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func TestPrepareMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
+func TestRunMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -211,7 +201,7 @@ func TestPrepareMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 	defer keypath.ResetClusterID()
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr, _ := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		if err := store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
@@ -231,7 +221,7 @@ func TestPrepareMicroserviceMetadataCleanupStopsOnRejectedState(t *testing.T) {
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
+		resultCh <- svr.runMicroserviceMetadataCleanup(ctx, term)
 	}()
 	select {
 	case err := <-resultCh:
@@ -321,7 +311,7 @@ func TestMicroserviceMetadataCleanupSkipsNonDefaultGroupsWithoutStaleMembers(t *
 	re.Nil(candidate)
 }
 
-func TestPrepareMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing.T) {
+func TestRunMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
@@ -330,7 +320,7 @@ func TestPrepareMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing
 	t.Cleanup(keypath.ResetClusterID)
 
 	store := storage.NewStorageWithEtcdBackend(client)
-	svr, _ := newMicroserviceMetadataCleanupTestServer(t, client, store)
+	svr, term := newMicroserviceMetadataCleanupTestServer(t, client, store)
 	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
 			ID:       constant.DefaultKeyspaceGroupID,
@@ -345,7 +335,7 @@ func TestPrepareMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- svr.prepareMicroserviceMetadataCleanup(ctx)
+		resultCh <- svr.runMicroserviceMetadataCleanup(ctx, term)
 	}()
 	select {
 	case err := <-resultCh:

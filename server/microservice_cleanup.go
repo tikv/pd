@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (
@@ -53,18 +54,31 @@ func rejectMicroserviceMetadataCleanup(format string, args ...any) error {
 	return errors.Wrapf(errMicroserviceMetadataCleanupRejected, format, args...)
 }
 
-// prepareMicroserviceMetadataCleanup makes the supported API-service-to-PD-mode
-// transition durable before the PD leader becomes ready. Unsafe metadata states
-// are left untouched and do not prevent PD mode from serving.
-func (s *Server) prepareMicroserviceMetadataCleanup(ctx context.Context) error {
+// scheduleMicroserviceMetadataCleanup cleans up supported API-service metadata
+// in the background after the PD leader starts serving.
+func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
 	if s.IsKeyspaceGroupEnabled() {
-		return nil
+		return
 	}
 	term, ok := s.captureMicroserviceMetadataCleanupTerm()
 	if !ok {
-		return errors.New("cannot capture the PD leadership term for microservice metadata cleanup")
+		log.Warn("cannot capture the PD leadership term for microservice metadata cleanup")
+		return
 	}
+	s.serverLoopWg.Add(1)
+	go func() {
+		defer logutil.LogPanic()
+		defer s.serverLoopWg.Done()
+		if err := s.runMicroserviceMetadataCleanup(ctx, term); err != nil && ctx.Err() == nil {
+			log.Warn("microservice metadata cleanup stopped before completion", errs.ZapError(err))
+		}
+	}()
+}
 
+func (s *Server) runMicroserviceMetadataCleanup(
+	ctx context.Context,
+	term microserviceMetadataCleanupTerm,
+) error {
 	retryInterval := microserviceMetadataCleanupInitialRetryInterval
 	for {
 		if !s.isMicroserviceMetadataCleanupTermCurrent(term) {
