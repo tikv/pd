@@ -43,3 +43,9 @@ func DeleteStoreMetrics(storeID string) {
 	filterSourceCounter.DeletePartialMatch(prometheus.Labels{"source": storeID})
 	filterTargetCounter.DeletePartialMatch(prometheus.Labels{"target": storeID})
 }
+
+// ResetFilterMetrics resets the filter metrics.
+func ResetFilterMetrics() {
+	filterSourceCounter.Reset()
+	filterTargetCounter.Reset()
+}

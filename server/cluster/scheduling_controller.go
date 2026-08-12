@@ -178,6 +178,8 @@ func resetSchedulingMetrics() {
 	statistics.ResetLabelStatsMetrics()
 	// reset hot cache metrics
 	statistics.ResetHotCacheStatusMetrics()
+	filter.ResetFilterMetrics()
+	hbstream.ResetHeartbeatStreamMetrics()
 }
 
 func (sc *schedulingController) collectSchedulingMetrics() {

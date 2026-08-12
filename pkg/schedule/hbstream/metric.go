@@ -35,3 +35,8 @@ func init() {
 func DeleteStoreMetrics(storeID string) {
 	heartbeatStreamCounter.DeletePartialMatch(prometheus.Labels{"store": storeID})
 }
+
+// ResetHeartbeatStreamMetrics resets the heartbeat stream metrics.
+func ResetHeartbeatStreamMetrics() {
+	heartbeatStreamCounter.Reset()
+}
