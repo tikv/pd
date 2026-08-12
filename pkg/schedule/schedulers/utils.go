@@ -139,7 +139,11 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		targetDelta := influence + tolerantResource
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + tolerantResource
+		// account for the candidate region's own size, so a target doesn't
+		// look artificially light just because this move hasn't landed yet.
+		// Unlike opInfluence (other, already-pending operators), this is not
+		// amplified: it is the literal size the target is about to receive.
+		targetDelta := influence*influenceAmp + tolerantResource + p.Region.GetApproximateSize()
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
