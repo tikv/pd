@@ -716,11 +716,13 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
 	if request.GetIncludeGlobalGcBarriers() {
 		gcState, globalGCBarriers, err = s.gcStateManager.GetGCStateWithGlobalGCBarriers(
+			ctx,
 			keyspaceID,
 			request.GetExcludeGcBarriers(),
 		)
 	} else {
 		gcState, err = s.gcStateManager.GetGCState(
+			ctx,
 			keyspaceID,
 			request.GetExcludeGcBarriers(),
 		)

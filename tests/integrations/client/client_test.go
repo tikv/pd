@@ -2179,7 +2179,7 @@ func (s *clientStatefulTestSuite) testUpdateServiceGCSafePointImpl(keyspaceID ui
 	// Suppress the unuseful lint warning.
 	//nolint:unparam
 	loadServiceGCSafePointByServiceID := func(serviceID string) *endpoint.ServiceSafePoint {
-		gcStates, err := s.srv.GetGCStateManager().GetGCState(keyspaceID, false)
+		gcStates, err := s.srv.GetGCStateManager().GetGCState(context.Background(), keyspaceID, false)
 		re.NoError(err)
 		for _, b := range gcStates.GCBarriers {
 			if b.BarrierID == serviceID {
