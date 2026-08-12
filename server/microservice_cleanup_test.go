@@ -289,6 +289,38 @@ func TestMicroserviceMetadataCleanupTransitionDetection(t *testing.T) {
 	re.NotNil(candidate)
 }
 
+func TestMicroserviceMetadataCleanupSkipsNonDefaultGroupsWithoutStaleMembers(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	t.Cleanup(clean)
+	keypath.SetClusterID(12357)
+	t.Cleanup(keypath.ResetClusterID)
+
+	store := storage.NewStorageWithEtcdBackend(client)
+	svr := &Server{storage: store, client: client}
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       1,
+			UserKind: endpoint.Standard.String(),
+		})
+	}))
+
+	candidate, err := svr.loadMicroserviceMetadataCleanupCandidate(ctx)
+	re.NoError(err)
+	re.Nil(candidate)
+
+	re.NoError(store.RunInTxn(ctx, func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, &endpoint.KeyspaceGroup{
+			ID:       constant.DefaultKeyspaceGroupID,
+			UserKind: endpoint.Basic.String(),
+		})
+	}))
+	candidate, err = svr.loadMicroserviceMetadataCleanupCandidate(ctx)
+	re.NoError(err)
+	re.Nil(candidate)
+}
+
 func TestPrepareMicroserviceMetadataCleanupStopsOnContextCancellation(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

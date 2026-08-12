@@ -178,44 +178,57 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 }
 
 func (s *Server) loadMicroserviceMetadataCleanupCandidate(ctx context.Context) (*mvccpb.KeyValue, error) {
-	// At most two records are needed: the default group and the first unsupported
-	// non-default group, if one exists.
+	// Read the default group first so normal PD-mode leader campaigns do not scan
+	// all keyspace groups. Non-default groups only matter when cleanup would mutate
+	// the default group.
 	groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
-	resp, err := etcdutil.EtcdKVGetWithContext(
+	resp, err := etcdutil.EtcdKVGetWithContext(ctx, s.client, groupKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Kvs) == 0 {
+		return nil, nil
+	}
+
+	groupKV := resp.Kvs[0]
+	group := &endpoint.KeyspaceGroup{}
+	if err := json.Unmarshal(groupKV.Value, group); err != nil {
+		return nil, rejectMicroserviceMetadataCleanup(
+			"cannot decode TSO keyspace group metadata when cleaning up PD mode microservice metadata: %v", err)
+	}
+	if group.ID != constant.DefaultKeyspaceGroupID {
+		return nil, rejectMicroserviceMetadataCleanup("found TSO keyspace group %d at the default group path when cleaning up PD mode microservice metadata", group.ID)
+	}
+	if group.IsSplitting() {
+		return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
+	}
+	if group.IsMerging() {
+		return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
+	}
+	if len(group.Members) == 0 {
+		return nil, nil
+	}
+
+	resp, err = etcdutil.EtcdKVGetWithContext(
 		ctx,
 		s.client,
-		groupKey,
+		keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID+1),
 		clientv3.WithRange(clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())),
-		clientv3.WithLimit(2),
+		clientv3.WithLimit(1),
 	)
 	if err != nil {
 		return nil, err
 	}
-	var candidate *mvccpb.KeyValue
-	for _, groupKV := range resp.Kvs {
-		group := &endpoint.KeyspaceGroup{}
-		if err := json.Unmarshal(groupKV.Value, group); err != nil {
+	if len(resp.Kvs) > 0 {
+		nonDefaultGroup := &endpoint.KeyspaceGroup{}
+		if err := json.Unmarshal(resp.Kvs[0].Value, nonDefaultGroup); err != nil {
 			return nil, rejectMicroserviceMetadataCleanup(
 				"cannot decode TSO keyspace group metadata when cleaning up PD mode microservice metadata: %v", err)
 		}
-		if string(groupKV.Key) != groupKey {
-			return nil, rejectMicroserviceMetadataCleanup(
-				"found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", group.ID)
-		}
-		if group.ID != constant.DefaultKeyspaceGroupID {
-			return nil, rejectMicroserviceMetadataCleanup("found TSO keyspace group %d at the default group path when cleaning up PD mode microservice metadata", group.ID)
-		}
-		if group.IsSplitting() {
-			return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting when cleaning up PD mode microservice metadata")
-		}
-		if group.IsMerging() {
-			return nil, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging when cleaning up PD mode microservice metadata")
-		}
-		if len(group.Members) > 0 {
-			candidate = groupKV
-		}
+		return nil, rejectMicroserviceMetadataCleanup(
+			"found non-default TSO keyspace group %d when cleaning up PD mode microservice metadata", nonDefaultGroup.ID)
 	}
-	return candidate, nil
+	return groupKV, nil
 }
 
 func (s *Server) clearDefaultTSOKeyspaceGroupMembers(
