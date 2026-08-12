@@ -802,6 +802,12 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	keyspaceController, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID, controller.EnableSingleGroupByKeyspace())
 	re.NoError(err)
 	keyspaceController.Start(suite.ctx)
+	// Deferred backstop: Stop is idempotent, so this is a no-op after the
+	// inline Stop below, but keeps a mid-test failure from leaving the
+	// ownership slot held and cascading into later tests.
+	defer func() {
+		re.NoError(keyspaceController.Stop())
+	}()
 
 	_, _, _, _, err = keyspaceController.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
 	re.NoError(err)
@@ -1809,9 +1815,12 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re := suite.Require()
 	cli := suite.client
 	// Test load from resource manager.
-	ctr, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
+	ctr1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
-	config := ctr.GetConfig()
+	defer func() {
+		re.NoError(ctr1.Stop())
+	}()
+	config := ctr1.GetConfig()
 	re.NotNil(config)
 	expectedConfig := controller.DefaultRUConfig()
 	re.Equal(expectedConfig.ReadBaseCost, config.ReadBaseCost)
@@ -1820,7 +1829,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 	re.Equal(expectedConfig.WriteBytesCost, config.WriteBytesCost)
 	re.Equal(expectedConfig.CPUMsCost, config.CPUMsCost)
 	// Release the ownership before acquiring the replacement.
-	re.NoError(ctr.Stop())
+	re.NoError(ctr1.Stop())
 	// Test init from given config.
 	ruConfig := &controller.RequestUnitConfig{
 		ReadBaseCost:     1,
@@ -1829,12 +1838,12 @@ func (suite *resourceManagerClientTestSuite) TestLoadRequestUnitConfig() {
 		WriteCostPerByte: 4,
 		CPUMsCost:        5,
 	}
-	ctr, err = controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig, constants.NullKeyspaceID)
+	ctr2, err := controller.NewResourceGroupController(suite.ctx, 1, cli, ruConfig, constants.NullKeyspaceID)
 	re.NoError(err)
 	defer func() {
-		re.NoError(ctr.Stop())
+		re.NoError(ctr2.Stop())
 	}()
-	config = ctr.GetConfig()
+	config = ctr2.GetConfig()
 	re.NotNil(config)
 	controllerConfig := controller.DefaultConfig()
 	controllerConfig.RequestUnit = *ruConfig
@@ -2015,6 +2024,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	c1.Start(suite.ctx)
+	// Deferred backstop for a mid-test failure; a no-op after the inline
+	// Stop below since Stop is idempotent.
+	defer func() {
+		re.NoError(c1.Stop())
+	}()
 	// helper function for sending HTTP requests and checking responses
 	sendRequest := func(method, url string, body io.Reader) []byte {
 		req, err := http.NewRequest(method, url, body)
@@ -2114,6 +2128,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, constants.NullKeyspaceID, controller.WithMaxWaitDuration(time.Hour))
 	re.NoError(err)
 	c2.Start(suite.ctx)
+	defer func() {
+		re.NoError(c2.Stop())
+	}()
 	expectRUCfg2 := *expectRUCfg
 	// always apply the client option
 	expectRUCfg2.LTBMaxWaitDuration = time.Hour
@@ -2133,8 +2150,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	// construction.
 	c3, err := controller.NewResourceGroupController(suite.ctx, 3, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
+	defer func() {
+		re.NoError(c3.Stop())
+	}()
 	re.Equal(expectRUCfg, c3.GetConfig())
-	re.NoError(c3.Stop())
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace() {
@@ -2415,6 +2434,11 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		c, err := controller.NewResourceGroupController(suite.ctx, clientID, cli, nil, keyspace)
 		re.NoError(err)
 		c.Start(suite.ctx)
+		// Cleanup backstop for a mid-iteration failure; a no-op after the
+		// inline Stop at the end of the iteration since Stop is idempotent.
+		suite.T().Cleanup(func() {
+			re.NoError(c.Stop())
+		})
 
 		// Test to load resource groups: only the controller's own keyspace
 		// group is visible to it.

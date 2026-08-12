@@ -20,14 +20,17 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 // TestControllerOwnershipExclusive verifies that acquiring a second controller
@@ -48,6 +51,9 @@ func TestControllerOwnershipExclusive(t *testing.T) {
 	// after the first controller is started.
 	_, err = NewResourceGroupController(ctx, 2, mockProvider, nil, constants.NullKeyspaceID)
 	re.ErrorIs(err, errs.ErrClientResourceGroupControllerAlreadyExists)
+	// The rejection happens before any side effect: the provider has served
+	// exactly one config load (from the first acquisition).
+	mockProvider.AssertNumberOfCalls(t, "Get", 1)
 	c1.Start(ctx)
 	_, err = NewResourceGroupController(ctx, 2, mockProvider, nil, constants.NullKeyspaceID)
 	re.ErrorIs(err, errs.ErrClientResourceGroupControllerAlreadyExists)
@@ -124,6 +130,7 @@ func TestControllerOwnershipConcurrent(t *testing.T) {
 		active    atomic.Int32
 		successes atomic.Int32
 		overlaps  atomic.Int32
+		stopErrs  atomic.Int32
 	)
 	for i := range 16 {
 		wg.Add(1)
@@ -142,17 +149,125 @@ func TestControllerOwnershipConcurrent(t *testing.T) {
 				// no other goroutine can acquire until Stop releases it.
 				active.Add(-1)
 				if err := c.Stop(); err != nil {
-					overlaps.Add(1)
+					stopErrs.Add(1)
 				}
 			}
 		}()
 	}
 	wg.Wait()
 	re.Zero(overlaps.Load())
+	re.Zero(stopErrs.Load())
 	re.Positive(successes.Load())
 
 	// The slot must end up free.
 	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	re.NoError(c.Stop())
+}
+
+// TestControllerOwnershipHeldAfterContextCancel verifies that canceling the
+// context passed to Start stops the run loop but does not release the
+// process-wide ownership slot; only an explicit Stop does.
+func TestControllerOwnershipHeldAfterContextCancel(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	mockProvider := newMockResourceGroupProvider()
+
+	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	c.Start(ctx)
+	cancel()
+	// Wait for the run loop to exit; the slot must still be held.
+	c.wg.Wait()
+	_, err = NewResourceGroupController(context.Background(), 2, mockProvider, nil, constants.NullKeyspaceID)
+	re.ErrorIs(err, errs.ErrClientResourceGroupControllerAlreadyExists)
+
+	re.NoError(c.Stop())
+	replacement, err := NewResourceGroupController(context.Background(), 3, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	re.NoError(replacement.Stop())
+}
+
+// TestControllerConcurrentStartStop verifies that a Stop racing a Start can
+// neither leak a run loop that no longer owns the slot nor leave the slot
+// held after both return.
+func TestControllerConcurrentStartStop(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockProvider := newMockResourceGroupProvider()
+
+	for range 50 {
+		c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		var (
+			wg      sync.WaitGroup
+			stopErr error
+		)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			c.Start(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			stopErr = c.Stop()
+		}()
+		wg.Wait()
+		re.NoError(stopErr)
+		// Whichever side won, no run loop may survive Stop: either Start
+		// was refused, or Stop canceled the started loop and waited for it.
+		c.wg.Wait()
+		// The slot must be free for a replacement.
+		replacement, err := NewResourceGroupController(ctx, 2, mockProvider, nil, constants.NullKeyspaceID)
+		re.NoError(err)
+		re.NoError(replacement.Stop())
+	}
+}
+
+// TestStopUnstartedControllerCleansMetrics verifies that stopping a
+// controller that was used but never started still cleans the process-global
+// metric state before releasing the slot.
+func TestStopUnstartedControllerCleansMetrics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockProvider := newMockResourceGroupProvider()
+	group := &rmpb.ResourceGroup{
+		Name: "unstarted_cleanup",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "unstarted_cleanup", mock.Anything).Return(group, nil)
+
+	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	// Controller methods are usable before Start and populate the
+	// process-global status gauge.
+	_, err = c.tryGetResourceGroupController(ctx, "unstarted_cleanup", false)
+	re.NoError(err)
+	re.NotZero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
+
+	// Stop on the unstarted controller must clean the process-global state
+	// before handing the slot to a replacement.
+	re.NoError(c.Stop())
+	re.Zero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
+}
+
+// gaugeSeriesCount returns the number of series currently exported by vec.
+func gaugeSeriesCount(vec *prometheus.GaugeVec) int {
+	ch := make(chan prometheus.Metric)
+	go func() {
+		vec.Collect(ch)
+		close(ch)
+	}()
+	count := 0
+	for range ch {
+		count++
+	}
+	return count
 }

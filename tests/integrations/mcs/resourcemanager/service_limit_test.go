@@ -87,8 +87,12 @@ func (suite *serviceLimitTestSuite) SetupTest() {
 }
 
 func (suite *serviceLimitTestSuite) TearDownTest() {
-	// Release the controller ownership so the next test can acquire it.
-	suite.Require().NoError(suite.controller.Stop())
+	// Release the controller ownership so the next test can acquire it. The
+	// nil check keeps a SetupTest failure before the controller assignment
+	// from panicking here and masking the original error.
+	if suite.controller != nil {
+		suite.Require().NoError(suite.controller.Stop())
+	}
 	suite.cancel()
 	suite.cluster.Destroy()
 }

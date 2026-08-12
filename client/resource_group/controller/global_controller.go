@@ -186,12 +186,16 @@ type ResourceGroupsController struct {
 	// 0 means not loaded or not configured (treated as v1).
 	ruVersion atomic.Int32
 
-	// stopOnce makes Stop idempotent and guarantees the process-wide
-	// ownership slot is released exactly once. stopped keeps a stopped
-	// controller from being started afterwards, which would leak an
-	// unowned run loop.
-	stopOnce sync.Once
-	stopped  atomic.Bool
+	// lifecycleMu serializes Start against Stop: it guards the publication
+	// of loopCtx/loopCancel and the stopped flag, so that a Stop concurrent
+	// with Start either observes the started loop and cancels it, or marks
+	// the controller stopped before Start launches the loop. Without it, a
+	// racing Start could leak a run loop that no longer owns the
+	// process-wide slot. stopOnce makes Stop idempotent and guarantees the
+	// slot is released exactly once.
+	lifecycleMu sync.Mutex
+	stopOnce    sync.Once
+	stopped     bool
 
 	wg sync.WaitGroup
 }
@@ -210,13 +214,20 @@ func NewResourceGroupController(
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
 	// Reserve the process-wide ownership slot before any side effect: the
-	// steps below perform network I/O and update process-global state.
+	// steps below perform network I/O and update process-global state. The
+	// deferred unreserve keeps a failure (or panic) on any construction path
+	// from leaking the slot.
 	if err := ownership.reserve(); err != nil {
 		return nil, err
 	}
+	bound := false
+	defer func() {
+		if !bound {
+			ownership.unreserve()
+		}
+	}()
 	config, err := loadServerConfig(ctx, provider)
 	if err != nil {
-		ownership.unreserve()
 		return nil, err
 	}
 	if requestUnitConfig != nil {
@@ -244,6 +255,7 @@ func NewResourceGroupController(
 	// Extract initial ruVersion from the controller config's RUVersionPolicy.
 	controller.updateRUVersionFromConfig(config)
 	ownership.bind(controller)
+	bound = true
 	return controller, nil
 }
 
@@ -320,7 +332,9 @@ const (
 // Canceling ctx stops the run loop but does not release the process-wide
 // ownership slot; call Stop to release it.
 func (c *ResourceGroupsController) Start(ctx context.Context) {
-	if c.stopped.Load() {
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.stopped {
 		log.Error("resource group controller is already stopped, cannot be started again")
 		return
 	}
@@ -413,11 +427,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
-				metrics.ResourceGroupStatusGauge.Reset()
-				c.requestSourceStates.Range(func(_, v any) bool {
-					v.(*requestSourceMetricsState).cleanup()
-					return true
-				})
+				c.cleanupProcessGlobalMetrics()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode.Store(true)
@@ -544,14 +554,32 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 // controller cannot be started again.
 func (c *ResourceGroupsController) Stop() error {
 	c.stopOnce.Do(func() {
-		c.stopped.Store(true)
-		if c.loopCancel != nil {
-			c.loopCancel()
+		c.lifecycleMu.Lock()
+		c.stopped = true
+		cancel := c.loopCancel
+		c.lifecycleMu.Unlock()
+		if cancel != nil {
+			cancel()
 			c.wg.Wait()
 		}
+		// The run loop cleans the process-global metrics up on exit, but a
+		// controller that was never started (or was used again after its
+		// run loop already exited) has no loop to do it, so clean them up
+		// here as well before handing the slot to a replacement.
+		c.cleanupProcessGlobalMetrics()
 		ownership.release(c)
 	})
 	return nil
+}
+
+// cleanupProcessGlobalMetrics cleans the process-global metric state
+// populated on behalf of this controller. It is safe to call more than once.
+func (c *ResourceGroupsController) cleanupProcessGlobalMetrics() {
+	metrics.ResourceGroupStatusGauge.Reset()
+	c.requestSourceStates.Range(func(_, v any) bool {
+		v.(*requestSourceMetricsState).cleanup()
+		return true
+	})
 }
 
 // loadGroupController just wraps the `Load` method of `sync.Map`.
