@@ -32,7 +32,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
 
@@ -45,6 +48,10 @@ type fakeGCStateReader struct {
 	getStateCalls           int
 	getAllCalls             int
 	closed                  bool
+}
+
+type unusedPDClient struct {
+	pd.Client
 }
 
 func (r *fakeGCStateReader) getGCState(
@@ -400,6 +407,108 @@ func TestGCStateAPIOptions(t *testing.T) {
 	}
 }
 
+func TestNewPDGCStateReaderUsesConfiguredTimeout(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		flagValue   string
+		wantTimeout time.Duration
+	}{
+		{name: "default", wantTimeout: 30 * time.Second},
+		{name: "custom", flagValue: "45s", wantTimeout: 45 * time.Second},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			wantErr := errors.New("stop after inspecting client options")
+			clientFactory := func(
+				_ context.Context,
+				_ caller.Component,
+				_ []string,
+				_ pd.SecurityOption,
+				clientOptions ...opt.ClientOption,
+			) (pd.Client, error) {
+				options := opt.NewOption()
+				for _, apply := range clientOptions {
+					apply(options)
+				}
+				require.Equal(t, testCase.wantTimeout, options.Timeout)
+				return &unusedPDClient{}, wantErr
+			}
+			gcStateCommand := buildGCStateCommand(func(cmd *cobra.Command) (gcStateReader, error) {
+				return newPDGCStateReaderWithClientFactory(cmd, clientFactory)
+			})
+			rootCommand := &cobra.Command{Use: "pd-ctl", SilenceUsage: true}
+			rootCommand.PersistentFlags().String("pd", "http://127.0.0.1:2379", "")
+			rootCommand.PersistentFlags().String("cacert", "", "")
+			rootCommand.PersistentFlags().String("cert", "", "")
+			rootCommand.PersistentFlags().String("key", "", "")
+			rootCommand.AddCommand(gcStateCommand)
+			args := []string{"gc-state", "all"}
+			if testCase.flagValue != "" {
+				args = append(args, "--timeout", testCase.flagValue)
+			}
+			rootCommand.SetArgs(args)
+			rootCommand.SetOut(io.Discard)
+			rootCommand.SetErr(io.Discard)
+
+			err := rootCommand.Execute()
+			require.ErrorIs(t, err, wantErr)
+		})
+	}
+}
+
+func TestGCStateCommandTimeout(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		args        []string
+		wantTimeout time.Duration
+	}{
+		{name: "all-default", args: []string{"all"}, wantTimeout: 30 * time.Second},
+		{name: "all-custom", args: []string{"all", "--timeout", "2m"}, wantTimeout: 2 * time.Minute},
+		{name: "keyspace-custom", args: []string{"keyspace", "42", "--timeout", "45s"}, wantTimeout: 45 * time.Second},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			reader := &fakeGCStateReader{
+				state: gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
+					WithGlobalGCBarriers(nil),
+				clusterState: gc.NewClusterGCStatesWithGlobalGCBarriers(
+					map[uint32]gc.GCState{},
+					nil,
+				),
+			}
+			var gotTimeout time.Duration
+			cmd := buildGCStateCommand(func(cmd *cobra.Command) (gcStateReader, error) {
+				var err error
+				gotTimeout, err = cmd.Flags().GetDuration(gcStateTimeoutFlag)
+				return reader, err
+			})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(testCase.args)
+
+			require.NoError(t, cmd.Execute())
+			require.Equal(t, testCase.wantTimeout, gotTimeout)
+		})
+	}
+}
+
+func TestGCStateCommandRejectsNonPositiveTimeout(t *testing.T) {
+	for _, timeout := range []string{"0s", "-1s"} {
+		t.Run(timeout, func(t *testing.T) {
+			factoryCalled := false
+			cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
+				factoryCalled = true
+				return nil, errors.New("factory must not run")
+			})
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"all", "--timeout", timeout})
+
+			err := cmd.Execute()
+			require.EqualError(t, err, "timeout must be a positive duration")
+			require.False(t, factoryCalled)
+		})
+	}
+}
+
 func TestGCStateCommandGlobalBarrierFlag(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
@@ -671,6 +780,16 @@ func TestGCStateCommandErrors(t *testing.T) {
 			wantMessage: "failed to get GC state for keyspace 42",
 		},
 		{
+			name: "single-rpc-timeout",
+			args: []string{"keyspace", "42", "--timeout", "45s"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					err: status.Error(codes.DeadlineExceeded, "deadline exceeded"),
+				}, nil
+			},
+			wantMessage: "gc-state keyspace timed out after 45s; retry with a longer --timeout",
+		},
+		{
 			name: "single-wrapped-unimplemented",
 			args: []string{"keyspace", "42"},
 			factory: func(*cobra.Command) (gcStateReader, error) {
@@ -708,6 +827,16 @@ func TestGCStateCommandErrors(t *testing.T) {
 				return &fakeGCStateReader{err: errors.New("rpc rejected")}, nil
 			},
 			wantMessage: "failed to get all keyspaces GC states",
+		},
+		{
+			name: "all-rpc-timeout",
+			args: []string{"all", "--timeout", "2m"},
+			factory: func(*cobra.Command) (gcStateReader, error) {
+				return &fakeGCStateReader{
+					err: status.Error(codes.DeadlineExceeded, "deadline exceeded"),
+				}, nil
+			},
+			wantMessage: "gc-state all timed out after 2m0s; retry with a longer --timeout",
 		},
 		{
 			name: "all-wrapped-unimplemented",
@@ -759,6 +888,10 @@ func TestGCStateCommandHelpContract(t *testing.T) {
 	require.NotNil(t, excludeGlobalBarriers)
 	require.Equal(t, "false", excludeGlobalBarriers.DefValue)
 	require.Equal(t, "exclude global GC barriers from the PD request and JSON output", excludeGlobalBarriers.Usage)
+	timeout := cmd.PersistentFlags().Lookup("timeout")
+	require.NotNil(t, timeout)
+	require.Equal(t, "30s", timeout.DefValue)
+	require.Equal(t, "timeout for GC state RPCs", timeout.Usage)
 
 	commands := cmd.Commands()
 	require.Len(t, commands, 2)
@@ -779,7 +912,7 @@ func TestGCStateCommandHelpContract(t *testing.T) {
 	require.Equal(t, "all", all.Use)
 	require.Equal(t, "show effective GC scopes and cluster-wide GC state", all.Short)
 	require.Equal(t, "Show all effective GC scopes and local barriers, with global barriers once at the top level. Use --exclude-global-barriers to omit cluster-wide barriers.", all.Long)
-	require.Equal(t, "  pd-ctl gc-state all", all.Example)
+	require.Equal(t, "  pd-ctl gc-state all\n  pd-ctl gc-state all --timeout 2m", all.Example)
 }
 
 type failingWriter struct{}

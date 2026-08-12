@@ -30,6 +30,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/gc"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/keyspace/constant"
 )
@@ -49,9 +50,19 @@ type gcStateReader interface {
 
 type gcStateReaderFactory func(*cobra.Command) (gcStateReader, error)
 
+type pdClientFactory func(
+	ctx context.Context,
+	callerComponent caller.Component,
+	svrAddrs []string,
+	security pd.SecurityOption,
+	opts ...opt.ClientOption,
+) (pd.Client, error)
+
 const (
 	gcStateIncludeExpiredFlag        = "include-expired"
 	gcStateExcludeGlobalBarriersFlag = "exclude-global-barriers"
+	gcStateTimeoutFlag               = "timeout"
+	defaultGCStateTimeout            = 30 * time.Second
 )
 
 type pdGCStateReader struct {
@@ -93,6 +104,13 @@ func (r *pdGCStateReader) close() {
 }
 
 func newPDGCStateReader(cmd *cobra.Command) (gcStateReader, error) {
+	return newPDGCStateReaderWithClientFactory(cmd, pd.NewClientWithContext)
+}
+
+func newPDGCStateReaderWithClientFactory(
+	cmd *cobra.Command,
+	clientFactory pdClientFactory,
+) (gcStateReader, error) {
 	caPath, err := cmd.Flags().GetString("cacert")
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -105,7 +123,11 @@ func newPDGCStateReader(cmd *cobra.Command) (gcStateReader, error) {
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	client, err := pd.NewClientWithContext(
+	timeout, err := getGCStateTimeout(cmd)
+	if err != nil {
+		return nil, err
+	}
+	client, err := clientFactory(
 		cmd.Context(),
 		caller.Component(PDControlCallerID),
 		getEndpoints(cmd),
@@ -114,6 +136,7 @@ func newPDGCStateReader(cmd *cobra.Command) (gcStateReader, error) {
 			CertPath: certPath,
 			KeyPath:  keyPath,
 		},
+		opt.WithCustomTimeoutOption(timeout),
 	)
 	if err != nil {
 		return nil, err
@@ -341,6 +364,17 @@ func getGCStateIncludeExpired(cmd *cobra.Command) (bool, error) {
 	return includeExpired, nil
 }
 
+func getGCStateTimeout(cmd *cobra.Command) (time.Duration, error) {
+	timeout, err := cmd.Flags().GetDuration(gcStateTimeoutFlag)
+	if err != nil {
+		return 0, errors.WithStack(err)
+	}
+	if timeout <= 0 {
+		return 0, errors.New("timeout must be a positive duration")
+	}
+	return timeout, nil
+}
+
 func getGCStateIncludeGlobalGCBarriers(
 	cmd *cobra.Command,
 ) (bool, error) {
@@ -382,6 +416,11 @@ func buildGCStateCommand(factory gcStateReaderFactory) *cobra.Command {
 		false,
 		"exclude global GC barriers from the PD request and JSON output",
 	)
+	command.PersistentFlags().Duration(
+		gcStateTimeoutFlag,
+		defaultGCStateTimeout,
+		"timeout for GC state RPCs",
+	)
 	command.AddCommand(
 		newGCStateKeyspaceCommand(factory),
 		newGCStateAllCommand(factory),
@@ -406,6 +445,10 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			timeout, err := getGCStateTimeout(cmd)
+			if err != nil {
+				return err
+			}
 			includeExpired, err := getGCStateIncludeExpired(cmd)
 			if err != nil {
 				return err
@@ -426,7 +469,13 @@ func newGCStateKeyspaceCommand(factory gcStateReaderFactory) *cobra.Command {
 				includeGlobalGCBarriers,
 			)
 			if err != nil {
-				if status.Code(err) == codes.Unimplemented {
+				switch status.Code(err) {
+				case codes.DeadlineExceeded:
+					return errors.Annotatef(err,
+						"gc-state keyspace timed out after %s; "+
+							"retry with a longer --%s",
+						timeout, gcStateTimeoutFlag)
+				case codes.Unimplemented:
 					return errors.Annotate(err,
 						"gc-state requires a PD server that supports GetGCState")
 				}
@@ -454,9 +503,14 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 		Long: "Show all effective GC scopes and local barriers, with global " +
 			"barriers once at the top level. Use --exclude-global-barriers to " +
 			"omit cluster-wide barriers.",
-		Example: "  pd-ctl gc-state all",
-		Args:    cobra.NoArgs,
+		Example: "  pd-ctl gc-state all\n" +
+			"  pd-ctl gc-state all --timeout 2m",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			timeout, err := getGCStateTimeout(cmd)
+			if err != nil {
+				return err
+			}
 			includeExpired, err := getGCStateIncludeExpired(cmd)
 			if err != nil {
 				return err
@@ -476,7 +530,13 @@ func newGCStateAllCommand(factory gcStateReaderFactory) *cobra.Command {
 				includeGlobalGCBarriers,
 			)
 			if err != nil {
-				if status.Code(err) == codes.Unimplemented {
+				switch status.Code(err) {
+				case codes.DeadlineExceeded:
+					return errors.Annotatef(err,
+						"gc-state all timed out after %s; "+
+							"retry with a longer --%s",
+						timeout, gcStateTimeoutFlag)
+				case codes.Unimplemented:
 					return errors.Annotate(err,
 						"gc-state all requires a PD server that supports "+
 							"GetAllKeyspacesGCStates")

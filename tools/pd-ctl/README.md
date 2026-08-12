@@ -110,6 +110,14 @@ and `9223372036854775807` means that a barrier never expires. Because PD rounds
 remaining TTLs down to whole seconds, a zero TTL can also represent a barrier
 with less than one second remaining.
 
+GC state RPCs time out after 30 seconds by default. The timeout applies to both
+subcommands and must be a positive duration. If a large cluster takes longer to
+enumerate, increase it with `--timeout` using Go duration syntax:
+
+```bash
+pd-ctl gc-state all --timeout 2m
+```
+
 Use `--exclude-global-barriers` to skip the global-barrier read and remove the
 `global_gc_barriers` field from the JSON output. The flag applies to both
 remaining subcommands:
