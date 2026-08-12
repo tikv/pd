@@ -1453,6 +1453,19 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 	updatePeersStat(r.pendingPeers, region.GetPendingPeers())
 }
 
+// snapshotRootTree returns a read-only snapshot of the root region tree, so that
+// a long scan does not have to hold r.t for its whole duration. See
+// rootRangeSnapshot for what the snapshot does and does not guarantee.
+//
+// This takes the write lock rather than the read lock, because btree Clone
+// rewrites the source tree's copy-on-write context. The critical section is O(1):
+// a struct copy and two small allocations, independent of the number of regions.
+func (r *RegionsInfo) snapshotRootTree() *rootRangeSnapshot {
+	r.t.Lock()
+	defer r.t.Unlock()
+	return r.tree.snapshot()
+}
+
 // TreeLen returns the RegionsInfo tree length(now only used in test)
 func (r *RegionsInfo) TreeLen() int {
 	r.t.RLock()
@@ -2159,6 +2172,13 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...Bat
 		opt(scanOptions)
 	}
 
+	// This holds r.t for the whole scan, which a rootRangeSnapshot could avoid.
+	// Measured on 1M regions, that is a bad trade here: the scan is short and the
+	// call rate is high, so taking r.t exclusively once per call to clone the tree
+	// costs far more than the read lock it replaces. At GOMAXPROCS=4 with
+	// concurrent heartbeat writers, eight-region scans went from 3.1us to 20.7us
+	// per call. Only a shared, invalidated-on-structural-change snapshot would help
+	// this shape of caller; see rootRangeSnapshot.
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
@@ -2250,31 +2270,24 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 		defer r.t.RUnlock()
 		return r.tree.totalSize
 	}
+	// Walk a snapshot instead of scanning the live tree in chunks.
+	//
+	// The chunked version took r.t once per ScanRegionLimit regions, so on a large
+	// cluster one call acquired the lock hundreds of times, and each acquisition
+	// let at most one waiting writer through. It was also not exact: it resumed
+	// each chunk at the previous region's end key, and scanRange resolves that key
+	// to the region *containing* it, so a merge across a chunk boundary made the
+	// merged region contribute its whole size to a range that had already been
+	// counted in part.
+	snap := r.snapshotRootTree()
 	var size int64
-	for {
-		r.t.RLock()
-		var cnt int
-		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-				return false
-			}
-			if cnt >= ScanRegionLimit {
-				return false
-			}
-			cnt++
-			startKey = region.GetEndKey()
-			size += region.GetApproximateSize()
-			return true
-		})
-		r.t.RUnlock()
-		if cnt == 0 {
-			break
+	snap.scanRange(startKey, func(region *RegionInfo) bool {
+		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+			return false
 		}
-		if len(startKey) == 0 {
-			break
-		}
-	}
-
+		size += region.GetApproximateSize()
+		return true
+	})
 	return size
 }
 

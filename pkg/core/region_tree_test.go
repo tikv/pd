@@ -243,6 +243,78 @@ func updateRegions(re *require.Assertions, tree *regionTree, regions []*RegionIn
 	}
 }
 
+// snapshotRanges returns the key ranges a snapshot reports, in iteration order.
+func snapshotRanges(snap *rootRangeSnapshot) [][2]string {
+	var got [][2]string
+	snap.scanRange([]byte(""), func(r *RegionInfo) bool {
+		got = append(got, [2]string{string(r.GetStartKey()), string(r.GetEndKey())})
+		return true
+	})
+	return got
+}
+
+// treeRanges returns the key ranges a live tree reports, in iteration order.
+func treeRanges(regions *RegionsInfo) [][2]string {
+	var got [][2]string
+	regions.tree.scanRange([]byte(""), func(r *RegionInfo) bool {
+		got = append(got, [2]string{string(r.GetStartKey()), string(r.GetEndKey())})
+		return true
+	})
+	return got
+}
+
+// TestRootRangeSnapshotIsolation checks the contract documented on
+// rootRangeSnapshot: the shape is frozen, the values are not.
+//
+// It applies all three mutation classes after taking the snapshot -- a same-range
+// update, a split, and a removal -- and asserts that the snapshot still reports
+// the original key ranges in the original order while the live tree reports the
+// new ones.
+func TestRootRangeSnapshotIsolation(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	put := func(id uint64, start, end string, opts ...RegionCreateOption) *RegionInfo {
+		region := NewTestRegionInfo(id, 1, []byte(start), []byte(end), opts...)
+		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
+		re.NoError(err)
+		return region
+	}
+
+	put(1, "a", "b", SetApproximateSize(10))
+	put(2, "b", "c", SetApproximateSize(10))
+	put(3, "c", "d", SetApproximateSize(10))
+	re.Equal(int64(30), regions.GetRegionSizeByRange([]byte("a"), []byte("d")))
+
+	snap := regions.snapshotRootTree()
+	original := [][2]string{{"a", "b"}, {"b", "c"}, {"c", "d"}}
+	re.Equal(original, snapshotRanges(snap))
+
+	// 1. Same range, new value.
+	put(2, "b", "c", SetApproximateSize(99), SetRegionVersion(2))
+	// 2. Split [c, d) into [c, cc) and [cc, d).
+	put(3, "c", "cc", SetRegionVersion(2))
+	put(4, "cc", "d", SetRegionVersion(2))
+	// 3. Remove [a, b).
+	regions.RemoveRegionIfExist(1)
+
+	// The shape is frozen: same items, same ranges, same order, same length.
+	re.Equal(3, snap.length())
+	re.Equal(original, snapshotRanges(snap))
+
+	// The value is not frozen. The same-range update has completed and the item is
+	// shared with the live tree, so the snapshot now reports the new size. This is
+	// the documented latitude, not a bug.
+	var sizeOfB int64
+	snap.scanRange([]byte("b"), func(r *RegionInfo) bool {
+		sizeOfB = r.GetApproximateSize()
+		return false
+	})
+	re.Equal(int64(99), sizeOfB)
+
+	// The live tree has moved on.
+	re.Equal([][2]string{{"b", "c"}, {"c", "cc"}, {"cc", "d"}}, treeRanges(regions))
+}
+
 func TestRegionTreeSplitAndMerge(t *testing.T) {
 	re := require.New(t)
 	tree := newRegionTree()

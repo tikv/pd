@@ -356,10 +356,80 @@ func (t *regionTree) searchByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	return regions
 }
 
-// find returns the range item contains the start key.
-func (t *regionTree) find(item *regionItem) *regionItem {
+// rootRangeSnapshot is a read-only view of a region tree, produced by an O(1)
+// copy-on-write btree Clone. A caller can scan an arbitrarily large key range
+// from a snapshot without holding the tree's lock for the duration of the scan.
+//
+// # What a snapshot freezes
+//
+// The tree's shape: the set of items, each item's key range, and therefore the
+// key-space coverage, the iteration order and the length. Regions created, split,
+// merged or removed after the snapshot was taken are invisible to it, and regions
+// removed after it was taken stay visible to it.
+//
+// This is what a chunked scan cannot offer. A scan that releases the lock and
+// re-enters the tree at the last end key can see the key space change underneath
+// it: a split at a chunk boundary yields a region counted twice, and a merge that
+// swallows the boundary region leaves a range no chunk covers. A snapshot has no
+// second scan to be inconsistent with.
+//
+// # What a snapshot does not freeze
+//
+// The values. The RegionInfo behind an item may be replaced concurrently by the
+// heartbeat path, but only by one covering the same key range, see regionItem. So
+// a scan observes exactly one region per key, and for each of them either the
+// value that was live when the snapshot was taken or a later value for the same
+// range, with fresher epoch, leader, peers or statistics.
+//
+// A scan of a live tree under one read lock is stronger than this: there, every
+// region comes from a single instant. Callers that need agreement between two
+// different regions' values, rather than agreement about which key ranges exist,
+// must not use a snapshot.
+//
+// # References and lifetime
+//
+// A snapshot deliberately takes no reference on the regions it holds, see
+// RegionInfo.IncRef. Doing so would make it O(n), and the reference count carries
+// the functional "already present in the subtree" signal that RaftCluster relies
+// on. A region reached through a snapshot may therefore already be gone from the
+// live tree.
+//
+// A snapshot pins the btree nodes that existed when it was taken. Those nodes can
+// no longer be recycled through the shared free list, and the regions they point
+// at stay reachable. Keep a snapshot function-scoped and short-lived; never store
+// one in a long-lived struct.
+type rootRangeSnapshot struct {
+	tree *btree.BTreeG[*regionItem]
+}
+
+// snapshot returns a read-only view of the tree.
+//
+// The caller must hold the tree's *write* lock. btree Clone rewrites the source
+// tree's copy-on-write context, so it must not run concurrently with a write or
+// with another Clone; see btree.BTreeG.Clone.
+func (t *regionTree) snapshot() *rootRangeSnapshot {
+	return &rootRangeSnapshot{tree: t.tree.Clone()}
+}
+
+// scanRange scans from the first region containing or behind the start key until
+// f returns false. It takes no lock.
+func (s *rootRangeSnapshot) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+	scanTreeRange(s.tree, startKey, f)
+}
+
+// length returns the number of regions the snapshot holds.
+func (s *rootRangeSnapshot) length() int {
+	return s.tree.Len()
+}
+
+// findItem returns the item in tree whose key range contains the start key of
+// the given item.
+//
+// It only reads tree, so it is also safe to call on a snapshot. See
+// rootRangeSnapshot.
+func findItem(tree *btree.BTreeG[*regionItem], item *regionItem) *regionItem {
 	var result *regionItem
-	t.tree.DescendLessOrEqual(item, func(i *regionItem) bool {
+	tree.DescendLessOrEqual(item, func(i *regionItem) bool {
 		result = i
 		return false
 	})
@@ -371,23 +441,33 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 	return result
 }
 
-// scanRage scans from the first region containing or behind the start key
-// until f return false
-func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+// scanTreeRange scans tree from the first region containing or behind the start
+// key until f returns false.
+//
+// It only reads tree, so it is also safe to call on a snapshot. See
+// rootRangeSnapshot.
+func scanTreeRange(tree *btree.BTreeG[*regionItem], startKey []byte, f func(*RegionInfo) bool) {
 	region := &RegionInfo{meta: &metapb.Region{StartKey: startKey}}
-	// find if there is a region with key range [s, d), s <= startKey < d
-	fn := func(item *regionItem) bool {
-		r := item
-		return f(r.getRegion())
-	}
 	start := newRegionItem(region)
-	startItem := t.find(start)
+	// find if there is a region with key range [s, d), s <= startKey < d
+	startItem := findItem(tree, start)
 	if startItem == nil {
 		startItem = start
 	}
-	t.tree.AscendGreaterOrEqual(startItem, func(item *regionItem) bool {
-		return fn(item)
+	tree.AscendGreaterOrEqual(startItem, func(item *regionItem) bool {
+		return f(item.getRegion())
 	})
+}
+
+// find returns the range item contains the start key.
+func (t *regionTree) find(item *regionItem) *regionItem {
+	return findItem(t.tree, item)
+}
+
+// scanRage scans from the first region containing or behind the start key
+// until f return false
+func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
+	scanTreeRange(t.tree, startKey, f)
 }
 
 func (t *regionTree) scanRanges() []*RegionInfo {
