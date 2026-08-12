@@ -97,6 +97,7 @@ type RegionSetInformer interface {
 	RandWitnessRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	RandPendingRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo
 	GetAverageRegionSize() int64
+	GetNonEmptyAverageRegionSize() int64
 	GetStoreRegionCount(storeID uint64) int
 	GetRegion(id uint64) *RegionInfo
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)

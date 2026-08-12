@@ -117,6 +117,11 @@ func (r *rangeCluster) GetAverageRegionSize() int64 {
 	return r.subCluster.GetAverageRegionSize()
 }
 
+// GetNonEmptyAverageRegionSize returns the average approximate size of non-empty regions.
+func (r *rangeCluster) GetNonEmptyAverageRegionSize() int64 {
+	return r.subCluster.GetNonEmptyAverageRegionSize()
+}
+
 // GetAvgNetworkSlowScore returns the average network slow score.
 func (r *rangeCluster) GetAvgNetworkSlowScore(id uint64) uint64 {
 	return r.subCluster.GetAvgNetworkSlowScore(id)
