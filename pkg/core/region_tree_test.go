@@ -274,11 +274,10 @@ func treeRanges(regions *RegionsInfo) [][2]string {
 func TestRootRangeSnapshotIsolation(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
-	put := func(id uint64, start, end string, opts ...RegionCreateOption) *RegionInfo {
+	put := func(id uint64, start, end string, opts ...RegionCreateOption) {
 		region := NewTestRegionInfo(id, 1, []byte(start), []byte(end), opts...)
 		_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 		re.NoError(err)
-		return region
 	}
 
 	put(1, "a", "b", SetApproximateSize(10))
