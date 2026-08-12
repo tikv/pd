@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/errors"
 
@@ -40,12 +42,307 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
-	kvBase := kv.NewEtcdKVBase(client)
+func newEtcdStorageEndpoint(
+	t *testing.T,
+) (*StorageEndpoint, func()) {
+	return newEtcdStorageEndpointWithOptions(t, nil)
+}
 
-	s := NewStorageEndpoint(kvBase, nil)
-	return s, clean
+func newEtcdStorageEndpointWithOptions(
+	t *testing.T,
+	option *etcdutil.TestEtcdClusterOptions,
+) (*StorageEndpoint, func()) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, option)
+	base := kv.NewEtcdKVBase(client)
+	return NewStorageEndpoint(base, nil), clean
+}
+
+type contextReaderOnlyBase struct {
+	kv.Base
+	loadCalled atomic.Bool
+}
+
+func (b *contextReaderOnlyBase) LoadWithContext(
+	context.Context,
+	string,
+) (string, error) {
+	b.loadCalled.Store(true)
+	return "", nil
+}
+
+func (b *contextReaderOnlyBase) LoadRangeWithContext(
+	context.Context,
+	string,
+	string,
+	int,
+) ([]string, []string, error) {
+	b.loadCalled.Store(true)
+	return nil, nil, nil
+}
+
+func TestGCStateContextTransactionRejectsMissingCapabilities(t *testing.T) {
+	re := require.New(t)
+	memoryEndpoint := NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	err := memoryEndpoint.GetGCStateProvider().
+		RunInGCStateTransactionWithContext(
+			context.Background(),
+			func(*GCStateWriteBatch) error {
+				return nil
+			},
+		)
+	re.ErrorContains(err, "context-aware reads")
+
+	readerOnly := &contextReaderOnlyBase{
+		Base: kv.NewMemoryKV(),
+	}
+	readerEndpoint := NewStorageEndpoint(readerOnly, nil)
+	err = readerEndpoint.GetGCStateProvider().
+		RunInGCStateTransactionWithContext(
+			context.Background(),
+			func(*GCStateWriteBatch) error {
+				return nil
+			},
+		)
+	re.ErrorContains(err, "context-aware raw transactions")
+	re.False(readerOnly.loadCalled.Load())
+}
+
+func TestGCStateContextTransactionCancellation(t *testing.T) {
+	testCases := []struct {
+		name    string
+		matcher etcdutil.UnaryRPCMatcher
+		body    func(
+			context.Context,
+			GCStateProvider,
+			*GCStateWriteBatch,
+		) error
+	}{
+		{
+			name: "initial-revision",
+			matcher: matchRangeKey(
+				keypath.GCStateRevisionPath(),
+			),
+			body: func(
+				context.Context,
+				GCStateProvider,
+				*GCStateWriteBatch,
+			) error {
+				return nil
+			},
+		},
+		{
+			name: "data-read",
+			matcher: matchRangeKey(
+				keypath.TxnSafePointPath(
+					constant.NullKeyspaceID,
+				),
+			),
+			body: func(
+				ctx context.Context,
+				provider GCStateProvider,
+				_ *GCStateWriteBatch,
+			) error {
+				_, err := provider.LoadTxnSafePointWithContext(
+					ctx,
+					constant.NullKeyspaceID,
+				)
+				return err
+			},
+		},
+		{
+			name: "final-transaction",
+			matcher: matchTxnComparisonKey(
+				keypath.GCStateRevisionPath(),
+			),
+			body: func(
+				context.Context,
+				GCStateProvider,
+				*GCStateWriteBatch,
+			) error {
+				return nil
+			},
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			re := require.New(t)
+			blocker := etcdutil.NewBlockingUnaryClientInterceptor(
+				testCase.matcher,
+			)
+			option := &etcdutil.TestEtcdClusterOptions{
+				ClientCfgModifier: func(config *clientv3.Config) {
+					config.DialOptions = append(
+						config.DialOptions,
+						grpc.WithChainUnaryInterceptor(
+							blocker.UnaryClientInterceptor,
+						),
+					)
+				},
+			}
+			storage, clean := newEtcdStorageEndpointWithOptions(
+				t,
+				option,
+			)
+			defer clean()
+			defer blocker.Release()
+
+			provider := storage.GetGCStateProvider()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			blocker.Enable()
+			go func() {
+				result <- provider.RunInGCStateTransactionWithContext(
+					ctx,
+					func(batch *GCStateWriteBatch) error {
+						return testCase.body(ctx, provider, batch)
+					},
+				)
+			}()
+
+			waitForGCStateContextSignal(
+				re,
+				blocker.Entered(),
+				"the etcd request was not intercepted",
+			)
+			cancel()
+			waitForGCStateContextSignal(
+				re,
+				blocker.ContextDone(),
+				"the intercepted etcd request context was not canceled",
+			)
+			re.Equal(
+				context.Canceled,
+				waitForGCStateContextError(re, result),
+			)
+		})
+	}
+}
+
+func matchRangeKey(key string) etcdutil.UnaryRPCMatcher {
+	return func(method string, request any) bool {
+		rangeRequest, ok := request.(*etcdserverpb.RangeRequest)
+		return method == "/etcdserverpb.KV/Range" &&
+			ok &&
+			string(rangeRequest.Key) == key
+	}
+}
+
+func matchTxnComparisonKey(key string) etcdutil.UnaryRPCMatcher {
+	return func(method string, request any) bool {
+		txnRequest, ok := request.(*etcdserverpb.TxnRequest)
+		return method == "/etcdserverpb.KV/Txn" &&
+			ok &&
+			len(txnRequest.Compare) > 0 &&
+			string(txnRequest.Compare[0].Key) == key
+	}
+}
+
+func waitForGCStateContextSignal(
+	re *require.Assertions,
+	signal <-chan struct{},
+	message string,
+) {
+	select {
+	case <-signal:
+	case <-time.After(5 * time.Second):
+		re.FailNow(message)
+	}
+}
+
+func waitForGCStateContextError(
+	re *require.Assertions,
+	result <-chan error,
+) error {
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		re.FailNow("the GC state transaction did not return")
+		return nil
+	}
+}
+
+func TestGCStateContextReads(t *testing.T) {
+	re := require.New(t)
+	storage, clean := newEtcdStorageEndpoint(t)
+	defer clean()
+	provider := storage.GetGCStateProvider()
+	ctx := context.Background()
+
+	localBarriers, err := provider.LoadAllGCBarriersWithContext(
+		ctx,
+		constant.NullKeyspaceID,
+	)
+	re.NoError(err)
+	re.Nil(localBarriers)
+	globalBarriers, err := provider.LoadAllGlobalGCBarriersWithContext(ctx)
+	re.NoError(err)
+	re.Nil(globalBarriers)
+
+	const (
+		txnSafePoint = uint64(456139133457530881)
+		gcSafePoint  = uint64(456139133457530882)
+	)
+	localExpiration := time.Unix(1740127928, 0)
+	globalExpiration := time.Unix(1740127929, 0)
+	localBarrier := NewGCBarrier(
+		"local-context-read",
+		456139133457530883,
+		&localExpiration,
+	)
+	globalBarrier := NewGlobalGCBarrier(
+		"global-context-read",
+		456139133457530884,
+		&globalExpiration,
+	)
+	re.NoError(provider.RunInGCStateTransaction(
+		func(batch *GCStateWriteBatch) error {
+			if err := batch.SetTxnSafePoint(
+				constant.NullKeyspaceID,
+				txnSafePoint,
+			); err != nil {
+				return err
+			}
+			if err := batch.SetGCSafePoint(
+				constant.NullKeyspaceID,
+				gcSafePoint,
+			); err != nil {
+				return err
+			}
+			if err := batch.SetGCBarrier(
+				constant.NullKeyspaceID,
+				localBarrier,
+			); err != nil {
+				return err
+			}
+			return batch.SetGlobalGCBarrier(globalBarrier)
+		},
+	))
+
+	loadedTxnSafePoint, err := provider.LoadTxnSafePointWithContext(
+		ctx,
+		constant.NullKeyspaceID,
+	)
+	re.NoError(err)
+	re.Equal(txnSafePoint, loadedTxnSafePoint)
+	loadedGCSafePoint, err := provider.LoadGCSafePointWithContext(
+		ctx,
+		constant.NullKeyspaceID,
+	)
+	re.NoError(err)
+	re.Equal(gcSafePoint, loadedGCSafePoint)
+	localBarriers, err = provider.LoadAllGCBarriersWithContext(
+		ctx,
+		constant.NullKeyspaceID,
+	)
+	re.NoError(err)
+	re.Equal([]*GCBarrier{localBarrier}, localBarriers)
+	globalBarriers, err = provider.LoadAllGlobalGCBarriersWithContext(ctx)
+	re.NoError(err)
+	re.Equal([]*GlobalGCBarrier{globalBarrier}, globalBarriers)
 }
 
 func TestGCBarriersConversions(t *testing.T) {

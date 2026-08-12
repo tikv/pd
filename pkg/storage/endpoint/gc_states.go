@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -281,6 +282,35 @@ func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	return p.loadGCSafePointForKeyspaceLevelGC(keyspaceID)
 }
 
+// LoadGCSafePointWithContext loads the current GC safe point of the given keyspaceID with the provided context.
+func (p GCStateProvider) LoadGCSafePointWithContext(
+	ctx context.Context,
+	keyspaceID uint32,
+) (uint64, error) {
+	key := keypath.GCSafePointPath(keyspaceID)
+	value, err := p.storage.loadWithContext(ctx, key)
+	if err != nil || value == "" {
+		return 0, err
+	}
+	if keyspaceID == constant.NullKeyspaceID {
+		gcSafePoint, err := strconv.ParseUint(value, 16, 64)
+		if err != nil {
+			return 0, errs.ErrStrconvParseUint.
+				Wrap(err).
+				GenWithStackByArgs()
+		}
+		return gcSafePoint, nil
+	}
+
+	gcSafePoint := &keyspaceGCSafePoint{}
+	if err = json.Unmarshal([]byte(value), gcSafePoint); err != nil {
+		return 0, errs.ErrJSONUnmarshal.
+			Wrap(err).
+			GenWithStackByCause()
+	}
+	return gcSafePoint.SafePoint, nil
+}
+
 // loadGCSafePointForUnifiedGC loads the GC safe point of the unified GC.
 func (p GCStateProvider) loadGCSafePointForUnifiedGC() (uint64, error) {
 	value, err := p.storage.Load(keypath.GCSafePointPath(constant.NullKeyspaceID))
@@ -336,6 +366,25 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
+// LoadTxnSafePointWithContext loads the current transaction safe point of the given keyspaceID with the provided context.
+func (p GCStateProvider) LoadTxnSafePointWithContext(
+	ctx context.Context,
+	keyspaceID uint32,
+) (uint64, error) {
+	key := keypath.TxnSafePointPath(keyspaceID)
+	value, err := p.storage.loadWithContext(ctx, key)
+	if err != nil || value == "" {
+		return 0, err
+	}
+	txnSafePoint, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0, errs.ErrStrconvParseUint.
+			Wrap(err).
+			GenWithStackByArgs()
+	}
+	return txnSafePoint, nil
+}
+
 // LoadGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
 	key := keypath.GCBarrierPath(keyspaceID, barrierID)
@@ -366,6 +415,36 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return barriers, nil
 }
 
+// LoadAllGCBarriersWithContext loads all GC barriers of the given keyspace with the provided context.
+// Note that reserved barrier IDs (e.g., "gc_worker") are not filtered out here.
+func (p GCStateProvider) LoadAllGCBarriersWithContext(
+	ctx context.Context,
+	keyspaceID uint32,
+) ([]*GCBarrier, error) {
+	prefix := keypath.GCBarrierPrefix(keyspaceID)
+	// TODO: Limit the count for each call.
+	_, serviceSafePoints, err := loadJSONByPrefixWithContext[*ServiceSafePoint](
+		ctx,
+		p.storage,
+		prefix,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(serviceSafePoints) == 0 {
+		return nil, nil
+	}
+	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
+	for _, serviceSafePoint := range serviceSafePoints {
+		barriers = append(
+			barriers,
+			gcBarrierFromServiceSafePoint(serviceSafePoint),
+		)
+	}
+	return barriers, nil
+}
+
 // LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier, error) {
 	key := keypath.GlobalGCBarrierPath(barrierID)
@@ -380,6 +459,24 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 func (p GCStateProvider) LoadAllGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
 	return p.loadAllGlobalGCBarriersImpl(prefix)
+}
+
+// LoadAllGlobalGCBarriersWithContext loads all global GC barriers with the provided context.
+func (p GCStateProvider) LoadAllGlobalGCBarriersWithContext(
+	ctx context.Context,
+) ([]*GlobalGCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	// TODO: Limit the count for each call.
+	_, barriers, err := loadJSONByPrefixWithContext[*GlobalGCBarrier](
+		ctx,
+		p.storage,
+		prefix,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return barriers, nil
 }
 
 func (p GCStateProvider) loadAllGlobalGCBarriersImpl(prefix string) ([]*GlobalGCBarrier, error) {
@@ -440,21 +537,13 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 	if err != nil {
 		return errors.AddStack(err)
 	}
-	condition := kv.RawTxnCondition{
-		Key:     revisionKey,
-		CmpType: kv.RawTxnCmpNotExists,
-	}
-	var currentRevisionValue uint64
-	if currentRevision != "" {
-		condition.CmpType = kv.RawTxnCmpEqual
-		condition.Value = currentRevision
-		currentRevisionValue, err = strconv.ParseUint(currentRevision, 10, 64)
-	}
-
+	condition, nextRevision, err := prepareGCStateRevision(
+		currentRevision,
+		revisionKey,
+	)
 	if err != nil {
-		return errors.AddStack(err)
+		return err
 	}
-	nextRevision := strconv.FormatUint(currentRevisionValue+1, 10)
 
 	wb := GCStateWriteBatch{}
 	err = f(&wb)
@@ -462,17 +551,7 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 		return errors.AddStack(err)
 	}
 
-	ops := wb.ops
-
-	// No need to increase the revision if there's no write (so that it acts like an RLock and concurrent reads won't
-	// conflict with each other).
-	if len(ops) > 0 {
-		ops = append(ops, kv.RawTxnOp{
-			Key:    revisionKey,
-			OpType: kv.RawTxnOpPut,
-			Value:  nextRevision,
-		})
-	}
+	ops := appendGCStateRevision(wb.ops, revisionKey, nextRevision)
 
 	txn, err := p.storage.createRawTxn()
 	if err != nil {
@@ -490,6 +569,121 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 		return errors.Errorf("unexpected number of results: %d != %d", len(ops), len(result.Responses))
 	}
 	return nil
+}
+
+// RunInGCStateTransactionWithContext runs a transaction for updating or reading GC states with the provided context.
+func (p GCStateProvider) RunInGCStateTransactionWithContext(
+	ctx context.Context,
+	fn func(batch *GCStateWriteBatch) error,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	reader, err := p.storage.contextReader()
+	if err != nil {
+		return err
+	}
+	txnCapable, err := p.storage.rawTxnCapableWithContext()
+	if err != nil {
+		return err
+	}
+
+	revisionKey := keypath.GCStateRevisionPath()
+	currentRevision, err := reader.LoadWithContext(ctx, revisionKey)
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return errors.AddStack(err)
+	}
+	condition, nextRevision, err := prepareGCStateRevision(
+		currentRevision,
+		revisionKey,
+	)
+	if err != nil {
+		return err
+	}
+
+	batch := GCStateWriteBatch{}
+	if err = fn(&batch); err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return errors.AddStack(err)
+	}
+	operations := appendGCStateRevision(
+		batch.ops,
+		revisionKey,
+		nextRevision,
+	)
+
+	result, err := txnCapable.CreateRawTxnWithContext(ctx).
+		If(condition).
+		Then(operations...).
+		Commit()
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return contextErr
+		}
+		return errs.ErrEtcdTxnInternal.
+			Wrap(err).
+			GenWithStackByArgs()
+	}
+	if !result.Succeeded {
+		return errs.ErrEtcdTxnConflict.GenWithStackByArgs()
+	}
+	if len(operations) != len(result.Responses) {
+		return errors.Errorf(
+			"unexpected number of results: %d != %d",
+			len(operations),
+			len(result.Responses),
+		)
+	}
+	return nil
+}
+
+func prepareGCStateRevision(
+	currentRevision, revisionKey string,
+) (kv.RawTxnCondition, string, error) {
+	condition := kv.RawTxnCondition{
+		Key:     revisionKey,
+		CmpType: kv.RawTxnCmpNotExists,
+	}
+	var currentRevisionValue uint64
+	if currentRevision != "" {
+		condition.CmpType = kv.RawTxnCmpEqual
+		condition.Value = currentRevision
+		parsed, err := strconv.ParseUint(
+			currentRevision,
+			10,
+			64,
+		)
+		if err != nil {
+			return kv.RawTxnCondition{}, "", errors.AddStack(err)
+		}
+		currentRevisionValue = parsed
+	}
+	nextRevision := strconv.FormatUint(
+		currentRevisionValue+1,
+		10,
+	)
+	return condition, nextRevision, nil
+}
+
+func appendGCStateRevision(
+	operations []kv.RawTxnOp,
+	revisionKey, nextRevision string,
+) []kv.RawTxnOp {
+	// No need to increase the revision if there's no write (so that it acts like an RLock and concurrent reads won't
+	// conflict with each other).
+	if len(operations) == 0 {
+		return operations
+	}
+	return append(operations, kv.RawTxnOp{
+		Key:    revisionKey,
+		OpType: kv.RawTxnOpPut,
+		Value:  nextRevision,
+	})
 }
 
 // CompatibleLoadAllServiceGCSafePoints returns all services GC safe points with their etcd key.
