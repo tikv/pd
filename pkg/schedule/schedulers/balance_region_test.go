@@ -17,10 +17,13 @@ package schedulers
 import (
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -57,7 +60,7 @@ func TestInfluenceAmp(t *testing.T) {
 
 	// It will schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
-	tc.AddRegionStore(1, int(100+influenceAmp+3))
+	tc.AddRegionStore(1, int(100+influenceAmp+4))
 	tc.AddRegionStore(2, int(100-influenceAmp))
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
@@ -70,11 +73,82 @@ func TestInfluenceAmp(t *testing.T) {
 
 	// It will not schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
-	tc.AddRegionStore(1, int(100+influenceAmp+2))
+	tc.AddRegionStore(1, int(100+influenceAmp+3))
 	solver.Source = tc.GetStore(1)
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.False(solver.shouldBalance(""))
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
+}
+
+// TestSingleRegionOnLargeEmptyDiskCanMigrate verifies that when a store's disk is
+// mostly empty except for a single small region (e.g. 6TiB capacity with only a
+// 10MiB region), region-score-v2 still produces enough of a score gap against an
+// otherwise-identical, entirely empty peer store for balance-region to want to
+// move that region — i.e. the score is dominated by the presence of the one
+// region rather than by real disk utilization (10MiB vs 6TiB is a negligible
+// utilization difference).
+func TestSingleRegionOnLargeEmptyDiskCanMigrate(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re := require.New(t)
+
+	const (
+		capacity     = 6 * units.TiB
+		regionSizeMB = 10 // MiB, matches core.StoreInfo.GetRegionSize()'s unit
+	)
+
+	mkStore := func(id uint64, usedMB int64) *core.StoreInfo {
+		usedBytes := uint64(usedMB) * units.MiB
+		stats := &pdpb.StoreStats{
+			Capacity:  capacity,
+			UsedSize:  usedBytes,
+			Available: capacity - usedBytes,
+		}
+		return core.NewStoreInfo(
+			&metapb.Store{Id: id, State: metapb.StoreState_Up},
+			core.SetStoreStats(stats),
+			core.SetRegionCount(10),
+			core.SetRegionSize(usedMB),
+			core.SetLastHeartbeatTS(time.Now()),
+		)
+	}
+
+	// storeA holds the cluster's only non-empty region; storeB is otherwise
+	// identical (same capacity, same region count) but has no data at all.
+	tc.PutStore(mkStore(1, regionSizeMB))
+	tc.PutStore(mkStore(2, 0))
+
+	tc.AddLeaderRegion(1, 1, 2)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSizeMB))
+	tc.PutRegion(region)
+
+	// Mirror the real-world setup that motivated this test: each store already
+	// holds 10 regions (region *count* is balanced), but region 1 above is the
+	// only one with any data — the other 18 are freshly-split, empty regions.
+	// Without these, region 1 would be the cluster's only region and
+	// GetAverageRegionSize() would just equal its own size, defeating the
+	// tolerant-resource margin and masking the scenario this test documents.
+	var nextID uint64 = 2
+	for range 9 {
+		tc.AddLeaderRegion(nextID, 1)
+		empty := tc.GetRegion(nextID).Clone(core.SetApproximateSize(0))
+		tc.PutRegion(empty)
+		nextID++
+	}
+	for range 9 {
+		tc.AddLeaderRegion(nextID, 2)
+		empty := tc.GetRegion(nextID).Clone(core.SetApproximateSize(0))
+		tc.PutRegion(empty)
+		nextID++
+	}
+
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
+	influence := oc.GetOpInfluence(tc.GetBasicCluster())
+	basePlan := plan.NewBalanceSchedulerPlan()
+	solver := newSolver(basePlan, kind, tc, influence)
+	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+	re.True(solver.shouldBalance(""))
 }
 
 func TestShouldBalance(t *testing.T) {
