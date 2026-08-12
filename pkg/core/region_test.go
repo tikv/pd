@@ -435,14 +435,14 @@ func TestRegionMap(t *testing.T) {
 	re := require.New(t)
 	rm := make(map[uint64]*regionItem)
 	checkMap(re, rm)
-	rm[1] = &regionItem{RegionInfo: regionInfo(1)}
+	rm[1] = newRegionItem(regionInfo(1))
 	checkMap(re, rm, 1)
 
-	rm[2] = &regionItem{RegionInfo: regionInfo(2)}
-	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	rm[2] = newRegionItem(regionInfo(2))
+	rm[3] = newRegionItem(regionInfo(3))
 	checkMap(re, rm, 1, 2, 3)
 
-	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	rm[3] = newRegionItem(regionInfo(3))
 	delete(rm, 4)
 	checkMap(re, rm, 1, 2, 3)
 
@@ -450,7 +450,7 @@ func TestRegionMap(t *testing.T) {
 	delete(rm, 1)
 	checkMap(re, rm, 2)
 
-	rm[3] = &regionItem{RegionInfo: regionInfo(3)}
+	rm[3] = newRegionItem(regionInfo(3))
 	checkMap(re, rm, 2, 3)
 }
 

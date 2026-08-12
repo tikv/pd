@@ -99,21 +99,21 @@ func TestRegionInfo(t *testing.T) {
 
 func TestRegionItem(t *testing.T) {
 	re := require.New(t)
-	item := newRegionItem([]byte("b"), []byte{})
+	item := newRegionItemFromRange([]byte("b"), []byte{})
 
-	re.False(item.Less(newRegionItem([]byte("a"), []byte{})))
-	re.False(item.Less(newRegionItem([]byte("b"), []byte{})))
-	re.True(item.Less(newRegionItem([]byte("c"), []byte{})))
+	re.False(item.Less(newRegionItemFromRange([]byte("a"), []byte{})))
+	re.False(item.Less(newRegionItemFromRange([]byte("b"), []byte{})))
+	re.True(item.Less(newRegionItemFromRange([]byte("c"), []byte{})))
 
-	re.False(item.contain([]byte("a")))
-	re.True(item.contain([]byte("b")))
-	re.True(item.contain([]byte("c")))
+	re.False(item.getRegion().contain([]byte("a")))
+	re.True(item.getRegion().contain([]byte("b")))
+	re.True(item.getRegion().contain([]byte("c")))
 
-	item = newRegionItem([]byte("b"), []byte("d"))
-	re.False(item.contain([]byte("a")))
-	re.True(item.contain([]byte("b")))
-	re.True(item.contain([]byte("c")))
-	re.False(item.contain([]byte("d")))
+	item = newRegionItemFromRange([]byte("b"), []byte("d"))
+	re.False(item.getRegion().contain([]byte("a")))
+	re.True(item.getRegion().contain([]byte("b")))
+	re.True(item.getRegion().contain([]byte("c")))
+	re.False(item.getRegion().contain([]byte("d")))
 }
 
 func newRegionWithStat(start, end string, size, keys int64) *RegionInfo {
@@ -161,9 +161,9 @@ func TestRegionTree(t *testing.T) {
 
 	updateNewItem(tree, regionA)
 	updateNewItem(tree, regionC)
-	re.Nil(tree.overlaps(newRegionItem([]byte("b"), []byte("c"))))
-	re.Equal(regionC, tree.overlaps(newRegionItem([]byte("c"), []byte("d")))[0])
-	re.Equal(regionC, tree.overlaps(newRegionItem([]byte("a"), []byte("cc")))[1])
+	re.Nil(tree.overlaps(newRegionItemFromRange([]byte("b"), []byte("c"))))
+	re.Equal(regionC, tree.overlaps(newRegionItemFromRange([]byte("c"), []byte("d")))[0])
+	re.Equal(regionC, tree.overlaps(newRegionItemFromRange([]byte("a"), []byte("cc")))[1])
 	re.Nil(tree.search([]byte{}))
 	re.Equal(regionA, tree.search([]byte("a")))
 	re.Nil(tree.search([]byte("b")))
@@ -191,28 +191,28 @@ func TestRegionTree(t *testing.T) {
 	// check get adjacent regions
 	prev, next := tree.getAdjacentRegions(regionA)
 	re.Nil(prev)
-	re.Equal(regionB, next.RegionInfo)
+	re.Equal(regionB, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionB)
-	re.Equal(regionA, prev.RegionInfo)
-	re.Equal(regionD, next.RegionInfo)
+	re.Equal(regionA, prev.getRegion())
+	re.Equal(regionD, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionC)
-	re.Equal(regionB, prev.RegionInfo)
-	re.Equal(regionD, next.RegionInfo)
+	re.Equal(regionB, prev.getRegion())
+	re.Equal(regionD, next.getRegion())
 	prev, next = tree.getAdjacentRegions(regionD)
-	re.Equal(regionB, prev.RegionInfo)
+	re.Equal(regionB, prev.getRegion())
 	re.Nil(next)
 
 	// region with the same range and different region id will not be delete.
-	region0 := newRegionItem([]byte{}, []byte("a")).RegionInfo
+	region0 := newRegionItemFromRange([]byte{}, []byte("a")).getRegion()
 	updateNewItem(tree, region0)
 	re.Equal(region0, tree.search([]byte{}))
-	anotherRegion0 := newRegionItem([]byte{}, []byte("a")).RegionInfo
+	anotherRegion0 := newRegionItemFromRange([]byte{}, []byte("a")).getRegion()
 	anotherRegion0.meta.Id = 123
 	tree.remove(anotherRegion0)
 	re.Equal(region0, tree.search([]byte{}))
 
 	// overlaps with 0, A, B, C.
-	region0D := newRegionItem([]byte(""), []byte("d")).RegionInfo
+	region0D := newRegionItemFromRange([]byte(""), []byte("d")).getRegion()
 	updateNewItem(tree, region0D)
 	re.Equal(region0D, tree.search([]byte{}))
 	re.Equal(region0D, tree.search([]byte("a")))
@@ -221,7 +221,7 @@ func TestRegionTree(t *testing.T) {
 	re.Equal(regionD, tree.search([]byte("d")))
 
 	// overlaps with D.
-	regionE := newRegionItem([]byte("e"), []byte{}).RegionInfo
+	regionE := newRegionItemFromRange([]byte("e"), []byte{}).getRegion()
 	updateNewItem(tree, regionE)
 	re.Equal(region0D, tree.search([]byte{}))
 	re.Equal(region0D, tree.search([]byte("a")))
@@ -246,7 +246,7 @@ func updateRegions(re *require.Assertions, tree *regionTree, regions []*RegionIn
 func TestRegionTreeSplitAndMerge(t *testing.T) {
 	re := require.New(t)
 	tree := newRegionTree()
-	regions := []*RegionInfo{newRegionItem([]byte{}, []byte{}).RegionInfo}
+	regions := []*RegionInfo{newRegionItemFromRange([]byte{}, []byte{}).getRegion()}
 
 	// Byte will underflow/overflow if n > 7.
 	n := 7
@@ -408,7 +408,7 @@ func TestStoreRegionCount(t *testing.T) {
 }
 
 func updateNewItem(tree *regionTree, region *RegionInfo) {
-	item := &regionItem{RegionInfo: region}
+	item := newRegionItem(region)
 	tree.update(item, false)
 }
 
@@ -431,8 +431,8 @@ func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*Regi
 	re.Len(keys, len(regions))
 }
 
-func newRegionItem(start, end []byte) *regionItem {
-	return &regionItem{RegionInfo: NewTestRegionInfo(1, 1, start, end)}
+func newRegionItemFromRange(start, end []byte) *regionItem {
+	return newRegionItem(NewTestRegionInfo(1, 1, start, end))
 }
 
 type mockRegionTreeData struct {
@@ -519,7 +519,7 @@ func BenchmarkRegionTreeSequentialLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		index := i % MaxCount
-		data.tree.find(&regionItem{RegionInfo: data.items[index]})
+		data.tree.find(newRegionItem(data.items[index]))
 	}
 }
 
@@ -528,7 +528,7 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		index := i % MaxCount
-		data.tree.find(&regionItem{RegionInfo: data.items[index]})
+		data.tree.find(newRegionItem(data.items[index]))
 	}
 }
 
