@@ -338,6 +338,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		log.Error("resource group controller is already stopped, cannot be started again")
 		return
 	}
+	if c.loopCtx != nil {
+		log.Error("resource group controller is already started")
+		return
+	}
 	c.loopCtx, c.loopCancel = context.WithCancel(ctx)
 	c.wg.Add(1)
 	go func() {
@@ -574,7 +578,13 @@ func (c *ResourceGroupsController) Stop() error {
 
 // cleanupProcessGlobalMetrics cleans the process-global metric state
 // populated on behalf of this controller. It is safe to call more than once.
+// Only the current ownership holder may reset the process-global collectors:
+// a controller allocated outside the supported API must not disturb the
+// owner's state.
 func (c *ResourceGroupsController) cleanupProcessGlobalMetrics() {
+	if !ownership.owns(c) {
+		return
+	}
 	metrics.ResourceGroupStatusGauge.Reset()
 	c.requestSourceStates.Range(func(_, v any) bool {
 		v.(*requestSourceMetricsState).cleanup()

@@ -258,6 +258,58 @@ func TestStopUnstartedControllerCleansMetrics(t *testing.T) {
 	re.Zero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
 }
 
+// TestControllerDoubleStart verifies that a second Start is refused instead
+// of launching a duplicate run loop whose context could never be canceled.
+func TestControllerDoubleStart(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockProvider := newMockResourceGroupProvider()
+
+	c, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	c.Start(ctx)
+	loopCtx := c.loopCtx
+	c.Start(ctx)
+	re.Same(loopCtx, c.loopCtx, "second Start must not replace the run loop context")
+	re.NoError(c.Stop())
+}
+
+// TestForeignControllerStopDoesNotDisturbOwner verifies that stopping a
+// controller allocated outside the supported API neither releases the
+// owner's slot nor clears the owner's process-global metric state.
+func TestForeignControllerStopDoesNotDisturbOwner(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mockProvider := newMockResourceGroupProvider()
+	group := &rmpb.ResourceGroup{
+		Name: "owner_group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{FillRate: 1000},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "owner_group", mock.Anything).Return(group, nil)
+
+	owner, err := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	re.NoError(err)
+	_, err = owner.tryGetResourceGroupController(ctx, "owner_group", false)
+	re.NoError(err)
+	re.NotZero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
+
+	foreign := &ResourceGroupsController{}
+	re.NoError(foreign.Stop())
+	re.NotZero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
+	_, err = NewResourceGroupController(ctx, 2, mockProvider, nil, constants.NullKeyspaceID)
+	re.ErrorIs(err, errs.ErrClientResourceGroupControllerAlreadyExists)
+
+	re.NoError(owner.Stop())
+	re.Zero(gaugeSeriesCount(metrics.ResourceGroupStatusGauge))
+}
+
 // gaugeSeriesCount returns the number of series currently exported by vec.
 func gaugeSeriesCount(vec *prometheus.GaugeVec) int {
 	ch := make(chan prometheus.Metric)

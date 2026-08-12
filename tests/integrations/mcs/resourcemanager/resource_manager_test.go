@@ -1062,6 +1062,12 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID, controller.EnableSingleGroupByKeyspace())
 	re.NoError(err)
 	controller.Start(suite.ctx)
+	// Backstop for a mid-test failure; a no-op after the inline Stop at the
+	// end of the test since Stop is idempotent. Without it, a held ownership
+	// slot would fail every later test in the suite.
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 	resourceGroupName := suite.initGroups[1].Name
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 2, times: 100, waitDuration: 0}
 	for range tcs.times {
@@ -1195,6 +1201,9 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	c, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID, controller.EnableSingleGroupByKeyspace())
 	re.NoError(err)
 	c.Start(suite.ctx)
+	defer func() {
+		re.NoError(c.Stop())
+	}()
 
 	resourceGroupName := groupNames[0]
 	// init
@@ -1783,6 +1792,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 10000,
@@ -1885,6 +1897,9 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	controller.Start(suite.ctx)
+	defer func() {
+		re.NoError(controller.Stop())
+	}()
 
 	testConfig := struct {
 		tcs   tokenConsumptionPerSecond
@@ -1953,6 +1968,9 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	c, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	c.Start(suite.ctx)
+	defer func() {
+		re.NoError(c.Stop())
+	}()
 
 	resourceGroupName := enableBackgroundGroup(false)
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))

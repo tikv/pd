@@ -81,3 +81,10 @@ func (o *controllerOwnership) release(c *ResourceGroupsController) {
 		o.owner = nil
 	}
 }
+
+// owns reports whether c currently holds the slot.
+func (o *controllerOwnership) owns(c *ResourceGroupsController) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.owner == c
+}
