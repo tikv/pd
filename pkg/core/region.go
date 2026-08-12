@@ -1359,7 +1359,6 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		rangeChanged = !origin.rangeEqualsTo(region)
 		if rangeChanged {
 			// Delete itself in regionTree so that overlaps will not contain itself.
-			// Because the regionItem is reused, there is no need to delete it in the regionMap.
 			idx := -1
 			for i, o := range ol {
 				if o.GetID() == region.GetID() {
@@ -1370,13 +1369,29 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 			if idx >= 0 {
 				ol = append(ol[:idx], ol[idx+1:]...)
 			}
+			// Remove the origin first, while the old item still holds it: remove
+			// locates the tree item by the origin's own key range, and adjusts the
+			// tree statistics and the reference count through it.
 			r.tree.remove(origin)
-			// Update the RegionInfo in the regionItem.
-			item.setRegion(region)
+			// The key range changed, so the old item cannot be reused. An item that
+			// has been in a tree must never change its range, or an outstanding
+			// copy-on-write snapshot would keep it at its old position while
+			// reporting the new range. Allocate a fresh item and repoint the map
+			// entry; see regionItem.
+			//
+			// The assignment below cannot be undone by the overlap cleanup further
+			// down, because overlaps never contains this region itself: either it
+			// was filtered out of ol just above, or tree.update recomputes the
+			// overlaps after the tree.remove call above has already taken this
+			// region out of the tree.
+			item = newRegionItem(region)
+			r.regions[region.GetID()] = item
 		} else {
 			// If the range is not changed, only the statistical on the regionTree needs to be updated.
 			r.tree.updateStat(origin, region)
-			// Update the RegionInfo in the regionItem.
+			// The range is unchanged, so the item may keep its position and only
+			// its value is replaced. This is the region-heartbeat path, and it is
+			// the only place allowed to replace a tree-resident item's value.
 			item.setRegion(region)
 			return origin, nil, rangeChanged
 		}

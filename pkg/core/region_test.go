@@ -530,6 +530,38 @@ func TestSetRegionConcurrence(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
+// TestSetRegionRangeChangedRepointsMap checks that a region whose key range
+// changes ends up reachable through both the region map and the region tree.
+//
+// A range change allocates a fresh regionItem and repoints r.regions at it, so
+// the map entry must survive the overlap cleanup that follows. If it did not,
+// GetRegion would keep returning the pre-split region for ever, with no error and
+// no metric to show it.
+func TestSetRegionRangeChangedRepointsMap(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+
+	origin := NewTestRegionInfo(1, 1, []byte("a"), []byte("c"))
+	_, err := regions.AtomicCheckAndPutRegion(ContextTODO(), origin)
+	re.NoError(err)
+	re.Equal(int32(2), origin.GetRef()) // root tree plus overlap tree
+
+	// Shrink the region: same ID, same start key, smaller end key, higher version.
+	shrunk := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"), SetRegionVersion(2))
+	_, err = regions.AtomicCheckAndPutRegion(ContextTODO(), shrunk)
+	re.NoError(err)
+
+	re.Same(shrunk, regions.GetRegion(1))
+	re.Same(shrunk, regions.tree.search([]byte("a")))
+	re.Equal(1, regions.tree.length())
+	re.Same(shrunk, regions.regions[1].getRegion())
+	// The fresh item took over the reference the old one held.
+	re.Equal(int32(2), shrunk.GetRef())
+	re.Zero(origin.GetRef())
+	// [b, c) is no longer covered by any region.
+	re.Nil(regions.tree.search([]byte("b")))
+}
+
 func TestSetRegion(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
