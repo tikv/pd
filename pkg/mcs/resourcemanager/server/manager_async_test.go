@@ -767,210 +767,130 @@ func TestAsyncLoadResourceGroupsCrossTermDeletePublishesToNewTerm(t *testing.T) 
 	re.Nil(g, "the deleted group must not be resurrected by the new term's merge")
 }
 
-// TestDeleteResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange guards
-// the other half of the #11105 "parked-before-storage" interleaving that
-// TestAsyncLoadResourceGroupsCrossTermDeletePublishesToNewTerm above does not
-// cover: unlike that test, here the new term's own reload confirms the group
-// (storage is unchanged - the Delete never reached its storage phase) before
-// the parked Delete resumes. Proceeding to remove it from storage now would
-// race a write that has already won and would just get silently dropped by
-// publishResourceGroupMutation's confirmed-write guard, leaving storage
-// empty but the live cache still serving the group forever - the exact
-// #11105 shape. hasNewerConfirmedWrite must catch this and abort before the
-// storage write, while still leaving the sibling "nothing confirmed yet"
-// case (the other test) to succeed normally.
-func TestDeleteResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange(t *testing.T) {
-	re := require.New(t)
-	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(1, "ct-del-abort", newAsyncTestGroup("ct-del-abort")))
-
-	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
-	m.storage = store
-	re.NoError(m.Init(context.Background()))
-	cancelTerm1 := m.cancel
-	defer stopAsyncTestManager(m)
-	defer store.unblock()
-
-	// Let term 1 load fully so the Delete starts against a settled term.
-	store.waitEntered(t)
-	store.unblock()
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
-
-	// Park the Delete between resolving its keyspace manager and its storage
-	// phase.
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/deleteResourceGroupBeforeStorage", func() {
-		close(reached)
-		<-release
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/deleteResourceGroupBeforeStorage"))
-	}()
-	var delErr error
-	delDone := make(chan struct{})
-	go func() {
-		defer close(delDone)
-		delErr = m.DeleteResourceGroup(1, "ct-del-abort")
-	}()
-	select {
-	case <-reached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the delete to reach its storage phase")
+// TestResourceGroupMutationAbortsOnNewerConfirmedWriteAcrossTermChange
+// guards the "parked-before-storage" side of the #11105 interleaving for all
+// three mutation kinds: an old-term Add/Modify/Delete parked before its
+// storage phase must abort, not touch storage, once it wakes up to find the
+// new term already has confirmed data for the same group (here, from the
+// new term's own reload of unchanged storage, since the mutation never
+// reached its own storage phase). Proceeding would race a write that has
+// already won and would just get silently dropped by
+// publishResourceGroupMutation's confirmed-write guard - for Delete that
+// would leave storage empty but the cache still serving the group forever,
+// the exact #11105 shape; for Add/Modify it would overwrite storage with a
+// stale value nobody asked for. hasNewerConfirmedWrite must catch this and
+// abort before the storage write in every case, while still leaving the
+// sibling "nothing confirmed yet" case
+// (TestAsyncLoadResourceGroupsCrossTermDeletePublishesToNewTerm) to succeed
+// normally.
+func TestResourceGroupMutationAbortsOnNewerConfirmedWriteAcrossTermChange(t *testing.T) {
+	cases := []struct {
+		name      string
+		group     string
+		failpoint string
+		mutate    func(m *Manager, group string) error
+	}{
+		{
+			name:      "delete",
+			group:     "ct-del-abort",
+			failpoint: "deleteResourceGroupBeforeStorage",
+			mutate: func(m *Manager, group string) error {
+				return m.DeleteResourceGroup(1, group)
+			},
+		},
+		{
+			name:      "add",
+			group:     "ct-add-abort",
+			failpoint: "addResourceGroupBeforeStorage",
+			mutate: func(m *Manager, group string) error {
+				updated := newAsyncTestGroup(group)
+				updated.KeyspaceId = &resource_manager.KeyspaceIDValue{Keyspace: &resource_manager.KeyspaceIDValue_Value{Value: 1}}
+				updated.RUSettings.RU.Settings.FillRate = asyncTestGroupFillRate * 2
+				return m.AddResourceGroup(updated)
+			},
+		},
+		{
+			name:      "modify",
+			group:     "ct-modify-abort",
+			failpoint: "modifyResourceGroupBeforeStorage",
+			mutate: func(m *Manager, group string) error {
+				modified := newAsyncTestGroup(group)
+				modified.KeyspaceId = &resource_manager.KeyspaceIDValue{Keyspace: &resource_manager.KeyspaceIDValue_Value{Value: 1}}
+				modified.RUSettings.RU.Settings.FillRate = asyncTestGroupFillRate * 2
+				return m.ModifyResourceGroup(modified)
+			},
+		},
 	}
 
-	// Leadership changes and term 2 fully completes loading. Storage is
-	// unchanged (the Delete never reached its storage phase), so term 2's own
-	// reload confirms the group in the new term's cache.
-	cancelTerm1()
-	re.NoError(m.Init(context.Background()))
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			store := newBlockingResourceGroupStorage()
+			re.NoError(store.SaveResourceGroupSetting(1, tc.group, newAsyncTestGroup(tc.group)))
 
-	// Resume the parked Delete: it must see term 2 already has confirmed data
-	// for this group and abort, instead of removing it from storage on
-	// behalf of the detached term-1 manager.
-	close(release)
-	<-delDone
-	re.ErrorIs(delErr, errs.ErrResourceGroupsLoading)
+			m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+			m.storage = store
+			re.NoError(m.Init(context.Background()))
+			cancelTerm1 := m.cancel
+			defer stopAsyncTestManager(m)
+			defer store.unblock()
 
-	g, err := m.GetResourceGroup(1, "ct-del-abort", false)
-	re.NoError(err)
-	re.NotNil(g, "the aborted delete must not have removed the group from storage")
-}
+			// Let term 1 load fully so the mutation starts against a settled term.
+			store.waitEntered(t)
+			store.unblock()
+			testutil.Eventually(re, func() bool {
+				groups, err := m.GetResourceGroupList(1, false)
+				return err == nil && len(groups) == 2
+			}, testutil.WithTickInterval(20*time.Millisecond))
 
-// TestAddResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange is
-// AddResourceGroup's counterpart to the Delete test above: an old-term Add
-// parked before its storage phase must abort, not overwrite storage, once it
-// wakes up to find the new term already has confirmed data for the same
-// group (here, from the new term's own reload of unchanged storage).
-func TestAddResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange(t *testing.T) {
-	re := require.New(t)
-	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(1, "ct-add-abort", newAsyncTestGroup("ct-add-abort")))
+			// Park the mutation between resolving its keyspace manager and its
+			// storage phase.
+			reached := make(chan struct{})
+			release := make(chan struct{})
+			fpPath := "github.com/tikv/pd/pkg/mcs/resourcemanager/server/" + tc.failpoint
+			re.NoError(failpoint.EnableCall(fpPath, func() {
+				close(reached)
+				<-release
+			}))
+			defer func() {
+				re.NoError(failpoint.Disable(fpPath))
+			}()
+			var mutErr error
+			mutDone := make(chan struct{})
+			go func() {
+				defer close(mutDone)
+				mutErr = tc.mutate(m, tc.group)
+			}()
+			select {
+			case <-reached:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for the mutation to reach its storage phase")
+			}
 
-	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
-	m.storage = store
-	re.NoError(m.Init(context.Background()))
-	cancelTerm1 := m.cancel
-	defer stopAsyncTestManager(m)
-	defer store.unblock()
+			// Leadership changes and term 2 fully completes loading. Storage is
+			// unchanged (the mutation never reached its storage phase), so term
+			// 2's own reload confirms the group in the new term's cache.
+			cancelTerm1()
+			re.NoError(m.Init(context.Background()))
+			testutil.Eventually(re, func() bool {
+				groups, err := m.GetResourceGroupList(1, false)
+				return err == nil && len(groups) == 2
+			}, testutil.WithTickInterval(20*time.Millisecond))
 
-	store.waitEntered(t)
-	store.unblock()
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
+			// Resume the parked mutation: it must see term 2 already has
+			// confirmed data for this group and abort, instead of touching
+			// storage on behalf of the detached term-1 manager.
+			close(release)
+			<-mutDone
+			re.ErrorIs(mutErr, errs.ErrResourceGroupsLoading)
 
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/addResourceGroupBeforeStorage", func() {
-		close(reached)
-		<-release
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/addResourceGroupBeforeStorage"))
-	}()
-	updated := newAsyncTestGroup("ct-add-abort")
-	updated.KeyspaceId = &resource_manager.KeyspaceIDValue{Keyspace: &resource_manager.KeyspaceIDValue_Value{Value: 1}}
-	updated.RUSettings.RU.Settings.FillRate = asyncTestGroupFillRate * 2
-	var addErr error
-	addDone := make(chan struct{})
-	go func() {
-		defer close(addDone)
-		addErr = m.AddResourceGroup(updated)
-	}()
-	select {
-	case <-reached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the add to reach its storage phase")
+			g, err := m.GetResourceGroup(1, tc.group, false)
+			re.NoError(err)
+			re.NotNil(g, "the aborted mutation must not have removed the group from storage")
+			re.Equal(float64(asyncTestGroupFillRate), g.RUSettings.RU.getFillRate(),
+				"the aborted mutation must not have overwritten storage with a stale value")
+		})
 	}
-
-	cancelTerm1()
-	re.NoError(m.Init(context.Background()))
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
-
-	close(release)
-	<-addDone
-	re.ErrorIs(addErr, errs.ErrResourceGroupsLoading)
-
-	g, err := m.GetResourceGroup(1, "ct-add-abort", false)
-	re.NoError(err)
-	re.NotNil(g)
-	re.Equal(float64(asyncTestGroupFillRate), g.RUSettings.RU.getFillRate(),
-		"the aborted add must not have overwritten storage with the stale term-1 value")
-}
-
-// TestModifyResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange is
-// ModifyResourceGroup's counterpart to the Delete and Add tests above.
-func TestModifyResourceGroupAbortsOnNewerConfirmedWriteAcrossTermChange(t *testing.T) {
-	re := require.New(t)
-	store := newBlockingResourceGroupStorage()
-	re.NoError(store.SaveResourceGroupSetting(1, "ct-modify-abort", newAsyncTestGroup("ct-modify-abort")))
-
-	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
-	m.storage = store
-	re.NoError(m.Init(context.Background()))
-	cancelTerm1 := m.cancel
-	defer stopAsyncTestManager(m)
-	defer store.unblock()
-
-	store.waitEntered(t)
-	store.unblock()
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
-
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/mcs/resourcemanager/server/modifyResourceGroupBeforeStorage", func() {
-		close(reached)
-		<-release
-	}))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/modifyResourceGroupBeforeStorage"))
-	}()
-	modified := newAsyncTestGroup("ct-modify-abort")
-	modified.KeyspaceId = &resource_manager.KeyspaceIDValue{Keyspace: &resource_manager.KeyspaceIDValue_Value{Value: 1}}
-	modified.RUSettings.RU.Settings.FillRate = asyncTestGroupFillRate * 2
-	var modErr error
-	modDone := make(chan struct{})
-	go func() {
-		defer close(modDone)
-		modErr = m.ModifyResourceGroup(modified)
-	}()
-	select {
-	case <-reached:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for the modify to reach its storage phase")
-	}
-
-	cancelTerm1()
-	re.NoError(m.Init(context.Background()))
-	testutil.Eventually(re, func() bool {
-		groups, err := m.GetResourceGroupList(1, false)
-		return err == nil && len(groups) == 2
-	}, testutil.WithTickInterval(20*time.Millisecond))
-
-	close(release)
-	<-modDone
-	re.ErrorIs(modErr, errs.ErrResourceGroupsLoading)
-
-	g, err := m.GetResourceGroup(1, "ct-modify-abort", false)
-	re.NoError(err)
-	re.NotNil(g)
-	re.Equal(float64(asyncTestGroupFillRate), g.RUSettings.RU.getFillRate(),
-		"the aborted modify must not have overwritten storage with the stale term-1 value")
 }
 
 // TestAsyncLoadResourceGroupsExhaustedRetriesReturnLoadingError guards the
