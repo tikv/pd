@@ -59,6 +59,12 @@ type schedulingController struct {
 	hotStat     *statistics.HotStat
 	slowStat    *statistics.SlowStat
 	running     bool
+
+	// recentlyTombstonedStores is the set of store IDs collectSchedulingMetrics saw
+	// tombstoned on its last tick. Only that method, driven by
+	// runSchedulingMetricsCollectionJob's own single-goroutine ticker, touches it, so
+	// it needs no lock.
+	recentlyTombstonedStores map[uint64]struct{}
 }
 
 // newSchedulingController creates a new scheduling controller.
@@ -185,23 +191,40 @@ func resetSchedulingMetrics() {
 func (sc *schedulingController) collectSchedulingMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(sc.opt)
 	stores := sc.GetStores()
+	// Unlike the other per-store cleanup called once from BuryStoreLocked, filter
+	// and heartbeat-stream metrics for a tombstoned store keep getting rewritten by
+	// unrelated, ongoing activity for as long as the store stays known: every
+	// scheduler's Schedule() still runs StoreStateFilter against it every cycle
+	// (that rejection is what increments the filter counters), and the heartbeat
+	// stream keepalive ticker keeps touching it as long as its stream is still
+	// bound. A one-shot delete at bury time gets undone almost immediately, so
+	// delete unconditionally here on every tick instead.
+	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
 		if s.IsRemoved() {
-			// Unlike the other per-store cleanup called once from BuryStoreLocked, filter
-			// and heartbeat-stream metrics for a tombstoned store keep getting rewritten by
-			// unrelated, ongoing activity for as long as the store stays known: every
-			// scheduler's Schedule() still runs StoreStateFilter against it every cycle
-			// (that rejection is what increments the filter counters), and the heartbeat
-			// stream keepalive ticker keeps touching it as long as its stream is still
-			// bound. A one-shot delete at bury time gets undone almost immediately, so
-			// delete unconditionally here on every tick instead.
-			storeIDStr := strconv.FormatUint(s.GetID(), 10)
+			storeID := s.GetID()
+			current[storeID] = struct{}{}
+			storeIDStr := strconv.FormatUint(storeID, 10)
 			filter.DeleteStoreMetrics(storeIDStr)
 			hbstream.DeleteStoreMetrics(storeIDStr)
 		}
 	}
+	// A store that was tombstoned as of the last sweep but isn't known at all this
+	// tick was fully removed in between. The loop above only reaches stores
+	// GetStores() currently returns, so a write landing in that gap -- after the
+	// last sweep saw it tombstoned but before removal completed -- would otherwise
+	// be unreachable by any future sweep. One more delete call closes that window;
+	// it's a no-op if nothing was actually rewritten.
+	for storeID := range sc.recentlyTombstonedStores {
+		if _, stillKnown := current[storeID]; !stillKnown {
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			filter.DeleteStoreMetrics(storeIDStr)
+			hbstream.DeleteStoreMetrics(storeIDStr)
+		}
+	}
+	sc.recentlyTombstonedStores = current
 	statsMap.Collect()
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	sc.coordinator.CollectHotSpotMetrics()

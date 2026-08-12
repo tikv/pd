@@ -86,7 +86,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
 			storeIDStr := strconv.FormatUint(store.GetId(), 10)
-			statistics.ResetStoreStatistics(store.GetAddress(), storeIDStr)
+			statistics.ResetStoreStatistics(storeIDStr)
 			filter.DeleteStoreMetrics(storeIDStr)
 			hbstream.DeleteStoreMetrics(storeIDStr)
 			schedulers.DeleteStoreMetrics(storeIDStr)

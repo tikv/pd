@@ -95,6 +95,11 @@ type Cluster struct {
 	pdLeader          atomic.Value
 	running           atomic.Bool
 
+	// recentlyTombstonedStores is the set of store IDs collectMetrics saw tombstoned
+	// on its last tick. Only that method, driven by runMetricsCollectionJob's own
+	// single-goroutine ticker, touches it, so it needs no lock.
+	recentlyTombstonedStores map[uint64]struct{}
+
 	backendAddress string
 	httpClient     *http.Client
 
@@ -721,6 +726,16 @@ func (c *Cluster) runMetricsCollectionJob() {
 	}
 }
 
+// deleteTombstonedStoreMetrics deletes every per-store metric this package knows
+// about (heartbeat/bucket metrics, storeStatusGauge/clusterStatusGauge, filter
+// counters, and heartbeat-stream counters) for a tombstoned store.
+func deleteTombstonedStoreMetrics(storeID string) {
+	statistics.ResetStoreStatistics(storeID)
+	DeleteStoreMetrics(storeID)
+	filter.DeleteStoreMetrics(storeID)
+	hbstream.DeleteStoreMetrics(storeID)
+}
+
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
 	stores := c.GetStores()
@@ -732,20 +747,34 @@ func (c *Cluster) collectMetrics() {
 	// Schedule() still runs StoreStateFilter against every known store each cycle
 	// (that rejection is what increments the filter counters), and the heartbeat
 	// stream keepalive ticker keeps touching a tombstoned store as long as its
-	// stream is still bound. If cleanup only ran once per store, such late writes
-	// would never get swept again for as long as the store stays
-	// tombstoned-but-not-yet-removed. DeletePartialMatch on labels that no longer
-	// exist is a cheap no-op, so repeating it every tick is safe.
+	// stream is still bound. ObserveHotStat above can likewise recreate
+	// storeStatusGauge from rolling stats that were never retired. If cleanup only
+	// ran once per store, such late writes would never get swept again for as long
+	// as the store stays tombstoned-but-not-yet-removed. DeletePartialMatch on
+	// labels that no longer exist is a cheap no-op, so repeating it every tick is
+	// safe.
+	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
 		if s.IsRemoved() {
-			storeIDStr := strconv.FormatUint(s.GetID(), 10)
-			DeleteStoreMetrics(s.GetAddress(), storeIDStr)
-			filter.DeleteStoreMetrics(storeIDStr)
-			hbstream.DeleteStoreMetrics(storeIDStr)
+			storeID := s.GetID()
+			current[storeID] = struct{}{}
+			deleteTombstonedStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
+	// A store that was tombstoned as of the last sweep but isn't known at all this
+	// tick was fully removed in between. The loop above only reaches stores
+	// GetStores() currently returns, so a write landing in that gap -- after the
+	// last sweep saw it tombstoned but before removal completed -- would otherwise
+	// be unreachable by any future sweep. One more delete call closes that window;
+	// it's a no-op if nothing was actually rewritten.
+	for storeID := range c.recentlyTombstonedStores {
+		if _, stillKnown := current[storeID]; !stillKnown {
+			deleteTombstonedStoreMetrics(strconv.FormatUint(storeID, 10))
+		}
+	}
+	c.recentlyTombstonedStores = current
 	statsMap.Collect()
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()

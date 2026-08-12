@@ -223,6 +223,7 @@ func DeleteStoreMetrics(storeID string) {
 	slowStoreTriggerLimitGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	storeSlowTrendEvictedStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
 	balanceRangeGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+	HotPendingSum.DeletePartialMatch(prometheus.Labels{"store": storeID})
 }
 
 func balanceLeaderCounterWithEvent(event string) prometheus.Counter {

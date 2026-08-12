@@ -96,8 +96,12 @@ func init() {
 }
 
 // DeleteStoreMetrics deletes the per-store heartbeat/bucket metrics of a store.
-func DeleteStoreMetrics(storeAddress, id string) {
-	labels := prometheus.Labels{"address": storeAddress, "store": id}
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func DeleteStoreMetrics(id string) {
+	labels := prometheus.Labels{"store": id}
 	storeHeartbeatHandleDuration.DeletePartialMatch(labels)
 	storeHeartbeatCounter.DeletePartialMatch(labels)
 	regionHeartbeatHandleDuration.DeletePartialMatch(labels)

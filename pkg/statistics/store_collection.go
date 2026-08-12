@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -292,8 +290,12 @@ func (s *storeStatistics) collect() {
 }
 
 // ResetStoreStatistics resets the metrics of store.
-func ResetStoreStatistics(storeAddress string, id string) {
-	storeStatusGauge.DeletePartialMatch(prometheus.Labels{"address": storeAddress, "store": id})
+// Matches on the store label alone, not address: PD allows an existing store ID to
+// change address (e.g. after a TiKV restart with a new IP), so requiring the current
+// address to match as well would permanently leak any series recorded under a
+// previous address.
+func ResetStoreStatistics(id string) {
+	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
 }
 
