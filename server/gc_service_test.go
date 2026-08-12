@@ -23,49 +23,73 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func TestContextErrorToGRPCStatus(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), 0)
+	defer deadlineCancel()
+
 	testCases := []struct {
 		name string
+		ctx  context.Context
 		err  error
 		code codes.Code
 	}{
 		{
-			name: "canceled",
-			err:  context.Canceled,
-			code: codes.Canceled,
-		},
-		{
-			name: "wrapped-canceled",
+			name: "canceled-request-matching-wrapped-error",
+			ctx:  canceledCtx,
 			err:  fmt.Errorf("read GC state: %w", context.Canceled),
 			code: codes.Canceled,
 		},
 		{
-			name: "deadline",
-			err:  context.DeadlineExceeded,
-			code: codes.DeadlineExceeded,
-		},
-		{
-			name: "wrapped-deadline",
+			name: "expired-request-matching-wrapped-error",
+			ctx:  deadlineCtx,
 			err:  fmt.Errorf("read GC state: %w", context.DeadlineExceeded),
 			code: codes.DeadlineExceeded,
 		},
 		{
-			name: "storage-error",
+			name: "canceled-request-mismatched-error",
+			ctx:  canceledCtx,
+			err:  fmt.Errorf("read GC state: %w", context.DeadlineExceeded),
+			code: codes.OK,
+		},
+		{
+			name: "canceled-request-unrelated-error",
+			ctx:  canceledCtx,
 			err:  errors.New("storage failed"),
+			code: codes.OK,
+		},
+		{
+			name: "active-request-internal-etcd-get-deadline",
+			ctx:  context.Background(),
+			err: errs.ErrEtcdKVGet.
+				Wrap(context.DeadlineExceeded).
+				GenWithStackByCause(),
+			code: codes.OK,
+		},
+		{
+			name: "active-request-internal-etcd-txn-deadline",
+			ctx:  context.Background(),
+			err: errs.ErrEtcdTxnInternal.
+				Wrap(context.DeadlineExceeded).
+				GenWithStackByArgs(),
 			code: codes.OK,
 		},
 	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			statusErr := contextErrorToGRPCStatus(testCase.err)
+			statusErr := contextErrorToGRPCStatus(testCase.ctx, testCase.err)
 			if testCase.code == codes.OK {
 				require.NoError(t, statusErr)
 				return
 			}
 			require.Equal(t, testCase.code, status.Code(statusErr))
+			require.Equal(t, testCase.ctx.Err().Error(), status.Convert(statusErr).Message())
 		})
 	}
 }

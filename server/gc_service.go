@@ -37,11 +37,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-func contextErrorToGRPCStatus(err error) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return status.FromContextError(err).Err()
+func contextErrorToGRPCStatus(ctx context.Context, err error) error {
+	ctxErr := ctx.Err()
+	// A live request can receive an error wrapping an internal etcd deadline, which must stay on the protobuf error-header path.
+	if ctxErr == nil || !errors.Is(err, ctxErr) {
+		return nil
 	}
-	return nil
+	return status.FromContextError(ctxErr).Err()
 }
 
 // UpdateGCSafePoint implements gRPC PDServer.
@@ -736,7 +738,7 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		)
 	}
 	if err != nil {
-		if statusErr := contextErrorToGRPCStatus(err); statusErr != nil {
+		if statusErr := contextErrorToGRPCStatus(ctx, err); statusErr != nil {
 			return nil, statusErr
 		}
 		return &pdpb.GetGCStateResponse{
@@ -788,7 +790,7 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx, request.GetExcludeGcBarriers())
 	if err != nil {
-		if statusErr := contextErrorToGRPCStatus(err); statusErr != nil {
+		if statusErr := contextErrorToGRPCStatus(ctx, err); statusErr != nil {
 			return nil, statusErr
 		}
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
