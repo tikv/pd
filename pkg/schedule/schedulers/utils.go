@@ -182,7 +182,10 @@ func (p *solver) getTolerantResource() int64 {
 	if (p.kind.Resource == constant.LeaderKind || p.kind.Resource == constant.WitnessKind) && p.kind.Policy == constant.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
 	} else {
-		regionSize := p.GetAverageRegionSize()
+		// Use the non-empty average so a cluster full of freshly-split,
+		// unwritten regions doesn't collapse the tolerant margin toward
+		// noise levels.
+		regionSize := p.GetNonEmptyAverageRegionSize()
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource

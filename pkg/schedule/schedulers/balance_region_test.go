@@ -80,14 +80,16 @@ func TestInfluenceAmp(t *testing.T) {
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
 }
 
-// TestSingleRegionOnLargeEmptyDiskCanMigrate verifies that when a store's disk is
-// mostly empty except for a single small region (e.g. 6TiB capacity with only a
-// 10MiB region), region-score-v2 still produces enough of a score gap against an
-// otherwise-identical, entirely empty peer store for balance-region to want to
-// move that region — i.e. the score is dominated by the presence of the one
-// region rather than by real disk utilization (10MiB vs 6TiB is a negligible
-// utilization difference).
-func TestSingleRegionOnLargeEmptyDiskCanMigrate(t *testing.T) {
+// TestSingleRegionOnLargeEmptyDiskDoesNotMigrate verifies that when a store's
+// disk is mostly empty except for a single small region (e.g. 6TiB capacity
+// with only a 10MiB region), balance-region does NOT move that region to an
+// otherwise-identical, entirely empty peer store. Moving it would not fix any
+// real imbalance (10MiB vs 6TiB capacity is a negligible utilization
+// difference either way) and would just relocate the same "which store holds
+// the only real data" state onto a different empty store — inviting the kind
+// of pointless churn reported in #11135, since every other empty store looks
+// equally attractive as a target on the next scheduling pass.
+func TestSingleRegionOnLargeEmptyDiskDoesNotMigrate(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	re := require.New(t)
@@ -114,20 +116,19 @@ func TestSingleRegionOnLargeEmptyDiskCanMigrate(t *testing.T) {
 	}
 
 	// storeA holds the cluster's only non-empty region; storeB is otherwise
-	// identical (same capacity, same region count) but has no data at all.
+	// identical (same capacity, same region count) but has no data at all,
+	// and does not already hold a peer of region 1 — a real Schedule() run
+	// would still consider it a legitimate, unfiltered candidate target.
 	tc.PutStore(mkStore(1, regionSizeMB))
 	tc.PutStore(mkStore(2, 0))
 
-	tc.AddLeaderRegion(1, 1, 2)
+	tc.AddLeaderRegion(1, 1)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSizeMB))
 	tc.PutRegion(region)
 
 	// Mirror the real-world setup that motivated this test: each store already
 	// holds 10 regions (region *count* is balanced), but region 1 above is the
-	// only one with any data — the other 18 are freshly-split, empty regions.
-	// Without these, region 1 would be the cluster's only region and
-	// GetAverageRegionSize() would just equal its own size, defeating the
-	// tolerant-resource margin and masking the scenario this test documents.
+	// only one with any data — the other 19 are freshly-split, empty regions.
 	var nextID uint64 = 2
 	for range 9 {
 		tc.AddLeaderRegion(nextID, 1)
@@ -135,7 +136,7 @@ func TestSingleRegionOnLargeEmptyDiskCanMigrate(t *testing.T) {
 		tc.PutRegion(empty)
 		nextID++
 	}
-	for range 9 {
+	for range 10 {
 		tc.AddLeaderRegion(nextID, 2)
 		empty := tc.GetRegion(nextID).Clone(core.SetApproximateSize(0))
 		tc.PutRegion(empty)
@@ -148,7 +149,7 @@ func TestSingleRegionOnLargeEmptyDiskCanMigrate(t *testing.T) {
 	solver := newSolver(basePlan, kind, tc, influence)
 	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
-	re.True(solver.shouldBalance(""))
+	re.False(solver.shouldBalance(""))
 }
 
 func TestShouldBalance(t *testing.T) {
