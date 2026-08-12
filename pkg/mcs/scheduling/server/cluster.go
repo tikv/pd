@@ -443,6 +443,7 @@ func (c *Cluster) updateScheduler() {
 	// Make sure the check will be triggered once later.
 	trySend(notifier)
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	defer c.persistConfig.ClearSchedulersUpdatingNotifier(notifier)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
@@ -786,6 +787,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
+	defer tracer.Release()
 	var taskRunner, miscRunner, logRunner ratelimit.Runner
 	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {

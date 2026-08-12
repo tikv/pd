@@ -15,20 +15,68 @@
 package server
 
 import (
+	"context"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestValidatePDForwardedHostWithoutLeader(t *testing.T) {
+	grpcServer := &GrpcServer{Server: &Server{member: member.NewMember(nil, nil, 1)}}
+	err := grpcServer.validatePDForwardedHost("http://127.0.0.1:2379")
+	require.ErrorIs(t, err, errs.ErrNotLeader)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+func TestIsSamePDClientURL(t *testing.T) {
+	testCases := []struct {
+		name   string
+		first  string
+		second string
+		same   bool
+	}{
+		{name: "same HTTP URL", first: "http://127.0.0.1:2379", second: "http://127.0.0.1:2379", same: true},
+		{name: "same HTTPS URL", first: "https://127.0.0.1:2379", second: "https://127.0.0.1:2379", same: true},
+		{name: "HTTP to HTTPS", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379", same: true},
+		{name: "HTTPS to HTTP", first: "https://127.0.0.1:2379", second: "http://127.0.0.1:2379", same: true},
+		{name: "uppercase scheme", first: "HTTP://127.0.0.1:2379", second: "https://127.0.0.1:2379"},
+		{name: "different host", first: "http://127.0.0.1:2379", second: "https://127.0.0.2:2379"},
+		{name: "different port", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2380"},
+		{name: "different path", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379/path"},
+		{name: "different query", first: "http://127.0.0.1:2379", second: "https://127.0.0.1:2379?query=value"},
+		{name: "nested scheme", first: "http://127.0.0.1:2379", second: "https://http://127.0.0.1:2379"},
+		{name: "missing scheme", first: "http://127.0.0.1:2379", second: "127.0.0.1:2379"},
+		{name: "unsupported scheme", first: "http://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
+		{name: "same unsupported URL", first: "ftp://127.0.0.1:2379", second: "ftp://127.0.0.1:2379"},
+		{name: "empty URLs"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			require.Equal(t, testCase.same, isSamePDClientURL(testCase.first, testCase.second))
+		})
+	}
 }
 
 func TestNewSchedulingAskBatchSplitRequestPreservesReason(t *testing.T) {
@@ -93,4 +141,50 @@ func TestConvertSchedulingHeaderPreservesError(t *testing.T) {
 			re.Equal(testCase.want, header.GetError())
 		})
 	}
+}
+
+func TestServiceDiscoveryRPCsReturnUnavailableWhenServerIsNotRunning(t *testing.T) {
+	grpcServer := &GrpcServer{Server: &Server{
+		serviceMiddlewarePersistOptions: config.NewServiceMiddlewarePersistOptions(&config.ServiceMiddlewareConfig{}),
+	}}
+	listener := bufconn.Listen(1024 * 1024)
+	transport := grpc.NewServer()
+	pdpb.RegisterPDServer(transport, grpcServer)
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- transport.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		transport.Stop()
+		require.NoError(t, <-serveErr)
+	})
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	client := pdpb.NewPDClient(conn)
+
+	members, err := client.GetMembers(context.Background(), &pdpb.GetMembersRequest{})
+	require.Nil(t, members)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	clusterInfo, err := client.GetClusterInfo(context.Background(), &pdpb.GetClusterInfoRequest{})
+	require.Nil(t, clusterInfo)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+func TestGetMembersErrorResult(t *testing.T) {
+	notStarted := errors.WithStack(errs.ErrServerNotStarted.FastGenByArgs())
+	response, err := getMembersErrorResult(notStarted)
+	require.Nil(t, response)
+	require.Equal(t, codes.Unavailable, status.Code(err))
+
+	internalErr := errors.New("failed to load members")
+	response, err = getMembersErrorResult(internalErr)
+	require.NoError(t, err)
+	require.Equal(t, pdpb.ErrorType_UNKNOWN, response.GetHeader().GetError().GetType())
+	require.Equal(t, internalErr.Error(), response.GetHeader().GetError().GetMessage())
 }

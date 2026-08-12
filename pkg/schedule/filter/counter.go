@@ -52,6 +52,7 @@ const (
 	engine
 	specialUse
 	isolation
+	leaderEvicted
 
 	storeStateOK
 	storeStateTombstone
@@ -82,6 +83,7 @@ var filters = [filtersLen]string{
 	"engine-filter",
 	"special-use-filter",
 	"isolation-filter",
+	"leader-evicted-filter",
 
 	"store-state-ok-filter",
 	"store-state-tombstone-filter",

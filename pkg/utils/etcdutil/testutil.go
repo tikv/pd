@@ -66,6 +66,7 @@ func genRandName() string {
 // TestEtcdClusterOptions is the options for NewTestEtcdCluster.
 type TestEtcdClusterOptions struct {
 	ServerCfgModifier func(cfg *embed.Config)
+	ClientCfgModifier CreateEtcdClientOpt
 }
 
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
@@ -80,7 +81,11 @@ func NewTestEtcdCluster(t testing.TB, count int, opt *TestEtcdClusterOptions) (s
 	}
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls, TestEtcdClientPurpose, true)
+	var clientOpts []CreateEtcdClientOpt
+	if opt != nil && opt.ClientCfgModifier != nil {
+		clientOpts = append(clientOpts, opt.ClientCfgModifier)
+	}
+	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls, TestEtcdClientPurpose, true, clientOpts...)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)
@@ -127,6 +132,7 @@ func MustAddEtcdMember(t testing.TB, cfg1 *embed.Config, client *clientv3.Client
 	cfg2.Name = genRandName()
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.ListenPeerUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
+	cfg2.LogLevel = cfg1.LogLevel
 	peerURL := cfg2.ListenPeerUrls[0].String()
 	addResp, err := AddEtcdMember(client, []string{peerURL})
 	re.NoError(err)

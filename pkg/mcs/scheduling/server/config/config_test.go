@@ -15,13 +15,81 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestSetScheduleConfigDoesNotBlockWhenSchedulersUpdatingNotifierIsFull(t *testing.T) {
+	re := require.New(t)
+	persistConfig := NewPersistConfig(&Config{}, nil)
+	notifier := make(chan struct{}, 1)
+	notifier <- struct{}{}
+	persistConfig.SetSchedulersUpdatingNotifier(notifier)
+
+	done := make(chan struct{})
+	go func() {
+		persistConfig.SetScheduleConfig(newScheduleConfig(types.BalanceLeaderScheduler))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		re.Fail("SetScheduleConfig should not block on a full schedulers updating notifier")
+	}
+}
+
+func TestClearSchedulersUpdatingNotifier(t *testing.T) {
+	re := require.New(t)
+	persistConfig := NewPersistConfig(&Config{}, nil)
+	oldNotifier := make(chan struct{}, 1)
+	newNotifier := make(chan struct{}, 1)
+
+	persistConfig.SetSchedulersUpdatingNotifier(oldNotifier)
+	persistConfig.SetSchedulersUpdatingNotifier(newNotifier)
+	persistConfig.ClearSchedulersUpdatingNotifier(oldNotifier)
+	persistConfig.SetScheduleConfig(newScheduleConfig(types.BalanceLeaderScheduler))
+
+	select {
+	case <-oldNotifier:
+		re.Fail("old notifier should not receive scheduler update after a newer notifier is registered")
+	default:
+	}
+	select {
+	case <-newNotifier:
+	case <-time.After(time.Second):
+		re.Fail("new notifier should receive scheduler update")
+	}
+
+	persistConfig.ClearSchedulersUpdatingNotifier(newNotifier)
+	persistConfig.SetScheduleConfig(newScheduleConfig(types.BalanceRegionScheduler))
+	select {
+	case <-newNotifier:
+		re.Fail("cleared notifier should not receive scheduler update")
+	default:
+	}
+}
+
+func newScheduleConfig(schedulerType types.CheckerSchedulerType) *sc.ScheduleConfig {
+	return &sc.ScheduleConfig{
+		Schedulers: []sc.SchedulerConfig{
+			{Type: types.SchedulerTypeCompatibleMap[schedulerType]},
+		},
+	}
+}
 
 func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 	re := require.New(t)
@@ -43,8 +111,15 @@ func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, persistConfig.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20}, persistConfig.GetStoreLimit(1))
 
-	// Simulate a restarted process whose package-level default goes back to the built-in value.
+	data, err := json.Marshal(persistConfig.GetScheduleConfig())
+	re.NoError(err)
+	var reloadedScheduleConfig sc.ScheduleConfig
+	re.NoError(json.Unmarshal(data, &reloadedScheduleConfig))
+	restartedConfig := NewConfig()
+	restartedConfig.Schedule = reloadedScheduleConfig
+	restartedPersistConfig := NewPersistConfig(restartedConfig, nil)
+
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
 	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
-	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, persistConfig.GetStoreLimit(2))
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, restartedPersistConfig.GetStoreLimit(2))
 }

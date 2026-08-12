@@ -16,6 +16,7 @@ package member
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -63,8 +64,6 @@ type Participant struct {
 	// campaignChecker is used to check whether the additional constraints for a
 	// campaign are satisfied. If it returns false, the campaign will fail.
 	campaignChecker atomic.Value // Store as leadershipCheckFunc
-	// expectedPrimaryLease is the expected lease for the primary.
-	expectedPrimaryLease atomic.Value // stored as *election.Lease
 }
 
 // NewParticipant create a new Participant.
@@ -114,6 +113,18 @@ func (p *Participant) ParticipantString() string {
 		return ""
 	}
 	return p.participant.String()
+}
+
+// IsExpectedPrimary reports whether expectedValue (an expected primary transfer
+// marker, which holds a member's advertise address) exactly matches one of this
+// participant's listen URLs. The match is exact list membership rather than a
+// substring search of the serialized member value, so one member's address being a
+// substring of another's value cannot misroute a transfer.
+func (p *Participant) IsExpectedPrimary(expectedValue string) bool {
+	if p.participant == nil {
+		return false
+	}
+	return slices.Contains(p.participant.GetListenUrls(), expectedValue)
 }
 
 // Client returns the etcd client.
@@ -178,11 +189,19 @@ func (p *Participant) GetLeadership() *election.Leadership {
 }
 
 // Campaign is used to campaign the leadership and make it become a primary.
-func (p *Participant) Campaign(_ context.Context, leaseTimeout int64) error {
+func (p *Participant) Campaign(ctx context.Context, leaseTimeout int64) error {
+	return p.CampaignWithCmps(ctx, leaseTimeout)
+}
+
+// CampaignWithCmps campaigns the leadership with extra etcd comparisons appended to
+// the leader-key transaction. The caller can use it to make the campaign conditional,
+// e.g. asserting the expected primary flag still points to this member, so that
+// acquiring the leader key and the affinity check happen atomically.
+func (p *Participant) CampaignWithCmps(_ context.Context, leaseTimeout int64, cmps ...clientv3.Cmp) error {
 	if !p.campaignCheck() {
 		return errs.ErrCheckCampaign
 	}
-	return p.leadership.Campaign(leaseTimeout, p.MemberValue())
+	return p.leadership.Campaign(leaseTimeout, p.MemberValue(), cmps...)
 }
 
 // getPersistentPrimary gets the corresponding primary from etcd by given electionPath (as the key).
@@ -268,20 +287,6 @@ func (p *Participant) campaignCheck() bool {
 // SetCampaignChecker sets the pre-campaign checker.
 func (p *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 	p.campaignChecker.Store(checker)
-}
-
-// SetExpectedPrimaryLease sets the expected lease for the primary.
-func (p *Participant) SetExpectedPrimaryLease(lease *election.Lease) {
-	p.expectedPrimaryLease.Store(lease)
-}
-
-// GetExpectedPrimaryLease gets the expected lease for the primary.
-func (p *Participant) GetExpectedPrimaryLease() *election.Lease {
-	l := p.expectedPrimaryLease.Load()
-	if l == nil {
-		return nil
-	}
-	return l.(*election.Lease)
 }
 
 // NewParticipantByService creates a new participant by service name.

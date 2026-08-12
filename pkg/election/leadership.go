@@ -73,9 +73,6 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
-	// primaryWatch is for the primary watch only,
-	// which is used to reuse `Watch` interface in `Leadership`.
-	primaryWatch atomic.Bool
 }
 
 // NewLeadership creates a new Leadership.
@@ -130,16 +127,6 @@ func (ls *Leadership) GetLeaderValue() string {
 		return ""
 	}
 	return leaderValue.(string)
-}
-
-// SetPrimaryWatch sets the primary watch flag.
-func (ls *Leadership) SetPrimaryWatch(val bool) {
-	ls.primaryWatch.Store(val)
-}
-
-// IsPrimary gets the primary watch flag.
-func (ls *Leadership) IsPrimary() bool {
-	return ls.primaryWatch.Load()
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -421,13 +408,6 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
-				// ONLY `{service}/primary/transfer` API update primary will meet this condition.
-				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
-					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
-						zap.String("leader-key", ls.leaderKey), zap.ByteString("cur-value", ev.Kv.Value),
-						zap.String("purpose", ls.purpose))
-					return
-				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -449,6 +429,5 @@ func (ls *Leadership) Reset() {
 	if err != nil {
 		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
 	}
-	ls.SetPrimaryWatch(false)
 	ls.leaderValue.Store("")
 }

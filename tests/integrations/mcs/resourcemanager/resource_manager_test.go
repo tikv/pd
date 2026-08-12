@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -559,6 +560,21 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 
+	// This test overwrites the shared controller config key, so save the
+	// original value and restore it afterwards to avoid polluting other tests.
+	originalConfig, err := suite.client.Get(ctx, pd.ControllerConfigPathPrefixBytes)
+	re.NoError(err)
+	defer func() {
+		if len(originalConfig.GetKvs()) == 0 {
+			_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, []byte("{}"))
+			re.NoError(err)
+			return
+		}
+		// Use suite.ctx because the test-scoped ctx is canceled by earlier defers.
+		_, err := suite.client.Put(suite.ctx, pd.ControllerConfigPathPrefixBytes, originalConfig.GetKvs()[0].GetValue())
+		re.NoError(err)
+	}()
+
 	minRevision := int64(0)
 	maxRevision := int64(0)
 	for i := range 3 {
@@ -599,7 +615,7 @@ func (suite *resourceManagerClientTestSuite) TestKeyspaceResourceGroupController
 	configBytes, err := json.Marshal(config)
 	re.NoError(err)
 	// trigger resource group controller to watch config changes.
-	_, err = suite.client.Put(ctx, fmt.Appendf(nil, "%s/%d", pd.ControllerConfigPathPrefixBytes, 1), configBytes)
+	_, err = suite.client.Put(ctx, pd.ControllerConfigPathPrefixBytes, configBytes)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		return rgController.GetRUVersion() == controller.RUVersionV2
@@ -775,6 +791,14 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	resp, err := cli.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	// In standalone RM mode, writes go through the PD proxy and the standalone
+	// RM observes persisted metadata asynchronously. Wait until the read path
+	// can see the group before the controller lazily loads it.
+	var getErr error
+	testutil.Eventually(re, func() bool {
+		_, getErr = cli.GetResourceGroup(suite.ctx, group.Name)
+		return getErr == nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
 	_, _, _, _, err = controller.OnRequestWait(suite.ctx, group.Name, tcs.makeReadRequest())
@@ -1419,8 +1443,14 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		gresp, err := cli.GetResourceGroup(suite.ctx, tcase.name)
-		re.NoError(err)
+		var gresp *rmpb.ResourceGroup
+		testutil.Eventually(re, func() bool {
+			gresp, err = cli.GetResourceGroup(suite.ctx, tcase.name)
+			if err != nil || gresp.GetName() != tcase.name {
+				return false
+			}
+			return !tcase.modifySuccess || reflect.DeepEqual(group, gresp)
+		}, testutil.WithTickInterval(50*time.Millisecond))
 		re.Equal(tcase.name, gresp.Name)
 		if tcase.modifySuccess {
 			re.Equal(group, gresp)
@@ -1442,8 +1472,12 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 				re.NoError(err)
 				re.Contains(dresp, "Success!")
-				_, err = cli.GetResourceGroup(suite.ctx, g.Name)
-				re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name))
+				expectedErr := fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = [PD:resourcemanager:ErrGroupNotExists]the %v resource group does not exist", g.Name, g.Name)
+				testutil.Eventually(re, func() bool {
+					_, err = cli.GetResourceGroup(suite.ctx, g.Name)
+					return err != nil && err.Error() == expectedErr
+				}, testutil.WithTickInterval(50*time.Millisecond))
+				re.EqualError(err, expectedErr)
 			}
 
 			// to test the deletion of persistence
@@ -2079,8 +2113,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 
 	// Add keyspace meta.
 	keyspace := &keyspacepb.KeyspaceMeta{
-		Id:   keyspaceID,
-		Name: "keyspace_test",
+		Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceID},
+		Name:     "keyspace_test",
 	}
 	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
 	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
@@ -2122,7 +2156,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.Len(rgs, 2) // Including the default resource group.
 	for _, r := range rgs {
 		re.NotNil(r.KeyspaceId)
-		re.Equal(r.KeyspaceId.Value, keyspaceID)
+		re.Equal(r.KeyspaceId.GetValue(), keyspaceID)
 		switch r.Name {
 		case server.DefaultResourceGroupName:
 		case group.Name:
@@ -2171,7 +2205,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.NotEqual(rg.RUStats, testConsumption)
 
 	// Test AcquireTokenBuckets with keyspace id
-	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
+	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}}
 	_, err = clientKeyspace.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
 	time.Sleep(10 * time.Millisecond)
@@ -2217,7 +2251,10 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 		client := suite.setupKeyspaceClient(re, keyspaceID)
 		clients[i] = client
 		// Create and save keyspace metadata
-		keyspaceMeta := &keyspacepb.KeyspaceMeta{Id: keyspaceID, Name: keyspaceName}
+		keyspaceMeta := &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceID},
+			Name:     keyspaceName,
+		}
 		err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
 			return storage.SaveKeyspaceMeta(txn, keyspaceMeta)
 		})
@@ -2227,7 +2264,7 @@ func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucketsWithMultiKey
 			Name:       groupName,
 			Mode:       rmpb.GroupMode_RUMode,
 			RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 10000}, Tokens: 100000}},
-			KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+			KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceID}},
 		}
 		_, err = clients[i].AddResourceGroup(ctx, groups[i])
 		re.NoError(err)
@@ -2422,11 +2459,17 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	keyspaceA := uint32(10)
 	keyspaceB := uint32(11)
 	err := storage.RunInTxn(ctx, func(txn kv.Txn) error {
-		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceA, Name: "ks_A"})
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceA},
+			Name:     "ks_A",
+		})
 	})
 	re.NoError(err)
 	err = storage.RunInTxn(ctx, func(txn kv.Txn) error {
-		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{Id: keyspaceB, Name: "ks_B"})
+		return storage.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+			Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: keyspaceB},
+			Name:     "ks_B",
+		})
 	})
 	re.NoError(err)
 
@@ -2447,14 +2490,14 @@ func (suite *resourceManagerClientTestSuite) TestCannotModifyKeyspaceOfResourceG
 	re.NoError(err)
 	re.Equal(groupName, g.Name)
 	re.NotNil(g.KeyspaceId)
-	re.Equal(keyspaceA, g.KeyspaceId.Value)
+	re.Equal(keyspaceA, g.KeyspaceId.GetValue())
 
 	// Try to modify the group with a different keyspace ID using Client A
 	modifiedGroup := &rmpb.ResourceGroup{
 		Name:       groupName,
 		Mode:       rmpb.GroupMode_RUMode,
 		Priority:   5,
-		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceB},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Keyspace: &rmpb.KeyspaceIDValue_Value{Value: keyspaceB}},
 	}
 
 	// It should be failed because the keyspace ID does not match

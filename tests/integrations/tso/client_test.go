@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -517,23 +518,76 @@ func (suite *tsoClientTestSuite) TestTSONotLeaderWhenRebaseErr() {
 		suite.T().Skip("skipping test in microservice mode")
 	}
 	re := suite.Require()
-	pdClient := suite.clients[0]
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
-	// Resign the leader to trigger the rebase error.
-	err := suite.pdLeaderServer.ResignLeaderWithRetry()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := cluster.GetServer(leaderName)
+	re.NoError(pdLeader.BootstrapCluster())
+	memberID := pdLeader.GetLeader().GetMemberId()
+	pdClient, err := pd.NewClientWithContext(ctx,
+		caller.TestComponent,
+		[]string{pdLeader.GetAddr()}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	memberIDs := make([]string, 0, len(cluster.GetServers()))
+	for _, server := range cluster.GetServers() {
+		memberIDs = append(memberIDs, strconv.FormatUint(server.GetServerID(), 10))
+	}
+	memberIDList := strings.Join(memberIDs, ",")
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", fmt.Sprintf("return(\"%s\")", memberIDList)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipRetry", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", fmt.Sprintf("return(\"%s\")", memberIDList)))
+	leaderFailpointsDisabled := false
+	disableLeaderFailpoints := func() {
+		if leaderFailpointsDisabled {
+			return
+		}
+		leaderFailpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	}
+	failpointsDisabled := false
+	disableFailpoints := func() {
+		if failpointsDisabled {
+			return
+		}
+		failpointsDisabled = true
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+		disableLeaderFailpoints()
+	}
+	defer disableFailpoints()
+	// Exit the PD leader loop to trigger the rebase error without directly transferring etcd leadership.
 	// Trying to get TSO should fail with "not leader" error.
-	_, _, err = pdClient.GetTS(suite.ctx)
-	re.ErrorContains(err, "not leader")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipRetry"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+	getTSError := func() error {
+		_, _, err := pdClient.GetTS(ctx)
+		return err
+	}
+	testutil.Eventually(re, func() bool {
+		err := getTSError()
+		return err != nil && strings.Contains(err.Error(), "not leader")
+	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(20*time.Millisecond))
+	disableLeaderFailpoints()
+	for range 10 {
+		re.ErrorContains(getTSError(), "not leader")
+	}
+	disableFailpoints()
 	// The TSO should be eventually available.
 	testutil.Eventually(re, func() bool {
-		_, _, err := pdClient.GetTS(suite.ctx)
+		_, _, err := pdClient.GetTS(ctx)
 		return err == nil
-	})
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *tsoClientTestSuite) TestRetryGetTSNotLeader() {
@@ -684,6 +738,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 
 	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
+	}()
 	pdClient, err := pd.NewClientWithContext(ctx,
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
@@ -693,6 +750,11 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -706,11 +768,9 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Restart the TSO cluster
 	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
-	defer tsoCluster.Destroy()
+	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy
 	utils.WaitForTSOServiceAvailable(ctx, re, pdClient)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
 func checkTSO(

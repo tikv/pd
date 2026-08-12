@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"path"
 	"runtime"
 	"runtime/trace"
 	"strconv"
@@ -30,6 +29,8 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -230,6 +231,11 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 		time.Sleep(5 * time.Second)
 	})
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
+	if forwardedHost != "" {
+		if err := s.validatePDForwardedHost(forwardedHost); err != nil {
+			return nil, err
+		}
+	}
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
@@ -249,9 +255,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
-		return &pdpb.GetClusterInfoResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
-		}, nil
+		return nil, errs.ErrNotStarted
 	}
 
 	var tsoServiceAddrs []string
@@ -438,32 +442,25 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
-		return &pdpb.GetMembersResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
-		}, nil
+		return nil, errs.ErrNotStarted
 	}
-	members, err := cluster.GetMembers(s.GetClient())
+	members, err := s.Server.GetMembers()
 	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
+		return getMembersErrorResult(err)
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
 	leaderID := s.member.GetEtcdLeader()
-	for _, m := range members {
-		if m.MemberId == leaderID {
-			etcdLeader = m
-			break
-		}
-	}
-
 	leader := s.member.GetLeader()
-	for _, m := range members {
-		if m.MemberId == leader.GetMemberId() {
-			pdLeader = m
-			break
+	etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
+	if (pdLeader == nil && leader != nil) || (etcdLeader == nil && leaderID != 0) {
+		members, err = s.ReloadMembers()
+		if err != nil {
+			return getMembersErrorResult(err)
 		}
+		leaderID = s.member.GetEtcdLeader()
+		leader = s.member.GetLeader()
+		etcdLeader, pdLeader = findLeadersInMembers(members, leaderID, leader)
 	}
 
 	return &pdpb.GetMembersResponse{
@@ -474,9 +471,31 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}, nil
 }
 
+func getMembersErrorResult(err error) (*pdpb.GetMembersResponse, error) {
+	if errors.ErrorEqual(err, errs.ErrServerNotStarted.FastGenByArgs()) {
+		return nil, errs.ErrNotStarted
+	}
+	// Keep other server-side failures in the response header so clients don't
+	// mistake them for service or transport availability failures.
+	return &pdpb.GetMembersResponse{
+		Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+	}, nil
+}
+
+func findLeadersInMembers(members []*pdpb.Member, etcdLeaderID uint64, leader *pdpb.Member) (etcdLeader, pdLeader *pdpb.Member) {
+	for _, m := range members {
+		if m.GetMemberId() == etcdLeaderID {
+			etcdLeader = m
+		}
+		if leader != nil && m.GetMemberId() == leader.GetMemberId() {
+			pdLeader = m
+		}
+	}
+	return etcdLeader, pdLeader
+}
+
 // Tso implements gRPC PDServer.
 func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
-	stream = newTsoMetricsStream(stream)
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -494,9 +513,12 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-		tsoRequestProxyCtx context.Context
-		forwarder          = newTSOForwarder(stream)
-		tsoStreamErr       error
+		tsoRequestProxyCtx   context.Context
+		forwardedHost        = grpcutil.GetForwardedHost(stream.Context())
+		forwardedClientConn  *grpc.ClientConn
+		forwarder            = newTSOForwarder(stream)
+		tsoStreamErr         error
+		forwardedHostChecked = forwardedHost == ""
 	)
 
 	defer func() {
@@ -553,14 +575,21 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errs.ErrNotStarted
 		}
 
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
-		if !s.isLocalRequest(forwardedHost) {
-			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
-			if err != nil {
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(forwardedHost); err != nil {
 				return errors.WithStack(err)
 			}
+			forwardedHostChecked = true
+		}
+		if !s.isLocalRequest(forwardedHost) {
+			if forwardedClientConn == nil {
+				forwardedClientConn, err = s.getDelegateClient(s.ctx, forwardedHost)
+				if err != nil {
+					return errors.WithStack(err)
+				}
+			}
 
-			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
+			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, forwardedClientConn, request, stream)
 			// don't pass a stream context here as dispatcher serves multiple streams
 			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
@@ -1061,7 +1090,6 @@ func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 
 // ReportBuckets implements gRPC PDServer
 func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
-	stream = newReportBucketsMetricsStream(stream)
 	var (
 		server                      = &bucketHeartbeatServer{stream: stream}
 		forwardStream               pdpb.PD_ReportBucketsClient
@@ -1071,6 +1099,8 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		forwardErrCh                chan error
 		forwardSchedulingStream     schedulingpb.Scheduling_RegionBucketsClient
 		lastForwardedSchedulingHost string
+		metadataForwardedHost       = grpcutil.GetForwardedHost(stream.Context())
+		forwardedHostChecked        = metadataForwardedHost == ""
 	)
 	defer func() {
 		if cancel != nil {
@@ -1096,7 +1126,13 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(metadataForwardedHost); err != nil {
+				return err
+			}
+			forwardedHostChecked = true
+		}
+		forwardedHost := metadataForwardedHost
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -1241,7 +1277,6 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 
 // RegionHeartbeat implements gRPC PDServer.
 func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error {
-	stream = newRegionHeartbeatMetricsStream(stream)
 	var (
 		server                      = &heartbeatServer{stream: stream}
 		flowRoundDivisor            = core.GetFlowRoundDivisorByDigit(s.persistOptions.GetPDServerConfig().FlowRoundByDigit)
@@ -1253,6 +1288,8 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		forwardErrCh                chan error
 		forwardSchedulingStream     schedulingpb.Scheduling_RegionHeartbeatClient
 		lastForwardedSchedulingHost string
+		metadataForwardedHost       = grpcutil.GetForwardedHost(stream.Context())
+		forwardedHostChecked        = metadataForwardedHost == ""
 	)
 	defer func() {
 		// cancel the forward stream
@@ -1275,7 +1312,13 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
+		if !forwardedHostChecked {
+			if err := s.validatePDForwardedHost(metadataForwardedHost); err != nil {
+				return err
+			}
+			forwardedHostChecked = true
+		}
+		forwardedHost := metadataForwardedHost
 		failpoint.Inject("grpcClientClosed", func() {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
 		})
@@ -1555,7 +1598,6 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 
 // QueryRegion provides a stream processing of the region query.
 func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
-	stream = newQueryRegionMetricsStream(stream)
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return err
@@ -2030,7 +2072,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
-	stream = newSyncRegionsMetricsStream(stream)
 	if s.IsClosed() || s.cluster == nil {
 		return errs.ErrNotStarted
 	}
@@ -2370,8 +2411,33 @@ func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInf
 	}, nil
 }
 
-// for CDC compatibility, we need to initialize config path to `globalConfigPath`
+// For CDC compatibility, we need to initialize an empty config path to
+// `globalConfigPath`.
 const globalConfigPath = "/global/config/"
+
+func normalizeGlobalConfigPath(configPath string) (string, error) {
+	if configPath == "" {
+		return globalConfigPath, nil
+	}
+	rootPath := strings.TrimSuffix(globalConfigPath, "/")
+	if configPath == rootPath {
+		return globalConfigPath, nil
+	}
+	if !strings.HasPrefix(configPath, globalConfigPath) {
+		return "", status.Errorf(codes.InvalidArgument, "global config path %q is not allowed", configPath)
+	}
+	return configPath, nil
+}
+
+func resolveGlobalConfigKey(configPath, name string) string {
+	if name == "" {
+		return strings.TrimSuffix(configPath, "/")
+	}
+	if strings.HasSuffix(configPath, "/") {
+		return configPath + name
+	}
+	return configPath + "/" + name
+}
 
 // StoreGlobalConfig store global config into etcd by transaction
 // Since item value needs to support marshal of different struct types,
@@ -2387,13 +2453,13 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 	if done != nil {
 		defer done()
 	}
-	configPath := request.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
+	configPath, err := normalizeGlobalConfigPath(request.GetConfigPath())
+	if err != nil {
+		return nil, err
 	}
 	ops := make([]clientv3.Op, len(request.Changes))
 	for i, item := range request.Changes {
-		name := path.Join(configPath, item.GetName())
+		key := resolveGlobalConfigKey(configPath, item.GetName())
 		switch item.GetKind() {
 		case pdpb.EventType_PUT:
 			// For CDC compatibility, we need to check the Value field firstly.
@@ -2401,9 +2467,9 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 			if value == "" {
 				value = string(item.GetPayload())
 			}
-			ops[i] = clientv3.OpPut(name, value)
+			ops[i] = clientv3.OpPut(key, value)
 		case pdpb.EventType_DELETE:
-			ops[i] = clientv3.OpDelete(name)
+			ops[i] = clientv3.OpDelete(key)
 		}
 	}
 	res, err :=
@@ -2432,15 +2498,21 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		defer done()
 	}
 	configPath := request.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
+	// Keep the legacy prefix-load behavior used by cloud-storage-engine, but
+	// only for the exact controller path. Other operations and direct sibling
+	// paths must remain within the global config namespace.
+	if request.Names != nil || configPath != keypath.ControllerConfigPath() {
+		configPath, err = normalizeGlobalConfigPath(configPath)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// Since item value needs to support marshal of different struct types,
 	// it should be set to `Payload bytes` instead of `Value string`.
 	if request.Names != nil {
 		res := make([]*pdpb.GlobalConfigItem, len(request.Names))
 		for i, name := range request.Names {
-			r, err := s.client.Get(ctx, path.Join(configPath, name))
+			r, err := s.client.Get(ctx, resolveGlobalConfigKey(configPath, name))
 			if err != nil {
 				res[i] = &pdpb.GlobalConfigItem{Name: name, Error: &pdpb.Error{Type: pdpb.ErrorType_UNKNOWN, Message: err.Error()}}
 			} else if len(r.Kvs) == 0 {
@@ -2467,7 +2539,6 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // by Etcd.Watch() as long as the context has not been canceled or timed out.
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
-	server = newWatchGlobalConfigMetricsStream(server)
 	if s.client == nil {
 		return errs.ErrEtcdNotStarted
 	}
@@ -2478,12 +2549,12 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	if done != nil {
 		defer done()
 	}
+	configPath, err := normalizeGlobalConfigPath(req.GetConfigPath())
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
-	configPath := req.GetConfigPath()
-	if configPath == "" {
-		configPath = globalConfigPath
-	}
 	revision := req.GetRevision()
 	// If the revision is compacted, will meet required revision has been compacted error.
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.

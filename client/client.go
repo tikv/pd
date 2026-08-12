@@ -574,7 +574,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			return physical, logical, err
 		}
 
-		if !errs.IsLeaderChange(err) {
+		if !isRetryableGetTSError(err) {
 			break
 		}
 
@@ -585,7 +585,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 			failpoint.Return(physical, logical, err)
 		})
 
-		// If the leader changes, we need to retry.
+		// If the leader changes or the callee ID mismatches, we need to retry.
 		// For the first time, we retry immediately to avoid impacting the latency.
 		var interval time.Duration
 		if retryCount != 0 {
@@ -606,6 +606,10 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	})
 	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
+}
+
+func isRetryableGetTSError(err error) bool {
+	return errs.IsLeaderChange(err) || errs.IsCalleeMismatch(err)
 }
 
 // GetLocalTS implements the TSOClient interface.

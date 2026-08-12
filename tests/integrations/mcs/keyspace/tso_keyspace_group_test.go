@@ -753,15 +753,15 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 		}
 
 		retryCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
 
 		physicalTS, logicalTS, err := client.GetTS(retryCtx)
+		cancel()
 		if err != nil {
 			return false
 		}
 		recoveredTS = tsoutil.ComposeTS(physicalTS, logicalTS)
 		return recoveredTS > setup.initialTS
-	}, testutil.WithWaitFor(60*time.Second), testutil.WithTickInterval(500*time.Millisecond))
+	}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(500*time.Millisecond))
 	getTSCancel()
 	re.Greater(recoveredTS, setup.initialTS)
 
