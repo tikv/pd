@@ -504,28 +504,31 @@ func (m *Manager) initControllerConfig() error {
 		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
 		return err
 	}
-	// Unmarshal into a clone and publish it under the lock: on a
-	// re-initialization after a leadership change, the previous term's
-	// background goroutines may still be reading the current config.
-	m.RLock()
+	// Clone, merge, save, and publish all under the same lock, matching
+	// SetKeyspaceRUVersion/UpdateControllerConfigItem's pattern: this makes
+	// initControllerConfig's own re-save fully serialized against every
+	// other config mutator too, instead of only against itself via ordering
+	// (save-before-publish). Without this, a concurrent SetKeyspaceRUVersion
+	// or UpdateControllerConfigItem call could commit its change to storage
+	// and m.controllerConfig in between this call's unlocked read/merge and
+	// its own unlocked save, and this call's now-stale snapshot would
+	// silently overwrite it - the same class of lost update fixed for
+	// SetKeyspaceRUVersion. Requests are gated behind IsServing(), which
+	// only flips true after Init (and thus this call) returns, so holding
+	// the lock across the save here does not add contention with live
+	// request traffic in the common case.
+	m.Lock()
+	defer m.Unlock()
 	controllerConfig := cloneControllerConfig(m.controllerConfig)
-	m.RUnlock()
 	if err = json.Unmarshal([]byte(v), &controllerConfig); err != nil {
 		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
-	// re-save the config to make sure the config has been persisted. This
-	// must run before controllerConfig is published into m.controllerConfig
-	// below: once published, it's reachable (and mutable) by any concurrent
-	// caller holding m.Lock() - e.g. SetKeyspaceRUVersion - which would race
-	// with this unlocked marshal-and-save if it ran after instead.
 	if m.writeRole.AllowsMetadataWrite() {
 		if err := m.storage.SaveControllerConfig(controllerConfig); err != nil {
 			return err
 		}
 	}
-	m.Lock()
 	m.controllerConfig = controllerConfig
-	m.Unlock()
 	return nil
 }
 
