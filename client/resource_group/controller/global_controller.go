@@ -555,7 +555,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 // Stop stops ResourceGroupController service and releases the process-wide
 // ownership slot, allowing a replacement controller to be constructed. It is
 // idempotent and also valid on a controller that was never started. A stopped
-// controller cannot be started again.
+// controller cannot be started again and must not be used further: requests
+// served after Stop would repopulate the process-global metric state with
+// series that no cleanup path collects anymore.
 func (c *ResourceGroupsController) Stop() error {
 	c.stopOnce.Do(func() {
 		c.lifecycleMu.Lock()
