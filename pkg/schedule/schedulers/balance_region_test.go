@@ -60,7 +60,7 @@ func TestInfluenceAmp(t *testing.T) {
 
 	// It will schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
-	tc.AddRegionStore(1, int(100+influenceAmp+4))
+	tc.AddRegionStore(1, int(100+influenceAmp+3))
 	tc.AddRegionStore(2, int(100-influenceAmp))
 	tc.AddLeaderRegion(1, 1, 2)
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(R))
@@ -73,11 +73,42 @@ func TestInfluenceAmp(t *testing.T) {
 
 	// It will not schedule if the diff region count is greater than the sum
 	// of TolerantSizeRatio and influenceAmp*2.
-	tc.AddRegionStore(1, int(100+influenceAmp+3))
+	tc.AddRegionStore(1, int(100+influenceAmp+2))
 	solver.Source = tc.GetStore(1)
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.False(solver.shouldBalance(""))
 	re.Less(solver.sourceScore-solver.targetScore, float64(1))
+}
+
+// TestBalanceRegionOrdinaryMoveNotBlockedByCandidateSize guards against
+// double-counting the candidate region's size on top of tolerantResource in
+// targetStoreScore. tolerantResource already represents roughly one average
+// region's worth of margin, so a candidate whose size sits at or below that
+// margin must not additionally raise the bar the target has to clear. Here
+// the source holds three ordinary, equal-sized regions and the target is
+// empty: moving one region is a clear improvement (192 vs 96 after the move)
+// and must still be scheduled.
+func TestBalanceRegionOrdinaryMoveNotBlockedByCandidateSize(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re := require.New(t)
+
+	tc.SetTolerantSizeRatio(1)
+	tc.SetRegionScoreFormulaVersion("v1")
+
+	tc.AddRegionStore(1, 3, 288)
+	tc.AddRegionStore(2, 0, 0)
+	tc.AddLeaderRegion(1, 1)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(96))
+	tc.PutRegion(region)
+
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
+	influence := oc.GetOpInfluence(tc.GetBasicCluster())
+	basePlan := plan.NewBalanceSchedulerPlan()
+	solver := newSolver(basePlan, kind, tc, influence)
+	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+	re.True(solver.shouldBalance(""))
 }
 
 // TestSingleRegionOnLargeEmptyDiskDoesNotMigrate verifies that when a store's
