@@ -58,9 +58,13 @@ type ListServiceGCSafepoint struct {
 //	@Failure	500	{string}	string	"PD server failed to proceed the request."
 //	@Router		/gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
+	requestCtx := r.Context()
 	gcStateManager := h.svr.GetGCStateManager()
-	gcState, err := gcStateManager.GetGCState(r.Context(), constant.NullKeyspaceID, false)
+	gcState, err := gcStateManager.GetGCState(requestCtx, constant.NullKeyspaceID, false)
 	if err != nil {
+		if requestCtx.Err() != nil {
+			return
+		}
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

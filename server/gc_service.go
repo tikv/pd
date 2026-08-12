@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -35,6 +36,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func contextErrorToGRPCStatus(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return status.FromContextError(err).Err()
+	}
+	return nil
+}
 
 // UpdateGCSafePoint implements gRPC PDServer.
 //
@@ -728,6 +736,9 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 		)
 	}
 	if err != nil {
+		if statusErr := contextErrorToGRPCStatus(err); statusErr != nil {
+			return nil, statusErr
+		}
 		return &pdpb.GetGCStateResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
@@ -777,6 +788,9 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx, request.GetExcludeGcBarriers())
 	if err != nil {
+		if statusErr := contextErrorToGRPCStatus(err); statusErr != nil {
+			return nil, statusErr
+		}
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
