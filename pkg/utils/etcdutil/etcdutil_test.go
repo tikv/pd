@@ -36,6 +36,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/failpoint"
 
@@ -128,6 +129,87 @@ func TestEtcdKVGet(t *testing.T) {
 	resp, err = EtcdKVGet(client, next, withRange, withLimit, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend))
 	re.NoError(err)
 	re.Len(resp.Kvs, 2)
+}
+
+func TestEtcdKVGetWithContextCancellation(t *testing.T) {
+	re := require.New(t)
+	const key = "test/context"
+
+	blocker := NewBlockingUnaryClientInterceptor(
+		func(method string, request any) bool {
+			rangeRequest, ok := request.(*etcdserverpb.RangeRequest)
+			return method == "/etcdserverpb.KV/Range" &&
+				ok &&
+				string(rangeRequest.Key) == key &&
+				len(rangeRequest.RangeEnd) == 0
+		},
+	)
+	option := &TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(
+				config.DialOptions,
+				grpc.WithChainUnaryInterceptor(
+					blocker.UnaryClientInterceptor,
+				),
+			)
+		},
+	}
+	_, client, clean := NewTestEtcdCluster(t, 1, option)
+	defer clean()
+	defer blocker.Release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	blocker.Enable()
+	go func() {
+		_, err := EtcdKVGetWithContext(ctx, client, key)
+		result <- err
+	}()
+
+	select {
+	case <-blocker.Entered():
+	case <-time.After(5 * time.Second):
+		re.FailNow("the etcd Range request was not intercepted")
+	}
+	cancel()
+	select {
+	case <-blocker.ContextDone():
+	case <-time.After(5 * time.Second):
+		re.FailNow("the intercepted Range context was not canceled")
+	}
+	select {
+	case err := <-result:
+		re.Equal(context.Canceled, err)
+	case <-time.After(5 * time.Second):
+		re.FailNow("EtcdKVGetWithContext did not return")
+	}
+}
+
+func TestEtcdKVGetWithContextPreCanceled(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	response, err := EtcdKVGetWithContext(ctx, client, "unused")
+	re.Nil(response)
+	re.Equal(context.Canceled, err)
+}
+
+func TestEtcdKVGetWithContextExpiredDeadline(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+
+	ctx, cancel := context.WithDeadline(
+		context.Background(),
+		time.Now().Add(-time.Second),
+	)
+	defer cancel()
+	response, err := EtcdKVGetWithContext(ctx, client, "unused")
+	re.Nil(response)
+	re.Equal(context.DeadlineExceeded, err)
 }
 
 func TestEtcdKVPutWithTTL(t *testing.T) {
