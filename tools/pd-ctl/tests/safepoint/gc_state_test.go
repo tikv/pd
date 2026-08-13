@@ -89,6 +89,19 @@ func requireGCStateCommandBarriers(
 	}
 }
 
+func requireGCStateCommandState(
+	re *require.Assertions,
+	actual gcStateCommandState,
+	expected gcStateCommandState,
+	expectedBarriers []expectedGCStateCommandBarrier,
+) {
+	re.Equal(expected.KeyspaceID, actual.KeyspaceID)
+	re.Equal(expected.IsKeyspaceLevelGC, actual.IsKeyspaceLevelGC)
+	re.Equal(expected.TxnSafePoint, actual.TxnSafePoint)
+	re.Equal(expected.GCSafePoint, actual.GCSafePoint)
+	requireGCStateCommandBarriers(re, actual.GCBarriers, expectedBarriers)
+}
+
 func TestGCState(t *testing.T) {
 	re := require.New(t)
 	ctx := t.Context()
@@ -422,10 +435,26 @@ func TestGCState(t *testing.T) {
 	}
 	excludedNullState, ok := excludedStatesByID[constant.NullKeyspaceID]
 	re.True(ok)
-	re.Equal(nullState, excludedNullState)
+	requireGCStateCommandState(
+		re,
+		excludedNullState,
+		nullState,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-null", barrierTS: 110},
+			{barrierID: "z-null", barrierTS: 120, expires: true},
+		},
+	)
 	excludedKeyspaceLevelState, ok := excludedStatesByID[keyspaceLevelID]
 	re.True(ok)
-	re.Equal(keyspaceLevelState, excludedKeyspaceLevelState)
+	requireGCStateCommandState(
+		re,
+		excludedKeyspaceLevelState,
+		keyspaceLevelState,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-local", barrierTS: 210},
+			{barrierID: "z-local", barrierTS: 220, expires: true},
+		},
+	)
 
 	output, err = tests.ExecuteCommand(
 		ctl.GetRootCmd(),
@@ -452,10 +481,27 @@ func TestGCState(t *testing.T) {
 	}
 	excludedNullStateWithExpired, ok := excludedStatesByIDWithExpired[constant.NullKeyspaceID]
 	re.True(ok)
-	re.Equal(nullState, excludedNullStateWithExpired)
+	requireGCStateCommandState(
+		re,
+		excludedNullStateWithExpired,
+		nullState,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-null", barrierTS: 110},
+			{barrierID: "z-null", barrierTS: 120, expires: true},
+		},
+	)
 	excludedKeyspaceLevelStateWithExpired, ok := excludedStatesByIDWithExpired[keyspaceLevelID]
 	re.True(ok)
-	re.Equal(keyspaceLevelStateWithExpired, excludedKeyspaceLevelStateWithExpired)
+	requireGCStateCommandState(
+		re,
+		excludedKeyspaceLevelStateWithExpired,
+		keyspaceLevelStateWithExpired,
+		[]expectedGCStateCommandBarrier{
+			{barrierID: "a-local", barrierTS: 210},
+			{barrierID: "z-local", barrierTS: 220, expires: true},
+			{barrierID: "expired-local", barrierTS: 230, expired: true},
+		},
+	)
 
 	if kerneltype.IsNextGen() {
 		systemState, ok := statesByID[constant.SystemKeyspaceID]
