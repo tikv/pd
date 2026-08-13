@@ -213,36 +213,57 @@ func shouldIncludeGCBarrier(ttl time.Duration, includeExpired bool) bool {
 	return includeExpired || ttl > 0
 }
 
-func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo, includeExpired bool) []gcBarrierOutput {
+type gcBarrierFields struct {
+	barrierID string
+	barrierTS uint64
+	ttl       time.Duration
+}
+
+func newGCBarrierOutputs[T any](
+	barriers []T,
+	includeExpired bool,
+	extract func(T) (gcBarrierFields, bool),
+) []gcBarrierOutput {
 	result := make([]gcBarrierOutput, 0, len(barriers))
 	for _, barrier := range barriers {
-		if barrier == nil || !shouldIncludeGCBarrier(barrier.TTL, includeExpired) {
+		fields, ok := extract(barrier)
+		if !ok || !shouldIncludeGCBarrier(fields.ttl, includeExpired) {
 			continue
 		}
 		result = append(result, gcBarrierOutput{
-			BarrierID:  barrier.BarrierID,
-			BarrierTS:  barrier.BarrierTS,
-			TTLSeconds: gcStateTTLSeconds(barrier.TTL),
+			BarrierID:  fields.barrierID,
+			BarrierTS:  fields.barrierTS,
+			TTLSeconds: gcStateTTLSeconds(fields.ttl),
 		})
 	}
 	sortGCBarrierOutputs(result)
 	return result
 }
 
-func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo, includeExpired bool) []gcBarrierOutput {
-	result := make([]gcBarrierOutput, 0, len(barriers))
-	for _, barrier := range barriers {
-		if barrier == nil || !shouldIncludeGCBarrier(barrier.TTL, includeExpired) {
-			continue
+func newLocalGCBarrierOutputs(barriers []*gc.GCBarrierInfo, includeExpired bool) []gcBarrierOutput {
+	return newGCBarrierOutputs(barriers, includeExpired, func(barrier *gc.GCBarrierInfo) (gcBarrierFields, bool) {
+		if barrier == nil {
+			return gcBarrierFields{}, false
 		}
-		result = append(result, gcBarrierOutput{
-			BarrierID:  barrier.BarrierID,
-			BarrierTS:  barrier.BarrierTS,
-			TTLSeconds: gcStateTTLSeconds(barrier.TTL),
-		})
-	}
-	sortGCBarrierOutputs(result)
-	return result
+		return gcBarrierFields{
+			barrierID: barrier.BarrierID,
+			barrierTS: barrier.BarrierTS,
+			ttl:       barrier.TTL,
+		}, true
+	})
+}
+
+func newGlobalGCBarrierOutputs(barriers []*gc.GlobalGCBarrierInfo, includeExpired bool) []gcBarrierOutput {
+	return newGCBarrierOutputs(barriers, includeExpired, func(barrier *gc.GlobalGCBarrierInfo) (gcBarrierFields, bool) {
+		if barrier == nil {
+			return gcBarrierFields{}, false
+		}
+		return gcBarrierFields{
+			barrierID: barrier.BarrierID,
+			barrierTS: barrier.BarrierTS,
+			ttl:       barrier.TTL,
+		}, true
+	})
 }
 
 func newKeyspaceGCStateOutput(

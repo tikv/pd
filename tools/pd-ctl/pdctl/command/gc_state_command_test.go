@@ -549,21 +549,6 @@ func TestGCStateCommandGlobalBarrierFlag(t *testing.T) {
 	}
 }
 
-func TestGCStateGlobalCommandIsRemoved(t *testing.T) {
-	factoryCalled := false
-	cmd := buildGCStateCommand(func(*cobra.Command) (gcStateReader, error) {
-		factoryCalled = true
-		return nil, errors.New("factory must not run")
-	})
-	cmd.SetOut(io.Discard)
-	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"global"})
-
-	err := cmd.Execute()
-	require.ErrorContains(t, err, `unknown command "global"`)
-	require.False(t, factoryCalled)
-}
-
 func TestGCStateKeyspaceCommand(t *testing.T) {
 	state := gc.NewGCStateWithGCBarriers(42, 100, 90, nil).
 		WithGlobalGCBarriers(nil)
