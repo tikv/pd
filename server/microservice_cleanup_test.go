@@ -95,6 +95,31 @@ func TestCleanupMicroserviceMetadataPreservesDefaultGroup(t *testing.T) {
 }
 
 func TestCleanupMicroserviceMetadataRejectsUnsafeState(t *testing.T) {
+	t.Run("missing-default-group", func(t *testing.T) {
+		svr, store := newMicroserviceMetadataCleanupTestServer(t, 13014)
+		ctx := context.Background()
+		require.NoError(t, store.RunInTxn(ctx, func(txn kv.Txn) error {
+			return store.SaveKeyspaceMeta(txn, &keyspacepb.KeyspaceMeta{
+				Keyspace: &keyspacepb.KeyspaceMeta_Id{Id: 1},
+				Name:     "keyspace-1",
+				Config: map[string]string{
+					keyspace.TSOKeyspaceGroupIDKey: "0",
+				},
+			})
+		}))
+
+		changed, err := svr.CleanupMicroserviceMetadata(ctx)
+		require.False(t, changed)
+		require.ErrorIs(t, err, ErrMicroserviceMetadataCleanupRejected)
+		require.NoError(t, store.RunInTxn(ctx, func(txn kv.Txn) error {
+			meta, err := store.LoadKeyspaceMeta(txn, 1)
+			require.NoError(t, err)
+			require.NotNil(t, meta)
+			require.Equal(t, "0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
+			return nil
+		}))
+	})
+
 	t.Run("non-default-group", func(t *testing.T) {
 		svr, store := newMicroserviceMetadataCleanupTestServer(t, 13002)
 		defaultGroup := newMicroserviceMetadataCleanupTestDefaultGroup()
@@ -194,6 +219,7 @@ func TestCleanupMicroserviceMetadataIsFencedByExactLeadershipTerm(t *testing.T) 
 	result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 	require.False(t, result.changed)
 	require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
+	require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
 	require.NotEmpty(t, loadMicroserviceMetadataCleanupTestGroup(
 		t, store, constant.DefaultKeyspaceGroupID).Members)
 }
@@ -219,20 +245,13 @@ func TestCleanupMicroserviceMetadataPreservesConcurrentGroupUpdate(t *testing.T)
 	result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 	require.False(t, result.changed)
 	require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
+	require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
 	group := loadMicroserviceMetadataCleanupTestGroup(t, store, constant.DefaultKeyspaceGroupID)
 	require.Equal(t, newMembers, group.Members)
 	require.Equal(t, []uint32{1, 2}, group.Keyspaces)
 }
 
 func TestCleanupMicroserviceMetadataFencesNoOp(t *testing.T) {
-	t.Run("absent", func(t *testing.T) {
-		svr, _ := newMicroserviceMetadataCleanupTestServer(t, 13009)
-
-		changed, err := svr.CleanupMicroserviceMetadata(context.Background())
-		require.NoError(t, err)
-		require.False(t, changed)
-	})
-
 	t.Run("empty-members-leadership-change", func(t *testing.T) {
 		svr, store := newMicroserviceMetadataCleanupTestServer(t, 13010)
 		group := newMicroserviceMetadataCleanupTestDefaultGroup()
@@ -248,6 +267,7 @@ func TestCleanupMicroserviceMetadataFencesNoOp(t *testing.T) {
 		result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 		require.False(t, result.changed)
 		require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
+		require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
 	})
 
 	t.Run("empty-members-group-update", func(t *testing.T) {
@@ -267,28 +287,40 @@ func TestCleanupMicroserviceMetadataFencesNoOp(t *testing.T) {
 		result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 		require.False(t, result.changed)
 		require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
+		require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
 		require.Equal(t, []uint32{1, 2}, loadMicroserviceMetadataCleanupTestGroup(
 			t, store, constant.DefaultKeyspaceGroupID).Keyspaces)
 	})
 
-	t.Run("absent-default-created", func(t *testing.T) {
+	t.Run("empty-members-group-deleted", func(t *testing.T) {
 		svr, store := newMicroserviceMetadataCleanupTestServer(t, 13012)
+		group := newMicroserviceMetadataCleanupTestDefaultGroup()
+		group.Members = nil
+		saveMicroserviceMetadataCleanupTestGroup(t, store, group)
 
 		blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 		resultCh := runMicroserviceMetadataCleanup(t, svr)
 		blocker.wait(t)
-		saveMicroserviceMetadataCleanupTestGroup(t, store, newMicroserviceMetadataCleanupTestDefaultGroup())
+		require.NoError(t, store.RunInTxn(context.Background(), func(txn kv.Txn) error {
+			return store.DeleteKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		}))
 		blocker.releaseCleanup()
 
 		result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 		require.False(t, result.changed)
 		require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
-		require.NotNil(t, loadMicroserviceMetadataCleanupTestGroup(
-			t, store, constant.DefaultKeyspaceGroupID))
+		require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
+
+		changed, err := svr.CleanupMicroserviceMetadata(context.Background())
+		require.False(t, changed)
+		require.ErrorIs(t, err, ErrMicroserviceMetadataCleanupRejected)
 	})
 
 	t.Run("non-default-created", func(t *testing.T) {
 		svr, store := newMicroserviceMetadataCleanupTestServer(t, 13013)
+		group := newMicroserviceMetadataCleanupTestDefaultGroup()
+		group.Members = nil
+		saveMicroserviceMetadataCleanupTestGroup(t, store, group)
 
 		blocker := enableMicroserviceMetadataCleanupCommitBlocker(t)
 		resultCh := runMicroserviceMetadataCleanup(t, svr)
@@ -302,6 +334,7 @@ func TestCleanupMicroserviceMetadataFencesNoOp(t *testing.T) {
 		result := waitMicroserviceMetadataCleanupResult(t, resultCh)
 		require.False(t, result.changed)
 		require.ErrorIs(t, result.err, ErrMicroserviceMetadataCleanupUnavailable)
+		require.ErrorContains(t, result.err, "leadership or keyspace-group metadata changed during cleanup")
 		require.NotNil(t, loadMicroserviceMetadataCleanupTestGroup(t, store, 1))
 	})
 }

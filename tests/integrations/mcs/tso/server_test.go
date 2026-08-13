@@ -52,6 +52,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
+	serverapi "github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
@@ -796,14 +797,14 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 	re.NotNil(pdServer)
 	re.NoError(pdServer.BootstrapCluster())
 
-	const userKeyspaceName = "metadata_cleanup_user_keyspace"
+	const userKeyspaceName = "metadata_cleanup_ks"
 	userKeyspace, err := pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name: userKeyspaceName,
 	})
 	re.NoError(err)
 	userKeyspaceID := userKeyspace.GetId()
 	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	oldTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 	re.NoError(err)
@@ -828,23 +829,23 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 
 	oldTSOCluster.Destroy()
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	pdServer = restartPDWithServices(ctx, re, tc, pdServer, nil)
-	waitForTSOMonotonic(re, ctx, defaultClient, &globalLastTS)
-	waitForTSOMonotonic(re, ctx, userClient, &globalLastTS)
+	waitForTSOMonotonic(ctx, re, defaultClient, &globalLastTS)
+	waitForTSOMonotonic(ctx, re, userClient, &globalLastTS)
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	re.True(cleanupMicroserviceMetadataViaHTTP(re, pdServer))
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 	re.NoError(checkTSOMonotonic(ctx, defaultClient, &globalLastTS, 10))
 	re.NoError(checkTSOMonotonic(ctx, userClient, &globalLastTS, 10))
 
 	pdServer = restartPDWithServices(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	newTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 	re.NoError(err)
@@ -852,9 +853,9 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 	waitForTSOServiceReady(re, newTSOCluster)
 	newMembers := newTSOCluster.GetKeyspaceGroupMember()
 	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, newMembers)
-	waitForTSOMonotonic(re, ctx, defaultClient, &globalLastTS)
-	waitForTSOMonotonic(re, ctx, userClient, &globalLastTS)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceName)
+	waitForTSOMonotonic(ctx, re, defaultClient, &globalLastTS)
+	waitForTSOMonotonic(ctx, re, userClient, &globalLastTS)
+	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 }
 
 func restartPDWithServices(
@@ -887,9 +888,7 @@ func cleanupMicroserviceMetadataViaHTTP(re *require.Assertions, pdServer *tests.
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode, string(body))
 
-	result := struct {
-		Changed bool `json:"changed"`
-	}{}
+	result := serverapi.CleanupMicroserviceMetadataResponse{}
 	re.NoError(json.Unmarshal(body, &result))
 	return result.Changed
 }
@@ -951,9 +950,9 @@ func keyspaceGroupMembersEqual(actual, expected []endpoint.KeyspaceGroupMember) 
 func assertUserKeyspaceInDefaultGroup(
 	re *require.Assertions,
 	pdServer *tests.TestServer,
-	userKeyspaceName string,
+	userKeyspaceID uint32,
 ) {
-	meta, err := pdServer.GetServer().GetKeyspaceManager().LoadKeyspace(userKeyspaceName)
+	meta, err := pdServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(userKeyspaceID)
 	re.NoError(err)
 	re.Equal("0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
 }
@@ -971,7 +970,7 @@ func waitForTSOServiceReady(re *require.Assertions, tsoCluster *tests.TestTSOClu
 	return primary
 }
 
-func waitForTSOMonotonic(re *require.Assertions, ctx context.Context, client pd.Client, globalLastTS *uint64) {
+func waitForTSOMonotonic(ctx context.Context, re *require.Assertions, client pd.Client, globalLastTS *uint64) {
 	for range 10 {
 		var physical, logical int64
 		testutil.Eventually(re, func() bool {
@@ -979,7 +978,7 @@ func waitForTSOMonotonic(re *require.Assertions, ctx context.Context, client pd.
 			physical, logical, err = client.GetTS(ctx)
 			return err == nil
 		}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
-		ts := (uint64(physical) << 18) + uint64(logical)
+		ts := tsoutil.ComposeTS(physical, logical)
 		re.Greater(ts, *globalLastTS)
 		*globalLastTS = ts
 	}

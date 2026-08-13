@@ -397,7 +397,16 @@ func (suite *adminTestSuite) checkCleanupMicroserviceMetadata(cluster *tests.Tes
 	}))
 
 	url := leader.GetAddr() + "/pd/api/v1/admin/microservice/metadata/cleanup"
+	re.NoError(storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.DeleteKeyspaceGroup(txn, keyspaceconstant.DefaultKeyspaceGroupID)
+	}))
+	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,
+		testutil.Status(re, http.StatusConflict)))
+
 	// Only POST is allowed. A rejected method must not mutate the metadata.
+	re.NoError(storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceGroup(txn, group)
+	}))
 	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
 		testutil.Status(re, http.StatusMethodNotAllowed)))
 	storedGroups, err := storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)

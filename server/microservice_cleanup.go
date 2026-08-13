@@ -57,7 +57,10 @@ func unavailableMicroserviceMetadataCleanup(format string, args ...any) error {
 // CleanupMicroserviceMetadata clears the persisted Members field of the default
 // TSO keyspace group in normal PD mode and reports whether it changed. A nil
 // error is fenced by one exact normal-PD leadership term and represents a
-// linearizable check that no non-default keyspace group existed at that point.
+// linearizable check that the default group existed, had no transition in
+// progress, had no non-default sibling, and had no persisted member at that
+// point. The caller must ensure keyspace assignments have already been merged
+// into the default group and all microservice metadata writers are stopped.
 func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) {
 	term, err := s.captureMicroserviceMetadataCleanupTerm()
 	if err != nil {
@@ -82,38 +85,33 @@ func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) 
 			"failed to read keyspace-group metadata: %v", err)
 	}
 
-	var (
-		group         *endpoint.KeyspaceGroup
-		groupRevision clientv3.Cmp
-		changed       bool
-	)
-	switch {
-	case len(resp.Kvs) == 0:
-		groupRevision = clientv3.Compare(clientv3.CreateRevision(groupKey), "=", 0)
-	case string(resp.Kvs[0].Key) != groupKey || len(resp.Kvs) > 1:
-		return false, rejectMicroserviceMetadataCleanup("found a non-default TSO keyspace group")
-	default:
-		group = &endpoint.KeyspaceGroup{}
-		if err := json.Unmarshal(resp.Kvs[0].Value, group); err != nil {
-			return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
-		}
-		if group.ID != constant.DefaultKeyspaceGroupID {
-			return false, rejectMicroserviceMetadataCleanup(
-				"found TSO keyspace group %d at the default group path", group.ID)
-		}
-		if group.IsSplitting() {
-			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting")
-		}
-		if group.IsMerging() {
-			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging")
-		}
-		groupRevision = clientv3.Compare(
-			clientv3.ModRevision(groupKey),
-			"=",
-			resp.Kvs[0].ModRevision,
-		)
-		changed = len(group.Members) > 0
+	if len(resp.Kvs) == 0 {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group does not exist")
 	}
+	if string(resp.Kvs[0].Key) != groupKey || len(resp.Kvs) > 1 {
+		return false, rejectMicroserviceMetadataCleanup("found a non-default TSO keyspace group")
+	}
+
+	group := &endpoint.KeyspaceGroup{}
+	if err := json.Unmarshal(resp.Kvs[0].Value, group); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if group.ID != constant.DefaultKeyspaceGroupID {
+		return false, rejectMicroserviceMetadataCleanup(
+			"found TSO keyspace group %d at the default group path", group.ID)
+	}
+	if group.IsSplitting() {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting")
+	}
+	if group.IsMerging() {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging")
+	}
+	groupRevision := clientv3.Compare(
+		clientv3.ModRevision(groupKey),
+		"=",
+		resp.Kvs[0].ModRevision,
+	)
+	changed := len(group.Members) > 0
 
 	nonDefaultGroupStart := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID + 1)
 	comparisons := []clientv3.Cmp{
