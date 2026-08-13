@@ -902,7 +902,7 @@ func waitForDefaultKeyspaceGroup(
 	testutil.Eventually(re, func() bool {
 		group, err := loadOnlyDefaultKeyspaceGroup(pdServer)
 		return err == nil &&
-			slices.Contains(group.Keyspaces, constant.DefaultKeyspaceID) &&
+			slices.Contains(group.Keyspaces, keyspace.GetBootstrapKeyspaceID()) &&
 			slices.Contains(group.Keyspaces, userKeyspaceID) &&
 			keyspaceGroupMembersEqual(group.Members, expectedMembers)
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
@@ -916,7 +916,7 @@ func assertDefaultKeyspaceGroup(
 ) {
 	group, err := loadOnlyDefaultKeyspaceGroup(pdServer)
 	re.NoError(err)
-	re.Contains(group.Keyspaces, constant.DefaultKeyspaceID)
+	re.Contains(group.Keyspaces, keyspace.GetBootstrapKeyspaceID())
 	re.Contains(group.Keyspaces, userKeyspaceID)
 	re.True(keyspaceGroupMembersEqual(group.Members, expectedMembers),
 		"unexpected keyspace group members, expected %v, got %v", expectedMembers, group.Members)
