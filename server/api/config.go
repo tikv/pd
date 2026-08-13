@@ -679,9 +679,7 @@ func (h *confHandler) getLeaderConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var leaderConfig config.Config
-	err = json.Unmarshal(b, &leaderConfig)
-	return &leaderConfig, err
+	return unmarshalRemoteConfig(b)
 }
 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
@@ -702,12 +700,16 @@ func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	var schedulingServerConfig config.Config
-	err = json.Unmarshal(b, &schedulingServerConfig)
-	if err != nil {
+	return unmarshalRemoteConfig(b)
+}
+
+func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
+	var cfg config.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	return &schedulingServerConfig, nil
+	cfg.Schedule.MigrateDeprecatedFlags()
+	return &cfg, nil
 }
 
 func (h *confHandler) updateControllerConfig(key string, value any) error {

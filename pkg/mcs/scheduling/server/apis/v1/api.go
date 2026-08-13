@@ -362,6 +362,7 @@ func getConfig(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
 		return
 	}
+	primaryCfg.Schedule.MigrateDeprecatedFlags()
 
 	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
 	mergedCfg := localCfg
