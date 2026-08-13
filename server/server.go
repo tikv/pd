@@ -2310,11 +2310,66 @@ func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) 
 		return false, rejectMicroserviceMetadataCleanup("found a non-default TSO keyspace group")
 	}
 
+	persistedGroup := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(resp.Kvs[0].Value, &persistedGroup); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if persistedGroup == nil {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata is not a JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(resp.Kvs[0].Value))
+	if _, err := decoder.Token(); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	seenFields := make(map[string]struct{}, len(persistedGroup))
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		field, ok := token.(string)
+		if !ok {
+			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has a non-string field")
+		}
+		if _, ok := seenFields[field]; ok {
+			return false, rejectMicroserviceMetadataCleanup(
+				"default TSO keyspace group metadata contains duplicate field %q", field)
+		}
+		seenFields[field] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	groupIDValue, ok := persistedGroup["id"]
+	if !ok {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has no ID")
+	}
+	var persistedGroupID *uint32
+	if err := json.Unmarshal(groupIDValue, &persistedGroupID); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if persistedGroupID == nil {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has no ID")
+	}
+	canonicalFields := [...]string{"id", "user-kind", "split-state", "merge-state", "members", "keyspaces"}
+	for key := range persistedGroup {
+		for _, canonicalField := range canonicalFields {
+			if key != canonicalField && strings.EqualFold(key, canonicalField) {
+				return false, rejectMicroserviceMetadataCleanup(
+					"default TSO keyspace group metadata contains non-canonical field %q", key)
+			}
+		}
+	}
+
 	group := &endpoint.KeyspaceGroup{}
 	if err := json.Unmarshal(resp.Kvs[0].Value, group); err != nil {
 		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
-	if group.ID != constant.DefaultKeyspaceGroupID {
+	if *persistedGroupID != constant.DefaultKeyspaceGroupID || group.ID != constant.DefaultKeyspaceGroupID {
 		return false, rejectMicroserviceMetadataCleanup(
 			"found TSO keyspace group %d at the default group path", group.ID)
 	}
@@ -2344,8 +2399,10 @@ func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) 
 	}
 	operation := clientv3.OpGet(groupKey)
 	if changed {
-		group.Members = nil
-		value, err := json.Marshal(group)
+		// Rewrite only the members field so metadata written by a newer version
+		// is not lost if it contains fields this binary does not recognize.
+		persistedGroup["members"] = json.RawMessage("null")
+		value, err := json.Marshal(persistedGroup)
 		if err != nil {
 			return false, errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
 		}

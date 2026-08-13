@@ -15,7 +15,9 @@
 package server
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -92,6 +94,71 @@ func TestCleanupMicroserviceMetadataPreservesDefaultGroup(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resp.Kvs, 1)
 	require.Equal(t, timestampValue, string(resp.Kvs[0].Value))
+}
+
+func TestCleanupMicroserviceMetadataPreservesUnknownGroupFields(t *testing.T) {
+	svr, _ := newMicroserviceMetadataCleanupTestServer(t, 13015)
+	ctx := context.Background()
+	const (
+		futureField = `{"large-id":9007199254740993,"nested":{"enabled":true}}`
+		groupJSON   = `{"id":0,"user-kind":"basic","members":[{"address":"http://127.0.0.1:3379","priority":0}],"keyspaces":[1],"future-field":` + futureField + `}`
+	)
+	groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
+	_, err := svr.client.Put(ctx, groupKey, groupJSON)
+	require.NoError(t, err)
+
+	changed, err := svr.CleanupMicroserviceMetadata(ctx)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	resp, err := etcdutil.EtcdKVGet(svr.client, groupKey)
+	require.NoError(t, err)
+	require.Len(t, resp.Kvs, 1)
+	persistedGroup := make(map[string]json.RawMessage)
+	require.NoError(t, json.Unmarshal(resp.Kvs[0].Value, &persistedGroup))
+	require.Equal(t, "null", string(persistedGroup["members"]))
+	require.True(t, bytes.Equal(json.RawMessage(futureField), persistedGroup["future-field"]))
+
+	value := string(resp.Kvs[0].Value)
+	modRevision := resp.Kvs[0].ModRevision
+	changed, err = svr.CleanupMicroserviceMetadata(ctx)
+	require.NoError(t, err)
+	require.False(t, changed)
+	resp, err = etcdutil.EtcdKVGet(svr.client, groupKey)
+	require.NoError(t, err)
+	require.Len(t, resp.Kvs, 1)
+	require.Equal(t, value, string(resp.Kvs[0].Value))
+	require.Equal(t, modRevision, resp.Kvs[0].ModRevision)
+}
+
+func TestCleanupMicroserviceMetadataRejectsInvalidGroupJSONObjects(t *testing.T) {
+	testCases := []struct {
+		name      string
+		groupJSON string
+	}{
+		{name: "null", groupJSON: "null"},
+		{name: "missing-id", groupJSON: `{"members":[]}`},
+		{name: "non-canonical-members", groupJSON: `{"id":0,"Members":[{"address":"http://127.0.0.1:3379","priority":0}]}`},
+		{name: "duplicate-members", groupJSON: `{"id":0,"members":[{"address":"http://127.0.0.1:3379","priority":0}],"members":[]}`},
+		{name: "duplicate-transition", groupJSON: `{"id":0,"split-state":{"split-source":0},"split-state":null,"members":[]}`},
+	}
+	for i, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			svr, _ := newMicroserviceMetadataCleanupTestServer(t, uint64(13016+i))
+			ctx := context.Background()
+			groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
+			_, err := svr.client.Put(ctx, groupKey, testCase.groupJSON)
+			require.NoError(t, err)
+
+			changed, err := svr.CleanupMicroserviceMetadata(ctx)
+			require.False(t, changed)
+			require.ErrorIs(t, err, ErrMicroserviceMetadataCleanupRejected)
+			resp, err := etcdutil.EtcdKVGet(svr.client, groupKey)
+			require.NoError(t, err)
+			require.Len(t, resp.Kvs, 1)
+			require.Equal(t, testCase.groupJSON, string(resp.Kvs[0].Value))
+		})
+	}
 }
 
 func TestCleanupMicroserviceMetadataRejectsUnsafeState(t *testing.T) {
