@@ -2254,7 +2254,7 @@ var (
 	// keyspace-group state cannot be safely cleaned up.
 	ErrMicroserviceMetadataCleanupRejected = errors.New("microservice metadata cleanup rejected")
 	// ErrMicroserviceMetadataCleanupUnavailable indicates that the request could
-	// not be completed under the current normal-PD leadership term.
+	// not be completed under the current leadership term in PD mode.
 	ErrMicroserviceMetadataCleanupUnavailable = errors.New("microservice metadata cleanup unavailable")
 )
 
@@ -2273,8 +2273,8 @@ func unavailableMicroserviceMetadataCleanup(format string, args ...any) error {
 }
 
 // CleanupMicroserviceMetadata clears the persisted Members field of the default
-// TSO keyspace group in normal PD mode and reports whether it changed. A nil
-// error is fenced by one exact normal-PD leadership term and represents a
+// TSO keyspace group in PD mode and reports whether it changed. A nil error is
+// fenced by one exact leadership term in PD mode and represents a
 // linearizable check that the default group existed, had no transition in
 // progress, had no non-default sibling, and had no persisted member at that
 // point. The caller must ensure keyspace assignments have already been merged
@@ -2371,12 +2371,12 @@ func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) 
 func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataCleanupTerm, error) {
 	if s.client == nil || s.member == nil || !s.member.IsServing() {
 		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
-			"normal PD leader is not serving")
+			"leader in PD mode is not serving")
 	}
 	leadership := s.member.GetLeadership()
 	if leadership == nil || leadership.GetLease() == nil {
 		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
-			"normal PD leadership is not initialized")
+			"leadership in PD mode is not initialized")
 	}
 	term := microserviceMetadataCleanupTerm{
 		leaderKey:   leadership.GetLeaderKey(),
@@ -2385,7 +2385,7 @@ func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataC
 	}
 	if term.leaderKey == "" || term.leaderValue == "" || term.leaseID == 0 {
 		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
-			"normal PD leadership term is incomplete")
+			"leadership term in PD mode is incomplete")
 	}
 	return term, nil
 }

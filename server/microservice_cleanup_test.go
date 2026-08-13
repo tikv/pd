@@ -172,7 +172,7 @@ func TestCleanupMicroserviceMetadataRejectsUnsafeState(t *testing.T) {
 	}
 }
 
-func TestCleanupMicroserviceMetadataRequiresNormalPDLeader(t *testing.T) {
+func TestCleanupMicroserviceMetadataRequiresPDModeLeader(t *testing.T) {
 	t.Run("microservice-mode", func(t *testing.T) {
 		svr, _ := newMicroserviceMetadataCleanupTestServer(t, 13005)
 		svr.isKeyspaceGroupEnabled = true

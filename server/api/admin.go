@@ -59,10 +59,10 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 }
 
 // CleanupMicroserviceMetadata cleans up stale microservice runtime metadata in
-// normal PD mode.
+// PD mode.
 //
 //	@Tags		admin
-//	@Summary	Clean up stale microservice runtime metadata in normal PD mode.
+//	@Summary	Clean up stale microservice runtime metadata in PD mode.
 //	@Produce	json
 //	@Success	200	{object}	CleanupMicroserviceMetadataResponse	"Whether any metadata was changed."
 //	@Failure	409	{string}	string	"The cleanup is rejected in the current state."
