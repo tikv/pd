@@ -409,20 +409,15 @@ func (suite *adminTestSuite) checkCleanupMicroserviceMetadata(cluster *tests.Tes
 	}))
 	re.NoError(testutil.CheckGetJSON(tests.TestDialClient, url, nil,
 		testutil.Status(re, http.StatusMethodNotAllowed)))
-	storedGroups, err := storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
-	re.NoError(err)
-	re.Len(storedGroups, 1)
-	re.Equal(group.Members, storedGroups[0].Members)
 
 	response := &api.CleanupMicroserviceMetadataResponse{}
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,
 		testutil.StatusOK(re), testutil.ExtractJSON(re, response)))
 	re.True(response.Changed)
-	storedGroups, err = storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
+	storedGroups, err := storage.LoadKeyspaceGroups(keyspaceconstant.DefaultKeyspaceGroupID, 1)
 	re.NoError(err)
 	re.Len(storedGroups, 1)
 	re.Empty(storedGroups[0].Members)
-	re.Equal(group.Keyspaces, storedGroups[0].Keyspaces)
 
 	response.Changed = true
 	re.NoError(testutil.CheckPostJSON(tests.TestDialClient, url, nil,

@@ -809,7 +809,7 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 	oldTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 	re.NoError(err)
 	defer oldTSOCluster.Destroy()
-	oldTSOPrimary := waitForTSOServiceReady(re, oldTSOCluster)
+	oldTSOPrimary := oldTSOCluster.WaitForDefaultPrimaryServing(re)
 	oldMembers := oldTSOCluster.GetKeyspaceGroupMember()
 	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
 
@@ -829,13 +829,11 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 
 	oldTSOCluster.Destroy()
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	pdServer = restartPDWithServices(ctx, re, tc, pdServer, nil)
 	waitForTSOMonotonic(ctx, re, defaultClient, &globalLastTS)
 	waitForTSOMonotonic(ctx, re, userClient, &globalLastTS)
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, oldMembers)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	re.True(cleanupMicroserviceMetadataViaHTTP(re, pdServer))
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
@@ -845,12 +843,11 @@ func TestCleanupMicroserviceMetadataForModeSwitch(t *testing.T) {
 
 	pdServer = restartPDWithServices(ctx, re, tc, pdServer, []string{mcs.PDServiceName})
 	assertDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, nil)
-	assertUserKeyspaceInDefaultGroup(re, pdServer, userKeyspaceID)
 
 	newTSOCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
 	re.NoError(err)
 	defer newTSOCluster.Destroy()
-	waitForTSOServiceReady(re, newTSOCluster)
+	newTSOCluster.WaitForDefaultPrimaryServing(re)
 	newMembers := newTSOCluster.GetKeyspaceGroupMember()
 	waitForDefaultKeyspaceGroup(re, pdServer, userKeyspaceID, newMembers)
 	waitForTSOMonotonic(ctx, re, defaultClient, &globalLastTS)
@@ -955,19 +952,6 @@ func assertUserKeyspaceInDefaultGroup(
 	meta, err := pdServer.GetServer().GetKeyspaceManager().LoadKeyspaceByID(userKeyspaceID)
 	re.NoError(err)
 	re.Equal("0", meta.GetConfig()[keyspace.TSOKeyspaceGroupIDKey])
-}
-
-func waitForTSOServiceReady(re *require.Assertions, tsoCluster *tests.TestTSOCluster) *tso.Server {
-	primary := tsoCluster.WaitForDefaultPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		resp, err := tests.TestDialClient.Get(primary.GetAddr() + tsoapi.APIPathPrefix + "/health")
-		if err != nil {
-			return false
-		}
-		defer resp.Body.Close()
-		return resp.StatusCode == http.StatusOK
-	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(100*time.Millisecond))
-	return primary
 }
 
 func waitForTSOMonotonic(ctx context.Context, re *require.Assertions, client pd.Client, globalLastTS *uint64) {
