@@ -286,11 +286,14 @@ func (b *GlobalGCBarrierInfo) isExpiredImpl(now time.Time) bool {
 //nolint:revive
 type GCState struct {
 	// The ID of the keyspace this GC state belongs to.
-	KeyspaceID    uint32
-	TxnSafePoint  uint64
-	GCSafePoint   uint64
-	hasGCBarriers bool
-	gcBarriers    []*GCBarrierInfo
+	KeyspaceID uint32
+	// IsKeyspaceLevelGC reports whether this state belongs to an independent
+	// keyspace-level GC scope.
+	IsKeyspaceLevelGC bool
+	TxnSafePoint      uint64
+	GCSafePoint       uint64
+	hasGCBarriers     bool
+	gcBarriers        []*GCBarrierInfo
 
 	hasGlobalGCBarriers bool
 	globalGCBarriers    []*GlobalGCBarrierInfo

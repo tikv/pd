@@ -2872,9 +2872,16 @@ func (s *clientStatefulTestSuite) TestGetAllKeyspaceGCStates() {
 	re.NoError(err)
 	res, err = cli.GetAllKeyspacesGCStates(ctx, gc.ExcludeGCBarriers(false), gc.ExcludeGlobalGCBarriers(false))
 	re.NoError(err)
-	state, ok = res.GCStates[2]
+	state1, ok := res.GCStates[1]
 	re.True(ok)
-	gcBarriers, err = state.GetGCBarriers()
+	re.True(state1.IsKeyspaceLevelGC)
+	state2, ok := res.GCStates[2]
+	re.True(ok)
+	re.True(state2.IsKeyspaceLevelGC)
+	state3, ok := res.GCStates[3]
+	re.True(ok)
+	re.False(state3.IsKeyspaceLevelGC)
+	gcBarriers, err = state2.GetGCBarriers()
 	re.NoError(err)
 	re.Equal("b4", gcBarriers[0].BarrierID)
 	re.Equal(uint64(14), gcBarriers[0].BarrierTS)
