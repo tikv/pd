@@ -277,7 +277,8 @@ func TestReportedConsumptionStripsPagingPrecharge(t *testing.T) {
 			float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion +
 			float64(cfg.ReadBytesCost)*1024,
 	}
-	reported := reportedRequestConsumption(calculators, req, tokenDelta)
+	var reportedBuf rmpb.Consumption
+	reported := reportedRequestConsumption(calculators, req, tokenDelta, &reportedBuf)
 
 	re.InDelta(float64(cfg.ReadBaseCost)+
 		float64(cfg.ReadPerBatchBaseCost)*defaultAvgBatchProportion,
@@ -301,7 +302,8 @@ func TestReportedConsumptionRestoresPagingActualUsage(t *testing.T) {
 		RRU:       float64(cfg.ReadBytesCost) * (float64(actualReadBytes) - float64(req.predictedReadBytes)),
 		ReadBytes: float64(actualReadBytes),
 	}
-	reported := reportedResponseConsumption(calculators, req, tokenDelta)
+	var reportedBuf rmpb.Consumption
+	reported := reportedResponseConsumption(calculators, req, tokenDelta, &reportedBuf)
 
 	re.InDelta(float64(cfg.ReadBytesCost)*float64(actualReadBytes), reported.RRU, 1e-6)
 	re.Equal(float64(actualReadBytes), reported.ReadBytes)
@@ -319,11 +321,112 @@ func TestReportedConsumptionReusesDeltaWithoutPagingPrecharge(t *testing.T) {
 	}
 	tokenDelta := &rmpb.Consumption{RRU: 1, ReadBytes: 64}
 
-	reportedRequest := reportedRequestConsumption(calculators, req, tokenDelta)
-	reportedResponse := reportedResponseConsumption(calculators, req, tokenDelta)
+	var requestBuf, responseBuf rmpb.Consumption
+	reportedRequest := reportedRequestConsumption(calculators, req, tokenDelta, &requestBuf)
+	reportedResponse := reportedResponseConsumption(calculators, req, tokenDelta, &responseBuf)
 
 	re.Same(tokenDelta, reportedRequest)
 	re.Same(tokenDelta, reportedResponse)
+}
+
+func TestReportedWriteConsumptionSettlesAtResponse(t *testing.T) {
+	re := require.New(t)
+	kvCalc := newKVCalculator(DefaultRUConfig())
+	calculators := []ResourceCalculator{kvCalc}
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+
+	requestDelta := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(requestDelta, req)
+	var reportedRequestBuf rmpb.Consumption
+	reportedRequest := reportedRequestConsumption(calculators, req, requestDelta, &reportedRequestBuf)
+	re.NotSame(requestDelta, reportedRequest)
+	re.Zero(reportedRequest.WRU)
+	re.Zero(reportedRequest.WriteBytes)
+	re.Equal(requestDelta.KvWriteRpcCount, reportedRequest.KvWriteRpcCount)
+	re.Positive(requestDelta.WRU)
+
+	var reservation rmpb.Consumption
+	fillWriteReservationConsumption(calculators, req, &reservation)
+	successDelta := &rmpb.Consumption{}
+	var reportedSuccessBuf rmpb.Consumption
+	reportedSuccess := reportedResponseConsumption(calculators, req, successDelta, &reportedSuccessBuf)
+	re.Equal(&reservation, reportedSuccess)
+	re.Empty(successDelta)
+
+	failureDelta := &rmpb.Consumption{}
+	kvCalc.AfterKVRequest(failureDelta, req, &TestResponseInfo{succeed: false})
+	originalFailure := *failureDelta
+	expectedFailure := *failureDelta
+	add(&expectedFailure, &reservation)
+	var reportedFailureBuf rmpb.Consumption
+	reportedFailure := reportedResponseConsumption(calculators, req, failureDelta, &reportedFailureBuf)
+	re.Equal(&expectedFailure, reportedFailure)
+	re.Equal(&originalFailure, failureDelta)
+}
+
+func TestReportedWriteConsumptionDoesNotAllocate(t *testing.T) {
+	kvCalc := newKVCalculator(DefaultRUConfig())
+	calculators := []ResourceCalculator{kvCalc}
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+	requestDelta := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(requestDelta, req)
+	responseDelta := &rmpb.Consumption{}
+
+	requestAllocs := testing.AllocsPerRun(1000, func() {
+		var reported rmpb.Consumption
+		if reportedRequestConsumption(calculators, req, requestDelta, &reported) != &reported {
+			panic("reported request consumption did not use the caller buffer")
+		}
+	})
+	responseAllocs := testing.AllocsPerRun(1000, func() {
+		var reported rmpb.Consumption
+		if reportedResponseConsumption(calculators, req, responseDelta, &reported) != &reported {
+			panic("reported response consumption did not use the caller buffer")
+		}
+	})
+
+	require.Zero(t, requestAllocs)
+	require.Zero(t, responseAllocs)
+}
+
+func BenchmarkReportedWriteConsumption(b *testing.B) {
+	kvCalc := newKVCalculator(DefaultRUConfig())
+	calculators := []ResourceCalculator{kvCalc}
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+	requestDelta := &rmpb.Consumption{}
+	kvCalc.BeforeKVRequest(requestDelta, req)
+	responseDelta := &rmpb.Consumption{}
+
+	b.Run("request", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var reported rmpb.Consumption
+			if reportedRequestConsumption(calculators, req, requestDelta, &reported) != &reported {
+				b.Fatal("reported request consumption did not use the caller buffer")
+			}
+		}
+	})
+	b.Run("response", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			var reported rmpb.Consumption
+			if reportedResponseConsumption(calculators, req, responseDelta, &reported) != &reported {
+				b.Fatal("reported response consumption did not use the caller buffer")
+			}
+		}
+	})
 }
 
 func TestEqualRU(t *testing.T) {
