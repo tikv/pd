@@ -124,7 +124,9 @@ func (cw *Watcher) getSchedulersController() *schedulers.Controller {
 
 func (cw *Watcher) initializeConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cfg := &persistedConfig{}
+		cfg := &persistedConfig{
+			Schedule: sc.ScheduleConfig{DefaultStoreLimit: sc.DefaultStoreLimitConfig()},
+		}
 		if err := json.Unmarshal(kv.Value, cfg); err != nil {
 			log.Warn("failed to unmarshal scheduling config entry",
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))

@@ -188,19 +188,46 @@ remove-peer = 70
 		})
 	}
 
-	schedule := &sc.ScheduleConfig{StoreBalanceRate: 50}
+	schedule := &sc.ScheduleConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"store-balance-rate":50}`), schedule))
 	schedule.MigrateDeprecatedFlags()
 	re.Equal(sc.StoreLimitConfig{AddPeer: 50, RemovePeer: 50}, schedule.DefaultStoreLimit)
 
-	schedule = &sc.ScheduleConfig{
-		StoreBalanceRate: 50,
-		DefaultStoreLimit: sc.StoreLimitConfig{
-			AddPeer:    0,
-			RemovePeer: 60,
-		},
-	}
+	schedule = &sc.ScheduleConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"store-balance-rate":50,"default-store-limit":{"add-peer":0,"remove-peer":60}}`), schedule))
 	schedule.MigrateDeprecatedFlags()
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+}
+
+func TestReloadLegacyStoreBalanceRate(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	type legacyScheduleConfig struct {
+		StoreBalanceRate float64 `json:"store-balance-rate"`
+	}
+	type legacyConfig struct {
+		Schedule legacyScheduleConfig `json:"schedule"`
+	}
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(storage.SaveConfig(&legacyConfig{
+		Schedule: legacyScheduleConfig{StoreBalanceRate: 60},
+	}))
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(opt.Reload(storage))
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 60}
+	re.Equal(expected, opt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(expected, opt.GetStoreLimit(100))
+	re.Zero(opt.GetScheduleConfig().StoreBalanceRate)
 }
 
 func TestReloadUpgrade(t *testing.T) {

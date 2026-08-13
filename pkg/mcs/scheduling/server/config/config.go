@@ -289,6 +289,7 @@ func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
 		}
 	}
+	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // GetReplicationConfig returns replication configurations.
