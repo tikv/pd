@@ -60,7 +60,11 @@ func TestServiceRegistryEntry(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
 	defer clean()
-	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
+	entry1 := &ServiceRegistryEntry{
+		ServiceAddr: "127.0.0.1:1",
+		GitHash:     "new-build",
+		Features:    map[string]string{"feature-a": "new-build"},
+	}
 	s1, err := entry1.Serialize()
 	re.NoError(err)
 	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, DefaultLeaseInSeconds)
@@ -80,10 +84,12 @@ func TestServiceRegistryEntry(t *testing.T) {
 	err = returnedEntry1.Deserialize([]byte(endpoints[0]))
 	re.NoError(err)
 	re.Equal("127.0.0.1:1", returnedEntry1.ServiceAddr)
+	re.Equal(entry1.Features, returnedEntry1.Features)
 	returnedEntry2 := &ServiceRegistryEntry{}
 	err = returnedEntry2.Deserialize([]byte(endpoints[1]))
 	re.NoError(err)
 	re.Equal("127.0.0.1:2", returnedEntry2.ServiceAddr)
+	re.Nil(returnedEntry2.Features)
 
 	sr1.cancel()
 	sr2.cancel()

@@ -293,6 +293,17 @@ func TestValidation(t *testing.T) {
 	re.Error(cfg.Schedule.Validate())
 	cfg.Schedule.LowSpaceRatio = 0.8
 	re.NoError(cfg.Schedule.Validate())
+	cfg.Schedule.DefaultStoreLimit.AddPeer = -1
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.add-peer")
+	cfg.Schedule.DefaultStoreLimit.AddPeer = math.Inf(1)
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.add-peer")
+	cfg.Schedule.DefaultStoreLimit.AddPeer = 15
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = -1
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = math.NaN()
+	re.ErrorContains(cfg.Schedule.Validate(), "default-store-limit.remove-peer")
+	cfg.Schedule.DefaultStoreLimit.RemovePeer = 15
+	re.NoError(cfg.Schedule.Validate())
 	cfg.Schedule.TolerantSizeRatio = -0.6
 	re.Error(cfg.Schedule.Validate())
 	// check quota

@@ -16,6 +16,7 @@ package config
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -628,6 +629,14 @@ func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 
 // Validate is used to validate if some scheduling configurations are right.
 func (c *ScheduleConfig) Validate() error {
+	if math.IsNaN(c.DefaultStoreLimit.AddPeer) || math.IsInf(c.DefaultStoreLimit.AddPeer, 0) ||
+		c.DefaultStoreLimit.AddPeer < 0 {
+		return errors.New("default-store-limit.add-peer should be finite and non-negative")
+	}
+	if math.IsNaN(c.DefaultStoreLimit.RemovePeer) || math.IsInf(c.DefaultStoreLimit.RemovePeer, 0) ||
+		c.DefaultStoreLimit.RemovePeer < 0 {
+		return errors.New("default-store-limit.remove-peer should be finite and non-negative")
+	}
 	if c.TolerantSizeRatio < 0 {
 		return errors.New("tolerant-size-ratio should be non-negative")
 	}

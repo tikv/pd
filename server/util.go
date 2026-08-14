@@ -29,6 +29,8 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -56,6 +58,61 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 			zap.String("pd-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
+}
+
+func checkDefaultStoreLimitPersistenceFeature(component, name, gitHash, featureGitHash string) error {
+	if featureGitHash == "" || featureGitHash != gitHash {
+		return errors.Errorf(
+			"cannot update default store limit while %s member %s does not support persisted default store limits",
+			component, name)
+	}
+	return nil
+}
+
+// checkDefaultStoreLimitPersistenceSupport prevents a new persisted schedule
+// field from being activated while an old PD or Scheduling Service member can
+// still become leader/primary and drop the unknown field on its next persist.
+func (s *Server) checkDefaultStoreLimitPersistenceSupport() error {
+	members, err := s.ReloadMembers()
+	if err != nil {
+		return errors.Annotate(err, "failed to load PD members before updating default store limit")
+	}
+	for _, member := range members {
+		gitHash, err := s.GetMember().GetMemberGitHash(member.GetMemberId())
+		if err != nil {
+			return errors.Annotatef(err, "failed to load git hash for PD member %s", member.GetName())
+		}
+		featureGitHash, err := s.GetMember().GetMemberFeature(
+			member.GetMemberId(), versioninfo.DefaultStoreLimitPersistence)
+		if err != nil {
+			return errors.Errorf(
+				"cannot update default store limit while PD member %s does not support persisted default store limits",
+				member.GetName())
+		}
+		if err := checkDefaultStoreLimitPersistenceFeature(
+			"PD", member.GetName(), gitHash, featureGitHash); err != nil {
+			return err
+		}
+	}
+
+	if !s.IsServiceIndependent(mcsconstant.SchedulingServiceName) {
+		return nil
+	}
+	schedulingMembers, err := discovery.GetMSMembers(mcsconstant.SchedulingServiceName, s.GetClient())
+	if err != nil {
+		return errors.Annotate(err, "failed to load Scheduling Service members before updating default store limit")
+	}
+	if len(schedulingMembers) == 0 {
+		return errors.New("cannot update default store limit without a registered Scheduling Service member")
+	}
+	for _, member := range schedulingMembers {
+		if err := checkDefaultStoreLimitPersistenceFeature(
+			"Scheduling Service", member.Name, member.GitHash,
+			member.Features[versioninfo.DefaultStoreLimitPersistence]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {

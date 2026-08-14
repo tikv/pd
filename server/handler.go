@@ -255,6 +255,9 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
+	if err := h.s.checkDefaultStoreLimitPersistenceSupport(); err != nil {
+		return err
+	}
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 

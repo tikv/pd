@@ -291,6 +291,11 @@ func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *d
 		StartTimestamp: s.StartTimestamp(),
 		Name:           s.Name(),
 	}
+	if serviceName == constant.SchedulingServiceName {
+		serviceID.Features = map[string]string{
+			versioninfo.DefaultStoreLimitPersistence: versioninfo.PDGitHash,
+		}
+	}
 	serializedEntry, err := serviceID.Serialize()
 	if err != nil {
 		return nil, nil, err

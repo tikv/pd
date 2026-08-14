@@ -498,6 +498,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err := s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash); err != nil {
 		return err
 	}
+	if err := s.member.SetMemberFeature(
+		s.member.ID(), versioninfo.DefaultStoreLimitPersistence, versioninfo.PDGitHash); err != nil {
+		return err
+	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.DefaultLabel,
@@ -1287,6 +1291,11 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetScheduleConfig()
+	if cfg.DefaultStoreLimit != old.DefaultStoreLimit {
+		if err := s.checkDefaultStoreLimitPersistenceSupport(); err != nil {
+			return err
+		}
+	}
 	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)

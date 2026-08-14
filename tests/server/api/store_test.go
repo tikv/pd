@@ -15,6 +15,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +32,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -45,6 +49,39 @@ type storeTestSuite struct {
 
 func TestStoreTestSuite(t *testing.T) {
 	suite.Run(t, new(storeTestSuite))
+}
+
+func TestDefaultStoreLimitRequiresAllPDsToSupportPersistence(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	re.NoError(cluster.GetLeaderServer().BootstrapCluster())
+
+	leader := cluster.GetLeaderServer()
+	var follower *tests.TestServer
+	for _, server := range cluster.GetServers() {
+		if server.GetServerID() != leader.GetServerID() {
+			follower = server
+			break
+		}
+	}
+	re.NotNil(follower)
+	_, err = cluster.GetEtcdClient().Delete(context.Background(), keypath.MemberFeaturePath(
+		follower.GetServerID(), versioninfo.DefaultStoreLimitPersistence))
+	re.NoError(err)
+
+	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
+	body := []byte(`{"rate":60,"type":"add-peer"}`)
+	err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
+		testutil.StatusNotOK(re),
+		testutil.StringContain(re, "does not support persisted default store limits"))
+	re.NoError(err)
+	re.Equal(float64(15), leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) SetupSuite() {
@@ -149,6 +186,57 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetAllLimit)
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
+}
+
+func (suite *storeTestSuite) TestStoreLimitPersistenceCompatibility() {
+	suite.env.RunTest(suite.checkStoreLimitPersistenceCompatibility)
+}
+
+func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
+	body := []byte(`{"rate":60,"type":"add-peer"}`)
+
+	_, err := cluster.GetEtcdClient().Delete(context.Background(), keypath.MemberFeaturePath(
+		leader.GetServerID(), versioninfo.DefaultStoreLimitPersistence))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
+		testutil.StatusNotOK(re),
+		testutil.StringContain(re, "does not support persisted default store limits"))
+	re.NoError(err)
+
+	err = leader.GetServer().GetMember().SetMemberFeature(
+		leader.GetServerID(), versioninfo.DefaultStoreLimitPersistence, versioninfo.PDGitHash)
+	re.NoError(err)
+	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+		entry := &discovery.ServiceRegistryEntry{
+			Name:        schedulingServer.Name(),
+			ServiceAddr: schedulingServer.GetAdvertiseListenAddr(),
+			Version:     versioninfo.PDReleaseVersion,
+			GitHash:     versioninfo.PDGitHash,
+		}
+		serializedEntry, err := entry.Serialize()
+		re.NoError(err)
+		registryPath := keypath.RegistryPath(constant.SchedulingServiceName, entry.ServiceAddr)
+		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
+		re.NoError(err)
+		err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
+			testutil.StatusNotOK(re),
+			testutil.StringContain(re, "Scheduling Service member"))
+		re.NoError(err)
+
+		entry.Features = map[string]string{
+			versioninfo.DefaultStoreLimitPersistence: versioninfo.PDGitHash,
+		}
+		serializedEntry, err = entry.Serialize()
+		re.NoError(err)
+		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
+		re.NoError(err)
+	}
+	err = testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+	re.NoError(err)
+	re.Equal(float64(60), leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
