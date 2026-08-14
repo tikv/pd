@@ -55,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -207,6 +208,21 @@ type RaftCluster struct {
 	syncRegionRunner ratelimit.Runner
 
 	stopGCStateManager func()
+
+	// onStoreBuried is an optional callback invoked (at least once) with a store's
+	// ID right after it's buried, for cleanup that only the owning package can do
+	// without an import cycle -- e.g. the server package's own heartbeat/bucket
+	// metrics, which server/cluster cannot import directly. Set via
+	// SetOnStoreBuried; read through an atomic pointer since BuryStoreLocked can run
+	// before the owner has had a chance to install it.
+	onStoreBuried atomic.Pointer[func(storeID string)]
+}
+
+// SetOnStoreBuried sets the callback invoked when a store is buried
+// (transitions to tombstone), for per-store cleanup owned by a package that
+// server/cluster cannot import.
+func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
+	c.onStoreBuried.Store(&fn)
 }
 
 // Status saves some state information.
@@ -1772,8 +1788,12 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		statistics.ResetStoreStatistics(storeIDStr)
 		filter.DeleteStoreMetrics(storeIDStr)
 		hbstream.DeleteStoreMetrics(storeIDStr)
+		schedule.DeleteStoreMetrics(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
+		}
+		if fn := c.onStoreBuried.Load(); fn != nil {
+			(*fn)(storeIDStr)
 		}
 	}
 	return err
@@ -2177,7 +2197,14 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
+	filter.DeleteStoreMetrics(storeIDStr)
+	hbstream.DeleteStoreMetrics(storeIDStr)
+	schedule.DeleteStoreMetrics(storeIDStr)
+	if fn := c.onStoreBuried.Load(); fn != nil {
+		(*fn)(storeIDStr)
+	}
 	c.DeleteStore(store)
 	return nil
 }

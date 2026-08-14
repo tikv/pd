@@ -148,6 +148,10 @@ func (s *HeartbeatStreams) run() {
 				delete(s.streams, storeID)
 				continue
 			}
+			if store.IsRemoved() {
+				delete(s.streams, storeID)
+				continue
+			}
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
@@ -169,6 +173,10 @@ func (s *HeartbeatStreams) run() {
 				store := s.storeInformer.GetStore(storeID)
 				if store == nil {
 					log.Warn("failed to get store", zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
+					delete(s.streams, storeID)
+					continue
+				}
+				if store.IsRemoved() {
 					delete(s.streams, storeID)
 					continue
 				}

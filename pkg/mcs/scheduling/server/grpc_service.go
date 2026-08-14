@@ -149,6 +149,9 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		if store == nil {
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
+		if store.IsRemoved() {
+			return errors.Errorf("store ID %d is tombstone", storeID)
+		}
 
 		storeAddress := store.GetAddress()
 		storeLabel := strconv.FormatUint(storeID, 10)
@@ -220,6 +223,8 @@ func (s *Service) RegionBuckets(stream schedulingpb.Scheduling_RegionBucketsServ
 			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
 			// So we should not return error here.
 			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else if store.IsRemoved() {
+			log.Debug("the store of the bucket in region is tombstone", zap.Uint64("region-id", buckets.GetRegionId()), zap.Uint64("store-id", store.GetID()))
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()

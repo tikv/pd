@@ -97,7 +97,14 @@ type Cluster struct {
 
 	// recentlyTombstonedStores is the set of store IDs collectMetrics saw tombstoned
 	// on its last tick. Only that method, driven by runMetricsCollectionJob's own
-	// single-goroutine ticker, touches it, so it needs no lock.
+	// single-goroutine ticker, touches it, so it needs no lock. Filter counters are
+	// the only metrics that still need this: every scheduler's Schedule() keeps
+	// running StoreStateFilter against a tombstoned-but-known store every cycle,
+	// which is what increments them, so a one-shot delete at bury time gets undone
+	// almost immediately. Heartbeat, heartbeat-stream, and store-status metrics no
+	// longer need it -- writes to them stop at bury time (see the store-tombstoned
+	// callback wired in SetRuntimeResources and the IsRemoved checks in
+	// grpc_service.go/heartbeat_streams.go).
 	recentlyTombstonedStores map[uint64]struct{}
 
 	backendAddress string
@@ -331,6 +338,10 @@ func (c *Cluster) SetRuntimeResources(
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
+	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		c.hotStat.RemoveRollingStoreStats(storeID)
+		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+	})
 }
 
 func (c *Cluster) stopCluster() {
@@ -726,33 +737,14 @@ func (c *Cluster) runMetricsCollectionJob() {
 	}
 }
 
-// deleteTombstonedStoreMetrics deletes every per-store metric this package knows
-// about (heartbeat/bucket metrics, storeStatusGauge/clusterStatusGauge, filter
-// counters, and heartbeat-stream counters) for a tombstoned store.
-func deleteTombstonedStoreMetrics(storeID string) {
-	statistics.ResetStoreStatistics(storeID)
-	DeleteStoreMetrics(storeID)
-	filter.DeleteStoreMetrics(storeID)
-	hbstream.DeleteStoreMetrics(storeID)
-}
-
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
 	stores := c.GetStores()
-	// Delete unconditionally on every tick rather than tracking which stores were
-	// already cleaned: a region heartbeat for an already-tombstoned store can still
-	// land here and recreate a series. RegionHeartbeat (grpc_service.go) only checks
-	// store == nil, not store.IsRemoved(), before recording regionHeartbeat* metrics.
-	// The same is true of filter and heartbeat-stream metrics: every scheduler's
-	// Schedule() still runs StoreStateFilter against every known store each cycle
-	// (that rejection is what increments the filter counters), and the heartbeat
-	// stream keepalive ticker keeps touching a tombstoned store as long as its
-	// stream is still bound. ObserveHotStat above can likewise recreate
-	// storeStatusGauge from rolling stats that were never retired. If cleanup only
-	// ran once per store, such late writes would never get swept again for as long
-	// as the store stays tombstoned-but-not-yet-removed. DeletePartialMatch on
-	// labels that no longer exist is a cheap no-op, so repeating it every tick is
-	// safe.
+	// Filter counters are the only ones that need repeated cleanup here: every
+	// scheduler's Schedule() still runs StoreStateFilter against every known store
+	// each cycle, and that rejection is what increments them, so a one-shot delete
+	// at bury time gets undone almost immediately. DeletePartialMatch on labels that
+	// no longer exist is a cheap no-op, so repeating it every tick is safe.
 	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
@@ -760,7 +752,7 @@ func (c *Cluster) collectMetrics() {
 		if s.IsRemoved() {
 			storeID := s.GetID()
 			current[storeID] = struct{}{}
-			deleteTombstonedStoreMetrics(strconv.FormatUint(storeID, 10))
+			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
 	// A store that was tombstoned as of the last sweep but isn't known at all this
@@ -771,7 +763,7 @@ func (c *Cluster) collectMetrics() {
 	// it's a no-op if nothing was actually rewritten.
 	for storeID := range c.recentlyTombstonedStores {
 		if _, stillKnown := current[storeID]; !stillKnown {
-			deleteTombstonedStoreMetrics(strconv.FormatUint(storeID, 10))
+			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
 	c.recentlyTombstonedStores = current

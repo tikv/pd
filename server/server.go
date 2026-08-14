@@ -246,11 +246,6 @@ type Server struct {
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
-
-	// recentlyTombstonedStores is the set of store IDs cleanupRemovedStoreMetrics saw
-	// tombstoned on its last tick. Only that method, driven by serverMetricsLoop's own
-	// single-goroutine ticker, touches it, so it needs no lock.
-	recentlyTombstonedStores map[uint64]struct{}
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -530,6 +525,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, tsoStorage, s)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
+	// This package's own heartbeat/bucket-report metrics can't be cleaned up from
+	// within RaftCluster's bury path without an import cycle, so RaftCluster invokes
+	// this callback instead.
+	s.cluster.SetOnStoreBuried(DeleteStoreMetrics)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -749,53 +748,11 @@ func (s *Server) serverMetricsLoop() {
 		select {
 		case <-ticker.C:
 			s.collectEtcdStateMetrics()
-			s.cleanupRemovedStoreMetrics()
 		case <-ctx.Done():
 			log.Info("server is closed, exit metrics loop")
 			return
 		}
 	}
-}
-
-// cleanupRemovedStoreMetrics deletes the per-store heartbeat/bucket-report metrics
-// of stores that have been tombstoned. These metrics are recorded directly in this
-// package (not in pkg/statistics or pkg/schedule), so they cannot be cleaned up from
-// within RaftCluster's bury path and are instead swept periodically here.
-func (s *Server) cleanupRemovedStoreMetrics() {
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return
-	}
-	// Delete unconditionally on every tick rather than tracking which stores were
-	// already cleaned: a region heartbeat for an already-tombstoned store can still
-	// land here and recreate a series. HandleRegionHeartbeat only checks
-	// store == nil, not store.IsRemoved(), before recording regionHeartbeat*/
-	// bucketReport* metrics -- unlike HandleStoreHeartbeat, which rejects tombstoned
-	// stores up front via checkStore(). If cleanup only ran once per store, such a
-	// late write would never get swept again for as long as the store stays
-	// tombstoned-but-not-yet-removed. DeletePartialMatch on labels that no longer
-	// exist is a cheap no-op, so repeating it every tick is safe.
-	current := make(map[uint64]struct{})
-	for _, store := range rc.GetStores() {
-		if !store.IsRemoved() {
-			continue
-		}
-		storeID := store.GetID()
-		current[storeID] = struct{}{}
-		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
-	}
-	// A store that was tombstoned as of the last sweep but isn't known at all this
-	// tick was fully removed in between. This loop only reaches stores GetStores()
-	// currently returns, so a write landing in that gap -- after the last sweep saw
-	// it tombstoned but before removal completed -- would otherwise be unreachable
-	// by any future sweep. One more delete call closes that window; it's a no-op if
-	// nothing was actually rewritten.
-	for storeID := range s.recentlyTombstonedStores {
-		if _, stillKnown := current[storeID]; !stillKnown {
-			DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
-		}
-	}
-	s.recentlyTombstonedStores = current
 }
 
 // encryptionKeyManagerLoop is used to start monitor encryption key changes.

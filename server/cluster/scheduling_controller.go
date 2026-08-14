@@ -63,7 +63,12 @@ type schedulingController struct {
 	// recentlyTombstonedStores is the set of store IDs collectSchedulingMetrics saw
 	// tombstoned on its last tick. Only that method, driven by
 	// runSchedulingMetricsCollectionJob's own single-goroutine ticker, touches it, so
-	// it needs no lock.
+	// it needs no lock. Filter counters are the only metrics that still need this:
+	// every scheduler's Schedule() keeps running StoreStateFilter against a
+	// tombstoned-but-known store every cycle, which is what increments them, so a
+	// one-shot delete at bury time gets undone almost immediately. Heartbeat-stream
+	// metrics no longer need it -- BuryStoreLocked's cleanup plus the IsRemoved
+	// check in heartbeat_streams.go's run loop stop those writes at bury time.
 	recentlyTombstonedStores map[uint64]struct{}
 }
 
@@ -192,13 +197,12 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(sc.opt)
 	stores := sc.GetStores()
 	// Unlike the other per-store cleanup called once from BuryStoreLocked, filter
-	// and heartbeat-stream metrics for a tombstoned store keep getting rewritten by
-	// unrelated, ongoing activity for as long as the store stays known: every
-	// scheduler's Schedule() still runs StoreStateFilter against it every cycle
-	// (that rejection is what increments the filter counters), and the heartbeat
-	// stream keepalive ticker keeps touching it as long as its stream is still
-	// bound. A one-shot delete at bury time gets undone almost immediately, so
-	// delete unconditionally here on every tick instead.
+	// metrics for a tombstoned store keep getting rewritten by unrelated, ongoing
+	// activity for as long as the store stays known: every scheduler's Schedule()
+	// still runs StoreStateFilter against it every cycle, and that rejection is
+	// what increments the filter counters. A one-shot delete at bury time gets
+	// undone almost immediately, so delete unconditionally here on every tick
+	// instead.
 	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
@@ -206,9 +210,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		if s.IsRemoved() {
 			storeID := s.GetID()
 			current[storeID] = struct{}{}
-			storeIDStr := strconv.FormatUint(storeID, 10)
-			filter.DeleteStoreMetrics(storeIDStr)
-			hbstream.DeleteStoreMetrics(storeIDStr)
+			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
 	// A store that was tombstoned as of the last sweep but isn't known at all this
@@ -219,9 +221,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	// it's a no-op if nothing was actually rewritten.
 	for storeID := range sc.recentlyTombstonedStores {
 		if _, stillKnown := current[storeID]; !stillKnown {
-			storeIDStr := strconv.FormatUint(storeID, 10)
-			filter.DeleteStoreMetrics(storeIDStr)
-			hbstream.DeleteStoreMetrics(storeIDStr)
+			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
 	sc.recentlyTombstonedStores = current
