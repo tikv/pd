@@ -70,8 +70,10 @@ func checkDefaultStoreLimitPersistenceFeature(component, name, gitHash, featureG
 }
 
 // checkDefaultStoreLimitPersistenceSupport prevents a new persisted schedule
-// field from being activated while an old PD or Scheduling Service member can
-// still become leader/primary and drop the unknown field on its next persist.
+// field from being activated while a currently registered old PD or Scheduling
+// Service member can still become leader/primary and drop the unknown field on
+// its next persist. It is a rolling-upgrade gate, not a downgrade guard: a
+// pre-feature binary does not understand this check or the persisted field.
 func (s *Server) checkDefaultStoreLimitPersistenceSupport() error {
 	members, err := s.ReloadMembers()
 	if err != nil {
