@@ -211,13 +211,6 @@ var (
 			Name:      "region_request_cnt",
 			Help:      "Counter of region request.",
 		}, []string{"request", "caller_id", "caller_component", "event"})
-	microserviceMetadataCleanupCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "microservice_metadata_cleanup_total",
-			Help:      "Counter of best-effort microservice metadata cleanup events in PD mode.",
-		}, []string{"outcome"})
 )
 
 func init() {
@@ -244,5 +237,4 @@ func init() {
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
 	prometheus.MustRegister(regionRequestCounter)
-	prometheus.MustRegister(microserviceMetadataCleanupCounter)
 }

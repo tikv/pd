@@ -90,7 +90,6 @@ func (s *Server) runMicroserviceMetadataCleanup(
 			return nil
 		}
 		if goerrors.Is(err, errMicroserviceMetadataCleanupRejected) {
-			microserviceMetadataCleanupCounter.WithLabelValues("rejected").Inc()
 			log.Warn("cannot safely clean up microservice metadata in PD mode",
 				errs.ZapError(err))
 			return nil
@@ -99,7 +98,6 @@ func (s *Server) runMicroserviceMetadataCleanup(
 			return ctx.Err()
 		}
 
-		microserviceMetadataCleanupCounter.WithLabelValues("retry").Inc()
 		log.Warn("failed to clean up microservice metadata in PD mode, retry later",
 			zap.Duration("retry-interval", retryInterval),
 			errs.ZapError(err))
@@ -177,7 +175,6 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 		return err
 	}
 	if groupKV == nil {
-		microserviceMetadataCleanupCounter.WithLabelValues("skipped").Inc()
 		return nil
 	}
 	cleared, err := s.clearDefaultTSOKeyspaceGroupMembers(ctx, term, groupKV)
@@ -185,7 +182,6 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 		return err
 	}
 	if cleared {
-		microserviceMetadataCleanupCounter.WithLabelValues("success").Inc()
 		log.Info("cleaned up microservice metadata in PD mode",
 			zap.Bool("cleared-default-keyspace-group-members", true))
 	}
