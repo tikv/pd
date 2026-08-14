@@ -1374,7 +1374,8 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.Errorf("invalid store ID %d, not found", storeID)
 		}
 		if store.IsRemoved() {
-			return errors.Errorf("store ID %d is tombstone", storeID)
+			log.Debug("skip region heartbeat from tombstone store", zap.Uint64("store-id", storeID))
+			continue
 		}
 		storeAddress := store.GetAddress()
 
