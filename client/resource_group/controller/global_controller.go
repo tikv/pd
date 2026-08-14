@@ -186,13 +186,9 @@ type ResourceGroupsController struct {
 	// 0 means not loaded or not configured (treated as v1).
 	ruVersion atomic.Int32
 
-	// lifecycleMu serializes Start against Stop: it guards the publication
-	// of loopCtx/loopCancel and the stopped flag, so that a Stop concurrent
-	// with Start either observes the started loop and cancels it, or marks
-	// the controller stopped before Start launches the loop. Without it, a
-	// racing Start could leak a run loop that no longer owns the
-	// process-wide slot. stopOnce makes Stop idempotent and guarantees the
-	// slot is released exactly once.
+	// lifecycleMu serializes Start against Stop; without it, a Start racing
+	// a Stop could leak a run loop that no longer owns the process-wide
+	// slot.
 	lifecycleMu sync.Mutex
 	stopOnce    sync.Once
 	stopped     bool
@@ -213,10 +209,8 @@ func NewResourceGroupController(
 	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
-	// Reserve the process-wide ownership slot before any side effect: the
-	// steps below perform network I/O and update process-global state. The
-	// deferred unreserve keeps a failure (or panic) on any construction path
-	// from leaking the slot.
+	// Reserve the ownership slot before any side effect: the steps below
+	// perform network I/O and update process-global state.
 	if err := ownership.reserve(); err != nil {
 		return nil, err
 	}
@@ -555,9 +549,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 // Stop stops ResourceGroupController service and releases the process-wide
 // ownership slot, allowing a replacement controller to be constructed. It is
 // idempotent and also valid on a controller that was never started. A stopped
-// controller cannot be started again and must not be used further: requests
-// served after Stop would repopulate the process-global metric state with
-// series that no cleanup path collects anymore.
+// controller cannot be started again and must not serve further requests:
+// metric series created after Stop are never cleaned up.
 func (c *ResourceGroupsController) Stop() error {
 	c.stopOnce.Do(func() {
 		c.lifecycleMu.Lock()
@@ -568,21 +561,17 @@ func (c *ResourceGroupsController) Stop() error {
 			cancel()
 			c.wg.Wait()
 		}
-		// The run loop cleans the process-global metrics up on exit, but a
-		// controller that was never started (or was used again after its
-		// run loop already exited) has no loop to do it, so clean them up
-		// here as well before handing the slot to a replacement.
+		// Also covers controllers without a run loop to do it on exit,
+		// e.g. never started, or used again after context cancellation.
 		c.cleanupProcessGlobalMetrics()
 		ownership.release(c)
 	})
 	return nil
 }
 
-// cleanupProcessGlobalMetrics cleans the process-global metric state
-// populated on behalf of this controller. It is safe to call more than once.
-// Only the current ownership holder may reset the process-global collectors:
-// a controller allocated outside the supported API must not disturb the
-// owner's state.
+// cleanupProcessGlobalMetrics is idempotent. It is restricted to the current
+// ownership holder so that a controller allocated outside the supported API
+// cannot reset the owner's process-global collectors.
 func (c *ResourceGroupsController) cleanupProcessGlobalMetrics() {
 	if !ownership.owns(c) {
 		return

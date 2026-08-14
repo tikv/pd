@@ -20,33 +20,23 @@ import (
 	"github.com/tikv/pd/client/errs"
 )
 
-// controllerOwnership enforces the process-wide single-controller contract:
-// at most one ResourceGroupsController acquired through
-// NewResourceGroupController may exist in a process at a time. The contract
-// exists because several integrations around the controller are process-global
-// and carry no controller identity, e.g. the resource-control Prometheus
-// collectors, the enableControllerTraceLog flag, and the client-go
-// resource-control interceptor.
-//
-// The ownership slot is reserved before the controller is constructed (the
-// constructor performs network I/O and updates process-global state), bound to
-// the controller on success, and released either on a failed construction or
-// by an idempotent Stop. Canceling the context passed to Start stops the run
-// loop but does NOT release ownership; callers must call Stop explicitly.
+// controllerOwnership enforces the single-controller contract of
+// tikv/pd#11080: at most one ResourceGroupsController acquired through
+// NewResourceGroupController may exist in a process at a time, because the
+// integrations around the controller (Prometheus collectors, the trace-log
+// flag, the client-go interceptor) are process-global and carry no
+// controller identity. The slot is released only by an explicit Stop; in
+// particular, canceling the context passed to Start does not release it.
 type controllerOwnership struct {
 	mu sync.Mutex
-	// reserved is true while a constructor holds the slot but has not bound
-	// a controller to it yet.
+	// reserved marks a construction in progress, before a controller is
+	// bound to the slot.
 	reserved bool
-	// owner is the controller currently holding the slot.
-	owner *ResourceGroupsController
+	owner    *ResourceGroupsController
 }
 
-// ownership is the process-wide ownership slot.
 var ownership controllerOwnership
 
-// reserve claims the slot for a construction in progress. It returns
-// ErrClientResourceGroupControllerAlreadyExists if the slot is held.
 func (o *controllerOwnership) reserve() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -57,14 +47,12 @@ func (o *controllerOwnership) reserve() error {
 	return nil
 }
 
-// unreserve releases a reservation after a failed construction.
 func (o *controllerOwnership) unreserve() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.reserved = false
 }
 
-// bind transfers the reservation to the successfully constructed controller.
 func (o *controllerOwnership) bind(c *ResourceGroupsController) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -72,8 +60,8 @@ func (o *controllerOwnership) bind(c *ResourceGroupsController) {
 	o.reserved = false
 }
 
-// release frees the slot if and only if c is the current owner, so a stale
-// controller's Stop cannot release a newer controller's slot.
+// release only honors the current owner, so a stale controller's Stop cannot
+// free a newer controller's slot.
 func (o *controllerOwnership) release(c *ResourceGroupsController) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -82,7 +70,6 @@ func (o *controllerOwnership) release(c *ResourceGroupsController) {
 	}
 }
 
-// owns reports whether c currently holds the slot.
 func (o *controllerOwnership) owns(c *ResourceGroupsController) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()

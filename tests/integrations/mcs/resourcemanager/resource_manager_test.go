@@ -802,9 +802,8 @@ func (suite *resourceManagerClientTestSuite) TestWatchWithSingleGroupByKeyspace(
 	keyspaceController, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID, controller.EnableSingleGroupByKeyspace())
 	re.NoError(err)
 	keyspaceController.Start(suite.ctx)
-	// Deferred backstop: Stop is idempotent, so this is a no-op after the
-	// inline Stop below, but keeps a mid-test failure from leaving the
-	// ownership slot held and cascading into later tests.
+	// Backstop: a mid-test failure must not leave the ownership slot held,
+	// which would fail every later test in the suite.
 	defer func() {
 		re.NoError(keyspaceController.Stop())
 	}()
@@ -1062,9 +1061,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	controller, err := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, constants.NullKeyspaceID, controller.EnableSingleGroupByKeyspace())
 	re.NoError(err)
 	controller.Start(suite.ctx)
-	// Backstop for a mid-test failure; a no-op after the inline Stop at the
-	// end of the test since Stop is idempotent. Without it, a held ownership
-	// slot would fail every later test in the suite.
+	// Backstop for a mid-test failure; Stop is idempotent.
 	defer func() {
 		re.NoError(controller.Stop())
 	}()
@@ -2042,8 +2039,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil, constants.NullKeyspaceID)
 	re.NoError(err)
 	c1.Start(suite.ctx)
-	// Deferred backstop for a mid-test failure; a no-op after the inline
-	// Stop below since Stop is idempotent.
+	// Backstop for a mid-test failure; Stop is idempotent.
 	defer func() {
 		re.NoError(c1.Stop())
 	}()
@@ -2440,10 +2436,9 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		re.Contains(resp, "Success!")
 	}
 
-	// For each keyspace in turn, run one active controller and verify that it
-	// loads and watches only its own keyspace's resource groups. The process
-	// contract allows at most one active controller at a time, so the
-	// per-keyspace coverage is sequential.
+	// One active controller per keyspace in turn (the process contract
+	// forbids coexistence), verifying that each loads and watches only its
+	// own keyspace's resource groups.
 	clientID := uint64(1)
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 100}
 	fillRate := uint64(12345)
@@ -2452,8 +2447,7 @@ func (suite *resourceManagerClientTestSuite) TestLoadAndWatchWithDifferentKeyspa
 		c, err := controller.NewResourceGroupController(suite.ctx, clientID, cli, nil, keyspace)
 		re.NoError(err)
 		c.Start(suite.ctx)
-		// Cleanup backstop for a mid-iteration failure; a no-op after the
-		// inline Stop at the end of the iteration since Stop is idempotent.
+		// Backstop for a mid-iteration failure; Stop is idempotent.
 		suite.T().Cleanup(func() {
 			re.NoError(c.Stop())
 		})
