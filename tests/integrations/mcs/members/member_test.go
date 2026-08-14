@@ -808,12 +808,24 @@ func (suite *memberTestSuite) TestEvictPrimaryRejectedForInvalidCandidate() {
 
 		// The rejection must happen before any transfer, so every normal
 		// group's primary is still on target even though outsider would have
-		// been a valid destination for all of them.
-		serving := mustGetKeyspaceGroupMembers(re, target.(*tso.Server))
-		for _, id := range normalIDs {
-			g, ok := serving[id]
-			re.True(ok)
-			re.True(g.IsPrimary)
+		// been a valid destination for all of them. Primary movement is
+		// asynchronous (the successful-transfer checks above poll for it), so a
+		// broken handler that started a transfer for a normal group before
+		// rejecting restrictedID could still pass a single immediate snapshot.
+		// Hold the check across the same window used for those polls instead,
+		// failing as soon as any normal group's primary moves off target.
+		holdDeadline := time.Now().Add(10 * time.Second)
+		for {
+			serving := mustGetKeyspaceGroupMembers(re, target.(*tso.Server))
+			for _, id := range normalIDs {
+				g, ok := serving[id]
+				re.True(ok)
+				re.True(g.IsPrimary)
+			}
+			if time.Now().After(holdDeadline) {
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
 		}
 
 		// Move every group's primary off target so the next trial's groups are
