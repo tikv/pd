@@ -408,6 +408,36 @@ func TestWriteReservationEntersReportedConsumptionAtResponse(t *testing.T) {
 	re.Equal(requestDelta.WriteBytes, responseReport.GetConsumptionSinceLastRequest().GetWriteBytes())
 }
 
+func TestWriteReservationSettlesWhenResponseTokenWaitFails(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	req := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  1024,
+		numReplicas: 3,
+	}
+	// A response payload above bigRequestThreshold on a throttled group forces
+	// the response-side acquireTokens to reserve instead of taking debt, and
+	// the cancelled context makes that reservation wait fail.
+	resp := &TestResponseInfo{succeed: true, readBytes: 1 << 40}
+
+	requestDelta, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
+	re.NoError(err)
+	re.Positive(requestDelta.WRU)
+
+	gc.isThrottled.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = gc.onResponseWaitImpl(ctx, req, resp)
+	re.Error(err)
+
+	gc.mu.Lock()
+	consumption := *gc.mu.consumption
+	gc.mu.Unlock()
+	re.InDelta(requestDelta.WRU, consumption.WRU, 1e-6)
+	re.Equal(requestDelta.WriteBytes, consumption.WriteBytes)
+}
+
 func TestPagingPrechargeRefundDoesNotEnterReportedResponseConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)

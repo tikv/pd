@@ -732,6 +732,17 @@ func (gc *groupCostController) onResponseWaitImpl(
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(count, req)
 	}
+
+	// Settle accounting before the token wait: the resources are already
+	// consumed once a response arrives, and an error during the wait must not
+	// skip settlement, or the restored write reservation would never enter
+	// reported consumption.
+	gc.mu.Lock()
+	add(gc.mu.consumption, reportedDelta)
+	add(gc.mu.storeCounter[req.StoreID()], count)
+	add(gc.mu.globalCounter, count)
+	gc.mu.Unlock()
+
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
@@ -768,12 +779,6 @@ func (gc *groupCostController) onResponseWaitImpl(
 	if isPagingRead {
 		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
 	}
-
-	gc.mu.Lock()
-	add(gc.mu.consumption, reportedDelta)
-	add(gc.mu.storeCounter[req.StoreID()], count)
-	add(gc.mu.globalCounter, count)
-	gc.mu.Unlock()
 
 	return delta, waitDuration, nil
 }
