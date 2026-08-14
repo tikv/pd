@@ -216,7 +216,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "server",
 			Name:      "microservice_metadata_cleanup_total",
-			Help:      "Counter of microservice metadata cleanup events during PD-mode leader preparation.",
+			Help:      "Counter of best-effort microservice metadata cleanup events in PD mode.",
 		}, []string{"outcome"})
 )
 

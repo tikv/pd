@@ -54,8 +54,9 @@ func rejectMicroserviceMetadataCleanup(format string, args ...any) error {
 	return errors.Wrapf(errMicroserviceMetadataCleanupRejected, format, args...)
 }
 
-// scheduleMicroserviceMetadataCleanup cleans up supported API-service metadata
-// in the background after the PD leader starts serving.
+// scheduleMicroserviceMetadataCleanup starts best-effort cleanup of supported
+// API-service metadata after the PD leader starts serving. It does not gate
+// leader readiness and is scoped to the current leadership term.
 func (s *Server) scheduleMicroserviceMetadataCleanup(ctx context.Context) {
 	if s.IsKeyspaceGroupEnabled() {
 		return
