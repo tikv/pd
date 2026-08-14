@@ -810,29 +810,36 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 		})
 		<-cleanupRelease
 	}))
-	t.Cleanup(func() {
+	defer func() {
 		cleanupReleaseOnce.Do(func() {
 			close(cleanupRelease)
 		})
 		re.NoError(failpoint.Disable(cleanupBlockerName))
-	})
+	}()
 
-	const switchRounds = 2
-	for round := range switchRounds {
+	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+	re.NoError(err)
+	defer func() {
+		if tsoCluster != nil {
+			tsoCluster.Destroy()
+		}
+	}()
+
+	for _, tsoStartsBeforeCleanup := range []bool{true, false} {
 		waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
-		tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
-		re.NoError(err)
 		waitTSOServiceReady(re, tsoCluster)
+		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 		checkMicroserviceTSOAvailable(ctx, re, pdServer)
 		checkKeyspaceTSOAvailable(ctx, re, pdServer)
-		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 		tsoCluster.Destroy()
+		tsoCluster = nil
 		seedDefaultKeyspaceGroupMembers(ctx, re, pdServer, []endpoint.KeyspaceGroupMember{{
 			Address:  "http://127.0.0.1:1",
 			Priority: mcs.DefaultKeyspaceGroupReplicaPriority,
 		}})
 
-		if round == 0 {
+		if tsoStartsBeforeCleanup {
 			pdServer, err = startPDForServiceMode(ctx, tc, pdServer, nil)
 			re.NoError(err)
 			select {
@@ -845,13 +852,27 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 			checkPDLeaderAPIAvailable(ctx, re, pdServer)
 			checkPDTSOAvailable(ctx, re, pdServer)
 			checkKeyspaceTSOAvailable(ctx, re, pdServer)
-			cleanupReleaseOnce.Do(func() {
-				close(cleanupRelease)
-			})
 		} else {
 			pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, nil)
 			re.NoError(err)
+			waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
 		}
+
+		tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
+		re.NoError(err)
+		if tsoStartsBeforeCleanup {
+			for _, server := range tsoCluster.GetServers() {
+				resp, err := tests.TestDialClient.Get(server.GetAddr() + tsoapi.APIPathPrefix + "/health")
+				re.NoError(err)
+				statusCode := resp.StatusCode
+				re.NoError(resp.Body.Close())
+				re.Equal(http.StatusNotFound, statusCode)
+			}
+			cleanupReleaseOnce.Do(func() {
+				close(cleanupRelease)
+			})
+		}
+		waitTSOServiceReady(re, tsoCluster)
 		checkPDTSOAvailable(ctx, re, pdServer)
 		checkKeyspaceTSOAvailable(ctx, re, pdServer)
 		waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
@@ -861,13 +882,10 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	}
 
 	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
-	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
-	re.NoError(err)
-	defer tsoCluster.Destroy()
 	waitTSOServiceReady(re, tsoCluster)
+	waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 	checkMicroserviceTSOAvailable(ctx, re, pdServer)
 	checkKeyspaceTSOAvailable(ctx, re, pdServer)
-	waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 }
 
 func restartPDForServiceMode(
