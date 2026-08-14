@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -600,4 +602,176 @@ func TestPDLeaderStepsDownWhenRenewalsFail(t *testing.T) {
 		return !oldLeader.IsServing()
 	}, testutil.WithWaitFor(30*time.Second))
 	re.NotEqual(oldLeaderName, waitLeaderChange(re, cluster, oldLeaderName))
+}
+
+// TestPDLeaderClearsIdentityBeforeBlockingCleanup asserts the ordering inside the
+// step-down path: the in-memory leader identity is dropped before anything that
+// can block for an unbounded time.
+//
+// Two paths report leadership without consulting IsServing - GetMembers reads
+// GetLeader directly, and the v1 redirector handles a request locally when the
+// cached leader name is its own - so a member whose cleanup never finishes would
+// otherwise keep answering as the leader for as long as a storage stall lasts.
+func TestPDLeaderClearsIdentityBeforeBlockingCleanup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// One member is enough: everything asserted below is this member's own
+	// in-memory state, and no peer has to take over for the assertions to mean
+	// what they say.
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName).GetServer()
+	re.True(leaderServer.IsServing())
+
+	// The lease this member currently holds. Its ID is what pins the assertion
+	// below to the term being given up here; see the comment on the conjunction.
+	oldLease := leaderServer.GetMember().GetLeadership().GetLease()
+	re.NotNil(oldLease)
+	oldLeaseID := oldLease.GetID()
+	re.NotEqual(clientv3.NoLease, oldLeaseID)
+
+	// Stand in for the part of the cleanup that can block. Everything in
+	// Lease.Close past this point either talks to the local etcd or logs, and on
+	// a stalled volume neither of those returns.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	// Fail renewals so the local deadline is what ends the term.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	// All four have to hold at the same instant, and that conjunction is the
+	// whole point of the test:
+	//
+	//   - the leader is already nil;
+	//   - the leader value is still set, which Leadership.Reset clears only after
+	//     Lease.Close returns, so the cleanup is provably still blocked;
+	//   - the lease reads as expired, so this is a term being given up rather
+	//     than one being campaigned for;
+	//   - and it is still the *same* lease, which is what makes the previous two
+	//     mean what they appear to mean.
+	//
+	// That last conjunct is what makes the first three mean what they appear to.
+	// Leadership.Campaign stores a non-empty leader value and installs a fresh
+	// lease before it grants that lease, and a fresh lease has no expire time and
+	// so reads as expired - so the first three are also satisfied while a
+	// campaign is in flight, and go on being satisfied indefinitely after one
+	// fails, since campaignLeader returns on a failed Campaign before it sets up
+	// the resign at all. Neither case arises in this one-member cluster, where
+	// Campaign does not fail and the in-flight window is a single local Grant
+	// wide, so the lease ID is not what makes the test fail today under a
+	// reversed Member.Resign. It is what keeps the assertion honest if the test
+	// grows back to several members, and what stops the failed-campaign state
+	// from ever standing in for a step-down. Reset never replaces the lease and
+	// Close never clears its ID, so the ID stays put through the blocked close,
+	// while every campaign installs a lease whose ID is either zero or newly
+	// assigned by etcd.
+	testutil.Eventually(re, func() bool {
+		m := leaderServer.GetMember()
+		return m.GetLeader() == nil &&
+			m.GetLeadership().GetLeaderValue() != "" &&
+			!m.GetLeadership().Check() &&
+			m.GetLeadership().GetLease().GetID() == oldLeaseID
+	}, testutil.WithWaitFor(30*time.Second))
+}
+
+// TestPDLeaderResignsBeforeLoggingStepDown covers the other half of the same
+// ordering, the one inside campaignLeader: the leadership is given up before the
+// line explaining why it was given up is written.
+//
+// The two are separate because they can be reversed separately. Member.Resign
+// puts the in-memory stores ahead of the lease teardown; campaignLeader puts the
+// whole resign ahead of its own log call. Logging is not obviously blocking, but
+// it writes to a file that can share a volume with the data directory, and on a
+// stalled volume it does not return - which is exactly when the member must not
+// still be answering as the leader.
+func TestPDLeaderResignsBeforeLoggingStepDown(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	re.NoError(cluster.RunInitialServers())
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := cluster.GetServer(leaderName).GetServer()
+	re.True(leaderServer.IsServing())
+
+	oldLease := leaderServer.GetMember().GetLeadership().GetLease()
+	re.NotNil(oldLease)
+	oldLeaseID := oldLease.GetID()
+	re.NotEqual(clientv3.NoLease, oldLeaseID)
+
+	// Capture the log after the cluster is up, so that this replacement is the
+	// one that sticks, and put the previous global logger back afterwards: the
+	// file is deleted when this test returns, and anything still writing to the
+	// replacement would be writing into a deleted file.
+	logCfg := &log.Config{Level: "info"}
+	logFile, err := os.CreateTemp("", "pd_tests")
+	re.NoError(err)
+	fname := logFile.Name()
+	re.NoError(logFile.Close())
+	logCfg.File.Filename = fname
+	lg, props, err := log.InitLogger(logCfg)
+	re.NoError(err)
+	restoreLogger := log.ReplaceGlobals(lg, props)
+	defer func() {
+		restoreLogger()
+		os.RemoveAll(fname)
+	}()
+
+	// Hold the step-down open inside Lease.Close, so that there is a window in
+	// which the resign has started but has not finished. Without it the log line
+	// would follow the resign too closely to observe either way.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/blockLeaseClose",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/blockLeaseClose"))
+	}()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/keepAliveFailed",
+		fmt.Sprintf("return(\"leader election@%s\")", leaderName)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/keepAliveFailed"))
+	}()
+
+	const stepDownMsg = "no longer a leader because lease has expired"
+
+	// Wait for the member to be inside the blocked close of the term it started
+	// with, exactly as in the test above.
+	testutil.Eventually(re, func() bool {
+		m := leaderServer.GetMember()
+		return m.GetLeader() == nil &&
+			m.GetLeadership().GetLeaderValue() != "" &&
+			!m.GetLeadership().Check() &&
+			m.GetLeadership().GetLease().GetID() == oldLeaseID
+	}, testutil.WithWaitFor(30*time.Second))
+
+	// The identity is gone, and the reason has not been written yet. Reverse the
+	// two in campaignLeader and the line is already there by the time the resign
+	// it precedes has cleared the leader.
+	content, err := os.ReadFile(fname)
+	re.NoError(err)
+	re.NotContains(string(content), stepDownMsg)
+
+	// And the line does arrive once the blocked close finishes. This is what
+	// keeps the assertion above from passing merely because nothing was ever
+	// captured.
+	testutil.Eventually(re, func() bool {
+		content, err := os.ReadFile(fname)
+		re.NoError(err)
+		return strings.Contains(string(content), stepDownMsg)
+	}, testutil.WithWaitFor(30*time.Second))
 }

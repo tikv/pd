@@ -159,6 +159,18 @@ func (l *Lease) Close() error {
 	localTTLRemaining.unregister(l)
 	// Reset expire time.
 	l.expireTime.Store(typeutil.ZeroTime)
+	// Everything below here talks to etcd or logs, so it can block for an
+	// unbounded time when the volume holding the data directory stops completing
+	// writes. This failpoint stands in for that, so a test can assert that the
+	// caller has already given up its identity in memory by the time it gets here.
+	// The pause is bounded rather than open-ended because Server.Close stops the
+	// server loop before it closes the election client, so a wait that only ends
+	// with the client would deadlock the shutdown it is meant to outlive.
+	failpoint.Inject("blockLeaseClose", func(val failpoint.Value) {
+		if l.matchesFailpointTarget(val) {
+			time.Sleep(10 * time.Second)
+		}
+	})
 	// Try to revoke lease to make subsequent elections faster.
 	ctx, cancel := context.WithTimeout(l.client.Ctx(), revokeLeaseTimeout)
 	defer cancel()

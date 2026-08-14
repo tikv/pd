@@ -202,9 +202,13 @@ func (a *Allocator) handleTSOUpdateFailure(stateIDBeforeUpdate uint64, err error
 			append(a.logFields, errs.ZapError(err))...)
 		return
 	}
+	// Reset before logging, for the same reason the step-down branches in
+	// campaignLeader do: the reset gives the leadership up, and on a stalled
+	// volume the log below can block for an unbounded time, leaving a member
+	// that no longer serves still answering as the primary.
+	a.resetAllocatorLocked(true)
 	log.Warn("failed to update allocator's timestamp, resetting the TSO allocator with leadership resignation",
 		append(a.logFields, errs.ZapError(err))...)
-	a.resetAllocatorLocked(true)
 }
 
 // SetTSO sets the physical part with given TSO.
@@ -366,11 +370,14 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", a.keyspaceGroupID)
 	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
-	defer resetPrimaryOnce.Do(func() {
+	// A named function rather than an inline defer because the step-down branch
+	// below calls it before it logs; see the comment there.
+	resetPrimary := func() {
 		cancel()
 		a.member.Resign()
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
-	})
+	}
+	defer resetPrimaryOnce.Do(resetPrimary)
 
 	log.Info("tso primary is ready to serve", a.logFields...)
 
@@ -384,6 +391,12 @@ func (a *Allocator) campaignPrimary(expectedPrimary string) {
 			// expiration and a `{service}/primary/transfer` API call, which resigns
 			// this primary by revoking its leader lease.
 			if !a.isServing() {
+				// Resign before logging, not in the deferred reset below. The
+				// log can block for an unbounded time on a stalled volume, and
+				// GetPrimaryAddr reports this member through GetServingUrls
+				// without consulting isServing, so a primary that is still
+				// waiting on that log would keep being handed out.
+				resetPrimaryOnce.Do(resetPrimary)
 				log.Info("no longer a primary because lease has expired or transferred, the tso primary will step down", a.logFields...)
 				return
 			}
