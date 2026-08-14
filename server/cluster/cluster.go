@@ -218,9 +218,7 @@ type RaftCluster struct {
 	onStoreBuried atomic.Pointer[func(storeID string)]
 }
 
-// SetOnStoreBuried sets the callback invoked when a store is buried
-// (transitions to tombstone), for per-store cleanup owned by a package that
-// server/cluster cannot import.
+// SetOnStoreBuried sets the callback invoked when a store is buried.
 func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
 	c.onStoreBuried.Store(&fn)
 }

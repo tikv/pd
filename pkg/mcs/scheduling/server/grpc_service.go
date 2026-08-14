@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -263,17 +264,25 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 		return &schedulingpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	start := time.Now()
-	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+	storeID := request.GetStats().GetStoreId()
+	if c.GetStore(storeID) == nil {
 		metaWatcher.GetStoreWatcher().ForceLoad()
 	}
 
-	storeID := request.GetStats().GetStoreId()
 	store := c.GetStore(storeID)
-	storeAddress := ""
-	if store != nil {
-		storeAddress = store.GetAddress()
+	if store == nil {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v not found", storeID)),
+		}, nil
 	}
+	if store.IsRemoved() {
+		return &schedulingpb.StoreHeartbeatResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN, fmt.Sprintf("store %v is tombstone", storeID)),
+		}, nil
+	}
+
+	start := time.Now()
+	storeAddress := store.GetAddress()
 	storeLabel := strconv.FormatUint(storeID, 10)
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		storeHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "error").Inc()

@@ -554,14 +554,26 @@ func (f *HotPeerCache) gc() {
 	for _, storeID := range f.cluster.GetStores() {
 		stores[storeID.GetID()] = struct{}{}
 	}
+	// calcHotThresholds can populate thresholdsOfStore for a store that never becomes
+	// hot enough to enter peersOfStore, so peersOfStore alone can miss it; check the
+	// union of both.
+	removed := make(map[uint64]struct{})
 	for storeID := range f.peersOfStore {
 		if _, ok := stores[storeID]; !ok {
-			delete(f.peersOfStore, storeID)
-			delete(f.regionsOfStore, storeID)
-			delete(f.thresholdsOfStore, storeID)
-			delete(f.metrics, storeID)
-			hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
+			removed[storeID] = struct{}{}
 		}
+	}
+	for storeID := range f.thresholdsOfStore {
+		if _, ok := stores[storeID]; !ok {
+			removed[storeID] = struct{}{}
+		}
+	}
+	for storeID := range removed {
+		delete(f.peersOfStore, storeID)
+		delete(f.regionsOfStore, storeID)
+		delete(f.thresholdsOfStore, storeID)
+		delete(f.metrics, storeID)
+		hotCacheStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeTag(storeID), "type": f.kind.String()})
 	}
 	// remove expired items
 	for _, peers := range f.peersOfStore {

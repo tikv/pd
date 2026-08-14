@@ -96,15 +96,10 @@ type Cluster struct {
 	running           atomic.Bool
 
 	// recentlyTombstonedStores is the set of store IDs collectMetrics saw tombstoned
-	// on its last tick. Only that method, driven by runMetricsCollectionJob's own
-	// single-goroutine ticker, touches it, so it needs no lock. Filter counters are
-	// the only metrics that still need this: every scheduler's Schedule() keeps
-	// running StoreStateFilter against a tombstoned-but-known store every cycle,
-	// which is what increments them, so a one-shot delete at bury time gets undone
-	// almost immediately. Heartbeat, heartbeat-stream, and store-status metrics no
-	// longer need it -- writes to them stop at bury time (see the store-tombstoned
-	// callback wired in SetRuntimeResources and the IsRemoved checks in
-	// grpc_service.go/heartbeat_streams.go).
+	// on its last tick, needed to catch a store that gets fully removed between two
+	// ticks so its filter counters still get one final delete. Only collectMetrics,
+	// via runMetricsCollectionJob's single-goroutine ticker, touches it, so it needs
+	// no lock.
 	recentlyTombstonedStores map[uint64]struct{}
 
 	backendAddress string
@@ -740,11 +735,10 @@ func (c *Cluster) runMetricsCollectionJob() {
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
 	stores := c.GetStores()
-	// Filter counters are the only ones that need repeated cleanup here: every
-	// scheduler's Schedule() still runs StoreStateFilter against every known store
-	// each cycle, and that rejection is what increments them, so a one-shot delete
-	// at bury time gets undone almost immediately. DeletePartialMatch on labels that
-	// no longer exist is a cheap no-op, so repeating it every tick is safe.
+	// Filter counters need repeated cleanup: schedulers keep rejecting a
+	// tombstoned-but-known store via StoreStateFilter every cycle, so a one-shot
+	// delete at bury time doesn't stick. Deleting already-gone labels is a cheap
+	// no-op, so repeating it every tick is safe.
 	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
@@ -755,12 +749,9 @@ func (c *Cluster) collectMetrics() {
 			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
 		}
 	}
-	// A store that was tombstoned as of the last sweep but isn't known at all this
-	// tick was fully removed in between. The loop above only reaches stores
-	// GetStores() currently returns, so a write landing in that gap -- after the
-	// last sweep saw it tombstoned but before removal completed -- would otherwise
-	// be unreachable by any future sweep. One more delete call closes that window;
-	// it's a no-op if nothing was actually rewritten.
+	// A store fully removed between two ticks drops out of GetStores() before this
+	// sweep can catch it there; delete once more for anything recentlyTombstonedStores
+	// still remembers but current no longer has.
 	for storeID := range c.recentlyTombstonedStores {
 		if _, stillKnown := current[storeID]; !stillKnown {
 			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
