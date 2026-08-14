@@ -19,14 +19,20 @@ import (
 	"sort"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+var _ ContextReader = (*etcdKVBase)(nil)
+var _ RawTxnCapableWithContext = (*etcdKVBase)(nil)
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -43,6 +49,138 @@ func TestEtcd(t *testing.T) {
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
 	testRawTxn(re, kv)
+}
+
+func TestEtcdLoadRangeWithContextCancellation(t *testing.T) {
+	re := require.New(t)
+	const (
+		startKey = "context/range/start"
+		endKey   = "context/range/end"
+	)
+	blocker := etcdutil.NewBlockingUnaryClientInterceptor(
+		func(method string, request any) bool {
+			rangeRequest, ok := request.(*etcdserverpb.RangeRequest)
+			return method == "/etcdserverpb.KV/Range" &&
+				ok &&
+				string(rangeRequest.Key) == startKey &&
+				string(rangeRequest.RangeEnd) == endKey
+		},
+	)
+	client, clean := newEtcdClientWithBlocker(t, blocker)
+	defer clean()
+	defer blocker.Release()
+
+	base := NewEtcdKVBase(client)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	blocker.Enable()
+	go func() {
+		_, _, err := base.LoadRangeWithContext(
+			ctx,
+			startKey,
+			endKey,
+			10,
+		)
+		result <- err
+	}()
+
+	waitForBlockerEntry(re, blocker)
+	cancel()
+	waitForBlockerContextDone(re, blocker)
+	re.Equal(context.Canceled, waitForError(re, result))
+}
+
+func TestEtcdRawTxnWithContextCancellation(t *testing.T) {
+	re := require.New(t)
+	const key = "context/txn"
+	blocker := etcdutil.NewBlockingUnaryClientInterceptor(
+		func(method string, request any) bool {
+			txnRequest, ok := request.(*etcdserverpb.TxnRequest)
+			return method == "/etcdserverpb.KV/Txn" &&
+				ok &&
+				len(txnRequest.Compare) == 1 &&
+				string(txnRequest.Compare[0].Key) == key
+		},
+	)
+	client, clean := newEtcdClientWithBlocker(t, blocker)
+	defer clean()
+	defer blocker.Release()
+
+	base := NewEtcdKVBase(client)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	blocker.Enable()
+	go func() {
+		_, err := base.CreateRawTxnWithContext(ctx).
+			If(RawTxnCondition{
+				Key:     key,
+				CmpType: RawTxnCmpNotExists,
+			}).
+			Then(RawTxnOp{
+				Key:    key,
+				OpType: RawTxnOpGet,
+			}).
+			Commit()
+		result <- err
+	}()
+
+	waitForBlockerEntry(re, blocker)
+	cancel()
+	waitForBlockerContextDone(re, blocker)
+	re.ErrorIs(waitForError(re, result), context.Canceled)
+}
+
+func newEtcdClientWithBlocker(
+	t *testing.T,
+	blocker *etcdutil.BlockingUnaryClientInterceptor,
+) (*clientv3.Client, func()) {
+	option := &etcdutil.TestEtcdClusterOptions{
+		ClientCfgModifier: func(config *clientv3.Config) {
+			config.DialOptions = append(
+				config.DialOptions,
+				grpc.WithChainUnaryInterceptor(
+					blocker.UnaryClientInterceptor,
+				),
+			)
+		},
+	}
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, option)
+	return client, clean
+}
+
+func waitForBlockerEntry(
+	re *require.Assertions,
+	blocker *etcdutil.BlockingUnaryClientInterceptor,
+) {
+	select {
+	case <-blocker.Entered():
+	case <-time.After(5 * time.Second):
+		re.FailNow("the etcd request was not intercepted")
+	}
+}
+
+func waitForBlockerContextDone(
+	re *require.Assertions,
+	blocker *etcdutil.BlockingUnaryClientInterceptor,
+) {
+	select {
+	case <-blocker.ContextDone():
+	case <-time.After(5 * time.Second):
+		re.FailNow("the intercepted etcd request context was not canceled")
+	}
+}
+
+func waitForError(
+	re *require.Assertions,
+	result <-chan error,
+) error {
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		re.FailNow("the etcd request did not return")
+		return nil
+	}
 }
 
 func TestLevelDB(t *testing.T) {

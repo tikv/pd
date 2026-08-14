@@ -159,27 +159,45 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 	return rmResp, nil
 }
 
-// EtcdKVGet returns the etcd GetResponse by given key or key prefix
-func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+// EtcdKVGet returns the etcd GetResponse by given key or key prefix.
+func EtcdKVGet(client *clientv3.Client, key string, options ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+	return EtcdKVGetWithContext(client.Ctx(), client, key, options...)
+}
+
+// EtcdKVGetWithContext returns the etcd GetResponse by given key or key prefix
+// using the caller context.
+func EtcdKVGetWithContext(
+	ctx context.Context,
+	client *clientv3.Client,
+	key string,
+	options ...clientv3.OpOption,
+) (*clientv3.GetResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	operationCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	start := time.Now()
-	failpoint.Inject("SlowEtcdKVGet", func(val failpoint.Value) {
-		d := val.(int)
-		time.Sleep(time.Duration(d) * time.Second)
+	failpoint.Inject("SlowEtcdKVGet", func(value failpoint.Value) {
+		seconds := value.(int)
+		time.Sleep(time.Duration(seconds) * time.Second)
 	})
-	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
+	response, err := clientv3.NewKV(client).Get(operationCtx, key, options...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
 	}
 
 	if err != nil {
-		e := errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
-		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(e))
-		return resp, e
+		if contextErr := ctx.Err(); contextErr != nil {
+			return response, contextErr
+		}
+		wrapped := errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		log.Error("load from etcd meet error", zap.String("key", key), errs.ZapError(wrapped))
+		return response, wrapped
 	}
-	return resp, nil
+	return response, nil
 }
 
 // WriteKeyToFile writes the key to the file. It is only used for testing.

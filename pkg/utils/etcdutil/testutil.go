@@ -15,9 +15,12 @@
 package etcdutil
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,12 +28,111 @@ import (
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+// UnaryRPCMatcher reports whether a unary RPC matches a test condition.
+type UnaryRPCMatcher func(method string, request any) bool
+
+// BlockingUnaryClientInterceptor blocks at most one matched unary RPC after it
+// is enabled.
+type BlockingUnaryClientInterceptor struct {
+	matcher UnaryRPCMatcher
+	enabled atomic.Bool
+
+	entered     chan struct{}
+	contextDone chan struct{}
+	release     chan struct{}
+
+	enteredOnce     sync.Once
+	contextDoneOnce sync.Once
+	releaseOnce     sync.Once
+}
+
+// NewBlockingUnaryClientInterceptor creates a one-shot blocking interceptor
+// that uses matcher to select the unary RPC to block.
+func NewBlockingUnaryClientInterceptor(
+	matcher UnaryRPCMatcher,
+) *BlockingUnaryClientInterceptor {
+	return &BlockingUnaryClientInterceptor{
+		matcher:     matcher,
+		entered:     make(chan struct{}),
+		contextDone: make(chan struct{}),
+		release:     make(chan struct{}),
+	}
+}
+
+// Enable arms the interceptor to block one matching unary RPC.
+func (b *BlockingUnaryClientInterceptor) Enable() {
+	b.enabled.Store(true)
+}
+
+// Entered returns a channel that closes when the matching RPC is blocked.
+func (b *BlockingUnaryClientInterceptor) Entered() <-chan struct{} {
+	return b.entered
+}
+
+// ContextDone returns a channel that closes when the blocked RPC context is
+// canceled.
+func (b *BlockingUnaryClientInterceptor) ContextDone() <-chan struct{} {
+	return b.contextDone
+}
+
+// Release allows the blocked RPC to continue. It is safe to call more than
+// once.
+func (b *BlockingUnaryClientInterceptor) Release() {
+	b.releaseOnce.Do(func() {
+		close(b.release)
+	})
+}
+
+// UnaryClientInterceptor blocks at most one enabled, matching unary RPC until
+// its context is canceled or Release is called.
+func (b *BlockingUnaryClientInterceptor) UnaryClientInterceptor(
+	ctx context.Context,
+	method string,
+	request, reply any,
+	connection *grpc.ClientConn,
+	invoker grpc.UnaryInvoker,
+	options ...grpc.CallOption,
+) error {
+	if !b.enabled.Load() || !b.matcher(method, request) ||
+		!b.enabled.CompareAndSwap(true, false) {
+		return invoker(
+			ctx,
+			method,
+			request,
+			reply,
+			connection,
+			options...,
+		)
+	}
+
+	b.enteredOnce.Do(func() {
+		close(b.entered)
+	})
+	select {
+	case <-ctx.Done():
+		b.contextDoneOnce.Do(func() {
+			close(b.contextDone)
+		})
+		return ctx.Err()
+	case <-b.release:
+		return invoker(
+			ctx,
+			method,
+			request,
+			reply,
+			connection,
+			options...,
+		)
+	}
+}
 
 // NewTestEtcdConfig is used to create a etcd config for the unit test purpose.
 func NewTestEtcdConfig(c ...*log.Config) *embed.Config {

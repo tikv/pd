@@ -15,6 +15,7 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -57,6 +58,56 @@ func (se *StorageEndpoint) createRawTxn() (kv.RawTxn, error) {
 	return rawTxnCapable.CreateRawTxn(), nil
 }
 
+func (se *StorageEndpoint) contextReader() (
+	kv.ContextReader,
+	error,
+) {
+	reader, ok := se.Base.(kv.ContextReader)
+	if !ok {
+		return nil, errors.New(
+			"storage endpoint does not support context-aware reads",
+		)
+	}
+	return reader, nil
+}
+
+func (se *StorageEndpoint) rawTxnCapableWithContext() (
+	kv.RawTxnCapableWithContext,
+	error,
+) {
+	capable, ok := se.Base.(kv.RawTxnCapableWithContext)
+	if !ok {
+		return nil, errors.New(
+			"storage endpoint does not support " +
+				"context-aware raw transactions",
+		)
+	}
+	return capable, nil
+}
+
+func (se *StorageEndpoint) loadWithContext(
+	ctx context.Context,
+	key string,
+) (string, error) {
+	reader, err := se.contextReader()
+	if err != nil {
+		return "", err
+	}
+	return reader.LoadWithContext(ctx, key)
+}
+
+func (se *StorageEndpoint) loadRangeWithContext(
+	ctx context.Context,
+	key, endKey string,
+	limit int,
+) ([]string, []string, error) {
+	reader, err := se.contextReader()
+	if err != nil {
+		return nil, nil, err
+	}
+	return reader.LoadRangeWithContext(ctx, key, endKey, limit)
+}
+
 // loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
 func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	value, err := se.Load(key)
@@ -71,6 +122,29 @@ func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	var data T
 	if err = json.Unmarshal([]byte(value), &data); err != nil {
 		return data, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	return data, nil
+}
+
+func loadJSONWithContext[T any](
+	ctx context.Context,
+	storage *StorageEndpoint,
+	key string,
+) (T, error) {
+	value, err := storage.loadWithContext(ctx, key)
+	if err != nil {
+		var empty T
+		return empty, err
+	}
+	if value == "" {
+		var empty T
+		return empty, nil
+	}
+	var data T
+	if err = json.Unmarshal([]byte(value), &data); err != nil {
+		return data, errs.ErrJSONUnmarshal.
+			Wrap(err).
+			GenWithStackByArgs()
 	}
 	return data, nil
 }
@@ -93,6 +167,39 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 		var item T
 		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
 			return nil, nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+		}
+		data = append(data, item)
+	}
+	return keys, data, nil
+}
+
+func loadJSONByPrefixWithContext[T any](
+	ctx context.Context,
+	storage *StorageEndpoint,
+	prefix string,
+	limit int,
+) ([]string, []T, error) {
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	keys, values, err := storage.loadRangeWithContext(
+		ctx,
+		prefix,
+		prefixEnd,
+		limit,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(keys) == 0 {
+		return nil, nil, nil
+	}
+
+	data := make([]T, 0, len(keys))
+	for i := range keys {
+		var item T
+		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
+			return nil, nil, errs.ErrJSONUnmarshal.
+				Wrap(err).
+				GenWithStackByArgs()
 		}
 		data = append(data, item)
 	}

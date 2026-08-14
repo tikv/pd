@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"math"
 	"time"
 
@@ -35,6 +36,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
+
+func contextErrorToGRPCStatus(ctx context.Context, err error) error {
+	ctxErr := ctx.Err()
+	// A live request can receive an error wrapping an internal etcd deadline, which must stay on the protobuf error-header path.
+	if ctxErr == nil || !errors.Is(err, ctxErr) {
+		return nil
+	}
+	return status.FromContextError(ctxErr).Err()
+}
 
 // UpdateGCSafePoint implements gRPC PDServer.
 //
@@ -716,16 +726,21 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
 	if request.GetIncludeGlobalGcBarriers() {
 		gcState, globalGCBarriers, err = s.gcStateManager.GetGCStateWithGlobalGCBarriers(
+			ctx,
 			keyspaceID,
 			request.GetExcludeGcBarriers(),
 		)
 	} else {
 		gcState, err = s.gcStateManager.GetGCState(
+			ctx,
 			keyspaceID,
 			request.GetExcludeGcBarriers(),
 		)
 	}
 	if err != nil {
+		if statusErr := contextErrorToGRPCStatus(ctx, err); statusErr != nil {
+			return nil, statusErr
+		}
 		return &pdpb.GetGCStateResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
@@ -775,6 +790,9 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates(ctx, request.GetExcludeGcBarriers())
 	if err != nil {
+		if statusErr := contextErrorToGRPCStatus(ctx, err); statusErr != nil {
+			return nil, statusErr
+		}
 		return &pdpb.GetAllKeyspacesGCStatesResponse{
 			Header: grpcutil.WrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil

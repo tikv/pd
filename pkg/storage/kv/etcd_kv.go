@@ -54,37 +54,70 @@ func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 
 // Load loads the value of the key from etcd.
 func (kv *etcdKVBase) Load(key string) (string, error) {
-	resp, err := etcdutil.EtcdKVGet(kv.client, key)
+	return kv.LoadWithContext(kv.client.Ctx(), key)
+}
+
+// LoadWithContext loads the value of the key from etcd with the provided context.
+func (kv *etcdKVBase) LoadWithContext(
+	ctx context.Context,
+	key string,
+) (string, error) {
+	response, err := etcdutil.EtcdKVGetWithContext(
+		ctx,
+		kv.client,
+		key,
+	)
 	if err != nil {
 		return "", err
 	}
-	if n := len(resp.Kvs); n == 0 {
+	if count := len(response.Kvs); count == 0 {
 		return "", nil
-	} else if n > 1 {
-		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+	} else if count > 1 {
+		return "", errs.ErrEtcdKVGetResponse.
+			GenWithStackByArgs(response.Kvs)
 	}
-	return string(resp.Kvs[0].Value), nil
+	return string(response.Kvs[0].Value), nil
 }
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
-	var OpOption []clientv3.OpOption
-	// If endKey is "\x00", it means to scan with prefix.
-	// If the key is empty and endKey is "\x00", it means to scan all keys.
-	if endKey == "\x00" {
-		OpOption = append(OpOption, clientv3.WithPrefix())
-	} else {
-		OpOption = append(OpOption, clientv3.WithRange(endKey))
-	}
+func (kv *etcdKVBase) LoadRange(
+	key, endKey string,
+	limit int,
+) ([]string, []string, error) {
+	return kv.LoadRangeWithContext(
+		kv.client.Ctx(),
+		key,
+		endKey,
+		limit,
+	)
+}
 
-	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
+// LoadRangeWithContext loads a range of keys [key, endKey) from etcd with the provided context.
+func (kv *etcdKVBase) LoadRangeWithContext(
+	ctx context.Context,
+	key, endKey string,
+	limit int,
+) (keys, values []string, err error) {
+	var options []clientv3.OpOption
+	if endKey == "\x00" {
+		options = append(options, clientv3.WithPrefix())
+	} else {
+		options = append(options, clientv3.WithRange(endKey))
+	}
+	options = append(options, clientv3.WithLimit(int64(limit)))
+
+	response, err := etcdutil.EtcdKVGetWithContext(
+		ctx,
+		kv.client,
+		key,
+		options...,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	keys = make([]string, 0, len(resp.Kvs))
-	values = make([]string, 0, len(resp.Kvs))
-	for _, item := range resp.Kvs {
+	keys = make([]string, 0, len(response.Kvs))
+	values = make([]string, 0, len(response.Kvs))
+	for _, item := range response.Kvs {
 		keys = append(keys, string(item.Key))
 		values = append(values, string(item.Value))
 	}
@@ -127,8 +160,15 @@ func (kv *etcdKVBase) Remove(key string) error {
 
 // CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *etcdKVBase) CreateRawTxn() RawTxn {
+	return kv.CreateRawTxnWithContext(kv.client.Ctx())
+}
+
+// CreateRawTxnWithContext creates a transaction with the provided context.
+func (kv *etcdKVBase) CreateRawTxnWithContext(
+	ctx context.Context,
+) RawTxn {
 	return &rawTxnWrapper{
-		inner: NewSlowLogTxn(kv.client),
+		inner: NewSlowLogTxnWithContext(ctx, kv.client),
 	}
 }
 
