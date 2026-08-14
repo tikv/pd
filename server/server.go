@@ -442,6 +442,29 @@ func (s *Server) startClient() error {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	//
+	// Its health checker is disabled on purpose, and that must stay that way. The
+	// client is built from this member's own advertise client URLs and only the
+	// health checker ever rewrites that endpoint list, so leaving the checker off
+	// pins the client to the local etcd server for the lifetime of the process.
+	//
+	// That is what makes the leader lease a statement about *this* member.
+	// Renewing it has to be answered here, and when the local server still
+	// believes it is the etcd leader - which is exactly when the colocation check
+	// in `campaignLeader` is fooled too, since both read the same cached value -
+	// etcd answers only after proving that leadership with a linearizable read.
+	// A member that has stopped making progress cannot pass that, so the two
+	// signals cannot fail together. (When the local server knows it is not the
+	// leader, etcd instead forwards the renewal to the real one and the colocation
+	// check is the signal that fires.)
+	//
+	// With the checker enabled the client follows the healthy members instead, so
+	// a member whose own etcd has stopped making progress keeps renewing its
+	// leader lease through a peer and never gives up a leadership it can no
+	// longer serve. In tikv/pd#10671 that also blocked every other member from
+	// taking over, because the leader key hangs off the same lease.
+	//
+	// `TestElectionClientStaysOnLocalMember` guards this.
 	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, etcdutil.ElectionEtcdClientPurpose, false)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
