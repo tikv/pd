@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -2246,6 +2247,204 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 		}
 	}
 	return false
+}
+
+var (
+	// ErrMicroserviceMetadataCleanupRejected indicates that the persisted
+	// keyspace-group state cannot be safely cleaned up.
+	ErrMicroserviceMetadataCleanupRejected = errors.New("microservice metadata cleanup rejected")
+	// ErrMicroserviceMetadataCleanupUnavailable indicates that the request could
+	// not be completed under the current leadership term in PD mode.
+	ErrMicroserviceMetadataCleanupUnavailable = errors.New("microservice metadata cleanup unavailable")
+)
+
+type microserviceMetadataCleanupTerm struct {
+	leaderKey   string
+	leaderValue string
+	leaseID     clientv3.LeaseID
+}
+
+func rejectMicroserviceMetadataCleanup(format string, args ...any) error {
+	return errors.Wrapf(ErrMicroserviceMetadataCleanupRejected, format, args...)
+}
+
+func unavailableMicroserviceMetadataCleanup(format string, args ...any) error {
+	return errors.Wrapf(ErrMicroserviceMetadataCleanupUnavailable, format, args...)
+}
+
+// CleanupMicroserviceMetadata clears the persisted Members field of the default
+// TSO keyspace group in PD mode and reports whether it changed. A nil error is
+// fenced by one exact leadership term in PD mode and represents a
+// linearizable check that the default group existed, had no transition in
+// progress, had no non-default sibling, and had no persisted member at that
+// point. The caller must ensure keyspace assignments have already been merged
+// into the default group and all microservice metadata writers are stopped.
+func (s *Server) CleanupMicroserviceMetadata(ctx context.Context) (bool, error) {
+	term, err := s.captureMicroserviceMetadataCleanupTerm()
+	if err != nil {
+		return false, err
+	}
+	if s.IsKeyspaceGroupEnabled() {
+		return false, rejectMicroserviceMetadataCleanup("pd is already running in microservice mode")
+	}
+
+	groupKey := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID)
+	groupPrefixEnd := clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())
+	operationCtx, cancel := context.WithTimeout(ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	resp, err := s.client.Get(
+		operationCtx,
+		groupKey,
+		clientv3.WithRange(groupPrefixEnd),
+		clientv3.WithLimit(2),
+	)
+	if err != nil {
+		return false, unavailableMicroserviceMetadataCleanup(
+			"failed to read keyspace-group metadata: %v", err)
+	}
+
+	if len(resp.Kvs) == 0 {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group does not exist")
+	}
+	if string(resp.Kvs[0].Key) != groupKey || len(resp.Kvs) > 1 {
+		return false, rejectMicroserviceMetadataCleanup("found a non-default TSO keyspace group")
+	}
+
+	persistedGroup := make(map[string]json.RawMessage)
+	if err := json.Unmarshal(resp.Kvs[0].Value, &persistedGroup); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if persistedGroup == nil {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata is not a JSON object")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(resp.Kvs[0].Value))
+	if _, err := decoder.Token(); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	seenFields := make(map[string]struct{}, len(persistedGroup))
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+		field, ok := token.(string)
+		if !ok {
+			return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has a non-string field")
+		}
+		if _, ok := seenFields[field]; ok {
+			return false, rejectMicroserviceMetadataCleanup(
+				"default TSO keyspace group metadata contains duplicate field %q", field)
+		}
+		seenFields[field] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+		}
+	}
+	if _, err := decoder.Token(); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	groupIDValue, ok := persistedGroup["id"]
+	if !ok {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has no ID")
+	}
+	var persistedGroupID *uint32
+	if err := json.Unmarshal(groupIDValue, &persistedGroupID); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if persistedGroupID == nil {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group metadata has no ID")
+	}
+	canonicalFields := [...]string{"id", "user-kind", "split-state", "merge-state", "members", "keyspaces"}
+	for key := range persistedGroup {
+		for _, canonicalField := range canonicalFields {
+			if key != canonicalField && strings.EqualFold(key, canonicalField) {
+				return false, rejectMicroserviceMetadataCleanup(
+					"default TSO keyspace group metadata contains non-canonical field %q", key)
+			}
+		}
+	}
+
+	group := &endpoint.KeyspaceGroup{}
+	if err := json.Unmarshal(resp.Kvs[0].Value, group); err != nil {
+		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	if *persistedGroupID != constant.DefaultKeyspaceGroupID || group.ID != constant.DefaultKeyspaceGroupID {
+		return false, rejectMicroserviceMetadataCleanup(
+			"found TSO keyspace group %d at the default group path", group.ID)
+	}
+	if group.IsSplitting() {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is splitting")
+	}
+	if group.IsMerging() {
+		return false, rejectMicroserviceMetadataCleanup("default TSO keyspace group is merging")
+	}
+	groupRevision := clientv3.Compare(
+		clientv3.ModRevision(groupKey),
+		"=",
+		resp.Kvs[0].ModRevision,
+	)
+	changed := len(group.Members) > 0
+
+	nonDefaultGroupStart := keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID + 1)
+	comparisons := []clientv3.Cmp{
+		clientv3.Compare(clientv3.Value(term.leaderKey), "=", term.leaderValue),
+		clientv3.Compare(clientv3.LeaseValue(term.leaderKey), "=", term.leaseID),
+		groupRevision,
+		clientv3.Compare(
+			clientv3.CreateRevision(nonDefaultGroupStart).WithRange(groupPrefixEnd),
+			"=",
+			0,
+		),
+	}
+	operation := clientv3.OpGet(groupKey)
+	if changed {
+		// Rewrite only the members field so metadata written by a newer version
+		// is not lost if it contains fields this binary does not recognize.
+		persistedGroup["members"] = json.RawMessage("null")
+		value, err := json.Marshal(persistedGroup)
+		if err != nil {
+			return false, errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
+		}
+		operation = clientv3.OpPut(groupKey, string(value))
+	}
+
+	failpoint.InjectCall("beforeCleanupMicroserviceMetadataCommit")
+	txnResp, err := kv.NewSlowLogTxnWithContext(operationCtx, s.client).
+		If(comparisons...).
+		Then(operation).
+		Commit()
+	if err != nil {
+		return false, unavailableMicroserviceMetadataCleanup(
+			"failed to commit microservice metadata cleanup: %v", err)
+	}
+	if txnResp.Succeeded {
+		return changed, nil
+	}
+	return false, unavailableMicroserviceMetadataCleanup(
+		"leadership or keyspace-group metadata changed during cleanup")
+}
+
+func (s *Server) captureMicroserviceMetadataCleanupTerm() (microserviceMetadataCleanupTerm, error) {
+	if s.client == nil || s.member == nil || !s.member.IsServing() {
+		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
+			"leader in PD mode is not serving")
+	}
+	leadership := s.member.GetLeadership()
+	if leadership == nil || leadership.GetLease() == nil {
+		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
+			"leadership in PD mode is not initialized")
+	}
+	term := microserviceMetadataCleanupTerm{
+		leaderKey:   leadership.GetLeaderKey(),
+		leaderValue: leadership.GetLeaderValue(),
+		leaseID:     leadership.GetLease().GetID(),
+	}
+	if term.leaderKey == "" || term.leaderValue == "" || term.leaseID == 0 {
+		return microserviceMetadataCleanupTerm{}, unavailableMicroserviceMetadataCleanup(
+			"leadership term in PD mode is incomplete")
+	}
+	return term, nil
 }
 
 // MarkSnapshotRecovering mark pd that we're recovering

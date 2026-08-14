@@ -16,6 +16,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,11 +45,53 @@ type RecoveryStatusResponse struct {
 	Marked bool `json:"marked"`
 }
 
+// CleanupMicroserviceMetadataResponse represents the result of microservice
+// metadata cleanup.
+type CleanupMicroserviceMetadataResponse struct {
+	Changed bool `json:"changed"`
+}
+
 func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 	return &adminHandler{
 		svr: svr,
 		rd:  rd,
 	}
+}
+
+// CleanupMicroserviceMetadata cleans up stale microservice runtime metadata in
+// PD mode.
+//
+//	@Tags		admin
+//	@Summary	Clean up stale microservice runtime metadata in PD mode.
+//	@Produce	json
+//	@Success	200	{object}	CleanupMicroserviceMetadataResponse	"Whether any metadata was changed."
+//	@Failure	409	{string}	string	"The cleanup is rejected in the current state."
+//	@Failure	500	{string}	string	"PD failed to clean up the metadata."
+//	@Failure	503	{string}	string	"The cleanup is temporarily unavailable."
+//	@Router		/admin/microservice/metadata/cleanup [post]
+func (h *adminHandler) CleanupMicroserviceMetadata(w http.ResponseWriter, r *http.Request) {
+	// The redirect middleware allows callers to explicitly request follower
+	// handling. Never let that opt-in turn this mutating operation into a
+	// follower-local write.
+	if !h.svr.IsServing() {
+		h.rd.JSON(w, http.StatusServiceUnavailable, server.ErrMicroserviceMetadataCleanupUnavailable.Error())
+		return
+	}
+
+	changed, err := h.svr.CleanupMicroserviceMetadata(r.Context())
+	if err != nil {
+		switch {
+		case errors.Is(err, server.ErrMicroserviceMetadataCleanupRejected):
+			h.rd.JSON(w, http.StatusConflict, err.Error())
+		case errors.Is(err, server.ErrMicroserviceMetadataCleanupUnavailable):
+			h.rd.JSON(w, http.StatusServiceUnavailable, err.Error())
+		default:
+			apiutil.ErrorResp(h.rd, w, err)
+		}
+		return
+	}
+
+	h.rd.JSON(w, http.StatusOK, &CleanupMicroserviceMetadataResponse{Changed: changed})
 }
 
 // DeleteRegionCache removes a specific region from cache.
