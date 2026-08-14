@@ -803,7 +803,7 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	cleanupReached := make(chan struct{})
 	cleanupRelease := make(chan struct{})
 	var cleanupReachedOnce, cleanupReleaseOnce sync.Once
-	const cleanupBlockerName = "github.com/tikv/pd/server/beforeClearDefaultTSOKeyspaceGroupMembersCommit"
+	const cleanupBlockerName = "github.com/tikv/pd/server/beforeMicroserviceMetadataCleanupCommit"
 	re.NoError(failpoint.EnableCall(cleanupBlockerName, func() {
 		cleanupReachedOnce.Do(func() {
 			close(cleanupReached)
