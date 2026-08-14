@@ -774,6 +774,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 }
 
 const modeSwitchUserKeyspaceName = "mode_switch_user_ks"
+const modeSwitchPDModeKeyspaceName = "mode_switch_pd_mode_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
@@ -831,7 +832,7 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 		waitTSOServiceReady(re, tsoCluster)
 		waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 		checkMicroserviceTSOAvailable(ctx, re, pdServer)
-		checkKeyspaceTSOAvailable(ctx, re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
 		tsoCluster.Destroy()
 		tsoCluster = nil
 		seedDefaultKeyspaceGroupMembers(ctx, re, pdServer, []endpoint.KeyspaceGroupMember{{
@@ -851,11 +852,18 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 			re.True(pdServer.WaitLeader(), "normal-mode PD did not become ready while mode cleanup was pending")
 			checkPDLeaderAPIAvailable(ctx, re, pdServer)
 			checkPDTSOAvailable(ctx, re, pdServer)
-			checkKeyspaceTSOAvailable(ctx, re, pdServer)
+			checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
 		} else {
 			pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, nil)
 			re.NoError(err)
 			waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
+		}
+		if tsoStartsBeforeCleanup {
+			// Create a keyspace while PD is running in normal mode.
+			_, err = pdServer.GetServer().GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+				Name: modeSwitchPDModeKeyspaceName,
+			})
+			re.NoError(err)
 		}
 
 		tsoCluster, err = tests.NewTestTSOCluster(ctx, 1, pdServer.GetAddr())
@@ -874,18 +882,21 @@ func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 		}
 		waitTSOServiceReady(re, tsoCluster)
 		checkPDTSOAvailable(ctx, re, pdServer)
-		checkKeyspaceTSOAvailable(ctx, re, pdServer)
+		checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
 		waitDefaultKeyspaceGroupMembers(re, pdServer, nil)
 
 		pdServer, err = restartPDForServiceMode(ctx, tc, pdServer, []string{mcs.PDServiceName})
 		re.NoError(err)
+		if tsoStartsBeforeCleanup {
+			checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchPDModeKeyspaceName)
+		}
 	}
 
 	waitDefaultKeyspaceGroupReady(re, pdServer, userKeyspaceID)
 	waitTSOServiceReady(re, tsoCluster)
 	waitDefaultKeyspaceGroupMembers(re, pdServer, tsoCluster.GetKeyspaceGroupMember())
 	checkMicroserviceTSOAvailable(ctx, re, pdServer)
-	checkKeyspaceTSOAvailable(ctx, re, pdServer)
+	checkKeyspaceTSOAvailable(ctx, re, pdServer, modeSwitchUserKeyspaceName)
 }
 
 func restartPDForServiceMode(
@@ -1032,11 +1043,12 @@ func checkKeyspaceTSOAvailable(
 	ctx context.Context,
 	re *require.Assertions,
 	pdServer *tests.TestServer,
+	keyspaceName string,
 ) {
 	cli := utils.SetupClientWithAPIContext(
 		ctx,
 		re,
-		pd.NewAPIContextV2(modeSwitchUserKeyspaceName),
+		pd.NewAPIContextV2(keyspaceName),
 		[]string{pdServer.GetAddr()},
 	)
 	defer cli.Close()
