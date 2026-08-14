@@ -299,6 +299,20 @@ func TestStoreStateFilter(t *testing.T) {
 		{3, plan.StatusOK, plan.StatusStoreRemoved},
 	}
 	check(store, testCases)
+
+	// Unhealthy (>10min unreachable, still under the 30min down threshold).
+	// regionSource (filter 1) now rejects it directly via isUnhealthy; every
+	// other role still rejects it via the pre-existing isDisconnected(20s) check.
+	store = store.Clone(core.SetStoreState(metapb.StoreState_Up)).
+		Clone(core.SetLastHeartbeatTS(time.Now().Add(-15 * time.Minute))).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: false}))
+	testCases = []testCase{
+		{0, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
+		{1, plan.StatusStoreUnhealthy, plan.StatusStoreDisconnected},
+		{2, plan.StatusStoreDisconnected, plan.StatusStoreDisconnected},
+		{3, plan.StatusOK, plan.StatusOK},
+	}
+	check(store, testCases)
 }
 
 func TestHotRegionEvictedTargetFilter(t *testing.T) {
@@ -373,6 +387,17 @@ func TestStoreStateFilterReason(t *testing.T) {
 		{0, "store-state-ok-filter", "store-state-ok-filter"},
 		{1, "store-state-busy-filter", "store-state-busy-filter"},
 		{2, "store-state-busy-filter", "store-state-busy-filter"},
+		{3, "store-state-ok-filter", "store-state-ok-filter"},
+	}
+	check(store, testCases)
+
+	// Unhealthy (>10min unreachable, still under the 30min down threshold).
+	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-15 * time.Minute))).
+		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: false}))
+	testCases = []testCase{
+		{0, "store-state-disconnect-filter", "store-state-disconnect-filter"},
+		{1, "store-state-unhealthy-filter", "store-state-unhealthy-filter"},
+		{2, "store-state-disconnect-filter", "store-state-disconnect-filter"},
 		{3, "store-state-ok-filter", "store-state-ok-filter"},
 	}
 	check(store, testCases)

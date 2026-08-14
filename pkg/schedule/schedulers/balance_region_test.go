@@ -245,6 +245,7 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	ops, _ := sb.Schedule(tc, false)
 	op := ops[0]
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpKind(0), 4, 1)
+	re.True(op.NeedStoreHealthCheck())
 
 	// Test stateFilter.
 	tc.SetStoreOffline(1)

@@ -208,7 +208,7 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 }
 
 func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core.RegionInfo) bool {
-	err := step.CheckInProgress(oc.cluster, oc.config, region)
+	err := step.CheckInProgress(oc.cluster, oc.config, region, op.NeedStoreHealthCheck())
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
 		if oc.RemoveOperator(op, StaleStatus) {
