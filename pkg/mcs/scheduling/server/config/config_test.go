@@ -109,6 +109,8 @@ func TestPersistConfigDefaultStoreLimit(t *testing.T) {
 
 	persistConfig.SetAllStoresLimit(storelimit.AddPeer, 60)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, persistConfig.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15},
+		persistConfig.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 20}, persistConfig.GetStoreLimit(1))
 
 	data, err := json.Marshal(persistConfig.GetScheduleConfig())
@@ -157,6 +159,11 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 			config:   `{"store-balance-rate":60,"default-store-limit":{"add-peer":0},"store-limit":{}}`,
 			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60},
 		},
+		{
+			name:     "compatibility entry survives a pre-feature rewrite",
+			config:   `{"store-limit":{"0":{"add-peer":70,"remove-peer":0}}}`,
+			expected: sc.StoreLimitConfig{AddPeer: 70, RemovePeer: 0},
+		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -169,6 +176,8 @@ func TestAdjustScheduleConfigDefaultStoreLimit(t *testing.T) {
 			re.NoError(json.Unmarshal([]byte(`{"schedule":`+testCase.config+`}`), watchedConfig))
 			AdjustScheduleCfg(&watchedConfig.Schedule)
 			re.Equal(testCase.expected, watchedConfig.Schedule.DefaultStoreLimit)
+			re.Equal(testCase.expected,
+				watchedConfig.Schedule.StoreLimit[sc.DefaultStoreLimitCompatStoreID])
 			re.Zero(watchedConfig.Schedule.StoreBalanceRate)
 
 			cfg := NewConfig()

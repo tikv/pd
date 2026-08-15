@@ -283,6 +283,9 @@ func (s *storeStatistics) collect() {
 	}
 
 	for storeID, limit := range s.opt.GetStoresLimit() {
+		if storeID == config.DefaultStoreLimitCompatStoreID {
+			continue
+		}
 		id := strconv.FormatUint(storeID, 10)
 		StoreLimitGauge.WithLabelValues(id, "add-peer").Set(limit.AddPeer)
 		StoreLimitGauge.WithLabelValues(id, "remove-peer").Set(limit.RemovePeer)

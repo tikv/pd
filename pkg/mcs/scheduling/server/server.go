@@ -627,7 +627,7 @@ func (s *Server) GetPersistConfig() *config.PersistConfig {
 // GetConfig gets the config.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistConfig.GetScheduleConfig().Clone()
+	cfg.Schedule = *s.persistConfig.GetScheduleConfig().CloneWithoutDefaultStoreLimitCompat()
 	cfg.Replication = *s.persistConfig.GetReplicationConfig().Clone()
 	cfg.ClusterVersion = *s.persistConfig.GetClusterVersion()
 	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()

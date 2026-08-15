@@ -1200,7 +1200,7 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
-	cfg.Schedule = *s.persistOptions.GetScheduleConfig().Clone()
+	cfg.Schedule = *s.persistOptions.GetScheduleConfig().CloneWithoutDefaultStoreLimitCompat()
 	cfg.Replication = *s.persistOptions.GetReplicationConfig().Clone()
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
@@ -1278,7 +1278,7 @@ func (s *Server) SetMicroserviceConfig(cfg config.MicroserviceConfig) error {
 
 // GetScheduleConfig gets the balance config information.
 func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
-	return s.persistOptions.GetScheduleConfig().Clone()
+	return s.persistOptions.GetScheduleConfig().CloneWithoutDefaultStoreLimitCompat()
 }
 
 // SetScheduleConfig sets the balance config information.

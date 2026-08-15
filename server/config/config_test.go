@@ -97,6 +97,8 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.NoError(err)
 	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15}, opt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 15},
+		opt.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
 
 	storage := storage.NewStorageWithMemoryBackend()
 	re.NoError(opt.Persist(storage))
@@ -127,6 +129,58 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.NoError(reloadedOpt.Reload(storage))
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
+}
+
+func TestReloadDefaultStoreLimitAfterPreFeatureRewrite(t *testing.T) {
+	re := require.New(t)
+	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+	oldRemovePeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+	defer func() {
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, oldAddPeer)
+		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, oldRemovePeer)
+	}()
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	opt.SetAllStoresLimit(storelimit.AddPeer, 60)
+	opt.SetAllStoresLimit(storelimit.RemovePeer, 0)
+	expected := sc.StoreLimitConfig{AddPeer: 60, RemovePeer: 0}
+	re.Equal(expected, opt.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
+
+	// Simulate a pre-feature leader loading and rewriting the full config. It
+	// drops default-store-limit, but preserves the legacy per-store map.
+	type preFeatureScheduleConfig struct {
+		MaxSnapshotCount uint64                         `json:"max-snapshot-count"`
+		StoreLimit       map[uint64]sc.StoreLimitConfig `json:"store-limit"`
+	}
+	type preFeatureConfig struct {
+		Schedule preFeatureScheduleConfig `json:"schedule"`
+	}
+	storage := storage.NewStorageWithMemoryBackend()
+	re.NoError(storage.SaveConfig(&preFeatureConfig{
+		Schedule: preFeatureScheduleConfig{
+			MaxSnapshotCount: 10,
+			StoreLimit:       opt.GetScheduleConfig().Clone().StoreLimit,
+		},
+	}))
+
+	// A new leader restores the public field from the compatibility entry,
+	// including an explicit zero value.
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, 15)
+	sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, 15)
+	reloadedOpt, err := newTestScheduleOption()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(uint64(10), reloadedOpt.GetMaxSnapshotCount())
+	re.Equal(expected, reloadedOpt.GetScheduleConfig().DefaultStoreLimit)
+	re.Equal(expected, reloadedOpt.GetStoreLimit(100))
+	re.Equal(expected, reloadedOpt.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
+
+	publicCfg := reloadedOpt.GetScheduleConfig().CloneWithoutDefaultStoreLimitCompat()
+	_, ok := publicCfg.StoreLimit[sc.DefaultStoreLimitCompatStoreID]
+	re.False(ok)
 }
 
 func TestDefaultStoreLimitAdjust(t *testing.T) {
@@ -197,6 +251,18 @@ remove-peer = 70
 	re.NoError(json.Unmarshal([]byte(`{"store-balance-rate":50,"default-store-limit":{"add-peer":0,"remove-peer":60}}`), schedule))
 	schedule.MigrateDeprecatedFlags()
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+
+	schedule = &sc.ScheduleConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"store-limit":{"0":{"add-peer":70,"remove-peer":0}}}`), schedule))
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 70, RemovePeer: 0}, schedule.DefaultStoreLimit)
+	re.Equal(schedule.DefaultStoreLimit, schedule.StoreLimit[sc.DefaultStoreLimitCompatStoreID])
+
+	schedule = &sc.ScheduleConfig{}
+	re.NoError(json.Unmarshal([]byte(`{"default-store-limit":{"add-peer":0,"remove-peer":60},"store-limit":{"0":{"add-peer":70,"remove-peer":80}}}`), schedule))
+	schedule.MigrateDeprecatedFlags()
+	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 60}, schedule.DefaultStoreLimit)
+	re.Equal(schedule.DefaultStoreLimit, schedule.StoreLimit[sc.DefaultStoreLimitCompatStoreID])
 }
 
 func TestReloadLegacyStoreBalanceRate(t *testing.T) {

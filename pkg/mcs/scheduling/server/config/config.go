@@ -271,6 +271,7 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
+	cfg.SyncDefaultStoreLimitCompat()
 	o.schedule.Store(cfg)
 	// The coordinator is not aware of the underlying scheduler config changes,
 	// we should notify it to update the schedulers proactively.

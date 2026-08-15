@@ -83,6 +83,7 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	cfg.SyncDefaultStoreLimitCompat()
 	o.schedule.Store(cfg)
 }
 
@@ -789,9 +790,11 @@ func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
+	schedule := o.GetScheduleConfig().Clone()
+	schedule.SyncDefaultStoreLimitCompat()
 	cfg := &persistedConfig{
 		Config: &Config{
-			Schedule:        *o.GetScheduleConfig(),
+			Schedule:        *schedule,
 			Replication:     *o.GetReplicationConfig(),
 			PDServerCfg:     *o.GetPDServerConfig(),
 			ReplicationMode: *o.GetReplicationModeConfig(),
