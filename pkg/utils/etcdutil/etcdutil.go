@@ -300,15 +300,6 @@ func newClient(tlsConfig *tls.Config, endpoints []string, opts ...CreateEtcdClie
 	}
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
-	// AutoSyncInterval is deliberately left unset, and nothing in this
-	// repository calls client.Sync(). Together with the health checker being
-	// disabled for it, that is what keeps the election client talking only to
-	// its own member's etcd: a client that rediscovers the cluster would let a
-	// member whose own etcd has stopped making progress keep renewing its leader
-	// lease through a healthy peer, which is the failure tikv/pd#7780 and
-	// tikv/pd#10671 describe. Setting it here, or passing an opt that does,
-	// silently reintroduces that. Note that TestElectionClientStaysOnLocalMember
-	// only catches a sync interval short enough to fire during the test.
 	cfg := clientv3.Config{
 		Endpoints:            endpoints,
 		DialTimeout:          defaultEtcdClientTimeout,

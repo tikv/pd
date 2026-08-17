@@ -60,9 +60,7 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 type Leadership struct {
 	// purpose is used to show what this election for
 	purpose string
-	// name identifies the member campaigning for this leadership. It is handed
-	// to every lease this leadership creates so that a test can single out one
-	// member of a cluster; see Lease.matchesFailpointTarget.
+	// name scopes test failpoints to one member.
 	name string
 	// The lease which is used to get this leadership
 	lease  atomic.Value // stored as *lease
@@ -79,8 +77,7 @@ type Leadership struct {
 	campaignTimes []time.Time
 }
 
-// NewLeadership creates a new Leadership. `name` identifies the member that owns
-// it, and is only used to tell members of the same election apart.
+// NewLeadership creates a new Leadership for the named member.
 func NewLeadership(client *clientv3.Client, leaderKey, purpose, name string) *Leadership {
 	leadership := &Leadership{
 		purpose:       purpose,

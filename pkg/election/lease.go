@@ -44,10 +44,7 @@ const (
 type Lease struct {
 	// purpose is used to show what this election for
 	purpose string
-	// name identifies the member this lease belongs to. Every member in an
-	// election shares the same purpose, so purpose alone cannot tell them apart;
-	// the failpoints below need to single out one member of a cluster that runs
-	// several of them in a single process.
+	// name scopes test failpoints to one member.
 	name string
 	// etcd client and lease
 	client *clientv3.Client
@@ -65,9 +62,7 @@ type Lease struct {
 	metrics leaseMetrics
 }
 
-// NewLease creates a new Lease instance. `name` identifies the member the lease
-// belongs to; it is not part of the metrics labels, which stay keyed on purpose
-// alone so that the label cardinality does not grow with the cluster.
+// NewLease creates a new Lease instance.
 func NewLease(client *clientv3.Client, purpose, name string) *Lease {
 	return &Lease{
 		purpose: purpose,
@@ -78,12 +73,7 @@ func NewLease(client *clientv3.Client, purpose, name string) *Lease {
 	}
 }
 
-// matchesFailpointTarget reports whether a failpoint value of the form
-// "<purpose>@<name>" refers to this lease. Scoping on the member name as well as
-// the purpose matters because `failpoint.Enable` arms an injection point for the
-// whole process, while the integration tests run every member of a cluster
-// inside one process: a purpose-only match would degrade the members that are
-// supposed to stay healthy and take over.
+// matchesFailpointTarget matches "<purpose>@<name>" for member-scoped failpoints.
 func (l *Lease) matchesFailpointTarget(val failpoint.Value) bool {
 	target, ok := val.(string)
 	if !ok {
@@ -308,14 +298,8 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				lastRequestStart, _ := lastTime.Swap(requestStart).(time.Time)
 				res, err := l.lease.KeepAliveOnce(ctx1, l.GetID())
 				failpoint.Inject("keepAliveFailed", func(val failpoint.Value) {
-					// Falsify only this caller's view of the renewal. The
-					// request above has already reached etcd and succeeded, so
-					// the lease is still being renewed server side and the
-					// leader key never expires on its own. That is deliberate:
-					// it leaves the local deadline as the only thing that can
-					// end the term, which is what the renewal tests need to
-					// isolate. Injecting ahead of the request instead would let
-					// the key really expire and prove something weaker.
+					// Inject after the request so etcd keeps the lease alive while
+					// the caller observes renewal failure.
 					if l.matchesFailpointTarget(val) {
 						res, err = nil, errors.New("keep alive failed")
 					}

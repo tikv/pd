@@ -321,47 +321,12 @@ func (m *Member) MoveEtcdLeader(ctx context.Context, old, new uint64) error {
 	return nil
 }
 
-// GetEtcdLeader returns the embedded etcd server's view of the current etcd
-// leader ID, or 0 when it does not know one.
-//
-// The value is best effort and may be arbitrarily stale. `EtcdServer.lead` has a
-// single writer, `updateLead` inside the etcd Ready consumption loop, and that
-// loop persists every Ready synchronously before it consumes the next one. A
-// member whose storage stops completing writes therefore keeps reporting the
-// last leader it saw for as long as the stall lasts. That is what tikv/pd#7780
-// describes, and what tikv/pd#10671 and tikv/pd#10746 ran into.
-//
-// It must therefore never be the only thing a member consults to decide whether
-// it may keep serving as the PD leader. That decision belongs to the leader
-// lease behind `Member.IsServing`: a renewal has to be answered by this member's
-// own etcd server, which answers only after proving its own leadership, so the
-// lease cannot stay valid on a member that has stopped making progress. The two
-// signals do not share a failure mode, which is the point.
-//
-// The current callers are all consistent with that rule:
-//
-//   - `Server.campaignLeader` evaluates `Member.IsServing` first in the same
-//     tick, so this check only makes a step-down that would happen anyway
-//     happen sooner;
-//   - `Server.leaderLoop` uses it to avoid campaigning while another member is
-//     the etcd leader. That is a liveness heuristic: a campaign started on a
-//     stale value still cannot take leadership from anyone, because the campaign
-//     transaction requires the leader key to be absent;
-//   - `Member.preCheckLeader` and the members HTTP handler only compare it
-//     against 0;
-//   - `Member.CheckPriority` uses it to pick an etcd leader transfer target, and
-//     `GetMembers` reports it to clients. Both are best effort by nature;
-//   - `Server.leaderLoop` also passes it as the `old` argument to
-//     `MoveEtcdLeader`. That is an action rather than a guard, but it is only
-//     reached on the fail-safe side of the check, where the value says the
-//     leader is somebody else.
-//
-// A new caller that turns this value into a safety decision would turn
-// tikv/pd#7780 from a detection delay back into a correctness bug.
+// GetEtcdLeader returns the embedded etcd server's cached leader ID, or 0.
+// The value can remain stale while the Ready loop is blocked on storage, so it
+// must not be used alone to decide whether this member may serve (tikv/pd#7780).
 func (m *Member) GetEtcdLeader() uint64 {
 	failpoint.Inject("staleEtcdLeaderView", func(val failpoint.Value) {
-		// Reproduce the frozen cache of tikv/pd#7780: this member keeps
-		// believing that it is the etcd leader, whatever else happens.
+		// Simulate a stale local leader view.
 		if name, ok := val.(string); ok && name == m.Name() {
 			failpoint.Return(m.ID())
 		}
