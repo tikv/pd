@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -65,6 +67,23 @@ var storeStatuses = []string{
 	clusterStatusStoreServingCount,
 	clusterStatusStoreRemovingCount,
 	clusterStatusStoreRemovedCount,
+}
+
+// storeStats are the clusterStatusGauge sub-metrics that observe() stops
+// refreshing once a store is tombstoned (it returns before reaching them), so
+// they'd otherwise keep showing their last pre-tombstone value indefinitely.
+// storeStatuses above is deliberately not included here: those are refreshed
+// unconditionally on every observe() regardless of tombstone state, and
+// deleting store_tombstone_count/store_removed_count at bury time would only
+// make them vanish from dashboards until the next collection tick -- ops
+// needs to see how many stores are currently tombstoned without that gap.
+var storeStats = []string{
+	clusterStatusRegionCount,
+	clusterStatusLeaderCount,
+	clusterStatusWitnessCount,
+	clusterStatusLearnerCount,
+	clusterStatusStorageSize,
+	clusterStatusStorageCapacity,
 }
 
 type storeStatistics struct {
@@ -296,7 +315,9 @@ func (s *storeStatistics) collect() {
 // previous address.
 func ResetStoreStatistics(id string) {
 	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
-	clusterStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	for _, m := range storeStats {
+		clusterStatusGauge.DeletePartialMatch(prometheus.Labels{"type": m, "store": id})
+	}
 }
 
 type storeStatisticsMap struct {
