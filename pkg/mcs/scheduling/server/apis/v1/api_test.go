@@ -15,6 +15,8 @@
 package apis
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +26,8 @@ import (
 	"go.uber.org/goleak"
 
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
+	serverconfig "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -45,4 +49,22 @@ func TestGetAllStoresReturnsNotBootstrappedWhenBasicClusterMissing(t *testing.T)
 
 	re.Equal(http.StatusInternalServerError, resp.Code)
 	re.Contains(resp.Body.String(), "not bootstrapped")
+}
+
+func TestMergeDynamicConfigFromPrimaryHidesDefaultStoreLimitCompat(t *testing.T) {
+	re := require.New(t)
+	defaultLimit := sc.DefaultStoreLimitConfig()
+	localCfg := &serverconfig.Config{Name: "follower"}
+	var primaryCfg serverconfig.Config
+	legacyPrimaryConfig := fmt.Sprintf(
+		`{"schedule":{"store-limit":{"0":{"add-peer":%g,"remove-peer":%g}}},"replication":{"max-replicas":5}}`,
+		defaultLimit.AddPeer, defaultLimit.RemovePeer)
+	re.NoError(json.Unmarshal([]byte(legacyPrimaryConfig), &primaryCfg))
+
+	mergedCfg := mergeDynamicConfigFromPrimary(localCfg, primaryCfg)
+
+	re.Equal("follower", mergedCfg.Name)
+	re.Equal(defaultLimit, mergedCfg.Schedule.DefaultStoreLimit)
+	re.NotContains(mergedCfg.Schedule.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
+	re.Equal(uint64(5), mergedCfg.Replication.MaxReplicas)
 }
