@@ -92,7 +92,7 @@ type evictSlowStoreSchedulerConfig struct {
 	// EnableGroupEviction allows the disk slow store scheduler to evict leaders from every
 	// slow store that shares one isolation domain, instead of only a single store. The
 	// domain is derived from the placement rules (see groupIsolationLabels), so this switch
-	// only turns the behavior off; it never widens what counts as one domain. Enabled by
+	// only opts into the behavior; it never widens what counts as one domain. Disabled by
 	// default.
 	EnableGroupEviction      bool     `json:"enable-group-eviction"`
 	EnableNetworkSlowStore   bool     `json:"enable-network-slow-store"`
@@ -109,7 +109,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:          time.Time{},
 		RecoverySec:                     defaultRecoverySec,
 		EvictedStores:                   make([]uint64, 0),
-		EnableGroupEviction:             true,
+		EnableGroupEviction:             false,
 		Batch:                           EvictLeaderBatchSize,
 		EnableNetworkSlowStore:          false,
 		PausedNetworkSlowStores:         make([]uint64, 0),
@@ -459,9 +459,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	// Seed the defaults that differ from the zero value so a persisted config written
-	// before the field existed keeps the default instead of silently reading as false.
-	newCfg := &evictSlowStoreSchedulerConfig{EnableGroupEviction: true}
+	newCfg := &evictSlowStoreSchedulerConfig{}
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}

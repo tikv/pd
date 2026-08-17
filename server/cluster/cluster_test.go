@@ -3528,10 +3528,10 @@ func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	controller := co.GetSchedulersController()
 
 	// Reconfigure the already-running evict-slow-store scheduler in place with instant
-	// recovery (recovery-duration:0) so the test need not wait out the window, and with
-	// group eviction off so the single-store behavior can be observed first.
+	// recovery (recovery-duration:0) so the test need not wait out the window. Group
+	// eviction stays at its disabled default, so the single-store behavior comes first.
 	updateSchedulerConfig(re, controller, types.EvictSlowStoreScheduler.String(),
-		`{"recovery-duration":0, "enable-group-eviction":false}`)
+		`{"recovery-duration":0}`)
 
 	// Every rule enforces zone isolation, so a whole zone is a drainable domain.
 	re.NoError(tc.GetRuleManager().SetRule(&placement.Rule{
@@ -3574,7 +3574,7 @@ func TestEvictSlowStoreGroupEviction(t *testing.T) {
 	})
 	// second node in zone 1 becomes slow
 	markSlow(2, 100)
-	re.Never(func() bool { // group eviction is disabled
+	re.Never(func() bool { // group eviction is disabled by default
 		return tc.GetStore(2).EvictedAsSlowStore()
 	}, time.Second, time.Millisecond*100)
 
