@@ -113,6 +113,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	w.storeWatcher.SetReconcileDeletedKeys()
 	w.storeWatcher.StartWatchLoop()
 	return w.storeWatcher.WaitLoad()
 }

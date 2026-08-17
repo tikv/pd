@@ -521,6 +521,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	kgm.tsoNodesWatcher.SetReconcileDeletedKeys()
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
