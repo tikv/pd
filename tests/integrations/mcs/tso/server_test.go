@@ -774,7 +774,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 }
 
 const modeSwitchUserKeyspaceName = "mode_switch_user_ks"
-const modeSwitchPDModeKeyspaceName = "mode_switch_pd_mode_ks"
+const modeSwitchPDModeKeyspaceName = "mode_switch_pd_ks"
 
 func TestPDModeSwitchBetweenMicroserviceAndMonolithMultipleTimes(t *testing.T) {
 	re := require.New(t)
