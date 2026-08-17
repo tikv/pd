@@ -549,10 +549,16 @@ func (f *HotPeerCache) gc() {
 		return
 	}
 	f.lastGCTime = time.Now()
-	// remove tombstone stores
+	// remove tombstone stores. GetStores() still returns a tombstoned store
+	// until it's fully removed, so treat IsRemoved() the same as absent here
+	// -- nothing writes region heartbeats for it anymore, so there's no
+	// reason to wait for full removal before cleaning it up.
 	stores := make(map[uint64]struct{})
-	for _, storeID := range f.cluster.GetStores() {
-		stores[storeID.GetID()] = struct{}{}
+	for _, store := range f.cluster.GetStores() {
+		if store.IsRemoved() {
+			continue
+		}
+		stores[store.GetID()] = struct{}{}
 	}
 	// calcHotThresholds can populate thresholdsOfStore for a store that never becomes
 	// hot enough to enter peersOfStore, so peersOfStore alone can miss it; check the
