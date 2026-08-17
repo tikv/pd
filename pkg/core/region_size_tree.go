@@ -400,6 +400,8 @@ func (t *regionSizeTree) getRegionSizeByRange(startKey, endKey []byte) int64 {
 			size += item.size
 			return true
 		})
+		// Let reconciliations proceed between chunks. A query can therefore observe
+		// multiple index versions, which is acceptable for approximate statistics.
 		t.mu.RUnlock()
 		if count == 0 || len(startKey) == 0 {
 			break
