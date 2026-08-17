@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.etcd.io/etcd/api/v3/mvccpb"
@@ -65,6 +66,32 @@ const (
 	opDelete
 )
 
+type keyspaceGroupAutoSplitConfig struct {
+	enabled                     bool
+	keyspaceCountSplitThreshold int
+	patrolInterval              time.Duration
+}
+
+var defaultKeyspaceGroupAutoSplitConfig = keyspaceGroupAutoSplitConfig{
+	enabled:                     true,
+	keyspaceCountSplitThreshold: defaultKeyspaceCountSplitThreshold,
+	patrolInterval:              autoSplitKeyspaceGroupPatrolInterval,
+}
+
+// KeyspaceGroupManagerOption configures a GroupManager.
+type KeyspaceGroupManagerOption func(*GroupManager)
+
+// WithKeyspaceGroupAutoSplitConfig configures auto-splitting by keyspace count.
+func WithKeyspaceGroupAutoSplitConfig(
+	enabled bool,
+	keyspaceCountSplitThreshold int,
+	patrolInterval time.Duration,
+) KeyspaceGroupManagerOption {
+	return func(m *GroupManager) {
+		m.updateKeyspaceGroupAutoSplitConfig(enabled, keyspaceCountSplitThreshold, patrolInterval, false)
+	}
+}
+
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
 	ctx    context.Context
@@ -88,6 +115,9 @@ type GroupManager struct {
 	serviceRegistryMap map[string]string
 	// tsoNodesWatcher is the watcher for the registered tso servers.
 	tsoNodesWatcher *etcdutil.LoopWatcher
+
+	autoSplitConfig        atomic.Value
+	autoSplitConfigChanged chan struct{}
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
@@ -95,6 +125,7 @@ func NewKeyspaceGroupManager(
 	ctx context.Context,
 	store endpoint.KeyspaceGroupStorage,
 	client *clientv3.Client,
+	opts ...KeyspaceGroupManagerOption,
 ) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
@@ -102,13 +133,18 @@ func NewKeyspaceGroupManager(
 		groups[i] = newIndexedHeap(int(mcs.MaxKeyspaceGroupCountInUse))
 	}
 	m := &GroupManager{
-		ctx:                ctx,
-		cancel:             cancel,
-		store:              store,
-		groups:             groups,
-		client:             client,
-		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
-		serviceRegistryMap: make(map[string]string),
+		ctx:                    ctx,
+		cancel:                 cancel,
+		store:                  store,
+		groups:                 groups,
+		client:                 client,
+		nodesBalancer:          balancer.GenByPolicy[string](defaultBalancerPolicy),
+		serviceRegistryMap:     make(map[string]string),
+		autoSplitConfigChanged: make(chan struct{}, 1),
+	}
+	m.autoSplitConfig.Store(defaultKeyspaceGroupAutoSplitConfig)
+	for _, opt := range opts {
+		opt(m)
 	}
 
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
@@ -118,6 +154,48 @@ func NewKeyspaceGroupManager(
 		m.tsoNodesWatcher.StartWatchLoop()
 	}
 	return m
+}
+
+// UpdateKeyspaceGroupAutoSplitConfig updates the auto-split config used by the patrol loop.
+func (m *GroupManager) UpdateKeyspaceGroupAutoSplitConfig(
+	enabled bool,
+	keyspaceCountSplitThreshold int,
+	patrolInterval time.Duration,
+) {
+	m.updateKeyspaceGroupAutoSplitConfig(enabled, keyspaceCountSplitThreshold, patrolInterval, true)
+}
+
+func (m *GroupManager) updateKeyspaceGroupAutoSplitConfig(
+	enabled bool,
+	keyspaceCountSplitThreshold int,
+	patrolInterval time.Duration,
+	notify bool,
+) {
+	if keyspaceCountSplitThreshold <= 0 {
+		keyspaceCountSplitThreshold = defaultKeyspaceCountSplitThreshold
+	}
+	if patrolInterval <= 0 {
+		patrolInterval = autoSplitKeyspaceGroupPatrolInterval
+	}
+	m.autoSplitConfig.Store(keyspaceGroupAutoSplitConfig{
+		enabled:                     enabled,
+		keyspaceCountSplitThreshold: keyspaceCountSplitThreshold,
+		patrolInterval:              patrolInterval,
+	})
+	if notify {
+		select {
+		case m.autoSplitConfigChanged <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (m *GroupManager) getKeyspaceGroupAutoSplitConfig() keyspaceGroupAutoSplitConfig {
+	cfg, ok := m.autoSplitConfig.Load().(keyspaceGroupAutoSplitConfig)
+	if !ok {
+		return defaultKeyspaceGroupAutoSplitConfig
+	}
+	return cfg
 }
 
 // Bootstrap saves default keyspace group info and init group mapping in the memory.
@@ -229,14 +307,18 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 // patrolKeyspaceGroupSizeForAutoSplit periodically checks all tso keyspace groups.
-// If a group's keyspace count exceeds defaultKeyspaceCountSplitThreshold,
+// If a group's keyspace count exceeds the configured threshold,
 // it automatically splits a new group and moves about half of the keyspaces to the new group.
 func (m *GroupManager) patrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
-	ticker := time.NewTicker(autoSplitKeyspaceGroupPatrolInterval)
+	cfg := m.getKeyspaceGroupAutoSplitConfig()
+	ticker := time.NewTicker(cfg.patrolInterval)
 	defer ticker.Stop()
-	log.Info("start to patrol keyspace group size for auto-split")
+	log.Info("start to patrol keyspace group size for auto-split",
+		zap.Bool("enabled", cfg.enabled),
+		zap.Int("keyspace-count-split-threshold", cfg.keyspaceCountSplitThreshold),
+		zap.Duration("patrol-interval", cfg.patrolInterval))
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -245,6 +327,13 @@ func (m *GroupManager) patrolKeyspaceGroupSizeForAutoSplit(ctx context.Context) 
 		case <-ctx.Done():
 			log.Info("the raftcluster is closed, stop patrolling keyspace group size for auto-split")
 			return
+		case <-m.autoSplitConfigChanged:
+			cfg = m.getKeyspaceGroupAutoSplitConfig()
+			ticker.Reset(cfg.patrolInterval)
+			log.Info("updated keyspace group auto-split config",
+				zap.Bool("enabled", cfg.enabled),
+				zap.Int("keyspace-count-split-threshold", cfg.keyspaceCountSplitThreshold),
+				zap.Duration("patrol-interval", cfg.patrolInterval))
 		case <-ticker.C:
 			m.doPatrolKeyspaceGroupSizeForAutoSplit(ctx)
 		}
@@ -259,6 +348,10 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 	case <-ctx.Done():
 		return
 	default:
+	}
+	cfg := m.getKeyspaceGroupAutoSplitConfig()
+	if !cfg.enabled {
+		return
 	}
 	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
@@ -275,7 +368,7 @@ func (m *GroupManager) doPatrolKeyspaceGroupSizeForAutoSplit(ctx context.Context
 			zap.Uint32("max-keyspace-group-count-in-use", mcs.MaxKeyspaceGroupCountInUse))
 		return
 	}
-	threshold := defaultKeyspaceCountSplitThreshold
+	threshold := cfg.keyspaceCountSplitThreshold
 	failpoint.Inject("autoSplitKeyspaceGroupThreshold", func() {
 		threshold = 5
 	})

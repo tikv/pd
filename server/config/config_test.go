@@ -344,6 +344,47 @@ func TestLegacyDisableRawKVRegionSplitConfigDoesNotPanic(t *testing.T) {
 	})
 }
 
+func TestKeyspaceAutoSplitConfigAdjustAndValidate(t *testing.T) {
+	re := require.New(t)
+	load := func(s string) (*Config, error) {
+		cfg := NewConfig()
+		meta, err := toml.Decode(s, &cfg)
+		re.NoError(err)
+		return cfg, cfg.Adjust(&meta, false)
+	}
+
+	cfg, err := load("")
+	re.NoError(err)
+	re.True(cfg.Keyspace.IsTSOKeyspaceGroupAutoSplitEnabled())
+	re.Equal(defaultTSOKeyspaceGroupAutoSplitThreshold, cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitThreshold())
+	re.Equal(
+		defaultTSOKeyspaceGroupAutoSplitPatrolInterval,
+		cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitPatrolInterval())
+
+	cfg, err = load(`
+[keyspace]
+enable-tso-keyspace-group-auto-split = false
+tso-keyspace-group-auto-split-threshold = 100000
+tso-keyspace-group-auto-split-patrol-interval = "1h"
+`)
+	re.NoError(err)
+	re.False(cfg.Keyspace.IsTSOKeyspaceGroupAutoSplitEnabled())
+	re.Equal(100000, cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitThreshold())
+	re.Equal(time.Hour, cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitPatrolInterval())
+
+	_, err = load(`
+[keyspace]
+tso-keyspace-group-auto-split-threshold = 0
+`)
+	re.ErrorContains(err, "tso-keyspace-group-auto-split-threshold should be greater than 0")
+
+	_, err = load(`
+[keyspace]
+tso-keyspace-group-auto-split-patrol-interval = "0s"
+`)
+	re.ErrorContains(err, "tso-keyspace-group-auto-split-patrol-interval should be greater than 0")
+}
+
 func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {

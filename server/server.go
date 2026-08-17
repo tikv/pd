@@ -532,7 +532,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:   keyspace.AllocStep,
 	})
 	if s.IsKeyspaceGroupEnabled() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client,
+			keyspace.WithKeyspaceGroupAutoSplitConfig(
+				s.cfg.Keyspace.IsTSOKeyspaceGroupAutoSplitEnabled(),
+				s.cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitThreshold(),
+				s.cfg.Keyspace.GetTSOKeyspaceGroupAutoSplitPatrolInterval()))
 	}
 	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
 	s.keyspaceManager = keyspace.NewKeyspaceManager(
@@ -1222,9 +1226,15 @@ func (s *Server) SetKeyspaceConfigWithoutKeyspaceManagerUpdate(oldCfg, newCfg *c
 	return s.setKeyspaceConfigInner(oldCfg, newCfg, false)
 }
 
-// UpdateKeyspaceConfig updates keyspace manager's keyspace config.
+// UpdateKeyspaceConfig updates keyspace-related runtime config.
 func (s *Server) UpdateKeyspaceConfig(newCfg *config.KeyspaceConfig) {
 	s.keyspaceManager.UpdateConfig(newCfg)
+	if s.keyspaceGroupManager != nil {
+		s.keyspaceGroupManager.UpdateKeyspaceGroupAutoSplitConfig(
+			newCfg.IsTSOKeyspaceGroupAutoSplitEnabled(),
+			newCfg.GetTSOKeyspaceGroupAutoSplitThreshold(),
+			newCfg.GetTSOKeyspaceGroupAutoSplitPatrolInterval())
+	}
 }
 
 func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, updateKeyspaceManager bool) error {
@@ -1244,7 +1254,7 @@ func (s *Server) setKeyspaceConfigInner(oldCfg, newCfg *config.KeyspaceConfig, u
 		return err
 	}
 	if updateKeyspaceManager {
-		s.keyspaceManager.UpdateConfig(newCfg)
+		s.UpdateKeyspaceConfig(newCfg)
 	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
@@ -2150,7 +2160,7 @@ func (s *Server) loadKeyspaceConfig() {
 		return
 	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
-	s.keyspaceManager.UpdateConfig(cfg)
+	s.UpdateKeyspaceConfig(cfg)
 }
 
 func (s *Server) loadRateLimitConfig() {
