@@ -317,7 +317,7 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					// isolate. Injecting ahead of the request instead would let
 					// the key really expire and prove something weaker.
 					if l.matchesFailpointTarget(val) {
-						res, err = nil, errors.New("keepAliveFailed")
+						res, err = nil, errors.New("keep alive failed")
 					}
 				})
 
