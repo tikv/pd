@@ -925,6 +925,9 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	if region == nil {
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
+	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
+		return nil
+	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.

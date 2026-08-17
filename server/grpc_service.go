@@ -1190,7 +1190,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			// So we should not return error here.
 			log.Debug("the store of the bucket in region is not found", zap.Uint64("region-id", buckets.GetRegionId()))
 		} else if store.IsRemoved() {
-			log.Debug("the store of the bucket in region is tombstone", zap.Uint64("region-id", buckets.GetRegionId()), zap.Uint64("store-id", store.GetID()))
+			continue
 		} else {
 			storeLabel = strconv.FormatUint(store.GetID(), 10)
 			storeAddress = store.GetAddress()
