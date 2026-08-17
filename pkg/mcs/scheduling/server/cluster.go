@@ -95,13 +95,6 @@ type Cluster struct {
 	pdLeader          atomic.Value
 	running           atomic.Bool
 
-	// recentlyTombstonedStores is the set of store IDs collectMetrics saw tombstoned
-	// on its last tick, needed to catch a store that gets fully removed between two
-	// ticks so its filter counters still get one final delete. Only collectMetrics,
-	// via runMetricsCollectionJob's single-goroutine ticker, touches it, so it needs
-	// no lock.
-	recentlyTombstonedStores map[uint64]struct{}
-
 	backendAddress string
 	httpClient     *http.Client
 
@@ -735,29 +728,10 @@ func (c *Cluster) runMetricsCollectionJob() {
 func (c *Cluster) collectMetrics() {
 	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
 	stores := c.GetStores()
-	// Filter counters need repeated cleanup: schedulers keep rejecting a
-	// tombstoned-but-known store via StoreStateFilter every cycle, so a one-shot
-	// delete at bury time doesn't stick. Deleting already-gone labels is a cheap
-	// no-op, so repeating it every tick is safe.
-	current := make(map[uint64]struct{})
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
-		if s.IsRemoved() {
-			storeID := s.GetID()
-			current[storeID] = struct{}{}
-			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
-		}
 	}
-	// A store fully removed between two ticks drops out of GetStores() before this
-	// sweep can catch it there; delete once more for anything recentlyTombstonedStores
-	// still remembers but current no longer has.
-	for storeID := range c.recentlyTombstonedStores {
-		if _, stillKnown := current[storeID]; !stillKnown {
-			filter.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
-		}
-	}
-	c.recentlyTombstonedStores = current
 	statsMap.Collect()
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
