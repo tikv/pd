@@ -147,6 +147,7 @@ func ResetSchedulerMetrics() {
 	regionLabelStatusGauge.Reset()
 	opInfluenceStatus.Reset()
 	hotSchedulerResultCounter.Reset()
+	balanceWitnessCounter.Reset()
 	balanceDirectionCounter.Reset()
 	hotDirectionCounter.Reset()
 	evictedSlowStoreStatusGauge.Reset()
