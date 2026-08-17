@@ -177,6 +177,15 @@ func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 	stats := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
+		// A tombstoned store can still show up as a peer here: the leader reporting
+		// this region may not have caught up with a raft config change removing it
+		// yet. Skip it so gc() cleaning up its entries at bury time doesn't get
+		// undone by the very next heartbeat from this region's (live) leader. A
+		// store the cluster doesn't know about yet is a different case (e.g. a
+		// target store for an in-flight add-peer) and isn't skipped here.
+		if store := f.cluster.GetStore(storeID); store != nil && store.IsRemoved() {
+			continue
+		}
 		oldItem := f.getOldHotPeerStat(regionID, storeID)
 
 		// check whether the peer is allowed to be inherited
