@@ -1187,6 +1187,40 @@ func TestEvictSlowStoreInsufficientHealthyZones(t *testing.T) {
 	re.Empty(conf.evictedStores())
 }
 
+// TestEvictSlowStoreTiFlashNotAHealthyDomain: a TiFlash store must not count as a domain
+// that can host leaders. TiFlash only carries learners, so it never appears in the per-region
+// follower candidates a leader can move to, and counting its zone would let the guard approve
+// draining z1 while only one real TiKV domain survives.
+func TestEvictSlowStoreTiFlashNotAHealthyDomain(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// z1 is slow, z2 has a healthy TiKV store, z3 has only a TiFlash store.
+	tc.AddLabelsStore(1, 0, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 0, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 0, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 0, map[string]string{"zone": "z3", "host": "h4", core.EngineKey: core.EngineTiFlash})
+	tc.AddLeaderRegion(1, 1, 3)
+	tc.AddLeaderRegion(2, 2, 3)
+
+	es := createTestEvictSlowStoreScheduler(re, oc)
+	enableGroupEviction(re, tc, es, "zone", "zone", "host")
+	conf := es.(*evictSlowStoreScheduler).conf
+
+	setStoreSlowScore(tc, 1, 100)
+	setStoreSlowScore(tc, 2, 100)
+
+	ops, _ := es.Schedule(tc, false)
+	re.Empty(ops)
+	re.Empty(conf.evictedStores())
+
+	// Making z3 a real TiKV zone gives two surviving domains, so the drain is allowed.
+	tc.AddLabelsStore(5, 0, map[string]string{"zone": "z3", "host": "h5"})
+	es.Schedule(tc, false)
+	re.ElementsMatch([]uint64{1, 2}, conf.evictedStores())
+}
+
 // TestEvictSlowStoreReconcileAndFreeze: while draining a zone, newly-slow same-zone
 // stores are added, but a slow store appearing in another zone freezes expansion.
 func TestEvictSlowStoreReconcileAndFreeze(t *testing.T) {

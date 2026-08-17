@@ -943,7 +943,11 @@ func sameLocation(ref, store *core.StoreInfo, labels []string) bool {
 // eligibleHealthyLeaderTargets returns the stores that could actually receive leaders,
 // applying the same target-store checks as a leader transfer (StoreStateFilter with
 // TransferLeader set) so the domain counting matches what the operator layer will accept.
-// It additionally drops disk-slow stores, which the leader-target filter does not reject.
+// It additionally drops:
+//   - non-TiKV stores: a leader can only move to a voter, and TiFlash keeps learners only,
+//     so those stores never appear in the per-region follower candidates that
+//     scheduleEvictLeaderOnce picks from. StoreStateFilter does not check the engine.
+//   - disk-slow stores, which the leader-target filter does not reject either.
 func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.StoreInfo) []*core.StoreInfo {
 	candidates := filter.NewCandidates(stores).
 		FilterTarget(
@@ -960,7 +964,7 @@ func eligibleHealthyLeaderTargets(cluster sche.SchedulerCluster, stores []*core.
 
 	healthy := candidates[:0]
 	for _, store := range candidates {
-		if store.IsSlow() {
+		if !store.IsTiKV() || store.IsSlow() {
 			continue
 		}
 		healthy = append(healthy, store)
