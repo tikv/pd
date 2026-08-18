@@ -1793,6 +1793,7 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		filter.DeleteStoreMetrics(storeIDStr)
 		hbstream.DeleteStoreMetrics(storeIDStr)
 		schedule.DeleteStoreMetrics(storeIDStr)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}
