@@ -145,9 +145,12 @@ func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []F
 	for _, filter := range filters {
 		status := filter.Target(conf, store)
 		if !status.IsOK() {
-			if status != statusStoreRemoved {
-				targetID := storeID
-				filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), targetID).Inc()
+			// Check the store itself rather than this filter's own status: an
+			// earlier filter in the chain (e.g. an exclusion filter) can reject
+			// a tombstoned store for a reason other than statusStoreRemoved,
+			// which would otherwise still recreate the deleted series.
+			if !store.IsRemoved() {
+				filterTargetCounter.WithLabelValues(filter.Scope(), filter.Type().String(), storeID).Inc()
 			}
 			return false
 		}
