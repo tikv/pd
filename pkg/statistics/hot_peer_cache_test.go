@@ -853,6 +853,87 @@ func TestDifferentReportInterval(t *testing.T) {
 	}
 }
 
+func TestHotPeerCacheGetHotPeerStatsForStores(t *testing.T) {
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		t.Run(kind.String(), func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			cache := NewHotPeerCache(ctx, core.NewBasicCluster(), kind)
+			antiCount := kind.DefaultAntiCount()
+
+			putTestHotPeer(cache, 1, 11, 3, antiCount, false)
+			putTestHotPeer(cache, 2, 21, 3, antiCount, false)
+			putTestHotPeer(cache, 3, 31, 3, antiCount, false)
+			putTestHotPeer(cache, 1, 12, 0, antiCount, false)
+			putTestHotPeer(cache, 3, 32, 3, antiCount, true)
+			putTestHotPeer(cache, 3, 33, 3, antiCount-1, false)
+
+			stats := cache.GetHotPeerStatsForStores([]uint64{1, 3, 1, 99}, 1)
+			re.NotNil(stats)
+			re.Equal([]uint64{11}, hotPeerRegionIDs(stats[1]))
+			re.Equal([]uint64{31}, hotPeerRegionIDs(stats[3]))
+			re.NotContains(stats, uint64(2))
+			re.NotContains(stats, uint64(99))
+			re.Len(stats, 2)
+
+			stats = cache.GetHotPeerStatsForStores([]uint64{99}, 1)
+			re.NotNil(stats)
+			re.Empty(stats)
+
+			stats = cache.GetHotPeerStatsForStores(nil, 1)
+			re.NotNil(stats)
+			re.Empty(stats)
+		})
+	}
+}
+
+func TestHotPeerCacheTargetedStatsMatchFullStatsFiltering(t *testing.T) {
+	for _, kind := range []utils.RWType{utils.Read, utils.Write} {
+		t.Run(kind.String(), func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			cache := NewHotPeerCache(ctx, core.NewBasicCluster(), kind)
+			antiCount := kind.DefaultAntiCount()
+
+			putTestHotPeer(cache, 1, 11, 4, antiCount, false)
+			putTestHotPeer(cache, 1, 12, 1, antiCount, false)
+			putTestHotPeer(cache, 2, 21, 4, antiCount, false)
+			putTestHotPeer(cache, 3, 31, 4, antiCount, false)
+			putTestHotPeer(cache, 3, 32, 4, antiCount, true)
+			putTestHotPeer(cache, 3, 33, 4, antiCount-1, false)
+
+			full := cache.GetHotPeerStats(2)
+			targeted := cache.GetHotPeerStatsForStores([]uint64{1, 3}, 2)
+			for _, storeID := range []uint64{1, 3} {
+				re.Equal(hotPeerRegionIDs(full[storeID]), hotPeerRegionIDs(targeted[storeID]))
+			}
+			re.NotContains(targeted, uint64(2))
+		})
+	}
+}
+
+func putTestHotPeer(cache *HotPeerCache, storeID, regionID uint64, hotDegree, antiCount int, inCold bool) {
+	cache.putItem(&HotPeerStat{
+		StoreID:   storeID,
+		RegionID:  regionID,
+		HotDegree: hotDegree,
+		AntiCount: antiCount,
+		Loads:     make([]float64, utils.DimLen),
+		inCold:    inCold,
+	})
+}
+
+func hotPeerRegionIDs(stats []*HotPeerStat) []uint64 {
+	regionIDs := make([]uint64, 0, len(stats))
+	for _, stat := range stats {
+		regionIDs = append(regionIDs, stat.RegionID)
+	}
+	sort.Slice(regionIDs, func(i, j int) bool { return regionIDs[i] < regionIDs[j] })
+	return regionIDs
+}
+
 func BenchmarkCheckRegionFlow(b *testing.B) {
 	re := require.New(b)
 	cluster := core.NewBasicCluster()
