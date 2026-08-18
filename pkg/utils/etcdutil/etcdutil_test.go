@@ -865,9 +865,9 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() 
 	}
 }
 
-func (suite *loopWatcherTestSuite) TestWatcherLoadUsesSingleRevision() {
+func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision() {
 	re := suite.Require()
-	const prefix = "TestWatcherLoadUsesSingleRevision/"
+	const prefix = "TestWatcherConsistentLoadUsesSingleRevision/"
 	for _, suffix := range []string{"a", "b", "c"} {
 		suite.put(re, prefix+suffix, "old")
 	}
@@ -893,7 +893,12 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadUsesSingleRevision() {
 			values[string(kv.Key)] = string(kv.Value)
 			if !updated {
 				updated = true
-				_, err := suite.client.Put(suite.ctx, prefix+"b", "new")
+				// Update one loaded and one unloaded key in the same revision. A
+				// latest-page scan would combine the old a with the new b.
+				_, err := suite.client.Txn(suite.ctx).Then(
+					clientv3.OpPut(prefix+"a", "new"),
+					clientv3.OpPut(prefix+"b", "new"),
+				).Commit()
 				return err
 			}
 			return nil
@@ -902,7 +907,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadUsesSingleRevision() {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
-	watcher.SetReloadOnCompaction()
+	watcher.SetConsistentLoad()
 	watcher.SetLoadBatchSize(1)
 	revision, err := watcher.load(suite.ctx)
 	re.NoError(err)

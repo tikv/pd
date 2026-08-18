@@ -603,6 +603,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	kgm.groupWatcher.SetConsistentLoad()
 	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
 		if maxLoadedModRevision > 0 {
 			kgm.SetModRevision(maxLoadedModRevision)
