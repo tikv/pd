@@ -154,7 +154,17 @@ func (s *HeartbeatStreams) run() {
 			}
 			storeAddress := store.GetAddress()
 			if stream, ok := s.streams[storeID]; ok {
-				if err := stream.Send(msg); err != nil {
+				err := stream.Send(msg)
+				// Send can block; re-fetch the store so bury/removal that
+				// happened while it was blocked doesn't recreate a series
+				// DeleteStoreMetrics already deleted for this store.
+				if store = s.storeInformer.GetStore(storeID); store == nil || store.IsRemoved() {
+					if err != nil {
+						delete(s.streams, storeID)
+					}
+					continue
+				}
+				if err != nil {
 					log.Warn("send heartbeat message fail",
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
 					delete(s.streams, storeID)
@@ -182,7 +192,15 @@ func (s *HeartbeatStreams) run() {
 				}
 				storeAddress := store.GetAddress()
 				storeLabel := strconv.FormatUint(storeID, 10)
-				if err := stream.Send(keepAlive); err != nil {
+				err := stream.Send(keepAlive)
+				// Same re-fetch as the msg case above: Send can block across a bury.
+				if store = s.storeInformer.GetStore(storeID); store == nil || store.IsRemoved() {
+					if err != nil {
+						delete(s.streams, storeID)
+					}
+					continue
+				}
+				if err != nil {
 					log.Warn("send keepalive message fail, store maybe disconnected",
 						zap.Uint64("target-store-id", storeID),
 						errs.ZapError(err))
