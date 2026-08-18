@@ -535,44 +535,12 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // membership/distribution metadata.
 // Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
 // Value: endpoint.KeyspaceGroup
-// Revision marker: /pd/{cluster_id}/tso/keyspace_groups/revision
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
-	maxGroupEventRevision := uint64(0)
-	maxMarkerEventRevision := uint64(0)
-	batchApplyFailed := false
-	preEventsFn := func([]*clientv3.Event) error {
-		maxLoadedModRevision = 0
-		maxGroupEventRevision = 0
-		maxMarkerEventRevision = 0
-		batchApplyFailed = false
-		return nil
-	}
-	setModRevision := func(revision uint64) bool {
-		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
-			addr, ok := val.(string)
-			if ok && addr == kgm.electionNamePrefix {
-				failpoint.Return(false)
-			}
-		})
-		return kgm.SetModRevision(revision)
-	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		if string(kv.Key) == keypath.KeyspaceGroupRevisionPath() {
-			failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
-				addr, ok := val.(string)
-				if ok && addr == kgm.electionNamePrefix {
-					failpoint.Return(nil)
-				}
-			})
-			maxMarkerEventRevision = max(maxMarkerEventRevision, uint64(kv.ModRevision))
-			maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
-			return nil
-		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
-			batchApplyFailed = true
 			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
@@ -581,7 +549,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
-		maxGroupEventRevision = max(maxGroupEventRevision, uint64(kv.ModRevision))
 		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
@@ -590,36 +557,12 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		if string(kv.Key) == keypath.KeyspaceGroupRevisionPath() {
-			return nil
-		}
 		groupID, err := ExtractKeyspaceGroupIDFromPath(kgm.compiledKGMembershipIDRegexp, string(kv.Key))
 		if err != nil {
-			batchApplyFailed = true
 			return err
 		}
-		maxGroupEventRevision = max(maxGroupEventRevision, uint64(kv.ModRevision))
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
-	}
-	persistRevisionMarker := func(revision uint64) error {
-		for {
-			ctx, cancel := context.WithTimeout(kgm.ctx, etcdutil.DefaultRequestTimeout)
-			_, err := kgm.etcdClient.Put(ctx, keypath.KeyspaceGroupRevisionPath(), "1")
-			cancel()
-			if err == nil {
-				return nil
-			}
-			log.Warn("failed to persist keyspace group revision marker, retrying",
-				zap.Uint64("revision", revision), zap.Error(err))
-			retryTimer := time.NewTimer(time.Second)
-			select {
-			case <-kgm.ctx.Done():
-				retryTimer.Stop()
-				return kgm.ctx.Err()
-			case <-retryTimer.C:
-			}
-		}
 	}
 	postEventsFn := func(event []*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
@@ -627,17 +570,15 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
 		}
-		if len(event) > 0 && !batchApplyFailed {
-			// Old PD versions and full transactions do not persist the marker.
-			// Checkpoint them before publishing a revision that a restarted TSO
-			// must be able to recover.
-			if maxGroupEventRevision > maxMarkerEventRevision {
-				if err := persistRevisionMarker(maxGroupEventRevision); err != nil {
-					return err
-				}
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+			addr, ok := val.(string)
+			if ok && addr == kgm.electionNamePrefix {
+				failpoint.Return(nil)
 			}
+		})
+		if len(event) > 0 {
 			last := event[len(event)-1]
-			if !setModRevision(uint64(last.Kv.ModRevision)) {
+			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
 				log.Warn("watch keyspace group met mod revision not increased",
 					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
 					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
@@ -646,27 +587,27 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		}
 		return nil
 	}
-	loadSuccessFn := func() {
-		// Use the applied keys' revisions instead of the global snapshot
-		// revision, which also includes unrelated etcd writes.
-		if maxLoadedModRevision > 0 {
-			setModRevision(maxLoadedModRevision)
-		}
-	}
 	kgm.groupWatcher = etcdutil.NewLoopWatcher(
 		kgm.ctx,
 		&kgm.wg,
 		kgm.etcdClient,
 		"keyspace-watcher",
-		keypath.KeyspaceGroupPrefix(),
-		preEventsFn,
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
+		func([]*clientv3.Event) error {
+			maxLoadedModRevision = 0
+			return nil
+		},
 		putFn,
 		deleteFn,
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	kgm.groupWatcher.SetReconcileDeletedKeys()
-	kgm.groupWatcher.SetLoadSuccessFn(loadSuccessFn)
+	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
+		if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
+		}
+	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}
@@ -1072,8 +1013,12 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	kg := kgm.kgs[groupID]
 	if kg != nil {
 		for _, kid := range kg.Keyspaces {
-			// Preserve ownership that a newer group update has already claimed.
-			if currentGroupID, ok := kgm.keyspaceLookupTable[kid]; ok && currentGroupID == groupID {
+			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
+			//     so we decouple the relationship in the global keyspace lookup table.
+			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
+			//     which has already declared the ownership of the keyspace, so we don't need
+			//     delete it from the global keyspace lookup table and overwrite the ownership.
+			if kid == kg.ID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
 		}

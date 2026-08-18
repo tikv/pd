@@ -58,7 +58,6 @@ const (
 	defaultKeyspaceCountSplitThreshold = 40000
 	// autoSplitKeyspaceGroupPatrolInterval is the interval for patrolling keyspace group size for auto-split.
 	autoSplitKeyspaceGroupPatrolInterval = 15 * time.Minute
-	keyspaceGroupRevisionValue           = "1"
 )
 
 const (
@@ -91,62 +90,6 @@ type GroupManager struct {
 	tsoNodesWatcher *etcdutil.LoopWatcher
 }
 
-type keyspaceGroupRevisionStorage struct {
-	endpoint.KeyspaceGroupStorage
-}
-
-type keyspaceGroupRevisionTxn struct {
-	kv.Txn
-	changed    bool
-	operations int
-}
-
-// Save records keyspace group writes so the transaction can advance the revision marker.
-func (txn *keyspaceGroupRevisionTxn) Save(key, value string) error {
-	if err := txn.Txn.Save(key, value); err != nil {
-		return err
-	}
-	txn.operations++
-	if strings.HasPrefix(key, keypath.KeyspaceGroupIDPrefix()) {
-		txn.changed = true
-	}
-	return nil
-}
-
-// Remove records keyspace group deletions so the transaction can advance the revision marker.
-func (txn *keyspaceGroupRevisionTxn) Remove(key string) error {
-	if err := txn.Txn.Remove(key); err != nil {
-		return err
-	}
-	txn.operations++
-	if strings.HasPrefix(key, keypath.KeyspaceGroupIDPrefix()) {
-		txn.changed = true
-	}
-	return nil
-}
-
-// RunInTxn atomically advances the revision marker when the transaction has reserved capacity.
-// A full transaction is checkpointed by the TSO watcher before its revision is published.
-func (s *keyspaceGroupRevisionStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
-	return s.KeyspaceGroupStorage.RunInTxn(ctx, func(txn kv.Txn) error {
-		revisionTxn := &keyspaceGroupRevisionTxn{Txn: txn}
-		if err := f(revisionTxn); err != nil {
-			return err
-		}
-		if !revisionTxn.changed || revisionTxn.operations >= etcdutil.MaxEtcdTxnOps {
-			return nil
-		}
-		return txn.Save(keypath.KeyspaceGroupRevisionPath(), keyspaceGroupRevisionValue)
-	})
-}
-
-func withKeyspaceGroupRevision(store endpoint.KeyspaceGroupStorage) endpoint.KeyspaceGroupStorage {
-	if _, ok := store.(*keyspaceGroupRevisionStorage); ok {
-		return store
-	}
-	return &keyspaceGroupRevisionStorage{KeyspaceGroupStorage: store}
-}
-
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.
 func NewKeyspaceGroupManager(
 	ctx context.Context,
@@ -161,7 +104,7 @@ func NewKeyspaceGroupManager(
 	m := &GroupManager{
 		ctx:                ctx,
 		cancel:             cancel,
-		store:              withKeyspaceGroupRevision(store),
+		store:              store,
 		groups:             groups,
 		client:             client,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
@@ -196,13 +139,6 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
 	if err != nil && err != errs.ErrKeyspaceGroupExists {
-		return err
-	}
-	// Persist a marker on every bootstrap so upgraded clusters retain a
-	// revision that is at least as new as all existing keyspace group state.
-	if err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
-		return txn.Save(keypath.KeyspaceGroupRevisionPath(), keyspaceGroupRevisionValue)
-	}); err != nil {
 		return err
 	}
 

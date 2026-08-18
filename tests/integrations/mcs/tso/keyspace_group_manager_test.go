@@ -46,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -1137,9 +1138,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 
 	var (
-		// Exercise the default etcd transaction boundary. The revision marker
-		// must not turn a previously valid 128-group request into 129 writes.
-		keyspaceGroupNum = 128
+		keyspaceGroupNum = etcdutil.MaxEtcdTxnOps
 		keyspaceGroups   = make([]*endpoint.KeyspaceGroup, 0, keyspaceGroupNum)
 		keyspaces        = make([]uint32, 0, keyspaceGroupNum)
 	)

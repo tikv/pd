@@ -210,257 +210,32 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsAssignment() {
 	suite.runTestLoadKeyspaceGroupsAssignment(re, maxCountInUse+1, 0, 10)
 }
 
-func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevision() {
+func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadSetsModRevision() {
 	re := suite.Require()
-
 	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
 	defer mgr.Close()
 
 	const (
 		groupID    = uint32(1)
 		keyspaceID = uint32(101)
 	)
-	err := addKeyspaceGroupAssignment(
+	re.NoError(addKeyspaceGroupAssignment(
 		suite.ctx,
 		suite.etcdClient,
 		groupID,
 		[]string{mgr.tsoServiceID.ServiceAddr},
 		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
 		[]uint32{keyspaceID},
-	)
-	re.NoError(err)
-
+	))
 	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
 	re.NoError(err)
 	re.Len(resp.Kvs, 1)
-	groupRevision := uint64(resp.Kvs[0].ModRevision)
 
-	const deletedGroupID = uint32(2)
-	err = addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		deletedGroupID,
-		[]string{mgr.tsoServiceID.ServiceAddr},
-		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
-		[]uint32{keyspaceID + 1},
-	)
-	re.NoError(err)
-	deleteResp, err := suite.etcdClient.Txn(suite.ctx).Then(
-		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(deletedGroupID)),
-		clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
-	).Commit()
-	re.NoError(err)
-	deletedRevision := uint64(deleteResp.Header.Revision)
-	re.Greater(deletedRevision, groupRevision)
-
-	err = mgr.Initialize()
-	re.NoError(err)
-
-	_, kg, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
-	re.NoError(err)
-	re.NotNil(kg)
-	re.Equal(groupID, loadedGroupID)
-	re.Equal(deletedRevision, loadedRevision)
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestFailedSnapshotDoesNotSetModRevision() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	defer mgr.Close()
-
-	_, err := suite.etcdClient.Txn(suite.ctx).Then(
-		clientv3.OpPut(keypath.KeyspaceGroupIDPath(1), "{"),
-		clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
-	).Commit()
-	re.NoError(err)
-
-	re.Error(mgr.Initialize())
-	mgr.RLock()
-	defer mgr.RUnlock()
-	re.Zero(mgr.modRevision)
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestSnapshotRevisionRemainsComparableAcrossManagers() {
-	re := suite.Require()
-	keypath.SetClusterID(rand.Uint64())
-
-	cfg1 := suite.createConfig()
-	cfg2 := suite.createConfig()
-	mgr1 := suite.newKeyspaceGroupManager(1, cfg1)
-	mgr2 := suite.newKeyspaceGroupManager(1, cfg2)
-	defer mgr1.Close()
-	defer mgr2.Close()
-
-	const (
-		groupID    = uint32(1)
-		keyspaceID = uint32(101)
-	)
-	re.NoError(addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		groupID,
-		[]string{
-			mgr1.tsoServiceID.ServiceAddr,
-			mgr2.tsoServiceID.ServiceAddr,
-		},
-		[]int{
-			mcs.DefaultKeyspaceGroupReplicaPriority,
-			mcs.DefaultKeyspaceGroupReplicaPriority,
-		},
-		[]uint32{keyspaceID},
-	))
-	re.NoError(mgr1.Initialize())
-
-	_, _, _, oldRevision, err := mgr1.FindGroupByKeyspaceID(keyspaceID)
-	re.NoError(err)
-	re.NotZero(oldRevision)
-
-	_, err = suite.etcdClient.Put(suite.ctx, "/unrelated/revision-gap", "1")
-	re.NoError(err)
-
-	re.NoError(mgr2.Initialize())
-	_, _, _, newRevision, err := mgr2.FindGroupByKeyspaceID(keyspaceID)
-	re.NoError(err)
-	re.Equal(oldRevision, newRevision)
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestLegacyDeleteRevisionSurvivesRestart() {
-	re := suite.Require()
-	keypath.SetClusterID(rand.Uint64())
-
-	cfg1 := suite.createConfig()
-	cfg2 := suite.createConfig()
-	mgr1 := suite.newKeyspaceGroupManager(1, cfg1)
-	mgr2 := suite.newKeyspaceGroupManager(1, cfg2)
-	defer mgr1.Close()
-	defer mgr2.Close()
-
-	const (
-		groupID    = uint32(1)
-		keyspaceID = uint32(101)
-	)
-	re.NoError(addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		groupID,
-		[]string{mgr1.tsoServiceID.ServiceAddr, mgr2.tsoServiceID.ServiceAddr},
-		[]int{mcs.DefaultKeyspaceGroupReplicaPriority, mcs.DefaultKeyspaceGroupReplicaPriority},
-		[]uint32{keyspaceID},
-	))
-	re.NoError(mgr1.Initialize())
-
-	// Simulate an old PD writer, which deletes the group without a revision marker.
-	deleteResp, err := suite.etcdClient.Delete(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
-	re.NoError(err)
-	deletedRevision := uint64(deleteResp.Header.Revision)
-
-	testutil.Eventually(re, func() bool {
-		_, _, loadedGroupID, loadedRevision, err := mgr1.FindGroupByKeyspaceID(keyspaceID)
-		return err == nil && loadedGroupID == constant.DefaultKeyspaceGroupID &&
-			loadedRevision >= deletedRevision
-	})
-
-	markerResp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupRevisionPath())
-	re.NoError(err)
-	re.Len(markerResp.Kvs, 1)
-	re.GreaterOrEqual(uint64(markerResp.Kvs[0].ModRevision), deletedRevision)
-
-	re.NoError(mgr2.Initialize())
-	_, _, loadedGroupID, loadedRevision, err := mgr2.FindGroupByKeyspaceID(keyspaceID)
-	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, loadedGroupID)
-	re.GreaterOrEqual(loadedRevision, deletedRevision)
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMissedDelete() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	const (
-		groupID    = uint32(1)
-		keyspaceID = uint32(101)
-	)
-	re.NoError(addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		groupID,
-		[]string{mgr.tsoServiceID.ServiceAddr},
-		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
-		[]uint32{keyspaceID},
-	))
 	re.NoError(mgr.Initialize())
-
-	_, _, loadedGroupID, oldRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
-	re.NoError(err)
-	re.Equal(groupID, loadedGroupID)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
-	}()
-	deleteResp, err := suite.etcdClient.Txn(suite.ctx).Then(
-		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(groupID)),
-		clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
-	).Commit()
-	re.NoError(err)
-	re.Greater(uint64(deleteResp.Header.Revision), oldRevision)
-
-	// The watch response is discarded. A full snapshot reload must still remove
-	// the missing group and publish the marker revision loaded with that snapshot.
-	testutil.Eventually(re, func() bool {
-		mgr.groupWatcher.ForceLoad()
-		mgr.RLock()
-		defer mgr.RUnlock()
-		_, keyspaceExists := mgr.keyspaceLookupTable[keyspaceID]
-		return mgr.kgs[groupID] == nil && !keyspaceExists &&
-			mgr.modRevision == uint64(deleteResp.Header.Revision)
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
-
 	_, _, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
 	re.NoError(err)
-	re.Equal(constant.DefaultKeyspaceGroupID, loadedGroupID)
-	re.Equal(uint64(deleteResp.Header.Revision), loadedRevision)
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestInitialSkipKeyspaceWatchDoesNotAdvanceRevision() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	point := fmt.Sprintf("return(\"%s\")", mgr.electionNamePrefix)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch", point))
-	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/SkipKeyspaceWatch"))
-	}()
-
-	const (
-		groupID    = uint32(1)
-		keyspaceID = uint32(101)
-	)
-	re.NoError(addKeyspaceGroupAssignment(
-		suite.ctx,
-		suite.etcdClient,
-		groupID,
-		[]string{mgr.tsoServiceID.ServiceAddr},
-		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
-		[]uint32{keyspaceID},
-	))
-	re.NoError(mgr.Initialize())
-
-	mgr.RLock()
-	loadedGroup := mgr.kgs[groupID]
-	loadedRevision := mgr.modRevision
-	mgr.RUnlock()
-
-	re.Nil(loadedGroup)
-	re.Zero(loadedRevision, "a skipped initial watch must not advertise an unapplied revision")
+	re.Equal(groupID, loadedGroupID)
+	re.Equal(uint64(resp.Kvs[0].ModRevision), loadedRevision)
 }
 
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
@@ -1243,36 +1018,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 			}
 		}
 	}
-}
-
-func (suite *keyspaceGroupManagerTestSuite) TestDeleteKeyspaceGroupMaintainsLookupOwnership() {
-	re := suite.Require()
-	mgr := suite.newUniqueKeyspaceGroupManager(0)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	const (
-		groupID         = uint32(1)
-		newOwnerGroupID = uint32(2)
-		ownedKeyspaceID = uint32(101)
-		movedKeyspaceID = groupID
-	)
-	mgr.Lock()
-	mgr.kgs[groupID] = &endpoint.KeyspaceGroup{
-		ID:        groupID,
-		Keyspaces: []uint32{ownedKeyspaceID, movedKeyspaceID},
-	}
-	mgr.keyspaceLookupTable[ownedKeyspaceID] = groupID
-	mgr.keyspaceLookupTable[movedKeyspaceID] = newOwnerGroupID
-	mgr.Unlock()
-
-	mgr.deleteKeyspaceGroup(groupID)
-
-	mgr.RLock()
-	defer mgr.RUnlock()
-	_, ownedKeyspaceExists := mgr.keyspaceLookupTable[ownedKeyspaceID]
-	re.False(ownedKeyspaceExists)
-	re.Equal(newOwnerGroupID, mgr.keyspaceLookupTable[movedKeyspaceID])
 }
 
 func verifyLocalKeyspaceLookupTable(

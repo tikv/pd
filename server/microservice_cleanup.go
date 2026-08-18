@@ -203,10 +203,7 @@ func (s *Server) cleanupMicroserviceMetadataInPDMode(
 			clientv3.Compare(clientv3.LeaseValue(term.leaderKey), "=", term.leaseID),
 			clientv3.Compare(clientv3.ModRevision(groupKey), "=", groupKV.ModRevision),
 		).
-		Then(
-			clientv3.OpPut(groupKey, string(value)),
-			clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
-		).
+		Then(clientv3.OpPut(groupKey, string(value))).
 		Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()

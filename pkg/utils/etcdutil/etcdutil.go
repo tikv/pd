@@ -401,8 +401,8 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
-	// loadSuccessFn is called after a full snapshot load succeeds.
-	loadSuccessFn func()
+	// initialLoadSuccessFn is called after the initial load succeeds and before watching starts.
+	initialLoadSuccessFn func()
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -515,6 +515,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		})
 		watchStartRevision, err = lw.load(ctx)
 		if err == nil && ctx.Err() == nil {
+			if lw.initialLoadSuccessFn != nil {
+				lw.initialLoadSuccessFn()
+			}
 			break
 		}
 		select {
@@ -760,19 +763,11 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			return
 		}
-		if preErr != nil {
+		if preErr != nil || !lw.reconcileDeletedKeys {
 			return
 		}
 		if loadCompleted && callbackErr == nil {
-			if lw.loadSuccessFn != nil {
-				lw.loadSuccessFn()
-			}
-			if lw.reconcileDeletedKeys {
-				lw.loadedKeys = snapshotKeys
-			}
-			return
-		}
-		if !lw.reconcileDeletedKeys {
+			lw.loadedKeys = snapshotKeys
 			return
 		}
 		// Some callbacks may have succeeded before another callback failed. The
@@ -984,11 +979,10 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
 }
 
-// SetLoadSuccessFn sets a callback that runs only after a revision-consistent
-// snapshot load succeeds. It must be called before StartWatchLoop and used
-// together with SetReloadOnCompaction or SetReconcileDeletedKeys.
-func (lw *LoopWatcher) SetLoadSuccessFn(fn func()) {
-	lw.loadSuccessFn = fn
+// SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.
+// It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
+	lw.initialLoadSuccessFn = fn
 }
 
 // SetReloadOnCompaction enables a full, revision-consistent snapshot reload

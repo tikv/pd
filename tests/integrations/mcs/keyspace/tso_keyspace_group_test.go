@@ -39,10 +39,8 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/keyspace/constant"
-	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	mcs "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -146,27 +144,6 @@ func (suite *keyspaceGroupTestSuite) closeAllTSONodesAndWait(re *require.Asserti
 		noTSOServers := len(tsoURLs) == 0
 		return noTSOServers
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(500*time.Millisecond))
-}
-
-func (suite *keyspaceGroupTestSuite) waitTSOKeyspaceGroupReady(
-	re *require.Assertions,
-	node *tsoserver.Server,
-	keyspaceID, keyspaceGroupID uint32,
-) {
-	testutil.Eventually(re, func() bool {
-		resp, err := node.GetClient().Get(suite.ctx, keypath.KeyspaceGroupIDPath(keyspaceGroupID))
-		if err != nil || len(resp.Kvs) == 0 {
-			return false
-		}
-		targetRevision := uint64(resp.Kvs[0].ModRevision)
-		_, kg, loadedGroupID, loadedRevision, err :=
-			node.GetKeyspaceGroupManager().FindGroupByKeyspaceID(keyspaceID)
-		return err == nil &&
-			kg != nil &&
-			loadedGroupID == keyspaceGroupID &&
-			loadedRevision >= targetRevision &&
-			node.IsKeyspaceServingByGroup(keyspaceID, keyspaceGroupID)
-	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
@@ -581,13 +558,12 @@ func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Ass
 
 // tsoTestSetup holds the setup information for TSO tests
 type tsoTestSetup struct {
-	nodes           map[string]bs.Server
-	cleanups        []func()
-	client          pd.Client
-	initialTS       uint64
-	firstNodeAddr   string
-	keyspaceID      uint32
-	keyspaceGroupID uint32
+	nodes         map[string]bs.Server
+	cleanups      []func()
+	client        pd.Client
+	initialTS     uint64
+	firstNodeAddr string
+	keyspaceID    uint32
 }
 
 // setupTSONodesAndClient creates TSO nodes, keyspace group, and returns initialized client
@@ -673,13 +649,12 @@ func (suite *keyspaceGroupTestSuite) setupTSONodesAndClient(re *require.Assertio
 		break
 	}
 	return &tsoTestSetup{
-		nodes:           nodes,
-		cleanups:        cleanups,
-		client:          client,
-		initialTS:       initialTS,
-		firstNodeAddr:   firstNodeAddr,
-		keyspaceID:      keyspaceID,
-		keyspaceGroupID: keyspaceGroupID,
+		nodes:         nodes,
+		cleanups:      cleanups,
+		client:        client,
+		initialTS:     initialTS,
+		firstNodeAddr: firstNodeAddr,
+		keyspaceID:    keyspaceID,
 	}
 }
 
@@ -702,6 +677,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	const (
 		// Time to wait for GetTS to start
 		waitForGetTSStart = 3 * time.Second
+		keyspaceGroupID   = uint32(1)
 	)
 
 	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
@@ -714,7 +690,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
 	// use a longer timeout to avoid test flakiness
-	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(60*time.Second))
+	setup := suite.setupTSONodesAndClient(re, 2, keyspaceGroupID, opt.WithCustomTimeoutOption(60*time.Second))
 	defer func() {
 		for _, cleanup := range setup.cleanups {
 			cleanup()
@@ -761,7 +737,12 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	setup.cleanups = append(setup.cleanups, cleanup)
 	nodes[newNode.GetAddr()] = newNode
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
-	suite.waitTSOKeyspaceGroupReady(re, newNode, setup.keyspaceID, setup.keyspaceGroupID)
+	testutil.Eventually(re, func() bool {
+		_, group, groupID, revision, err :=
+			newNode.GetKeyspaceGroupManager().FindGroupByKeyspaceID(setup.keyspaceID)
+		return err == nil && group != nil && groupID == keyspaceGroupID && revision > 0 &&
+			newNode.IsKeyspaceServingByGroup(setup.keyspaceID, keyspaceGroupID)
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	// Step 7: Verify eventual recovery after node restart.
 	// The in-flight GetTS may stay attached to stale discovery/metadata during

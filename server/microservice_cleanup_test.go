@@ -88,13 +88,6 @@ func TestCleanupMicroserviceMetadataInPDMode(t *testing.T) {
 
 	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
 	re.NoError(svr.cleanupMicroserviceMetadataInPDMode(ctx, term))
-	groupResp, err := client.Get(ctx, keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
-	re.NoError(err)
-	re.Len(groupResp.Kvs, 1)
-	markerResp, err := client.Get(ctx, keypath.KeyspaceGroupRevisionPath())
-	re.NoError(err)
-	re.Len(markerResp.Kvs, 1)
-	re.Equal(groupResp.Kvs[0].ModRevision, markerResp.Kvs[0].ModRevision)
 
 	groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	re.NoError(err)

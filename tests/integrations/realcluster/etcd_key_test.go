@@ -78,7 +78,6 @@ var (
 		"/pd//scheduler_config/evict-stopping-store-scheduler",
 		"/pd//timestamp",
 		"/pd//tso/keyspace_groups/membership/", // ms
-		"/pd//tso/keyspace_groups/revision",    // ms
 		"/pd/cluster_id",
 	}
 	// The keys that prefix is `/ms`.
@@ -96,7 +95,6 @@ var (
 	// These keys with `/pd` are only in `ms` mode.
 	pdMSKeys = []string{
 		"/pd//tso/keyspace_groups/membership/",
-		"/pd//tso/keyspace_groups/revision",
 	}
 )
 
