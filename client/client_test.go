@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -70,6 +71,89 @@ func TestClientWithRetry(t *testing.T) {
 	re.Error(err)
 	defer cli.Close()
 	re.Less(time.Since(start), time.Second*10)
+}
+
+func TestNewClientInitialization(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	serverURLs := []string{"http://127.0.0.1:2379"}
+
+	cli, err := createClient(
+		ctx,
+		caller.TestComponent,
+		42,
+		serverURLs,
+		SecurityOption{},
+		opt.WithMaxErrorRetry(5),
+		opt.WithCustomTimeoutOption(2*time.Second),
+	)
+	re.NoError(err)
+	t.Cleanup(cli.inner.cancel)
+	re.Equal(caller.TestComponent, cli.callerComponent)
+	re.Equal(uint32(42), cli.inner.keyspaceID)
+	re.Equal(serverURLs, cli.inner.svrUrls)
+	re.NotNil(cli.inner.updateTokenConnectionCh)
+	re.Nil(cli.inner.tlsCfg)
+	re.Equal(5, cli.inner.option.MaxRetryTimes)
+	re.Equal(2*time.Second, cli.inner.option.Timeout)
+
+	cancel()
+	select {
+	case <-cli.inner.ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("client context was not canceled with its parent")
+	}
+}
+
+func TestNewClientInitializationWithInvalidTLSConfig(t *testing.T) {
+	cli, err := createClient(
+		context.Background(),
+		caller.TestComponent,
+		constants.NullKeyspaceID,
+		nil,
+		SecurityOption{
+			SSLCABytes:   []byte("invalid"),
+			SSLCertBytes: []byte("invalid"),
+			SSLKEYBytes:  []byte("invalid"),
+		},
+	)
+	require.Error(t, err)
+	require.Nil(t, cli)
+}
+
+func TestNewClientWithKeyspaceInvalidTLSConfig(t *testing.T) {
+	cli, err := NewClientWithKeyspace(
+		context.Background(),
+		caller.TestComponent,
+		42,
+		[]string{testClientURL},
+		SecurityOption{
+			SSLCABytes:   []byte("invalid"),
+			SSLCertBytes: []byte("invalid"),
+			SSLKEYBytes:  []byte("invalid"),
+		},
+	)
+	require.Error(t, err)
+	require.Nil(t, cli)
+	require.ErrorIs(t, err, errs.ErrCryptoX509KeyPair)
+}
+
+func TestNewClientWithKeyspaceNameInvalidTLSConfig(t *testing.T) {
+	cli, err := NewClientWithAPIContext(
+		context.Background(),
+		NewAPIContextV2("test-keyspace"),
+		caller.TestComponent,
+		[]string{testClientURL},
+		SecurityOption{
+			SSLCABytes:   []byte("invalid"),
+			SSLCertBytes: []byte("invalid"),
+			SSLKEYBytes:  []byte("invalid"),
+		},
+	)
+	require.Error(t, err)
+	require.Nil(t, cli)
+	require.ErrorIs(t, err, errs.ErrCryptoX509KeyPair)
 }
 
 func TestIsRetryableGetTSError(t *testing.T) {

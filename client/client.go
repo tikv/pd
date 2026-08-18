@@ -238,6 +238,20 @@ func createClientWithKeyspace(
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
+	c, err := createClient(ctx, callerComponent, keyspaceID, svrAddrs, security, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return c, c.inner.init(nil)
+}
+
+// createClient creates the client state shared by all initialization paths.
+func createClient(
+	ctx context.Context,
+	callerComponent caller.Component,
+	keyspaceID uint32, svrAddrs []string,
+	security SecurityOption, opts ...opt.ClientOption,
+) (*client, error) {
 	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
@@ -269,7 +283,7 @@ func createClientWithKeyspace(
 		opt(c.inner.option)
 	}
 
-	return c, c.inner.init(nil)
+	return c, nil
 }
 
 // APIVersion is the API version the server and the client is using.
@@ -356,41 +370,15 @@ func newClientWithKeyspaceName(
 	keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
-	tlsCfg, err := tlsutil.TLSConfig{
-		CAPath:   security.CAPath,
-		CertPath: security.CertPath,
-		KeyPath:  security.KeyPath,
-
-		SSLCABytes:   security.SSLCABytes,
-		SSLCertBytes: security.SSLCertBytes,
-		SSLKEYBytes:  security.SSLKEYBytes,
-	}.ToTLSConfig()
+	// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
+	// finally update the keyspace id to the service discovery for the following interactions.
+	c, err := createClient(ctx, callerComponent, constants.NullKeyspaceID, svrAddrs, security, opts...)
 	if err != nil {
 		return nil, err
 	}
-	clientCtx, clientCancel := context.WithCancel(ctx)
-	c := &client{
-		callerComponent: adjustCallerComponent(callerComponent),
-		inner: &innerClient{
-			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
-			// finally update the keyspace id to the service discovery for the following interactions.
-			keyspaceID:              constants.NullKeyspaceID,
-			updateTokenConnectionCh: make(chan struct{}, 1),
-			ctx:                     clientCtx,
-			cancel:                  clientCancel,
-			svrUrls:                 svrAddrs,
-			tlsCfg:                  tlsCfg,
-			option:                  opt.NewOption(),
-		},
-	}
-
-	// Inject the client options.
-	for _, opt := range opts {
-		opt(c.inner.option)
-	}
 
 	updateKeyspaceIDFunc := func() error {
-		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
+		keyspaceMeta, err := c.LoadKeyspace(c.inner.ctx, keyspaceName)
 		if err != nil {
 			return err
 		}
