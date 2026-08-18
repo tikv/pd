@@ -2350,13 +2350,15 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 // at all (e.g. a scatter-range invocation over a key range that is entirely
 // still-empty regions), falls back to the plain average over all regions —
 // same as GetAverageRegionSize — instead of returning 0 and silently
-// zeroing out any configured tolerant-size-ratio.
+// zeroing out any configured tolerant-size-ratio. If there are no regions
+// at all, falls back to EmptyRegionApproximateSize for the same reason,
+// rather than 0.
 func (r *RegionsInfo) GetNonEmptyAverageRegionSize() int64 {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	if r.tree.nonEmptyRegionsCnt == 0 {
 		if r.tree.length() == 0 {
-			return 0
+			return EmptyRegionApproximateSize
 		}
 		return r.tree.TotalSize() / int64(r.tree.length())
 	}
