@@ -63,6 +63,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -2204,9 +2206,12 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	}
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
+	statistics.ResetStoreStatistics(storeIDStr)
 	filter.DeleteStoreMetrics(storeIDStr)
 	hbstream.DeleteStoreMetrics(storeIDStr)
 	schedule.DeleteStoreMetrics(storeIDStr)
+	schedulers.DeleteStoreMetrics(storeIDStr)
+	scatter.DeleteStoreMetrics(storeIDStr)
 	if fn := c.onStoreBuried.Load(); fn != nil {
 		(*fn)(storeIDStr)
 	}

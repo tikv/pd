@@ -119,6 +119,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		if origin != nil {
 			storeIDStr := strconv.FormatUint(storeID, 10)
 			statistics.DeleteClusterStatusMetrics(origin)
+			statistics.ResetStoreStatistics(storeIDStr)
 			filter.DeleteStoreMetrics(storeIDStr)
 			hbstream.DeleteStoreMetrics(storeIDStr)
 			schedulers.DeleteStoreMetrics(storeIDStr)
