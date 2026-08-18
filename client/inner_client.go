@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/apipb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -45,6 +46,7 @@ const (
 
 type innerClient struct {
 	keyspaceID       uint32
+	keyspaceIdentity *apipb.KeyspaceIdentity
 	keyspaceMeta     *keyspacepb.KeyspaceMeta // keyspace metadata
 	svrUrls          []string
 	serviceDiscovery sd.ServiceDiscovery
@@ -66,7 +68,7 @@ type innerClient struct {
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 	c.serviceDiscovery = sd.NewServiceDiscovery(
 		c.ctx, c.cancel, &c.wg, c.setServiceMode,
-		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
+		updateKeyspaceIDCb, c.keyspaceID, c.keyspaceIdentity, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		if c.serviceDiscovery != nil {
@@ -174,7 +176,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
-			c.keyspaceID, c.keyspaceMeta, c.tlsCfg, c.option)
+			c.keyspaceID, c.keyspaceIdentity, c.keyspaceMeta, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = tso.NewClient(c.ctx, c.option,
