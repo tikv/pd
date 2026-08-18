@@ -1276,6 +1276,29 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	re.GreaterOrEqual(result.revision, updatedResp.Header.Revision+1)
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherUsesCustomCompactionReload() {
+	re := suite.Require()
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherUsesCustomCompactionReload",
+		func([]*clientv3.Event) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.SetCompactionReloadFn(func(context.Context) (int64, error) {
+		return 42, nil
+	})
+
+	revision, shouldContinue := watcher.reloadAfterCompaction(suite.ctx)
+	re.True(shouldContinue)
+	re.Equal(int64(42), revision)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCanceled() {
 	re := suite.Require()
 	const key = "TestWatcherStopsCompactionReloadWhenContextCanceled"
