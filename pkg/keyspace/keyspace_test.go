@@ -159,7 +159,7 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
 	}, kgm, nil)
 	re.NoError(manager.Bootstrap())
-	requests := makeCreateKeyspaceRequests(2)
+	requests := makeCreateKeyspaceRequests(1)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed", `return(true)`))
 
 	// Create a keyspace with existing name must return error.
@@ -169,29 +169,27 @@ func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceGroupsTxnOpFailed"))
 
-	// A wait-split failure after a previously failed attempt must still allow the
-	// same name to be reused: the keyspace is created and left disabled rather
-	// than blocked or rolled back.
+	// A wait-split failure rolls back the atomically-committed keyspace meta, so
+	// the same name is free to be reused by a subsequent attempt.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	_, err = manager.CreateKeyspace(requests[0])
+	re.Error(err)
+	_, err = manager.LoadKeyspace(requests[0].Name)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+
 	ks, err := manager.CreateKeyspace(requests[0])
 	re.NoError(err)
 	km, err := manager.LoadKeyspace(ks.Name)
 	re.NoError(err)
-	re.Equal(keyspacepb.KeyspaceState_DISABLED, km.State)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
-	ks, err = manager.CreateKeyspace(requests[1])
-	re.NoError(err)
-	km, err = manager.LoadKeyspace(ks.Name)
-	re.NoError(err)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, km.State)
 }
 
-// TestWaitSplitFailureStillCreatesKeyspace verifies that when the post-commit
-// wait-for-split fails, CreateKeyspace does not fail: the keyspace metadata is
-// already committed atomically and the region will be split by patrol, so the
-// creation is treated as best-effort and returns the created keyspace.
-func (suite *keyspaceTestSuite) TestWaitSplitFailureStillCreatesKeyspace() {
+// TestWaitSplitFailureRollsBackKeyspace verifies that when the post-commit
+// wait-for-split fails, CreateKeyspace rolls back the atomically-committed
+// keyspace meta and region label rule and returns an error, so a failed
+// creation does not leave a permanently-disabled keyspace behind.
+func (suite *keyspaceTestSuite) TestWaitSplitFailureRollsBackKeyspace() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -216,14 +214,10 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureStillCreatesKeyspace() {
 		Name:       "waitsplitfail",
 		CreateTime: time.Now().Unix(),
 	})
-	// Wait-split failed, but the keyspace must still be created and left disabled
-	// for a later split/recovery path to enable explicitly.
-	re.NoError(err)
-	re.NotNil(ks)
-	loaded, err := manager.LoadKeyspace("waitsplitfail")
-	re.NoError(err)
-	re.Equal(ks.GetId(), loaded.GetId())
-	re.Equal(keyspacepb.KeyspaceState_DISABLED, loaded.State)
+	re.Error(err)
+	re.Nil(ks)
+	_, err = manager.LoadKeyspace("waitsplitfail")
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 }
 
 // TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the
@@ -589,6 +583,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	delete(updated.Config, UserKindKey)
 	delete(updated.Config, GCManagementType)
 	delete(updated.Config, RegionBoundType)
+	delete(updated.Config, WaitRegionSplitKey)
 	checkMutations(re, nil, updated.Config, mutations)
 }
 

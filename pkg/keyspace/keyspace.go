@@ -416,18 +416,20 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		if err == nil {
 			// only enable the keyspace after the split is finished, so that the keyspace is not used before the split is finished.
 			err = manager.enableNewKeyspace(tracer.keyspaceID, createTime)
+			if err == nil {
+				keyspace.State = keyspacepb.KeyspaceState_ENABLED
+				keyspace.StateChangedAt = createTime
+			}
 		}
 		if err != nil {
-			// The keyspace metadata, meta-service group assignment, and TSO
-			// keyspace-group membership are already committed atomically above, so
-			// creation is still considered successful: leave the keyspace disabled
-			// rather than rolling it back. A later patrol or split-recovery path can
-			// enable it once the region is actually split.
-			log.Warn("[create-keyspace] failed to enable keyspace after split, keyspace left disabled",
-				zap.Uint32("keyspace-id", tracer.keyspaceID),
-				zap.String("keyspace-name", tracer.keyspaceName),
-				zap.Error(err),
-			)
+			if rbErr := manager.rollbackCreateKeyspace(keyspace); rbErr != nil {
+				log.Warn("[create-keyspace] failed to rollback keyspace after enable failed",
+					zap.Uint32("keyspace-id", tracer.keyspaceID),
+					zap.String("keyspace-name", tracer.keyspaceName),
+					errs.ZapError(rbErr),
+				)
+			}
+			return nil, err
 		}
 	}
 
@@ -439,6 +441,32 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
+}
+
+// rollbackCreateKeyspace undoes the keyspace meta and region label rule committed
+// by createKeyspaceWithoutCheck when the post-commit wait-for-split or enable step
+// fails. It deliberately does not touch the meta-service group assignment count or
+// the TSO keyspace-group membership committed by the same transaction: leaving
+// those slightly over-counted/stale is an accepted trade-off, since precisely
+// unwinding them here would need to duplicate the locking rules those subsystems
+// already enforce.
+func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
+	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		return manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName())
+	})
+	if err != nil {
+		return err
+	}
+	manager.metaLock.Lock(keyspace.GetId())
+	manager.keyspaceNameLookup.Delete(keyspace.GetId())
+	manager.keyspaceStateLookup.Delete(keyspace.GetId())
+	manager.metaLock.Unlock(keyspace.GetId())
+
+	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
+	if !ok {
+		return errors.New("cluster does not support region label")
+	}
+	return cl.GetRegionLabeler().DeleteLabelRule(getRegionLabelID(keyspace.GetId()))
 }
 
 // runCreateKeyspaceTxn runs the keyspace creation operations in a single
