@@ -184,11 +184,18 @@ func (p *solver) getTolerantResource() int64 {
 
 	if (p.kind.Resource == constant.LeaderKind || p.kind.Resource == constant.WitnessKind) && p.kind.Policy == constant.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
-	} else {
+	} else if p.kind.Resource == constant.RegionKind {
 		// Use the non-empty average so a cluster full of freshly-split,
 		// unwritten regions doesn't collapse the tolerant margin toward
-		// noise levels.
+		// noise levels. Scoped to RegionKind: this targets balance-region's
+		// size-based churn specifically. LeaderKind/WitnessKind with BySize
+		// keep using the full average below, since a cluster with one large
+		// data region among many empty ones shouldn't have its leader
+		// tolerance dictated by that one region's size.
 		regionSize := p.GetNonEmptyAverageRegionSize()
+		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
+	} else {
+		regionSize := p.GetAverageRegionSize()
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource
