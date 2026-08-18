@@ -110,3 +110,18 @@ func DeleteStoreMetrics(id string) {
 	regionBucketsCounter.DeletePartialMatch(labels)
 	regionBucketsReportInterval.DeletePartialMatch(labels)
 }
+
+// ResetMetrics resets the per-store heartbeat/bucket metrics declared in this
+// file. DeleteStoreMetrics only ever removes one store's series at a time, so
+// on a primary handoff or cluster shutdown it can't be used to clear every
+// store still known to the outgoing Cluster instance; this wipes the vectors
+// wholesale instead, the same way the other packages' ResetXxxMetrics do.
+func ResetMetrics() {
+	storeHeartbeatHandleDuration.Reset()
+	storeHeartbeatCounter.Reset()
+	regionHeartbeatHandleDuration.Reset()
+	regionHeartbeatCounter.Reset()
+	regionBucketsHandleDuration.Reset()
+	regionBucketsCounter.Reset()
+	regionBucketsReportInterval.Reset()
+}
