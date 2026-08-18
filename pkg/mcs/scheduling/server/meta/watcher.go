@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -100,6 +101,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 			hbstream.DeleteStoreMetrics(storeIDStr)
 			schedulers.DeleteStoreMetrics(storeIDStr)
 			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
 			if fn := w.onStoreTombstoned.Load(); fn != nil {
 				(*fn)(store.GetId())
 			}
@@ -121,6 +123,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 			hbstream.DeleteStoreMetrics(storeIDStr)
 			schedulers.DeleteStoreMetrics(storeIDStr)
 			schedule.DeleteStoreMetrics(storeIDStr)
+			scatter.DeleteStoreMetrics(storeIDStr)
 			if fn := w.onStoreTombstoned.Load(); fn != nil {
 				(*fn)(storeID)
 			}

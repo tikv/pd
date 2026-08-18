@@ -208,7 +208,9 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
 	sc.hotStat.RemoveRollingStoreStats(storeID)
 	sc.slowStat.RemoveSlowStoreStatus(storeID)
-	schedulers.DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+	storeIDStr := strconv.FormatUint(storeID, 10)
+	schedulers.DeleteStoreMetrics(storeIDStr)
+	scatter.DeleteStoreMetrics(storeIDStr)
 }
 
 func (sc *schedulingController) updateStoreStatistics(storeID uint64, isSlow bool) {
