@@ -911,22 +911,27 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 
 // HandleRegionBuckets processes region buckets from client
 func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	if err := c.processRegionBuckets(b); err != nil {
+	applied, err := c.processRegionBuckets(b)
+	if err != nil {
 		return err
 	}
-
-	c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	if applied {
+		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	}
 	return nil
 }
 
-// processRegionBuckets update the bucket information.
-func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets updates the bucket information. The first return
+// value reports whether the report was actually applied, so callers don't
+// enqueue hot-bucket work for a report that was ignored because its leader
+// is tombstoned.
+func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		return errors.Errorf("region %v not found", buckets.GetRegionId())
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
-		return nil
+		return false, nil
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
@@ -934,10 +939,10 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
 		if success := region.CompareAndSetReportBuckets(buckets); success {
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return true, nil
 }
 
 // IsPrepared return true if the prepare checker is ready.

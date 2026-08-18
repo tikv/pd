@@ -874,7 +874,8 @@ func TestBucketCompatibility(t *testing.T) {
 		Version:  3,
 		Keys:     [][]byte{{'a'}, {'d'}},
 	}
-	re.NoError(cluster.processRegionBuckets(bucket2))
+	_, err = cluster.processRegionBuckets(bucket2)
+	re.NoError(err)
 	re.Equal(bucket2, cluster.GetRegion(1).GetBuckets())
 
 	region3 := region2.Clone(core.WithIncVersion())
@@ -895,7 +896,8 @@ func TestBucketCompatibility(t *testing.T) {
 		Version:  5,
 		Keys:     [][]byte{{'a'}, {'e'}},
 	}
-	re.NoError(cluster.processRegionBuckets(bucket4))
+	_, err = cluster.processRegionBuckets(bucket4)
+	re.NoError(err)
 	re.Equal(bucket3, cluster.GetRegion(1).GetBuckets())
 	re.Equal(bucket4, cluster.GetRegion(1).GetReportBuckets())
 }
@@ -1022,7 +1024,8 @@ func TestBucketHeartbeat(t *testing.T) {
 		Version:  1,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.Error(cluster.processRegionBuckets(buckets))
+	_, err = cluster.processRegionBuckets(buckets)
+	re.Error(err)
 
 	// case2: bucket can be processed after the region update.
 	stores := newTestStores(3, "2.0.0")
@@ -1035,18 +1038,21 @@ func TestBucketHeartbeat(t *testing.T) {
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[0].Clone()))
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), regions[1].Clone()))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
-	re.NoError(cluster.processRegionBuckets(buckets))
+	_, err = cluster.processRegionBuckets(buckets)
+	re.NoError(err)
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case3: the bucket version is same.
-	re.NoError(cluster.processRegionBuckets(buckets))
+	_, err = cluster.processRegionBuckets(buckets)
+	re.NoError(err)
 	// case4: the bucket version is changed.
 	newBuckets := &metapb.Buckets{
 		RegionId: 1,
 		Version:  3,
 		Keys:     [][]byte{{'1'}, {'2'}},
 	}
-	re.NoError(cluster.processRegionBuckets(newBuckets))
+	_, err = cluster.processRegionBuckets(newBuckets)
+	re.NoError(err)
 	re.Equal(newBuckets, cluster.GetRegion(uint64(1)).GetBuckets())
 
 	// case5: region update should inherit buckets.
@@ -1412,12 +1418,13 @@ func TestConcurrentReportBucket(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
-		err := cluster.processRegionBuckets(bucket1)
+		_, err := cluster.processRegionBuckets(bucket1)
 		re.NoError(err)
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/concurrentBucketHeartbeat"))
-	re.NoError(cluster.processRegionBuckets(bucket2))
+	_, err = cluster.processRegionBuckets(bucket2)
+	re.NoError(err)
 	wg.Wait()
 	re.Equal(bucket1, cluster.GetRegion(1).GetBuckets())
 }

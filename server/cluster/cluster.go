@@ -1291,15 +1291,18 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	return nil
 }
 
-// processRegionBuckets update the bucket information.
-func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets updates the bucket information. The first return value
+// reports whether the report was actually applied, so callers don't enqueue
+// hot-bucket work for a report that was ignored because its leader is
+// tombstoned.
+func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		core.RegionCacheMissCounter.Inc()
-		return errors.Errorf("region %v not found", buckets.GetRegionId())
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
 	}
 	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
-		return nil
+		return false, nil
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
@@ -1308,11 +1311,11 @@ func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	for range 3 {
 		if success := region.CompareAndSetReportBuckets(buckets); success {
 			core.UpdateSuccessCounter.Inc()
-			return nil
+			return true, nil
 		}
 	}
 	core.UpdateFailedCounter.Inc()
-	return nil
+	return true, nil
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
