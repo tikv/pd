@@ -1217,7 +1217,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	// test TiFlash store limit
-	expect := map[uint64]sc.StoreLimitConfig{11: {AddPeer: 30, RemovePeer: 30}}
+	expect := map[string]sc.StoreLimitConfig{"11": {AddPeer: 30, RemovePeer: 30}}
 	re.Equal(expect, svr.GetScheduleConfig().StoreLimit)
 
 	// cannot disable placement rules with TiFlash nodes
@@ -1470,7 +1470,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	// restart PD
 	// Here we use an empty storelimit to simulate the upgrade progress.
 	scheduleCfg := rc.GetScheduleConfig().Clone()
-	scheduleCfg.StoreLimit = map[uint64]sc.StoreLimitConfig{}
+	scheduleCfg.StoreLimit = map[string]sc.StoreLimitConfig{}
 	re.NoError(leaderServer.GetServer().SetScheduleConfig(*scheduleCfg))
 	err = leaderServer.Stop()
 	re.NoError(err)
