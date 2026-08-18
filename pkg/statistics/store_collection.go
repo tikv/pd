@@ -18,8 +18,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -315,8 +313,14 @@ func (s *storeStatistics) collect() {
 // previous address.
 func ResetStoreStatistics(id string) {
 	storeStatusGauge.DeletePartialMatch(utils.SingleLabel("store", id))
+	// clusterStatusGauge's complete label tuples are bounded by the two
+	// possible core.StoreInfo.Engine() outputs, so an exact DeleteLabelValues
+	// per (type, engine) is enough to cover every series for this store --
+	// unlike DeletePartialMatch, it doesn't lock and scan the whole vector,
+	// which matters when many stores are tombstoned around the same time.
 	for _, m := range storeStats {
-		clusterStatusGauge.DeletePartialMatch(prometheus.Labels{"type": m, "store": id})
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiKV, id)
+		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiFlash, id)
 	}
 }
 
