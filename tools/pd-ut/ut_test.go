@@ -89,3 +89,23 @@ func TestCheckDiff(t *testing.T) {
 	re.NoError(err)
 	re.Empty(diffText)
 }
+
+func TestOrderTasks(t *testing.T) {
+	tasks := []task{
+		{pkg: "pkg/z", test: "TestB"},
+		{pkg: "pkg/a", test: "TestC"},
+		{pkg: "pkg/a", test: "TestA"},
+		{pkg: "pkg/m", test: "TestA"},
+		{pkg: "pkg/z", test: "TestA"},
+	}
+
+	orderTasks(tasks)
+
+	require.Equal(t, []task{
+		{pkg: "pkg/a", test: "TestA"},
+		{pkg: "pkg/m", test: "TestA"},
+		{pkg: "pkg/z", test: "TestA"},
+		{pkg: "pkg/a", test: "TestC"},
+		{pkg: "pkg/z", test: "TestB"},
+	}, tasks)
+}
