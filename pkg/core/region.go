@@ -2355,19 +2355,17 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 // regions) are excluded so a cluster with many of them doesn't get this
 // average diluted toward noise levels. When there are no non-empty regions
 // at all (e.g. a scatter-range invocation over a key range that is entirely
-// still-empty regions), falls back to the plain average over all regions —
-// same as GetAverageRegionSize — instead of returning 0 and silently
-// zeroing out any configured tolerant-size-ratio. If there are no regions
-// at all, falls back to EmptyRegionApproximateSize for the same reason,
-// rather than 0.
+// still-empty regions, or no regions at all), falls back to
+// EmptyRegionApproximateSize instead of 0, so a configured tolerant-size-ratio
+// is never silently zeroed out.
 func (r *RegionsInfo) GetNonEmptyAverageRegionSize() int64 {
 	r.t.RLock()
 	defer r.t.RUnlock()
+	if r.tree == nil {
+		return 0
+	}
 	if r.tree.nonEmptyRegionsCnt == 0 {
-		if r.tree.length() == 0 {
-			return EmptyRegionApproximateSize
-		}
-		return r.tree.TotalSize() / int64(r.tree.length())
+		return EmptyRegionApproximateSize
 	}
 	return r.tree.nonEmptyTotalSize / int64(r.tree.nonEmptyRegionsCnt)
 }
