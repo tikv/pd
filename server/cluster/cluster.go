@@ -156,7 +156,11 @@ type Server interface {
 type RaftCluster struct {
 	syncutil.RWMutex
 	storeStateLock *syncutil.LockGroup
-	wg             sync.WaitGroup
+	// putStoreLock serializes uniqueness checks and store writes in putStoreImpl
+	// so concurrent PutStore requests with different store IDs cannot both pass
+	// an address / peer-address conflict check against a stale GetStores() snapshot.
+	putStoreLock syncutil.Mutex
+	wg           sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -1522,6 +1526,11 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreVersion(store); err != nil {
 		return err
 	}
+
+	// Serialize uniqueness checks with the store write so concurrent PutStore
+	// requests cannot both pass against a stale GetStores() snapshot (ref #11096).
+	c.putStoreLock.Lock()
+	defer c.putStoreLock.Unlock()
 
 	// Store address and peer address can not collide across stores.
 	// TiFlash uses peer address for Raft replication, so a non-empty peer
