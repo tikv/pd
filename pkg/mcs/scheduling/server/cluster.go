@@ -943,7 +943,7 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
 			return true, nil
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 // IsPrepared return true if the prepare checker is ready.

@@ -1315,7 +1315,7 @@ func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error
 		}
 	}
 	core.UpdateFailedCounter.Inc()
-	return true, nil
+	return false, nil
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
