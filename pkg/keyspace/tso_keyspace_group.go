@@ -97,7 +97,8 @@ type keyspaceGroupRevisionStorage struct {
 
 type keyspaceGroupRevisionTxn struct {
 	kv.Txn
-	changed bool
+	changed    bool
+	operations int
 }
 
 // Save records keyspace group writes so the transaction can advance the revision marker.
@@ -105,6 +106,7 @@ func (txn *keyspaceGroupRevisionTxn) Save(key, value string) error {
 	if err := txn.Txn.Save(key, value); err != nil {
 		return err
 	}
+	txn.operations++
 	if strings.HasPrefix(key, keypath.KeyspaceGroupIDPrefix()) {
 		txn.changed = true
 	}
@@ -116,20 +118,22 @@ func (txn *keyspaceGroupRevisionTxn) Remove(key string) error {
 	if err := txn.Txn.Remove(key); err != nil {
 		return err
 	}
+	txn.operations++
 	if strings.HasPrefix(key, keypath.KeyspaceGroupIDPrefix()) {
 		txn.changed = true
 	}
 	return nil
 }
 
-// RunInTxn atomically advances the revision marker when the transaction changes a keyspace group.
+// RunInTxn atomically advances the revision marker when the transaction has reserved capacity.
+// A full transaction is checkpointed by the TSO watcher before its revision is published.
 func (s *keyspaceGroupRevisionStorage) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
 	return s.KeyspaceGroupStorage.RunInTxn(ctx, func(txn kv.Txn) error {
 		revisionTxn := &keyspaceGroupRevisionTxn{Txn: txn}
 		if err := f(revisionTxn); err != nil {
 			return err
 		}
-		if !revisionTxn.changed {
+		if !revisionTxn.changed || revisionTxn.operations >= etcdutil.MaxEtcdTxnOps {
 			return nil
 		}
 		return txn.Save(keypath.KeyspaceGroupRevisionPath(), keyspaceGroupRevisionValue)

@@ -539,9 +539,13 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
+	maxGroupEventRevision := uint64(0)
+	maxMarkerEventRevision := uint64(0)
 	batchApplyFailed := false
 	preEventsFn := func([]*clientv3.Event) error {
 		maxLoadedModRevision = 0
+		maxGroupEventRevision = 0
+		maxMarkerEventRevision = 0
 		batchApplyFailed = false
 		return nil
 	}
@@ -562,6 +566,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 					failpoint.Return(nil)
 				}
 			})
+			maxMarkerEventRevision = max(maxMarkerEventRevision, uint64(kv.ModRevision))
 			maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 			return nil
 		}
@@ -576,6 +581,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
+		maxGroupEventRevision = max(maxGroupEventRevision, uint64(kv.ModRevision))
 		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
@@ -592,8 +598,28 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			batchApplyFailed = true
 			return err
 		}
+		maxGroupEventRevision = max(maxGroupEventRevision, uint64(kv.ModRevision))
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
+	}
+	persistRevisionMarker := func(revision uint64) error {
+		for {
+			ctx, cancel := context.WithTimeout(kgm.ctx, etcdutil.DefaultRequestTimeout)
+			_, err := kgm.etcdClient.Put(ctx, keypath.KeyspaceGroupRevisionPath(), "1")
+			cancel()
+			if err == nil {
+				return nil
+			}
+			log.Warn("failed to persist keyspace group revision marker, retrying",
+				zap.Uint64("revision", revision), zap.Error(err))
+			retryTimer := time.NewTimer(time.Second)
+			select {
+			case <-kgm.ctx.Done():
+				retryTimer.Stop()
+				return kgm.ctx.Err()
+			case <-retryTimer.C:
+			}
+		}
 	}
 	postEventsFn := func(event []*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
@@ -602,6 +628,14 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			kgm.updateKeyspaceGroup(group)
 		}
 		if len(event) > 0 && !batchApplyFailed {
+			// Old PD versions and full transactions do not persist the marker.
+			// Checkpoint them before publishing a revision that a restarted TSO
+			// must be able to recover.
+			if maxGroupEventRevision > maxMarkerEventRevision {
+				if err := persistRevisionMarker(maxGroupEventRevision); err != nil {
+					return err
+				}
+			}
 			last := event[len(event)-1]
 			if !setModRevision(uint64(last.Kv.ModRevision)) {
 				log.Warn("watch keyspace group met mod revision not increased",

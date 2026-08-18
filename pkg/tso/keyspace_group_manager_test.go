@@ -326,6 +326,54 @@ func (suite *keyspaceGroupManagerTestSuite) TestSnapshotRevisionRemainsComparabl
 	re.Equal(oldRevision, newRevision)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestLegacyDeleteRevisionSurvivesRestart() {
+	re := suite.Require()
+	keypath.SetClusterID(rand.Uint64())
+
+	cfg1 := suite.createConfig()
+	cfg2 := suite.createConfig()
+	mgr1 := suite.newKeyspaceGroupManager(1, cfg1)
+	mgr2 := suite.newKeyspaceGroupManager(1, cfg2)
+	defer mgr1.Close()
+	defer mgr2.Close()
+
+	const (
+		groupID    = uint32(1)
+		keyspaceID = uint32(101)
+	)
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		groupID,
+		[]string{mgr1.tsoServiceID.ServiceAddr, mgr2.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority, mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{keyspaceID},
+	))
+	re.NoError(mgr1.Initialize())
+
+	// Simulate an old PD writer, which deletes the group without a revision marker.
+	deleteResp, err := suite.etcdClient.Delete(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
+	re.NoError(err)
+	deletedRevision := uint64(deleteResp.Header.Revision)
+
+	testutil.Eventually(re, func() bool {
+		_, _, loadedGroupID, loadedRevision, err := mgr1.FindGroupByKeyspaceID(keyspaceID)
+		return err == nil && loadedGroupID == constant.DefaultKeyspaceGroupID &&
+			loadedRevision >= deletedRevision
+	})
+
+	markerResp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupRevisionPath())
+	re.NoError(err)
+	re.Len(markerResp.Kvs, 1)
+	re.GreaterOrEqual(uint64(markerResp.Kvs[0].ModRevision), deletedRevision)
+
+	re.NoError(mgr2.Initialize())
+	_, _, loadedGroupID, loadedRevision, err := mgr2.FindGroupByKeyspaceID(keyspaceID)
+	re.NoError(err)
+	re.Equal(constant.DefaultKeyspaceGroupID, loadedGroupID)
+	re.GreaterOrEqual(loadedRevision, deletedRevision)
+}
+
 func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMissedDelete() {
 	re := suite.Require()
 
