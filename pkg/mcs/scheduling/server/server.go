@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
@@ -519,6 +520,7 @@ func (s *Server) startCluster(ctx context.Context) error {
 		metaWatcher     *meta.Watcher
 		ruleWatcher     *rule.Watcher
 		affinityWatcher *affinity.Watcher
+		keyspaceWatcher *keyspace_meta.Watcher
 		cluster         *Cluster
 		err             error
 	)
@@ -553,6 +555,10 @@ func (s *Server) startCluster(ctx context.Context) error {
 			affinityWatcher.Close()
 			affinityWatcher = nil
 		}
+		if keyspaceWatcher != nil {
+			keyspaceWatcher.Close()
+			keyspaceWatcher = nil
+		}
 		if storage != nil {
 			storage.Close()
 		}
@@ -580,14 +586,20 @@ func (s *Server) startCluster(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	keyspaceWatcher, err = keyspace_meta.NewWatcher(ctx, s.GetClient(),
+		cluster.GetCoordinator().GetCheckerController(), cluster.GetKeyspaceCache())
+	if err != nil {
+		return err
+	}
 
-	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher)
+	cluster.SetRuntimeResources(metaWatcher, configWatcher, ruleWatcher, affinityWatcher, keyspaceWatcher)
 	// Set watchers to nil to avoid being closed in defer when cluster initialization is successful,
 	// since cluster will take over the ownership of these watchers and close them when stopping cluster.
 	metaWatcher = nil
 	configWatcher = nil
 	ruleWatcher = nil
 	affinityWatcher = nil
+	keyspaceWatcher = nil
 	cluster.StartBackgroundJobs()
 	s.cluster.Store(cluster)
 	initSucceeded = true

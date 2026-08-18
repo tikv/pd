@@ -107,8 +107,10 @@ type Manager struct {
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
 	// cached keyspace meta info for each keyspace ID.
+	// TODO: Remove this two maps after the cache fully takes effect and is verified to be stable.
 	keyspaceNameLookup  sync.Map // store as ID(uint32) -> name(string)
 	keyspaceStateLookup sync.Map // store as ID(uint32) -> state(keyspacepb.KeyspaceState)
+	cache               *Cache
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -159,6 +161,7 @@ func NewKeyspaceManager(
 		kgm:               kgm,
 		mgm:               mgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
+		cache:             NewCache(),
 	}
 	// Let the meta-service group manager validate group deletion against actual
 	// keyspace assignments instead of the drift-prone persisted counter.
@@ -170,6 +173,14 @@ func NewKeyspaceManager(
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
+	// Warm up the in-memory keyspace cache from storage before it is relied upon
+	// for keyspace existence/range queries. Unlike keyspaceNameLookup and
+	// keyspaceStateLookup, the cache is otherwise only populated lazily as
+	// individual keyspaces are touched, so without this a fresh PD leader would
+	// report false negatives for any keyspace it hasn't queried yet.
+	if err := manager.loadCache(); err != nil {
+		return err
+	}
 	bootstrapKeyspaceID := GetBootstrapKeyspaceID()
 	bootstrapKeyspaceName := GetBootstrapKeyspaceName()
 	err := manager.initReserveKeyspace(bootstrapKeyspaceID, bootstrapKeyspaceName)
@@ -564,6 +575,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 	if err == nil {
 		// Update the keyspace name cache only after the transaction commits.
 		manager.keyspaceNameLookup.Store(keyspace.GetId(), keyspace.Name)
+		manager.cache.Save(keyspace.GetId(), keyspace.Name, keyspace.State)
 	}
 	return err
 }
@@ -1058,6 +1070,7 @@ func (manager *Manager) RemoveKeyspace(txn kv.Txn, id uint32) error {
 	}
 	manager.keyspaceNameLookup.Delete(id)
 	manager.keyspaceStateLookup.Delete(id)
+	manager.cache.DeleteKeyspace(id)
 	// Keep the meta-service group assignment accounting in sync within the same
 	// txn. Without this, removed keyspaces leak count and could permanently block
 	// deleting an otherwise-empty group.
@@ -1162,6 +1175,7 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 	meta.StateChangedAt = now
 	// Update the keyspace state to the cache.
 	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
+	manager.cache.Save(meta.GetId(), meta.GetName(), newState)
 	return nil
 }
 
@@ -1191,6 +1205,63 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 		}
 	}
 	return keyspaces, nil
+}
+
+// GetKeyspaceIDInRange returns one existing keyspace ID in [start, end].
+func (manager *Manager) GetKeyspaceIDInRange(start, end uint32, limit int) ([]uint32, bool) {
+	if manager == nil {
+		return []uint32{start}, true
+	}
+	return manager.cache.GetKeyspaceIDInRange(start, end, limit)
+}
+
+// KeyspaceExist checks if a keyspace exists by ID.
+func (manager *Manager) KeyspaceExist(id uint32) bool {
+	if id == constant.NullKeyspaceID {
+		return true
+	}
+	if id == constant.MaxValidKeyspaceID {
+		return true
+	}
+	if manager == nil {
+		return true
+	}
+	state, err := manager.GetKeyspaceStateByID(id)
+	if err != nil {
+		return false
+	}
+
+	return state != keyspacepb.KeyspaceState_TOMBSTONE
+}
+
+// loadCache scans all keyspaces from storage and populates the in-memory
+// keyspace cache. It is meant to be called once during startup so the cache
+// reflects every existing keyspace up front, rather than relying solely on
+// the lazy population that happens as individual keyspaces are created,
+// transitioned, or queried.
+func (manager *Manager) loadCache() error {
+	startID := constant.StartKeyspaceID
+	for {
+		var keyspaces []*keyspacepb.KeyspaceMeta
+		if err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			var err error
+			keyspaces, err = manager.store.LoadRangeKeyspace(txn, startID, etcdutil.MaxEtcdTxnOps)
+			return err
+		}); err != nil {
+			return err
+		}
+		for _, ks := range keyspaces {
+			if ks == nil {
+				continue
+			}
+			manager.cache.Save(ks.GetId(), ks.GetName(), ks.GetState())
+		}
+		if len(keyspaces) < etcdutil.MaxEtcdTxnOps {
+			break
+		}
+		startID = keyspaces[len(keyspaces)-1].GetId() + 1
+	}
+	return nil
 }
 
 // CountKeyspacesByMetaServiceGroup scans all keyspaces and counts how many are
@@ -1259,6 +1330,7 @@ func (manager *Manager) GetKeyspaceNameByID(id uint32) (string, error) {
 	}
 	// Load or store the keyspace name to the cache.
 	actual, _ := manager.keyspaceNameLookup.LoadOrStore(id, loadedName)
+	manager.cache.Save(id, loadedName, meta.GetState())
 	return actual.(string), nil
 }
 
@@ -1282,6 +1354,7 @@ func (manager *Manager) GetKeyspaceStateByID(id uint32) (keyspacepb.KeyspaceStat
 	loadedState = meta.GetState()
 	// Load or store the keyspace state to the cache.
 	actual, _ := manager.keyspaceStateLookup.LoadOrStore(id, loadedState)
+	manager.cache.Save(meta.GetId(), meta.GetName(), loadedState)
 	return actual.(keyspacepb.KeyspaceState), nil
 }
 

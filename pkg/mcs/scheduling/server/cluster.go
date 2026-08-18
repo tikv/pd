@@ -38,8 +38,10 @@ import (
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/keyspace"
 	mcsaffinity "github.com/tikv/pd/pkg/mcs/scheduling/server/affinity"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/keyspace_meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -88,6 +90,8 @@ type Cluster struct {
 	configWatcher     *config.Watcher
 	ruleWatcher       *rule.Watcher
 	affinityWatcher   *mcsaffinity.Watcher
+	keyspaceWatcher   *keyspace_meta.Watcher
+	keyspaceCache     *keyspace.Cache
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	pdLeader          atomic.Value
@@ -158,6 +162,7 @@ func NewCluster(
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		hbStreams:         hbStreams,
+		keyspaceCache:     keyspace.NewCache(),
 		checkMembershipCh: checkMembershipCh,
 		httpClient:        httpClient,
 		backendAddress:    backendAddress,
@@ -235,6 +240,11 @@ func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 // GetAffinityManager returns the affinity manager.
 func (c *Cluster) GetAffinityManager() *affinity.Manager {
 	return c.affinityManager
+}
+
+// GetKeyspaceCache returns the keyspace cache.
+func (c *Cluster) GetKeyspaceCache() *keyspace.Cache {
+	return c.keyspaceCache
 }
 
 // GetRegionSplitter returns the region splitter.
@@ -317,6 +327,7 @@ func (c *Cluster) SetRuntimeResources(
 	configWatcher *config.Watcher,
 	ruleWatcher *rule.Watcher,
 	affinityWatcher *mcsaffinity.Watcher,
+	keyspaceWatcher *keyspace_meta.Watcher,
 ) {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
@@ -324,6 +335,7 @@ func (c *Cluster) SetRuntimeResources(
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
+	c.keyspaceWatcher = keyspaceWatcher
 }
 
 func (c *Cluster) stopCluster() {
@@ -337,12 +349,14 @@ func (c *Cluster) cleanupRuntimeResources() {
 	ruleWatcher := c.ruleWatcher
 	metaWatcher := c.metaWatcher
 	configWatcher := c.configWatcher
+	keyspaceWatcher := c.keyspaceWatcher
 	hbStreams := c.hbStreams
 	storage := c.storage
 	c.affinityWatcher = nil
 	c.ruleWatcher = nil
 	c.metaWatcher = nil
 	c.configWatcher = nil
+	c.keyspaceWatcher = nil
 	c.hbStreams = nil
 	c.storage = nil
 	c.runtimeMu.Unlock()
@@ -359,6 +373,9 @@ func (c *Cluster) cleanupRuntimeResources() {
 	}
 	if configWatcher != nil {
 		configWatcher.Close()
+	}
+	if keyspaceWatcher != nil {
+		keyspaceWatcher.Close()
 	}
 	if storage != nil {
 		storage.Close()
