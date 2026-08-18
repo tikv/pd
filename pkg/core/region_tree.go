@@ -65,9 +65,9 @@ type regionTree struct {
 	totalSize int64
 	// nonEmptyTotalSize and nonEmptyRegionsCnt mirror totalSize/length but
 	// exclude empty regions (approximateSize <= EmptyRegionApproximateSize),
-	// so GetAverageRegionSize can reflect only regions that actually hold
-	// data instead of being diluted by a large number of freshly-split,
-	// unwritten regions.
+	// backing GetNonEmptyAverageRegionSize so it can reflect only regions
+	// that actually hold data instead of being diluted by a large number of
+	// freshly-split, unwritten regions.
 	nonEmptyTotalSize   int64
 	nonEmptyRegionsCnt  int
 	totalWriteBytesRate float64

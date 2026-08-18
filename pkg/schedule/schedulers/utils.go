@@ -172,6 +172,7 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 			zap.Int64("source-size", p.Source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("target-size", p.Target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
+			zap.Int64("non-empty-average-region-size", p.GetNonEmptyAverageRegionSize()),
 			zap.Int64("tolerant-resource", p.getTolerantResource()))
 	}
 	return shouldBalance
