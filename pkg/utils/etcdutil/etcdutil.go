@@ -401,6 +401,8 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
+	// initialLoadSuccessFn is called after the initial load succeeds and before watching starts.
+	initialLoadSuccessFn func()
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -410,6 +412,8 @@ type LoopWatcher struct {
 	loadRetryTimes int
 	// loadBatchSize is used to set the batch size for loading data from etcd.
 	loadBatchSize int64
+	// consistentLoad pins paginated full loads to one etcd revision.
+	consistentLoad bool
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
@@ -513,6 +517,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		})
 		watchStartRevision, err = lw.load(ctx)
 		if err == nil && ctx.Err() == nil {
+			if lw.initialLoadSuccessFn != nil {
+				lw.initialLoadSuccessFn()
+			}
 			break
 		}
 		select {
@@ -734,7 +741,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	var (
 		startKey              = lw.key
 		limit                 = lw.loadBatchSize
-		consistentReload      = lw.reloadOnCompaction
+		consistentLoad        = lw.consistentLoad || lw.reloadOnCompaction
 		snapshotRevision      int64
 		preErr                error
 		callbackErr           error
@@ -753,7 +760,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
-			if consistentReload && err == nil {
+			if consistentLoad && err == nil {
 				err = postErr
 			}
 			return
@@ -777,9 +784,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			delete(lw.loadedKeys, key)
 		}
 	}()
-	// A compaction reload must fail instead of advancing past callbacks that did
+	// A consistent load must fail instead of advancing past callbacks that did
 	// not apply. Unopted loads retain their legacy callback error semantics.
-	if preErr != nil && consistentReload {
+	if preErr != nil && consistentLoad {
 		return 0, preErr
 	}
 
@@ -812,7 +819,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			return 0, err
 		}
-		if consistentReload {
+		if consistentLoad {
 			page := resp.Kvs
 			if resp.More && len(page) > 0 {
 				// WithLimit requests one extra key to use as the next page's cursor.
@@ -972,6 +979,18 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// SetConsistentLoad makes full loads use one etcd snapshot revision.
+// It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetConsistentLoad() {
+	lw.consistentLoad = true
+}
+
+// SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.
+// It must be called before StartWatchLoop.
+func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
+	lw.initialLoadSuccessFn = fn
 }
 
 // SetReloadOnCompaction enables a full, revision-consistent snapshot reload
