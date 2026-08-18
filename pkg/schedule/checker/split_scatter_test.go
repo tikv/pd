@@ -54,10 +54,6 @@ func (c *Controller) collectTopPendingSplitScatter(limit int) []splitScatterPend
 	return c.splitScatter.collectTopPendingSplitScatter(limit)
 }
 
-func (c *Controller) dispatchSplitScatterRegions() {
-	c.splitScatter.dispatchSplitScatterRegions()
-}
-
 func TestSplitScatterControllerCleanupResetsPendingGauge(t *testing.T) {
 	re := require.New(t)
 	splitScatterPendingGauge.Set(7)
@@ -120,6 +116,33 @@ func TestCheckSplitScatterRegionsCreatesScatterOperator(t *testing.T) {
 	batchGroup, ok := op.GetAdditionalInfo("batch-group")
 	re.True(ok)
 	re.Equal(group, batchGroup)
+}
+
+func TestDispatchSplitScatterRegionsRequiresPrepared(t *testing.T) {
+	re := require.New(t)
+	controller, tc, oc, cleanup := newTestSplitScatterController(t)
+	defer cleanup()
+
+	controller.RecordSplitScatterBatch(100, splitScatterTestSourceWaitVersion, []uint64{101, 102})
+	putSplitScatterRegion(tc, 101, "m", "t", splitScatterReportedCPUUsage)
+	putSplitScatterRegion(tc, 102, "t", "", splitScatterReportedCPUUsage)
+	advanceSplitScatterSourceVersion(t, tc)
+
+	controller.prepareChecker.ResetPrepared()
+	controller.dispatchSplitScatterRegions()
+	for _, regionID := range []uint64{100, 101, 102} {
+		re.Nil(oc.GetOperator(regionID))
+	}
+
+	controller.prepareChecker.SetPrepared()
+	controller.dispatchSplitScatterRegions()
+	var op *operator.Operator
+	for _, regionID := range []uint64{100, 101, 102} {
+		if op = oc.GetOperator(regionID); op != nil {
+			break
+		}
+	}
+	re.NotNil(op)
 }
 
 func TestDispatchSplitScatterKeepsPendingUntilSplitHeartbeat(t *testing.T) {

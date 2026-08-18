@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/preparecheck"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -57,10 +58,17 @@ type Controller struct {
 	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
+	prepareChecker    *preparecheck.Checker
 }
 
 // NewController creates a scheduler controller.
-func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller, prepareCheckers ...*preparecheck.Checker) *Controller {
+	prepareChecker := preparecheck.NewChecker(cluster.GetPrepareRegionCount)
+	if len(prepareCheckers) > 0 && prepareCheckers[0] != nil {
+		prepareChecker = prepareCheckers[0]
+	} else {
+		prepareChecker.SetPrepared()
+	}
 	return &Controller{
 		ctx:               ctx,
 		cluster:           cluster,
@@ -68,6 +76,7 @@ func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage e
 		schedulers:        make(map[string]*ScheduleController),
 		schedulerHandlers: make(map[string]http.Handler),
 		opController:      opController,
+		prepareChecker:    prepareChecker,
 	}
 }
 
@@ -389,13 +398,22 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	for {
 		select {
 		case <-ticker.C:
-			diagnosable := s.IsDiagnosticAllowed()
-			if !s.AllowSchedule(diagnosable) {
+			shouldResetTicker := false
+			if !c.prepareChecker.RunIfPrepared(func() {
+				diagnosable := s.IsDiagnosticAllowed()
+				if !s.AllowSchedule(diagnosable) {
+					return
+				}
+				shouldResetTicker = true
+				if op := s.Schedule(diagnosable); len(op) > 0 {
+					added := c.opController.AddWaitingOperator(op...)
+					log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
+				}
+			}) {
 				continue
 			}
-			if op := s.Schedule(diagnosable); len(op) > 0 {
-				added := c.opController.AddWaitingOperator(op...)
-				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.GetName()))
+			if !shouldResetTicker {
+				continue
 			}
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(s.GetInterval())

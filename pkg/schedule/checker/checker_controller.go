@@ -35,6 +35,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/preparecheck"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -94,13 +95,20 @@ type Controller struct {
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
 	patrolRegionScanLimit int
+	prepareChecker        *preparecheck.Checker
 	metrics               *checkerControllerMetrics
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, opController *operator.Controller, prepareCheckers ...*preparecheck.Checker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
 	ruleManager := cluster.GetRuleManager()
+	prepareChecker := preparecheck.NewChecker(cluster.GetPrepareRegionCount)
+	if len(prepareCheckers) > 0 && prepareCheckers[0] != nil {
+		prepareChecker = prepareCheckers[0]
+	} else {
+		prepareChecker.SetPrepared()
+	}
 	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -119,6 +127,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
+		prepareChecker:          prepareChecker,
 		metrics:                 newCheckerControllerMetrics(),
 	}
 	c.splitScatter = newSplitScatterController(ctx, cluster, opController, c.AddPendingProcessedRegions)
@@ -148,6 +157,9 @@ func (c *Controller) PatrolRegions() {
 			})
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
+			if !c.prepareChecker.IsPrepared() {
+				continue
+			}
 			if c.cluster.IsSchedulingHalted() {
 				for len(c.patrolRegionContext.regionChan) > 0 {
 					<-c.patrolRegionContext.regionChan
@@ -174,7 +186,7 @@ func (c *Controller) PatrolRegions() {
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseDispatchSplitScatter], func() {
-				c.splitScatter.dispatchSplitScatterRegions()
+				c.dispatchSplitScatterRegions()
 			})
 
 			measure(c.metrics.patrolPhaseHistograms[phaseScanRegions], func() {
@@ -209,6 +221,10 @@ func (c *Controller) PatrolRegions() {
 			return
 		}
 	}
+}
+
+func (c *Controller) dispatchSplitScatterRegions() {
+	c.prepareChecker.RunIfPrepared(c.splitScatter.dispatchSplitScatterRegions)
 }
 
 func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
@@ -272,27 +288,29 @@ func (c *Controller) checkPendingProcessedRegions() {
 
 // checkPriorityRegions checks priority regions
 func (c *Controller) checkPriorityRegions() {
-	items := c.GetPriorityRegions()
-	removes := make([]uint64, 0)
-	priorityListGauge.Set(float64(len(items)))
-	for _, id := range items {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			removes = append(removes, id)
-			continue
+	c.prepareChecker.RunIfPrepared(func() {
+		items := c.GetPriorityRegions()
+		removes := make([]uint64, 0)
+		priorityListGauge.Set(float64(len(items)))
+		for _, id := range items {
+			region := c.cluster.GetRegion(id)
+			if region == nil {
+				removes = append(removes, id)
+				continue
+			}
+			ops := c.CheckRegion(region)
+			// it should skip if region needs to merge
+			if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
+				continue
+			}
+			if !c.opController.ExceedStoreLimit(ops...) {
+				c.opController.AddWaitingOperator(ops...)
+			}
 		}
-		ops := c.CheckRegion(region)
-		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].HasRelatedMergeRegion() {
-			continue
+		for _, v := range removes {
+			c.RemovePriorityRegions(v)
 		}
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-		}
-	}
-	for _, v := range removes {
-		c.RemovePriorityRegions(v)
-	}
+	})
 }
 
 // CheckRegion will check the region and add a new operator if needed.
@@ -394,6 +412,12 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 }
 
 func (c *Controller) tryAddOperators(region *core.RegionInfo) {
+	c.prepareChecker.RunIfPrepared(func() {
+		c.tryAddOperatorsLocked(region)
+	})
+}
+
+func (c *Controller) tryAddOperatorsLocked(region *core.RegionInfo) {
 	if region == nil {
 		// the region could be recent split, continue to wait.
 		return
