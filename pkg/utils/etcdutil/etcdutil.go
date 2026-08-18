@@ -161,7 +161,19 @@ func RemoveEtcdMember(client *clientv3.Client, id uint64) (*clientv3.MemberRemov
 
 // EtcdKVGet returns the etcd GetResponse by given key or key prefix
 func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-	ctx, cancel := context.WithTimeout(c.Ctx(), DefaultRequestTimeout)
+	return EtcdKVGetWithContext(c.Ctx(), c, key, opts...)
+}
+
+// EtcdKVGetWithContext returns the etcd GetResponse by the given key or key
+// prefix. The request stops when either ctx is canceled or the default request
+// timeout is reached.
+func EtcdKVGetWithContext(
+	ctx context.Context,
+	c *clientv3.Client,
+	key string,
+	opts ...clientv3.OpOption,
+) (*clientv3.GetResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
 	defer cancel()
 
 	start := time.Now()
@@ -389,6 +401,8 @@ type LoopWatcher struct {
 	postEventsFn func([]*clientv3.Event) error
 	// preEventsFn is used to call before handling all events.
 	preEventsFn func([]*clientv3.Event) error
+	// loadSuccessFn is called after a full snapshot load succeeds.
+	loadSuccessFn func()
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -400,8 +414,6 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
-	// compactionReloadRetryInterval is the additional backoff before retrying a failed compaction reload.
-	compactionReloadRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
 	// snapshot without changing their externally visible event contract.
 	reloadOnCompaction bool
@@ -621,26 +633,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				if lw.compactionReloadRetryInterval > 0 {
-					retryTimer := time.NewTimer(lw.compactionReloadRetryInterval)
-					select {
-					case <-ctx.Done():
-						retryTimer.Stop()
-						return revision, nil
-					case <-retryTimer.C:
-					}
+				loadedRevision, shouldContinue := lw.reloadAfterCompaction(ctx)
+				if !shouldContinue {
+					return max(revision, loadedRevision), nil
 				}
-				loadedRevision, loadErr := lw.load(ctx)
-				if loadErr != nil {
-					lw.compactionReloadRetryInterval *= 2
-					if lw.compactionReloadRetryInterval == 0 {
-						lw.compactionReloadRetryInterval = lw.watchChangeRetryInterval
-					}
-					lw.compactionReloadRetryInterval = min(
-						lw.compactionReloadRetryInterval, maxCompactionReloadRetryInterval)
-					return revision, loadErr
-				}
-				lw.compactionReloadRetryInterval = 0
 				revision = loadedRevision
 				continue
 			} else if err := wresp.Err(); err != nil { // wresp.Err() contains CompactRevision not equal to 0
@@ -705,10 +701,42 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}
 }
 
+// reloadAfterCompaction rebuilds the watched state before a new watch is
+// created. A compacted watch cannot resume from its previous revision, so keep
+// the retry state local to this resync attempt and retry until it succeeds or
+// the watcher is stopped. The returned revision is the next revision after a
+// successful reload, even when the boolean is false; zero means no reload
+// completed. The boolean reports whether watching should continue.
+func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
+	retryInterval := lw.watchChangeRetryInterval
+	for {
+		loadedRevision, err := lw.load(ctx)
+		if err == nil {
+			return loadedRevision, ctx.Err() == nil
+		}
+		if ctx.Err() != nil {
+			return 0, false
+		}
+
+		log.Warn("failed to reload compacted watcher state, retrying",
+			zap.String("name", lw.name), zap.String("key", lw.key),
+			zap.Duration("retry-interval", retryInterval), zap.Error(err))
+		retryTimer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			retryTimer.Stop()
+			return 0, false
+		case <-retryTimer.C:
+		}
+		retryInterval = min(retryInterval*2, maxCompactionReloadRetryInterval)
+	}
+}
+
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	var (
 		startKey              = lw.key
 		limit                 = lw.loadBatchSize
+		consistentReload      = lw.reloadOnCompaction
 		snapshotRevision      int64
 		preErr                error
 		callbackErr           error
@@ -716,9 +744,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		reconciledDeletedKeys []string
 		loadCompleted         bool
 	)
-	if lw.reconcileDeletedKeys {
-		snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
-	}
 	opts := lw.buildLoadingOpts(limit, snapshotRevision)
 
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
@@ -728,18 +753,26 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 	defer func() {
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
-			log.Warn("run post event failed in watch loop", zap.String("name", lw.name),
+			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
-			if err == nil {
+			if consistentReload && err == nil {
 				err = postErr
 			}
 			return
 		}
-		if preErr != nil || !lw.reconcileDeletedKeys {
+		if preErr != nil {
 			return
 		}
 		if loadCompleted && callbackErr == nil {
-			lw.loadedKeys = snapshotKeys
+			if lw.loadSuccessFn != nil {
+				lw.loadSuccessFn()
+			}
+			if lw.reconcileDeletedKeys {
+				lw.loadedKeys = snapshotKeys
+			}
+			return
+		}
+		if !lw.reconcileDeletedKeys {
 			return
 		}
 		// Some callbacks may have succeeded before another callback failed. The
@@ -754,7 +787,9 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			delete(lw.loadedKeys, key)
 		}
 	}()
-	if preErr != nil {
+	// A compaction reload must fail instead of advancing past callbacks that did
+	// not apply. Unopted loads retain their legacy callback error semantics.
+	if preErr != nil && consistentReload {
 		return 0, preErr
 	}
 
@@ -787,10 +822,52 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			return 0, err
 		}
-		if snapshotRevision == 0 {
-			snapshotRevision = resp.Header.Revision
-			opts = lw.buildLoadingOpts(limit, snapshotRevision)
+		if consistentReload {
+			page := resp.Kvs
+			if resp.More && len(page) > 0 {
+				// WithLimit requests one extra key to use as the next page's cursor.
+				startKey = string(page[len(page)-1].Key)
+				page = page[:len(page)-1]
+			}
+			if snapshotRevision == 0 {
+				snapshotRevision = resp.Header.Revision
+				opts = lw.buildLoadingOpts(limit, snapshotRevision)
+				if lw.reconcileDeletedKeys {
+					snapshotKeys = make(map[string]struct{}, len(lw.loadedKeys))
+				}
+			}
+			for _, item := range page {
+				putErr := lw.putFn(item)
+				if putErr != nil {
+					if callbackErr == nil {
+						callbackErr = putErr
+					}
+					log.Warn("put failed in watch loop when loading consistent snapshot", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
+				} else {
+					if lw.reconcileDeletedKeys {
+						snapshotKeys[string(item.Key)] = struct{}{}
+					}
+					log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+						zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
+				}
+			}
+			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
+			if !resp.More {
+				if callbackErr == nil {
+					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+				}
+				loadCompleted = true
+				return snapshotRevision + 1, callbackErr
+			}
+			continue
 		}
+
+		// Keep the legacy per-page loading semantics for consumers that do not
+		// opt in to compaction reload. Their callbacks may publish each load
+		// attempt, so pinning a revision could expose a partial snapshot if that
+		// revision is compacted before a later page is read. Keep their hot loop
+		// free of reconciliation bookkeeping as well.
 		for i, item := range resp.Kvs {
 			if i == len(resp.Kvs)-1 && resp.More {
 				// If there are more keys, we need to load the next batch.
@@ -800,28 +877,18 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				// we need to skip the last key for the current batch.
 				continue
 			}
-			putErr := lw.putFn(item)
-			if putErr != nil {
-				if callbackErr == nil {
-					callbackErr = putErr
-				}
+			err = lw.putFn(item)
+			if err != nil {
 				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
-					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(putErr))
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
 			} else {
-				if lw.reconcileDeletedKeys {
-					snapshotKeys[string(item.Key)] = struct{}{}
-				}
 				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
 					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			if callbackErr == nil {
-				reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
-			}
-			loadCompleted = true
-			return snapshotRevision + 1, callbackErr
+			return resp.Header.Revision + 1, err
 		}
 	}
 }
@@ -841,7 +908,7 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]
 			if firstErr == nil {
 				firstErr = err
 			}
-			log.Error("delete failed in watch loop when reconciling loaded keys",
+			log.Warn("delete failed in watch loop when reconciling loaded keys",
 				zap.String("name", lw.name), zap.String("watch-key", lw.key),
 				zap.String("key", key), zap.Error(err))
 			continue
@@ -917,9 +984,19 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
 }
 
-// SetReloadOnCompaction enables a full snapshot reload after compaction without
-// retaining watched keys or reconciling deletions. It must be called before
-// StartWatchLoop. Callers must be able to safely replay every key in a snapshot.
+// SetLoadSuccessFn sets a callback that runs only after a revision-consistent
+// snapshot load succeeds. It must be called before StartWatchLoop and used
+// together with SetReloadOnCompaction or SetReconcileDeletedKeys.
+func (lw *LoopWatcher) SetLoadSuccessFn(fn func()) {
+	lw.loadSuccessFn = fn
+}
+
+// SetReloadOnCompaction enables a full, revision-consistent snapshot reload
+// after compaction without retaining watched keys or reconciling deletions.
+// Load callback errors are propagated in this mode so a failed reload cannot
+// advance the watch revision. It must be called before StartWatchLoop. Callers
+// must tolerate partial application and replay; batch-publishing consumers must
+// keep failed loads private.
 func (lw *LoopWatcher) SetReloadOnCompaction() {
 	lw.reloadOnCompaction = true
 }

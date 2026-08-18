@@ -264,6 +264,24 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsSetsModRevisio
 	re.Equal(deletedRevision, loadedRevision)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestFailedSnapshotDoesNotSetModRevision() {
+	re := suite.Require()
+
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	defer mgr.Close()
+
+	_, err := suite.etcdClient.Txn(suite.ctx).Then(
+		clientv3.OpPut(keypath.KeyspaceGroupIDPath(1), "{"),
+		clientv3.OpPut(keypath.KeyspaceGroupRevisionPath(), "1"),
+	).Commit()
+	re.NoError(err)
+
+	re.Error(mgr.Initialize())
+	mgr.RLock()
+	defer mgr.RUnlock()
+	re.Zero(mgr.modRevision)
+}
+
 func (suite *keyspaceGroupManagerTestSuite) TestSnapshotRevisionRemainsComparableAcrossManagers() {
 	re := suite.Require()
 	keypath.SetClusterID(rand.Uint64())

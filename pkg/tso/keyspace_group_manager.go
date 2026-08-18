@@ -539,9 +539,20 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
+	batchApplyFailed := false
 	preEventsFn := func([]*clientv3.Event) error {
 		maxLoadedModRevision = 0
+		batchApplyFailed = false
 		return nil
+	}
+	setModRevision := func(revision uint64) bool {
+		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
+			addr, ok := val.(string)
+			if ok && addr == kgm.electionNamePrefix {
+				failpoint.Return(false)
+			}
+		})
+		return kgm.SetModRevision(revision)
 	}
 	putFn := func(kv *mvccpb.KeyValue) error {
 		if string(kv.Key) == keypath.KeyspaceGroupRevisionPath() {
@@ -556,6 +567,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
+			batchApplyFailed = true
 			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
@@ -577,6 +589,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		}
 		groupID, err := ExtractKeyspaceGroupIDFromPath(kgm.compiledKGMembershipIDRegexp, string(kv.Key))
 		if err != nil {
+			batchApplyFailed = true
 			return err
 		}
 		kgm.deleteKeyspaceGroup(groupID)
@@ -588,27 +601,23 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			delete(kgm.groupUpdateRetryList, id)
 			kgm.updateKeyspaceGroup(group)
 		}
-		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
-			addr, ok := val.(string)
-			if ok && addr == kgm.electionNamePrefix {
-				failpoint.Return(nil)
-			}
-		})
-		if len(event) > 0 {
+		if len(event) > 0 && !batchApplyFailed {
 			last := event[len(event)-1]
-			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
+			if !setModRevision(uint64(last.Kv.ModRevision)) {
 				log.Warn("watch keyspace group met mod revision not increased",
 					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
 					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
 				)
 			}
-		} else if maxLoadedModRevision > 0 {
-			// LoopWatcher reports a snapshot load with an empty event batch. Use
-			// the applied keys' revisions instead of the global snapshot revision,
-			// which also includes unrelated etcd writes.
-			kgm.SetModRevision(maxLoadedModRevision)
 		}
 		return nil
+	}
+	loadSuccessFn := func() {
+		// Use the applied keys' revisions instead of the global snapshot
+		// revision, which also includes unrelated etcd writes.
+		if maxLoadedModRevision > 0 {
+			setModRevision(maxLoadedModRevision)
+		}
 	}
 	kgm.groupWatcher = etcdutil.NewLoopWatcher(
 		kgm.ctx,
@@ -623,6 +632,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		true, /* withPrefix */
 	)
 	kgm.groupWatcher.SetReconcileDeletedKeys()
+	kgm.groupWatcher.SetLoadSuccessFn(loadSuccessFn)
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}
