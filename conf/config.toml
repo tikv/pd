@@ -215,3 +215,15 @@
 ## Example:
 ## pre-alloc = ["admin", "user1", "user2"]
 # pre-alloc = []
+
+## enable-tso-keyspace-group-auto-split controls whether TSO keyspace groups
+## are automatically split when their keyspace count exceeds the threshold.
+# enable-tso-keyspace-group-auto-split = true
+
+## tso-keyspace-group-auto-split-threshold is the keyspace count threshold for
+## automatically splitting a TSO keyspace group.
+# tso-keyspace-group-auto-split-threshold = 40000
+
+## tso-keyspace-group-auto-split-patrol-interval is the interval for checking
+## TSO keyspace group size.
+# tso-keyspace-group-auto-split-patrol-interval = "15m"
