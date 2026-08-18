@@ -838,6 +838,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() 
 			firstErr := fmt.Errorf("callback failed at index %d", test.errorIndex)
 			errorKey := fmt.Sprintf("%s%d", prefix, test.errorIndex)
 			processed := make([]string, 0, 3)
+			loadSuccessCalls := 0
 			watcher := NewLoopWatcher(
 				suite.ctx,
 				&suite.wg,
@@ -857,10 +858,12 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadPreservesFirstCallbackError() 
 				true, /* withPrefix */
 			)
 			watcher.SetReloadOnCompaction()
+			watcher.SetLoadSuccessFn(func() { loadSuccessCalls++ })
 			watcher.SetLoadBatchSize(test.batchSize)
 			_, err := watcher.load(suite.ctx)
 			re.ErrorIs(err, firstErr)
 			re.Len(processed, 3)
+			re.Zero(loadSuccessCalls)
 		})
 	}
 }
@@ -882,6 +885,7 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 
 	values := make(map[string]string)
 	updated := false
+	loadSuccessCalls := 0
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
@@ -908,6 +912,7 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
+	watcher.SetLoadSuccessFn(func() { loadSuccessCalls++ })
 	watcher.SetLoadBatchSize(1)
 	revision, err := watcher.load(suite.ctx)
 	re.NoError(err)
@@ -915,6 +920,7 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 	re.Equal("old", values[prefix+"a"])
 	re.Equal("old", values[prefix+"b"])
 	re.Equal("old", values[prefix+"c"])
+	re.Equal(1, loadSuccessCalls)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCompaction() {

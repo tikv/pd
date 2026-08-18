@@ -172,6 +172,12 @@ func (s *state) SetModRevision(modRevision uint64) bool {
 	return false
 }
 
+func (s *state) getModRevision() uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.modRevision
+}
+
 // getSplittingGroups returns the IDs of the splitting keyspace groups.
 func (s *state) getSplittingGroups() []uint32 {
 	s.RLock()
@@ -538,7 +544,13 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
+	loadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
+		modRevision := uint64(kv.ModRevision)
+		if loadedModRevision > 0 && modRevision <= loadedModRevision {
+			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
+			return nil
+		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
@@ -549,7 +561,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
-		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
+		maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -596,6 +608,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
 		func([]*clientv3.Event) error {
 			maxLoadedModRevision = 0
+			loadedModRevision = kgm.getModRevision()
 			return nil
 		},
 		putFn,
@@ -603,8 +616,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	kgm.groupWatcher.SetConsistentLoad()
-	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
+	kgm.groupWatcher.SetReconcileDeletedKeys()
+	kgm.groupWatcher.SetLoadSuccessFn(func() {
 		if maxLoadedModRevision > 0 {
 			kgm.SetModRevision(maxLoadedModRevision)
 		}
@@ -1014,12 +1027,8 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 	kg := kgm.kgs[groupID]
 	if kg != nil {
 		for _, kid := range kg.Keyspaces {
-			// if kid == kg.ID, it means the keyspace still belongs to this keyspace group,
-			//     so we decouple the relationship in the global keyspace lookup table.
-			// if kid != kg.ID, it means the keyspace has been moved to another keyspace group
-			//     which has already declared the ownership of the keyspace, so we don't need
-			//     delete it from the global keyspace lookup table and overwrite the ownership.
-			if kid == kg.ID {
+			// Preserve ownership that a newer group update has already claimed.
+			if currentGroupID, ok := kgm.keyspaceLookupTable[kid]; ok && currentGroupID == groupID {
 				delete(kgm.keyspaceLookupTable, kid)
 			}
 		}

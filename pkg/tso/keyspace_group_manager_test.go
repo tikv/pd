@@ -238,6 +238,59 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadSetsModRevision() {
 	re.Equal(uint64(resp.Kvs[0].ModRevision), loadedRevision)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMembership() {
+	re := suite.Require()
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	defer mgr.Close()
+
+	for groupID, keyspaceID := range map[uint32]uint32{1: 101, 2: 202, 3: 303} {
+		re.NoError(addKeyspaceGroupAssignment(
+			suite.ctx,
+			suite.etcdClient,
+			groupID,
+			[]string{mgr.tsoServiceID.ServiceAddr},
+			[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+			[]uint32{keyspaceID},
+		))
+	}
+	re.NoError(mgr.Initialize())
+
+	mgr.RLock()
+	unchangedGroup := mgr.kgs[3]
+	mgr.RUnlock()
+	re.NotNil(unchangedGroup)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+	}()
+	updatedGroup, err := json.Marshal(&endpoint.KeyspaceGroup{
+		ID:        2,
+		Members:   []endpoint.KeyspaceGroupMember{{Address: mgr.tsoServiceID.ServiceAddr}},
+		Keyspaces: []uint32{203},
+	})
+	re.NoError(err)
+	resp, err := suite.etcdClient.Txn(suite.ctx).Then(
+		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(1)),
+		clientv3.OpPut(keypath.KeyspaceGroupIDPath(2), string(updatedGroup)),
+	).Commit()
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		mgr.groupWatcher.ForceLoad()
+		mgr.RLock()
+		defer mgr.RUnlock()
+		_, oldDeletedKeyspaceExists := mgr.keyspaceLookupTable[101]
+		_, oldUpdatedKeyspaceExists := mgr.keyspaceLookupTable[202]
+		return mgr.kgs[1] == nil &&
+			!oldDeletedKeyspaceExists &&
+			!oldUpdatedKeyspaceExists &&
+			mgr.keyspaceLookupTable[203] == 2 &&
+			mgr.kgs[3] == unchangedGroup &&
+			mgr.modRevision == uint64(resp.Header.Revision)
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
 func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	re := suite.Require()
