@@ -498,10 +498,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	if err := s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash); err != nil {
 		return err
 	}
-	if err := s.member.SetMemberFeature(
-		s.member.ID(), versioninfo.DefaultStoreLimitPersistence, versioninfo.PDGitHash); err != nil {
-		return err
-	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.DefaultLabel,

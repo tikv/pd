@@ -32,8 +32,6 @@ type ServiceRegistryEntry struct {
 	GitHash        string `json:"git-hash"`
 	DeployPath     string `json:"deploy-path"`
 	StartTimestamp int64  `json:"start-timestamp"`
-	// Features maps a supported feature to the build hash that advertised it.
-	Features map[string]string `json:"features,omitempty"`
 }
 
 // Serialize this service registry entry

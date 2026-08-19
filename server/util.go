@@ -16,8 +16,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
@@ -36,6 +39,8 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 )
+
+const defaultStoreLimitPersistenceProbeTimeout = 3 * time.Second
 
 // CheckAndGetPDVersion checks and returns the PD version.
 func CheckAndGetPDVersion() *semver.Version {
@@ -60,8 +65,41 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 	}
 }
 
-func checkDefaultStoreLimitPersistenceFeature(component, name, gitHash, featureGitHash string) error {
-	if featureGitHash == "" || featureGitHash != gitHash {
+func checkDefaultStoreLimitPersistenceAtURL(
+	ctx context.Context,
+	client *http.Client,
+	component, name, baseURL, configPath string,
+) error {
+	configURL, err := url.JoinPath(baseURL, configPath)
+	if err != nil {
+		return errors.Annotatef(err, "failed to build config URL for %s member %s", component, name)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, defaultStoreLimitPersistenceProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, configURL, http.NoBody)
+	if err != nil {
+		return errors.Annotatef(err, "failed to create config request for %s member %s", component, name)
+	}
+	// Force the request to be handled and serialized by the target member. An
+	// old member omits default-store-limit from this response, even if another
+	// member in the cluster already supports the field.
+	req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
+	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
+	resp, err := client.Do(req)
+	if err != nil {
+		return errors.Annotatef(err, "failed to load config from %s member %s", component, name)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errors.Errorf("failed to load config from %s member %s: HTTP status %d", component, name, resp.StatusCode)
+	}
+	var cfg struct {
+		Schedule map[string]json.RawMessage `json:"schedule"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+		return errors.Annotatef(err, "failed to decode config from %s member %s", component, name)
+	}
+	if _, ok := cfg.Schedule["default-store-limit"]; !ok {
 		return errors.Errorf(
 			"cannot update default store limit while %s member %s does not support persisted default store limits",
 			component, name)
@@ -69,30 +107,42 @@ func checkDefaultStoreLimitPersistenceFeature(component, name, gitHash, featureG
 	return nil
 }
 
+func checkDefaultStoreLimitPersistenceMember(
+	ctx context.Context,
+	client *http.Client,
+	component, name string,
+	baseURLs []string,
+	configPath string,
+) error {
+	if len(baseURLs) == 0 {
+		return errors.Errorf("cannot check persisted default store limit support for %s member %s without a client URL", component, name)
+	}
+	var lastErr error
+	for _, baseURL := range baseURLs {
+		if err := checkDefaultStoreLimitPersistenceAtURL(ctx, client, component, name, baseURL, configPath); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	return lastErr
+}
+
 // checkDefaultStoreLimitPersistenceSupport prevents a new persisted schedule
 // field from being activated while a currently registered old PD or Scheduling
 // Service member can still become leader/primary and drop the unknown field on
-// its next persist. It is a rolling-upgrade gate, not a downgrade guard: a
-// pre-feature binary does not understand this check or the persisted field.
+// its next persist. It probes the existing config endpoint so capability is
+// detected directly without extending member registration metadata. It is a
+// rolling-upgrade gate, not a downgrade guard: a pre-feature binary does not
+// understand this check or the persisted field.
 func (s *Server) checkDefaultStoreLimitPersistenceSupport() error {
 	members, err := s.ReloadMembers()
 	if err != nil {
 		return errors.Annotate(err, "failed to load PD members before updating default store limit")
 	}
 	for _, member := range members {
-		gitHash, err := s.GetMember().GetMemberGitHash(member.GetMemberId())
-		if err != nil {
-			return errors.Annotatef(err, "failed to load git hash for PD member %s", member.GetName())
-		}
-		featureGitHash, err := s.GetMember().GetMemberFeature(
-			member.GetMemberId(), versioninfo.DefaultStoreLimitPersistence)
-		if err != nil {
-			return errors.Errorf(
-				"cannot update default store limit while PD member %s does not support persisted default store limits",
-				member.GetName())
-		}
-		if err := checkDefaultStoreLimitPersistenceFeature(
-			"PD", member.GetName(), gitHash, featureGitHash); err != nil {
+		if err := checkDefaultStoreLimitPersistenceMember(
+			s.Context(), s.GetHTTPClient(), "PD", member.GetName(), member.GetClientUrls(), "/pd/api/v1/config"); err != nil {
 			return err
 		}
 	}
@@ -108,9 +158,9 @@ func (s *Server) checkDefaultStoreLimitPersistenceSupport() error {
 		return errors.New("cannot update default store limit without a registered Scheduling Service member")
 	}
 	for _, member := range schedulingMembers {
-		if err := checkDefaultStoreLimitPersistenceFeature(
-			"Scheduling Service", member.Name, member.GitHash,
-			member.Features[versioninfo.DefaultStoreLimitPersistence]); err != nil {
+		if err := checkDefaultStoreLimitPersistenceMember(
+			s.Context(), s.GetHTTPClient(), "Scheduling Service", member.Name,
+			[]string{member.ServiceAddr}, "/scheduling/api/v1/config"); err != nil {
 			return err
 		}
 	}

@@ -482,19 +482,6 @@ func (m *Member) GetMemberGitHash(id uint64) (string, error) {
 	return string(res.Kvs[0].Value), nil
 }
 
-// GetMemberFeature loads the build hash that advertised a member feature.
-func (m *Member) GetMemberFeature(id uint64, feature string) (string, error) {
-	key := keypath.MemberFeaturePath(id, feature)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return "", err
-	}
-	if len(res.Kvs) == 0 {
-		return "", errs.ErrEtcdKVGetResponse.FastGenByArgs("no value")
-	}
-	return string(res.Kvs[0].Value), nil
-}
-
 // SetMemberBinaryVersion saves a member's binary version.
 func (m *Member) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
 	key := keypath.MemberBinaryVersionPath(id)
@@ -519,20 +506,6 @@ func (m *Member) SetMemberGitHash(id uint64, gitHash string) error {
 	}
 	if !res.Succeeded {
 		return errors.New("failed to save git hash")
-	}
-	return nil
-}
-
-// SetMemberFeature advertises a member feature for the current build hash.
-func (m *Member) SetMemberFeature(id uint64, feature, gitHash string) error {
-	key := keypath.MemberFeaturePath(id, feature)
-	txn := kv.NewSlowLogTxn(m.client)
-	res, err := txn.Then(clientv3.OpPut(key, gitHash)).Commit()
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !res.Succeeded {
-		return errors.New("failed to save member feature")
 	}
 	return nil
 }

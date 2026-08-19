@@ -26,13 +26,6 @@ import (
 // Feature supported features.
 type Feature int
 
-const (
-	// DefaultStoreLimitPersistence is advertised by PD and Scheduling Service
-	// members that preserve schedule.default-store-limit when loading and
-	// persisting the shared scheduling configuration.
-	DefaultStoreLimitPersistence = "default-store-limit-persistence"
-)
-
 // Features list.
 // The cluster provides corresponding new features if the cluster version
 // greater than or equal to the required minimum version of the feature.

@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -49,39 +51,6 @@ type storeTestSuite struct {
 
 func TestStoreTestSuite(t *testing.T) {
 	suite.Run(t, new(storeTestSuite))
-}
-
-func TestDefaultStoreLimitRequiresAllPDsToSupportPersistence(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster.Destroy()
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	re.NoError(cluster.GetLeaderServer().BootstrapCluster())
-
-	leader := cluster.GetLeaderServer()
-	var follower *tests.TestServer
-	for _, server := range cluster.GetServers() {
-		if server.GetServerID() != leader.GetServerID() {
-			follower = server
-			break
-		}
-	}
-	re.NotNil(follower)
-	_, err = cluster.GetEtcdClient().Delete(context.Background(), keypath.MemberFeaturePath(
-		follower.GetServerID(), versioninfo.DefaultStoreLimitPersistence))
-	re.NoError(err)
-
-	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
-	body := []byte(`{"rate":60,"type":"add-peer"}`)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
-		testutil.StatusNotOK(re),
-		testutil.StringContain(re, "does not support persisted default store limits"))
-	re.NoError(err)
-	re.Equal(float64(15), leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) SetupSuite() {
@@ -198,23 +167,16 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
 	body := []byte(`{"rate":60,"type":"add-peer"}`)
 
-	_, err := cluster.GetEtcdClient().Delete(context.Background(), keypath.MemberFeaturePath(
-		leader.GetServerID(), versioninfo.DefaultStoreLimitPersistence))
-	re.NoError(err)
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
-		testutil.StatusNotOK(re),
-		testutil.StringContain(re, "does not support persisted default store limits"))
-	re.NoError(err)
-
-	err = leader.GetServer().GetMember().SetMemberFeature(
-		leader.GetServerID(), versioninfo.DefaultStoreLimitPersistence, versioninfo.PDGitHash)
-	re.NoError(err)
 	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+		preFeatureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, err := w.Write([]byte(`{"schedule":{"store-limit":{}}}`))
+			assert.NoError(suite.T(), err)
+		}))
+		defer preFeatureServer.Close()
 		entry := &discovery.ServiceRegistryEntry{
-			Name:        schedulingServer.Name(),
-			ServiceAddr: schedulingServer.GetAdvertiseListenAddr(),
+			Name:        "pre-feature-scheduling",
+			ServiceAddr: preFeatureServer.URL,
 			Version:     versioninfo.PDReleaseVersion,
-			GitHash:     versioninfo.PDGitHash,
 		}
 		serializedEntry, err := entry.Serialize()
 		re.NoError(err)
@@ -225,16 +187,10 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 			testutil.StatusNotOK(re),
 			testutil.StringContain(re, "Scheduling Service member"))
 		re.NoError(err)
-
-		entry.Features = map[string]string{
-			versioninfo.DefaultStoreLimitPersistence: versioninfo.PDGitHash,
-		}
-		serializedEntry, err = entry.Serialize()
-		re.NoError(err)
-		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
+		_, err = cluster.GetEtcdClient().Delete(context.Background(), registryPath)
 		re.NoError(err)
 	}
-	err = testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
+	err := testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
 	re.NoError(err)
 	re.Equal(float64(60), leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }

@@ -30,8 +30,3 @@ func MemberGitHashPath(id uint64) string {
 func MemberBinaryVersionPath(id uint64) string {
 	return fmt.Sprintf(memberBinaryVersionPathFormat, ClusterID(), id)
 }
-
-// MemberFeaturePath returns the path of a feature advertised by a member.
-func MemberFeaturePath(id uint64, feature string) string {
-	return fmt.Sprintf(memberFeaturePathFormat, ClusterID(), id, feature)
-}
