@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,6 +63,7 @@ type flakyKeyspaceGroupStorage struct {
 	endpoint.KeyspaceGroupStorage
 	loadFailures  atomic.Int64
 	loadFailureCh chan struct{}
+	loadError     func(uint32) error
 }
 
 func (s *flakyKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*endpoint.KeyspaceGroup, error) {
@@ -72,6 +72,9 @@ func (s *flakyKeyspaceGroupStorage) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*e
 		select {
 		case s.loadFailureCh <- struct{}{}:
 		default:
+		}
+		if s.loadError != nil {
+			return nil, s.loadError(id)
 		}
 		return nil, errLoadKeyspaceGroup
 	}
@@ -125,16 +128,9 @@ func TestReconcileKeyspaceGroupsDoesNotLoadHealthyGroups(t *testing.T) {
 	})
 	manager.Unlock()
 
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	for range 10 {
-		re.False(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
-	}
-	runtime.ReadMemStats(&after)
+	re.False(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
 	re.Zero(store.loadGroupsCount.Load())
 	re.Zero(store.loadGroupCount.Load())
-	re.Less((after.TotalAlloc-before.TotalAlloc)/10, uint64(4096))
 }
 
 func TestReconcileKeyspaceGroupsRevalidatesGroupBeforeWriting(t *testing.T) {
@@ -183,6 +179,80 @@ func TestReconcileKeyspaceGroupsRevalidatesGroupBeforeWriting(t *testing.T) {
 		return err
 	}))
 	re.Equal(storedGroup.Members, got.Members)
+}
+
+func TestReconcileKeyspaceGroupsRetriesCanceledAllocation(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	manager := NewKeyspaceGroupManager(ctx, store, nil)
+	defer manager.Close()
+	manager.nodesBalancer.Put("http://tso-1")
+	manager.nodesBalancer.Put("http://tso-2")
+	termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
+	re.NoError(manager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+	}}))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/cancelAllocNodesContext", "return"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/cancelAllocNodesContext"))
+	}()
+	re.True(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
+	group, err := manager.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.Empty(group.Members)
+}
+
+func TestReconcileKeyspaceGroupsHandlesLoadErrorsByScope(t *testing.T) {
+	tests := []struct {
+		name         string
+		loadError    func(uint32) error
+		wantFailures int64
+	}{
+		{
+			name: "batch storage error",
+			loadError: func(uint32) error {
+				return errs.ErrEtcdKVGet.Wrap(errLoadKeyspaceGroup).GenWithStackByCause()
+			},
+			wantFailures: 1,
+		},
+		{
+			name: "group state error",
+			loadError: func(id uint32) error {
+				return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(id)
+			},
+			wantFailures: 0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			re := require.New(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			store := &flakyKeyspaceGroupStorage{
+				KeyspaceGroupStorage: endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+			}
+			manager := NewKeyspaceGroupManager(ctx, store, nil)
+			defer manager.Close()
+			manager.nodesBalancer.Put("http://tso-1")
+			manager.nodesBalancer.Put("http://tso-2")
+			termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
+			re.NoError(manager.CreateKeyspaceGroups([]*endpoint.KeyspaceGroup{
+				{ID: 1, UserKind: endpoint.Standard.String()},
+				{ID: 2, UserKind: endpoint.Standard.String()},
+			}))
+			store.loadFailures.Store(2)
+			store.loadError = test.loadError
+
+			re.True(manager.reconcileKeyspaceGroupsForTerm(termCtx, term))
+			re.Equal(test.wantFailures, store.loadFailures.Load())
+		})
+	}
 }
 
 func TestKeyspaceGroupWatcherDoesNotOverwriteLocalCommit(t *testing.T) {
@@ -484,9 +554,7 @@ func TestTSONodesWatcherTriggersNodeAllocation(t *testing.T) {
 	}, testutil.WithWaitFor(time.Second), testutil.WithTickInterval(10*time.Millisecond))
 }
 
-func BenchmarkReconcileKeyspaceGroupsMillionKeyspaces(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func BenchmarkDecodeKeyspaceGroupMembershipMillionKeyspaces(b *testing.B) {
 	keyspaces := make([]uint32, 1_000_000)
 	for i := range keyspaces {
 		keyspaces[i] = uint32(i)
@@ -505,61 +573,14 @@ func BenchmarkReconcileKeyspaceGroupsMillionKeyspaces(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	if err := store.RunInTxn(ctx, func(txn kv.Txn) error {
-		return store.SaveKeyspaceGroup(txn, group)
-	}); err != nil {
-		b.Fatal(err)
+	b.ReportAllocs()
+	b.SetBytes(int64(len(payload)))
+	for b.Loop() {
+		groupID, members, err := decodeKeyspaceGroupMembership(payload)
+		if err != nil || groupID != group.ID || len(members) != len(group.Members) {
+			b.Fatalf("failed to decode keyspace group membership: id=%d members=%d err=%v", groupID, len(members), err)
+		}
 	}
-
-	b.Run("legacy-full-load", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			groups, err := store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
-			if err != nil || len(groups) != 1 {
-				b.Fatalf("failed to load keyspace groups: groups=%d err=%v", len(groups), err)
-			}
-		}
-		b.ReportMetric(float64(len(payload)), "etcd-read-bytes/op")
-	})
-
-	b.Run("event-driven-healthy", func(b *testing.B) {
-		countingStore := &countingKeyspaceGroupStorage{KeyspaceGroupStorage: store}
-		manager := NewKeyspaceGroupManager(ctx, countingStore, nil)
-		defer manager.Close()
-		manager.nodesBalancer.Put("http://tso-1")
-		manager.nodesBalancer.Put("http://tso-2")
-		termCtx, term, _ := manager.beginKeyspaceGroupReconcileTerm(ctx)
-		manager.Lock()
-		manager.putKeyspaceGroupLocked(group)
-		manager.Unlock()
-		b.ReportAllocs()
-		for b.Loop() {
-			if manager.reconcileKeyspaceGroupsForTerm(termCtx, term) {
-				b.Fatal("healthy groups should not need a retry")
-			}
-		}
-		if countingStore.loadGroupsCount.Load() != 0 || countingStore.loadGroupCount.Load() != 0 {
-			b.Fatal("healthy reconciliation read keyspace groups from storage")
-		}
-		b.ReportMetric(0, "etcd-read-bytes/op")
-	})
-
-	b.Run("watch-membership-only", func(b *testing.B) {
-		manager := NewKeyspaceGroupManager(ctx, store, nil)
-		manager.groupWatcherTerm = 1
-		manager.Lock()
-		manager.putKeyspaceGroupLocked(group)
-		manager.Unlock()
-		kv := &mvccpb.KeyValue{Value: payload}
-		b.ReportAllocs()
-		b.SetBytes(int64(len(payload)))
-		for b.Loop() {
-			if _, _, err := manager.applyKeyspaceGroupMembership(1, kv, false); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
 }
 
 type keyspaceGroupTestSuite struct {

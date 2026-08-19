@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	goerrors "errors"
 	"slices"
 	"sort"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -233,13 +235,18 @@ func (m *GroupManager) resetKeyspaceGroupCacheLocked() {
 func (m *GroupManager) putKeyspaceGroupLocked(group *endpoint.KeyspaceGroup) {
 	previousMembers, exists := m.groupMemberships[group.ID]
 	membershipChanged := !exists || !slices.Equal(previousMembers, group.Members)
-	for _, groupsByKind := range m.groups {
-		groupsByKind.Remove(group.ID)
-	}
 	userKind := endpoint.StringUserKind(group.UserKind)
+	for kind, groupsByKind := range m.groups {
+		if kind != userKind {
+			groupsByKind.Remove(group.ID)
+		}
+	}
 	m.groups[userKind].Put(group)
+	if !membershipChanged {
+		return
+	}
 	m.groupMemberships[group.ID] = slices.Clone(group.Members)
-	if membershipChanged && m.groupWatcherTerm != 0 && m.reconcileCh != nil &&
+	if m.groupWatcherTerm != 0 && m.reconcileCh != nil &&
 		m.keyspaceGroupMembersNeedReconcile(group.Members) {
 		notifyKeyspaceGroupReconcile(m.reconcileCh)
 	}
@@ -265,12 +272,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context, term u
 	defer m.wg.Done()
 	defer m.cancelKeyspaceGroupReconcileTerm(term)
 	var retryCh <-chan time.Time
-	updateRetry := func(needRetry bool) {
-		retryCh = nil
-		if needRetry {
-			retryCh = time.After(keyspaceGroupReconcileRetryInterval)
-		}
-	}
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
@@ -286,9 +287,11 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context, term u
 			log.Info("the raftcluster is closed, stop to alloc nodes to all keyspace groups")
 			return
 		case <-reconcileCh:
-			updateRetry(m.reconcileKeyspaceGroupsForTerm(ctx, term))
 		case <-retryCh:
-			updateRetry(m.reconcileKeyspaceGroupsForTerm(ctx, term))
+		}
+		retryCh = nil
+		if m.reconcileKeyspaceGroupsForTerm(ctx, term) {
+			retryCh = time.After(keyspaceGroupReconcileRetryInterval)
 		}
 	}
 }
@@ -313,7 +316,8 @@ func (m *GroupManager) reconcileKeyspaceGroupsForTerm(ctx context.Context, term 
 	if !m.isKeyspaceGroupReconcileTermActive(ctx, term) {
 		return false
 	}
-	if m.GetNodesCount() == 0 {
+	tsoNodes := m.nodesBalancer.GetAll()
+	if len(tsoNodes) == 0 {
 		return false
 	}
 
@@ -332,36 +336,43 @@ func (m *GroupManager) reconcileKeyspaceGroupsForTerm(ctx context.Context, term 
 		if !m.isKeyspaceGroupReconcileTermActive(ctx, term) {
 			return false
 		}
-		existMembers := make(map[string]struct{}, len(group.members))
-		for _, member := range group.members {
-			if exist, addr := m.IsExistNode(member.Address); exist {
-				existMembers[addr] = struct{}{}
-			}
-		}
-		numExistMembers := len(existMembers)
-		if numExistMembers != 0 && numExistMembers == len(group.members) && numExistMembers == m.GetNodesCount() {
+		if !keyspaceGroupMembersNeedReconcileWithNodes(group.members, tsoNodes) {
 			continue
 		}
-		if numExistMembers < mcs.DefaultKeyspaceGroupReplicaCount {
-			nodes, err := m.reconcileNodesForKeyspaceGroup(ctx, group.id)
-			if err != nil {
-				log.Warn("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.id), zap.Error(err))
-				needRetry = true
-				continue
+		allocatedNodes, err := m.reconcileNodesForKeyspaceGroup(ctx, group.id)
+		if err != nil {
+			if !m.isKeyspaceGroupReconcileTermActive(ctx, term) {
+				return false
 			}
-			if nodes != nil {
-				log.Info("alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.id), zap.Any("nodes", nodes))
+			log.Warn("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.id), zap.Error(err))
+			needRetry = true
+			if shouldAbortKeyspaceGroupReconcile(err) {
+				return true
 			}
+			continue
+		}
+		if allocatedNodes != nil {
+			log.Info("alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.id), zap.Any("nodes", allocatedNodes))
 		}
 	}
 	return needRetry
 }
 
+// shouldAbortKeyspaceGroupReconcile reports whether an error affects the whole batch.
+func shouldAbortKeyspaceGroupReconcile(err error) bool {
+	if goerrors.Is(err, errs.ErrEtcdKVGet) ||
+		goerrors.Is(err, context.Canceled) ||
+		goerrors.Is(err, context.DeadlineExceeded) ||
+		goerrors.Is(err, errs.ErrNoAvailableNode) {
+		return true
+	}
+	_, ok := status.FromError(err)
+	return ok
+}
+
 func (m *GroupManager) isKeyspaceGroupReconcileTermActive(ctx context.Context, term uint64) bool {
-	select {
-	case <-ctx.Done():
+	if ctx.Err() != nil {
 		return false
-	default:
 	}
 	m.RLock()
 	defer m.RUnlock()
@@ -693,17 +704,21 @@ func (m *GroupManager) applyKeyspaceGroupMembershipDelete(term uint64, kv *mvccp
 }
 
 func (m *GroupManager) keyspaceGroupMembersNeedReconcile(members []endpoint.KeyspaceGroupMember) bool {
-	if m.GetNodesCount() == 0 {
+	return keyspaceGroupMembersNeedReconcileWithNodes(members, m.nodesBalancer.GetAll())
+}
+
+func keyspaceGroupMembersNeedReconcileWithNodes(members []endpoint.KeyspaceGroupMember, nodes []string) bool {
+	if len(nodes) == 0 {
 		return false
 	}
 	existMembers := make(map[string]struct{}, len(members))
 	for _, member := range members {
-		if exist, addr := m.IsExistNode(member.Address); exist {
+		if exist, addr := findEquivalentNode(nodes, member.Address); exist {
 			existMembers[addr] = struct{}{}
 		}
 	}
 	numExistMembers := len(existMembers)
-	if numExistMembers != 0 && numExistMembers == len(members) && numExistMembers == m.GetNodesCount() {
+	if numExistMembers != 0 && numExistMembers == len(members) && numExistMembers == len(nodes) {
 		return false
 	}
 	return numExistMembers < mcs.DefaultKeyspaceGroupReplicaCount
@@ -1318,6 +1333,7 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithOptions(
 	defer m.Unlock()
 	ctx, cancel := context.WithTimeout(operationCtx, allocNodesTimeout)
 	defer cancel()
+	failpoint.Inject("cancelAllocNodesContext", func() { cancel() })
 	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
 
@@ -1340,14 +1356,15 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithOptions(
 			return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(id)
 		}
 		if revalidateMembers {
+			tsoNodes := m.nodesBalancer.GetAll()
 			existMembers = make(map[string]struct{}, len(kg.Members))
 			for _, member := range kg.Members {
-				if exist, addr := m.IsExistNode(member.Address); exist {
+				if exist, addr := findEquivalentNode(tsoNodes, member.Address); exist {
 					existMembers[addr] = struct{}{}
 				}
 			}
 			numExistMembers := len(existMembers)
-			if (numExistMembers != 0 && numExistMembers == len(kg.Members) && numExistMembers == m.GetNodesCount()) ||
+			if (numExistMembers != 0 && numExistMembers == len(kg.Members) && numExistMembers == len(tsoNodes)) ||
 				numExistMembers >= desiredReplicaCount {
 				return nil
 			}
@@ -1363,7 +1380,7 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithOptions(
 		for len(existMembers) < desiredReplicaCount {
 			select {
 			case <-ctx.Done():
-				return nil
+				return ctx.Err()
 			case <-ticker.C:
 			}
 			if m.GetNodesCount() == 0 { // double check
@@ -1489,7 +1506,10 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 
 // IsExistNode checks if the node exists.
 func (m *GroupManager) IsExistNode(addr string) (bool, string) {
-	nodes := m.nodesBalancer.GetAll()
+	return findEquivalentNode(m.nodesBalancer.GetAll(), addr)
+}
+
+func findEquivalentNode(nodes []string, addr string) (bool, string) {
 	for _, node := range nodes {
 		if typeutil.EqualBaseURLs(node, addr) {
 			return true, node
