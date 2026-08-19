@@ -123,6 +123,29 @@ func TestRegionSizeTreeRebuildsAndScansInBatches(t *testing.T) {
 	require.Nil(t, regions.sizeTree.Load())
 }
 
+func TestRegionSizeTreeResetInvalidatesLockedQuery(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	regions.PutRegion(newRegionSizeTreeTestRegion(1, "a", "z", 1, 10))
+	tree := startRegionSizeTreeForTest(t, regions)
+
+	// Model a query that has acquired the size-tree read lock and passed its
+	// initial readiness check. Reset invalidates the result immediately, but the
+	// worker cannot clear the tree until the query releases its read lock.
+	tree.mu.RLock()
+	re.True(tree.isReady())
+	resetDone := make(chan struct{})
+	go func() {
+		regions.ResetRegionCache()
+		close(resetDone)
+	}()
+	re.Eventually(func() bool { return !tree.isReady() }, 5*time.Second, 10*time.Millisecond)
+	re.Equal(int64(10), tree.getRegionSizeByRangeLocked([]byte("a"), []byte("z")))
+	re.False(tree.isReady())
+	tree.mu.RUnlock()
+	<-resetDone
+}
+
 func TestRegionSizeTreeCanceledRebuildIsNeverReady(t *testing.T) {
 	regions := NewRegionsInfo()
 	regionCount := ScanRegionLimit + 1
@@ -354,7 +377,7 @@ func TestRegionSizeTreeDelayedChildNotificationsDoNotRemoveMergedRegion(t *testi
 	tree.drain()
 
 	re.Equal(1, regionSizeTreeLengthForTest(tree))
-	re.Equal(int64(120), tree.getRegionSizeByRange(nil, nil))
+	re.Equal(int64(120), regionSizeTreeSizeForTest(tree))
 }
 
 func TestRegionSizeTreeCoalescesRemoveAndSameIDReplacement(t *testing.T) {
@@ -382,7 +405,7 @@ func TestRegionSizeTreeCoalescesRemoveAndSameIDReplacement(t *testing.T) {
 	tree.drain()
 
 	re.Equal(1, regionSizeTreeLengthForTest(tree))
-	re.Equal(int64(40), tree.getRegionSizeByRange(nil, nil))
+	re.Equal(int64(40), regionSizeTreeSizeForTest(tree))
 }
 
 func TestRegionSizeTreeConvergesAfterCoalescedOverlapReplacementRemoval(t *testing.T) {
@@ -443,7 +466,7 @@ func TestRegionSizeTreeConvergesAfterCoalescedOverlapReplacementRemoval(t *testi
 			re.Nil(regions.GetRegion(replacement.GetID()))
 			tree.drain()
 			re.Zero(regionSizeTreeLengthForTest(tree))
-			re.Zero(tree.getRegionSizeByRange(nil, nil))
+			re.Zero(regionSizeTreeSizeForTest(tree))
 		})
 	}
 }
@@ -521,6 +544,12 @@ func regionSizeTreeLengthForTest(tree *regionSizeTree) int {
 	tree.mu.RLock()
 	defer tree.mu.RUnlock()
 	return tree.tree.Len()
+}
+
+func regionSizeTreeSizeForTest(tree *regionSizeTree) int64 {
+	tree.mu.RLock()
+	defer tree.mu.RUnlock()
+	return tree.getRegionSizeByRangeLocked(nil, nil)
 }
 
 func newRegionSizeTreeTestRegion(id uint64, startKey, endKey string, version uint64, size int64) *RegionInfo {

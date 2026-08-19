@@ -2337,8 +2337,8 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 // Regions intersecting [startKey, endKey) and whether the eventually
 // consistent index is ready.
 func (r *RegionsInfo) GetRegionSizeByRangeFromSizeTree(startKey, endKey []byte) (int64, bool) {
-	if sizeTree := r.sizeTree.Load(); sizeTree != nil && sizeTree.isReady() {
-		return sizeTree.getRegionSizeByRange(startKey, endKey), true
+	if sizeTree := r.sizeTree.Load(); sizeTree != nil {
+		return sizeTree.getRegionSizeByRange(startKey, endKey)
 	}
 	return 0, false
 }

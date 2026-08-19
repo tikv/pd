@@ -1959,7 +1959,10 @@ func TestPreparingRegionSizeUsesRegionSizeTree(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster := &RaftCluster{ctx: ctx, BasicCluster: core.NewBasicCluster()}
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.SetServiceIndependent(mcsconstant.SchedulingServiceName)
 	peer := &metapb.Peer{Id: 1, StoreId: 1}
 	region := core.NewRegionInfo(&metapb.Region{
 		Id:       1,
@@ -1967,7 +1970,7 @@ func TestPreparingRegionSizeUsesRegionSizeTree(t *testing.T) {
 		EndKey:   []byte("z"),
 		Peers:    []*metapb.Peer{peer},
 	}, peer, core.SetApproximateSize(10))
-	cluster.PutRegion(region)
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
 	result := cluster.getPreparingRegionSize(nil, nil)
 	re.Equal(int64(10), result.size)
 	re.True(result.available)
@@ -1980,8 +1983,7 @@ func TestPreparingRegionSizeUsesRegionSizeTree(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 
 	updated := region.Clone(core.SetApproximateSize(40))
-	_, err := cluster.CheckAndPutRootTree(core.ContextTODO(), updated)
-	re.NoError(err)
+	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), updated))
 	re.Equal(int64(40), cluster.GetRegionSizeByRange(nil, nil))
 	result = cluster.getPreparingRegionSize(nil, nil)
 	re.Equal(int64(40), result.size)

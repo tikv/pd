@@ -378,34 +378,32 @@ func (t *regionSizeTree) reset() {
 	t.regions = make(map[uint64]*regionSizeItem)
 }
 
-func (t *regionSizeTree) getRegionSizeByRange(startKey, endKey []byte) int64 {
-	var size int64
-	for {
-		t.mu.RLock()
-		var count int
-		start := &regionSizeItem{startKey: startKey}
-		startItem := t.findLocked(start)
-		if startItem == nil {
-			startItem = start
-		}
-		t.tree.AscendGreaterOrEqual(startItem, func(item *regionSizeItem) bool {
-			if len(endKey) > 0 && bytes.Compare(item.startKey, endKey) >= 0 {
-				return false
-			}
-			if count >= ScanRegionLimit {
-				return false
-			}
-			count++
-			startKey = item.endKey
-			size += item.size
-			return true
-		})
-		// Let reconciliations proceed between chunks. A query can therefore observe
-		// multiple index versions, which is acceptable for approximate statistics.
-		t.mu.RUnlock()
-		if count == 0 || len(startKey) == 0 {
-			break
-		}
+func (t *regionSizeTree) getRegionSizeByRange(startKey, endKey []byte) (int64, bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if !t.isReady() {
+		return 0, false
 	}
+	size := t.getRegionSizeByRangeLocked(startKey, endKey)
+	if !t.isReady() {
+		return 0, false
+	}
+	return size, true
+}
+
+func (t *regionSizeTree) getRegionSizeByRangeLocked(startKey, endKey []byte) int64 {
+	var size int64
+	start := &regionSizeItem{startKey: startKey}
+	startItem := t.findLocked(start)
+	if startItem == nil {
+		startItem = start
+	}
+	t.tree.AscendGreaterOrEqual(startItem, func(item *regionSizeItem) bool {
+		if len(endKey) > 0 && bytes.Compare(item.startKey, endKey) >= 0 {
+			return false
+		}
+		size += item.size
+		return true
+	})
 	return size
 }
