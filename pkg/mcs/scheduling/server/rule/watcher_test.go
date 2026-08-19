@@ -265,4 +265,27 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
 	re.True(rw.ruleRevisionContinuous)
 	re.Equal([]string{"z2"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
+
+	mismatchedGroupValue, err := json.Marshal(&placement.RuleGroup{ID: "payload"})
+	re.NoError(err)
+	_, err = client.Put(ctx, keypath.RuleGroupIDPath("storage"), string(mismatchedGroupValue))
+	re.NoError(err)
+	_, err = rw.reconcileRuleSnapshot(ctx)
+	re.ErrorContains(err, "placement rule group snapshot key does not match payload identity")
+	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
+	re.Nil(ruleManager.GetRuleGroup("payload"))
+
+	mismatchedRule := &placement.Rule{GroupID: "payload", ID: "rule", Role: placement.Learner, Count: 1}
+	mismatchedRuleValue, err := json.Marshal(mismatchedRule)
+	re.NoError(err)
+	storageRule := &placement.Rule{GroupID: "storage", ID: "rule"}
+	_, err = client.Txn(ctx).Then(
+		clientv3.OpDelete(keypath.RuleGroupIDPath("storage")),
+		clientv3.OpPut(keypath.RuleKeyPath(storageRule.StoreKey()), string(mismatchedRuleValue)),
+	).Commit()
+	re.NoError(err)
+	_, err = rw.reconcileRuleSnapshot(ctx)
+	re.ErrorContains(err, "placement rule snapshot key does not match payload identity")
+	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
+	re.Nil(ruleManager.GetRule("payload", "rule"))
 }

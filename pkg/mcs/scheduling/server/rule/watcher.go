@@ -265,6 +265,9 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				if err != nil {
 					return fmt.Errorf("failed to load placement rule group snapshot at key %q: %w", item.Key, err)
 				}
+				if !bytes.Equal([]byte(group.ID), item.Key[len(groupPrefix):]) {
+					return fmt.Errorf("placement rule group snapshot key does not match payload identity: %q", item.Key)
+				}
 				old := changes[i].old
 				if old != nil && old.ID == group.ID && old.Index == group.Index && old.Override == group.Override {
 					continue
@@ -341,6 +344,9 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 				rule, err := placement.NewRuleFromJSON(item.Value)
 				if err != nil {
 					return fmt.Errorf("failed to load placement rule snapshot at key %q: %w", item.Key, err)
+				}
+				if !bytes.Equal([]byte(rule.StoreKey()), item.Key[len(rulePrefix):]) {
+					return fmt.Errorf("placement rule snapshot key does not match payload identity: %q", item.Key)
 				}
 				if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
 					return fmt.Errorf("failed to adjust placement rule snapshot at key %q: %w", item.Key, err)
@@ -475,9 +481,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		defer rw.ruleManager.Unlock()
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			applyFailed = true
-			if len(events) > 0 {
-				rw.ruleRevisionContinuous = false
-			}
+			rw.ruleRevisionContinuous = false
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
 		}
