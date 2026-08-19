@@ -59,3 +59,17 @@ func TestUnaryRPCsReturnUnavailableWhenServerIsNotRunning(t *testing.T) {
 	require.Nil(t, minTS)
 	require.Equal(t, codes.Unavailable, status.Code(err))
 }
+
+func TestResolveServingRevision(t *testing.T) {
+	revision, loaded := resolveServingRevision(10, 12, 8)
+	require.Equal(t, uint64(12), revision)
+	require.True(t, loaded)
+
+	revision, loaded = resolveServingRevision(10, 8, 12)
+	require.Equal(t, uint64(10), revision)
+	require.True(t, loaded)
+
+	revision, loaded = resolveServingRevision(12, 8, 10)
+	require.Equal(t, uint64(8), revision)
+	require.False(t, loaded)
+}

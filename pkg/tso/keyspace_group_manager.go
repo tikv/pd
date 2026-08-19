@@ -117,6 +117,8 @@ type state struct {
 	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modRevision uint64
+	// snapshotRevision is the latest etcd revision fully covered by the loaded keyspace group snapshot.
+	snapshotRevision uint64
 }
 
 func (s *state) initialize() {
@@ -176,6 +178,20 @@ func (s *state) getModRevision() uint64 {
 	s.RLock()
 	defer s.RUnlock()
 	return s.modRevision
+}
+
+func (s *state) setSnapshotRevision(snapshotRevision uint64) {
+	s.Lock()
+	defer s.Unlock()
+	s.snapshotRevision = max(s.snapshotRevision, snapshotRevision)
+}
+
+// GetSnapshotRevision returns the latest etcd revision fully covered by the loaded keyspace group snapshot.
+// Read it before the group state so a newly published revision cannot be paired with an older snapshot.
+func (s *state) GetSnapshotRevision() uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	return s.snapshotRevision
 }
 
 // getSplittingGroups returns the IDs of the splitting keyspace groups.
@@ -543,10 +559,12 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
+	maxLoadedModRevision := uint64(0)
 	loadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		modRevision := uint64(kv.ModRevision)
 		if loadedModRevision > 0 && modRevision <= loadedModRevision {
+			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 			return nil
 		}
 		group := &endpoint.KeyspaceGroup{}
@@ -559,6 +577,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
+		maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -604,6 +623,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
 		func([]*clientv3.Event) error {
+			maxLoadedModRevision = 0
 			loadedModRevision = kgm.getModRevision()
 			return nil
 		},
@@ -614,8 +634,11 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	)
 	kgm.groupWatcher.SetReconcileDeletedKeys()
 	kgm.groupWatcher.SetLoadSuccessFn(func(snapshotRevision int64) {
+		if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
+		}
 		if snapshotRevision > 0 {
-			kgm.SetModRevision(uint64(snapshotRevision))
+			kgm.setSnapshotRevision(uint64(snapshotRevision))
 		}
 	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {

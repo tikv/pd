@@ -230,12 +230,16 @@ func (suite *keyspaceGroupManagerTestSuite) TestInitialLoadSetsModRevision() {
 	resp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(groupID))
 	re.NoError(err)
 	re.Len(resp.Kvs, 1)
+	advanceResp, err := suite.etcdClient.Put(suite.ctx, fmt.Sprintf("/tso-test-revision/%d", rand.Uint64()), "")
+	re.NoError(err)
+	re.Greater(advanceResp.Header.Revision, resp.Kvs[0].ModRevision)
 
 	re.NoError(mgr.Initialize())
 	_, _, loadedGroupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(keyspaceID)
 	re.NoError(err)
 	re.Equal(groupID, loadedGroupID)
 	re.Equal(uint64(resp.Kvs[0].ModRevision), loadedRevision)
+	re.GreaterOrEqual(mgr.GetSnapshotRevision(), uint64(advanceResp.Header.Revision))
 }
 
 func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMembership() {
@@ -300,7 +304,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMem
 		return mgr.kgs[2] == nil &&
 			!keyspaceExists &&
 			mgr.kgs[3] == unchangedGroup &&
-			mgr.modRevision == uint64(deleteResp.Header.Revision)
+			mgr.modRevision == uint64(resp.Header.Revision) &&
+			mgr.snapshotRevision >= uint64(deleteResp.Header.Revision)
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
