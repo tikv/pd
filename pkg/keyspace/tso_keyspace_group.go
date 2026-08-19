@@ -1182,6 +1182,9 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if slice.Contains(mergeList, constant.DefaultKeyspaceGroupID) {
 		return errs.ErrModifyDefaultKeyspaceGroup
 	}
+	if slice.Contains(mergeList, mergeTargetID) {
+		return errors.Errorf("keyspace group %d cannot be both merge target and source", mergeTargetID)
+	}
 	var (
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup

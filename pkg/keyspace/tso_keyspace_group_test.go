@@ -608,6 +608,12 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{constant.DefaultKeyspaceGroupID})
 	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
+	// merge target cannot also be deleted as a merge source
+	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{1})
+	re.ErrorContains(err, "cannot be both merge target and source")
+	kg1, err = suite.kgm.GetKeyspaceGroupByID(1)
+	re.NoError(err)
+	re.NotNil(kg1)
 }
 
 func TestBuildSplitKeyspaces(t *testing.T) {

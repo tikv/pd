@@ -117,10 +117,10 @@ type state struct {
 	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modRevision uint64
-	// revisionPending prevents publishing changed membership before its revision.
-	revisionPending bool
-	// pendingRevision is the newest applied membership revision waiting to be published.
-	pendingRevision uint64
+	// revisionFence is the minimum revision that can publish the current membership.
+	// Zero means no unpublished change. Synthetic changes use one because real etcd
+	// revisions are always positive.
+	revisionFence uint64
 }
 
 func (s *state) initialize() {
@@ -169,22 +169,21 @@ func (s *state) getModRevision() uint64 {
 	return s.modRevision
 }
 
-func (s *state) beginRevisionUpdate(modRevision uint64) {
+func (s *state) fenceRevision(modRevision uint64) {
 	s.Lock()
 	defer s.Unlock()
-	s.revisionPending = true
-	s.pendingRevision = max(s.pendingRevision, modRevision)
+	modRevision = max(modRevision, 1)
+	s.revisionFence = max(s.revisionFence, modRevision)
 }
 
-func (s *state) finishRevisionUpdate(modRevision uint64) bool {
+func (s *state) publishRevision(modRevision uint64) bool {
 	s.Lock()
 	defer s.Unlock()
-	if s.pendingRevision > modRevision {
+	if s.revisionFence > modRevision {
 		return false
 	}
 	s.modRevision = max(s.modRevision, modRevision)
-	s.revisionPending = false
-	s.pendingRevision = 0
+	s.revisionFence = 0
 	return true
 }
 
@@ -560,18 +559,13 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
 	loadedModRevision := uint64(0)
-	membershipChanged := false
-	// A snapshot cannot recover a missing key's deletion revision. Keep this
-	// fence across reloads until a later watch event provides a comparable one.
-	unversionedDeletionPending := false
 	putFn := func(kv *mvccpb.KeyValue) error {
 		modRevision := uint64(kv.ModRevision)
 		if loadedModRevision > 0 && modRevision <= loadedModRevision {
 			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 			return nil
 		}
-		kgm.beginRevisionUpdate(modRevision)
-		membershipChanged = true
+		kgm.fenceRevision(modRevision)
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
@@ -596,9 +590,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			return err
 		}
 		delete(kgm.groupUpdateRetryList, groupID)
-		kgm.beginRevisionUpdate(uint64(kv.ModRevision))
-		membershipChanged = true
-		unversionedDeletionPending = unversionedDeletionPending || kv.ModRevision == 0
+		kgm.fenceRevision(uint64(kv.ModRevision))
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
@@ -606,8 +598,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
-			kgm.beginRevisionUpdate(0)
-			membershipChanged = true
 			kgm.updateKeyspaceGroup(group)
 		}
 	}
@@ -629,13 +619,11 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		}
 		last := event[len(event)-1]
 		modRevision := uint64(last.Kv.ModRevision)
-		if !kgm.finishRevisionUpdate(modRevision) {
+		if !kgm.publishRevision(modRevision) {
 			log.Warn("watch keyspace group met mod revision not increased",
 				zap.Uint64("current-mod-revision", kgm.getModRevision()),
 				zap.Uint64("new-mod-revision", modRevision),
 			)
-		} else {
-			unversionedDeletionPending = false
 		}
 		return nil
 	}
@@ -649,9 +637,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		func(events []*clientv3.Event) error {
 			maxLoadedModRevision = 0
 			loadedModRevision = kgm.getModRevision()
-			membershipChanged = false
 			if len(events) > 0 {
-				kgm.beginRevisionUpdate(uint64(events[len(events)-1].Kv.ModRevision))
+				kgm.fenceRevision(uint64(events[len(events)-1].Kv.ModRevision))
 			}
 			return nil
 		},
@@ -663,26 +650,14 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	kgm.groupWatcher.SetReconcileDeletedKeys()
 	kgm.groupWatcher.SetLoadSuccessFn(func() {
 		retryGroups()
-		if !membershipChanged {
-			return
-		}
 		if len(kgm.groupUpdateRetryList) > 0 {
 			log.Warn("keyspace group revision remains pending while updates need retry",
 				zap.Int("retry-group-count", len(kgm.groupUpdateRetryList)))
 			return
 		}
-		if unversionedDeletionPending {
-			log.Warn("keyspace group snapshot reconciled a deletion without its revision",
-				zap.Uint64("current-mod-revision", loadedModRevision))
-			return
-		}
 		if maxLoadedModRevision > loadedModRevision {
-			kgm.finishRevisionUpdate(maxLoadedModRevision)
-			return
+			kgm.publishRevision(maxLoadedModRevision)
 		}
-		log.Warn("keyspace group snapshot changed without a newer membership revision",
-			zap.Uint64("current-mod-revision", loadedModRevision),
-			zap.Uint64("loaded-mod-revision", maxLoadedModRevision))
 	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
@@ -1154,7 +1129,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	kgm.RLock()
 	defer kgm.RUnlock()
-	if kgm.revisionPending {
+	if kgm.revisionFence != 0 {
 		return nil, nil, constant.DefaultKeyspaceGroupID, kgm.modRevision, errs.ErrKeyspaceGroupModRevisionStale
 	}
 	return kgm.getKeyspaceGroupMetaWithCheckLocked(keyspaceID, constant.DefaultKeyspaceGroupID)
