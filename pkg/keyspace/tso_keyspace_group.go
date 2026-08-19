@@ -513,24 +513,16 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 }
 
 func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint64) error {
-	loading := false
+	var (
+		loading             bool
+		initialLoadComplete bool
+	)
 	compiledGroupIDPattern := keypath.GetCompiledKeyspaceGroupIDRegexp()
 	putFn := func(kv *mvccpb.KeyValue) error {
-		if !loading {
-			reconcileState, err := decodeKeyspaceGroupReconcileState(kv.Value)
-			if err != nil {
-				return err
-			}
-			if m.updateWatchedKeyspaceGroupReconcileState(term, reconcileState) {
-				return nil
-			}
-		}
-		group := &endpoint.KeyspaceGroup{}
-		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err)
-		}
-		m.putWatchedKeyspaceGroup(term, group)
-		return nil
+		// Only the initial term load owns the full serving cache. Later reloads
+		// must preserve Keyspaces that local writes may have advanced past the
+		// reload's pinned snapshot revision.
+		return m.applyWatchedKeyspaceGroupValue(term, kv.Value, !loading || initialLoadComplete)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		match := compiledGroupIDPattern.FindSubmatch(kv.Key)
@@ -568,11 +560,32 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
+	watcher.SetInitialLoadSuccessFn(func() {
+		initialLoadComplete = true
+	})
 	// The keyspace group count is bounded, so retaining watched keys lets a
 	// compaction reload remove groups that disappeared while events were missed.
 	watcher.SetReconcileDeletedKeys()
 	watcher.StartWatchLoop()
 	return watcher.WaitLoad()
+}
+
+func (m *GroupManager) applyWatchedKeyspaceGroupValue(term uint64, value []byte, preserveKeyspaces bool) error {
+	if preserveKeyspaces {
+		reconcileState, err := decodeKeyspaceGroupReconcileState(value)
+		if err != nil {
+			return err
+		}
+		if m.updateWatchedKeyspaceGroupReconcileState(term, reconcileState) {
+			return nil
+		}
+	}
+	group := &endpoint.KeyspaceGroup{}
+	if err := json.Unmarshal(value, group); err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err)
+	}
+	m.putWatchedKeyspaceGroup(term, group)
+	return nil
 }
 
 // decodeKeyspaceGroupReconcileState stops after Members. Persisted groups keep
@@ -1607,17 +1620,18 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 // MergeAllIntoDefaultKeyspaceGroup merges all other keyspace groups into the default keyspace group.
 func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 	defer logutil.LogPanic()
+	groupsByUserKind := m.snapshotKeyspaceGroupIDs()
 	// Since we don't take the default keyspace group into account,
 	// the number of unmerged keyspace groups is -1.
 	unmergedGroupNum := -1
 	// Calculate the total number of keyspace groups to merge.
-	for _, groups := range m.groups {
-		unmergedGroupNum += groups.Len()
+	for _, groupIDs := range groupsByUserKind {
+		unmergedGroupNum += len(groupIDs)
 	}
 	mergedGroupNum := 0
 	// Start to merge all keyspace groups into the default one.
-	for userKind, groups := range m.groups {
-		mergeNum := groups.Len()
+	for userKind, groupIDs := range groupsByUserKind {
+		mergeNum := len(groupIDs)
 		log.Info("start to merge all keyspace groups into the default one",
 			zap.Stringer("user-kind", userKind),
 			zap.Int("merge-num", mergeNum),
@@ -1630,9 +1644,9 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			maxBatchSize  = etcdutil.MaxEtcdTxnOps/2 - 1
 			groupsToMerge = make([]uint32, 0, maxBatchSize)
 		)
-		for idx, group := range groups.GetAll() {
-			if group.ID != constant.DefaultKeyspaceGroupID {
-				groupsToMerge = append(groupsToMerge, group.ID)
+		for idx, groupID := range groupIDs {
+			if groupID != constant.DefaultKeyspaceGroupID {
+				groupsToMerge = append(groupsToMerge, groupID)
 			}
 			if len(groupsToMerge) == 0 ||
 				(len(groupsToMerge) < maxBatchSize && idx < mergeNum-1) {
@@ -1701,6 +1715,20 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 		zap.Int("merged-group-num", mergedGroupNum),
 		zap.Int("unmerged-group-num", unmergedGroupNum))
 	return nil
+}
+
+func (m *GroupManager) snapshotKeyspaceGroupIDs() map[endpoint.UserKind][]uint32 {
+	m.RLock()
+	defer m.RUnlock()
+	groupsByUserKind := make(map[endpoint.UserKind][]uint32, len(m.groups))
+	for userKind, groups := range m.groups {
+		groupIDs := make([]uint32, 0, groups.Len())
+		for _, group := range groups.GetAll() {
+			groupIDs = append(groupIDs, group.ID)
+		}
+		groupsByUserKind[userKind] = groupIDs
+	}
+	return groupsByUserKind
 }
 
 // GetKeyspaceGroupPrimaryByID returns the primary node of the keyspace group by ID.

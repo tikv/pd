@@ -289,6 +289,80 @@ func TestKeyspaceGroupWatcherRejectsPreviousTermUpdates(t *testing.T) {
 	re.Nil(got)
 }
 
+func TestApplyWatchedKeyspaceGroupValuePreservesKeyspaces(t *testing.T) {
+	re := require.New(t)
+	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
+	defer manager.Close()
+	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
+
+	cachedGroup := &endpoint.KeyspaceGroup{
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces: []uint32{42, 43},
+	}
+	manager.putWatchedKeyspaceGroup(term, cachedGroup)
+	snapshotGroup := &endpoint.KeyspaceGroup{
+		ID:        cachedGroup.ID,
+		UserKind:  endpoint.Enterprise.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-2"}},
+		Keyspaces: []uint32{42},
+	}
+	payload, err := json.Marshal(snapshotGroup)
+	re.NoError(err)
+	re.NoError(manager.applyWatchedKeyspaceGroupValue(term, payload, true))
+
+	manager.RLock()
+	got := manager.groups[endpoint.Enterprise].Get(cachedGroup.ID)
+	old := manager.groups[endpoint.Standard].Get(cachedGroup.ID)
+	manager.RUnlock()
+	re.NotNil(got)
+	re.Equal(cachedGroup.Keyspaces, got.Keyspaces)
+	re.Equal(snapshotGroup.Members, got.Members)
+	re.Nil(old)
+
+	newGroup := &endpoint.KeyspaceGroup{
+		ID:        2,
+		UserKind:  endpoint.Standard.String(),
+		Keyspaces: []uint32{44},
+	}
+	payload, err = json.Marshal(newGroup)
+	re.NoError(err)
+	re.NoError(manager.applyWatchedKeyspaceGroupValue(term, payload, true))
+	manager.RLock()
+	got = manager.groups[endpoint.Standard].Get(newGroup.ID)
+	manager.RUnlock()
+	re.NotNil(got)
+	re.Equal(newGroup.Keyspaces, got.Keyspaces)
+}
+
+func TestSnapshotKeyspaceGroupIDsConcurrentWatcherUpdates(t *testing.T) {
+	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
+	defer manager.Close()
+	_, term := manager.beginKeyspaceGroupWatchTerm(t.Context())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := range 1000 {
+			group := &endpoint.KeyspaceGroup{
+				ID:       uint32(i%32 + 1),
+				UserKind: endpoint.Standard.String(),
+			}
+			manager.putWatchedKeyspaceGroup(term, group)
+			manager.removeWatchedKeyspaceGroup(term, group.ID)
+		}
+	}()
+	for range 1000 {
+		for _, groupIDs := range manager.snapshotKeyspaceGroupIDs() {
+			for _, groupID := range groupIDs {
+				require.LessOrEqual(t, groupID, uint32(32))
+			}
+		}
+	}
+	<-done
+}
+
 type keyspaceGroupTestSuite struct {
 	suite.Suite
 	ctx    context.Context
