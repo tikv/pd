@@ -202,6 +202,19 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		}
 	}
 	statsMap.Collect()
+	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
+	// GetStoresLimit() snapshot, taken independently of stores above and with
+	// no cluster reference of its own to re-check against. Reuse the stores
+	// snapshot already captured here to catch and undo it for any store
+	// that's gone by now, the same way the loop above does for the other
+	// per-store metrics.
+	for _, s := range stores {
+		if sc.GetStore(s.GetID()) == nil {
+			id := strconv.FormatUint(s.GetID(), 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+		}
+	}
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	sc.coordinator.CollectHotSpotMetrics()
 	if sc.regionStats == nil {
