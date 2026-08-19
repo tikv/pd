@@ -62,14 +62,7 @@ const (
 type regionTree struct {
 	tree *btree.BTreeG[*regionItem]
 	// Statistics
-	totalSize int64
-	// nonEmptyTotalSize and nonEmptyRegionsCnt mirror totalSize/length but
-	// exclude empty regions (approximateSize <= EmptyRegionApproximateSize),
-	// backing GetNonEmptyAverageRegionSize so it can reflect only regions
-	// that actually hold data instead of being diluted by a large number of
-	// freshly-split, unwritten regions.
-	nonEmptyTotalSize   int64
-	nonEmptyRegionsCnt  int
+	totalSize           int64
 	totalWriteBytesRate float64
 	totalWriteKeysRate  float64
 	// count the number of regions that not loaded from storage.
@@ -82,8 +75,6 @@ func newRegionTree() *regionTree {
 	return &regionTree{
 		tree:                     btree.NewG[*regionItem](defaultBTreeDegree),
 		totalSize:                0,
-		nonEmptyTotalSize:        0,
-		nonEmptyRegionsCnt:       0,
 		totalWriteBytesRate:      0,
 		totalWriteKeysRate:       0,
 		notFromStorageRegionsCnt: 0,
@@ -94,8 +85,6 @@ func newRegionTreeWithCountRef() *regionTree {
 	return &regionTree{
 		tree:                     btree.NewG[*regionItem](defaultBTreeDegree),
 		totalSize:                0,
-		nonEmptyTotalSize:        0,
-		nonEmptyRegionsCnt:       0,
 		totalWriteBytesRate:      0,
 		totalWriteKeysRate:       0,
 		notFromStorageRegionsCnt: 0,
@@ -185,10 +174,6 @@ func (t *regionTree) updateRef(origin, region *RegionInfo) {
 func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*RegionInfo) []*RegionInfo {
 	region := item.RegionInfo
 	t.totalSize += region.approximateSize
-	if region.approximateSize > EmptyRegionApproximateSize {
-		t.nonEmptyTotalSize += region.approximateSize
-		t.nonEmptyRegionsCnt++
-	}
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
@@ -216,10 +201,6 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 			logutil.ZapRedactStringer("delete-region", RegionToHexMeta(old.GetMeta())),
 			logutil.ZapRedactStringer("update-region", RegionToHexMeta(region.GetMeta())))
 		t.totalSize -= old.approximateSize
-		if old.approximateSize > EmptyRegionApproximateSize {
-			t.nonEmptyTotalSize -= old.approximateSize
-			t.nonEmptyRegionsCnt--
-		}
 		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
 		t.totalWriteBytesRate -= regionWriteBytesRate
 		t.totalWriteKeysRate -= regionWriteKeysRate
@@ -237,19 +218,11 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 // updateStat is used to update statistics when RegionInfo is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	t.totalSize += region.approximateSize
-	if region.approximateSize > EmptyRegionApproximateSize {
-		t.nonEmptyTotalSize += region.approximateSize
-		t.nonEmptyRegionsCnt++
-	}
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 
 	t.totalSize -= origin.approximateSize
-	if origin.approximateSize > EmptyRegionApproximateSize {
-		t.nonEmptyTotalSize -= origin.approximateSize
-		t.nonEmptyRegionsCnt--
-	}
 	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
@@ -279,10 +252,6 @@ func (t *regionTree) remove(region *RegionInfo) {
 	}
 
 	t.totalSize -= result.GetApproximateSize()
-	if result.GetApproximateSize() > EmptyRegionApproximateSize {
-		t.nonEmptyTotalSize -= result.GetApproximateSize()
-		t.nonEmptyRegionsCnt--
-	}
 	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate

@@ -109,7 +109,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		sourceDelta := influence - tolerantResource
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - tolerantResource
+		sourceDelta := influence*influenceAmp - p.getRegionScoreDelta()
 		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
@@ -139,14 +139,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		targetDelta := influence + tolerantResource
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
-		// tolerantResource already represents "about one region's worth" of
-		// margin (averageRegionSize * ratio). Adding the candidate's own size
-		// on top of it double-counts the same quantity and rejects ordinary
-		// moves between equal-sized regions. Take the larger of the two
-		// instead: fall back to the candidate's real size only when it
-		// exceeds the average-based margin, so a target doesn't look
-		// artificially light just because this move hasn't landed yet.
-		targetDelta := influence*influenceAmp + max(tolerantResource, p.Region.GetApproximateSize())
+		targetDelta := influence*influenceAmp + p.getRegionScoreDelta()
 		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
@@ -167,13 +160,20 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 	shouldBalance := p.sourceScore > p.targetScore
 
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
+		// For RegionKind, the delta actually applied to sourceScore/targetScore
+		// is getRegionScoreDelta(), not the bare tolerant margin, whenever the
+		// candidate region is larger than that margin — log the value that
+		// actually drove the decision instead of the one that may not have.
+		tolerantResource := p.getTolerantResource()
+		if p.kind.Resource == constant.RegionKind {
+			tolerantResource = p.getRegionScoreDelta()
+		}
 		log.Debug("skip balance "+p.kind.Resource.String(),
 			zap.String("scheduler", scheduleName), zap.Uint64("region-id", p.Region.GetID()), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID),
 			zap.Int64("source-size", p.Source.GetRegionSize()), zap.Float64("source-score", p.sourceScore),
 			zap.Int64("target-size", p.Target.GetRegionSize()), zap.Float64("target-score", p.targetScore),
 			zap.Int64("average-region-size", p.GetAverageRegionSize()),
-			zap.Int64("non-empty-average-region-size", p.GetNonEmptyAverageRegionSize()),
-			zap.Int64("tolerant-resource", p.getTolerantResource()))
+			zap.Int64("tolerant-resource", tolerantResource))
 	}
 	return shouldBalance
 }
@@ -185,21 +185,24 @@ func (p *solver) getTolerantResource() int64 {
 
 	if (p.kind.Resource == constant.LeaderKind || p.kind.Resource == constant.WitnessKind) && p.kind.Policy == constant.ByCount {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
-	} else if p.kind.Resource == constant.RegionKind {
-		// Use the non-empty average so a cluster full of freshly-split,
-		// unwritten regions doesn't collapse the tolerant margin toward
-		// noise levels. Scoped to RegionKind: this targets balance-region's
-		// size-based churn specifically. LeaderKind/WitnessKind with BySize
-		// keep using the full average below, since a cluster with one large
-		// data region among many empty ones shouldn't have its leader
-		// tolerance dictated by that one region's size.
-		regionSize := p.GetNonEmptyAverageRegionSize()
-		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	} else {
 		regionSize := p.GetAverageRegionSize()
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource
+}
+
+// getRegionScoreDelta returns the delta used to score a candidate move for
+// RegionKind balancing. It is the larger of the general tolerant margin and
+// the candidate region's own size, applied symmetrically to both the source
+// and target side, so a projected post-move comparison isn't skewed by one
+// side knowing the candidate's size and the other not.
+func (p *solver) getRegionScoreDelta() int64 {
+	delta := p.getTolerantResource()
+	if p.Region != nil {
+		delta = max(delta, p.Region.GetApproximateSize())
+	}
+	return delta
 }
 
 func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
