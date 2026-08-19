@@ -184,9 +184,10 @@ func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
 	re.NoError(manager.Bootstrap(t.Context()))
 
 	group := &endpoint.KeyspaceGroup{
-		ID:       1,
-		UserKind: endpoint.Standard.String(),
-		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces: []uint32{42},
 	}
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, group)
