@@ -741,10 +741,14 @@ retryLoop:
 func (gc *groupCostController) onRequestWaitImpl(
 	ctx context.Context, info RequestInfo,
 ) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
+	return gc.onRequestWaitWithDetailImpl(ctx, info, nil)
+}
+
+func (gc *groupCostController) onRequestWaitWithDetailImpl(
+	ctx context.Context, info RequestInfo, detail *RUCalculation,
+) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
 	delta = &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(delta, info)
-	}
+	calculateBeforeKVRequest(gc.calculators, delta, detail, info)
 	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
 
 	gc.mu.Lock()
@@ -796,17 +800,19 @@ func (gc *groupCostController) onRequestWaitImpl(
 func (gc *groupCostController) onResponseImpl(
 	req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
+	return gc.onResponseWithDetailImpl(req, resp, nil)
+}
+
+func (gc *groupCostController) onResponseWithDetailImpl(
+	req RequestInfo, resp ResponseInfo, detail *RUCalculation,
+) (*rmpb.Consumption, error) {
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	if isPagingRead {
 		gc.metrics.observePagingResponse(bytesForEst, resp.ReadBytes())
@@ -835,17 +841,19 @@ func (gc *groupCostController) onResponseImpl(
 func (gc *groupCostController) onResponseWaitImpl(
 	ctx context.Context, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, time.Duration, error) {
+	return gc.onResponseWaitWithDetailImpl(ctx, req, resp, nil)
+}
+
+func (gc *groupCostController) onResponseWaitWithDetailImpl(
+	ctx context.Context, req RequestInfo, resp ResponseInfo, detail *RUCalculation,
+) (*rmpb.Consumption, time.Duration, error) {
 	delta := &rmpb.Consumption{}
-	for _, calc := range gc.calculators {
-		calc.AfterKVRequest(delta, req, resp)
-	}
+	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
 	// `count` is the full per-request consumption (BeforeKVRequest + AfterKVRequest).
 	count := &rmpb.Consumption{}
 	*count = *delta
-	for _, calc := range gc.calculators {
-		calc.BeforeKVRequest(count, req)
-	}
+	calculateBeforeKVRequest(gc.calculators, count, nil, req)
 	bytesForEst, isPagingRead := pagingReadEstimate(req)
 	var waitDuration time.Duration
 	if !gc.burstable.Load() {
