@@ -322,6 +322,13 @@ func ResetStoreStatistics(id string) {
 		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiKV, id)
 		clusterStatusGauge.DeleteLabelValues(m, core.EngineTiFlash, id)
 	}
+	// mcs never cleaned StoreLimitGauge on its own: unlike the classic path's
+	// RemoveStoreLimit, the mcs scheduling service has no store-limit config
+	// of its own to persist a removal for. Deleting it here, alongside
+	// everything else this function already covers, closes that gap for
+	// both classic (redundant with RemoveStoreLimit, harmless) and mcs.
+	StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+	StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
 }
 
 type storeStatisticsMap struct {

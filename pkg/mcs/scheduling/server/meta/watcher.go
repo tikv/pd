@@ -117,6 +117,10 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
+			// Remove the store before the metric cleanup below, not after: see
+			// the matching comment on RaftCluster.deleteStore for why the order
+			// matters for a concurrently-running metrics collection tick.
+			w.basicCluster.DeleteStore(origin)
 			storeIDStr := strconv.FormatUint(storeID, 10)
 			statistics.DeleteClusterStatusMetrics(origin)
 			statistics.ResetStoreStatistics(storeIDStr)
@@ -128,7 +132,6 @@ func (w *Watcher) initializeStoreWatcher() error {
 			if fn := w.onStoreTombstoned.Load(); fn != nil {
 				(*fn)(storeID)
 			}
-			w.basicCluster.DeleteStore(origin)
 			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
 		return nil

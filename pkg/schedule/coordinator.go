@@ -570,6 +570,15 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
 		}
+
+		// stores is a snapshot taken before this loop; if s was fully removed
+		// concurrently, this write can recreate a series DeleteStoreMetrics
+		// already deleted for it, with no later event able to find and remove
+		// it again. Re-checking and redoing the cleanup here closes that race
+		// the same way the per-store statistics collection loop does.
+		if cluster.GetStore(storeID) == nil {
+			DeleteStoreMetrics(storeLabel)
+		}
 	}
 }
 

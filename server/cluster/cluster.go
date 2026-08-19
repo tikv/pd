@@ -2204,6 +2204,14 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
+	// Remove the store before the metric cleanup below, not after: a metrics
+	// collection tick observing this store concurrently re-checks GetStore
+	// right after it writes and undoes its own write if the store is already
+	// gone. If DeleteStore ran last, that re-check could still see the
+	// (already fully cleaned) tombstone entry and skip its own cleanup,
+	// leaving a series this cleanup just deleted with no later event able to
+	// find and remove it again.
+	c.DeleteStore(store)
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
 	statistics.ResetStoreStatistics(storeIDStr)
@@ -2216,7 +2224,6 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	if fn := c.onStoreBuried.Load(); fn != nil {
 		(*fn)(storeIDStr)
 	}
-	c.DeleteStore(store)
 	return nil
 }
 
