@@ -266,6 +266,15 @@ func (l *RegionLabeler) SaveRuleWithoutTxn(rule *LabelRule) {
 	l.ruleIndex.set(rule)
 }
 
+// DeleteRuleWithoutTxn updates the in-memory state for a LabelRule that has
+// already been durably removed by the caller (e.g. as part of a larger
+// transaction), without deleting from storage itself.
+func (l *RegionLabeler) DeleteRuleWithoutTxn(id string) {
+	l.Lock()
+	defer l.Unlock()
+	l.ruleIndex.delete(id)
+}
+
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 	if err := rule.CheckAndAdjust(); err != nil {

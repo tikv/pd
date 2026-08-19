@@ -688,7 +688,7 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 	if m == nil {
 		return nil, nil, nil
 	}
-	groupID, err := strconv.ParseUint(id, 10, 64)
+	groupID, err := strconv.ParseUint(id, 10, 32)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -718,18 +718,28 @@ func (m *GroupManager) updateKeyspaceForGroupTxnOp(userKind endpoint.UserKind, i
 		if err != nil {
 			return
 		}
-		m.Lock()
-		defer m.Unlock()
 		var kg *endpoint.KeyspaceGroup
-		loadErr := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
-			var loadErr error
-			kg, loadErr = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
-			return loadErr
-		})
+		var loadErr error
+		for i := range 3 {
+			loadErr = m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+				var err error
+				kg, err = m.store.LoadKeyspaceGroup(txn, uint32(groupID))
+				return err
+			})
+			if loadErr == nil && kg != nil {
+				break
+			}
+			if i < 2 {
+				time.Sleep(time.Second)
+			}
+		}
 		if loadErr != nil || kg == nil {
-			log.Warn("load keyspace group failed  from storage", zap.Uint64("group-id", groupID), zap.Error(loadErr))
+			log.Error("failed to reload keyspace group into cache after commit, cache may be stale",
+				zap.Uint64("group-id", groupID), zap.Error(loadErr))
 			return
 		}
+		m.Lock()
+		defer m.Unlock()
 		m.groups[userKind].Put(kg)
 	}
 	op := m.saveKeyspaceGroupTxnOp(uint32(groupID), keyspaceID, mutation)

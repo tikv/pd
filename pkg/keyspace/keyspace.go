@@ -226,10 +226,52 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	tracer.OnGetConfigFinished()
 	now := time.Now().Unix()
 	_, err = manager.createKeyspaceWithoutCheck(tracer, config, now)
-	if err != nil && err != errs.ErrKeyspaceExists {
+	if err == nil {
+		return nil
+	}
+	if err != errs.ErrKeyspaceExists {
 		return err
 	}
-	return nil
+	// The reserved keyspace meta already exists (e.g. PD restart): the atomic
+	// creation transaction aborted before reaching the group-membership and
+	// region-label-rule steps, so repair them explicitly here.
+	return manager.repairReservedKeyspace(id)
+}
+
+// repairReservedKeyspace ensures the reserved keyspace's TSO keyspace-group
+// membership and region label rule exist, even when its meta was already
+// created by an earlier Bootstrap call. It repairs against the keyspace's own
+// persisted config (not a freshly computed default), so it cannot move the
+// keyspace to a different group than the one it is actually recorded as
+// belonging to. Both underlying operations are idempotent (SaveRegionRule
+// overwrites unconditionally; the group op is a no-op if the keyspace is
+// already a member), so this is safe to run on every restart.
+func (manager *Manager) repairReservedKeyspace(id uint32) error {
+	meta, err := manager.LoadKeyspaceByID(id)
+	if err != nil {
+		return err
+	}
+	groupID := meta.GetConfig()[TSOKeyspaceGroupIDKey]
+	boundType := keyTypeStringToRegionBoundType(meta.GetConfig()[RegionBoundType])
+
+	txnOps := make([]txnOp, 0, 2)
+	op, _, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opAdd)
+	if err != nil {
+		return err
+	}
+	if op != nil {
+		txnOps = append(txnOps, op)
+	}
+
+	op, _, err = manager.saveKeyspaceRegionLabelerTxnOp(id, boundType)
+	if err != nil {
+		return err
+	}
+	if op != nil {
+		txnOps = append(txnOps, op)
+	}
+
+	return manager.RunTxn(0, txnOps)
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -445,28 +487,50 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 
 // rollbackCreateKeyspace undoes the keyspace meta and region label rule committed
 // by createKeyspaceWithoutCheck when the post-commit wait-for-split or enable step
-// fails. It deliberately does not touch the meta-service group assignment count or
-// the TSO keyspace-group membership committed by the same transaction: leaving
-// those slightly over-counted/stale is an accepted trade-off, since precisely
-// unwinding them here would need to duplicate the locking rules those subsystems
-// already enforce.
+// fails. When a region labeler is available, the meta removal and the label rule
+// removal are committed in the same transaction (region rule storage shares the
+// same kv.Txn as keyspace storage, the same way saveKeyspaceRegionLabelerTxnOp
+// composes them on the create path), so a failure here cannot leave a label rule
+// with no corresponding keyspace meta. If no labeler is configured, no label rule
+// could have been created either (saveKeyspaceRegionLabelerTxnOp requires the
+// same interface), so the meta removal proceeds on its own rather than treating
+// a missing labeler as a hard rollback failure.
+//
+// It deliberately does not touch the meta-service group assignment count or the
+// TSO keyspace-group membership committed by the same transaction: leaving those
+// slightly over-counted/stale is an accepted trade-off, since precisely
+// unwinding them here would need to duplicate the locking rules those
+// subsystems already enforce.
 func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
+	var regionLabeler *labeler.RegionLabeler
+	var ruleID string
+	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
+		regionLabeler = cl.GetRegionLabeler()
+		ruleID = getRegionLabelID(keyspace.GetId())
+	}
+
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		return manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName())
+		if err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName()); err != nil {
+			return err
+		}
+		if regionLabeler == nil {
+			return nil
+		}
+		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
 	})
 	if err != nil {
 		return err
 	}
+
 	manager.metaLock.Lock(keyspace.GetId())
 	manager.keyspaceNameLookup.Delete(keyspace.GetId())
 	manager.keyspaceStateLookup.Delete(keyspace.GetId())
 	manager.metaLock.Unlock(keyspace.GetId())
 
-	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
-	if !ok {
-		return errors.New("cluster does not support region label")
+	if regionLabeler != nil {
+		regionLabeler.DeleteRuleWithoutTxn(ruleID)
 	}
-	return cl.GetRegionLabeler().DeleteLabelRule(getRegionLabelID(keyspace.GetId()))
+	return nil
 }
 
 // runCreateKeyspaceTxn runs the keyspace creation operations in a single
@@ -965,6 +1029,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		)
 		return nil, err
 	}
+	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -974,6 +1039,15 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		zap.String("new-state", newState.String()),
 	)
 	return meta, nil
+}
+
+// storeKeyspaceStateCache updates keyspaceStateLookup for a keyspace whose new
+// state has just been durably committed. Callers must not hold metaLock for id
+// when calling this.
+func (manager *Manager) storeKeyspaceStateCache(id uint32, state keyspacepb.KeyspaceState) {
+	manager.metaLock.Lock(id)
+	defer manager.metaLock.Unlock(id)
+	manager.keyspaceStateLookup.Store(id, state)
 }
 
 // RemoveKeyspace removes the keyspace specified by id if it's in proper state and not protected.
@@ -1030,6 +1104,12 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		if err = manager.transformKeyspaceState(txn, meta, newState, now); err != nil {
 			return err
 		}
+		failpoint.Inject("saveKeyspaceMetaFailed", func() {
+			err = errors.New("failpoint triggered: saveKeyspaceMetaFailed")
+		})
+		if err != nil {
+			return err
+		}
 		return manager.store.SaveKeyspaceMeta(txn, meta)
 	})
 	if err != nil {
@@ -1040,6 +1120,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 		)
 		return nil, err
 	}
+	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
 	log.Info("[keyspace] keyspace state updated",
 		zap.Uint32("keyspace-id", meta.GetId()),
 		zap.String("name", meta.GetName()),
@@ -1072,6 +1153,7 @@ func (manager *Manager) enableNewKeyspace(id uint32, now int64) error {
 	if err != nil {
 		return err
 	}
+	manager.storeKeyspaceStateCache(meta.GetId(), meta.GetState())
 	if manager.mgm != nil {
 		manager.mgm.AttachEndpoints(meta.GetConfig())
 	}
@@ -1125,11 +1207,14 @@ func (manager *Manager) transformKeyspaceState(txn kv.Txn, meta *keyspacepb.Keys
 			return err
 		}
 	}
-	// If the operation is legal, update keyspace state and change time.
+	// If the operation is legal, update keyspace state and change time. The
+	// keyspaceStateLookup cache is deliberately not updated here: this runs
+	// inside the caller's transaction closure, before the transaction is known
+	// to have committed. Callers update the cache themselves once RunInTxn
+	// returns successfully, so a failed commit cannot leave the cache showing a
+	// state that was never durably persisted.
 	meta.State = newState
 	meta.StateChangedAt = now
-	// Update the keyspace state to the cache.
-	manager.keyspaceStateLookup.Store(meta.GetId(), newState)
 	return nil
 }
 

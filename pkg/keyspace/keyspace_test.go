@@ -144,6 +144,40 @@ func (suite *keyspaceTestSuite) TestInitTwice() {
 	re.NoError(manager.initReserveKeyspace(GetBootstrapKeyspaceID(), GetBootstrapKeyspaceName()))
 }
 
+// TestInitReserveKeyspaceRepairsGroupMembership verifies that when the reserved
+// keyspace's meta already exists (e.g. on a restart), initReserveKeyspace still
+// repairs its TSO keyspace-group membership if that was somehow lost, instead of
+// silently returning success once it sees ErrKeyspaceExists.
+func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() {
+	re := suite.Require()
+	manager := suite.manager
+	id := GetBootstrapKeyspaceID()
+
+	meta, err := manager.LoadKeyspaceByID(id)
+	re.NoError(err)
+	groupID := meta.GetConfig()[TSOKeyspaceGroupIDKey]
+	re.NotEmpty(groupID)
+	gid, err := strconv.ParseUint(groupID, 10, 64)
+	re.NoError(err)
+
+	// Simulate the reserved keyspace's group membership having been lost
+	// independently of its meta.
+	op, _, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opDelete)
+	re.NoError(err)
+	re.NoError(manager.RunTxn(uint32(gid), []txnOp{op}))
+	kg, err := manager.kgm.GetKeyspaceGroupByID(uint32(gid))
+	re.NoError(err)
+	re.NotContains(kg.Keyspaces, id)
+
+	// A restart re-runs Bootstrap -> initReserveKeyspace, which should repair the
+	// membership even though the keyspace meta already exists.
+	re.NoError(manager.initReserveKeyspace(id, GetBootstrapKeyspaceName()))
+
+	kg, err = manager.kgm.GetKeyspaceGroupByID(uint32(gid))
+	re.NoError(err)
+	re.Contains(kg.Keyspaces, id)
+}
+
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
 	re := suite.Require()
 	// A manager that waits for the region split during creation, so the
@@ -664,6 +698,40 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfigWithPreconditions() {
 	}, map[string]*string{})
 	re.NoError(err)
 	re.Equal("3000", meta.Config[currentKey])
+}
+
+// TestUpdateKeyspaceStateCacheNotUpdatedOnCommitFailure verifies that
+// keyspaceStateLookup is not updated when the underlying transaction that
+// persists the new state fails to commit: transformKeyspaceState mutates
+// meta.State in memory before the transaction commits, but the cache must
+// only be updated by the caller after RunInTxn actually succeeds.
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceStateCacheNotUpdatedOnCommitFailure() {
+	re := suite.Require()
+	manager := suite.manager
+	created, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "cache_commit_fail",
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, created.State)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceMetaFailed", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/saveKeyspaceMetaFailed"))
+	}()
+
+	_, err = manager.UpdateKeyspaceStateByID(created.GetId(), keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.Error(err)
+
+	// The commit failed, so neither the durable meta nor the state cache should
+	// have moved to DISABLED.
+	state, err := manager.GetKeyspaceStateByID(created.GetId())
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, state)
+
+	loaded, err := manager.LoadKeyspaceByID(created.GetId())
+	re.NoError(err)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, loaded.State)
 }
 
 func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
