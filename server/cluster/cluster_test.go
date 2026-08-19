@@ -1750,24 +1750,15 @@ func TestCalculateStoreSize1(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-<<<<<<< HEAD
-	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store))
-=======
-	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 2 (placement rule) / 4 (host) * 0.9 = 4500
-	re.Equal(4500.0, cluster.getThreshold(stores, store, &kr, regionSizes))
->>>>>>> ba23e721ae (server/cluster: avoid repeated region size scans (#11072))
+	re.Equal(4500.0, cluster.getThreshold(stores, store, regionSizes))
 
 	cluster.opt.SetPlacementRuleEnabled(false)
 	cluster.opt.SetLocationLabels([]string{"zone", "rack", "host"})
 	regionSizes = newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 30000 (total region size) / 3 (zone) / 4 (host) * 0.9 = 2250
-<<<<<<< HEAD
-	re.Equal(2250.0, cluster.getThreshold(stores, store))
-=======
-	re.Equal(2250.0, cluster.getThreshold(stores, store, &kr, regionSizes))
+	re.Equal(2250.0, cluster.getThreshold(stores, store, regionSizes))
 }
 
 func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
@@ -1812,47 +1803,20 @@ func TestRegionSizeCacheAcrossStoresAndRules(t *testing.T) {
 	regionSizes := newRegionSizeCache(loader)
 
 	stores := cluster.GetStores()
-	threshold1 := cluster.getThreshold(stores, cluster.GetStore(1), &kr, regionSizes)
-	threshold2 := cluster.getThreshold(stores, cluster.GetStore(2), &kr, regionSizes)
+	threshold1 := cluster.calculateRange(stores, cluster.GetStore(1), kr.StartKey, kr.EndKey, regionSizes) * 0.9
+	threshold2 := cluster.calculateRange(stores, cluster.GetStore(2), kr.StartKey, kr.EndKey, regionSizes) * 0.9
 	// (100 * 3 replicas / 2 stores + 100 * 1 learner / 2 stores) * 0.9 = 180.
 	re.Equal(180.0, threshold1)
 	re.Equal(180.0, threshold2)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
 
 	// A different range is loaded separately, then shared by all rules.
-	re.Equal(360.0, cluster.getThreshold(stores, cluster.GetStore(1), &otherKR, regionSizes))
+	re.Equal(360.0, cluster.calculateRange(stores, cluster.GetStore(1), otherKR.StartKey, otherKR.EndKey, regionSizes)*0.9)
 	re.Equal(1, loadCounts[regionSizeCacheKey{startKey: "m", endKey: "z"}])
 
 	nextRoundRegionSizes := newRegionSizeCache(loader)
-	re.Equal(threshold1, cluster.getThreshold(stores, cluster.GetStore(1), &kr, nextRoundRegionSizes))
+	re.Equal(threshold1, cluster.calculateRange(stores, cluster.GetStore(1), kr.StartKey, kr.EndKey, nextRoundRegionSizes)*0.9)
 	re.Equal(2, loadCounts[regionSizeCacheKey{startKey: "a", endKey: "m"}])
-}
-
-func TestStatsRegions(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, opt, err := newTestScheduleConfig()
-	re.NoError(err)
-	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
-	count := 10000
-	regions := newTestRegions(uint64(count), 3, 3)
-	for _, region := range regions {
-		err = tc.putRegion(region)
-		re.NoError(err)
-	}
-
-	stats := tc.GetRegionStatsByRange([]byte(""), []byte(""))
-	re.Equal(count, stats.Count)
-	stats = tc.GetHotRegionStatusByRange([]byte(""), []byte(""), "tikv")
-	re.Equal(count, stats.Count)
-
-	midKey := regions[count/2].GetStartKey()
-	stats = tc.GetRegionStatsByRange(midKey, []byte(""))
-	re.Equal(count/2, stats.Count)
-	stats = tc.GetHotRegionStatusByRange(midKey, []byte(""), "tikv")
-	re.Equal(count/2, stats.Count)
->>>>>>> ba23e721ae (server/cluster: avoid repeated region size scans (#11072))
 }
 
 func TestCalculateStoreSize2(t *testing.T) {
@@ -1930,16 +1894,9 @@ func TestCalculateStoreSize2(t *testing.T) {
 
 	stores := cluster.GetStores()
 	store := cluster.GetStore(1)
-<<<<<<< HEAD
-
-	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store))
-=======
-	kr := keyutil.NewKeyRange("", "")
 	regionSizes := newRegionSizeCache(cluster.GetRegionSizeByRange)
 	// 100 * 100 * 4 (total region size) / 2 (dc) / 2 (logic) / 3 (host) * 0.9 = 3000
-	re.Equal(3000.0, cluster.getThreshold(stores, store, &kr, regionSizes))
->>>>>>> ba23e721ae (server/cluster: avoid repeated region size scans (#11072))
+	re.Equal(3000.0, cluster.getThreshold(stores, store, regionSizes))
 }
 
 func TestStores(t *testing.T) {
