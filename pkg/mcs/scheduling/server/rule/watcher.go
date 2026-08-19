@@ -127,7 +127,8 @@ func (rw *Watcher) scanRuleSnapshotKeys(
 	for {
 		opts := []clientv3.OpOption{
 			clientv3.WithRange(endKey),
-			clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+			// etcd ranges are already ordered by key. WithSort would make etcd
+			// fetch and sort the whole range before applying the page limit.
 			clientv3.WithLimit(ruleSnapshotLoadBatchSize + 1),
 			clientv3.WithKeysOnly(),
 		}
@@ -354,6 +355,8 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 		ruleIndex++
 	}
 
+	// TryCommitPatchLocked rebuilds the rule index, so skip it when the snapshot
+	// contains no detected changes.
 	if changed {
 		rw.ruleManager.Lock()
 		err = rw.ruleManager.TryCommitPatchLocked(patch)
