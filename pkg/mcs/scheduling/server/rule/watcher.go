@@ -119,45 +119,54 @@ func NewWatcher(
 func (rw *Watcher) scanRuleSnapshotKeys(
 	ctx context.Context,
 	prefix string,
+	rangeEnds []string,
 	revision int64,
+	pageSize int64,
 	handlePage func([]*mvccpb.KeyValue, int64) error,
 ) (int64, error) {
 	startKey := prefix
-	endKey := clientv3.GetPrefixRangeEnd(prefix)
-	for {
-		opts := []clientv3.OpOption{
-			clientv3.WithRange(endKey),
-			// etcd ranges are already ordered by key. WithSort would make etcd
-			// fetch and sort the whole range before applying the page limit.
-			clientv3.WithLimit(ruleSnapshotLoadBatchSize + 1),
-			clientv3.WithKeysOnly(),
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+	for rangeIndex := 0; rangeIndex <= len(rangeEnds); rangeIndex++ {
+		endKey := prefixEnd
+		if rangeIndex < len(rangeEnds) {
+			endKey = rangeEnds[rangeIndex]
 		}
-		if revision > 0 {
-			opts = append(opts, clientv3.WithRev(revision))
-		}
-		resp, err := etcdutil.EtcdKVGetWithContext(ctx, rw.etcdClient, startKey, opts...)
-		if err != nil {
-			return 0, err
-		}
-		if revision == 0 {
-			revision = resp.Header.Revision
-		}
-
-		page := resp.Kvs
-		if resp.More {
-			if len(page) == 0 {
-				return 0, errors.New("placement rule snapshot returned an empty page")
+		for {
+			opts := []clientv3.OpOption{
+				clientv3.WithRange(endKey),
+				// etcd ranges are key-ascending by default.
+				clientv3.WithLimit(pageSize + 1),
+				clientv3.WithKeysOnly(),
 			}
-			startKey = string(page[len(page)-1].Key)
-			page = page[:len(page)-1]
+			if revision > 0 {
+				opts = append(opts, clientv3.WithRev(revision))
+			}
+			resp, err := etcdutil.EtcdKVGetWithContext(ctx, rw.etcdClient, startKey, opts...)
+			if err != nil {
+				return 0, err
+			}
+			if revision == 0 {
+				revision = resp.Header.Revision
+			}
+
+			page := resp.Kvs
+			if resp.More {
+				if len(page) == 0 {
+					return 0, errors.New("placement rule snapshot returned an empty page")
+				}
+				startKey = string(page[len(page)-1].Key)
+				page = page[:len(page)-1]
+			}
+			if err := handlePage(page, revision); err != nil {
+				return 0, err
+			}
+			if !resp.More {
+				break
+			}
 		}
-		if err := handlePage(page, revision); err != nil {
-			return 0, err
-		}
-		if !resp.More {
-			return revision, nil
-		}
+		startKey = endKey
 	}
+	return revision, nil
 }
 
 func (rw *Watcher) loadRuleSnapshotValues(
@@ -218,7 +227,8 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 	}
 
 	groupPrefix := []byte(rw.ruleGroupPathPrefix)
-	snapshotRevision, err := rw.scanRuleSnapshotKeys(ctx, rw.ruleGroupPathPrefix, 0,
+	snapshotRevision, err := rw.scanRuleSnapshotKeys(
+		ctx, rw.ruleGroupPathPrefix, nil, 0, ruleSnapshotLoadBatchSize,
 		func(page []*mvccpb.KeyValue, revision int64) error {
 			type groupChange struct {
 				meta *mvccpb.KeyValue
@@ -288,7 +298,14 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 		ruleKeyBuffer = hex.AppendEncode(ruleKeyBuffer, []byte(rule.ID))
 		return bytes.Compare(ruleKeyBuffer, key)
 	}
-	_, err = rw.scanRuleSnapshotKeys(ctx, rw.rulesPathPrefix, snapshotRevision,
+	// Bound each etcd range with the already sorted local rule keys. etcd
+	// computes the count over the whole requested range even when a limit is set.
+	ruleRangeEnds := make([]string, 0, len(rules)/int(ruleSnapshotLoadBatchSize))
+	for i := int(ruleSnapshotLoadBatchSize); i < len(rules); i += int(ruleSnapshotLoadBatchSize) {
+		ruleRangeEnds = append(ruleRangeEnds, rw.rulesPathPrefix+rules[i].StoreKey())
+	}
+	_, err = rw.scanRuleSnapshotKeys(
+		ctx, rw.rulesPathPrefix, ruleRangeEnds, snapshotRevision, ruleSnapshotLoadBatchSize,
 		func(page []*mvccpb.KeyValue, revision int64) error {
 			type ruleChange struct {
 				meta *mvccpb.KeyValue

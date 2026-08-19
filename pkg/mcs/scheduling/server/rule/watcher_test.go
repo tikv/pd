@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
@@ -128,6 +129,52 @@ func prepare(t require.TestingT, loadLabelRules bool) (context.Context, *clientv
 		etcd.Close()
 		os.RemoveAll(cfg.Dir)
 	}
+}
+
+func TestScanRuleSnapshotKeyRanges(t *testing.T) {
+	re := require.New(t)
+	ctx, client, clean := prepare(t, false)
+	defer clean()
+
+	prefix := keypath.RulesPathPrefix()
+	keys := []string{
+		prefix + "a",
+		prefix + "aa",
+		prefix + "aaa",
+		prefix + "aaaa",
+		prefix + "c",
+	}
+	ops := make([]clientv3.Op, 0, len(keys))
+	for _, key := range keys {
+		ops = append(ops, clientv3.OpPut(key, "value"))
+	}
+	resp, err := client.Txn(ctx).Then(ops...).Commit()
+	re.NoError(err)
+
+	rw := &Watcher{etcdClient: client}
+	var loaded []string
+	callbackCount := 0
+	revision, err := rw.scanRuleSnapshotKeys(ctx, prefix, []string{prefix + "b"}, 0, 2,
+		func(page []*mvccpb.KeyValue, _ int64) error {
+			for _, item := range page {
+				loaded = append(loaded, string(item.Key))
+			}
+			if callbackCount == 0 {
+				_, err := client.Txn(ctx).Then(
+					clientv3.OpDelete(prefix+"c"),
+					clientv3.OpPut(prefix+"d", "new"),
+				).Commit()
+				if err != nil {
+					return err
+				}
+			}
+			callbackCount++
+			return nil
+		})
+	re.NoError(err)
+	re.Equal(resp.Header.Revision, revision)
+	re.Equal(keys, loaded)
+	re.Greater(callbackCount, 2)
 }
 
 func TestReconcileRuleSnapshot(t *testing.T) {

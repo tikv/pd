@@ -923,9 +923,10 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]
 }
 
 func (lw *LoopWatcher) buildLoadingOpts(limit, revision int64) []clientv3.OpOption {
-	// MVCC ranges are ordered by key. An explicit sort would make etcd fetch and
-	// sort the whole range before applying the page limit.
-	var opts []clientv3.OpOption
+	// Sort by key to get the next key and we don't need to worry about the performance,
+	// Because the default sort is just SortByKey and SortAscend
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend)}
 	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
 	// However, when the startKey changes, the two are no longer equivalent.
 	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
