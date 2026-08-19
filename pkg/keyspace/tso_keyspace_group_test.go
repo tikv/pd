@@ -16,6 +16,7 @@ package keyspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -148,9 +149,10 @@ func TestAutoSplitPatrolReconcilesLoadedGroups(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	group := &endpoint.KeyspaceGroup{
-		ID:       1,
-		UserKind: endpoint.Standard.String(),
-		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		ID:        1,
+		UserKind:  endpoint.Standard.String(),
+		Members:   []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces: []uint32{42},
 	}
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, group)
@@ -170,6 +172,120 @@ func TestAutoSplitPatrolReconcilesLoadedGroups(t *testing.T) {
 	got := manager.groups[endpoint.Standard].Get(group.ID)
 	re.Len(got.Members, mcs.DefaultKeyspaceGroupReplicaCount)
 	re.NotEqual(typeutil.TrimScheme(got.Members[0].Address), typeutil.TrimScheme(got.Members[1].Address))
+}
+
+func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1, nil)
+	defer clean()
+	store := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(client), nil)
+	manager := NewKeyspaceGroupManager(t.Context(), store, client)
+	defer manager.Close()
+	re.NoError(manager.Bootstrap(t.Context()))
+
+	group := &endpoint.KeyspaceGroup{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+	}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+	re.Eventually(func() bool {
+		manager.RLock()
+		defer manager.RUnlock()
+		got := manager.groups[endpoint.Standard].Get(group.ID)
+		return got != nil && len(got.Members) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+
+	group.UserKind = endpoint.Enterprise.String()
+	group.SplitState = &endpoint.SplitState{SplitSource: group.ID}
+	group.Members = []endpoint.KeyspaceGroupMember{{Address: "http://tso-2"}}
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.SaveKeyspaceGroup(txn, group)
+	}))
+	re.Eventually(func() bool {
+		manager.RLock()
+		defer manager.RUnlock()
+		got := manager.groups[endpoint.Enterprise].Get(group.ID)
+		return manager.groups[endpoint.Standard].Get(group.ID) == nil &&
+			got != nil && got.SplitState != nil && got.SplitState.SplitSource == group.ID &&
+			len(got.Members) == 1 && got.Members[0].Address == "http://tso-2" &&
+			len(got.Keyspaces) == 1 && got.Keyspaces[0] == 42
+	}, 5*time.Second, 10*time.Millisecond)
+
+	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
+		return store.DeleteKeyspaceGroup(txn, group.ID)
+	}))
+	re.Eventually(func() bool {
+		manager.RLock()
+		defer manager.RUnlock()
+		for _, groups := range manager.groups {
+			if groups.Get(group.ID) != nil {
+				return false
+			}
+		}
+		return true
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestDecodeKeyspaceGroupReconcileStateSkipsKeyspaces(t *testing.T) {
+	re := require.New(t)
+	group := &endpoint.KeyspaceGroup{
+		ID:         1,
+		UserKind:   endpoint.Standard.String(),
+		SplitState: &endpoint.SplitState{SplitSource: 1},
+		Members:    []endpoint.KeyspaceGroupMember{{Address: "http://tso-1"}},
+		Keyspaces:  []uint32{1, 2, 3},
+	}
+	payload, err := json.Marshal(group)
+	re.NoError(err)
+
+	state, err := decodeKeyspaceGroupReconcileState(payload)
+	re.NoError(err)
+	re.Equal(group.ID, state.ID)
+	re.Equal(group.UserKind, state.UserKind)
+	re.Equal(group.SplitState, state.SplitState)
+	re.Equal(group.Members, state.Members)
+	re.Nil(state.Keyspaces)
+}
+
+func TestKeyspaceGroupWatcherRejectsPreviousTermUpdates(t *testing.T) {
+	re := require.New(t)
+	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
+	defer manager.Close()
+
+	_, previousTerm := manager.beginKeyspaceGroupWatchTerm(t.Context())
+	_, currentTerm := manager.beginKeyspaceGroupWatchTerm(t.Context())
+	group := &endpoint.KeyspaceGroup{
+		ID:       1,
+		UserKind: endpoint.Standard.String(),
+		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://current-tso"}},
+	}
+	manager.putWatchedKeyspaceGroup(previousTerm, group)
+	manager.RLock()
+	got := manager.groups[endpoint.Standard].Get(group.ID)
+	manager.RUnlock()
+	re.Nil(got)
+
+	manager.putWatchedKeyspaceGroup(currentTerm, group)
+	manager.updateWatchedKeyspaceGroupReconcileState(previousTerm, &endpoint.KeyspaceGroup{
+		ID:       group.ID,
+		UserKind: group.UserKind,
+		Members:  []endpoint.KeyspaceGroupMember{{Address: "http://stale-tso"}},
+	})
+	manager.removeWatchedKeyspaceGroup(previousTerm, group.ID)
+	manager.RLock()
+	got = manager.groups[endpoint.Standard].Get(group.ID)
+	manager.RUnlock()
+	re.NotNil(got)
+	re.Equal("http://current-tso", got.Members[0].Address)
+
+	manager.removeWatchedKeyspaceGroup(currentTerm, group.ID)
+	manager.RLock()
+	got = manager.groups[endpoint.Standard].Get(group.ID)
+	manager.RUnlock()
+	re.Nil(got)
 }
 
 type keyspaceGroupTestSuite struct {
