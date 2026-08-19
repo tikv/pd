@@ -45,8 +45,9 @@ const (
 
 // RequestInfo is the interface of the request information provider. A request should be
 // able to tell whether it's a write request and if so, the written bytes would also be provided.
-// Implementations may additionally provide PredictedReadBytes() and IsCop() methods to opt
-// into paging pre-charge accounting; missing methods are treated as no hint and non-cop.
+// Implementations may additionally provide RequestSource(), PredictedReadBytes(), and IsCop()
+// methods to opt into request-source metrics and paging pre-charge accounting. Missing methods
+// are treated as an empty request source, no prediction hint, and non-cop.
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
@@ -54,6 +55,11 @@ type RequestInfo interface {
 	StoreID() uint64
 	RequestSize() uint64
 	AccessLocationType() AccessLocationType
+}
+
+type requestSourceProvider interface {
+	// RequestSource returns the source of the request for RU attribution.
+	RequestSource() string
 }
 
 type predictedReadBytesProvider interface {
@@ -83,6 +89,14 @@ func predictedReadBytes(req RequestInfo) uint64 {
 func isCopRequest(req RequestInfo) bool {
 	copReq, ok := req.(copRequestInfo)
 	return ok && copReq.IsCop()
+}
+
+func requestSource(req RequestInfo) string {
+	provider, ok := req.(requestSourceProvider)
+	if !ok {
+		return ""
+	}
+	return provider.RequestSource()
 }
 
 // pagingReadEstimate returns the predicted read-bytes hint for coprocessor

@@ -532,6 +532,7 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 		},
 		true, /* withPrefix */
 	)
+	m.tsoNodesWatcher.SetReconcileDeletedKeys()
 }
 
 func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint64, reconcileCh chan<- struct{}) error {

@@ -166,8 +166,10 @@ type tsoTSOStreamAdapter struct {
 func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       clusterID,
-			KeyspaceId:      keyspaceID,
+			ClusterId: clusterID,
+			Keyspace: &tsopb.RequestHeader_KeyspaceId{
+				KeyspaceId: keyspaceID,
+			},
 			KeyspaceGroupId: keyspaceGroupID,
 			CalleeId:        s.calleeID,
 		},

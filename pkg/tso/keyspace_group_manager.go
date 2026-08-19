@@ -521,6 +521,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
+	kgm.tsoNodesWatcher.SetReconcileDeletedKeys()
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
 		log.Error("failed to load the registered tso servers", errs.ZapError(err))
@@ -536,6 +537,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
+	maxLoadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
@@ -547,6 +549,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
+		maxLoadedModRevision = max(maxLoadedModRevision, uint64(kv.ModRevision))
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -591,12 +594,21 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		"keyspace-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		func([]*clientv3.Event) error { return nil },
+		func([]*clientv3.Event) error {
+			maxLoadedModRevision = 0
+			return nil
+		},
 		putFn,
 		deleteFn,
 		postEventsFn,
 		true, /* withPrefix */
 	)
+	kgm.groupWatcher.SetConsistentLoad()
+	kgm.groupWatcher.SetInitialLoadSuccessFn(func() {
+		if maxLoadedModRevision > 0 {
+			kgm.SetModRevision(maxLoadedModRevision)
+		}
+	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}

@@ -677,6 +677,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	const (
 		// Time to wait for GetTS to start
 		waitForGetTSStart = 3 * time.Second
+		keyspaceGroupID   = uint32(1)
 	)
 
 	// Enable mockLoadKeyspace failpoint to return hardcoded keyspace meta for testing
@@ -689,7 +690,7 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 
 	// Step 1: Setup - Create 2 TSO nodes and client, get initial TSO
 	// use a longer timeout to avoid test flakiness
-	setup := suite.setupTSONodesAndClient(re, 2, 1, opt.WithCustomTimeoutOption(60*time.Second))
+	setup := suite.setupTSONodesAndClient(re, 2, keyspaceGroupID, opt.WithCustomTimeoutOption(60*time.Second))
 	defer func() {
 		for _, cleanup := range setup.cleanups {
 			cleanup()
@@ -736,6 +737,12 @@ func (suite *keyspaceGroupTestSuite) TestUpdateMemberWhenRecovery() {
 	setup.cleanups = append(setup.cleanups, cleanup)
 	nodes[newNode.GetAddr()] = newNode
 	tests.WaitForPrimaryServing(re, map[string]bs.Server{newNode.GetAddr(): newNode})
+	testutil.Eventually(re, func() bool {
+		_, group, groupID, revision, err :=
+			newNode.GetKeyspaceGroupManager().FindGroupByKeyspaceID(setup.keyspaceID)
+		return err == nil && group != nil && groupID == keyspaceGroupID && revision > 0 &&
+			newNode.IsKeyspaceServingByGroup(setup.keyspaceID, keyspaceGroupID)
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	// Step 7: Verify eventual recovery after node restart.
 	// The in-flight GetTS may stay attached to stale discovery/metadata during
