@@ -24,6 +24,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
@@ -58,6 +59,9 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
 			Ranges: keyRanges1,
 			Batch:  10,
+			InboundLeaderTransferRateLimits: map[uint64]inboundLeaderTransferRateLimit{
+				1: {LeadersPerSecond: 2, Burst: inboundLeaderTransferBurst},
+			},
 		},
 	}
 	conf2 := conf.clone()
@@ -69,6 +73,8 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	// update conf2
 	conf2.Ranges[1] = keyRanges2[1]
 	re.NotEqual(conf.Ranges, conf2.Ranges)
+	conf2.InboundLeaderTransferRateLimits[1] = inboundLeaderTransferRateLimit{LeadersPerSecond: 3, Burst: inboundLeaderTransferBurst}
+	re.NotEqual(conf.InboundLeaderTransferRateLimits, conf2.InboundLeaderTransferRateLimits)
 }
 
 func TestBalanceLeaderBatchLimit(t *testing.T) {
@@ -94,6 +100,194 @@ func TestBalanceLeaderBatchLimit(t *testing.T) {
 	lb.ServeHTTP(resp, req)
 	re.Equal(http.StatusBadRequest, resp.Code)
 	re.Equal(MaxBalanceLeaderBatchSize, lb.(*balanceLeaderScheduler).conf.getBatch())
+}
+
+func TestInboundLeaderTransferRateLimitConfig(t *testing.T) {
+	re := require.New(t)
+	storage := storage.NewStorageWithMemoryBackend()
+	now := time.Now()
+	conf := &balanceLeaderSchedulerConfig{
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
+			Batch: BalanceLeaderBatchSize,
+		},
+		now: func() time.Time { return now },
+	}
+	conf.init(types.BalanceLeaderScheduler.String(), storage, conf)
+
+	// The default is unlimited, and a limit for one target does not affect
+	// other target stores.
+	for range 10 {
+		re.True(conf.takeInboundLeaderTransfer(1))
+	}
+	httpCode, _ := conf.setInboundLeaderTransferRate(1, 2)
+	re.Equal(http.StatusOK, httpCode)
+	re.True(conf.takeInboundLeaderTransfer(1))
+	re.False(conf.takeInboundLeaderTransfer(1))
+	re.True(conf.takeInboundLeaderTransfer(2))
+	re.True(conf.takeInboundLeaderTransfer(2))
+
+	// A two-leaders-per-second limiter with burst one refills one token after
+	// half a second.
+	now = now.Add(499 * time.Millisecond)
+	re.False(conf.takeInboundLeaderTransfer(1))
+	now = now.Add(time.Millisecond)
+	re.True(conf.takeInboundLeaderTransfer(1))
+	re.False(conf.takeInboundLeaderTransfer(1))
+
+	// Updating the rate preserves the bucket state and uses the new refill rate.
+	httpCode, _ = conf.setInboundLeaderTransferRate(1, 4)
+	re.Equal(http.StatusOK, httpCode)
+	now = now.Add(249 * time.Millisecond)
+	re.False(conf.takeInboundLeaderTransfer(1))
+	now = now.Add(time.Millisecond)
+	re.True(conf.takeInboundLeaderTransfer(1))
+
+	// Deleting the per-store config immediately restores unlimited behavior.
+	httpCode, _ = conf.deleteInboundLeaderTransferRate(1)
+	re.Equal(http.StatusOK, httpCode)
+	for range 10 {
+		re.True(conf.takeInboundLeaderTransfer(1))
+	}
+}
+
+func TestInboundLeaderTransferRateLimitHTTPReadback(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	storage := storage.NewStorageWithMemoryBackend()
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage, ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+
+	body := bytes.NewBufferString(`{"store-id":42,"leaders-per-second":1.5}`)
+	req := httptest.NewRequest(http.MethodPost, "/config/inbound-leader-transfer-rate", body)
+	resp := httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/list", nil)
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	var got balanceLeaderSchedulerParam
+	re.NoError(json.Unmarshal(resp.Body.Bytes(), &got))
+	re.Equal(inboundLeaderTransferRateLimit{
+		LeadersPerSecond: 1.5,
+		Burst:            inboundLeaderTransferBurst,
+	}, got.InboundLeaderTransferRateLimits[42])
+
+	// Invalid generic updates are rejected without leaving a partial map entry.
+	body = bytes.NewBufferString(`{"inbound-leader-transfer-rate-limits":{"43":{"leaders-per-second":1,"burst":2}}}`)
+	req = httptest.NewRequest(http.MethodPost, "/config", body)
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusBadRequest, resp.Code)
+	re.NotContains(lb.(*balanceLeaderScheduler).conf.clone().InboundLeaderTransferRateLimits, uint64(43))
+
+	persisted, err := storage.LoadSchedulerConfig(types.BalanceLeaderScheduler.String())
+	re.NoError(err)
+	re.Contains(persisted, `"42":{"leaders-per-second":1.5,"burst":1}`)
+
+	// ReloadConfig is also the path used by the scheduling service's scheduler
+	// config watcher.
+	var persistedConfig map[string]any
+	re.NoError(json.Unmarshal([]byte(persisted), &persistedConfig))
+	persistedConfig["inbound-leader-transfer-rate-limits"] = map[string]any{
+		"42": map[string]any{"leaders-per-second": 3.0, "burst": 1},
+	}
+	reloaded, err := json.Marshal(persistedConfig)
+	re.NoError(err)
+	re.NoError(storage.SaveSchedulerConfig(types.BalanceLeaderScheduler.String(), reloaded))
+	re.NoError(lb.ReloadConfig())
+	re.Equal(3.0, lb.(*balanceLeaderScheduler).conf.clone().InboundLeaderTransferRateLimits[42].LeadersPerSecond)
+
+	req = httptest.NewRequest(http.MethodDelete, "/config/inbound-leader-transfer-rate/42", nil)
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+
+	req = httptest.NewRequest(http.MethodGet, "/list", nil)
+	resp = httptest.NewRecorder()
+	lb.ServeHTTP(resp, req)
+	re.Equal(http.StatusOK, resp.Code)
+	got = balanceLeaderSchedulerParam{}
+	re.NoError(json.Unmarshal(resp.Body.Bytes(), &got))
+	re.NotContains(got.InboundLeaderTransferRateLimits, uint64(42))
+}
+
+func TestBalanceLeaderInboundTargetRateLimit(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.SetTolerantSizeRatio(0.1)
+	tc.AddLeaderStore(1, 20)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 20)
+	for i := 1; i <= 20; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	scheduler := lb.(*balanceLeaderScheduler)
+	now := time.Now()
+	scheduler.conf.now = func() time.Time { return now }
+	httpCode, _ := scheduler.conf.setInboundLeaderTransferRate(2, 1)
+	re.Equal(http.StatusOK, httpCode)
+
+	ops, _ := lb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+
+	// A canceled operator does not alter Region or peer state. The limiter only
+	// accounts for operator creation and continues refilling normally.
+	re.True(ops[0].Cancel(operator.AdminStop))
+	re.Empty(func() []*operator.Operator {
+		ops, _ := lb.Schedule(tc, false)
+		return ops
+	}())
+	now = now.Add(time.Second)
+	ops, _ = lb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
+
+	// Diagnostic dry runs never consume a token.
+	now = now.Add(time.Second)
+	ops, _ = lb.Schedule(tc, true)
+	re.NotEmpty(ops)
+	ops, _ = lb.Schedule(tc, false)
+	re.Len(ops, 1)
+}
+
+func TestBalanceLeaderInboundTargetRateLimitFailedCandidate(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.SetTolerantSizeRatio(0.1)
+	tc.AddLeaderStore(1, 20)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 20)
+	// Store 2 is a learner, so no transfer-leader operator can be built for it.
+	tc.AddRegionWithLearner(1, 1, []uint64{3}, []uint64{2})
+
+	lb, err := CreateScheduler(types.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
+	re.NoError(err)
+	scheduler := lb.(*balanceLeaderScheduler)
+	scheduler.conf.now = time.Now
+	httpCode, _ := scheduler.conf.setInboundLeaderTransferRate(2, 1)
+	re.Equal(http.StatusOK, httpCode)
+	ops, _ := lb.Schedule(tc, false)
+	re.Empty(ops)
+
+	// Making store 2 a voter immediately allows the initial burst token. The
+	// failed candidate above did not consume or corrupt limiter state.
+	tc.AddLeaderRegion(1, 1, 2, 3)
+	ops, _ = lb.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 }
 
 type balanceLeaderSchedulerTestSuite struct {
