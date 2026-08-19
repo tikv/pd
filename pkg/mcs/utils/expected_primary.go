@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // GetExpectedPrimaryFlag gets the expected primary flag. A read failure is
@@ -166,7 +167,7 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 
 	if newPrimary != "" {
 		for _, member := range entries {
-			if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+			if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
 				continue
 			}
 			if isSamePrimary(member, newPrimary) && isSamePrimary(member, oldPrimary) {
@@ -186,7 +187,7 @@ func TransferPrimary(client *clientv3.Client, p *member.Participant, serviceName
 	var primaryIDs []string
 	for _, member := range entries {
 		// only members of specific group are valid primary candidates for TSO service.
-		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+		if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
 			continue
 		}
 		if (newPrimary == "" && !isSamePrimary(member, oldPrimary)) || isSamePrimary(member, newPrimary) {
@@ -238,6 +239,28 @@ func isSamePrimary(member discovery.ServiceRegistryEntry, primary string) bool {
 	return primary != "" && (member.Name == primary || member.ServiceAddr == primary)
 }
 
+// isGroupMember reports whether addr belongs to tsoMembersMap, which is keyed by
+// the group's persisted member addresses. A nil map means "no group filter" and
+// always matches. The exact lookup is the fast path; addr comes from the live
+// service registry and can differ from the persisted address only by scheme
+// during a supported HTTP-to-HTTPS transition (see KeyspaceGroupMember's
+// IsAddressEquivalent, issue #8284), so fall back to a scheme-insensitive
+// comparison against every key before concluding addr is not a member.
+func isGroupMember(tsoMembersMap map[string]bool, addr string) bool {
+	if tsoMembersMap == nil {
+		return true
+	}
+	if tsoMembersMap[addr] {
+		return true
+	}
+	for member := range tsoMembersMap {
+		if typeutil.EqualBaseURLs(member, addr) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsValidPrimaryCandidate reports whether newPrimary identifies a member of the
 // group represented by tsoMembersMap, given the already-fetched registry entries
 // for the service, so a caller can reject an invalid target up front instead of
@@ -251,7 +274,7 @@ func IsValidPrimaryCandidate(entries []discovery.ServiceRegistryEntry, newPrimar
 		return true
 	}
 	for _, member := range entries {
-		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+		if !isGroupMember(tsoMembersMap, member.ServiceAddr) {
 			continue
 		}
 		if isSamePrimary(member, newPrimary) {

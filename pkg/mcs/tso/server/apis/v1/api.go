@@ -17,6 +17,7 @@ package apis
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -389,6 +390,11 @@ func transferPrimary(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, "success")
 }
 
+// maxEvictPrimaryRequestBytes caps the /primary/evict request body. The body is a
+// single short string field, so this is generous while still bounding memory
+// against an unbounded or malicious request.
+const maxEvictPrimaryRequestBytes int64 = 4 << 10
+
 // evictPrimary transfers away every keyspace group primary currently held by this
 // node, moving each to another member of the same group. Groups that this node is
 // not serving as primary are skipped.
@@ -413,14 +419,20 @@ func transferPrimary(c *gin.Context) {
 // @Param    new_primary  body  string  false  "new primary name"
 // @Success  200          {object}  map[string]string
 // @Failure  400          {string}  string  "invalid request"
+// @Failure  413          {string}  string  "request body too large"
 // @Failure  500          {object}  map[string]string
 // @Router   /primary/evict [post]
 func evictPrimary(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 
-	body, err := io.ReadAll(c.Request.Body)
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxEvictPrimaryRequestBytes))
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		status := http.StatusBadRequest
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			status = http.StatusRequestEntityTooLarge
+		}
+		c.String(status, err.Error())
 		return
 	}
 	var input struct {

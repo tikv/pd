@@ -137,3 +137,30 @@ func TestIsValidPrimaryCandidate(t *testing.T) {
 	re.False(IsValidPrimaryCandidate(entries, "tso-3", groupMembers), "tso-3 is registered but not a member of this group")
 	re.False(IsValidPrimaryCandidate(entries, "tso-unknown", groupMembers), "an unregistered name never matches")
 }
+
+// TestIsValidPrimaryCandidateToleratesSchemeMismatch covers the supported
+// HTTP-to-HTTPS address transition, where the live registry can advertise a
+// scheme that differs from the one still persisted in the group's member list
+// (see KeyspaceGroupMember.IsAddressEquivalent, issue #8284). A member must not
+// be filtered out of its own group over a scheme difference alone.
+func TestIsValidPrimaryCandidateToleratesSchemeMismatch(t *testing.T) {
+	re := require.New(t)
+	entries := []discovery.ServiceRegistryEntry{
+		{Name: "tso-1", ServiceAddr: "https://127.0.0.1:1"},
+	}
+	// The group's persisted member address is still on the old scheme.
+	groupMembers := map[string]bool{"http://127.0.0.1:1": true}
+
+	re.True(IsValidPrimaryCandidate(entries, "tso-1", groupMembers),
+		"tso-1 is a group member even though the live registry's scheme differs from the persisted address")
+}
+
+func TestIsGroupMember(t *testing.T) {
+	re := require.New(t)
+	re.True(isGroupMember(nil, "http://127.0.0.1:1"), "a nil map means no group filter")
+
+	members := map[string]bool{"http://127.0.0.1:1": true}
+	re.True(isGroupMember(members, "http://127.0.0.1:1"), "exact match")
+	re.True(isGroupMember(members, "https://127.0.0.1:1"), "scheme-insensitive fallback match")
+	re.False(isGroupMember(members, "http://127.0.0.1:2"), "different host is not a member")
+}

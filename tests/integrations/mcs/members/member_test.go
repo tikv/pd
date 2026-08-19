@@ -473,6 +473,15 @@ func (suite *memberTestSuite) TestEvictPrimary() {
 		re.NoError(resp.Body.Close())
 	}
 
+	// A request body over the endpoint's size cap must be rejected with 413
+	// instead of being buffered in full.
+	oversizedBody := bytes.Repeat([]byte("x"), 8<<10)
+	oversizedResp, err := tests.TestDialClient.Post(src.GetAddr()+"/tso/api/v1/primary/evict",
+		"application/json", bytes.NewBuffer(oversizedBody))
+	re.NoError(err)
+	re.Equal(http.StatusRequestEntityTooLarge, oversizedResp.StatusCode)
+	re.NoError(oversizedResp.Body.Close())
+
 	for _, id := range groupIDs {
 		transferData, err := json.Marshal(map[string]any{
 			"new_primary":       src.Name(),
