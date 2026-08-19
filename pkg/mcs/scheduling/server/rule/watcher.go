@@ -212,7 +212,6 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 	suspectKeyRanges := &keyutil.KeyRanges{}
 	changedGroups := make(map[string]struct{})
 	changed := false
-	snapshotApplyFailed := false
 	groupIndex, ruleIndex := 0, 0
 
 	deleteGroup := func(group *placement.RuleGroup) {
@@ -264,10 +263,7 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 			for i, item := range values {
 				group, err := placement.NewRuleGroupFromJSON(item.Value)
 				if err != nil {
-					snapshotApplyFailed = true
-					log.Error("failed to load placement rule group snapshot",
-						zap.ByteString("key", item.Key), zap.Error(err))
-					continue
+					return fmt.Errorf("failed to load placement rule group snapshot at key %q: %w", item.Key, err)
 				}
 				old := changes[i].old
 				if old != nil && old.ID == group.ID && old.Index == group.Index && old.Override == group.Override {
@@ -344,16 +340,10 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 			for i, item := range values {
 				rule, err := placement.NewRuleFromJSON(item.Value)
 				if err != nil {
-					snapshotApplyFailed = true
-					log.Error("failed to load placement rule snapshot",
-						zap.ByteString("key", item.Key), zap.Error(err))
-					continue
+					return fmt.Errorf("failed to load placement rule snapshot at key %q: %w", item.Key, err)
 				}
 				if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
-					snapshotApplyFailed = true
-					log.Error("failed to adjust placement rule snapshot",
-						zap.ByteString("key", item.Key), zap.Error(err))
-					continue
+					return fmt.Errorf("failed to adjust placement rule snapshot at key %q: %w", item.Key, err)
 				}
 				patch.SetRule(rule)
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
@@ -385,12 +375,8 @@ func (rw *Watcher) reconcileRuleSnapshot(ctx context.Context) (int64, error) {
 			rw.checkerController.AddSuspectKeyRange(keyRange.StartKey, keyRange.EndKey)
 		}
 	}
-	if snapshotApplyFailed {
-		rw.ruleRevisionContinuous = false
-	} else {
-		rw.ruleRevision = snapshotRevision
-		rw.ruleRevisionContinuous = true
-	}
+	rw.ruleRevision = snapshotRevision
+	rw.ruleRevisionContinuous = true
 	return snapshotRevision + 1, nil
 }
 

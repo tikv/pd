@@ -184,15 +184,21 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 
 	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	conf := mockconfig.NewTestOptions()
-	ruleManager := placement.NewRuleManager(ctx, storage, nil, conf)
+	cluster := mockcluster.NewCluster(ctx, conf)
+	cluster.AddLabelsStore(1, 0, map[string]string{"zone": "z1"})
+	ruleManager := placement.NewRuleManager(ctx, storage, cluster, conf)
 	re.NoError(ruleManager.Initialize(3, nil, "", false))
 	re.NoError(ruleManager.SetRuleGroup(&placement.RuleGroup{ID: "g", Index: 1}))
 	re.NoError(ruleManager.SetRules([]*placement.Rule{
 		{GroupID: "g", ID: "deleted", Role: placement.Learner, Count: 1},
-		{GroupID: "g", ID: "unchanged", Role: placement.Learner, Count: 1},
+		{
+			GroupID: "g", ID: "unchanged", Role: placement.Learner, Count: 1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "zone", Op: placement.In, Values: []string{"z1"}},
+			},
+		},
 	}))
 
-	cluster := mockcluster.NewCluster(ctx, conf)
 	cluster.RuleManager = ruleManager
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), nil)
 	checkerController := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), opController)
@@ -239,4 +245,24 @@ func TestReconcileRuleSnapshot(t *testing.T) {
 	re.Zero(ruleManager.GetRuleGroup("g").Index)
 	re.Equal(updated.Header.Revision, rw.ruleRevision)
 	re.True(rw.ruleRevisionContinuous)
+
+	updatedRule := ruleManager.GetRule("g", "unchanged")
+	updatedRule.LabelConstraints[0].Values = []string{"z2"}
+	updatedRuleValue, err := json.Marshal(updatedRule)
+	re.NoError(err)
+	updatedRuleResp, err := client.Put(ctx, keypath.RuleKeyPath(updatedRule.StoreKey()), string(updatedRuleValue))
+	re.NoError(err)
+
+	_, err = rw.reconcileRuleSnapshot(ctx)
+	re.ErrorContains(err, "can not match any store")
+	re.Equal(updated.Header.Revision, rw.ruleRevision)
+	re.Equal([]string{"z1"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
+
+	cluster.SetStoreLabel(1, map[string]string{"zone": "z2"})
+	nextRevision, err = rw.reconcileRuleSnapshot(ctx)
+	re.NoError(err)
+	re.Equal(updatedRuleResp.Header.Revision+1, nextRevision)
+	re.Equal(updatedRuleResp.Header.Revision, rw.ruleRevision)
+	re.True(rw.ruleRevisionContinuous)
+	re.Equal([]string{"z2"}, ruleManager.GetRule("g", "unchanged").LabelConstraints[0].Values)
 }
