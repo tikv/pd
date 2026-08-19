@@ -253,6 +253,106 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	}
 }
 
+func TestRUCalculationDetail(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	cfg := *DefaultRUConfig()
+	cfg.ReadBaseCost = 1
+	cfg.ReadPerBatchBaseCost = 2
+	cfg.ReadBytesCost = 0.1
+	cfg.WriteBaseCost = 3
+	cfg.WritePerBatchBaseCost = 5
+	cfg.WriteBytesCost = 0.2
+	cfg.CPUMsCost = 0.5
+	gc.mainCfg = &cfg
+	gc.calculators = []ResourceCalculator{newKVCalculator(&cfg), newSQLCalculator(&cfg)}
+
+	readReq := &TestRequestInfo{
+		predictedReadBytes: 10,
+		isCop:              true,
+	}
+	var requestDetail RUCalculation
+	requestConsumption, _, _, _, err := gc.onRequestWaitWithDetailImpl(context.Background(), readReq, &requestDetail)
+	re.NoError(err)
+	re.InDelta(3.4, requestConsumption.RRU, 1e-12)
+	re.Equal(RUFactorSnapshot{
+		ReadBaseCost:          1,
+		ReadPerBatchBaseCost:  2,
+		ReadBytesCost:         0.1,
+		WriteBaseCost:         3,
+		WritePerBatchBaseCost: 5,
+		WriteBytesCost:        0.2,
+		CPUMsCost:             0.5,
+		BatchProportion:       0.7,
+	}, requestDetail.Factors)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(10), requestDetail.Inputs.ReadBytes)
+	re.InDelta(requestConsumption.RRU, requestDetail.RRU(), 1e-12)
+
+	readResp := &TestResponseInfo{
+		readBytes: 4,
+		kvCPU:     time.Millisecond,
+		succeed:   true,
+	}
+	var responseDetail RUCalculation
+	responseConsumption, _, err := gc.onResponseWaitWithDetailImpl(context.Background(), readReq, readResp, &responseDetail)
+	re.NoError(err)
+	re.InDelta(-0.1, responseConsumption.RRU, 1e-12)
+	re.Equal(requestDetail.Factors, responseDetail.Factors)
+	re.Equal(float64(-6), responseDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), responseDetail.Inputs.KVCPUTimeMs)
+	re.InDelta(responseConsumption.RRU, responseDetail.RRU(), 1e-12)
+
+	requestDetail.Add(responseDetail)
+	re.Equal(float64(1), requestDetail.Inputs.ReadRPCCount)
+	re.Equal(float64(4), requestDetail.Inputs.ReadBytes)
+	re.Equal(float64(1), requestDetail.Inputs.KVCPUTimeMs)
+
+	writeReq := &TestRequestInfo{
+		isWrite:     true,
+		writeBytes:  10,
+		numReplicas: 3,
+	}
+	var writeDetail RUCalculation
+	writeConsumption, _, _, _, err := gc.onRequestWaitWithDetailImpl(context.Background(), writeReq, &writeDetail)
+	re.NoError(err)
+	re.InDelta(25.5, writeConsumption.WRU, 1e-12)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.InDelta(writeConsumption.WRU, writeDetail.WRU(), 1e-12)
+
+	var paybackDetail RUCalculation
+	paybackConsumption, _, err := gc.onResponseWaitWithDetailImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: false}, &paybackDetail,
+	)
+	re.NoError(err)
+	re.InDelta(-5, paybackConsumption.WRU, 1e-12)
+	re.Equal(float64(1), paybackDetail.Inputs.FailedWriteRPCCount)
+	re.Equal(float64(10), paybackDetail.Inputs.FailedWriteBytes)
+	re.InDelta(paybackConsumption.WRU, paybackDetail.WRU(), 1e-12)
+
+	writeDetail.Add(paybackDetail)
+	re.Equal(float64(3), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(30), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+	re.Equal(float64(10), writeDetail.Inputs.FailedWriteBytes)
+
+	var retryDetail RUCalculation
+	retryConsumption, _, _, _, err := gc.onRequestWaitWithDetailImpl(context.Background(), writeReq, &retryDetail)
+	re.NoError(err)
+	re.InDelta(25.5, retryConsumption.WRU, 1e-12)
+	var retryResponseDetail RUCalculation
+	_, _, err = gc.onResponseWaitWithDetailImpl(
+		context.Background(), writeReq, &TestResponseInfo{succeed: true}, &retryResponseDetail,
+	)
+	re.NoError(err)
+	writeDetail.Add(retryDetail)
+	writeDetail.Add(retryResponseDetail)
+	re.Equal(float64(6), writeDetail.Inputs.ReplicaWeightedWriteRPCCount)
+	re.Equal(float64(60), writeDetail.Inputs.ReplicaWeightedWriteBytes)
+	re.Equal(float64(1), writeDetail.Inputs.FailedWriteRPCCount)
+}
+
 func TestOnResponseWaitConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
