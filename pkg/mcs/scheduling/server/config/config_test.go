@@ -52,6 +52,20 @@ func TestSetScheduleConfigDoesNotBlockWhenSchedulersUpdatingNotifierIsFull(t *te
 	}
 }
 
+func TestSetScheduleConfigDoesNotMutateInput(t *testing.T) {
+	re := require.New(t)
+	persistConfig := NewPersistConfig(&Config{}, nil)
+	input := persistConfig.GetScheduleConfig().Clone()
+	delete(input.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
+
+	persistConfig.SetScheduleConfig(input)
+
+	re.NotSame(input, persistConfig.GetScheduleConfig())
+	re.NotContains(input.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
+	re.Equal(input.DefaultStoreLimit,
+		persistConfig.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
+}
+
 func TestClearSchedulersUpdatingNotifier(t *testing.T) {
 	re := require.New(t)
 	persistConfig := NewPersistConfig(&Config{}, nil)

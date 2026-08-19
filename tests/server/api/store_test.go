@@ -165,7 +165,9 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
-	body := []byte(`{"rate":60,"type":"add-peer"}`)
+	currentDefault := leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer
+	newDefault := currentDefault + 45
+	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
 
 	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
 		preFeatureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -183,6 +185,11 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 		registryPath := keypath.RegistryPath(constant.SchedulingServiceName, entry.ServiceAddr)
 		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
 		re.NoError(err)
+		// Updating existing store entries to the already-persisted default does
+		// not activate the new field and must remain available during an upgrade.
+		err = testutil.CheckPostJSON(tests.TestDialClient, url,
+			[]byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, currentDefault)), testutil.StatusOK(re))
+		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
 			testutil.StatusNotOK(re),
 			testutil.StringContain(re, "Scheduling Service member"))
@@ -192,7 +199,7 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 	}
 	err := testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
 	re.NoError(err)
-	re.Equal(float64(60), leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
+	re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {

@@ -131,6 +131,21 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
 }
 
+func TestSetScheduleConfigDoesNotMutateInput(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+
+	input := opt.GetScheduleConfig().Clone()
+	delete(input.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
+	opt.SetScheduleConfig(input)
+
+	re.NotSame(input, opt.GetScheduleConfig())
+	re.NotContains(input.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
+	re.Equal(input.DefaultStoreLimit,
+		opt.GetScheduleConfig().StoreLimit[sc.DefaultStoreLimitCompatStoreID])
+}
+
 func TestReloadDefaultStoreLimitAfterPreFeatureRewrite(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

@@ -83,8 +83,9 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
-	cfg.SyncDefaultStoreLimitCompat()
-	o.schedule.Store(cfg)
+	cloned := cfg.Clone()
+	cloned.SyncDefaultStoreLimitCompat()
+	o.schedule.Store(cloned)
 }
 
 // GetReplicationConfig returns replication configurations.
