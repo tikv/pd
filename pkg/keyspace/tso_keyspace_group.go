@@ -519,10 +519,10 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 	)
 	compiledGroupIDPattern := keypath.GetCompiledKeyspaceGroupIDRegexp()
 	putFn := func(kv *mvccpb.KeyValue) error {
-		// Only the initial term load owns the full serving cache. Later reloads
-		// must preserve Keyspaces that local writes may have advanced past the
-		// reload's pinned snapshot revision.
-		return m.applyWatchedKeyspaceGroupValue(term, kv.Value, !loading || initialLoadComplete)
+		// Only post-initial full reloads preserve Keyspaces that local writes may
+		// have advanced past the reload's pinned snapshot revision. Initial loads
+		// and watch events own their full values, including Keyspaces.
+		return m.applyWatchedKeyspaceGroupValue(term, kv.Value, loading && initialLoadComplete)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		match := compiledGroupIDPattern.FindSubmatch(kv.Key)
@@ -589,8 +589,8 @@ func (m *GroupManager) applyWatchedKeyspaceGroupValue(term uint64, value []byte,
 }
 
 // decodeKeyspaceGroupReconcileState stops after Members. Persisted groups keep
-// every reconciliation field before Keyspaces, so the hot watch path does not
-// scan or allocate the potentially million-entry Keyspaces array.
+// every reconciliation field before Keyspaces, so post-initial full reloads do
+// not scan or allocate the potentially million-entry Keyspaces array.
 func decodeKeyspaceGroupReconcileState(value []byte) (*endpoint.KeyspaceGroup, error) {
 	decoder := json.NewDecoder(bytes.NewReader(value))
 	if _, err := decoder.Token(); err != nil {

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -202,6 +203,7 @@ func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
 	group.UserKind = endpoint.Enterprise.String()
 	group.SplitState = &endpoint.SplitState{SplitSource: group.ID}
 	group.Members = []endpoint.KeyspaceGroupMember{{Address: "http://tso-2"}}
+	group.Keyspaces = []uint32{42, 43}
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
 		return store.SaveKeyspaceGroup(txn, group)
 	}))
@@ -212,7 +214,7 @@ func TestKeyspaceGroupWatcherTracksExternalChanges(t *testing.T) {
 		return manager.groups[endpoint.Standard].Get(group.ID) == nil &&
 			got != nil && got.SplitState != nil && got.SplitState.SplitSource == group.ID &&
 			len(got.Members) == 1 && got.Members[0].Address == "http://tso-2" &&
-			len(got.Keyspaces) == 1 && got.Keyspaces[0] == 42
+			slices.Equal(got.Keyspaces, []uint32{42, 43})
 	}, 5*time.Second, 10*time.Millisecond)
 
 	re.NoError(store.RunInTxn(t.Context(), func(txn kv.Txn) error {
@@ -289,7 +291,7 @@ func TestKeyspaceGroupWatcherRejectsPreviousTermUpdates(t *testing.T) {
 	re.Nil(got)
 }
 
-func TestApplyWatchedKeyspaceGroupValuePreservesKeyspaces(t *testing.T) {
+func TestApplyWatchedKeyspaceGroupValuePreservesKeyspacesDuringReload(t *testing.T) {
 	re := require.New(t)
 	manager := NewKeyspaceGroupManager(t.Context(), endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil), nil)
 	defer manager.Close()
