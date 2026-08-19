@@ -37,7 +37,13 @@ var (
 	storesLimitPrefix  = "pd/api/v1/stores/limit"
 	storePrefix        = "pd/api/v1/store/%v"
 	storeUpStatePrefix = "pd/api/v1/store/%v/state?state=Up"
-	maxStoreLimit      = float64(200)
+)
+
+const (
+	pdStatusPrefix       = "pd/api/v1/status"
+	classicMaxStoreLimit = float64(200)
+	nextGenMaxStoreLimit = float64(1000)
+	nextGenKernelType    = "Next Generation"
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd
@@ -565,8 +571,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		var prefix string
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
-			if rate > maxStoreLimit {
-				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
+			if !validateAllStoresLimitRate(cmd, rate) {
 				return
 			}
 		} else {
@@ -595,8 +600,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Println("rate should be a number that > 0.")
 				return
 			}
-			if rate > maxStoreLimit {
-				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
+			if !validateAllStoresLimitRate(cmd, rate) {
 				return
 			}
 			postInput["rate"] = rate
@@ -608,6 +612,32 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 			postJSON(cmd, prefix, postInput)
 		}
 	}
+}
+
+func validateAllStoresLimitRate(cmd *cobra.Command, rate float64) bool {
+	maxStoreLimit := classicMaxStoreLimit
+	if rate > classicMaxStoreLimit {
+		resp, err := doRequest(cmd, pdStatusPrefix, http.MethodGet, http.Header{})
+		if err != nil {
+			cmd.Printf("Failed to get PD kernel type: %s\n", err)
+			return false
+		}
+		var status struct {
+			KernelType string `json:"kernel_type"`
+		}
+		if err := json.Unmarshal([]byte(resp), &status); err != nil {
+			cmd.Printf("Failed to parse PD kernel type: %s\n", err)
+			return false
+		}
+		if status.KernelType == nextGenKernelType {
+			maxStoreLimit = nextGenMaxStoreLimit
+		}
+	}
+	if rate > maxStoreLimit {
+		cmd.Printf("rate should be at most %.1f for all\n", maxStoreLimit)
+		return false
+	}
+	return true
 }
 
 func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
@@ -681,6 +711,9 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 	rate, err := strconv.ParseFloat(args[0], 64)
 	if err != nil || rate <= 0 {
 		cmd.Println("rate should be a number that > 0.")
+		return
+	}
+	if !validateAllStoresLimitRate(cmd, rate) {
 		return
 	}
 	prefix := storesLimitPrefix
