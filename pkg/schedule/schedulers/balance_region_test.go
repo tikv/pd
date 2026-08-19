@@ -111,6 +111,37 @@ func TestBalanceRegionOrdinaryMoveNotBlockedByCandidateSize(t *testing.T) {
 	re.True(solver.shouldBalance(""))
 }
 
+// TestBalanceRegionLargeCandidateDoesNotOvershoot guards against overshoot
+// when the candidate region is much larger than the tolerant margin.
+// sourceStoreScore and targetStoreScore both apply the same
+// max(tolerantResource, candidateSize) delta, so a candidate that would leave
+// the target heavier than the source after the move is correctly rejected:
+// tolerantResource=10, candidate=100, source=150, target=0 project to
+// source=50, target=100 after the move, which must not be scheduled even
+// though comparing raw pre-move sizes alone would allow it.
+func TestBalanceRegionLargeCandidateDoesNotOvershoot(t *testing.T) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	re := require.New(t)
+
+	tc.SetTolerantSizeRatio(0.1)
+	tc.SetRegionScoreFormulaVersion("v1")
+
+	tc.AddRegionStore(1, 1, 150)
+	tc.AddRegionStore(2, 0, 0)
+	tc.AddLeaderRegion(1, 1)
+	region := tc.GetRegion(1).Clone(core.SetApproximateSize(100))
+	tc.PutRegion(region)
+
+	kind := constant.NewScheduleKind(constant.RegionKind, constant.BySize)
+	influence := oc.GetOpInfluence(tc.GetBasicCluster())
+	basePlan := plan.NewBalanceSchedulerPlan()
+	solver := newSolver(basePlan, kind, tc, influence)
+	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
+	re.False(solver.shouldBalance(""))
+}
+
 // TestSingleRegionOnLargeEmptyDiskDoesNotMigrate verifies that when a store's
 // disk is mostly empty except for a single small region (e.g. 6TiB capacity
 // with only a 10MiB region), balance-region does NOT move that region to an
@@ -181,6 +212,51 @@ func TestSingleRegionOnLargeEmptyDiskDoesNotMigrate(t *testing.T) {
 	solver.Source, solver.Target, solver.Region = tc.GetStore(1), tc.GetStore(2), tc.GetRegion(1)
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(""), solver.targetStoreScore("")
 	re.False(solver.shouldBalance(""))
+}
+
+// TestBalanceRegionRealScheduleDoesNotMoveSoleRegion drives the actual
+// Schedule() entry point (not the solver methods directly) through the
+// #11135 churn scenario: one store holds only the cluster's one real region,
+// the other holds enough empty regions to dilute GetAverageRegionSize() well
+// below the candidate's size. On pre-PR code this deterministically produces
+// an operator — the real region is its store's only candidate, so region
+// selection can't dodge it by picking an empty region instead — while the
+// symmetric getRegionScoreDelta() must refuse it here. Checked in both
+// directions so the result isn't an artifact of store iteration/sort order.
+func TestBalanceRegionRealScheduleDoesNotMoveSoleRegion(t *testing.T) {
+	for _, realOnStore1 := range []bool{true, false} {
+		cancel, _, tc, oc := prepareSchedulersTest(false)
+		re := require.New(t)
+
+		tc.SetTolerantSizeRatio(1)
+		tc.SetRegionScoreFormulaVersion("v1")
+		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		tc.SetEnablePlacementRules(false)
+		tc.SetMaxReplicasWithLabel(false, 1)
+		sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
+		re.NoError(err)
+
+		realStore, emptyStore := uint64(1), uint64(2)
+		if !realOnStore1 {
+			realStore, emptyStore = 2, 1
+		}
+		tc.AddRegionStore(realStore, 1, 96)
+		tc.AddRegionStore(emptyStore, 9, 0)
+		tc.AddLeaderRegion(1, realStore)
+		tc.PutRegion(tc.GetRegion(1).Clone(core.SetApproximateSize(96)))
+		var nextID uint64 = 2
+		for range 9 {
+			tc.AddLeaderRegion(nextID, emptyStore)
+			tc.PutRegion(tc.GetRegion(nextID).Clone(core.SetApproximateSize(0)))
+			nextID++
+		}
+
+		for range 10 {
+			ops, _ := sb.Schedule(tc, false)
+			re.Empty(ops)
+		}
+		cancel()
+	}
 }
 
 func TestShouldBalance(t *testing.T) {

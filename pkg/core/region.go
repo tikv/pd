@@ -2343,26 +2343,6 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 	return r.tree.TotalSize() / int64(r.tree.length())
 }
 
-// GetNonEmptyAverageRegionSize returns the average approximate size of
-// non-empty regions only. Empty regions (e.g. freshly split, unwritten
-// regions) are excluded so a cluster with many of them doesn't get this
-// average diluted toward noise levels. When there are no non-empty regions
-// at all (e.g. a scatter-range invocation over a key range that is entirely
-// still-empty regions, or no regions at all), falls back to
-// EmptyRegionApproximateSize instead of 0, so a configured tolerant-size-ratio
-// is never silently zeroed out.
-func (r *RegionsInfo) GetNonEmptyAverageRegionSize() int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	if r.tree == nil {
-		return 0
-	}
-	if r.tree.nonEmptyRegionsCnt == 0 {
-		return EmptyRegionApproximateSize
-	}
-	return r.tree.nonEmptyTotalSize / int64(r.tree.nonEmptyRegionsCnt)
-}
-
 // ValidRegion is used to decide if the region is valid.
 func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
 	startKey := region.GetStartKey()
