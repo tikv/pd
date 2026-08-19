@@ -39,6 +39,11 @@ import (
 
 const maxScheduleRetries = 10
 
+type diagnosticDryRunScheduler interface {
+	// diagnoseDryRun collects a plan without consuming scheduler admission state.
+	diagnoseDryRun(cluster sche.SchedulerCluster) ([]*operator.Operator, []plan.Plan)
+}
+
 var (
 	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
@@ -553,6 +558,9 @@ retry:
 // DiagnoseDryRun returns the operators and plans of a scheduler.
 func (s *ScheduleController) DiagnoseDryRun() ([]*operator.Operator, []plan.Plan) {
 	cacheCluster := newCacheCluster(s.cluster)
+	if scheduler, ok := s.Scheduler.(diagnosticDryRunScheduler); ok {
+		return scheduler.diagnoseDryRun(cacheCluster)
+	}
 	return s.Scheduler.Schedule(cacheCluster, true)
 }
 

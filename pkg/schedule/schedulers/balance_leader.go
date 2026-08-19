@@ -110,6 +110,8 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 		conf.balanceLeaderSchedulerParam = *newParam
 		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
+			conf.balanceLeaderSchedulerParam = *oldParam
+			return http.StatusInternalServerError, err.Error()
 		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
@@ -204,6 +206,7 @@ func (conf *balanceLeaderSchedulerConfig) setInboundLeaderTransferRate(storeID u
 	}
 	conf.Lock()
 	defer conf.Unlock()
+	hadRateLimits := conf.InboundLeaderTransferRateLimits != nil
 	if conf.InboundLeaderTransferRateLimits == nil {
 		conf.InboundLeaderTransferRateLimits = make(map[uint64]inboundLeaderTransferRateLimit)
 	}
@@ -214,12 +217,21 @@ func (conf *balanceLeaderSchedulerConfig) setInboundLeaderTransferRate(storeID u
 	if conf.InboundLeaderTransferRateLimits[storeID] == newLimit {
 		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
+	oldLimit, hadLimit := conf.InboundLeaderTransferRateLimits[storeID]
 	conf.InboundLeaderTransferRateLimits[storeID] = newLimit
-	if limiter, ok := conf.inboundLeaderTransferLimiters[storeID]; ok {
-		limiter.SetLimitAt(conf.currentTimeLocked(), rate.Limit(leadersPerSecond))
-	}
 	if err := conf.save(); err != nil {
 		log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
+		if hadLimit {
+			conf.InboundLeaderTransferRateLimits[storeID] = oldLimit
+		} else if hadRateLimits {
+			delete(conf.InboundLeaderTransferRateLimits, storeID)
+		} else {
+			conf.InboundLeaderTransferRateLimits = nil
+		}
+		return http.StatusInternalServerError, err.Error()
+	}
+	if limiter, ok := conf.inboundLeaderTransferLimiters[storeID]; ok {
+		limiter.SetLimitAt(conf.currentTimeLocked(), rate.Limit(leadersPerSecond))
 	}
 	return http.StatusOK, "Config is updated."
 }
@@ -233,11 +245,14 @@ func (conf *balanceLeaderSchedulerConfig) deleteInboundLeaderTransferRate(storeI
 	if _, ok := conf.InboundLeaderTransferRateLimits[storeID]; !ok {
 		return http.StatusOK, "Config item does not exist, so do nothing."
 	}
+	oldLimit := conf.InboundLeaderTransferRateLimits[storeID]
 	delete(conf.InboundLeaderTransferRateLimits, storeID)
-	delete(conf.inboundLeaderTransferLimiters, storeID)
 	if err := conf.save(); err != nil {
 		log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
+		conf.InboundLeaderTransferRateLimits[storeID] = oldLimit
+		return http.StatusInternalServerError, err.Error()
 	}
+	delete(conf.inboundLeaderTransferLimiters, storeID)
 	return http.StatusOK, "Config is updated."
 }
 
@@ -476,10 +491,22 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 }
 
 // Schedule implements the Scheduler interface.
-func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, collectDiagnostics bool) ([]*operator.Operator, []plan.Plan) {
+	return s.scheduleWithInboundLeaderTransferLimit(cluster, collectDiagnostics, false)
+}
+
+func (s *balanceLeaderScheduler) diagnoseDryRun(cluster sche.SchedulerCluster) ([]*operator.Operator, []plan.Plan) {
+	return s.scheduleWithInboundLeaderTransferLimit(cluster, true, true)
+}
+
+func (s *balanceLeaderScheduler) scheduleWithInboundLeaderTransferLimit(
+	cluster sche.SchedulerCluster,
+	collectDiagnostics bool,
+	bypassInboundLeaderTransferRateLimit bool,
+) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
-	if dryRun {
+	if collectDiagnostics {
 		collector = plan.NewCollector(basePlan)
 	}
 	defer s.filterCounter.Flush()
@@ -503,7 +530,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	for sourceCandidate.hasStore() || targetCandidate.hasStore() {
 		// first choose source
 		if sourceCandidate.hasStore() {
-			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, collector, dryRun)
+			op := createTransferLeaderOperator(sourceCandidate, transferOut, s, solver, usedRegions, collector, bypassInboundLeaderTransferRateLimit)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
@@ -514,7 +541,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		}
 		// next choose target
 		if targetCandidate.hasStore() {
-			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, nil, dryRun)
+			op := createTransferLeaderOperator(targetCandidate, transferIn, s, solver, usedRegions, nil, bypassInboundLeaderTransferRateLimit)
 			if op != nil {
 				result = append(result, op)
 				if len(result) >= batch {
@@ -529,9 +556,9 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 }
 
 func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLeaderScheduler,
-	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector, dryRun bool) *operator.Operator {
+	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector, bypassInboundLeaderTransferRateLimit bool) *operator.Operator {
 	store := cs.getStore()
-	if dir == transferIn && !dryRun && !s.conf.isInboundLeaderTransferAllowed(store.GetID()) {
+	if dir == transferIn && !bypassInboundLeaderTransferRateLimit && !s.conf.isInboundLeaderTransferAllowed(store.GetID()) {
 		balanceLeaderCounterWithEvent("inbound-target-rate-limited").Inc()
 		cs.next()
 		return nil
@@ -550,12 +577,12 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	}
 	var op *operator.Operator
 	for range retryLimit {
-		if op = creator(ssolver, collector, dryRun); op != nil {
+		if op = creator(ssolver, collector, bypassInboundLeaderTransferRateLimit); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; ok {
 				op = nil
 				continue
 			}
-			if dryRun || s.conf.takeInboundLeaderTransfer(ssolver.targetStoreID()) {
+			if bypassInboundLeaderTransferRateLimit || s.conf.takeInboundLeaderTransfer(ssolver.targetStoreID()) {
 				break
 			}
 			balanceLeaderCounterWithEvent("inbound-target-rate-limited").Inc()
@@ -590,7 +617,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // transferLeaderOut transfers leader from the source store.
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
-func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector, dryRun bool) *operator.Operator {
+func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector, bypassInboundLeaderTransferRateLimit bool) *operator.Operator {
 	rs := s.conf.getRanges()
 	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
@@ -630,7 +657,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) < targets[j].LeaderScore(leaderSchedulePolicy, jOp)
 	})
 	for _, solver.Target = range targets {
-		if op := s.createOperator(solver, collector, dryRun); op != nil {
+		if op := s.createOperator(solver, collector, bypassInboundLeaderTransferRateLimit); op != nil {
 			return op
 		}
 	}
@@ -642,7 +669,7 @@ func (s *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // transferLeaderIn transfers leader to the target store.
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
-func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector, dryRun bool) *operator.Operator {
+func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector, bypassInboundLeaderTransferRateLimit bool) *operator.Operator {
 	rs := s.conf.getRanges()
 	if s.GetName() == types.BalanceLeaderScheduler.String() {
 		km := solver.GetKeyRangeManager()
@@ -695,14 +722,14 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		balanceLeaderNoTargetStoreCounter.Inc()
 		return nil
 	}
-	return s.createOperator(solver, collector, dryRun)
+	return s.createOperator(solver, collector, bypassInboundLeaderTransferRateLimit)
 }
 
 // createOperator creates the operator according to the source and target store.
 // If the region is hot or the difference between the two stores is tolerable, then
 // no new operator need to be created, otherwise create an operator that transfers
 // the leader from the source store to the target store for the region.
-func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector, dryRun bool) *operator.Operator {
+func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector, bypassInboundLeaderTransferRateLimit bool) *operator.Operator {
 	solver.Step++
 	defer func() { solver.Step-- }()
 	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(s.GetName()), solver.targetStoreScore(s.GetName())
@@ -713,7 +740,7 @@ func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 		}
 		return nil
 	}
-	if !dryRun && !s.conf.isInboundLeaderTransferAllowed(solver.targetStoreID()) {
+	if !bypassInboundLeaderTransferRateLimit && !s.conf.isInboundLeaderTransferAllowed(solver.targetStoreID()) {
 		balanceLeaderCounterWithEvent("inbound-target-rate-limited").Inc()
 		return nil
 	}

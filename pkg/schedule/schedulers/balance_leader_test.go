@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -151,6 +152,58 @@ func TestInboundLeaderTransferRateLimitConfig(t *testing.T) {
 	}
 }
 
+func TestInboundLeaderTransferRateLimitPersistenceFailure(t *testing.T) {
+	re := require.New(t)
+	storage := storage.NewStorageWithMemoryBackend()
+	now := time.Now()
+	conf := &balanceLeaderSchedulerConfig{
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
+			Batch: BalanceLeaderBatchSize,
+		},
+		now: func() time.Time { return now },
+	}
+	conf.init(types.BalanceLeaderScheduler.String(), storage, conf)
+
+	httpCode, _ := conf.setInboundLeaderTransferRate(1, 1)
+	re.Equal(http.StatusOK, httpCode)
+	re.True(conf.takeInboundLeaderTransfer(1))
+	re.Equal(1.0, float64(conf.inboundLeaderTransferLimiters[1].Limit()))
+
+	persistFail := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persistFail, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(persistFail))
+	}()
+
+	// Generic updates must roll back the parameter map when persistence fails.
+	httpCode, _ = conf.update([]byte(`{"inbound-leader-transfer-rate-limits":{"1":{"leaders-per-second":2,"burst":1}}}`))
+	re.Equal(http.StatusInternalServerError, httpCode)
+	re.Equal(1.0, conf.clone().InboundLeaderTransferRateLimits[1].LeadersPerSecond)
+
+	// Dedicated updates must preserve both the parameter and the live bucket.
+	httpCode, _ = conf.setInboundLeaderTransferRate(1, 2)
+	re.Equal(http.StatusInternalServerError, httpCode)
+	re.Equal(1.0, conf.clone().InboundLeaderTransferRateLimits[1].LeadersPerSecond)
+	re.Equal(1.0, float64(conf.inboundLeaderTransferLimiters[1].Limit()))
+
+	// A failed delete must keep the persisted setting and live bucket active.
+	httpCode, _ = conf.deleteInboundLeaderTransferRate(1)
+	re.Equal(http.StatusInternalServerError, httpCode)
+	re.Contains(conf.clone().InboundLeaderTransferRateLimits, uint64(1))
+	re.Contains(conf.inboundLeaderTransferLimiters, uint64(1))
+
+	persisted, err := storage.LoadSchedulerConfig(types.BalanceLeaderScheduler.String())
+	re.NoError(err)
+	re.Contains(persisted, `"1":{"leaders-per-second":1,"burst":1}`)
+
+	// The failed rate increase did not accelerate refill of the original bucket.
+	now = now.Add(500 * time.Millisecond)
+	re.False(conf.takeInboundLeaderTransfer(1))
+	now = now.Add(500 * time.Millisecond)
+	re.True(conf.takeInboundLeaderTransfer(1))
+}
+
 func TestInboundLeaderTransferRateLimitHTTPReadback(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
@@ -253,12 +306,16 @@ func TestBalanceLeaderInboundTargetRateLimit(t *testing.T) {
 	re.Len(ops, 1)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpLeader, 1, 2)
 
-	// Diagnostic dry runs never consume a token.
+	// A pure diagnostic dry run never consumes a token, while a normal
+	// diagnosable scheduling pass still does.
 	now = now.Add(time.Second)
-	ops, _ = lb.Schedule(tc, true)
+	scheduleController := NewScheduleController(context.Background(), tc, oc, lb)
+	defer scheduleController.Stop()
+	ops, _ = scheduleController.DiagnoseDryRun()
 	re.NotEmpty(ops)
-	ops, _ = lb.Schedule(tc, false)
+	ops = scheduleController.Schedule(true)
 	re.Len(ops, 1)
+	re.Empty(scheduleController.Schedule(true))
 }
 
 func TestBalanceLeaderInboundTargetRateLimitFailedCandidate(t *testing.T) {
