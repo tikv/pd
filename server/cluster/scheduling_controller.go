@@ -190,6 +190,16 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
+		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
+		// concurrent final removal of s between GetStores() above and this write
+		// can have its own metric cleanup undone by it. Since final removal only
+		// happens once and never re-adds the store, re-checking right after the
+		// write and redoing the cleanup if it's now gone closes that race without
+		// needing synchronization with the removal path.
+		if sc.GetStore(s.GetID()) == nil {
+			statistics.DeleteClusterStatusMetrics(s)
+			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()

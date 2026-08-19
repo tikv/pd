@@ -2212,6 +2212,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	schedule.DeleteStoreMetrics(storeIDStr)
 	schedulers.DeleteStoreMetrics(storeIDStr)
 	scatter.DeleteStoreMetrics(storeIDStr)
+	storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
 	if fn := c.onStoreBuried.Load(); fn != nil {
 		(*fn)(storeIDStr)
 	}
