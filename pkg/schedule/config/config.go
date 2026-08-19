@@ -349,11 +349,6 @@ type storeLimitConfigJSONPresence struct {
 	removePeer bool
 }
 
-// DefaultStoreLimitCompatStoreID is reserved for persisting the default store
-// limit in the legacy per-store map. Store ID 0 is invalid for a real store, so
-// pre-feature PD versions preserve this entry when they rewrite the full config.
-const DefaultStoreLimitCompatStoreID uint64 = 0
-
 // UnmarshalJSON tracks default-store-limit field presence for legacy config migration.
 func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
 	type scheduleConfig ScheduleConfig
@@ -391,23 +386,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	cfg.StoreLimit = storeLimit
 	cfg.Schedulers = schedulers
 	return &cfg
-}
-
-// SyncDefaultStoreLimitCompat stores the default in a representation that
-// pre-feature PD versions already understand and preserve.
-func (c *ScheduleConfig) SyncDefaultStoreLimitCompat() {
-	if c.StoreLimit == nil {
-		c.StoreLimit = make(map[uint64]StoreLimitConfig)
-	}
-	c.StoreLimit[DefaultStoreLimitCompatStoreID] = c.DefaultStoreLimit
-}
-
-// CloneWithoutDefaultStoreLimitCompat returns a public view of the schedule
-// config without the internal compatibility entry.
-func (c *ScheduleConfig) CloneWithoutDefaultStoreLimitCompat() *ScheduleConfig {
-	cfg := c.Clone()
-	delete(cfg.StoreLimit, DefaultStoreLimitCompatStoreID)
-	return cfg
 }
 
 // Adjust adjusts the config.
@@ -581,9 +559,6 @@ func (c *ScheduleConfig) migratePersistedStoreLimit() {
 	if c.StoreBalanceRate != 0 {
 		defaultStoreLimit = StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 	}
-	if compatDefault, ok := c.StoreLimit[DefaultStoreLimitCompatStoreID]; ok {
-		defaultStoreLimit = compatDefault
-	}
 	if !addPeerDefined {
 		c.DefaultStoreLimit.AddPeer = defaultStoreLimit.AddPeer
 	}
@@ -594,7 +569,6 @@ func (c *ScheduleConfig) migratePersistedStoreLimit() {
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
 	c.StoreBalanceRate = 0
 	c.defaultStoreLimitJSONPresence = nil
-	c.SyncDefaultStoreLimitCompat()
 }
 
 func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {

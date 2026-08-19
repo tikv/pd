@@ -3379,6 +3379,83 @@ func TestAddStoreLimitUsesPersistedDefaultStoreLimit(t *testing.T) {
 	re.Equal(sc.StoreLimitConfig{AddPeer: 30, RemovePeer: 30}, opt.GetScheduleConfig().StoreLimit[3])
 }
 
+type blockingSaveConfigStorage struct {
+	storage.Storage
+	saveStarted chan struct{}
+	releaseSave chan struct{}
+	once        sync.Once
+}
+
+func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
+	s.once.Do(func() {
+		close(s.saveStarted)
+		<-s.releaseSave
+	})
+	return s.Storage.SaveConfig(cfg)
+}
+
+func TestStoreLimitUpdatesAreSerialized(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	storage := &blockingSaveConfigStorage{
+		Storage:     storage.NewStorageWithMemoryBackend(),
+		saveStarted: make(chan struct{}),
+		releaseSave: make(chan struct{}),
+	}
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage)
+
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() { close(storage.releaseSave) })
+	}
+	t.Cleanup(release)
+
+	addDone := make(chan struct{})
+	go func() {
+		rc.AddStoreLimit(&metapb.Store{Id: 1})
+		close(addDone)
+	}()
+
+	select {
+	case <-storage.saveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("AddStoreLimit did not start persisting")
+	}
+
+	setAllDone := make(chan error, 1)
+	go func() {
+		setAllDone <- rc.SetAllStoresLimit(storelimit.AddPeer, 60)
+	}()
+
+	select {
+	case err := <-setAllDone:
+		re.NoError(err)
+		t.Fatal("SetAllStoresLimit was not serialized with AddStoreLimit")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-addDone:
+	case <-time.After(time.Second):
+		t.Fatal("AddStoreLimit did not finish")
+	}
+	select {
+	case err := <-setAllDone:
+		re.NoError(err)
+	case <-time.After(time.Second):
+		t.Fatal("SetAllStoresLimit did not finish")
+	}
+
+	cfg := opt.GetScheduleConfig()
+	re.Equal(float64(60), cfg.DefaultStoreLimit.AddPeer)
+	re.Equal(float64(60), cfg.StoreLimit[1].AddPeer)
+}
+
 func TestPatrolRegionConcurrency(t *testing.T) {
 	re := require.New(t)
 

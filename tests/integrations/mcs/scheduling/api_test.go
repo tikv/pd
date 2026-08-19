@@ -35,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -859,15 +858,6 @@ func (suite *schedulingForwardingTestSuite) TestForwardingAndLocalBehavior() {
 	re.Equal(suite.follower.GetConfig().LeaderLease, followerCfg.LeaderLease)
 	re.NotEqual(suite.primary.GetConfig().GetListenAddr(), followerCfg.GetListenAddr())
 	re.Equal(level, followerCfg.Log.Level)
-	re.NotContains(followerCfg.Schedule.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
-
-	var primaryCfg config.Config
-	primaryConfigURL := fmt.Sprintf("%s%s/config", suite.primary.GetAdvertiseListenAddr(), apis.APIPathPrefix)
-	err = testutil.ReadGetJSON(re, tests.TestDialClient, primaryConfigURL, &primaryCfg,
-		testutil.StatusOK(re))
-	re.NoError(err)
-	re.NotContains(primaryCfg.Schedule.StoreLimit, sc.DefaultStoreLimitCompatStoreID)
-	re.Equal(primaryCfg.Schedule.DefaultStoreLimit, followerCfg.Schedule.DefaultStoreLimit)
 
 	// Case 3: Test sync config from pd server.
 	configURL := urlPrefix + "/config"

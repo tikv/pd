@@ -79,7 +79,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		mergedCfg := localCfg
 		mergedCfg.Replication = leaderCfg.Replication
-		mergedCfg.Schedule = *leaderCfg.Schedule.CloneWithoutDefaultStoreLimitCompat()
+		mergedCfg.Schedule = leaderCfg.Schedule
 		h.rd.JSON(w, http.StatusOK, mergedCfg)
 		return
 	}
@@ -91,7 +91,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		cfg.Schedule = *schedulingServerConfig.Schedule.CloneWithoutDefaultStoreLimitCompat()
+		cfg.Schedule = schedulingServerConfig.Schedule
 		cfg.Replication = schedulingServerConfig.Replication
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
@@ -418,7 +418,7 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, cfg.Schedule.CloneWithoutDefaultStoreLimitCompat())
+		h.rd.JSON(w, http.StatusOK, cfg.Schedule)
 		return
 	}
 	cfg := h.svr.GetScheduleConfig()

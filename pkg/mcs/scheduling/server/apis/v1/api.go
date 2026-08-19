@@ -362,18 +362,12 @@ func getConfig(c *gin.Context) {
 		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
 		return
 	}
-	mergedCfg := mergeDynamicConfigFromPrimary(localCfg, primaryCfg)
-	c.IndentedJSON(http.StatusOK, mergedCfg)
-}
-
-func mergeDynamicConfigFromPrimary(localCfg *config.Config, primaryCfg config.Config) *config.Config {
 	primaryCfg.Schedule.MigrateDeprecatedFlags()
-	primaryCfg.Schedule = *primaryCfg.Schedule.CloneWithoutDefaultStoreLimitCompat()
 
 	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
 	localCfg.Schedule = primaryCfg.Schedule
 	localCfg.Replication = primaryCfg.Replication
-	return localCfg
+	c.IndentedJSON(http.StatusOK, localCfg)
 }
 
 // @Tags     admin

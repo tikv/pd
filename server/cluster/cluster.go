@@ -156,6 +156,7 @@ type Server interface {
 type RaftCluster struct {
 	syncutil.RWMutex
 	storeStateLock *syncutil.LockGroup
+	storeLimitLock syncutil.Mutex
 	wg             sync.WaitGroup
 
 	serverCtx context.Context
@@ -2383,6 +2384,9 @@ func (c *RaftCluster) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 
 // AddStoreLimit add a store limit for a given store ID.
 func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
+	c.storeLimitLock.Lock()
+	defer c.storeLimitLock.Unlock()
+
 	storeID := store.GetId()
 	cfg := c.opt.GetScheduleConfig().Clone()
 	if _, ok := cfg.StoreLimit[storeID]; ok {
@@ -2412,6 +2416,9 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 
 // RemoveStoreLimit remove a store limit for a given store ID.
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
+	c.storeLimitLock.Lock()
+	defer c.storeLimitLock.Unlock()
+
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
 		c.ResetStoreLimit(storeID, limitType)
@@ -2572,6 +2579,9 @@ func (c *RaftCluster) loadExternalTS() {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	c.storeLimitLock.Lock()
+	defer c.storeLimitLock.Unlock()
+
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {
@@ -2587,6 +2597,9 @@ func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePer
 
 // SetAllStoresLimit sets all store limit for a given type and rate.
 func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64) error {
+	c.storeLimitLock.Lock()
+	defer c.storeLimitLock.Unlock()
+
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetAllStoresLimit(typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {

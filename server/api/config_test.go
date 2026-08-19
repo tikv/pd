@@ -52,11 +52,6 @@ func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 			data:     `{"schedule":{"store-balance-rate":60,"default-store-limit":{"add-peer":0,"remove-peer":0}}}`,
 			expected: sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 0},
 		},
-		{
-			name:     "compatibility entry survives old primary rewrite",
-			data:     `{"schedule":{"store-limit":{"0":{"add-peer":70,"remove-peer":0}}}}`,
-			expected: sc.StoreLimitConfig{AddPeer: 70, RemovePeer: 0},
-		},
 	}
 
 	for _, testCase := range testCases {
@@ -67,11 +62,7 @@ func TestUnmarshalRemoteConfigMigratesDefaultStoreLimit(t *testing.T) {
 			cfg, err := unmarshalRemoteConfig([]byte(testCase.data))
 			require.NoError(t, err)
 			require.Equal(t, testCase.expected, cfg.Schedule.DefaultStoreLimit)
-			require.Equal(t, testCase.expected,
-				cfg.Schedule.StoreLimit[sc.DefaultStoreLimitCompatStoreID])
 			require.Zero(t, cfg.Schedule.StoreBalanceRate)
-			_, exposed := cfg.Schedule.CloneWithoutDefaultStoreLimitCompat().StoreLimit[sc.DefaultStoreLimitCompatStoreID]
-			require.False(t, exposed)
 
 			data, err := json.Marshal(cfg)
 			require.NoError(t, err)
