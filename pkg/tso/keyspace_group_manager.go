@@ -543,12 +543,10 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
-	maxLoadedModRevision := uint64(0)
 	loadedModRevision := uint64(0)
 	putFn := func(kv *mvccpb.KeyValue) error {
 		modRevision := uint64(kv.ModRevision)
 		if loadedModRevision > 0 && modRevision <= loadedModRevision {
-			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 			return nil
 		}
 		group := &endpoint.KeyspaceGroup{}
@@ -561,7 +559,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 				failpoint.Return(nil)
 			}
 		})
-		maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -607,7 +604,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
 		func([]*clientv3.Event) error {
-			maxLoadedModRevision = 0
 			loadedModRevision = kgm.getModRevision()
 			return nil
 		},
@@ -617,9 +613,9 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		true, /* withPrefix */
 	)
 	kgm.groupWatcher.SetReconcileDeletedKeys()
-	kgm.groupWatcher.SetLoadSuccessFn(func() {
-		if maxLoadedModRevision > 0 {
-			kgm.SetModRevision(maxLoadedModRevision)
+	kgm.groupWatcher.SetLoadSuccessFn(func(snapshotRevision int64) {
+		if snapshotRevision > 0 {
+			kgm.SetModRevision(uint64(snapshotRevision))
 		}
 	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {

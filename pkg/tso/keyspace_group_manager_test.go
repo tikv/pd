@@ -289,6 +289,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMem
 			mgr.kgs[3] == unchangedGroup &&
 			mgr.modRevision == uint64(resp.Header.Revision)
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	deleteResp, err := suite.etcdClient.Delete(suite.ctx, keypath.KeyspaceGroupIDPath(2))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		mgr.groupWatcher.ForceLoad()
+		mgr.RLock()
+		defer mgr.RUnlock()
+		_, keyspaceExists := mgr.keyspaceLookupTable[203]
+		return mgr.kgs[2] == nil &&
+			!keyspaceExists &&
+			mgr.kgs[3] == unchangedGroup &&
+			mgr.modRevision == uint64(deleteResp.Header.Revision)
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
