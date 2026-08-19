@@ -404,7 +404,7 @@ type LoopWatcher struct {
 	// initialLoadSuccessFn is called after the initial load succeeds and before watching starts.
 	initialLoadSuccessFn func()
 	// loadSuccessFn is called after a revision-consistent full load succeeds.
-	loadSuccessFn func(int64)
+	loadSuccessFn func()
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -775,7 +775,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				lw.loadedKeys = snapshotKeys
 			}
 			if lw.loadSuccessFn != nil {
-				lw.loadSuccessFn(snapshotRevision)
+				lw.loadSuccessFn()
 			}
 			return
 		}
@@ -1005,7 +1005,7 @@ func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
 
 // SetLoadSuccessFn sets a callback that runs after every revision-consistent
 // full load succeeds. It must be called before StartWatchLoop.
-func (lw *LoopWatcher) SetLoadSuccessFn(fn func(int64)) {
+func (lw *LoopWatcher) SetLoadSuccessFn(fn func()) {
 	lw.loadSuccessFn = fn
 }
 

@@ -443,6 +443,9 @@ func (m *GroupManager) GetKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup,
 
 // DeleteKeyspaceGroupByID deletes the keyspace group by ID.
 func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup, error) {
+	if id == constant.DefaultKeyspaceGroupID {
+		return nil, errs.ErrModifyDefaultKeyspaceGroup
+	}
 	var (
 		kg  *endpoint.KeyspaceGroup
 		err error
@@ -461,9 +464,24 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		if kg.IsSplitting() {
 			return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(id)
 		}
-		return m.store.DeleteKeyspaceGroup(txn, id)
+		defaultKG, err := m.store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
+		if err != nil {
+			return err
+		}
+		if defaultKG == nil {
+			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(constant.DefaultKeyspaceGroupID)
+		}
+		if err := m.store.DeleteKeyspaceGroup(txn, id); err != nil {
+			return err
+		}
+		// Refresh a surviving membership key so snapshot reloads retain the
+		// deletion's comparable revision.
+		return m.store.SaveKeyspaceGroup(txn, defaultKG)
 	}); err != nil {
 		return nil, err
+	}
+	if kg == nil {
+		return nil, nil
 	}
 
 	userKind := endpoint.StringUserKind(kg.UserKind)

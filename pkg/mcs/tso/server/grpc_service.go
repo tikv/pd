@@ -147,10 +147,8 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	snapshotRevision := s.keyspaceGroupManager.GetSnapshotRevision()
 	allocator, keyspaceGroup, keyspaceGroupID, modRevision, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
-	modRevision, revisionLoaded := resolveServingRevision(request.GetModRevision(), modRevision, snapshotRevision)
-	if !revisionLoaded {
+	if request.GetModRevision() > modRevision || errs.ErrKeyspaceGroupModRevisionStale.Equal(err) {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_INVALID_VALUE, errs.ErrKeyspaceGroupModRevisionStale.Error(), respKeyspaceGroup),
 		}, nil
@@ -196,13 +194,6 @@ func (s *Service) FindGroupByKeyspaceID(
 		},
 		ModRevision: modRevision,
 	}, nil
-}
-
-func resolveServingRevision(requestRevision, modRevision, snapshotRevision uint64) (uint64, bool) {
-	if requestRevision > max(modRevision, snapshotRevision) {
-		return modRevision, false
-	}
-	return max(requestRevision, modRevision), true
 }
 
 // GetMinTS gets the minimum timestamp across all keyspace groups served by the TSO server

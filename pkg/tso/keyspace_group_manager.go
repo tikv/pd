@@ -117,8 +117,10 @@ type state struct {
 	// modRevision is the modification revision of keyspace space.
 	// It is used to indicate that server must return the newer keyspace infos avoid to tso fallback the older keyspace.
 	modRevision uint64
-	// snapshotRevision is the latest etcd revision fully covered by the loaded keyspace group snapshot.
-	snapshotRevision uint64
+	// revisionPending prevents publishing changed membership before its revision.
+	revisionPending bool
+	// pendingRevision is the newest applied membership revision waiting to be published.
+	pendingRevision uint64
 }
 
 func (s *state) initialize() {
@@ -180,18 +182,23 @@ func (s *state) getModRevision() uint64 {
 	return s.modRevision
 }
 
-func (s *state) setSnapshotRevision(snapshotRevision uint64) {
+func (s *state) beginRevisionUpdate(modRevision uint64) {
 	s.Lock()
 	defer s.Unlock()
-	s.snapshotRevision = max(s.snapshotRevision, snapshotRevision)
+	s.revisionPending = true
+	s.pendingRevision = max(s.pendingRevision, modRevision)
 }
 
-// GetSnapshotRevision returns the latest etcd revision fully covered by the loaded keyspace group snapshot.
-// Read it before the group state so a newly published revision cannot be paired with an older snapshot.
-func (s *state) GetSnapshotRevision() uint64 {
-	s.RLock()
-	defer s.RUnlock()
-	return s.snapshotRevision
+func (s *state) finishRevisionUpdate(modRevision uint64) bool {
+	s.Lock()
+	defer s.Unlock()
+	if s.modRevision >= modRevision || s.pendingRevision > modRevision {
+		return false
+	}
+	s.modRevision = modRevision
+	s.revisionPending = false
+	s.pendingRevision = 0
+	return true
 }
 
 // getSplittingGroups returns the IDs of the splitting keyspace groups.
@@ -304,7 +311,12 @@ func (s *state) getKeyspaceGroupMetaWithCheck(
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
+	return s.getKeyspaceGroupMetaWithCheckLocked(keyspaceID, keyspaceGroupID)
+}
 
+func (s *state) getKeyspaceGroupMetaWithCheckLocked(
+	keyspaceID, keyspaceGroupID uint32,
+) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	if allocator := s.allocators[keyspaceGroupID]; allocator != nil {
 		kg := s.kgs[keyspaceGroupID]
 		if kg != nil {
@@ -561,15 +573,16 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	defaultKGConfigured := false
 	maxLoadedModRevision := uint64(0)
 	loadedModRevision := uint64(0)
+	membershipChanged := false
 	putFn := func(kv *mvccpb.KeyValue) error {
 		modRevision := uint64(kv.ModRevision)
-		if loadedModRevision > 0 && modRevision <= loadedModRevision {
-			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
-			return nil
-		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
 			return errs.ErrJSONUnmarshal.Wrap(err)
+		}
+		if loadedModRevision > 0 && modRevision <= loadedModRevision {
+			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
+			return nil
 		}
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
@@ -578,6 +591,9 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 			}
 		})
 		maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
+		delete(kgm.groupUpdateRetryList, group.ID)
+		kgm.beginRevisionUpdate(modRevision)
+		membershipChanged = true
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -589,29 +605,50 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		if err != nil {
 			return err
 		}
+		delete(kgm.groupUpdateRetryList, groupID)
+		kgm.beginRevisionUpdate(uint64(kv.ModRevision))
+		membershipChanged = true
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
-	postEventsFn := func(event []*clientv3.Event) error {
+	retryGroups := func() {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
+			kgm.beginRevisionUpdate(0)
+			membershipChanged = true
 			kgm.updateKeyspaceGroup(group)
 		}
+	}
+	postEventsFn := func(event []*clientv3.Event) error {
+		if len(event) == 0 {
+			return nil
+		}
+		retryGroups()
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
 			if ok && addr == kgm.electionNamePrefix {
 				failpoint.Return(nil)
 			}
 		})
-		if len(event) > 0 {
-			last := event[len(event)-1]
-			if !kgm.SetModRevision(uint64(last.Kv.ModRevision)) {
-				log.Warn("watch keyspace group met mod revision not increased",
-					zap.Uint32("current-mod-revision", uint32(kgm.modRevision)),
-					zap.Uint64("new-mod-revision", uint64(last.Kv.ModRevision)),
-				)
-			}
+		if len(kgm.groupUpdateRetryList) > 0 {
+			log.Warn("keyspace group revision remains pending while updates need retry",
+				zap.Int("retry-group-count", len(kgm.groupUpdateRetryList)))
+			return nil
+		}
+		last := event[len(event)-1]
+		modRevision := uint64(last.Kv.ModRevision)
+		var updated bool
+		if membershipChanged {
+			updated = kgm.finishRevisionUpdate(modRevision)
+		} else {
+			updated = kgm.SetModRevision(modRevision)
+		}
+		if !updated {
+			log.Warn("watch keyspace group met mod revision not increased",
+				zap.Uint64("current-mod-revision", kgm.getModRevision()),
+				zap.Uint64("new-mod-revision", modRevision),
+			)
 		}
 		return nil
 	}
@@ -625,6 +662,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		func([]*clientv3.Event) error {
 			maxLoadedModRevision = 0
 			loadedModRevision = kgm.getModRevision()
+			membershipChanged = false
 			return nil
 		},
 		putFn,
@@ -633,13 +671,23 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		true, /* withPrefix */
 	)
 	kgm.groupWatcher.SetReconcileDeletedKeys()
-	kgm.groupWatcher.SetLoadSuccessFn(func(snapshotRevision int64) {
-		if maxLoadedModRevision > 0 {
-			kgm.SetModRevision(maxLoadedModRevision)
+	kgm.groupWatcher.SetLoadSuccessFn(func() {
+		retryGroups()
+		if !membershipChanged {
+			return
 		}
-		if snapshotRevision > 0 {
-			kgm.setSnapshotRevision(uint64(snapshotRevision))
+		if len(kgm.groupUpdateRetryList) > 0 {
+			log.Warn("keyspace group revision remains pending while updates need retry",
+				zap.Int("retry-group-count", len(kgm.groupUpdateRetryList)))
+			return
 		}
+		if maxLoadedModRevision > loadedModRevision {
+			kgm.finishRevisionUpdate(maxLoadedModRevision)
+			return
+		}
+		log.Warn("keyspace group snapshot changed without a newer membership revision",
+			zap.Uint64("current-mod-revision", loadedModRevision),
+			zap.Uint64("loaded-mod-revision", maxLoadedModRevision))
 	})
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
@@ -1109,12 +1157,21 @@ func (kgm *KeyspaceGroupManager) GetAllocator(keyspaceGroupID uint32) (*Allocato
 func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 	keyspaceID uint32,
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
-	curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err :=
-		kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, constant.DefaultKeyspaceGroupID)
-	if err != nil {
-		return nil, curKeyspaceGroup, curKeyspaceGroupID, modRevision, err
+	kgm.RLock()
+	defer kgm.RUnlock()
+	if kgm.revisionPending {
+		return nil, nil, constant.DefaultKeyspaceGroupID, kgm.modRevision, errs.ErrKeyspaceGroupModRevisionStale
 	}
-	return curAllocator, curKeyspaceGroup, curKeyspaceGroupID, modRevision, nil
+	return kgm.getKeyspaceGroupMetaWithCheckLocked(keyspaceID, constant.DefaultKeyspaceGroupID)
+}
+
+// IsKeyspaceAssignedToGroup reports whether the current local state assigns a keyspace to a group.
+func (kgm *KeyspaceGroupManager) IsKeyspaceAssignedToGroup(keyspaceID, keyspaceGroupID uint32) bool {
+	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+		return false
+	}
+	_, _, currentGroupID, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
+	return err == nil && currentGroupID == keyspaceGroupID
 }
 
 // GetMember returns the member of the keyspace group serving the given keyspace.
