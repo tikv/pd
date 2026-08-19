@@ -405,6 +405,8 @@ type LoopWatcher struct {
 	initialLoadSuccessFn func()
 	// loadSuccessFn is called after a revision-consistent full load succeeds.
 	loadSuccessFn func()
+	// reloadStartFn is called before a retrying full reload starts.
+	reloadStartFn func()
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
@@ -637,6 +639,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					revision = wresp.CompactRevision
 					continue
 				}
+				lw.notifyReloadStart()
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
@@ -723,6 +726,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				callbackErr = postErr
 			}
 			if callbackErr != nil && lw.reloadOnCompaction {
+				lw.notifyReloadStart()
 				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
 				if !shouldContinue {
 					return max(revision, loadedRevision), nil
@@ -763,6 +767,12 @@ func (lw *LoopWatcher) reloadWithRetry(ctx context.Context) (int64, bool) {
 		case <-retryTimer.C:
 		}
 		retryInterval = min(retryInterval*2, maxCompactionReloadRetryInterval)
+	}
+}
+
+func (lw *LoopWatcher) notifyReloadStart() {
+	if lw.reloadStartFn != nil {
+		lw.reloadStartFn()
 	}
 }
 
@@ -1034,6 +1044,13 @@ func (lw *LoopWatcher) SetInitialLoadSuccessFn(fn func()) {
 // full load succeeds. It must be called before StartWatchLoop.
 func (lw *LoopWatcher) SetLoadSuccessFn(fn func()) {
 	lw.loadSuccessFn = fn
+}
+
+// SetReloadStartFn sets a callback that runs before a retrying full reload
+// starts after compaction or a failed watch callback. It must be called before
+// StartWatchLoop.
+func (lw *LoopWatcher) SetReloadStartFn(fn func()) {
+	lw.reloadStartFn = fn
 }
 
 // SetReloadOnCompaction enables a full, revision-consistent snapshot reload

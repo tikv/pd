@@ -1243,6 +1243,8 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 	re.NoError(err)
 
 	loadedValues := make(chan string, 1)
+	reloadStarted := make(chan struct{})
+	continueReload := make(chan struct{})
 	watcher := NewLoopWatcher(
 		ctx,
 		&sync.WaitGroup{},
@@ -1260,6 +1262,13 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 		false, /* withPrefix */
 	)
 	watcher.SetReloadOnCompaction()
+	watcher.SetReloadStartFn(func() {
+		close(reloadStarted)
+		select {
+		case <-continueReload:
+		case <-ctx.Done():
+		}
+	})
 
 	type watchResult struct {
 		revision int64
@@ -1270,6 +1279,18 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterCompactionWhenEnabled(
 		revision, watchErr := watcher.watch(ctx, initialResp.Header.Revision)
 		watchDone <- watchResult{revision: revision, err: watchErr}
 	}()
+
+	select {
+	case <-reloadStarted:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not announce the compaction reload")
+	}
+	select {
+	case value := <-loadedValues:
+		suite.T().Fatalf("watcher loaded %q before the reload-start callback completed", value)
+	default:
+	}
+	close(continueReload)
 
 	select {
 	case value := <-loadedValues:

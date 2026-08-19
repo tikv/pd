@@ -418,6 +418,29 @@ func (suite *keyspaceGroupManagerTestSuite) TestPendingGroupRevisionOnlyFencesDi
 	re.Equal(modRevision+1, loadedRevision)
 }
 
+func (suite *keyspaceGroupManagerTestSuite) TestPendingGroupReloadOnlyFencesDiscovery() {
+	re := suite.Require()
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	defer mgr.Close()
+	re.NoError(mgr.Initialize())
+
+	modRevision := mgr.getModRevision()
+	mgr.beginReload()
+	_, _, _, loadedRevision, err := mgr.FindGroupByKeyspaceID(getBootstrapKeyspaceID())
+	re.ErrorIs(err, errs.ErrKeyspaceGroupModRevisionStale)
+	re.Equal(modRevision, loadedRevision)
+	re.True(mgr.IsKeyspaceAssignedToGroup(getBootstrapKeyspaceID(), constant.DefaultKeyspaceGroupID))
+	_, err = mgr.GetMember(getBootstrapKeyspaceID(), constant.DefaultKeyspaceGroupID)
+	re.NoError(err)
+
+	mgr.finishReload()
+	_, group, groupID, loadedRevision, err := mgr.FindGroupByKeyspaceID(getBootstrapKeyspaceID())
+	re.NoError(err)
+	re.NotNil(group)
+	re.Equal(constant.DefaultKeyspaceGroupID, groupID)
+	re.Equal(modRevision, loadedRevision)
+}
+
 // TestLoadWithDifferentBatchSize tests the loading of the keyspace group assignment with the different batch size.
 func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 	re := suite.Require()

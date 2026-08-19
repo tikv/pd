@@ -121,6 +121,9 @@ type state struct {
 	// Zero means no unpublished change. Synthetic changes use one because real etcd
 	// revisions are always positive.
 	revisionFence uint64
+	// reloadPending is true while a full membership reload is in progress. It
+	// prevents discovery from serving state that may predate a compacted watch.
+	reloadPending bool
 }
 
 func (s *state) initialize() {
@@ -185,6 +188,18 @@ func (s *state) publishRevision(modRevision uint64) bool {
 	s.modRevision = max(s.modRevision, modRevision)
 	s.revisionFence = 0
 	return true
+}
+
+func (s *state) beginReload() {
+	s.Lock()
+	defer s.Unlock()
+	s.reloadPending = true
+}
+
+func (s *state) finishReload() {
+	s.Lock()
+	defer s.Unlock()
+	s.reloadPending = false
 }
 
 // getSplittingGroups returns the IDs of the splitting keyspace groups.
@@ -648,7 +663,9 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		true, /* withPrefix */
 	)
 	kgm.groupWatcher.SetReconcileDeletedKeys()
+	kgm.groupWatcher.SetReloadStartFn(kgm.beginReload)
 	kgm.groupWatcher.SetLoadSuccessFn(func() {
+		defer kgm.finishReload()
 		retryGroups()
 		if len(kgm.groupUpdateRetryList) > 0 {
 			log.Warn("keyspace group revision remains pending while updates need retry",
@@ -1129,7 +1146,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 ) (*Allocator, *endpoint.KeyspaceGroup, uint32, uint64, error) {
 	kgm.RLock()
 	defer kgm.RUnlock()
-	if kgm.revisionFence != 0 {
+	if kgm.reloadPending || kgm.revisionFence != 0 {
 		return nil, nil, constant.DefaultKeyspaceGroupID, kgm.modRevision, errs.ErrKeyspaceGroupModRevisionStale
 	}
 	return kgm.getKeyspaceGroupMetaWithCheckLocked(keyspaceID, constant.DefaultKeyspaceGroupID)
