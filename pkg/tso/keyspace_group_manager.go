@@ -163,19 +163,6 @@ func (s *state) getKeyspaceGroupMeta(
 	return s.allocators[groupID], s.kgs[groupID]
 }
 
-// SetModRevision sets the modification revision of the keyspace group state.
-// return true if the mod revision is updated.
-// It only allows increasing the mod revision.
-func (s *state) SetModRevision(modRevision uint64) bool {
-	s.Lock()
-	defer s.Unlock()
-	if s.modRevision < modRevision {
-		s.modRevision = modRevision
-		return true
-	}
-	return false
-}
-
 func (s *state) getModRevision() uint64 {
 	s.RLock()
 	defer s.RUnlock()
@@ -192,10 +179,10 @@ func (s *state) beginRevisionUpdate(modRevision uint64) {
 func (s *state) finishRevisionUpdate(modRevision uint64) bool {
 	s.Lock()
 	defer s.Unlock()
-	if s.modRevision >= modRevision || s.pendingRevision > modRevision {
+	if s.pendingRevision > modRevision {
 		return false
 	}
-	s.modRevision = modRevision
+	s.modRevision = max(s.modRevision, modRevision)
 	s.revisionPending = false
 	s.pendingRevision = 0
 	return true
@@ -574,15 +561,20 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	maxLoadedModRevision := uint64(0)
 	loadedModRevision := uint64(0)
 	membershipChanged := false
+	// A snapshot cannot recover a missing key's deletion revision. Keep this
+	// fence across reloads until a later watch event provides a comparable one.
+	unversionedDeletionPending := false
 	putFn := func(kv *mvccpb.KeyValue) error {
 		modRevision := uint64(kv.ModRevision)
-		group := &endpoint.KeyspaceGroup{}
-		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err)
-		}
 		if loadedModRevision > 0 && modRevision <= loadedModRevision {
 			maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 			return nil
+		}
+		kgm.beginRevisionUpdate(modRevision)
+		membershipChanged = true
+		group := &endpoint.KeyspaceGroup{}
+		if err := json.Unmarshal(kv.Value, group); err != nil {
+			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
 		failpoint.Inject("SkipKeyspaceWatch", func(val failpoint.Value) {
 			addr, ok := val.(string)
@@ -592,8 +584,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		})
 		maxLoadedModRevision = max(maxLoadedModRevision, modRevision)
 		delete(kgm.groupUpdateRetryList, group.ID)
-		kgm.beginRevisionUpdate(modRevision)
-		membershipChanged = true
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == constant.DefaultKeyspaceGroupID {
 			defaultKGConfigured = true
@@ -608,6 +598,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		delete(kgm.groupUpdateRetryList, groupID)
 		kgm.beginRevisionUpdate(uint64(kv.ModRevision))
 		membershipChanged = true
+		unversionedDeletionPending = unversionedDeletionPending || kv.ModRevision == 0
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
@@ -638,17 +629,13 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		}
 		last := event[len(event)-1]
 		modRevision := uint64(last.Kv.ModRevision)
-		var updated bool
-		if membershipChanged {
-			updated = kgm.finishRevisionUpdate(modRevision)
-		} else {
-			updated = kgm.SetModRevision(modRevision)
-		}
-		if !updated {
+		if !kgm.finishRevisionUpdate(modRevision) {
 			log.Warn("watch keyspace group met mod revision not increased",
 				zap.Uint64("current-mod-revision", kgm.getModRevision()),
 				zap.Uint64("new-mod-revision", modRevision),
 			)
+		} else {
+			unversionedDeletionPending = false
 		}
 		return nil
 	}
@@ -659,10 +646,13 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		"keyspace-watcher",
 		// To keep the consistency with the previous code, we should trim the suffix `/`.
 		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
-		func([]*clientv3.Event) error {
+		func(events []*clientv3.Event) error {
 			maxLoadedModRevision = 0
 			loadedModRevision = kgm.getModRevision()
 			membershipChanged = false
+			if len(events) > 0 {
+				kgm.beginRevisionUpdate(uint64(events[len(events)-1].Kv.ModRevision))
+			}
 			return nil
 		},
 		putFn,
@@ -679,6 +669,11 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		if len(kgm.groupUpdateRetryList) > 0 {
 			log.Warn("keyspace group revision remains pending while updates need retry",
 				zap.Int("retry-group-count", len(kgm.groupUpdateRetryList)))
+			return
+		}
+		if unversionedDeletionPending {
+			log.Warn("keyspace group snapshot reconciled a deletion without its revision",
+				zap.Uint64("current-mod-revision", loadedModRevision))
 			return
 		}
 		if maxLoadedModRevision > loadedModRevision {

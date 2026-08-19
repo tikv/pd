@@ -1316,13 +1316,13 @@ func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCa
 	)
 	watcher.SetReloadOnCompaction()
 
-	revision, shouldContinue := watcher.reloadAfterCompaction(ctx)
+	revision, shouldContinue := watcher.reloadWithRetry(ctx)
 	re.False(shouldContinue)
 	re.GreaterOrEqual(revision, putResp.Header.Revision+1)
 	re.Equal(1, putCalls)
 	re.Equal(1, postCalls)
 
-	revision, shouldContinue = watcher.reloadAfterCompaction(ctx)
+	revision, shouldContinue = watcher.reloadWithRetry(ctx)
 	re.False(shouldContinue)
 	re.Zero(revision)
 	re.Equal(1, putCalls)
@@ -1496,6 +1496,103 @@ func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbac
 	_, err = watcher.load(suite.ctx)
 	re.NoError(err)
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReloadsAfterWatchCallbackFailure() {
+	re := suite.Require()
+	const prefix = "TestWatcherReloadsAfterWatchCallbackFailure/"
+	validKey := prefix + "a-valid"
+	invalidKey := prefix + "b-invalid"
+	suite.put(re, validKey, "initial")
+	suite.put(re, invalidKey, "initial")
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	callbackErr := errors.New("invalid value")
+	postEventCounts := make(chan int, 8)
+	reloadDone := make(chan struct{})
+	var loadSuccessCalls atomic.Int32
+	cache := struct {
+		sync.RWMutex
+		values map[string]string
+	}{values: make(map[string]string)}
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			if string(kv.Value) == "invalid" {
+				return callbackErr
+			}
+			cache.Lock()
+			cache.values[string(kv.Key)] = string(kv.Value)
+			cache.Unlock()
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			cache.Lock()
+			delete(cache.values, string(kv.Key))
+			cache.Unlock()
+			return nil
+		},
+		func(events []*clientv3.Event) error {
+			select {
+			case postEventCounts <- len(events):
+			default:
+			}
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetReconcileDeletedKeys()
+	watcher.SetLoadSuccessFn(func() {
+		if loadSuccessCalls.Add(1) == 2 {
+			close(reloadDone)
+		}
+	})
+	watcher.watchChangeRetryInterval = 10 * time.Millisecond
+
+	revision, err := watcher.load(ctx)
+	re.NoError(err)
+	re.Zero(<-postEventCounts)
+
+	type watchResult struct {
+		revision int64
+		err      error
+	}
+	watchDone := make(chan watchResult, 1)
+	go func() {
+		nextRevision, watchErr := watcher.watch(ctx, revision)
+		watchDone <- watchResult{revision: nextRevision, err: watchErr}
+	}()
+
+	_, err = suite.client.Txn(suite.ctx).Then(
+		clientv3.OpPut(validKey, "updated"),
+		clientv3.OpPut(invalidKey, "invalid"),
+	).Commit()
+	re.NoError(err)
+	// Both events share one transaction revision. The successfully applied
+	// subset must not be passed to postEventsFn as a publishable batch.
+	re.Zero(<-postEventCounts)
+
+	recoveryResp, err := suite.client.Put(suite.ctx, invalidKey, "recovered")
+	re.NoError(err)
+	select {
+	case <-reloadDone:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not recover the failed batch from a snapshot")
+	}
+	cache.RLock()
+	re.Equal(map[string]string{validKey: "updated", invalidKey: "recovered"}, cache.values)
+	cache.RUnlock()
+
+	cancel()
+	result := <-watchDone
+	re.NoError(result.err)
+	re.GreaterOrEqual(result.revision, recoveryResp.Header.Revision+1)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRetriesFailedCompactionReloadWithBackoff() {

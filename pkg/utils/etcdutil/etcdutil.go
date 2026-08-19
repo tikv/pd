@@ -640,7 +640,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				loadedRevision, shouldContinue := lw.reloadAfterCompaction(ctx)
+				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
 				if !shouldContinue {
 					return max(revision, loadedRevision), nil
 				}
@@ -656,16 +656,22 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				goto watchChanLoop
 			}
-			if err := lw.preEventsFn(wresp.Events); err != nil {
-				log.Error("run pre event failed in watch loop", zap.Error(err),
+			callbackErr := lw.preEventsFn(wresp.Events)
+			if callbackErr != nil {
+				log.Error("run pre event failed in watch loop", zap.Error(callbackErr),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
 			var appliedEvents []*clientv3.Event
 			for _, event := range wresp.Events {
+				if callbackErr != nil && lw.reloadOnCompaction {
+					break
+				}
+				var eventErr error
 				switch event.Type {
 				case clientv3.EventTypePut:
-					if err := lw.putFn(event.Kv); err != nil {
-						log.Error("put failed in watch loop", zap.Error(err),
+					eventErr = lw.putFn(event.Kv)
+					if eventErr != nil {
+						log.Error("put failed in watch loop", zap.Error(eventErr),
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
@@ -677,8 +683,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.ByteString("value", event.Kv.Value))
 					}
 				case clientv3.EventTypeDelete:
-					if err := lw.deleteFn(event.Kv); err != nil {
-						log.Error("delete failed in watch loop", zap.Error(err),
+					eventErr = lw.deleteFn(event.Kv)
+					if eventErr != nil {
+						log.Error("delete failed in watch loop", zap.Error(eventErr),
 							zap.Int64("revision", revision), zap.String("name", lw.name),
 							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
@@ -689,9 +696,19 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 							zap.ByteString("key", event.Kv.Key))
 					}
 				}
+				if callbackErr == nil {
+					callbackErr = eventErr
+				}
 			}
-			if err := lw.postEventsFn(wresp.Events); err != nil {
-				log.Error("run post event failed in watch loop", zap.Error(err),
+			postEvents := wresp.Events
+			if callbackErr != nil && lw.reloadOnCompaction {
+				// The batch may share one transaction revision, so publishing even
+				// its successfully applied subset could expose incomplete state.
+				postEvents = nil
+			}
+			postErr := lw.postEventsFn(postEvents)
+			if postErr != nil {
+				log.Error("run post event failed in watch loop", zap.Error(postErr),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			} else {
 				for _, event := range appliedEvents {
@@ -702,19 +719,29 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					}
 				}
 			}
+			if callbackErr == nil {
+				callbackErr = postErr
+			}
+			if callbackErr != nil && lw.reloadOnCompaction {
+				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
+				if !shouldContinue {
+					return max(revision, loadedRevision), nil
+				}
+				revision = loadedRevision
+				continue
+			}
 			revision = wresp.Header.Revision + 1
 		}
 		goto watchChanLoop // Use goto to avoid creating a new watchChan
 	}
 }
 
-// reloadAfterCompaction rebuilds the watched state before a new watch is
-// created. A compacted watch cannot resume from its previous revision, so keep
-// the retry state local to this resync attempt and retry until it succeeds or
-// the watcher is stopped. The returned revision is the next revision after a
-// successful reload, even when the boolean is false; zero means no reload
+// reloadWithRetry rebuilds the watched state before a new watch is created.
+// Keep the retry state local to this resync attempt and retry until it succeeds
+// or the watcher is stopped. The returned revision is the next revision after
+// a successful reload, even when the boolean is false; zero means no reload
 // completed. The boolean reports whether watching should continue.
-func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
+func (lw *LoopWatcher) reloadWithRetry(ctx context.Context) (int64, bool) {
 	retryInterval := lw.watchChangeRetryInterval
 	for {
 		loadedRevision, err := lw.load(ctx)
@@ -725,7 +752,7 @@ func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) 
 			return 0, false
 		}
 
-		log.Warn("failed to reload compacted watcher state, retrying",
+		log.Warn("failed to reload watcher state, retrying",
 			zap.String("name", lw.name), zap.String("key", lw.key),
 			zap.Duration("retry-interval", retryInterval), zap.Error(err))
 		retryTimer := time.NewTimer(retryInterval)
@@ -1010,11 +1037,11 @@ func (lw *LoopWatcher) SetLoadSuccessFn(fn func()) {
 }
 
 // SetReloadOnCompaction enables a full, revision-consistent snapshot reload
-// after compaction without retaining watched keys or reconciling deletions.
-// Load callback errors are propagated in this mode so a failed reload cannot
-// advance the watch revision. It must be called before StartWatchLoop. Callers
-// must tolerate partial application and replay; batch-publishing consumers must
-// keep failed loads private.
+// after compaction or a failed watch callback without retaining watched keys or
+// reconciling deletions. Callback errors are propagated in this mode so failed
+// application cannot advance the watch revision. It must be called before
+// StartWatchLoop. Callers must tolerate partial application and replay;
+// batch-publishing consumers must keep failed loads private.
 func (lw *LoopWatcher) SetReloadOnCompaction() {
 	lw.reloadOnCompaction = true
 }

@@ -474,8 +474,8 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 		if err := m.store.DeleteKeyspaceGroup(txn, id); err != nil {
 			return err
 		}
-		// Refresh a surviving membership key so snapshot reloads retain the
-		// deletion's comparable revision.
+		// Refresh a surviving membership key so readers that observe this
+		// transaction retain the deletion's comparable revision.
 		return m.store.SaveKeyspaceGroup(txn, defaultKG)
 	}); err != nil {
 		return nil, err

@@ -268,17 +268,22 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMem
 	mgr.RUnlock()
 	re.NotNil(unchangedGroup)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)"))
+	const watchBlockFailpoint = "github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"
+	re.NoError(failpoint.Enable(watchBlockFailpoint, "return(true)"))
+	watchBlocked := true
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock"))
+		if watchBlocked {
+			re.NoError(failpoint.Disable(watchBlockFailpoint))
+		}
 	}()
+	loadedRevision := mgr.getModRevision()
 	updatedGroup, err := json.Marshal(&endpoint.KeyspaceGroup{
 		ID:        2,
 		Members:   []endpoint.KeyspaceGroupMember{{Address: mgr.tsoServiceID.ServiceAddr}},
 		Keyspaces: []uint32{203},
 	})
 	re.NoError(err)
-	resp, err := suite.etcdClient.Txn(suite.ctx).Then(
+	_, err = suite.etcdClient.Txn(suite.ctx).Then(
 		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(1)),
 		clientv3.OpPut(keypath.KeyspaceGroupIDPath(2), string(updatedGroup)),
 	).Commit()
@@ -287,40 +292,71 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMem
 	testutil.Eventually(re, func() bool {
 		mgr.groupWatcher.ForceLoad()
 		mgr.RLock()
-		defer mgr.RUnlock()
 		_, oldDeletedKeyspaceExists := mgr.keyspaceLookupTable[101]
 		_, oldUpdatedKeyspaceExists := mgr.keyspaceLookupTable[202]
-		return mgr.kgs[1] == nil &&
+		updated := mgr.kgs[1] == nil &&
 			!oldDeletedKeyspaceExists &&
 			!oldUpdatedKeyspaceExists &&
 			mgr.keyspaceLookupTable[203] == 2 &&
-			mgr.kgs[3] == unchangedGroup &&
-			mgr.modRevision == uint64(resp.Header.Revision)
+			mgr.kgs[3] == unchangedGroup
+		mgr.RUnlock()
+		_, _, _, revision, findErr := mgr.FindGroupByKeyspaceID(203)
+		return updated &&
+			errors.Is(findErr, errs.ErrKeyspaceGroupModRevisionStale) &&
+			revision == loadedRevision
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
-	defaultResp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
-	re.NoError(err)
-	re.Len(defaultResp.Kvs, 1)
-	deleteResp, err := suite.etcdClient.Txn(suite.ctx).Then(
-		clientv3.OpDelete(keypath.KeyspaceGroupIDPath(2)),
-		clientv3.OpPut(
-			keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID),
-			string(defaultResp.Kvs[0].Value),
-		),
-	).Commit()
-	re.NoError(err)
+	// A later full load must not use an unrelated surviving PUT to clear the
+	// unversioned deletion fence.
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		4,
+		[]string{mgr.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{404},
+	))
 	testutil.Eventually(re, func() bool {
 		mgr.groupWatcher.ForceLoad()
 		mgr.RLock()
-		defer mgr.RUnlock()
-		_, keyspaceExists := mgr.keyspaceLookupTable[203]
-		return mgr.kgs[2] == nil &&
-			!keyspaceExists &&
-			mgr.kgs[3] == unchangedGroup &&
-			mgr.modRevision == uint64(deleteResp.Header.Revision)
+		loaded := mgr.kgs[4] != nil
+		mgr.RUnlock()
+		_, _, _, revision, findErr := mgr.FindGroupByKeyspaceID(404)
+		return loaded &&
+			errors.Is(findErr, errs.ErrKeyspaceGroupModRevisionStale) &&
+			revision == loadedRevision
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
+	re.NoError(failpoint.Disable(watchBlockFailpoint))
+	watchBlocked = false
+	defaultResp, err := suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
+	re.NoError(err)
+	re.Len(defaultResp.Kvs, 1)
+	checkpointResp, err := suite.etcdClient.Put(
+		suite.ctx,
+		keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID),
+		string(defaultResp.Kvs[0].Value),
+	)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		_, _, groupID, revision, findErr := mgr.FindGroupByKeyspaceID(203)
+		return findErr == nil &&
+			groupID == 2 &&
+			revision == uint64(checkpointResp.Header.Revision)
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+
+	re.NoError(failpoint.Enable(watchBlockFailpoint, "return(true)"))
+	watchBlocked = true
 	staleRevision := mgr.getModRevision()
+	defaultResp, err = suite.etcdClient.Get(suite.ctx, keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID))
+	re.NoError(err)
+	re.Len(defaultResp.Kvs, 1)
+	_, err = suite.etcdClient.Put(
+		suite.ctx,
+		keypath.KeyspaceGroupIDPath(constant.DefaultKeyspaceGroupID),
+		string(defaultResp.Kvs[0].Value),
+	)
+	re.NoError(err)
 	_, err = suite.etcdClient.Delete(suite.ctx, keypath.KeyspaceGroupIDPath(3))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
@@ -332,6 +368,62 @@ func (suite *keyspaceGroupManagerTestSuite) TestGroupSnapshotReloadReconcilesMem
 		return removed &&
 			errors.Is(findErr, errs.ErrKeyspaceGroupModRevisionStale) &&
 			revision == staleRevision
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
+}
+
+func (suite *keyspaceGroupManagerTestSuite) TestWatchCallbackFailureKeepsRevisionPendingUntilReload() {
+	re := suite.Require()
+	mgr := suite.newUniqueKeyspaceGroupManager(1)
+	defer mgr.Close()
+
+	re.NoError(addKeyspaceGroupAssignment(
+		suite.ctx,
+		suite.etcdClient,
+		constant.DefaultKeyspaceGroupID,
+		[]string{mgr.tsoServiceID.ServiceAddr},
+		[]int{mcs.DefaultKeyspaceGroupReplicaPriority},
+		[]uint32{getBootstrapKeyspaceID()},
+	))
+	re.NoError(mgr.Initialize())
+	loadedRevision := mgr.getModRevision()
+
+	validGroup, err := json.Marshal(&endpoint.KeyspaceGroup{
+		ID:        1,
+		Members:   []endpoint.KeyspaceGroupMember{{Address: mgr.tsoServiceID.ServiceAddr}},
+		Keyspaces: []uint32{101},
+	})
+	re.NoError(err)
+	_, err = suite.etcdClient.Txn(suite.ctx).Then(
+		clientv3.OpPut(keypath.KeyspaceGroupIDPath(1), string(validGroup)),
+		clientv3.OpPut(keypath.KeyspaceGroupIDPath(2), "invalid"),
+	).Commit()
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		mgr.RLock()
+		validGroupApplied := mgr.kgs[1] != nil
+		mgr.RUnlock()
+		_, _, _, revision, findErr := mgr.FindGroupByKeyspaceID(101)
+		return validGroupApplied &&
+			errors.Is(findErr, errs.ErrKeyspaceGroupModRevisionStale) &&
+			revision == loadedRevision
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(10*time.Millisecond))
+
+	recoveredGroup, err := json.Marshal(&endpoint.KeyspaceGroup{
+		ID:        2,
+		Members:   []endpoint.KeyspaceGroupMember{{Address: mgr.tsoServiceID.ServiceAddr}},
+		Keyspaces: []uint32{202},
+	})
+	re.NoError(err)
+	recoveryResp, err := suite.etcdClient.Put(
+		suite.ctx,
+		keypath.KeyspaceGroupIDPath(2),
+		string(recoveredGroup),
+	)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		_, _, groupID, revision, findErr := mgr.FindGroupByKeyspaceID(101)
+		return findErr == nil && groupID == 1 && revision == uint64(recoveryResp.Header.Revision)
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 }
 
