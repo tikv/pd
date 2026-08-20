@@ -431,6 +431,15 @@ func (f *StoreStateFilter) isDisconnected(_ config.SharedConfigProvider, store *
 	return statusOK
 }
 
+func (f *StoreStateFilter) isUnhealthy(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if !f.AllowTemporaryStates && store.IsUnhealthy() {
+		f.Reason = storeStateUnhealthy
+		return statusStoreUnhealthy
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 func (f *StoreStateFilter) isBusy(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !f.AllowTemporaryStates && store.IsBusy() {
 		f.Reason = storeStateBusy
@@ -493,13 +502,13 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(conf config.SharedConfigProvi
 // N: the condition is expected to be true for a long time.
 // X means when the condition is true, the store CANNOT be selected.
 //
-// Condition    Down Offline Tomb Pause Disconn Busy RmLimit AddLimit Snap Pending Reject
-// IsTemporary  N    N       N    N     Y       Y    Y       Y        Y    Y       N
+// Condition    Down Offline Tomb Pause Disconn Unhealthy Busy RmLimit AddLimit Snap Pending Reject
+// IsTemporary  N    N       N    N     Y       Y         Y    Y       Y        Y    Y       N
 //
 // LeaderSource X            X    X     X
-// RegionSource                                 X    X                X
-// LeaderTarget X    X       X    X     X       X                                  X
-// RegionTarget X    X       X          X       X            X        X    X
+// RegionSource                                 X         X    X                X
+// LeaderTarget X    X       X    X     X                 X                                  X
+// RegionTarget X    X       X          X                 X            X        X    X
 
 const (
 	leaderSource = iota
@@ -518,7 +527,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 	case leaderSource:
 		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransferOut, f.isDisconnected}
 	case regionSource:
-		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
+		funcs = []conditionFunc{f.isUnhealthy, f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case witnessSource:
 		funcs = []conditionFunc{f.isBusy}
 	case leaderTarget:

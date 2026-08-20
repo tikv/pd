@@ -642,3 +642,14 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestOperatorStoreHealthCheck(t *testing.T) {
+	re := require.New(t)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 1, PeerID: 1})
+	// Not tied to creation: defaults to false, and can be toggled any time after Build/NewOperator.
+	re.False(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(true)
+	re.True(op.NeedStoreHealthCheck())
+	op.SetStoreHealthCheck(false)
+	re.False(op.NeedStoreHealthCheck())
+}
