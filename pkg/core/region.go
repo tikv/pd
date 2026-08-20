@@ -1050,6 +1050,7 @@ type RegionsInfo struct {
 	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
+	regionCount  int64                  // lock-free total count for read-only status APIs
 	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
@@ -1352,6 +1353,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		origin *RegionInfo
 	)
 	rangeChanged := true // This Region is new, or its range has changed.
+	regionCountDelta := int64(0)
 
 	if item = r.regions[region.GetID()]; item != nil {
 		// If this ID already exists, use the existing regionItem and pick out the origin.
@@ -1384,13 +1386,20 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		// If this ID does not exist, generate a new regionItem and save it in the regionMap.
 		item = &regionItem{RegionInfo: region}
 		r.regions[region.GetID()] = item
+		regionCountDelta++
 	}
 	var overlaps []*RegionInfo
 	if rangeChanged {
 		overlaps = r.tree.update(item, withOverlaps, ol...)
 		for _, old := range overlaps {
-			delete(r.regions, old.GetID())
+			if _, ok := r.regions[old.GetID()]; ok {
+				delete(r.regions, old.GetID())
+				regionCountDelta--
+			}
 		}
+	}
+	if regionCountDelta != 0 {
+		atomic.AddInt64(&r.regionCount, regionCountDelta)
 	}
 	// return rangeChanged to prevent duplicated calculation
 	return origin, overlaps, rangeChanged
@@ -1458,7 +1467,10 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 	defer r.t.Unlock()
 	// Remove from tree and regions.
 	r.tree.remove(region)
-	delete(r.regions, region.GetID())
+	if _, ok := r.regions[region.GetID()]; ok {
+		delete(r.regions, region.GetID())
+		atomic.AddInt64(&r.regionCount, -1)
+	}
 }
 
 // ResetRegionCache resets the regions info.
@@ -1466,6 +1478,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
 	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
+	atomic.StoreInt64(&r.regionCount, 0)
 	r.t.Unlock()
 	r.st.Lock()
 	defer r.st.Unlock()
@@ -1897,11 +1910,17 @@ func (r *RegionsInfo) GetStoreStats(storeID uint64) (leader, region, witness, le
 		r.learners[storeID].length(), r.pendingPeers[storeID].length(), r.leaders[storeID].TotalSize(), r.getStoreRegionSizeLocked(storeID)
 }
 
-// GetTotalRegionCount gets the total count of RegionInfo of regionMap
+// GetTotalRegionCount gets the total count of RegionInfo of regionMap.
 func (r *RegionsInfo) GetTotalRegionCount() int {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	return len(r.regions)
+}
+
+// GetTotalRegionCountAtomic gets the lock-free total count of RegionInfo.
+// It is intended for read-only status APIs where transient in-flight updates are acceptable.
+func (r *RegionsInfo) GetTotalRegionCountAtomic() int {
+	return int(atomic.LoadInt64(&r.regionCount))
 }
 
 // GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
