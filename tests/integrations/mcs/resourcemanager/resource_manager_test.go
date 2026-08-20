@@ -51,7 +51,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	srvconfig "github.com/tikv/pd/server/config"
@@ -162,12 +161,12 @@ func (suite *resourceManagerClientTestSuite) startMicroservicesForDiscovery(re *
 	backendEndpoints := leader.GetAddr()
 
 	// Start Resource Manager microservice and wait it is serving.
-	rmServer, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+	rmServer, cleanup := tests.StartSingleResourceManagerTestServer(suite.ctx, re, backendEndpoints, "")
 	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{rmServer.GetAddr(): rmServer})
 	suite.rmCleanup = cleanup
 
 	// Start TSO microservice and wait it is serving.
-	tsoServer, tsoCleanup := tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
+	tsoServer, tsoCleanup := tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, "")
 	_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{tsoServer.GetAddr(): tsoServer})
 	suite.tsoCleanup = tsoCleanup
 }
@@ -365,11 +364,11 @@ func TestSwitchModeDuringWorkload(t *testing.T) {
 
 			startMicroservices := func() (rmCleanup func(), tsoCleanup func()) {
 				backendEndpoints := leader.GetAddr()
-				rmServer, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+				rmServer, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, backendEndpoints, "")
 				_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{rmServer.GetAddr(): rmServer})
 				rmCleanup = cleanup
 
-				tsoServer, cleanupTSO := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
+				tsoServer, cleanupTSO := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, "")
 				_ = tests.WaitForPrimaryServing(re, map[string]bs.Server{tsoServer.GetAddr(): tsoServer})
 				tsoCleanup = cleanupTSO
 				return rmCleanup, tsoCleanup
