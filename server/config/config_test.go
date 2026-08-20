@@ -129,6 +129,32 @@ func TestReloadDefaultStoreLimit(t *testing.T) {
 	re.Equal(sc.StoreLimitConfig{AddPeer: 0, RemovePeer: 15}, reloadedOpt.GetStoreLimit(102))
 }
 
+func TestCompareAndPersistScheduleConfigRejectsStaleSnapshot(t *testing.T) {
+	re := require.New(t)
+	opt, err := newTestScheduleOption()
+	re.NoError(err)
+	storage := storage.NewStorageWithMemoryBackend()
+
+	stale := opt.GetScheduleConfig().Clone()
+	newDefault := stale.DefaultStoreLimit.AddPeer + 1
+	re.NoError(opt.UpdateScheduleConfig(storage, func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		next.DefaultStoreLimit.AddPeer = newDefault
+		return true, nil
+	}))
+
+	staleUpdate := stale.Clone()
+	staleUpdate.MaxSnapshotCount++
+	err = opt.CompareAndPersistScheduleConfig(storage, stale, staleUpdate)
+	re.ErrorContains(err, "changed by another process")
+	re.Equal(newDefault, opt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
+
+	persisted := &persistedConfig{Config: &Config{}}
+	exists, err := storage.LoadConfig(persisted)
+	re.NoError(err)
+	re.True(exists)
+	re.Equal(newDefault, persisted.Schedule.DefaultStoreLimit.AddPeer)
+}
+
 func TestDefaultStoreLimitAdjust(t *testing.T) {
 	re := require.New(t)
 	oldAddPeer := sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)

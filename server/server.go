@@ -1278,32 +1278,40 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
+func (s *Server) SetScheduleConfig(newCfg sc.ScheduleConfig) error {
+	oldCfg := s.GetScheduleConfig()
+	return s.setScheduleConfigIfUnchanged(oldCfg, &newCfg)
+}
+
+// SetScheduleConfigIfUnchanged sets the balance config information only when
+// the schedule config has not changed since it was read by the caller.
 // This function is exported to be used by the API.
-func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Server) SetScheduleConfigIfUnchanged(oldCfg, newCfg sc.ScheduleConfig) error {
+	return s.setScheduleConfigIfUnchanged(&oldCfg, &newCfg)
+}
+
+func (s *Server) setScheduleConfigIfUnchanged(oldCfg, newCfg *sc.ScheduleConfig) error {
+	if err := newCfg.Validate(); err != nil {
 		return err
 	}
-	if err := cfg.Deprecated(); err != nil {
+	if err := newCfg.Deprecated(); err != nil {
 		return err
 	}
-	old := s.persistOptions.GetScheduleConfig()
-	if cfg.DefaultStoreLimit != old.DefaultStoreLimit {
+	if newCfg.DefaultStoreLimit != oldCfg.DefaultStoreLimit {
 		if err := s.checkDefaultStoreLimitPersistenceSupport(); err != nil {
 			return err
 		}
 	}
-	s.persistOptions.SetScheduleConfig(&cfg)
-	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetScheduleConfig(old)
+	if err := s.persistOptions.CompareAndPersistScheduleConfig(s.storage, oldCfg, newCfg); err != nil {
 		log.Error("failed to update schedule config",
-			zap.Reflect("new", cfg),
-			zap.Reflect("old", old),
+			zap.Reflect("new", newCfg),
+			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
 	}
 	// Update the scheduling halt status at the same time.
-	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
-	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	s.persistOptions.SetSchedulingAllowanceStatus(newCfg.HaltScheduling, "manually")
+	log.Info("schedule config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
 }
 

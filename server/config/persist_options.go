@@ -18,6 +18,7 @@ import (
 	"context"
 	"reflect"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -45,6 +46,8 @@ import (
 // PersistOptions wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistOptions struct {
+	persistMu sync.Mutex
+
 	// configuration -> ttl value
 	ttl             *cache.TTLString
 	schedule        atomic.Value
@@ -84,6 +87,46 @@ func (o *PersistOptions) GetScheduleConfig() *sc.ScheduleConfig {
 // SetScheduleConfig sets the PD scheduling configuration.
 func (o *PersistOptions) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
+}
+
+// UpdateScheduleConfig serializes a schedule-config read-modify-persist
+// transaction with every other full-config persistence. The current config is
+// read-only; changes must be applied to next. Returning changed=false skips the
+// in-memory publication and persistence.
+func (o *PersistOptions) UpdateScheduleConfig(
+	storage endpoint.ConfigStorage,
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+
+	current := o.GetScheduleConfig()
+	next := current.Clone()
+	changed, err := update(current, next)
+	if err != nil || !changed {
+		return err
+	}
+	o.SetScheduleConfig(next)
+	if err := o.persistLocked(storage); err != nil {
+		o.SetScheduleConfig(current)
+		return err
+	}
+	return nil
+}
+
+// CompareAndPersistScheduleConfig publishes and persists next only when the
+// current schedule config still matches expected.
+func (o *PersistOptions) CompareAndPersistScheduleConfig(
+	storage endpoint.ConfigStorage,
+	expected, next *sc.ScheduleConfig,
+) error {
+	return o.UpdateScheduleConfig(storage, func(current, updated *sc.ScheduleConfig) (bool, error) {
+		if !reflect.DeepEqual(current, expected) {
+			return false, errors.New("update schedule config failed because it has been changed by another process, please retry")
+		}
+		*updated = *next.Clone()
+		return true, nil
+	})
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -783,12 +826,20 @@ type persistedConfig struct {
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
 func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
-	o.GetScheduleConfig().StoreLimitVersion = "v2"
-	return o.Persist(storage)
+	return o.UpdateScheduleConfig(storage, func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		next.StoreLimitVersion = storelimit.VersionV2
+		return true, nil
+	})
 }
 
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
+	o.persistMu.Lock()
+	defer o.persistMu.Unlock()
+	return o.persistLocked(storage)
+}
+
+func (o *PersistOptions) persistLocked(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{
 		Config: &Config{
 			Schedule:        *o.GetScheduleConfig(),

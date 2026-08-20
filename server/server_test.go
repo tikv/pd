@@ -48,6 +48,27 @@ func TestResetFollowerRegionCacheRequiresRegionStorage(t *testing.T) {
 	re.Error(s.ResetFollowerRegionCache())
 }
 
+func TestSetScheduleConfigIfUnchangedRejectsStaleSnapshot(t *testing.T) {
+	re := require.New(t)
+	cfg := config.NewConfig()
+	re.NoError(cfg.Adjust(nil, false))
+	s := &Server{
+		persistOptions: config.NewPersistOptions(cfg),
+		storage:        storage.NewStorageWithMemoryBackend(),
+	}
+
+	stale := s.GetScheduleConfig()
+	firstUpdate := stale.Clone()
+	firstUpdate.MaxSnapshotCount++
+	re.NoError(s.SetScheduleConfigIfUnchanged(*stale, *firstUpdate))
+
+	staleUpdate := stale.Clone()
+	staleUpdate.MaxPendingPeerCount++
+	err := s.SetScheduleConfigIfUnchanged(*stale, *staleUpdate)
+	re.ErrorContains(err, "changed by another process")
+	re.Equal(firstUpdate.MaxSnapshotCount, s.GetScheduleConfig().MaxSnapshotCount)
+}
+
 func TestDeleteFollowerRegion(t *testing.T) {
 	tests := []struct {
 		name        string

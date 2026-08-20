@@ -3383,18 +3383,23 @@ type blockingSaveConfigStorage struct {
 	storage.Storage
 	saveStarted chan struct{}
 	releaseSave chan struct{}
-	once        sync.Once
+	mu          sync.Mutex
+	saveCount   int
 }
 
 func (s *blockingSaveConfigStorage) SaveConfig(cfg any) error {
-	s.once.Do(func() {
+	s.mu.Lock()
+	s.saveCount++
+	isFirstSave := s.saveCount == 1
+	s.mu.Unlock()
+	if isFirstSave {
 		close(s.saveStarted)
 		<-s.releaseSave
-	})
+	}
 	return s.Storage.SaveConfig(cfg)
 }
 
-func TestStoreLimitUpdatesAreSerialized(t *testing.T) {
+func TestScheduleConfigPersistenceIsSerialized(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3414,16 +3419,15 @@ func TestStoreLimitUpdatesAreSerialized(t *testing.T) {
 	}
 	t.Cleanup(release)
 
-	addDone := make(chan struct{})
+	persistDone := make(chan error, 1)
 	go func() {
-		rc.AddStoreLimit(&metapb.Store{Id: 1})
-		close(addDone)
+		persistDone <- opt.Persist(storage)
 	}()
 
 	select {
 	case <-storage.saveStarted:
 	case <-time.After(time.Second):
-		t.Fatal("AddStoreLimit did not start persisting")
+		t.Fatal("the initial config persistence did not start")
 	}
 
 	setAllDone := make(chan error, 1)
@@ -3434,15 +3438,16 @@ func TestStoreLimitUpdatesAreSerialized(t *testing.T) {
 	select {
 	case err := <-setAllDone:
 		re.NoError(err)
-		t.Fatal("SetAllStoresLimit was not serialized with AddStoreLimit")
+		t.Fatal("SetAllStoresLimit was not serialized with an in-flight full-config persistence")
 	case <-time.After(100 * time.Millisecond):
 	}
 
 	release()
 	select {
-	case <-addDone:
+	case err := <-persistDone:
+		re.NoError(err)
 	case <-time.After(time.Second):
-		t.Fatal("AddStoreLimit did not finish")
+		t.Fatal("the initial config persistence did not finish")
 	}
 	select {
 	case err := <-setAllDone:
@@ -3453,7 +3458,11 @@ func TestStoreLimitUpdatesAreSerialized(t *testing.T) {
 
 	cfg := opt.GetScheduleConfig()
 	re.Equal(float64(60), cfg.DefaultStoreLimit.AddPeer)
-	re.Equal(float64(60), cfg.StoreLimit[1].AddPeer)
+
+	_, reloadedOpt, err := newTestScheduleConfig()
+	re.NoError(err)
+	re.NoError(reloadedOpt.Reload(storage))
+	re.Equal(float64(60), reloadedOpt.GetScheduleConfig().DefaultStoreLimit.AddPeer)
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {

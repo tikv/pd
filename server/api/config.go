@@ -297,6 +297,7 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 }
 
 func (h *confHandler) updateSchedule(config *config.Config, key string, value any) error {
+	oldSchedule := config.Schedule.Clone()
 	updated, found, err := jsonutil.AddKeyValue(&config.Schedule, key, value)
 	if err != nil {
 		return err
@@ -307,7 +308,7 @@ func (h *confHandler) updateSchedule(config *config.Config, key string, value an
 	}
 
 	if updated {
-		err = h.svr.SetScheduleConfig(config.Schedule)
+		err = h.svr.SetScheduleConfigIfUnchanged(*oldSchedule, config.Schedule)
 	}
 	return err
 }
@@ -459,8 +460,9 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	config := h.svr.GetScheduleConfig()
-	err = json.Unmarshal(data, &config)
+	oldConfig := h.svr.GetScheduleConfig()
+	newConfig := oldConfig.Clone()
+	err = json.Unmarshal(data, newConfig)
 	if err != nil {
 		var errCode errcode.ErrorCode
 		err = apiutil.TagJSONError(err)
@@ -473,7 +475,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.svr.SetScheduleConfig(*config); err != nil {
+	if err := h.svr.SetScheduleConfigIfUnchanged(*oldConfig, *newConfig); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
