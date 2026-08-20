@@ -131,6 +131,74 @@ func (suite *configTestSuite) TestConfigWatch() {
 	watcher.Close()
 }
 
+func (suite *configTestSuite) TestGCTunerConfigWatch() {
+	re := suite.Require()
+
+	// Make sure the config is persisted before the watcher is created.
+	persistConfig(re, suite.pdLeaderServer)
+	// Create a config watcher.
+	watcher, err := config.NewWatcher(
+		suite.ctx,
+		suite.pdLeaderServer.GetEtcdClient(),
+		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
+		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
+	)
+	re.NoError(err)
+	defer watcher.Close()
+
+	// Update the GC tuner config and verify the watcher receives the changes.
+	persistOpts := suite.pdLeaderServer.GetPersistOptions()
+	origCfg := persistOpts.GetPDServerConfig().Clone()
+	suite.T().Cleanup(func() {
+		persistOpts.SetPDServerConfig(origCfg)
+		persistConfig(re, suite.pdLeaderServer)
+	})
+	pdServerCfg := origCfg.Clone()
+
+	// test0: config don't contain server-config field, the watcher should use the default value.
+	type FakeConfig struct {
+		FakeField string `json:"fake-field"`
+	}
+	cfg := &FakeConfig{}
+	suite.pdLeaderServer.GetServer().GetStorage().SaveConfig(cfg)
+	testutil.Eventually(re, func() bool {
+		cfg := watcher.GetGCTunerConfig()
+		return cfg != nil && cfg.EnableGOGCTuner == true
+	})
+
+	// Test 1: Update EnableGOGCTuner to true
+	pdServerCfg.EnableGOGCTuner = true
+	persistOpts.SetPDServerConfig(pdServerCfg)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetGCTunerConfig().EnableGOGCTuner
+	})
+
+	// Test 2: Update GCTunerThreshold
+	pdServerCfg.GCTunerThreshold = 0.5
+	persistOpts.SetPDServerConfig(pdServerCfg)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetGCTunerConfig().GCTunerThreshold == 0.5
+	})
+
+	// Test 3: Update ServerMemoryLimit
+	pdServerCfg.ServerMemoryLimit = 0.8
+	persistOpts.SetPDServerConfig(pdServerCfg)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetGCTunerConfig().ServerMemoryLimit == 0.8
+	})
+
+	// Test 4: Update ServerMemoryLimitGCTrigger
+	pdServerCfg.ServerMemoryLimitGCTrigger = 0.6
+	persistOpts.SetPDServerConfig(pdServerCfg)
+	persistConfig(re, suite.pdLeaderServer)
+	testutil.Eventually(re, func() bool {
+		return watcher.GetGCTunerConfig().ServerMemoryLimitGCTrigger == 0.6
+	})
+}
+
 // Manually trigger the config persistence in the PD side.
 func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 	err := pdLeaderServer.GetPersistOptions().Persist(pdLeaderServer.GetServer().GetStorage())
