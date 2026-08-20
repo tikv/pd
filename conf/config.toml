@@ -215,3 +215,8 @@
 ## Example:
 ## pre-alloc = ["admin", "user1", "user2"]
 # pre-alloc = []
+##
+## meta-service-groups maps group IDs to addresses and default enabled state.
+## Example:
+## [keyspace.meta-service-groups]
+## "etcd-group-0" = { addresses = "etcd-group-0.tidb-serverless.cluster.svc.local", enabled = true }

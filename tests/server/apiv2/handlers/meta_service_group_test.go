@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
-	"github.com/tikv/pd/server/config"
+	serverconfig "github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -46,7 +46,16 @@ func TestMetaServiceGroupTestSuite(t *testing.T) {
 	suite.Run(t, new(metaServiceGroupTestSuite))
 }
 
-func mockMetaServiceGroups() map[string]string {
+func mockMetaServiceGroups() map[string]serverconfig.MetaServiceGroupConfig {
+	enabled := true
+	return map[string]serverconfig.MetaServiceGroupConfig{
+		"etcd-group-0": {Addresses: "etcd-group-0.tidb-serverless.cluster.svc.local", Enabled: &enabled},
+		"etcd-group-1": {Addresses: "etcd-group-1.tidb-serverless.cluster.svc.local", Enabled: &enabled},
+		"etcd-group-2": {Addresses: "etcd-group-2.tidb-serverless.cluster.svc.local", Enabled: &enabled},
+	}
+}
+
+func mockMetaServiceGroupAddresses() map[string]string {
 	return map[string]string{
 		"etcd-group-0": "etcd-group-0.tidb-serverless.cluster.svc.local",
 		"etcd-group-1": "etcd-group-1.tidb-serverless.cluster.svc.local",
@@ -58,7 +67,7 @@ func (suite *metaServiceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *serverconfig.Config, _ string) {
 		conf.Keyspace.WaitRegionSplit = false
 		conf.Keyspace.MetaServiceGroups = mockMetaServiceGroups()
 		conf.Keyspace.WaitRegionSplit = false
@@ -111,7 +120,7 @@ func collectStatus(re *require.Assertions, keyspaces []*keyspacepb.KeyspaceMeta)
 func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI() {
 	re := suite.Require()
 	// Adding a new group through /config should succeed and be visible via v2 API.
-	added := mockMetaServiceGroups()
+	added := mockMetaServiceGroupAddresses()
 	added["etcd-group-x"] = "etcd-group-x.example.local"
 	code, body := suite.setMetaServiceGroupsViaConfig(re, added)
 	re.Equal(http.StatusOK, code, body)
@@ -121,6 +130,8 @@ func (suite *metaServiceGroupTestSuite) TestUpdateMetaServiceGroupsViaConfigAPI(
 	for _, group := range groups {
 		if group.ID == "etcd-group-x" {
 			x = group
+		} else {
+			re.True(group.Status.Enabled)
 		}
 	}
 	re.NotNil(x, "etcd-group-x should be added via /config")
@@ -157,10 +168,9 @@ func (suite *metaServiceGroupTestSuite) TestMetaServiceGroupOperations() {
 	defaultKeyspace := mustLoadKeyspaces(re, suite.server, keyspace.GetBootstrapKeyspaceName())
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupIDKey)
 	re.NotContains(defaultKeyspace.GetConfig(), keyspace.MetaServiceGroupAddressesKey)
-	// Meta-service groups are disabled by default and must be enabled before assignment.
+	// Meta-service groups are enabled from config before assignment.
 	for _, group := range mustLoadMetaServiceGroups(re, suite.server) {
-		re.False(group.Status.Enabled)
-		mustEnableMetaServiceGroup(re, suite.server, group.ID)
+		re.True(group.Status.Enabled)
 	}
 	// Create keyspaces and collect their meta-service group configs.
 	keyspaces := mustMakeTestKeyspaces(re, suite.server, 20)
