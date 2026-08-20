@@ -82,7 +82,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
-			statistics.ResetStoreStatistics(store.GetAddress(), strconv.FormatUint(store.GetId(), 10))
+			statistics.ResetStoreStatistics(strconv.FormatUint(store.GetId(), 10))
 			// TODO: remove hot stats
 		}
 

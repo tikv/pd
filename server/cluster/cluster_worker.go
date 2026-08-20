@@ -276,10 +276,11 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 
 // HandleRegionBuckets processes region buckets from client
 func (c *RaftCluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	if err := c.processRegionBuckets(b); err != nil {
+	applied, err := c.processRegionBuckets(b)
+	if err != nil {
 		return err
 	}
-	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+	if applied && !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil

@@ -1268,7 +1268,11 @@ func (suite *clientStatelessTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
 	re.NotNil(cluster)
-	store := stores[0]
+	// Use stores[3]: this test destructively transitions it through
+	// offline -> tombstone, and stores[0..2] are the ones other tests in
+	// this suite heartbeat regions through (peers[0..2]) and expect to
+	// stay live for the rest of the suite.
+	store := stores[3]
 
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())

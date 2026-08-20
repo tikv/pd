@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -324,6 +326,10 @@ func (c *Cluster) SetRuntimeResources(
 	c.configWatcher = configWatcher
 	c.ruleWatcher = ruleWatcher
 	c.affinityWatcher = affinityWatcher
+	metaWatcher.SetOnStoreTombstoned(func(storeID uint64) {
+		c.hotStat.RemoveRollingStoreStats(storeID)
+		DeleteStoreMetrics(strconv.FormatUint(storeID, 10))
+	})
 }
 
 func (c *Cluster) stopCluster() {
@@ -725,8 +731,50 @@ func (c *Cluster) collectMetrics() {
 	for _, s := range stores {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
+		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
+		// concurrent bury or final removal of s between GetStores() above and
+		// this write can have its own metric cleanup undone by it. Re-checking
+		// right after the write and redoing the cleanup closes that race
+		// without needing synchronization with the bury/removal path.
+		current := c.GetStore(s.GetID())
+		// DeleteClusterStatusMetrics only covers the clusterStatusGauge fields
+		// observe() keeps refreshing unconditionally while a store stays
+		// tombstoned (store_tombstone_count and friends, self-healing by
+		// design); only clean those up once the store is gone for good, or
+		// they'd flicker off every tick during a legitimate tombstone period.
+		if current == nil {
+			statistics.DeleteClusterStatusMetrics(s)
+		}
+		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
+		// observe() itself stops writing as soon as it sees a tombstoned
+		// store -- so, unlike the fields above, there's no legitimate write to
+		// preserve here once the store is IsRemoved(), not just once it's
+		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
+		// full-vector scan, so only pay for it when this iteration's own s was
+		// still live (observe(s) could then have written using stale data);
+		// once a snapshot correctly shows IsRemoved(), observe() already
+		// skipped writing these fields and there's nothing to undo, so a
+		// tombstoned store sitting in GetStores() for up to 30 days doesn't
+		// cost a scan on every 10s tick.
+		if !s.IsRemoved() && (current == nil || current.IsRemoved()) {
+			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
+		}
 	}
 	statsMap.Collect()
+	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
+	// GetStoresLimit() snapshot, taken independently of stores above and with
+	// no cluster reference of its own to re-check against. Reuse the stores
+	// snapshot already captured here to catch and undo it. Like
+	// ResetStoreStatistics above, a store limit has no legitimate reason to
+	// still be configured once the store is tombstoned, so this also checks
+	// IsRemoved(), not just full removal.
+	for _, s := range stores {
+		if store := c.GetStore(s.GetID()); store == nil || store.IsRemoved() {
+			id := strconv.FormatUint(s.GetID(), 10)
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
+			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
+		}
+	}
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
@@ -745,6 +793,9 @@ func resetMetrics() {
 	statistics.Reset()
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
+	filter.ResetFilterMetrics()
+	hbstream.ResetHeartbeatStreamMetrics()
+	ResetStoreMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -903,19 +954,27 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 
 // HandleRegionBuckets processes region buckets from client
 func (c *Cluster) HandleRegionBuckets(b *metapb.Buckets) error {
-	if err := c.processRegionBuckets(b); err != nil {
+	applied, err := c.processRegionBuckets(b)
+	if err != nil {
 		return err
 	}
-
-	c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	if applied {
+		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
+	}
 	return nil
 }
 
-// processRegionBuckets update the bucket information.
-func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
+// processRegionBuckets updates the bucket information. The first return
+// value reports whether the report was actually applied, so callers don't
+// enqueue hot-bucket work for a report that was ignored because its leader
+// is tombstoned.
+func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
-		return errors.Errorf("region %v not found", buckets.GetRegionId())
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
+		return false, nil
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
@@ -923,10 +982,10 @@ func (c *Cluster) processRegionBuckets(buckets *metapb.Buckets) error {
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
 		if success := region.CompareAndSetReportBuckets(buckets); success {
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // IsPrepared return true if the prepare checker is ready.

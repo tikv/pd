@@ -29,3 +29,8 @@ var (
 func init() {
 	prometheus.MustRegister(hotSpotStatusGauge)
 }
+
+// DeleteStoreMetrics deletes the hotspot status metrics of a store.
+func DeleteStoreMetrics(storeID string) {
+	hotSpotStatusGauge.DeletePartialMatch(prometheus.Labels{"store": storeID})
+}

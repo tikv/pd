@@ -332,7 +332,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	defer s.filterCounter.Flush()
+	defer s.filterCounter.Flush(cluster)
 	batch := s.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
