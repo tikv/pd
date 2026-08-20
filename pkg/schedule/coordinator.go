@@ -571,12 +571,13 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 			})
 		}
 
-		// stores is a snapshot taken before this loop; if s was fully removed
-		// concurrently, this write can recreate a series DeleteStoreMetrics
-		// already deleted for it, with no later event able to find and remove
-		// it again. Re-checking and redoing the cleanup here closes that race
-		// the same way the per-store statistics collection loop does.
-		if cluster.GetStore(storeID) == nil {
+		// stores is a snapshot taken before this loop; if s was buried or fully
+		// removed concurrently, this write can recreate a series
+		// DeleteStoreMetrics already deleted for it. Unlike clusterStatusGauge's
+		// self-healing tombstone fields, hot-spot activity for a tombstoned
+		// store has no legitimate reason to keep being published, so check
+		// IsRemoved() here too, not just full removal.
+		if store := cluster.GetStore(storeID); store == nil || store.IsRemoved() {
 			DeleteStoreMetrics(storeLabel)
 		}
 	}

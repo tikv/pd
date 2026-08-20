@@ -191,13 +191,25 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		statsMap.Observe(s)
 		statistics.ObserveHotStat(s, sc.hotStat.StoresStats)
 		// Observe/ObserveHotStat write from this snapshot unconditionally, so a
-		// concurrent final removal of s between GetStores() above and this write
-		// can have its own metric cleanup undone by it. Since final removal only
-		// happens once and never re-adds the store, re-checking right after the
-		// write and redoing the cleanup if it's now gone closes that race without
-		// needing synchronization with the removal path.
-		if sc.GetStore(s.GetID()) == nil {
+		// concurrent bury or final removal of s between GetStores() above and
+		// this write can have its own metric cleanup undone by it. Re-checking
+		// right after the write and redoing the cleanup closes that race
+		// without needing synchronization with the bury/removal path.
+		current := sc.GetStore(s.GetID())
+		// DeleteClusterStatusMetrics only covers the clusterStatusGauge fields
+		// observe() keeps refreshing unconditionally while a store stays
+		// tombstoned (store_tombstone_count and friends, self-healing by
+		// design); only clean those up once the store is gone for good, or
+		// they'd flicker off every tick during a legitimate tombstone period.
+		if current == nil {
 			statistics.DeleteClusterStatusMetrics(s)
+		}
+		// ResetStoreStatistics covers storeStatusGauge/storeStats, which
+		// observe() itself stops writing as soon as it sees a tombstoned
+		// store -- so, unlike the fields above, there's no legitimate write to
+		// preserve here once the store is IsRemoved(), not just once it's
+		// gone entirely.
+		if current == nil || current.IsRemoved() {
 			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
 		}
 	}
@@ -205,11 +217,13 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	// statsMap.Collect() writes statistics.StoreLimitGauge from its own
 	// GetStoresLimit() snapshot, taken independently of stores above and with
 	// no cluster reference of its own to re-check against. Reuse the stores
-	// snapshot already captured here to catch and undo it for any store
-	// that's gone by now, the same way the loop above does for the other
-	// per-store metrics.
+	// snapshot already captured here to catch and undo it. Like
+	// ResetStoreStatistics above, a store limit has no legitimate reason to
+	// still be configured once the store is tombstoned (RemoveStoreLimit
+	// already clears it at bury time), so this also checks IsRemoved(), not
+	// just full removal.
 	for _, s := range stores {
-		if sc.GetStore(s.GetID()) == nil {
+		if store := sc.GetStore(s.GetID()); store == nil || store.IsRemoved() {
 			id := strconv.FormatUint(s.GetID(), 10)
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "add-peer")
 			statistics.StoreLimitGauge.DeleteLabelValues(id, "remove-peer")
