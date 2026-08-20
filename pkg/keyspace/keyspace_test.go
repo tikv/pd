@@ -161,13 +161,20 @@ func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() 
 	re.NoError(err)
 
 	// Simulate the reserved keyspace's group membership having been lost
-	// independently of its meta.
-	op, _, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opDelete)
+	// independently of its meta. Also invoke the returned callback so the
+	// in-memory group cache is made stale too (matching a real restart, where
+	// a freshly loaded cache would reflect the same incomplete storage) -
+	// otherwise the cache assertion below would trivially pass regardless of
+	// whether the repair actually refreshes the cache.
+	op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opDelete)
 	re.NoError(err)
 	re.NoError(manager.RunTxn(uint32(gid), []txnOp{op}))
+	cb(nil)
 	kg, err := manager.kgm.GetKeyspaceGroupByID(uint32(gid))
 	re.NoError(err)
 	re.NotContains(kg.Keyspaces, id)
+	_, err = manager.kgm.GetGroupByKeyspaceID(id)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
 
 	// A restart re-runs Bootstrap -> initReserveKeyspace, which should repair the
 	// membership even though the keyspace meta already exists.
@@ -176,6 +183,13 @@ func (suite *keyspaceTestSuite) TestInitReserveKeyspaceRepairsGroupMembership() 
 	kg, err = manager.kgm.GetKeyspaceGroupByID(uint32(gid))
 	re.NoError(err)
 	re.Contains(kg.Keyspaces, id)
+
+	// GetKeyspaceGroupByID reloads from storage regardless of cache state, so
+	// also check the in-memory group cache directly (what GetGroupByKeyspaceID
+	// reads) to confirm the repair's post-commit callback actually ran.
+	repairedGroupID, err := manager.kgm.GetGroupByKeyspaceID(id)
+	re.NoError(err)
+	re.Equal(uint32(gid), repairedGroupID)
 }
 
 func (suite *keyspaceTestSuite) TestCreateSameKeyspaceTwice() {
@@ -252,6 +266,56 @@ func (suite *keyspaceTestSuite) TestWaitSplitFailureRollsBackKeyspace() {
 	re.Nil(ks)
 	_, err = manager.LoadKeyspace("waitsplitfail")
 	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+}
+
+// TestWaitSplitFailureRollsBackCrossSubsystemState verifies that rollback on a
+// wait-split failure undoes not just the keyspace meta and region label rule
+// but also the TSO keyspace-group membership and the meta-service group
+// assignment count committed by the same transaction, refreshing the
+// corresponding in-memory caches rather than leaving them stale.
+func (suite *keyspaceTestSuite) TestWaitSplitFailureRollsBackCrossSubsystemState() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	kgm := NewKeyspaceGroupManager(ctx, store, nil)
+	re.NoError(kgm.Bootstrap(ctx))
+	manager := NewKeyspaceManager(ctx, store, nil, mockid.NewIDAllocator(), &mockConfig{
+		WaitRegionSplit:          true,
+		WaitRegionSplitTimeout:   typeutil.Duration{Duration: time.Second},
+		CheckRegionSplitInterval: typeutil.Duration{Duration: time.Millisecond},
+	}, kgm, nil)
+	re.NoError(manager.Bootstrap())
+
+	metaServiceGroupStore, ok := manager.store.(endpoint.MetaServiceGroupStorage)
+	re.True(ok)
+	manager.mgm = NewMetaServiceGroupManager(metaServiceGroupStore, map[string]string{})
+	manager.mgm.SetKeyspaceAssignmentCounter(manager.CountKeyspacesByMetaServiceGroup)
+	manager.mgm.updateGroups(map[string]string{"meta-1": "meta-1.svc.local"})
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/waitSplitKeyspaceFailed"))
+	}()
+
+	ks, err := manager.CreateKeyspace(&CreateKeyspaceRequest{
+		Name:       "rollback-cross-state",
+		CreateTime: time.Now().Unix(),
+	})
+	re.Error(err)
+	re.Nil(ks)
+	_, err = manager.LoadKeyspace("rollback-cross-state")
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+
+	// The allocator hands out sequential ids starting at 1, and Bootstrap
+	// doesn't consume one (the reserved keyspace's id is fixed, not
+	// allocated), so this failed creation must have taken id 1.
+	_, err = manager.kgm.GetGroupByKeyspaceID(1)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInAnyKeyspaceGroup)
+
+	status, err := manager.mgm.GetStatus(ctx)
+	re.NoError(err)
+	re.Equal(0, status["meta-1"].AssignmentCount)
 }
 
 // TestWaitSplitSuccessEnablesKeyspacePersistently verifies that once the

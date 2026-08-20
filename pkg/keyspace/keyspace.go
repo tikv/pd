@@ -245,33 +245,55 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 // keyspace to a different group than the one it is actually recorded as
 // belonging to. Both underlying operations are idempotent (SaveRegionRule
 // overwrites unconditionally; the group op is a no-op if the keyspace is
-// already a member), so this is safe to run on every restart.
+// already a member), so this is safe to run on every restart. The post-commit
+// callbacks are invoked once RunTxn succeeds, so the in-memory TSO group cache
+// and region labeler rule index are refreshed along with storage, not just
+// storage on its own.
 func (manager *Manager) repairReservedKeyspace(id uint32) error {
 	meta, err := manager.LoadKeyspaceByID(id)
 	if err != nil {
 		return err
 	}
-	groupID := meta.GetConfig()[TSOKeyspaceGroupIDKey]
+	groupIDStr := meta.GetConfig()[TSOKeyspaceGroupIDKey]
 	boundType := keyTypeStringToRegionBoundType(meta.GetConfig()[RegionBoundType])
 
 	txnOps := make([]txnOp, 0, 2)
-	op, _, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupID, id, opAdd)
+	txnCbs := make([]txnCb, 0, 2)
+	addTxn := func(op txnOp, cb txnCb) {
+		if op != nil {
+			txnOps = append(txnOps, op)
+		}
+		if cb != nil {
+			txnCbs = append(txnCbs, cb)
+		}
+	}
+
+	var groupID uint64
+	if groupIDStr != "" {
+		op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(endpoint.Basic, groupIDStr, id, opAdd)
+		if err != nil {
+			return err
+		}
+		addTxn(op, cb)
+		groupID, err = strconv.ParseUint(groupIDStr, 10, 32)
+		if err != nil {
+			return err
+		}
+	}
+
+	op, cb, err := manager.saveKeyspaceRegionLabelerTxnOp(id, boundType)
 	if err != nil {
 		return err
 	}
-	if op != nil {
-		txnOps = append(txnOps, op)
-	}
+	addTxn(op, cb)
 
-	op, _, err = manager.saveKeyspaceRegionLabelerTxnOp(id, boundType)
-	if err != nil {
+	if err := manager.RunTxn(uint32(groupID), txnOps); err != nil {
 		return err
 	}
-	if op != nil {
-		txnOps = append(txnOps, op)
+	for _, cb := range txnCbs {
+		cb(nil)
 	}
-
-	return manager.RunTxn(0, txnOps)
+	return nil
 }
 
 // UpdateConfig update keyspace manager's config.
@@ -464,7 +486,7 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 			}
 		}
 		if err != nil {
-			if rbErr := manager.rollbackCreateKeyspace(keyspace); rbErr != nil {
+			if rbErr := manager.rollbackCreateKeyspace(tracer, keyspace); rbErr != nil {
 				log.Warn("[create-keyspace] failed to rollback keyspace after enable failed",
 					zap.Uint32("keyspace-id", tracer.keyspaceID),
 					zap.String("keyspace-name", tracer.keyspaceName),
@@ -485,23 +507,20 @@ func (manager *Manager) createKeyspaceWithoutCheck(tracer *createKeyspaceTracer,
 	return keyspace, nil
 }
 
-// rollbackCreateKeyspace undoes the keyspace meta and region label rule committed
-// by createKeyspaceWithoutCheck when the post-commit wait-for-split or enable step
-// fails. When a region labeler is available, the meta removal and the label rule
-// removal are committed in the same transaction (region rule storage shares the
-// same kv.Txn as keyspace storage, the same way saveKeyspaceRegionLabelerTxnOp
-// composes them on the create path), so a failure here cannot leave a label rule
-// with no corresponding keyspace meta. If no labeler is configured, no label rule
-// could have been created either (saveKeyspaceRegionLabelerTxnOp requires the
-// same interface), so the meta removal proceeds on its own rather than treating
-// a missing labeler as a hard rollback failure.
-//
-// It deliberately does not touch the meta-service group assignment count or the
-// TSO keyspace-group membership committed by the same transaction: leaving those
-// slightly over-counted/stale is an accepted trade-off, since precisely
-// unwinding them here would need to duplicate the locking rules those
-// subsystems already enforce.
-func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
+// rollbackCreateKeyspace undoes everything createKeyspaceWithoutCheck committed
+// atomically: the keyspace meta, the meta-service group assignment count, the
+// TSO keyspace-group membership, and the region label rule. All of it is
+// undone in a single transaction — the meta-service and TSO group helpers used
+// here (unassignKeyspaceFromMetaServiceGroup, updateKeyspaceForGroupTxnOp with
+// opDelete) are the exact same ones the create path uses to do the opposite,
+// so they already manage their own locking correctly; nothing here duplicates
+// that logic. The corresponding in-memory caches (TSO group cache, region
+// labeler rule index, keyspace name/state lookup) are only refreshed once that
+// transaction commits.
+func (manager *Manager) rollbackCreateKeyspace(tracer *createKeyspaceTracer, keyspace *keyspacepb.KeyspaceMeta) error {
+	manager.metaLock.Lock(keyspace.GetId())
+	defer manager.metaLock.Unlock(keyspace.GetId())
+
 	var regionLabeler *labeler.RegionLabeler
 	var ruleID string
 	if cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler }); ok {
@@ -509,24 +528,56 @@ func (manager *Manager) rollbackCreateKeyspace(keyspace *keyspacepb.KeyspaceMeta
 		ruleID = getRegionLabelID(keyspace.GetId())
 	}
 
-	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+	txnOps := make([]txnOp, 0, 2)
+	txnCbs := make([]txnCb, 0, 2)
+	addTxn := func(op txnOp, cb txnCb) {
+		if op != nil {
+			txnOps = append(txnOps, op)
+		}
+		if cb != nil {
+			txnCbs = append(txnCbs, cb)
+		}
+	}
+
+	// Undo the TSO keyspace-group membership, symmetric to the opAdd done on
+	// the create path. Skipped when there's no group id, same as create.
+	var groupID uint64
+	if gid := keyspace.GetConfig()[TSOKeyspaceGroupIDKey]; gid != "" {
+		op, cb, err := manager.kgm.updateKeyspaceForGroupTxnOp(tracer.userKind, gid, keyspace.GetId(), opDelete)
+		if err != nil {
+			return err
+		}
+		addTxn(op, cb)
+		groupID, err = strconv.ParseUint(gid, 10, 32)
+		if err != nil {
+			return err
+		}
+	}
+
+	// Remove the meta, undo the meta-service group assignment count, and
+	// remove the region label rule, all in the same transaction.
+	addTxn(func(txn kv.Txn) error {
 		if err := manager.store.RemoveKeyspace(txn, keyspace.GetId(), keyspace.GetName()); err != nil {
+			return err
+		}
+		if err := manager.unassignKeyspaceFromMetaServiceGroup(txn, keyspace); err != nil {
 			return err
 		}
 		if regionLabeler == nil {
 			return nil
 		}
 		return regionLabeler.GetRuleStorage().DeleteRegionRule(txn, ruleID)
-	})
-	if err != nil {
+	}, nil)
+
+	if err := manager.RunTxn(uint32(groupID), txnOps); err != nil {
 		return err
 	}
+	for _, cb := range txnCbs {
+		cb(nil)
+	}
 
-	manager.metaLock.Lock(keyspace.GetId())
 	manager.keyspaceNameLookup.Delete(keyspace.GetId())
 	manager.keyspaceStateLookup.Delete(keyspace.GetId())
-	manager.metaLock.Unlock(keyspace.GetId())
-
 	if regionLabeler != nil {
 		regionLabeler.DeleteRuleWithoutTxn(ruleID)
 	}
