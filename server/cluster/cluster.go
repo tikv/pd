@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/affinity"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -56,7 +57,12 @@ import (
 	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+<<<<<<< HEAD
 	"github.com/tikv/pd/pkg/slice"
+=======
+	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -198,6 +204,24 @@ type RaftCluster struct {
 	logRunner ratelimit.Runner
 	// syncRegionRunner is used to sync region asynchronously.
 	syncRegionRunner ratelimit.Runner
+<<<<<<< HEAD
+=======
+
+	stopGCStateManager func()
+
+	// onStoreBuried is an optional callback invoked (at least once) with a store's
+	// ID right after it's buried, for cleanup that only the owning package can do
+	// without an import cycle -- e.g. the server package's own heartbeat/bucket
+	// metrics, which server/cluster cannot import directly. Set via
+	// SetOnStoreBuried; read through an atomic pointer since BuryStoreLocked can run
+	// before the owner has had a chance to install it.
+	onStoreBuried atomic.Pointer[func(storeID string)]
+}
+
+// SetOnStoreBuried sets the callback invoked when a store is buried.
+func (c *RaftCluster) SetOnStoreBuried(fn func(storeID string)) {
+	c.onStoreBuried.Store(&fn)
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 }
 
 // Status saves some state information.
@@ -1182,18 +1206,34 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	return nil
 }
 
+<<<<<<< HEAD
 // processReportBuckets update the bucket information.
 func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		regionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
+=======
+// processRegionBuckets updates the bucket information. The first return value
+// reports whether the report was actually applied, so callers don't enqueue
+// hot-bucket work for a report that was ignored because its leader is
+// tombstoned.
+func (c *RaftCluster) processRegionBuckets(buckets *metapb.Buckets) (bool, error) {
+	region := c.GetRegion(buckets.GetRegionId())
+	if region == nil {
+		core.RegionCacheMissCounter.Inc()
+		return false, errors.Errorf("region %v not found", buckets.GetRegionId())
+	}
+	if store := c.GetStore(region.GetLeader().GetStoreId()); store != nil && store.IsRemoved() {
+		return false, nil
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 	}
 	// use CAS to update the bucket information.
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
 	for range 3 {
+<<<<<<< HEAD
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
@@ -1209,6 +1249,15 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	}
 	updateFailedCounter.Inc()
 	return nil
+=======
+		if success := region.CompareAndSetReportBuckets(buckets); success {
+			core.UpdateSuccessCounter.Inc()
+			return true, nil
+		}
+	}
+	core.UpdateFailedCounter.Inc()
+	return false, nil
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
@@ -1652,12 +1701,22 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
+<<<<<<< HEAD
 		addr := store.GetAddress()
 		c.resetProgress(storeID, addr)
+=======
+>>>>>>> a77df243d9 (*: delete per-store metrics when a store is tombstoned (#11127))
 		storeIDStr := strconv.FormatUint(storeID, 10)
-		statistics.ResetStoreStatistics(addr, storeIDStr)
+		statistics.ResetStoreStatistics(storeIDStr)
+		filter.DeleteStoreMetrics(storeIDStr)
+		hbstream.DeleteStoreMetrics(storeIDStr)
+		schedule.DeleteStoreMetrics(storeIDStr)
+		storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
+		}
+		if fn := c.onStoreBuried.Load(); fn != nil {
+			(*fn)(storeIDStr)
 		}
 	}
 	return err
@@ -2168,8 +2227,26 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	statistics.DeleteClusterStatusMetrics(store)
+	// Remove the store before the metric cleanup below, not after: a metrics
+	// collection tick observing this store concurrently re-checks GetStore
+	// right after it writes and undoes its own write if the store is already
+	// gone. If DeleteStore ran last, that re-check could still see the
+	// (already fully cleaned) tombstone entry and skip its own cleanup,
+	// leaving a series this cleanup just deleted with no later event able to
+	// find and remove it again.
 	c.DeleteStore(store)
+	storeIDStr := strconv.FormatUint(store.GetID(), 10)
+	statistics.DeleteClusterStatusMetrics(store)
+	statistics.ResetStoreStatistics(storeIDStr)
+	filter.DeleteStoreMetrics(storeIDStr)
+	hbstream.DeleteStoreMetrics(storeIDStr)
+	schedule.DeleteStoreMetrics(storeIDStr)
+	schedulers.DeleteStoreMetrics(storeIDStr)
+	scatter.DeleteStoreMetrics(storeIDStr)
+	storeTriggerNetworkSlowEvict.DeleteLabelValues(storeIDStr)
+	if fn := c.onStoreBuried.Load(); fn != nil {
+		(*fn)(storeIDStr)
+	}
 	return nil
 }
 
