@@ -717,13 +717,17 @@ type ruleLeaderFitFilter struct {
 
 // newRuleLeaderFitFilter creates a filter that ensures after transfer leader with new store,
 // the isolation level will not decrease.
-func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
+func newRuleLeaderFitFilter(scope string, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, oldFit *placement.RegionFit, srcLeaderStoreID uint64, allowMoveLeader bool) Filter {
+	if oldFit == nil {
+		oldFit = ruleManager.FitRegion(cluster, region)
+	}
 	return &ruleLeaderFitFilter{
 		scope:            scope,
 		cluster:          cluster,
 		ruleManager:      ruleManager,
 		region:           region,
-		oldFit:           ruleManager.FitRegion(cluster, region),
+		oldFit:           oldFit,
 		srcLeaderStoreID: srcLeaderStoreID,
 		allowMoveLeader:  allowMoveLeader,
 	}
@@ -830,9 +834,16 @@ func NewPlacementSafeguard(scope string, conf config.SharedConfigProvider, clust
 // NewPlacementLeaderSafeguard creates a filter that ensures after transfer a leader with
 // existed peer, the placement restriction will not become worse.
 // Note that it only worked when PlacementRules enabled otherwise it will always permit the sourceStore.
-func NewPlacementLeaderSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager, region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
+func NewPlacementLeaderSafeguard(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, allowMoveLeader bool) Filter {
+	return NewPlacementLeaderSafeguardWithFit(scope, conf, cluster, ruleManager, region, sourceStore, nil, allowMoveLeader)
+}
+
+// NewPlacementLeaderSafeguardWithFit creates a placement leader safeguard with a reusable region fit.
+func NewPlacementLeaderSafeguardWithFit(scope string, conf config.SharedConfigProvider, cluster *core.BasicCluster, ruleManager *placement.RuleManager,
+	region *core.RegionInfo, sourceStore *core.StoreInfo, oldFit *placement.RegionFit, allowMoveLeader bool) Filter {
 	if conf.IsPlacementRulesEnabled() {
-		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, sourceStore.GetID(), allowMoveLeader)
+		return newRuleLeaderFitFilter(scope, cluster, ruleManager, region, oldFit, sourceStore.GetID(), allowMoveLeader)
 	}
 	return nil
 }
