@@ -133,6 +133,11 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
+	}()
 	suite.env.RunTest(suite.checkRegionsReplicated)
 }
 
@@ -140,6 +145,18 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	re := suite.Require()
 	pauseAllCheckers(re, cluster)
 	leader := cluster.GetLeaderServer()
+	var checkerController *checker.Controller
+	if sche := cluster.GetSchedulingPrimaryServer(); sche == nil {
+		checkerController = leader.GetRaftCluster().GetCoordinator().GetCheckerController()
+	} else {
+		checkerController = sche.GetCluster().GetCoordinator().GetCheckerController()
+	}
+	checkerController.ClearSuspectKeyRanges()
+	checkerController.ClearPendingProcessedRegions()
+	defer func() {
+		checkerController.ClearSuspectKeyRanges()
+		checkerController.ClearPendingProcessedRegions()
+	}()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	// add test region
@@ -202,11 +219,56 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		return status == "REPLICATED"
 	})
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
+	// A rule can have enough peers but still be pending because an offline
+	// peer has no replacement target.
+	putStore := func(store *core.StoreInfo) {
+		leader.GetRaftCluster().GetBasicCluster().PutStore(store)
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			schedulingServer.GetCluster().PutStore(store)
+		}
+	}
+	servingStore := leader.GetRaftCluster().GetStore(1)
+	offlineStore := servingStore.Clone(
+		core.SetStoreState(metapb.StoreState_Offline, false),
+		core.SetNodeState(metapb.NodeState_Removing),
+	)
+	putStore(offlineStore)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.Equal("PENDING", status)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
+	targetStore := &metapb.Store{
+		Id:        2,
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
+	}
+	tests.MustPutStore(re, cluster, targetStore)
+	availableTarget := leader.GetRaftCluster().GetStore(2).Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  uint64(10 * units.GiB),
+		Available: uint64(10 * units.GiB),
+	}))
+	putStore(availableTarget)
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+	putStore(availableTarget.Clone(
+		core.SetStoreState(metapb.StoreState_Offline, false),
+		core.SetNodeState(metapb.NodeState_Removing),
+	))
+	putStore(servingStore)
+
+	// Missing Region metadata must never be reported as complete.
+	noRegionURL := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix,
+		hex.EncodeToString(r1.GetEndKey()), hex.EncodeToString([]byte("c")))
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, noRegionURL, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+
+	gapURL := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix,
+		hex.EncodeToString([]byte("0")), hex.EncodeToString(r1.GetEndKey()))
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, gapURL, &status)
+	re.NoError(err)
+	re.Equal("INPROGRESS", status)
+
 	// test multiple rules
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
@@ -262,10 +324,11 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		return s1 || s2
 	})
 
+	// The new rule requires more peers, but there is no available target store.
 	testutil.Eventually(re, func() bool {
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, url, &status)
 		re.NoError(err)
-		return status == "INPROGRESS"
+		return status == "PENDING"
 	})
 
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))

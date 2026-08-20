@@ -180,7 +180,8 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Len(regions.Regions, 3)
 	state, err := client.GetRegionsReplicatedStateByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
 	re.NoError(err)
-	re.Equal("INPROGRESS", state)
+	// All candidate Stores are low on space, so no placement action can progress.
+	re.Equal("PENDING", state)
 	regionStats, err := client.GetRegionStatusByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), false)
 	re.NoError(err)
 	re.Positive(regionStats.Count)

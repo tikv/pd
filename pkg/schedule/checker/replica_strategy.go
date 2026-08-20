@@ -39,6 +39,13 @@ type ReplicaStrategy struct {
 	fastFailover   bool
 }
 
+func (s *ReplicaStrategy) operatorLevel() constant.PriorityLevel {
+	if s.fastFailover {
+		return constant.Urgent
+	}
+	return constant.High
+}
+
 // SelectStoreToAdd returns the store to add a replica to a region.
 // `coLocationStores` are the stores used to compare location with target
 // store.
@@ -58,10 +65,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	//
 	// The reason for it is to prevent the non-optimal replica placement due
 	// to the short-term state, resulting in redundant scheduling.
-	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
+	level := s.operatorLevel()
 	filters := []filter.Filter{
 		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
 		filter.NewStorageThresholdFilter(s.checkerName),
@@ -94,6 +98,76 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	return target.GetID(), false
 }
 
+type storeCandidateSet struct {
+	stores     []*core.StoreInfo
+	filters    []filter.Filter
+	next       int
+	candidates []*core.StoreInfo
+}
+
+// newStoreCandidateSet creates a lazily evaluated candidate set. Static Store
+// filters are evaluated at most once per Rule, and scanning stops as soon as a
+// Region finds a usable Store.
+func (s *ReplicaStrategy) newStoreCandidateSet(stores []*core.StoreInfo) *storeCandidateSet {
+	filters := []filter.Filter{
+		filter.NewStorageThresholdFilter(s.checkerName),
+		filter.NewSpecialUseFilter(s.checkerName),
+		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: s.operatorLevel()},
+	}
+	filters = append(filters, s.extraFilters...)
+	return &storeCandidateSet{stores: stores, filters: filters}
+}
+
+// hasStoreToAdd checks whether at least one Store can satisfy the Region-
+// specific exclusion and isolation constraints.
+func (s *ReplicaStrategy) hasStoreToAdd(
+	candidateSet *storeCandidateSet,
+	coLocationStores []*core.StoreInfo,
+	extraFilters ...filter.Filter,
+) bool {
+	conf := s.cluster.GetCheckerConfig()
+	var isolationFilter filter.Filter
+	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
+		isolationFilter = filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores)
+	}
+	matchesRegion := func(store *core.StoreInfo) bool {
+		if s.region.GetStorePeer(store.GetID()) != nil ||
+			(isolationFilter != nil && !isolationFilter.Target(conf, store).IsOK()) {
+			return false
+		}
+		for _, extraFilter := range extraFilters {
+			if !extraFilter.Target(conf, store).IsOK() {
+				return false
+			}
+		}
+		return true
+	}
+	for _, store := range candidateSet.candidates {
+		if matchesRegion(store) {
+			return true
+		}
+	}
+	for candidateSet.next < len(candidateSet.stores) {
+		store := candidateSet.stores[candidateSet.next]
+		candidateSet.next++
+		matched := true
+		for _, storeFilter := range candidateSet.filters {
+			if !storeFilter.Target(conf, store).IsOK() {
+				matched = false
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		candidateSet.candidates = append(candidateSet.candidates, store)
+		if matchesRegion(store) {
+			return true
+		}
+	}
+	return false
+}
+
 // SelectStoreToFix returns a store to replace down/offline old peer. The location
 // placement after scheduling is allowed to be worse than original.
 func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, old uint64) (uint64, bool) {
@@ -108,6 +182,57 @@ func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, o
 		coLocationStores = coLocationStores[1:]
 	}
 	return s.SelectStoreToAdd(coLocationStores)
+}
+
+func (s *ReplicaStrategy) hasStoreToFix(candidateSet *storeCandidateSet, coLocationStores []*core.StoreInfo, old uint64) bool {
+	if len(coLocationStores) == 0 {
+		return false
+	}
+	swapStoreToFirst(coLocationStores, old)
+	if len(coLocationStores) > 1 {
+		coLocationStores = coLocationStores[1:]
+	}
+	return s.hasStoreToAdd(candidateSet, coLocationStores)
+}
+
+func collectCoLocationStores(cluster sche.SharedCluster, region *core.RegionInfo, fit *placement.RegionFit, ruleFit *placement.RuleFit, oldStore *core.StoreInfo) []*core.StoreInfo {
+	var stores []*core.StoreInfo
+	for _, store := range cluster.GetRegionStores(region) {
+		if store.GetLabelValue(core.EngineKey) != oldStore.GetLabelValue(core.EngineKey) {
+			continue
+		}
+		for _, rule := range fit.GetRules() {
+			if rule.Role == ruleFit.Rule.Role && placement.MatchLabelConstraints(store, rule.LabelConstraints) {
+				stores = append(stores, store)
+				break
+			}
+		}
+	}
+	return stores
+}
+
+func (s *ReplicaStrategy) hasBetterLocation(
+	candidateSet *storeCandidateSet,
+	cluster sche.SharedCluster,
+	region *core.RegionInfo,
+	fit *placement.RegionFit,
+	ruleFit *placement.RuleFit,
+) bool {
+	oldStoreID, _ := s.selectStoreToRemoveWithTempState(ruleFit.Stores)
+	if oldStoreID == 0 {
+		return false
+	}
+	oldStore := cluster.GetStore(oldStoreID)
+	if oldStore == nil {
+		return false
+	}
+	coLocationStores := collectCoLocationStores(cluster, region, fit, ruleFit, oldStore)
+	if len(coLocationStores) == 0 {
+		return false
+	}
+	swapStoreToFirst(coLocationStores, oldStoreID)
+	locationImprover := filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, oldStore)
+	return s.hasStoreToAdd(candidateSet, coLocationStores[1:], locationImprover)
 }
 
 // SelectStoreToImprove returns a store to replace oldStore. The location
@@ -143,12 +268,8 @@ func swapStoreToFirst(stores []*core.StoreInfo, id uint64) {
 // SelectStoreToRemove returns the best option to remove from the region.
 func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo) uint64 {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: s.operatorLevel()}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
 	if source == nil {
@@ -160,10 +281,7 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 
 func (s *ReplicaStrategy) selectStoreToRemoveWithTempState(coLocationStores []*core.StoreInfo) (uint64, bool) {
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	level := constant.High
-	if s.fastFailover {
-		level = constant.Urgent
-	}
+	level := s.operatorLevel()
 	sourceCandidate := filter.NewCandidates(coLocationStores).
 		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true)
@@ -191,22 +309,7 @@ func (s *ReplicaStrategy) getBetterLocation(cluster sche.SharedCluster, region *
 	if oldStore == nil {
 		return 0, 0, false
 	}
-	var coLocationStores []*core.StoreInfo
-	regionStores := cluster.GetRegionStores(region)
-	for _, store := range regionStores {
-		if store.GetLabelValue(core.EngineKey) != oldStore.GetLabelValue(core.EngineKey) {
-			continue
-		}
-		for _, r := range fit.GetRules() {
-			if r.Role != rf.Rule.Role {
-				continue
-			}
-			if placement.MatchLabelConstraints(store, r.LabelConstraints) {
-				coLocationStores = append(coLocationStores, store)
-				break
-			}
-		}
-	}
+	coLocationStores := collectCoLocationStores(cluster, region, fit, rf, oldStore)
 	newStoreID, filterByTempState = s.SelectStoreToImprove(coLocationStores, oldStoreID)
 	if sourceFilterByTempState {
 		if newStoreID != 0 || filterByTempState {
