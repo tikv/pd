@@ -32,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/affinity"
@@ -161,6 +162,32 @@ func TestAskBatchSplitRecordsSplitScatterInSchedulingService(t *testing.T) {
 	re.Len(resp.GetIds(), 1)
 
 	re.Equal(float64(2), splitScatterPendingMetricValue(t))
+}
+
+func TestStoreHeartbeatUpdatesV2Window(t *testing.T) {
+	re := require.New(t)
+	_, cluster, _ := newTestSchedulingServiceForSplit(t)
+	cfg := cluster.persistConfig.GetScheduleConfig().Clone()
+	cfg.StoreLimitVersion = storelimit.VersionV2
+	cfg.StoreLimitV2WindowSize = 4096
+	cluster.persistConfig.SetScheduleConfig(cfg)
+
+	re.NoError(cluster.HandleStoreHeartbeat(&schedulingpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1},
+	}))
+	limit, ok := cluster.GetStore(1).GetStoreLimit().(*storelimit.SlidingWindows)
+	re.True(ok)
+	re.EqualValues(4096, limit.GetCap())
+
+	cfg = cluster.persistConfig.GetScheduleConfig().Clone()
+	cfg.StoreLimitV2WindowSize = 8192
+	cluster.persistConfig.SetScheduleConfig(cfg)
+	re.NoError(cluster.HandleStoreHeartbeat(&schedulingpb.StoreHeartbeatRequest{
+		Stats: &pdpb.StoreStats{StoreId: 1},
+	}))
+	limit, ok = cluster.GetStore(1).GetStoreLimit().(*storelimit.SlidingWindows)
+	re.True(ok)
+	re.EqualValues(8192, limit.GetCap())
 }
 
 func newTestSchedulingServiceForSplit(

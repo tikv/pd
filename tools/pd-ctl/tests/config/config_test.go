@@ -125,6 +125,12 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
+	// v2 SendSnapshot window size is dynamically configurable.
+	args = []string{"-u", pdAddr, "config", "set", "store-limit-v2-window-size", "32768"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.EqualValues(32768, svr.GetScheduleConfig().StoreLimitV2WindowSize)
+
 	origin := svr.GetPDServerConfig().FlowRoundByDigit
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = tests.ExecuteCommand(cmd, args...)

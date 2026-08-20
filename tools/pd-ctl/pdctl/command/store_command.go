@@ -37,7 +37,7 @@ var (
 	storesLimitPrefix  = "pd/api/v1/stores/limit"
 	storePrefix        = "pd/api/v1/store/%v"
 	storeUpStatePrefix = "pd/api/v1/store/%v/state?state=Up"
-	maxStoreLimit      = float64(200)
+	maxStoreLimit      = float64(2000)
 )
 
 // NewStoreCommand return a stores subcommand of rootCmd

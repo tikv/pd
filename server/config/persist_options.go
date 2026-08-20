@@ -395,14 +395,14 @@ func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, rate
 	switch typ {
 	case storelimit.AddPeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer)
+			rate = v.GetDefaultStoreLimit(storelimit.RemovePeer)
 		} else {
 			rate = v.StoreLimit[storeID].RemovePeer
 		}
 		slc = sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: rate}
 	case storelimit.RemovePeer:
 		if _, ok := v.StoreLimit[storeID]; !ok {
-			rate = sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer)
+			rate = v.GetDefaultStoreLimit(storelimit.AddPeer)
 		} else {
 			rate = v.StoreLimit[storeID].AddPeer
 		}
@@ -417,13 +417,13 @@ func (o *PersistOptions) SetAllStoresLimit(typ storelimit.Type, ratePerMin float
 	v := o.GetScheduleConfig().Clone()
 	switch typ {
 	case storelimit.AddPeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
+		v.SetDefaultStoreLimit(storelimit.AddPeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: ratePerMin, RemovePeer: v.StoreLimit[storeID].RemovePeer}
 			v.StoreLimit[storeID] = sc
 		}
 	case storelimit.RemovePeer:
-		sc.DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
+		v.SetDefaultStoreLimit(storelimit.RemovePeer, ratePerMin)
 		for storeID := range v.StoreLimit {
 			sc := sc.StoreLimitConfig{AddPeer: v.StoreLimit[storeID].AddPeer, RemovePeer: ratePerMin}
 			v.StoreLimit[storeID] = sc
@@ -495,8 +495,8 @@ func (o *PersistOptions) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCo
 	}
 	cfg := o.GetScheduleConfig().Clone()
 	limitCfg := sc.StoreLimitConfig{
-		AddPeer:    sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.AddPeer),
-		RemovePeer: sc.DefaultStoreLimit.GetDefaultStoreLimit(storelimit.RemovePeer),
+		AddPeer:    cfg.GetDefaultStoreLimit(storelimit.AddPeer),
+		RemovePeer: cfg.GetDefaultStoreLimit(storelimit.RemovePeer),
 	}
 	cfg.StoreLimit[storeID] = limitCfg
 	o.SetScheduleConfig(cfg)
@@ -527,6 +527,11 @@ func (o *PersistOptions) GetAllStoresLimit() map[uint64]sc.StoreLimitConfig {
 // GetStoreLimitVersion returns the limit version of store.
 func (o *PersistOptions) GetStoreLimitVersion() string {
 	return o.GetScheduleConfig().StoreLimitVersion
+}
+
+// GetStoreLimitV2WindowSize returns the configured v2 base window size in MiB.
+func (o *PersistOptions) GetStoreLimitV2WindowSize() int64 {
+	return o.GetScheduleConfig().GetStoreLimitV2WindowSize()
 }
 
 // GetTolerantSizeRatio gets the tolerant size ratio.

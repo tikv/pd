@@ -71,6 +71,7 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
+	defaultStoreLimitV2WindowSize    = int64(100)
 	defaultPatrolRegionWorkerCount   = 1
 	maxPatrolRegionWorkerCount       = 8
 
@@ -229,6 +230,8 @@ type ScheduleConfig struct {
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	// StoreLimitDefault is the default v1 limit inherited by newly registered TiKV stores.
+	StoreLimitDefault StoreLimitConfig `toml:"store-limit-default" json:"store-limit-default"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
 	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
 	//
@@ -322,6 +325,8 @@ type ScheduleConfig struct {
 	// v1: which is based on the region count by rate limit.
 	// v2: which is based on region size by window size.
 	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
+	// StoreLimitV2WindowSize is the per-store base SendSnapshot window size in MiB.
+	StoreLimitV2WindowSize int64 `toml:"store-limit-v2-window-size" json:"store-limit-v2-window-size"`
 
 	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
 	// and any other scheduling configs will be ignored.
@@ -415,6 +420,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
 	}
+	if !meta.IsDefined("store-limit-v2-window-size") {
+		c.StoreLimitV2WindowSize = defaultStoreLimitV2WindowSize
+	}
 	if !meta.IsDefined("patrol-region-worker-count") {
 		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
@@ -466,8 +474,14 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
 	}
 
+	if !meta.IsDefined("store-limit-default") {
+		c.StoreLimitDefault = StoreLimitConfig{
+			AddPeer:    DefaultStoreLimit.AddPeer,
+			RemovePeer: DefaultStoreLimit.RemovePeer,
+		}
+	}
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreLimitDefault = StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 
@@ -537,7 +551,7 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
 	c.DisableLearner = false
 	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
+		c.StoreLimitDefault = StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
 		c.StoreBalanceRate = 0
 	}
 	for _, b := range c.migrateConfigurationMap() {
@@ -570,6 +584,12 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
 		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
+	}
+	if c.StoreLimitDefault.AddPeer <= 0 || c.StoreLimitDefault.RemovePeer <= 0 {
+		return errors.New("store-limit-default should be larger than 0")
+	}
+	if c.StoreLimitV2WindowSize < minStoreLimitV2WindowSize {
+		return errors.Errorf("store-limit-v2-window-size should be at least %d", minStoreLimitV2WindowSize)
 	}
 	return nil
 }
@@ -604,6 +624,41 @@ func (c *ScheduleConfig) Deprecated() error {
 type StoreLimitConfig struct {
 	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
 	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+}
+
+const minStoreLimitV2WindowSize = int64(10)
+
+// GetDefaultStoreLimit returns the v1 limit inherited by newly registered TiKV stores.
+func (c *ScheduleConfig) GetDefaultStoreLimit(typ storelimit.Type) float64 {
+	var rate float64
+	switch typ {
+	case storelimit.AddPeer:
+		rate = c.StoreLimitDefault.AddPeer
+	case storelimit.RemovePeer:
+		rate = c.StoreLimitDefault.RemovePeer
+	}
+	if rate > 0 {
+		return rate
+	}
+	return DefaultStoreLimit.GetDefaultStoreLimit(typ)
+}
+
+// SetDefaultStoreLimit updates the v1 limit inherited by newly registered TiKV stores.
+func (c *ScheduleConfig) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
+	switch typ {
+	case storelimit.AddPeer:
+		c.StoreLimitDefault.AddPeer = ratePerMin
+	case storelimit.RemovePeer:
+		c.StoreLimitDefault.RemovePeer = ratePerMin
+	}
+}
+
+// GetStoreLimitV2WindowSize returns the configured v2 base window size in MiB.
+func (c *ScheduleConfig) GetStoreLimitV2WindowSize() int64 {
+	if c.StoreLimitV2WindowSize == 0 {
+		return defaultStoreLimitV2WindowSize
+	}
+	return c.StoreLimitV2WindowSize
 }
 
 // SchedulerConfigs is a slice of customized scheduler configuration.
