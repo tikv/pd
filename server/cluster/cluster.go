@@ -1790,6 +1790,7 @@ func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		c.prevStoreLimit.Delete(storeID)
 		c.RemoveStoreLimit(storeID)
+		c.ruleManager.RemoveStoreCache(storeID)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(storeIDStr)
 		filter.DeleteStoreMetrics(storeIDStr)
@@ -2182,7 +2183,6 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 					errs.ZapError(err))
 				return err
 			}
-			c.RemoveStoreLimit(store.GetID())
 			log.Info("delete store succeeded",
 				zap.Stringer("store", store.GetMeta()))
 		}
@@ -2212,6 +2212,13 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 	// leaving a series this cleanup just deleted with no later event able to
 	// find and remove it again.
 	c.DeleteStore(store)
+	c.ruleManager.RemoveStoreCache(store.GetID())
+	// The auto-GC path (checkStores' NodeState_Removed branch) only ever calls
+	// deleteStore, never RemoveTombStoneRecords, so the store-limit config entry
+	// needs to be cleared here rather than by the manual remove-tombstone caller
+	// alone -- otherwise a store reclaimed purely by the 30-day auto-GC timer
+	// never gets this cleanup at all.
+	c.RemoveStoreLimit(store.GetID())
 	storeIDStr := strconv.FormatUint(store.GetID(), 10)
 	statistics.DeleteClusterStatusMetrics(store)
 	statistics.ResetStoreStatistics(storeIDStr)
@@ -2621,6 +2628,18 @@ func (c *RaftCluster) loadExternalTS() {
 
 // SetStoreLimit sets a store limit for a given type and rate.
 func (c *RaftCluster) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) error {
+	// A tombstoned store's config entry is only ever cleared once, at bury time
+	// (RemoveStoreLimit); nothing sweeps it again afterward. Without this check,
+	// setting a limit for an already-tombstoned store re-adds it, and
+	// StoreLimitGauge stays republished for it until final removal.
+	//
+	// GetStore returning nil is deliberately NOT treated the same as removed
+	// here: callers legitimately set a store's limit before the store itself
+	// is registered (see testCluster.addRegionStore), so nil just means
+	// "not created yet," not "already gone."
+	if store := c.GetStore(storeID); store != nil && store.IsRemoved() {
+		return errs.ErrStoreRemoved.FastGenByArgs(storeID)
+	}
 	old := c.opt.GetScheduleConfig().Clone()
 	c.opt.SetStoreLimit(storeID, typ, ratePerMin)
 	if err := c.opt.Persist(c.storage); err != nil {
@@ -2800,6 +2819,15 @@ func (c *RaftCluster) UnsetServiceIndependent(name string) {
 const networkSlowStoreEvictThreshold = 99
 
 func (c *RaftCluster) adjustNetworkSlowStore(storeID uint64) {
+	// The gRPC handler's own IsRemoved() check isn't atomic with this call, so an
+	// in-flight StoreHeartbeat that already passed it can still reach here after
+	// bury. BuryStoreLocked only clears storeTriggerNetworkSlowEvict once, so a
+	// re-check here (unlike the metric write below, which has no such guard) is
+	// the only thing that can stop it from staying republished until final
+	// removal.
+	if store := c.GetStore(storeID); store == nil || store.IsRemoved() {
+		return
+	}
 	if c.GetAvgNetworkSlowScore(storeID) >= networkSlowStoreEvictThreshold {
 		c.TriggerNetworkSlowEvict(storeID)
 		storeTriggerNetworkSlowEvict.WithLabelValues(strconv.FormatUint(storeID, 10)).Inc()

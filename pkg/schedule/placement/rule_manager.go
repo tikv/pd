@@ -468,6 +468,11 @@ func (m *RuleManager) InvalidCache(regionID uint64) {
 	m.cache.Invalid(regionID)
 }
 
+// RemoveStoreCache removes the store cache with a given store ID.
+func (m *RuleManager) RemoveStoreCache(storeID uint64) {
+	m.cache.RemoveStoreCache(storeID)
+}
+
 // SetPlaceholderRegionFitCache sets a placeholder region fit cache information
 // Only used for testing
 func (m *RuleManager) SetPlaceholderRegionFitCache(region *core.RegionInfo) {

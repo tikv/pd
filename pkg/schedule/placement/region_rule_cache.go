@@ -53,6 +53,13 @@ func NewRegionRuleFitCacheManager() *RegionRuleFitCacheManager {
 	}
 }
 
+// RemoveStoreCache removes the store cache with a given store ID.
+func (manager *RegionRuleFitCacheManager) RemoveStoreCache(storeID uint64) {
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	delete(manager.storeCaches, storeID)
+}
+
 // Invalid cache by regionID
 func (manager *RegionRuleFitCacheManager) Invalid(regionID uint64) {
 	manager.mu.Lock()
@@ -203,7 +210,13 @@ func (manager *RegionRuleFitCacheManager) toStoreCacheList(stores []*core.StoreI
 				labels:  m,
 				state:   s.GetState(),
 			}
-			manager.storeCaches[s.GetID()] = sCache
+			// A removed store's entry is only ever cleared once, when it's
+			// buried or finally removed; a stale RegionInfo snapshot that
+			// still lists it as a peer must not re-add it here, or it would
+			// linger in storeCaches for good since nothing sweeps it again.
+			if !s.IsRemoved() {
+				manager.storeCaches[s.GetID()] = sCache
+			}
 		}
 		c = append(c, sCache)
 	}

@@ -368,6 +368,7 @@ func Reset() {
 	storeStatusGauge.Reset()
 	placementStatusGauge.Reset()
 	clusterStatusGauge.Reset()
+	StoreLimitGauge.Reset()
 	ResetRegionStatsMetrics()
 	ResetLabelStatsMetrics()
 	ResetHotCacheStatusMetrics()

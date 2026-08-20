@@ -100,8 +100,10 @@ func newBaseHotScheduler(
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
 func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.SchedulerCluster) {
-	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
+	stores := cluster.GetStores()
+	storeInfos := statistics.SummaryStoreInfos(stores)
 	s.summaryPendingInfluence(storeInfos)
+	s.stHistoryLoads.GC(stores)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
