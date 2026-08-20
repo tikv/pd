@@ -519,11 +519,17 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 }
 
 func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint64) error {
-	var updates map[uint32]watchedKeyspaceGroupUpdate
+	var (
+		updates  map[uint32]watchedKeyspaceGroupUpdate
+		batchErr error
+	)
 	compiledGroupIDPattern := keypath.GetCompiledKeyspaceGroupIDRegexp()
 	putFn := func(kv *mvccpb.KeyValue) error {
 		groupID, err := parseKeyspaceGroupID(compiledGroupIDPattern, kv.Key)
 		if err != nil {
+			if batchErr == nil {
+				batchErr = err
+			}
 			return err
 		}
 		if m.shouldSkipWatchedKeyspaceGroupUpdate(term, groupID, kv.ModRevision) {
@@ -531,10 +537,18 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 		}
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err)
+			err = errs.ErrJSONUnmarshal.Wrap(err)
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
 		}
 		if group.ID != groupID {
-			return errors.Errorf("keyspace group ID %d does not match storage path ID %d", group.ID, groupID)
+			err := errors.Errorf("keyspace group ID %d does not match storage path ID %d", group.ID, groupID)
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
 		}
 		updates[groupID] = watchedKeyspaceGroupUpdate{group: group, revision: kv.ModRevision}
 		return nil
@@ -542,6 +556,9 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		groupID, err := parseKeyspaceGroupID(compiledGroupIDPattern, kv.Key)
 		if err != nil {
+			if batchErr == nil {
+				batchErr = err
+			}
 			return err
 		}
 		updates[groupID] = watchedKeyspaceGroupUpdate{revision: kv.ModRevision}
@@ -556,18 +573,22 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 		keypath.KeyspaceGroupIDPrefix(),
 		func([]*clientv3.Event) error {
 			updates = make(map[uint32]watchedKeyspaceGroupUpdate)
+			batchErr = nil
 			return nil
 		},
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error {
+			if batchErr != nil {
+				return batchErr
+			}
 			m.applyWatchedKeyspaceGroupUpdates(term, updates)
 			return nil
 		},
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
-	watcher.SetAtomicCallbacks()
+	watcher.SetAtomicLoadCallbacks()
 	// The keyspace group count is bounded, so retaining watched keys lets a
 	// compaction reload remove groups that disappeared while events were missed.
 	watcher.SetReconcileDeletedKeys()

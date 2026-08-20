@@ -917,9 +917,9 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 	re.Equal("old", values[prefix+"c"])
 }
 
-func (suite *loopWatcherTestSuite) TestWatcherAtomicCallbacksDiscardIncompleteLoad() {
+func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad() {
 	re := suite.Require()
-	const prefix = "TestWatcherAtomicCallbacksDiscardIncompleteLoad/"
+	const prefix = "TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad/"
 	for _, suffix := range []string{"a", "b", "c"} {
 		suite.put(re, prefix+suffix, "value")
 	}
@@ -947,7 +947,7 @@ func (suite *loopWatcherTestSuite) TestWatcherAtomicCallbacksDiscardIncompleteLo
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
-	watcher.SetAtomicCallbacks()
+	watcher.SetAtomicLoadCallbacks()
 	watcher.SetLoadBatchSize(1)
 
 	_, err := watcher.load(ctx)
@@ -1600,7 +1600,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
-	watcher.SetAtomicCallbacks()
+	watcher.SetAtomicLoadCallbacks()
 	watcher.SetReconcileDeletedKeys()
 
 	done := make(chan error, 1)
