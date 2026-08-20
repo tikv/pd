@@ -215,6 +215,22 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			if numExistMembers != 0 && numExistMembers == len(group.Members) && numExistMembers == m.GetNodesCount() {
 				continue
 			}
+			// The default keyspace group is served by all TSO nodes by default,
+			// its primary is elected independently without relying on the member list.
+			// Checking its primary would cause a chicken-and-egg problem:
+			// the primary exists before members are allocated, but the allocation
+			// requires the primary to be absent.
+			if group.ID != constant.DefaultKeyspaceGroupID {
+				_, err := m.GetKeyspaceGroupPrimaryByID(group.ID)
+				if err == nil {
+					continue
+				}
+				if !errors.ErrorEqual(err, errs.ErrKeyspaceGroupPrimaryNotFound) {
+					log.Warn("failed to get primary for keyspace group",
+						zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
+					continue
+				}
+			}
 			if numExistMembers < mcs.DefaultKeyspaceGroupReplicaCount {
 				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, mcs.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {

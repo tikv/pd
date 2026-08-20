@@ -104,6 +104,11 @@ type server interface {
 	diagnosticspb.DiagnosticsServer
 	StartTimestamp() int64
 	Name() string
+	// GetLeaderLease returns the configured leader lease in seconds. It is
+	// reused as the service registry lease TTL. Services without a lease
+	// config should return 0, in which case discovery.DefaultLeaseInSeconds
+	// is used.
+	GetLeaderLease() int64
 }
 
 // InitClient initializes the etcd and http clients.
@@ -295,9 +300,12 @@ func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *d
 	if err != nil {
 		return nil, nil, err
 	}
+	// Reuse the configured leader lease as the registry lease TTL, but never
+	// go below discovery.DefaultLeaseInSeconds to keep the registry entry
+	// stable.
+	lease := max(s.GetLeaderLease(), discovery.DefaultLeaseInSeconds)
 	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(),
-		serviceName, s.GetAdvertiseListenAddr(), serializedEntry,
-		discovery.DefaultLeaseInSeconds)
+		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, lease)
 	if err := serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", serviceName), errs.ZapError(err))
 		return nil, nil, err
