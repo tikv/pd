@@ -47,9 +47,9 @@ func (suite *metaServiceGroupCLITestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	tc, err := pdTests.NewTestCluster(suite.ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.MetaServiceGroups = map[string]string{
-			"group-0": "addr0.example.com",
-			"group-1": "addr1.example.com",
+		conf.Keyspace.MetaServiceGroups = map[string]config.MetaServiceGroupConfig{
+			"group-0": {Addresses: "addr0.example.com"},
+			"group-1": {Addresses: "addr1.example.com"},
 		}
 		conf.Keyspace.WaitRegionSplit = false
 	})
