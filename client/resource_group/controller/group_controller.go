@@ -741,12 +741,7 @@ retryLoop:
 func (gc *groupCostController) onRequestWaitImpl(
 	ctx context.Context, info RequestInfo,
 ) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
-	return gc.onRequestWaitWithDetailImpl(ctx, info, nil)
-}
-
-func (gc *groupCostController) onRequestWaitWithDetailImpl(
-	ctx context.Context, info RequestInfo, detail *RUCalculation,
-) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
+	collector, detail := newRUCalculationDetail(info)
 	delta = &rmpb.Consumption{}
 	calculateBeforeKVRequest(gc.calculators, delta, detail, info)
 	reportedDelta := reportedRequestConsumption(gc.calculators, info, delta)
@@ -793,6 +788,9 @@ func (gc *groupCostController) onRequestWaitWithDetailImpl(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 	gc.metrics.addRequestSourceRUDelta(requestSource(info), reportedDelta)
+	if collector != nil {
+		collector.CollectRUCalculation(*detail)
+	}
 
 	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
@@ -800,12 +798,7 @@ func (gc *groupCostController) onRequestWaitWithDetailImpl(
 func (gc *groupCostController) onResponseImpl(
 	req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
-	return gc.onResponseWithDetailImpl(req, resp, nil)
-}
-
-func (gc *groupCostController) onResponseWithDetailImpl(
-	req RequestInfo, resp ResponseInfo, detail *RUCalculation,
-) (*rmpb.Consumption, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
 	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
@@ -834,6 +827,9 @@ func (gc *groupCostController) onResponseWithDetailImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	if collector != nil {
+		collector.CollectRUCalculation(*detail)
+	}
 
 	return delta, nil
 }
@@ -841,12 +837,7 @@ func (gc *groupCostController) onResponseWithDetailImpl(
 func (gc *groupCostController) onResponseWaitImpl(
 	ctx context.Context, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, time.Duration, error) {
-	return gc.onResponseWaitWithDetailImpl(ctx, req, resp, nil)
-}
-
-func (gc *groupCostController) onResponseWaitWithDetailImpl(
-	ctx context.Context, req RequestInfo, resp ResponseInfo, detail *RUCalculation,
-) (*rmpb.Consumption, time.Duration, error) {
+	collector, detail := newRUCalculationDetail(req)
 	delta := &rmpb.Consumption{}
 	calculateAfterKVRequest(gc.calculators, delta, detail, req, resp)
 	reportedDelta := reportedResponseConsumption(gc.calculators, req, delta)
@@ -898,8 +889,19 @@ func (gc *groupCostController) onResponseWaitWithDetailImpl(
 	gc.mu.Unlock()
 
 	gc.metrics.addRequestSourceRUDelta(requestSource(req), reportedDelta)
+	if collector != nil {
+		collector.CollectRUCalculation(*detail)
+	}
 
 	return delta, waitDuration, nil
+}
+
+func newRUCalculationDetail(req RequestInfo) (RUCalculationCollector, *RUCalculation) {
+	collector, ok := req.(RUCalculationCollector)
+	if !ok {
+		return nil, nil
+	}
+	return collector, &RUCalculation{}
 }
 
 func (gc *groupCostController) addRUConsumption(consumption *rmpb.Consumption) {

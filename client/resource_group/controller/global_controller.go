@@ -85,27 +85,6 @@ type ResourceGroupKVInterceptor interface {
 	GetRUVersion() RUVersion
 }
 
-// ResourceGroupKVInterceptorWithRUDetails optionally exposes the inputs and
-// factors used by the RU v1 calculation.
-type ResourceGroupKVInterceptorWithRUDetails interface {
-	ResourceGroupKVInterceptor
-	// OnRequestWaitWithRUDetails is OnRequestWait with its RU v1 formula inputs.
-	OnRequestWaitWithRUDetails(ctx context.Context, resourceGroupName string, info RequestInfo) (
-		delta, penalty *rmpb.Consumption, detail RUCalculation,
-		waitDuration time.Duration, priority uint32, err error,
-	)
-	// OnResponseWithRUDetails is OnResponse with its RU v1 formula inputs.
-	OnResponseWithRUDetails(resourceGroupName string, req RequestInfo, resp ResponseInfo) (
-		delta *rmpb.Consumption, detail RUCalculation, err error,
-	)
-	// OnResponseWaitWithRUDetails is OnResponseWait with its RU v1 formula inputs.
-	OnResponseWaitWithRUDetails(ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo) (
-		delta *rmpb.Consumption, detail RUCalculation, waitDuration time.Duration, err error,
-	)
-}
-
-var _ ResourceGroupKVInterceptorWithRUDetails = (*ResourceGroupsController)(nil)
-
 // ResourceGroupProvider provides some api to interact with resource manager server.
 type ResourceGroupProvider interface {
 	GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error)
@@ -859,22 +838,6 @@ func (c *ResourceGroupsController) OnRequestWait(
 	return gc.onRequestWaitImpl(ctx, info)
 }
 
-// OnRequestWaitWithRUDetails is OnRequestWait with the calculation delta
-// produced from the group controller's effective factor snapshot.
-func (c *ResourceGroupsController) OnRequestWaitWithRUDetails(
-	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (delta, penalty *rmpb.Consumption, detail RUCalculation, waitDuration time.Duration, priority uint32, err error) {
-	gc, err := c.tryGetResourceGroupController(ctx, resourceGroupName, true)
-	if err != nil {
-		return nil, nil, RUCalculation{}, 0, 0, err
-	}
-	delta, penalty, waitDuration, priority, err = gc.onRequestWaitWithDetailImpl(ctx, info, &detail)
-	if err != nil {
-		return nil, nil, RUCalculation{}, waitDuration, 0, err
-	}
-	return delta, penalty, detail, waitDuration, priority, nil
-}
-
 // OnResponse is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponse(
 	resourceGroupName string, req RequestInfo, resp ResponseInfo,
@@ -887,24 +850,6 @@ func (c *ResourceGroupsController) OnResponse(
 	return gc.onResponseImpl(req, resp)
 }
 
-// OnResponseWithRUDetails is OnResponse with the calculation delta produced
-// from the group controller's effective factor snapshot.
-func (c *ResourceGroupsController) OnResponseWithRUDetails(
-	resourceGroupName string, req RequestInfo, resp ResponseInfo,
-) (*rmpb.Consumption, RUCalculation, error) {
-	gc, ok := c.loadGroupController(resourceGroupName)
-	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
-		return &rmpb.Consumption{}, RUCalculation{}, nil
-	}
-	var detail RUCalculation
-	delta, err := gc.onResponseWithDetailImpl(req, resp, &detail)
-	if err != nil {
-		return nil, RUCalculation{}, err
-	}
-	return delta, detail, nil
-}
-
 // OnResponseWait is used to consume tokens after receiving response
 func (c *ResourceGroupsController) OnResponseWait(
 	ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo,
@@ -915,24 +860,6 @@ func (c *ResourceGroupsController) OnResponseWait(
 		return &rmpb.Consumption{}, time.Duration(0), nil
 	}
 	return gc.onResponseWaitImpl(ctx, req, resp)
-}
-
-// OnResponseWaitWithRUDetails is OnResponseWait with the calculation delta
-// produced from the group controller's effective factor snapshot.
-func (c *ResourceGroupsController) OnResponseWaitWithRUDetails(
-	ctx context.Context, resourceGroupName string, req RequestInfo, resp ResponseInfo,
-) (*rmpb.Consumption, RUCalculation, time.Duration, error) {
-	gc, ok := c.loadGroupController(resourceGroupName)
-	if !ok {
-		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
-		return &rmpb.Consumption{}, RUCalculation{}, 0, nil
-	}
-	var detail RUCalculation
-	delta, waitDuration, err := gc.onResponseWaitWithDetailImpl(ctx, req, resp, &detail)
-	if err != nil {
-		return nil, RUCalculation{}, waitDuration, err
-	}
-	return delta, detail, waitDuration, nil
 }
 
 // IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.

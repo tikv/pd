@@ -161,6 +161,12 @@ type RUCalculation struct {
 	Inputs  RUCalculationInputs
 }
 
+// RUCalculationCollector is optionally implemented by requests that need the
+// RU v1 calculation inputs used during request admission and settlement.
+type RUCalculationCollector interface {
+	CollectRUCalculation(RUCalculation)
+}
+
 // Add adds another calculation delta with the same factors to c.
 func (c *RUCalculation) Add(other RUCalculation) {
 	if c.Factors == (RUFactorSnapshot{}) {
