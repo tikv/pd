@@ -917,6 +917,45 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 	re.Equal("old", values[prefix+"c"])
 }
 
+func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad() {
+	re := suite.Require()
+	const prefix = "TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad/"
+	for _, suffix := range []string{"a", "b", "c"} {
+		suite.put(re, prefix+suffix, "value")
+	}
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	staged := make(map[string]string)
+	published := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			staged[string(kv.Key)] = string(kv.Value)
+			cancel()
+			return nil
+		},
+		func(*mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error {
+			published = true
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicLoadCallbacks()
+	watcher.SetLoadBatchSize(1)
+
+	_, err := watcher.load(ctx)
+	re.NoError(err)
+	re.NotEmpty(staged)
+	re.False(published)
+}
+
 func (suite *loopWatcherTestSuite) TestWatcherLoadKeepsDefaultPaginationAcrossCompaction() {
 	re := suite.Require()
 	const prefix = "TestWatcherLoadKeepsDefaultPaginationAcrossCompaction/"
@@ -1109,7 +1148,8 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	}()
 	cache := struct {
 		syncutil.RWMutex
-		data map[string]string
+		data           map[string]string
+		deleteRevision int64
 	}{data: make(map[string]string)}
 	checkCache := func(expected map[string]string) {
 		testutil.Eventually(re, func() bool {
@@ -1136,6 +1176,7 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 			cache.Lock()
 			defer cache.Unlock()
 			delete(cache.data, string(kv.Key))
+			cache.deleteRevision = kv.ModRevision
 			return nil
 		},
 		func([]*clientv3.Event) error { return nil },
@@ -1164,6 +1205,9 @@ func (suite *loopWatcherTestSuite) TestWatcherReloadsAndReconcilesAfterCompactio
 	re.NoError(err)
 	watcher.updateClientCh <- replacementClient
 	checkCache(map[string]string{keepKey: "after-compaction"})
+	cache.RLock()
+	re.Positive(cache.deleteRevision)
+	cache.RUnlock()
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherSkipsCompactionReloadByDefault() {

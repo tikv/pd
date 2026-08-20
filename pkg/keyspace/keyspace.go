@@ -1354,8 +1354,12 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		)
 	}()
 	for moreToPatrol {
-		var defaultKeyspaceGroup *endpoint.KeyspaceGroup
+		var (
+			defaultKeyspaceGroup *endpoint.KeyspaceGroup
+			storageTxn           kv.Txn
+		)
 		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			storageTxn = txn
 			var err error
 			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
 			if err != nil {
@@ -1449,7 +1453,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 			return err
 		}
 		manager.kgm.Lock()
-		manager.kgm.groups[endpoint.StringUserKind(defaultKeyspaceGroup.UserKind)].Put(defaultKeyspaceGroup)
+		manager.kgm.putKeyspaceGroupToCacheLocked(defaultKeyspaceGroup, kv.TxnRevision(storageTxn))
 		manager.kgm.Unlock()
 		// If all keyspaces in the current batch are assigned, update the next start ID.
 		manager.nextPatrolStartID = nextStartID

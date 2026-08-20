@@ -15,10 +15,10 @@
 package keyspace
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	goerrors "errors"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -81,6 +81,9 @@ type GroupManager struct {
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
+	// groupRevisions fences delayed watch events and stale reload snapshots.
+	// Deleted groups retain a tombstone revision in this map.
+	groupRevisions map[uint32]int64
 
 	// store is the storage for keyspace group related information.
 	store endpoint.KeyspaceGroupStorage
@@ -118,6 +121,7 @@ func NewKeyspaceGroupManager(
 		cancel:             cancel,
 		store:              store,
 		groups:             newKeyspaceGroupCache(),
+		groupRevisions:     make(map[uint32]int64),
 		client:             client,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
@@ -147,7 +151,7 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 
 	// Ignore the error if default keyspace group already exists in the storage (e.g. PD restart/recover).
 	m.Lock()
-	err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
+	_, err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{defaultKeyspaceGroup}, false)
 	m.Unlock()
 	if err != nil && err != errs.ErrKeyspaceGroupExists {
 		return err
@@ -181,6 +185,7 @@ func (m *GroupManager) reloadKeyspaceGroupCache() error {
 	}
 	m.Lock()
 	m.groups = cache
+	m.groupRevisions = make(map[uint32]int64)
 	m.Unlock()
 	return nil
 }
@@ -201,6 +206,7 @@ func (m *GroupManager) beginKeyspaceGroupWatchTerm(leaderCtx context.Context) (c
 	term := m.groupWatcherTerm
 	m.groupWatcherCancel = termCancel
 	m.groups = newKeyspaceGroupCache()
+	m.groupRevisions = make(map[uint32]int64)
 	m.Unlock()
 	return termCtx, term
 }
@@ -514,26 +520,48 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 
 func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint64) error {
 	var (
-		loading             bool
-		initialLoadComplete bool
+		updates  map[uint32]watchedKeyspaceGroupUpdate
+		batchErr error
 	)
 	compiledGroupIDPattern := keypath.GetCompiledKeyspaceGroupIDRegexp()
 	putFn := func(kv *mvccpb.KeyValue) error {
-		// Only post-initial full reloads preserve Keyspaces that local writes may
-		// have advanced past the reload's pinned snapshot revision. Initial loads
-		// and watch events own their full values, including Keyspaces.
-		return m.applyWatchedKeyspaceGroupValue(term, kv.Value, loading && initialLoadComplete)
+		groupID, err := parseKeyspaceGroupID(compiledGroupIDPattern, kv.Key)
+		if err != nil {
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
+		}
+		if m.shouldSkipWatchedKeyspaceGroupUpdate(term, groupID, kv.ModRevision) {
+			return nil
+		}
+		group := &endpoint.KeyspaceGroup{}
+		if err := json.Unmarshal(kv.Value, group); err != nil {
+			err = errs.ErrJSONUnmarshal.Wrap(err)
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
+		}
+		if group.ID != groupID {
+			err := errors.Errorf("keyspace group ID %d does not match storage path ID %d", group.ID, groupID)
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
+		}
+		updates[groupID] = watchedKeyspaceGroupUpdate{group: group, revision: kv.ModRevision}
+		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		match := compiledGroupIDPattern.FindSubmatch(kv.Key)
-		if match == nil {
-			return errors.Errorf("invalid keyspace group id path: %s", kv.Key)
-		}
-		id, err := strconv.ParseUint(string(match[1]), 10, 32)
+		groupID, err := parseKeyspaceGroupID(compiledGroupIDPattern, kv.Key)
 		if err != nil {
-			return errors.Wrap(err, "failed to parse keyspace group ID")
+			if batchErr == nil {
+				batchErr = err
+			}
+			return err
 		}
-		m.removeWatchedKeyspaceGroup(term, uint32(id))
+		updates[groupID] = watchedKeyspaceGroupUpdate{revision: kv.ModRevision}
 		return nil
 	}
 
@@ -543,26 +571,24 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 		m.client,
 		"keyspace-group-watcher",
 		keypath.KeyspaceGroupIDPrefix(),
-		func(events []*clientv3.Event) error {
-			if len(events) == 0 {
-				loading = true
-			}
+		func([]*clientv3.Event) error {
+			updates = make(map[uint32]watchedKeyspaceGroupUpdate)
+			batchErr = nil
 			return nil
 		},
 		putFn,
 		deleteFn,
-		func(events []*clientv3.Event) error {
-			if len(events) == 0 {
-				loading = false
+		func([]*clientv3.Event) error {
+			if batchErr != nil {
+				return batchErr
 			}
+			m.applyWatchedKeyspaceGroupUpdates(term, updates)
 			return nil
 		},
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
-	watcher.SetInitialLoadSuccessFn(func() {
-		initialLoadComplete = true
-	})
+	watcher.SetAtomicLoadCallbacks()
 	// The keyspace group count is bounded, so retaining watched keys lets a
 	// compaction reload remove groups that disappeared while events were missed.
 	watcher.SetReconcileDeletedKeys()
@@ -570,118 +596,69 @@ func (m *GroupManager) initKeyspaceGroupsWatcher(ctx context.Context, term uint6
 	return watcher.WaitLoad()
 }
 
-func (m *GroupManager) applyWatchedKeyspaceGroupValue(term uint64, value []byte, preserveKeyspaces bool) error {
-	if preserveKeyspaces {
-		reconcileState, err := decodeKeyspaceGroupReconcileState(value)
-		if err != nil {
-			return err
-		}
-		if m.updateWatchedKeyspaceGroupReconcileState(term, reconcileState) {
-			return nil
-		}
-	}
-	group := &endpoint.KeyspaceGroup{}
-	if err := json.Unmarshal(value, group); err != nil {
-		return errs.ErrJSONUnmarshal.Wrap(err)
-	}
-	m.putWatchedKeyspaceGroup(term, group)
-	return nil
+type watchedKeyspaceGroupUpdate struct {
+	group    *endpoint.KeyspaceGroup
+	revision int64
 }
 
-// decodeKeyspaceGroupReconcileState stops after Members. Persisted groups keep
-// every reconciliation field before Keyspaces, so post-initial full reloads do
-// not scan or allocate the potentially million-entry Keyspaces array.
-func decodeKeyspaceGroupReconcileState(value []byte) (*endpoint.KeyspaceGroup, error) {
-	decoder := json.NewDecoder(bytes.NewReader(value))
-	if _, err := decoder.Token(); err != nil {
-		return nil, err
+func parseKeyspaceGroupID(compiledPattern *regexp.Regexp, key []byte) (uint32, error) {
+	match := compiledPattern.FindSubmatch(key)
+	if match == nil {
+		return 0, errors.Errorf("invalid keyspace group id path: %s", key)
 	}
-	var (
-		group       endpoint.KeyspaceGroup
-		gotID       bool
-		gotUserKind bool
-		gotMembers  bool
-	)
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		field, ok := token.(string)
-		if !ok {
-			return nil, errors.New("invalid keyspace group field")
-		}
-		switch field {
-		case "id":
-			err = decoder.Decode(&group.ID)
-			gotID = err == nil
-		case "user-kind":
-			err = decoder.Decode(&group.UserKind)
-			gotUserKind = err == nil
-		case "split-state":
-			err = decoder.Decode(&group.SplitState)
-		case "merge-state":
-			err = decoder.Decode(&group.MergeState)
-		case "members":
-			err = decoder.Decode(&group.Members)
-			gotMembers = err == nil
-		default:
-			var ignored json.RawMessage
-			err = decoder.Decode(&ignored)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if gotID && gotUserKind && gotMembers {
-			return &group, nil
-		}
+	id, err := strconv.ParseUint(string(match[1]), 10, 32)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to parse keyspace group ID")
 	}
-	return nil, errors.New("keyspace group reconciliation state is incomplete")
+	return uint32(id), nil
 }
 
-func (m *GroupManager) updateWatchedKeyspaceGroupReconcileState(term uint64, state *endpoint.KeyspaceGroup) bool {
+func (m *GroupManager) shouldSkipWatchedKeyspaceGroupUpdate(term uint64, groupID uint32, revision int64) bool {
+	m.RLock()
+	defer m.RUnlock()
+	return term != m.groupWatcherTerm || revision <= m.groupRevisions[groupID]
+}
+
+func (m *GroupManager) applyWatchedKeyspaceGroupUpdates(term uint64, updates map[uint32]watchedKeyspaceGroupUpdate) {
 	m.Lock()
 	defer m.Unlock()
 	if term != m.groupWatcherTerm {
-		return true
+		return
 	}
-	for _, groups := range m.groups {
-		group := groups.Get(state.ID)
-		if group == nil {
-			continue
+	for groupID, update := range updates {
+		if update.group == nil {
+			m.removeKeyspaceGroupFromCacheLocked(groupID, update.revision)
+		} else {
+			m.putKeyspaceGroupToCacheLocked(update.group, update.revision)
 		}
-		updated := *group
-		updated.UserKind = state.UserKind
-		updated.SplitState = state.SplitState
-		updated.MergeState = state.MergeState
-		updated.Members = slices.Clone(state.Members)
-		groups.Remove(state.ID)
-		m.groups[endpoint.StringUserKind(state.UserKind)].Put(&updated)
-		return true
+		failpoint.InjectCall("afterApplyWatchedKeyspaceGroupUpdate")
 	}
-	return false
 }
 
-func (m *GroupManager) putWatchedKeyspaceGroup(term uint64, group *endpoint.KeyspaceGroup) {
-	m.Lock()
-	defer m.Unlock()
-	if term != m.groupWatcherTerm {
+func (m *GroupManager) putKeyspaceGroupToCacheLocked(group *endpoint.KeyspaceGroup, revision int64) {
+	currentRevision := m.groupRevisions[group.ID]
+	if currentRevision != 0 && revision <= currentRevision {
 		return
 	}
 	for _, groups := range m.groups {
 		groups.Remove(group.ID)
 	}
 	m.groups[endpoint.StringUserKind(group.UserKind)].Put(group)
+	if revision > currentRevision {
+		m.groupRevisions[group.ID] = revision
+	}
 }
 
-func (m *GroupManager) removeWatchedKeyspaceGroup(term uint64, groupID uint32) {
-	m.Lock()
-	defer m.Unlock()
-	if term != m.groupWatcherTerm {
+func (m *GroupManager) removeKeyspaceGroupFromCacheLocked(groupID uint32, revision int64) {
+	currentRevision := m.groupRevisions[groupID]
+	if currentRevision != 0 && revision <= currentRevision {
 		return
 	}
 	for _, groups := range m.groups {
 		groups.Remove(groupID)
+	}
+	if revision > currentRevision {
+		m.groupRevisions[groupID] = revision
 	}
 }
 
@@ -689,13 +666,13 @@ func (m *GroupManager) removeWatchedKeyspaceGroup(term uint64, groupID uint32) {
 func (m *GroupManager) CreateKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup) error {
 	m.Lock()
 	defer m.Unlock()
-	if err := m.saveKeyspaceGroups(keyspaceGroups, false); err != nil {
+	revision, err := m.saveKeyspaceGroups(keyspaceGroups, false)
+	if err != nil {
 		return err
 	}
 
 	for _, keyspaceGroup := range keyspaceGroups {
-		userKind := endpoint.StringUserKind(keyspaceGroup.UserKind)
-		m.groups[userKind].Put(keyspaceGroup)
+		m.putKeyspaceGroupToCacheLocked(keyspaceGroup, revision)
 	}
 
 	return nil
@@ -736,14 +713,19 @@ func (m *GroupManager) GetKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup,
 
 // DeleteKeyspaceGroupByID deletes the keyspace group by ID.
 func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGroup, error) {
+	if id == constant.DefaultKeyspaceGroupID {
+		return nil, errs.ErrModifyDefaultKeyspaceGroup
+	}
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg         *endpoint.KeyspaceGroup
+		storageTxn kv.Txn
+		err        error
 	)
 
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
 			return err
@@ -758,19 +740,23 @@ func (m *GroupManager) DeleteKeyspaceGroupByID(id uint32) (*endpoint.KeyspaceGro
 	}); err != nil {
 		return nil, err
 	}
+	if kg == nil {
+		return nil, nil
+	}
 
-	userKind := endpoint.StringUserKind(kg.UserKind)
 	// TODO: move out the keyspace to another group
 	// we don't need the keyspace group as the return value
-	m.groups[userKind].Remove(id)
+	m.removeKeyspaceGroupFromCacheLocked(id, kv.TxnRevision(storageTxn))
 
 	return kg, nil
 }
 
 // saveKeyspaceGroups will try to save the given keyspace groups into the storage.
 // If any keyspace group already exists and `overwrite` is false, it will return ErrKeyspaceGroupExists.
-func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) error {
+func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGroup, overwrite bool) (int64, error) {
+	var storageTxn kv.Txn
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		for _, keyspaceGroup := range keyspaceGroups {
 			// Check if keyspace group has already existed.
 			oldKG, err := m.store.LoadKeyspaceGroup(txn, keyspaceGroup.ID)
@@ -779,6 +765,9 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 			}
 			if oldKG != nil && !overwrite {
 				return errs.ErrKeyspaceGroupExists
+			}
+			if oldKG == nil && overwrite {
+				return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(keyspaceGroup.ID)
 			}
 			if oldKG.IsSplitting() && overwrite {
 				return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(keyspaceGroup.ID)
@@ -799,7 +788,7 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 		}
 		return nil
 	})
-	return err
+	return kv.TxnRevision(storageTxn), err
 }
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
@@ -861,11 +850,13 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	defer m.Unlock()
 
 	var (
-		kg  *endpoint.KeyspaceGroup
-		err error
+		kg         *endpoint.KeyspaceGroup
+		storageTxn kv.Txn
+		err        error
 	)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		// Load the keyspace group
 		kg, err = m.store.LoadKeyspaceGroup(txn, groupID)
 		if err != nil {
@@ -920,8 +911,7 @@ func (m *GroupManager) RemoveKeyspacesFromGroup(groupID uint32, km *Manager, key
 	}
 
 	// Update the cache
-	userKind := endpoint.StringUserKind(kg.UserKind)
-	m.groups[userKind].Put(kg)
+	m.putKeyspaceGroupToCacheLocked(kg, kv.TxnRevision(storageTxn))
 
 	return kg, nil
 }
@@ -978,10 +968,11 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 	}
 
 	if changed {
-		if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true); err != nil {
+		revision, err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{kg}, true)
+		if err != nil {
 			return err
 		}
-		m.groups[userKind].Put(kg)
+		m.putKeyspaceGroupToCacheLocked(kg, revision)
 	}
 	return nil
 }
@@ -1033,7 +1024,8 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 		updateOld = true
 	}
 
-	if err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true); err != nil {
+	revision, err := m.saveKeyspaceGroups([]*endpoint.KeyspaceGroup{oldKG, newKG}, true)
+	if err != nil {
 		if updateOld {
 			oldKG.Keyspaces = append(oldKG.Keyspaces, keyspaceID)
 			slices.Sort(oldKG.Keyspaces)
@@ -1045,11 +1037,11 @@ func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUse
 	}
 
 	if updateOld {
-		m.groups[oldUserKind].Put(oldKG)
+		m.putKeyspaceGroupToCacheLocked(oldKG, revision)
 	}
 
 	if updateNew {
-		m.groups[newUserKind].Put(newKG)
+		m.putKeyspaceGroupToCacheLocked(newKG, revision)
 	}
 
 	return nil
@@ -1061,10 +1053,15 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 	splitSourceID, splitTargetID uint32,
 	keyspaces []uint32, keyspaceIDRange ...uint32,
 ) error {
-	var splitSourceKg, splitTargetKg *endpoint.KeyspaceGroup
+	var (
+		splitSourceKg *endpoint.KeyspaceGroup
+		splitTargetKg *endpoint.KeyspaceGroup
+		storageTxn    kv.Txn
+	)
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		storageTxn = txn
 		// Load the old keyspace group first.
 		splitSourceKg, err = m.store.LoadKeyspaceGroup(txn, splitSourceID)
 		if err != nil {
@@ -1134,8 +1131,9 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 		return err
 	}
 	// Update the keyspace group cache.
-	m.groups[endpoint.StringUserKind(splitSourceKg.UserKind)].Put(splitSourceKg)
-	m.groups[endpoint.StringUserKind(splitTargetKg.UserKind)].Put(splitTargetKg)
+	revision := kv.TxnRevision(storageTxn)
+	m.putKeyspaceGroupToCacheLocked(splitSourceKg, revision)
+	m.putKeyspaceGroupToCacheLocked(splitTargetKg, revision)
 	return nil
 }
 
@@ -1220,13 +1218,18 @@ func buildSplitKeyspaces(
 
 // FinishSplitKeyspaceByID finishes the split keyspace group by the split target ID.
 func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
-	var splitTargetKg, splitSourceKg *endpoint.KeyspaceGroup
+	var (
+		splitTargetKg *endpoint.KeyspaceGroup
+		splitSourceKg *endpoint.KeyspaceGroup
+		storageTxn    kv.Txn
+	)
 	m.Lock()
 	defer m.Unlock()
 
 	failpoint.Inject("pauseFinishSplitBeforeTxn", nil)
 
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		storageTxn = txn
 		// Load the split target keyspace group first.
 		splitTargetKg, err = m.store.LoadKeyspaceGroup(txn, splitTargetID)
 		if err != nil {
@@ -1261,8 +1264,9 @@ func (m *GroupManager) FinishSplitKeyspaceByID(splitTargetID uint32) error {
 		return err
 	}
 	// Update the keyspace group cache.
-	m.groups[endpoint.StringUserKind(splitTargetKg.UserKind)].Put(splitTargetKg)
-	m.groups[endpoint.StringUserKind(splitSourceKg.UserKind)].Put(splitSourceKg)
+	revision := kv.TxnRevision(storageTxn)
+	m.putKeyspaceGroupToCacheLocked(splitTargetKg, revision)
+	m.putKeyspaceGroupToCacheLocked(splitSourceKg, revision)
 	log.Info("finish split keyspace group", zap.Uint32("split-source-id", splitSourceKg.ID), zap.Uint32("split-target-id", splitTargetID))
 	return nil
 }
@@ -1293,9 +1297,14 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithContext(
 	ticker := time.NewTicker(allocNodesInterval)
 	defer ticker.Stop()
 
-	var kg *endpoint.KeyspaceGroup
-	var nodes []endpoint.KeyspaceGroupMember
+	var (
+		kg                 *endpoint.KeyspaceGroup
+		nodes              []endpoint.KeyspaceGroupMember
+		storageTxn         kv.Txn
+		removeMissingGroup bool
+	)
 	err := m.store.RunInTxn(ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		var err error
 		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
@@ -1303,9 +1312,7 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithContext(
 		}
 		if kg == nil {
 			if existMembers == nil {
-				for _, groups := range m.groups {
-					groups.Remove(id)
-				}
+				removeMissingGroup = true
 			}
 			return errs.ErrKeyspaceGroupNotExists.FastGenByArgs(id)
 		}
@@ -1377,9 +1384,12 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithContext(
 		return m.store.SaveKeyspaceGroup(txn, kg)
 	})
 	if err != nil {
+		if removeMissingGroup {
+			m.removeKeyspaceGroupFromCacheLocked(id, kv.TxnRevision(storageTxn))
+		}
 		return nil, err
 	}
-	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	m.putKeyspaceGroupToCacheLocked(kg, kv.TxnRevision(storageTxn))
 	if nodes == nil {
 		return nil, nil
 	}
@@ -1393,8 +1403,12 @@ func (m *GroupManager) allocNodesForKeyspaceGroupWithContext(
 func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error {
 	m.Lock()
 	defer m.Unlock()
-	var kg *endpoint.KeyspaceGroup
+	var (
+		kg         *endpoint.KeyspaceGroup
+		storageTxn kv.Txn
+	)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		var err error
 		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
@@ -1422,7 +1436,7 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 	if err != nil {
 		return err
 	}
-	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	m.putKeyspaceGroupToCacheLocked(kg, kv.TxnRevision(storageTxn))
 	return nil
 }
 
@@ -1430,8 +1444,12 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, priority int) error {
 	m.Lock()
 	defer m.Unlock()
-	var kg *endpoint.KeyspaceGroup
+	var (
+		kg         *endpoint.KeyspaceGroup
+		storageTxn kv.Txn
+	)
 	err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) error {
+		storageTxn = txn
 		var err error
 		kg, err = m.store.LoadKeyspaceGroup(txn, id)
 		if err != nil {
@@ -1464,7 +1482,7 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 	if err != nil {
 		return err
 	}
-	m.groups[endpoint.StringUserKind(kg.UserKind)].Put(kg)
+	m.putKeyspaceGroupToCacheLocked(kg, kv.TxnRevision(storageTxn))
 	log.Info("set priority for keyspace group",
 		zap.Uint32("keyspace-group-id", id),
 		zap.String("node", node),
@@ -1502,10 +1520,12 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	var (
 		groups        = make(map[uint32]*endpoint.KeyspaceGroup, mergeListNum+1)
 		mergeTargetKg *endpoint.KeyspaceGroup
+		storageTxn    kv.Txn
 	)
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		storageTxn = txn
 		// Load and check all keyspace groups first.
 		for _, kgID := range append(mergeList, mergeTargetID) {
 			kg, err := m.store.LoadKeyspaceGroup(txn, kgID)
@@ -1564,10 +1584,10 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 		return err
 	}
 	// Update the keyspace group cache.
-	m.groups[endpoint.StringUserKind(mergeTargetKg.UserKind)].Put(mergeTargetKg)
+	revision := kv.TxnRevision(storageTxn)
+	m.putKeyspaceGroupToCacheLocked(mergeTargetKg, revision)
 	for _, kgID := range mergeList {
-		kg := groups[kgID]
-		m.groups[endpoint.StringUserKind(kg.UserKind)].Remove(kgID)
+		m.removeKeyspaceGroupFromCacheLocked(kgID, revision)
 	}
 	return nil
 }
@@ -1577,10 +1597,12 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 	var (
 		mergeTargetKg *endpoint.KeyspaceGroup
 		mergeList     []uint32
+		storageTxn    kv.Txn
 	)
 	m.Lock()
 	defer m.Unlock()
 	if err := m.store.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		storageTxn = txn
 		// Load the merge target keyspace group first.
 		mergeTargetKg, err = m.store.LoadKeyspaceGroup(txn, mergeTargetID)
 		if err != nil {
@@ -1610,7 +1632,7 @@ func (m *GroupManager) FinishMergeKeyspaceByID(mergeTargetID uint32) error {
 		return err
 	}
 	// Update the keyspace group cache.
-	m.groups[endpoint.StringUserKind(mergeTargetKg.UserKind)].Put(mergeTargetKg)
+	m.putKeyspaceGroupToCacheLocked(mergeTargetKg, kv.TxnRevision(storageTxn))
 	log.Info("finish merge keyspace group",
 		zap.Uint32("merge-target-id", mergeTargetKg.ID),
 		zap.Reflect("merge-list", mergeList))

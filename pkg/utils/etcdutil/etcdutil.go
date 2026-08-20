@@ -414,6 +414,9 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// consistentLoad pins paginated full loads to one etcd revision.
 	consistentLoad bool
+	// atomicLoadCallbacks keeps a failed or incomplete full load private by
+	// skipping postEventsFn. The consumer must stage changes until postEventsFn.
+	atomicLoadCallbacks bool
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
@@ -757,6 +760,10 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
+		if consistentLoad && lw.atomicLoadCallbacks &&
+			(preErr != nil || callbackErr != nil || !loadCompleted) {
+			return
+		}
 		if postErr := lw.postEventsFn([]*clientv3.Event{}); postErr != nil {
 			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(postErr))
@@ -852,7 +859,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 			if !resp.More {
 				if callbackErr == nil {
-					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys)
+					reconciledDeletedKeys, callbackErr = lw.reconcileLoadedKeys(snapshotKeys, snapshotRevision)
 				}
 				loadCompleted = true
 				return snapshotRevision + 1, callbackErr
@@ -890,7 +897,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 }
 
-func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]string, error) {
+func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}, snapshotRevision int64) ([]string, error) {
 	if !lw.reconcileDeletedKeys {
 		return nil, nil
 	}
@@ -900,7 +907,7 @@ func (lw *LoopWatcher) reconcileLoadedKeys(snapshotKeys map[string]struct{}) ([]
 		if _, ok := snapshotKeys[key]; ok {
 			continue
 		}
-		kv := &mvccpb.KeyValue{Key: []byte(key)}
+		kv := &mvccpb.KeyValue{Key: []byte(key), ModRevision: snapshotRevision}
 		if err := lw.deleteFn(kv); err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -985,6 +992,14 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 // It must be called before StartWatchLoop.
 func (lw *LoopWatcher) SetConsistentLoad() {
 	lw.consistentLoad = true
+}
+
+// SetAtomicLoadCallbacks prevents postEventsFn from publishing an incomplete
+// consistent load. The consumer's put and delete callbacks must only stage
+// changes, and postEventsFn must publish them. It must be called before
+// StartWatchLoop together with SetConsistentLoad.
+func (lw *LoopWatcher) SetAtomicLoadCallbacks() {
+	lw.atomicLoadCallbacks = true
 }
 
 // SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.
