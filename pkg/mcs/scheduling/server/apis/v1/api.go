@@ -357,12 +357,29 @@ func getConfig(c *gin.Context) {
 		c.String(resp.StatusCode, fmt.Sprintf("primary returned non-200 status: %s", string(body)))
 		return
 	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "failed to read primary's config: "+err.Error())
+		return
+	}
 	var primaryCfg config.Config
-	if err := json.NewDecoder(resp.Body).Decode(&primaryCfg); err != nil {
+	if err := json.Unmarshal(body, &primaryCfg); err != nil {
 		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
 		return
 	}
-	primaryCfg.Schedule.MigrateDeprecatedFlags()
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(body, &fields); err != nil {
+		c.String(http.StatusInternalServerError, "failed to decode primary's config: "+err.Error())
+		return
+	}
+	if len(fields.Schedule) != 0 {
+		if err := primaryCfg.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule); err != nil {
+			c.String(http.StatusInternalServerError, "failed to migrate primary's config: "+err.Error())
+			return
+		}
+	}
 
 	// Schedule and Replication are dynamic configs managed by primary, so we need to merge them.
 	localCfg.Schedule = primaryCfg.Schedule

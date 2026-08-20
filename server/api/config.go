@@ -296,21 +296,8 @@ func (h *confHandler) updateMicroserviceConfig(config *config.Config, key string
 	return err
 }
 
-func (h *confHandler) updateSchedule(config *config.Config, key string, value any) error {
-	oldSchedule := config.Schedule.Clone()
-	updated, found, err := jsonutil.AddKeyValue(&config.Schedule, key, value)
-	if err != nil {
-		return err
-	}
-
-	if !found {
-		return errors.Errorf("config item %s not found", key)
-	}
-
-	if updated {
-		err = h.svr.SetScheduleConfigIfUnchanged(*oldSchedule, config.Schedule)
-	}
-	return err
+func (h *confHandler) updateSchedule(_ *config.Config, key string, value any) error {
+	return h.svr.SetScheduleConfigItem(key, value)
 }
 
 func (h *confHandler) updateReplication(config *config.Config, key string, value any) error {
@@ -460,22 +447,14 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	oldConfig := h.svr.GetScheduleConfig()
-	newConfig := oldConfig.Clone()
-	err = json.Unmarshal(data, newConfig)
-	if err != nil {
+	if err := h.svr.PatchScheduleConfig(data); err != nil {
 		var errCode errcode.ErrorCode
-		err = apiutil.TagJSONError(err)
-		if jsonErr, ok := errors.Cause(err).(apiutil.JSONError); ok {
+		taggedErr := apiutil.TagJSONError(err)
+		if jsonErr, ok := errors.Cause(taggedErr).(apiutil.JSONError); ok {
 			errCode = errcode.NewInvalidInputErr(jsonErr.Err)
-		} else {
-			errCode = errcode.NewInternalErr(err)
+			apiutil.ErrorResp(h.rd, w, errCode)
+			return
 		}
-		apiutil.ErrorResp(h.rd, w, errCode)
-		return
-	}
-
-	if err := h.svr.SetScheduleConfigIfUnchanged(*oldConfig, *newConfig); err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -710,7 +689,17 @@ func unmarshalRemoteConfig(data []byte) (*config.Config, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	cfg.Schedule.MigrateDeprecatedFlags()
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return nil, err
+	}
+	if len(fields.Schedule) != 0 {
+		if err := cfg.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
 }
 

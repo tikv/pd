@@ -255,19 +255,6 @@ func (h *Handler) SetAllStoresLimit(ratePerMin float64, limitType storelimit.Typ
 	if err != nil {
 		return err
 	}
-	defaultStoreLimit := c.GetScheduleConfig().GetDefaultStoreLimit()
-	defaultChanged := true
-	switch limitType {
-	case storelimit.AddPeer:
-		defaultChanged = ratePerMin != defaultStoreLimit.AddPeer
-	case storelimit.RemovePeer:
-		defaultChanged = ratePerMin != defaultStoreLimit.RemovePeer
-	}
-	if defaultChanged {
-		if err := h.s.checkDefaultStoreLimitPersistenceSupport(); err != nil {
-			return err
-		}
-	}
 	return c.SetAllStoresLimit(limitType, ratePerMin)
 }
 

@@ -16,6 +16,7 @@ package config
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strconv"
 	"sync"
@@ -126,18 +127,10 @@ func (o *PersistOptions) UpdateScheduleConfig(
 	return nil
 }
 
-// CompareAndPersistScheduleConfig publishes and persists next only when the
-// current schedule config still matches expected.
-func (o *PersistOptions) CompareAndPersistScheduleConfig(
-	storage endpoint.ConfigStorage,
-	expected, next *sc.ScheduleConfig,
-) error {
-	return o.UpdateScheduleConfig(storage, func(current, updated *sc.ScheduleConfig) (bool, error) {
-		if !reflect.DeepEqual(current, expected) {
-			return false, errors.New("update schedule config failed because it has been changed by another process, please retry")
-		}
-		*updated = *next.Clone()
-		return true, nil
+// SetSchedulers replaces only the scheduler list on the latest schedule config.
+func (o *PersistOptions) SetSchedulers(schedulers sc.SchedulerConfigs) {
+	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
+		next.Schedulers = append(sc.SchedulerConfigs(nil), schedulers...)
 	})
 }
 
@@ -265,16 +258,16 @@ func (o *PersistOptions) GetSplitScatterScheduleLimit() uint64 {
 
 // SetAffinityScheduleLimit sets the limit for affinity schedule.
 func (o *PersistOptions) SetAffinityScheduleLimit(limit uint64) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.AffinityScheduleLimit = limit
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.AffinityScheduleLimit = limit
+	o.SetScheduleConfig(v)
 }
 
 // SetSplitScatterScheduleLimit sets the limit for split-scatter schedule.
 func (o *PersistOptions) SetSplitScatterScheduleLimit(limit uint64) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.SplitScatterScheduleLimit = limit
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.SplitScatterScheduleLimit = limit
+	o.SetScheduleConfig(v)
 }
 
 // SetPlacementRuleEnabled set PlacementRuleEnabled
@@ -380,9 +373,9 @@ func (o *PersistOptions) GetSplitMergeInterval() time.Duration {
 
 // SetSplitMergeInterval to set the interval between finishing split and starting to merge. It's only used to test.
 func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
+	o.SetScheduleConfig(v)
 }
 
 // GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
@@ -397,9 +390,9 @@ func (o *PersistOptions) IsDiagnosticAllowed() bool {
 
 // SetEnableDiagnostic to set the option for diagnose. It's only used to test.
 func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.EnableDiagnostic = enable
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
 }
 
 // IsWitnessAllowed returns whether is enable to use witness.
@@ -409,37 +402,37 @@ func (o *PersistOptions) IsWitnessAllowed() bool {
 
 // SetEnableWitness to set the option for witness. It's only used to test.
 func (o *PersistOptions) SetEnableWitness(enable bool) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.EnableWitness = enable
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enable
+	o.SetScheduleConfig(v)
 }
 
 // SetMaxStoreDownTime to set the max store down time. It's only used to test.
 func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.MaxStoreDownTime = typeutil.NewDuration(time)
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.MaxStoreDownTime = typeutil.NewDuration(time)
+	o.SetScheduleConfig(v)
 }
 
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.MaxMergeRegionSize = maxMergeRegionSize
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionSize = maxMergeRegionSize
+	o.SetScheduleConfig(v)
 }
 
 // SetMaxAffinityMergeRegionSize sets the max affinity merge region size.
 func (o *PersistOptions) SetMaxAffinityMergeRegionSize(maxAffinityMergeRegionSize uint64) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.MaxAffinityMergeRegionSize = maxAffinityMergeRegionSize
+	o.SetScheduleConfig(v)
 }
 
 // SetMaxMergeRegionKeys sets the max merge region keys.
 func (o *PersistOptions) SetMaxMergeRegionKeys(maxMergeRegionKeys uint64) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.MaxMergeRegionKeys = maxMergeRegionKeys
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.MaxMergeRegionKeys = maxMergeRegionKeys
+	o.SetScheduleConfig(v)
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
@@ -709,9 +702,9 @@ func (o *PersistOptions) IsUseJointConsensus() bool {
 
 // SetEnableUseJointConsensus to set the option for using joint consensus. It's only used to test.
 func (o *PersistOptions) SetEnableUseJointConsensus(enable bool) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.EnableJointConsensus = enable
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.EnableJointConsensus = enable
+	o.SetScheduleConfig(v)
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
@@ -836,6 +829,25 @@ type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
 	StoreConfig sc.StoreConfig `json:"store"`
+}
+
+// UnmarshalJSON consumes persisted schedule-field presence while decoding, so
+// decoder metadata never leaks into the runtime ScheduleConfig.
+func (c *persistedConfig) UnmarshalJSON(data []byte) error {
+	type plainPersistedConfig persistedConfig
+	if err := json.Unmarshal(data, (*plainPersistedConfig)(c)); err != nil {
+		return err
+	}
+	var fields struct {
+		Schedule json.RawMessage `json:"schedule"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Schedule) == 0 {
+		return nil
+	}
+	return c.Schedule.MigrateDeprecatedFlagsFromJSON(fields.Schedule)
 }
 
 // SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
@@ -1052,9 +1064,9 @@ func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
 
 // SetHaltScheduling set HaltScheduling.
 func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
-	o.mutateScheduleConfig(func(next *sc.ScheduleConfig) {
-		next.HaltScheduling = halt
-	})
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
 	o.SetSchedulingAllowanceStatus(halt, source)
 }
 

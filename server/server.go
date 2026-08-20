@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -1278,36 +1279,68 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
-func (s *Server) SetScheduleConfig(newCfg sc.ScheduleConfig) error {
-	oldCfg := s.GetScheduleConfig()
-	return s.setScheduleConfigIfUnchanged(oldCfg, &newCfg)
+func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		*next = *cfg.Clone()
+		return true, nil
+	})
 }
 
-// SetScheduleConfigIfUnchanged sets the balance config information only when
-// the schedule config has not changed since it was read by the caller.
-// This function is exported to be used by the API.
-func (s *Server) SetScheduleConfigIfUnchanged(oldCfg, newCfg sc.ScheduleConfig) error {
-	return s.setScheduleConfigIfUnchanged(&oldCfg, &newCfg)
-}
-
-func (s *Server) setScheduleConfigIfUnchanged(oldCfg, newCfg *sc.ScheduleConfig) error {
-	if err := newCfg.Validate(); err != nil {
-		return err
-	}
-	if err := newCfg.Deprecated(); err != nil {
-		return err
-	}
-	if newCfg.DefaultStoreLimit != oldCfg.DefaultStoreLimit {
-		if err := s.checkDefaultStoreLimitPersistenceSupport(); err != nil {
-			return err
+// PatchScheduleConfig applies a partial JSON update to the latest schedule
+// config inside the schedule persistence transaction.
+func (s *Server) PatchScheduleConfig(data []byte) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		if err := json.Unmarshal(data, next); err != nil {
+			return false, err
 		}
-	}
-	if err := s.persistOptions.CompareAndPersistScheduleConfig(s.storage, oldCfg, newCfg); err != nil {
+		return true, nil
+	})
+}
+
+// SetScheduleConfigItem applies one legacy /config schedule item to the latest
+// schedule config inside the schedule persistence transaction.
+func (s *Server) SetScheduleConfigItem(key string, value any) error {
+	return s.updateScheduleConfig(func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
+		updated, found, err := jsonutil.AddKeyValue(next, key, value)
+		if err != nil {
+			return false, err
+		}
+		if !found {
+			return false, errors.Errorf("config item %s not found", key)
+		}
+		return updated, nil
+	})
+}
+
+func (s *Server) updateScheduleConfig(
+	update func(current, next *sc.ScheduleConfig) (changed bool, err error),
+) error {
+	var oldCfg, newCfg *sc.ScheduleConfig
+	var applied bool
+	err := s.persistOptions.UpdateScheduleConfig(s.storage, func(current, next *sc.ScheduleConfig) (bool, error) {
+		changed, err := update(current, next)
+		oldCfg, newCfg = current, next
+		if err != nil || !changed {
+			return changed, err
+		}
+		if err := next.Validate(); err != nil {
+			return false, err
+		}
+		if err := next.Deprecated(); err != nil {
+			return false, err
+		}
+		applied = true
+		return true, nil
+	})
+	if err != nil {
 		log.Error("failed to update schedule config",
 			zap.Reflect("new", newCfg),
 			zap.Reflect("old", oldCfg),
 			errs.ZapError(err))
 		return err
+	}
+	if !applied {
+		return nil
 	}
 	// Update the scheduling halt status at the same time.
 	s.persistOptions.SetSchedulingAllowanceStatus(newCfg.HaltScheduling, "manually")

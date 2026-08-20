@@ -20,12 +20,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -157,11 +155,11 @@ func (suite *storeTestSuite) TestStores() {
 	suite.env.RunTestInNonMicroserviceEnv(suite.checkStoreLabel)
 }
 
-func (suite *storeTestSuite) TestStoreLimitPersistenceCompatibility() {
-	suite.env.RunTest(suite.checkStoreLimitPersistenceCompatibility)
+func (suite *storeTestSuite) TestStoreLimitRemainsAvailableDuringRollingUpgrade() {
+	suite.env.RunTest(suite.checkStoreLimitRemainsAvailableDuringRollingUpgrade)
 }
 
-func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *tests.TestCluster) {
+func (suite *storeTestSuite) checkStoreLimitRemainsAvailableDuringRollingUpgrade(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	url := leader.GetAddr() + "/pd/api/v1/stores/limit"
@@ -170,14 +168,9 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 	body := []byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, newDefault))
 
 	if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
-		preFeatureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, err := w.Write([]byte(`{"schedule":{"store-limit":{}}}`))
-			assert.NoError(suite.T(), err)
-		}))
-		defer preFeatureServer.Close()
 		entry := &discovery.ServiceRegistryEntry{
 			Name:        "pre-feature-scheduling",
-			ServiceAddr: preFeatureServer.URL,
+			ServiceAddr: "http://127.0.0.1:1",
 			Version:     versioninfo.PDReleaseVersion,
 		}
 		serializedEntry, err := entry.Serialize()
@@ -185,17 +178,15 @@ func (suite *storeTestSuite) checkStoreLimitPersistenceCompatibility(cluster *te
 		registryPath := keypath.RegistryPath(constant.SchedulingServiceName, entry.ServiceAddr)
 		_, err = cluster.GetEtcdClient().Put(context.Background(), registryPath, serializedEntry)
 		re.NoError(err)
-		// Updating existing store entries to the already-persisted default does
-		// not activate the new field and must remain available during an upgrade.
-		err = testutil.CheckPostJSON(tests.TestDialClient, url,
-			[]byte(fmt.Sprintf(`{"rate":%v,"type":"add-peer"}`, currentDefault)), testutil.StatusOK(re))
+		// /stores/limit existed before default persistence. Keep it available
+		// during rolling upgrades without synchronously depending on every
+		// registered Scheduling Service member.
+		err = testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
 		re.NoError(err)
-		err = testutil.CheckPostJSON(tests.TestDialClient, url, body,
-			testutil.StatusNotOK(re),
-			testutil.StringContain(re, "Scheduling Service member"))
-		re.NoError(err)
+		re.Equal(newDefault, leader.GetPersistOptions().GetScheduleConfig().DefaultStoreLimit.AddPeer)
 		_, err = cluster.GetEtcdClient().Delete(context.Background(), registryPath)
 		re.NoError(err)
+		return
 	}
 	err := testutil.CheckPostJSON(tests.TestDialClient, url, body, testutil.StatusOK(re))
 	re.NoError(err)

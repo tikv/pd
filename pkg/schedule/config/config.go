@@ -231,9 +231,6 @@ type ScheduleConfig struct {
 	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
 	// DefaultStoreLimit is the default limit of scheduling for stores.
 	DefaultStoreLimit StoreLimitConfig `toml:"default-store-limit" json:"default-store-limit"`
-	// defaultStoreLimitJSONPresence distinguishes omitted fields in persisted legacy JSON
-	// from explicitly configured zero values.
-	defaultStoreLimitJSONPresence *storeLimitConfigJSONPresence
 	// StoreLimit is the limit of scheduling for stores.
 	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
 	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
@@ -342,34 +339,6 @@ type ScheduleConfig struct {
 	// To avoid introducing a new configuration parameter, we derive the maximum number of keys
 	// from the maximum size using the global size-to-keys ratio.
 	MaxAffinityMergeRegionSize uint64 `toml:"max-affinity-merge-region-size" json:"max-affinity-merge-region-size"`
-}
-
-type storeLimitConfigJSONPresence struct {
-	addPeer    bool
-	removePeer bool
-}
-
-// UnmarshalJSON tracks default-store-limit field presence for legacy config migration.
-func (c *ScheduleConfig) UnmarshalJSON(data []byte) error {
-	type scheduleConfig ScheduleConfig
-	decoded := scheduleConfig(*c)
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	var fields struct {
-		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
-	}
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	_, addPeerDefined := fields.DefaultStoreLimit["add-peer"]
-	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
-	*c = ScheduleConfig(decoded)
-	c.defaultStoreLimitJSONPresence = &storeLimitConfigJSONPresence{
-		addPeer:    addPeerDefined,
-		removePeer: removePeerDefined,
-	}
-	return nil
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -548,13 +517,7 @@ func (c *ScheduleConfig) migrateStoreBalanceRate(defaultStoreLimitMeta *configut
 	c.StoreBalanceRate = 0
 }
 
-func (c *ScheduleConfig) migratePersistedStoreLimit() {
-	addPeerDefined, removePeerDefined := true, true
-	if c.defaultStoreLimitJSONPresence != nil {
-		addPeerDefined = c.defaultStoreLimitJSONPresence.addPeer
-		removePeerDefined = c.defaultStoreLimitJSONPresence.removePeer
-	}
-
+func (c *ScheduleConfig) migratePersistedStoreLimit(addPeerDefined, removePeerDefined bool) {
 	defaultStoreLimit := DefaultStoreLimitConfig()
 	if c.StoreBalanceRate != 0 {
 		defaultStoreLimit = StoreLimitConfig{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
@@ -568,7 +531,6 @@ func (c *ScheduleConfig) migratePersistedStoreLimit() {
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.AddPeer, c.DefaultStoreLimit.AddPeer)
 	DefaultStoreLimit.SetDefaultStoreLimit(storelimit.RemovePeer, c.DefaultStoreLimit.RemovePeer)
 	c.StoreBalanceRate = 0
-	c.defaultStoreLimitJSONPresence = nil
 }
 
 func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
@@ -617,8 +579,29 @@ func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new 
 
 // MigrateDeprecatedFlags updates new flags according to deprecated flags.
 func (c *ScheduleConfig) MigrateDeprecatedFlags() {
+	c.migrateDeprecatedFlags(true, true)
+}
+
+// MigrateDeprecatedFlagsFromJSON migrates a full persisted or remote schedule
+// config while preserving the distinction between omitted values and explicit
+// zero values. The JSON presence is consumed at the decoding boundary and is
+// never retained in the runtime ScheduleConfig.
+func (c *ScheduleConfig) MigrateDeprecatedFlagsFromJSON(data []byte) error {
+	var fields struct {
+		DefaultStoreLimit map[string]json.RawMessage `json:"default-store-limit"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, addPeerDefined := fields.DefaultStoreLimit["add-peer"]
+	_, removePeerDefined := fields.DefaultStoreLimit["remove-peer"]
+	c.migrateDeprecatedFlags(addPeerDefined, removePeerDefined)
+	return nil
+}
+
+func (c *ScheduleConfig) migrateDeprecatedFlags(addPeerDefined, removePeerDefined bool) {
 	c.DisableLearner = false
-	c.migratePersistedStoreLimit()
+	c.migratePersistedStoreLimit(addPeerDefined, removePeerDefined)
 	for _, b := range c.migrateConfigurationMap() {
 		// If old=false (previously disabled), set both old and new to false.
 		if *b[0] {

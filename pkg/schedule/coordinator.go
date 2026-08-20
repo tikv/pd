@@ -384,13 +384,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
 	validSchedulers := append(sc.SchedulerConfigs(nil), scheduleCfg.Schedulers...)
-	if err := c.cluster.GetSchedulerConfig().UpdateScheduleConfig(
-		c.cluster.GetStorage(),
-		func(_ *sc.ScheduleConfig, next *sc.ScheduleConfig) (bool, error) {
-			next.Schedulers = validSchedulers
-			return true, nil
-		},
-	); err != nil {
+	c.cluster.GetSchedulerConfig().SetSchedulers(validSchedulers)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
 	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", scheduleCfg.Schedulers))
