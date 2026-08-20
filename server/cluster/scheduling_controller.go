@@ -208,8 +208,14 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 		// observe() itself stops writing as soon as it sees a tombstoned
 		// store -- so, unlike the fields above, there's no legitimate write to
 		// preserve here once the store is IsRemoved(), not just once it's
-		// gone entirely.
-		if current == nil || current.IsRemoved() {
+		// gone entirely. But storeStatusGauge's cleanup is a DeletePartialMatch
+		// full-vector scan, so only pay for it when this iteration's own s was
+		// still live (observe(s) could then have written using stale data);
+		// once a snapshot correctly shows IsRemoved(), observe() already
+		// skipped writing these fields and there's nothing to undo, so a
+		// tombstoned store sitting in GetStores() for up to 30 days doesn't
+		// cost a scan on every 10s tick.
+		if !s.IsRemoved() && (current == nil || current.IsRemoved()) {
 			statistics.ResetStoreStatistics(strconv.FormatUint(s.GetID(), 10))
 		}
 	}
