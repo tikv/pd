@@ -364,11 +364,11 @@ func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 }
 
 const (
-	defaultEtcdRetryInterval         = time.Second
-	defaultLoadFromEtcdRetryTimes    = 3
-	maxCompactionReloadRetryInterval = time.Minute
-	maxLoadBatchSize                 = int64(10000)
-	minLoadBatchSize                 = int64(100)
+	defaultEtcdRetryInterval      = time.Second
+	defaultLoadFromEtcdRetryTimes = 3
+	maxWatcherReloadRetryInterval = time.Minute
+	maxLoadBatchSize              = int64(10000)
+	minLoadBatchSize              = int64(100)
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -414,9 +414,9 @@ type LoopWatcher struct {
 	loadBatchSize int64
 	// consistentLoad pins paginated full loads to one etcd revision.
 	consistentLoad bool
-	// atomicLoadCallbacks keeps a failed or incomplete full load private by
-	// skipping postEventsFn. The consumer must stage changes until postEventsFn.
-	atomicLoadCallbacks bool
+	// atomicCallbacks keeps failed callback batches private. The consumer must
+	// stage changes until postEventsFn publishes the complete batch.
+	atomicCallbacks bool
 	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
 	watchChangeRetryInterval time.Duration
 	// reloadOnCompaction is enabled by consumers that can reconcile a full
@@ -641,7 +641,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				log.Warn("required revision has been compacted, reload from etcd in watch loop",
 					zap.Int64("required-revision", revision), zap.Int64("compact-revision", wresp.CompactRevision),
 					zap.String("name", lw.name), zap.String("key", lw.key))
-				loadedRevision, shouldContinue := lw.reloadAfterCompaction(ctx)
+				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
 				if !shouldContinue {
 					return max(revision, loadedRevision), nil
 				}
@@ -657,51 +657,76 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				goto watchChanLoop
 			}
-			if err := lw.preEventsFn(wresp.Events); err != nil {
-				log.Error("run pre event failed in watch loop", zap.Error(err),
+			callbackErr := lw.preEventsFn(wresp.Events)
+			if callbackErr != nil {
+				log.Error("run pre event failed in watch loop", zap.Error(callbackErr),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
 			var appliedEvents []*clientv3.Event
-			for _, event := range wresp.Events {
-				switch event.Type {
-				case clientv3.EventTypePut:
-					if err := lw.putFn(event.Kv); err != nil {
-						log.Error("put failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name),
-							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
-					} else {
-						if lw.reconcileDeletedKeys {
-							appliedEvents = append(appliedEvents, event)
+			if callbackErr == nil || !lw.atomicCallbacks {
+				for _, event := range wresp.Events {
+					switch event.Type {
+					case clientv3.EventTypePut:
+						if err := lw.putFn(event.Kv); err != nil {
+							if callbackErr == nil {
+								callbackErr = err
+							}
+							log.Error("put failed in watch loop", zap.Error(err),
+								zap.Int64("revision", revision), zap.String("name", lw.name),
+								zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
+						} else {
+							if lw.reconcileDeletedKeys {
+								appliedEvents = append(appliedEvents, event)
+							}
+							log.Debug("put successfully in watch loop", zap.String("name", lw.name),
+								zap.ByteString("key", event.Kv.Key),
+								zap.ByteString("value", event.Kv.Value))
 						}
-						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
-							zap.ByteString("key", event.Kv.Key),
-							zap.ByteString("value", event.Kv.Value))
-					}
-				case clientv3.EventTypeDelete:
-					if err := lw.deleteFn(event.Kv); err != nil {
-						log.Error("delete failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name),
-							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
-					} else {
-						if lw.reconcileDeletedKeys {
-							appliedEvents = append(appliedEvents, event)
+					case clientv3.EventTypeDelete:
+						if err := lw.deleteFn(event.Kv); err != nil {
+							if callbackErr == nil {
+								callbackErr = err
+							}
+							log.Error("delete failed in watch loop", zap.Error(err),
+								zap.Int64("revision", revision), zap.String("name", lw.name),
+								zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
+						} else {
+							if lw.reconcileDeletedKeys {
+								appliedEvents = append(appliedEvents, event)
+							}
+							log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
+								zap.ByteString("key", event.Kv.Key))
 						}
-						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
-							zap.ByteString("key", event.Kv.Key))
 					}
 				}
 			}
-			if err := lw.postEventsFn(wresp.Events); err != nil {
-				log.Error("run post event failed in watch loop", zap.Error(err),
-					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
-			} else {
-				for _, event := range appliedEvents {
-					if event.Type == clientv3.EventTypeDelete {
-						delete(lw.loadedKeys, string(event.Kv.Key))
-					} else {
-						lw.loadedKeys[string(event.Kv.Key)] = struct{}{}
+			if callbackErr == nil || !lw.atomicCallbacks {
+				if err := lw.postEventsFn(wresp.Events); err != nil {
+					if callbackErr == nil {
+						callbackErr = err
+					}
+					log.Error("run post event failed in watch loop", zap.Error(err),
+						zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+				} else {
+					for _, event := range appliedEvents {
+						if event.Type == clientv3.EventTypeDelete {
+							delete(lw.loadedKeys, string(event.Kv.Key))
+						} else {
+							lw.loadedKeys[string(event.Kv.Key)] = struct{}{}
+						}
 					}
 				}
+			}
+			if callbackErr != nil && lw.atomicCallbacks {
+				log.Warn("watch callback batch failed, reload from etcd in watch loop",
+					zap.Int64("revision", revision), zap.String("name", lw.name),
+					zap.String("key", lw.key), zap.Error(callbackErr))
+				loadedRevision, shouldContinue := lw.reloadWithRetry(ctx)
+				if !shouldContinue {
+					return max(revision, loadedRevision), nil
+				}
+				revision = loadedRevision
+				continue
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -709,13 +734,13 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}
 }
 
-// reloadAfterCompaction rebuilds the watched state before a new watch is
-// created. A compacted watch cannot resume from its previous revision, so keep
-// the retry state local to this resync attempt and retry until it succeeds or
-// the watcher is stopped. The returned revision is the next revision after a
-// successful reload, even when the boolean is false; zero means no reload
-// completed. The boolean reports whether watching should continue.
-func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) {
+// reloadWithRetry rebuilds the watched state before a new watch is created.
+// The retry state is local to this resync attempt, which continues until it
+// succeeds or the watcher is stopped. The returned revision is the next
+// revision after a successful reload, even when the boolean is false; zero
+// means no reload completed. The boolean reports whether watching should
+// continue.
+func (lw *LoopWatcher) reloadWithRetry(ctx context.Context) (int64, bool) {
 	retryInterval := lw.watchChangeRetryInterval
 	for {
 		loadedRevision, err := lw.load(ctx)
@@ -726,7 +751,7 @@ func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) 
 			return 0, false
 		}
 
-		log.Warn("failed to reload compacted watcher state, retrying",
+		log.Warn("failed to reload watcher state, retrying",
 			zap.String("name", lw.name), zap.String("key", lw.key),
 			zap.Duration("retry-interval", retryInterval), zap.Error(err))
 		retryTimer := time.NewTimer(retryInterval)
@@ -736,7 +761,7 @@ func (lw *LoopWatcher) reloadAfterCompaction(ctx context.Context) (int64, bool) 
 			return 0, false
 		case <-retryTimer.C:
 		}
-		retryInterval = min(retryInterval*2, maxCompactionReloadRetryInterval)
+		retryInterval = min(retryInterval*2, maxWatcherReloadRetryInterval)
 	}
 }
 
@@ -760,7 +785,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			zap.String("key", lw.key), zap.Error(err))
 	}
 	defer func() {
-		if consistentLoad && lw.atomicLoadCallbacks &&
+		if consistentLoad && lw.atomicCallbacks &&
 			(preErr != nil || callbackErr != nil || !loadCompleted) {
 			return
 		}
@@ -994,12 +1019,14 @@ func (lw *LoopWatcher) SetConsistentLoad() {
 	lw.consistentLoad = true
 }
 
-// SetAtomicLoadCallbacks prevents postEventsFn from publishing an incomplete
-// consistent load. The consumer's put and delete callbacks must only stage
-// changes, and postEventsFn must publish them. It must be called before
+// SetAtomicCallbacks prevents postEventsFn from publishing an incomplete
+// callback batch. The consumer's put and delete callbacks must only stage
+// changes, and postEventsFn must publish them only when it returns nil. A watch
+// callback error triggers a full reload, so the consumer must enable a reload
+// mode that makes a full load authoritative. It must be called before
 // StartWatchLoop together with SetConsistentLoad.
-func (lw *LoopWatcher) SetAtomicLoadCallbacks() {
-	lw.atomicLoadCallbacks = true
+func (lw *LoopWatcher) SetAtomicCallbacks() {
+	lw.atomicCallbacks = true
 }
 
 // SetInitialLoadSuccessFn sets a callback that runs after the initial load succeeds.

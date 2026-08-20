@@ -917,9 +917,9 @@ func (suite *loopWatcherTestSuite) TestWatcherConsistentLoadUsesSingleRevision()
 	re.Equal("old", values[prefix+"c"])
 }
 
-func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad() {
+func (suite *loopWatcherTestSuite) TestWatcherAtomicCallbacksDiscardIncompleteLoad() {
 	re := suite.Require()
-	const prefix = "TestWatcherAtomicLoadCallbacksDiscardIncompleteLoad/"
+	const prefix = "TestWatcherAtomicCallbacksDiscardIncompleteLoad/"
 	for _, suffix := range []string{"a", "b", "c"} {
 		suite.put(re, prefix+suffix, "value")
 	}
@@ -947,7 +947,7 @@ func (suite *loopWatcherTestSuite) TestWatcherAtomicLoadCallbacksDiscardIncomple
 		true, /* withPrefix */
 	)
 	watcher.SetConsistentLoad()
-	watcher.SetAtomicLoadCallbacks()
+	watcher.SetAtomicCallbacks()
 	watcher.SetLoadBatchSize(1)
 
 	_, err := watcher.load(ctx)
@@ -1354,13 +1354,13 @@ func (suite *loopWatcherTestSuite) TestWatcherStopsCompactionReloadWhenContextCa
 	)
 	watcher.SetReloadOnCompaction()
 
-	revision, shouldContinue := watcher.reloadAfterCompaction(ctx)
+	revision, shouldContinue := watcher.reloadWithRetry(ctx)
 	re.False(shouldContinue)
 	re.GreaterOrEqual(revision, putResp.Header.Revision+1)
 	re.Equal(1, putCalls)
 	re.Equal(1, postCalls)
 
-	revision, shouldContinue = watcher.reloadAfterCompaction(ctx)
+	revision, shouldContinue = watcher.reloadWithRetry(ctx)
 	re.False(shouldContinue)
 	re.Zero(revision)
 	re.Equal(1, putCalls)
@@ -1534,6 +1534,106 @@ func (suite *loopWatcherTestSuite) TestWatcherRetriesWatchDeleteAfterPostCallbac
 	_, err = watcher.load(suite.ctx)
 	re.NoError(err)
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherReloadsFailedAtomicWatchBatch() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	const prefix = "TestWatcherReloadsFailedAtomicWatchBatch/"
+	validKey := prefix + "valid"
+	invalidKey := prefix + "invalid"
+	initial, err := suite.client.Get(ctx, prefix, clientv3.WithPrefix())
+	re.NoError(err)
+
+	cache := make(map[string]string)
+	var pending map[string]string
+	invalidErr := errors.New("invalid watch value")
+	firstFailure := make(chan struct{})
+	published := make(chan struct{}, 1)
+	failed := false
+	watcher := NewLoopWatcher(
+		ctx,
+		&sync.WaitGroup{},
+		suite.client,
+		"test",
+		prefix,
+		func([]*clientv3.Event) error {
+			pending = maps.Clone(cache)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			key := string(kv.Key)
+			if key == invalidKey {
+				if !failed {
+					failed = true
+					if _, err := suite.client.Delete(suite.ctx, invalidKey); err != nil {
+						return err
+					}
+					close(firstFailure)
+				}
+				return invalidErr
+			}
+			pending[key] = string(kv.Value)
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			delete(pending, string(kv.Key))
+			return nil
+		},
+		func(events []*clientv3.Event) error {
+			for _, event := range events {
+				if string(event.Kv.Key) == invalidKey {
+					return invalidErr
+				}
+			}
+			cache = pending
+			if cache[validKey] == "valid" {
+				select {
+				case published <- struct{}{}:
+				default:
+				}
+			}
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.SetConsistentLoad()
+	watcher.SetAtomicCallbacks()
+	watcher.SetReconcileDeletedKeys()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := watcher.watch(ctx, initial.Header.Revision+1)
+		done <- err
+	}()
+
+	_, err = suite.client.Txn(ctx).Then(
+		clientv3.OpPut(validKey, "valid"),
+		clientv3.OpPut(invalidKey, "invalid"),
+	).Commit()
+	re.NoError(err)
+
+	select {
+	case <-firstFailure:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not process the failed batch")
+	}
+	select {
+	case <-published:
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not reload the valid event from the failed batch")
+	}
+	re.Equal(map[string]string{validKey: "valid"}, cache)
+
+	cancel()
+	select {
+	case err := <-done:
+		re.NoError(err)
+	case <-time.After(3 * time.Second):
+		suite.T().Fatal("watcher did not stop")
+	}
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRetriesFailedCompactionReloadWithBackoff() {
