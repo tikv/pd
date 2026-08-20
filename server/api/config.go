@@ -264,6 +264,15 @@ func (h *confHandler) updateMetaServiceGroups(oldCfg, newCfg *config.KeyspaceCon
 	if err := config.AdjustMetaServiceGroups(newGroups); err != nil {
 		return err
 	}
+	oldGroups := oldCfg.GetMetaServiceGroupConfigs()
+	for id, group := range newGroups {
+		if group.Enabled == nil {
+			if oldGroup, ok := oldGroups[id]; ok {
+				group.Enabled = oldGroup.Enabled
+				newGroups[id] = group
+			}
+		}
+	}
 	deletedGroups := make([]string, 0)
 	for id := range oldCfg.GetMetaServiceGroups() {
 		if _, ok := newGroups[id]; !ok {

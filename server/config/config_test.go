@@ -602,51 +602,66 @@ func TestRateLimitClone(t *testing.T) {
 }
 
 func TestAdjustMetaServiceGroups(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
 	testCases := []struct {
 		name      string
-		groups    map[string]string
-		expected  map[string]string
+		groups    map[string]MetaServiceGroupConfig
+		expected  map[string]MetaServiceGroupConfig
 		expectErr bool
 		errorMsg  string
 	}{
 		{
-			name:     "trim group ID and endpoint",
-			groups:   map[string]string{" group-1 ": " http://127.0.0.1:2379 "},
-			expected: map[string]string{"group-1": "http://127.0.0.1:2379"},
+			name: "trim group ID, endpoint, and preserve enabled",
+			groups: map[string]MetaServiceGroupConfig{
+				" group-1 ": {Addresses: " http://127.0.0.1:2379 ", Enabled: boolPtr(true)},
+			},
+			expected: map[string]MetaServiceGroupConfig{
+				"group-1": {Addresses: "http://127.0.0.1:2379", Enabled: boolPtr(true)},
+			},
 		},
 		{
-			name:     "multiple groups",
-			groups:   map[string]string{"group-1": "http://127.0.0.1:2379", " group-2 ": " http://127.0.0.1:2380 "}, //nolint:gocritic // intentional whitespace to verify trimming
-			expected: map[string]string{"group-1": "http://127.0.0.1:2379", "group-2": "http://127.0.0.1:2380"},
+			name: "multiple groups",
+			groups: map[string]MetaServiceGroupConfig{
+				"group-1":   {Addresses: "http://127.0.0.1:2379"},
+				" group-2 ": {Addresses: " http://127.0.0.1:2380 ", Enabled: boolPtr(false)}, //nolint:gocritic // intentional whitespace to verify trimming
+			},
+			expected: map[string]MetaServiceGroupConfig{
+				"group-1": {Addresses: "http://127.0.0.1:2379"},
+				"group-2": {Addresses: "http://127.0.0.1:2380", Enabled: boolPtr(false)},
+			},
 		},
 		{
 			name:      "empty group ID after trim",
-			groups:    map[string]string{" ": "http://127.0.0.1:2379"},
+			groups:    map[string]MetaServiceGroupConfig{" ": {Addresses: "http://127.0.0.1:2379"}},
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group ID cannot be empty",
 		},
 		{
 			name:      "empty endpoint after trim",
-			groups:    map[string]string{"group-1": " "},
+			groups:    map[string]MetaServiceGroupConfig{"group-1": {Addresses: " "}},
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group addresses cannot be empty",
 		},
 		{
 			name:      "duplicate group ID after trim",
-			groups:    map[string]string{"group-1": "http://127.0.0.1:2379", " group-1 ": "http://127.0.0.1:2380"}, //nolint:gocritic // intentional whitespace to verify trimming
+			groups:    map[string]MetaServiceGroupConfig{"group-1": {Addresses: "http://127.0.0.1:2379"}, " group-1 ": {Addresses: "http://127.0.0.1:2380"}}, //nolint:gocritic // intentional whitespace to verify trimming
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group ID cannot be duplicated: group-1",
 		},
 		{
 			name:      "group ID with slash is rejected",
-			groups:    map[string]string{"group/1": "http://127.0.0.1:2379"},
+			groups:    map[string]MetaServiceGroupConfig{"group/1": {Addresses: "http://127.0.0.1:2379"}},
 			expectErr: true,
 			errorMsg:  "[keyspace] meta-service group ID cannot contain '/': group/1",
 		},
 		{
-			name:     "group ID with other special characters is allowed",
-			groups:   map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
-			expected: map[string]string{"group.1:8080": "http://127.0.0.1:2379"},
+			name: "group ID with other special characters is allowed",
+			groups: map[string]MetaServiceGroupConfig{
+				"group.1:8080": {Addresses: "http://127.0.0.1:2379"},
+			},
+			expected: map[string]MetaServiceGroupConfig{
+				"group.1:8080": {Addresses: "http://127.0.0.1:2379"},
+			},
 		},
 	}
 
@@ -662,4 +677,23 @@ func TestAdjustMetaServiceGroups(t *testing.T) {
 			re.Equal(testCase.expected, testCase.groups)
 		})
 	}
+}
+
+func TestMetaServiceGroupsTOMLDecode(t *testing.T) {
+	re := require.New(t)
+	cfg := NewConfig()
+	raw := `
+[keyspace]
+[keyspace.meta-service-groups]
+"group-1" = { addresses = " http://127.0.0.1:2379 ", enabled = true }
+"group-2" = "http://127.0.0.1:2380"
+`
+	_, err := toml.Decode(raw, cfg)
+	re.NoError(err)
+	re.NoError(cfg.Adjust(nil, false))
+	re.Equal("http://127.0.0.1:2379", cfg.Keyspace.MetaServiceGroups["group-1"].Addresses)
+	re.NotNil(cfg.Keyspace.MetaServiceGroups["group-1"].Enabled)
+	re.True(*cfg.Keyspace.MetaServiceGroups["group-1"].Enabled)
+	re.Equal("http://127.0.0.1:2380", cfg.Keyspace.MetaServiceGroups["group-2"].Addresses)
+	re.Nil(cfg.Keyspace.MetaServiceGroups["group-2"].Enabled)
 }

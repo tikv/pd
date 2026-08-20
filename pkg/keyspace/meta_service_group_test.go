@@ -22,6 +22,7 @@ import (
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	serverconfig "github.com/tikv/pd/server/config"
 )
 
 type metaServiceGroupTestSuite struct {
@@ -35,11 +36,11 @@ func TestMetaServiceGroupTestSuite(t *testing.T) {
 	suite.Run(t, new(metaServiceGroupTestSuite))
 }
 
-func mockMetaServiceGroups() map[string]string {
-	return map[string]string{
-		"etcd-group-0": "etcd-group-0.tidb-serverless.cluster.svc.local",
-		"etcd-group-1": "etcd-group-1.tidb-serverless.cluster.svc.local",
-		"etcd-group-2": "etcd-group-2.tidb-serverless.cluster.svc.local",
+func mockMetaServiceGroups() map[string]serverconfig.MetaServiceGroupConfig {
+	return map[string]serverconfig.MetaServiceGroupConfig{
+		"etcd-group-0": {Addresses: "etcd-group-0.tidb-serverless.cluster.svc.local"},
+		"etcd-group-1": {Addresses: "etcd-group-1.tidb-serverless.cluster.svc.local"},
+		"etcd-group-2": {Addresses: "etcd-group-2.tidb-serverless.cluster.svc.local"},
 	}
 }
 
@@ -125,7 +126,7 @@ func (suite *metaServiceGroupTestSuite) TestAttachEndpoints() {
 
 	expected := mockMetaServiceGroups()["etcd-group-1"]
 	actual := keyspaceConfig[MetaServiceGroupAddressesKey]
-	re.Equal(expected, actual, "AttachEndpoints should set the metaServiceGroups value")
+	re.Equal(expected.Addresses, actual, "AttachEndpoints should set the metaServiceGroups value")
 }
 
 func (suite *metaServiceGroupTestSuite) TestAttachEndpointsMissingGroup() {
@@ -146,8 +147,8 @@ func (suite *metaServiceGroupTestSuite) TestAttachEndpointsMissingGroup() {
 
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpoints() {
 	re := suite.Require()
-	newMap := map[string]string{
-		"foo": "foo.bar.local",
+	newMap := map[string]serverconfig.MetaServiceGroupConfig{
+		"foo": {Addresses: "foo.bar.local"},
 	}
 	suite.manager.updateGroups(newMap)
 	config := map[string]string{MetaServiceGroupIDKey: "foo"}
@@ -162,8 +163,8 @@ func (suite *metaServiceGroupTestSuite) TestGetGroupsReturnsCopy() {
 	delete(groups, "etcd-group-1")
 
 	currentGroups := suite.manager.GetGroups()
-	re.Equal(mockMetaServiceGroups()["etcd-group-0"], currentGroups["etcd-group-0"])
-	re.Equal(mockMetaServiceGroups()["etcd-group-1"], currentGroups["etcd-group-1"])
+	re.Equal(mockMetaServiceGroups()["etcd-group-0"].Addresses, currentGroups["etcd-group-0"])
+	re.Equal(mockMetaServiceGroups()["etcd-group-1"].Addresses, currentGroups["etcd-group-1"])
 }
 
 func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment() {
@@ -179,7 +180,7 @@ func (suite *metaServiceGroupTestSuite) TestUpdateEndpointsAndUpdateAssignment()
 
 	// Add a new group "etcd-group-3"
 	newMap := mockMetaServiceGroups()
-	newMap["etcd-group-3"] = "etcd-group-3.tidb-serverless.cluster.svc.local"
+	newMap["etcd-group-3"] = serverconfig.MetaServiceGroupConfig{Addresses: "etcd-group-3.tidb-serverless.cluster.svc.local"}
 	suite.manager.updateGroups(newMap)
 
 	// Move the assignment from the originally assigned group to "etcd-group-3"

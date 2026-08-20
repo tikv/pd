@@ -121,7 +121,7 @@ func PatchMetaServiceGroups(c *gin.Context) {
 	}
 	oldCfg := svr.GetPersistOptions().GetKeyspaceConfig()
 	newCfg := oldCfg.Clone()
-	newGroups := oldCfg.GetMetaServiceGroups()
+	newGroups := oldCfg.GetMetaServiceGroupConfigs()
 	deletedGroups := make([]string, 0)
 	for id, addresses := range normalizedPatch {
 		if addresses == nil {
@@ -130,7 +130,9 @@ func PatchMetaServiceGroups(c *gin.Context) {
 			deletedGroups = append(deletedGroups, id)
 		} else {
 			// Add or update operation
-			newGroups[id] = *addresses
+			group := newGroups[id]
+			group.Addresses = *addresses
+			newGroups[id] = group
 		}
 	}
 	newCfg.MetaServiceGroups = newGroups
