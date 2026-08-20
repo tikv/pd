@@ -75,7 +75,7 @@ func (m *MetaServiceGroupManager) GetStatus(ctx context.Context) (map[string]*en
 	err = m.store.RunInTxn(ctx, func(txn kv.Txn) error {
 		statusMap = make(map[string]*endpoint.MetaServiceGroupStatus, len(m.metaServiceGroups))
 		for groupID, group := range m.metaServiceGroups {
-			status, err := m.loadGroupStatusLocked(txn, groupID, group)
+			status, err := loadGroupStatusLocked(txn, groupID, group)
 			if err != nil {
 				return err
 			}
@@ -126,7 +126,7 @@ func (m *MetaServiceGroupManager) PatchStatus(ctx context.Context, groupID strin
 		if !ok {
 			return ErrUnknownMetaServiceGroup
 		}
-		status, err := m.loadGroupStatusLocked(txn, groupID, group)
+		status, err := loadGroupStatusLocked(txn, groupID, group)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ func (m *MetaServiceGroupManager) findMinMetaGroup(txn kv.Txn) (string, error) {
 	minCount := math.MaxInt
 	var assignedGroup string
 	for currentGroup, group := range m.metaServiceGroups {
-		status, err := m.loadGroupStatusLocked(txn, currentGroup, group)
+		status, err := loadGroupStatusLocked(txn, currentGroup, group)
 		if err != nil {
 			return "", err
 		}
@@ -211,7 +211,7 @@ func (m *MetaServiceGroupManager) AssignToGroup(ctx context.Context, count int) 
 		if !ok {
 			return ErrUnknownMetaServiceGroup
 		}
-		status, err := m.loadGroupStatusLocked(txn, assignedGroup, group)
+		status, err := loadGroupStatusLocked(txn, assignedGroup, group)
 		if err != nil {
 			return err
 		}
@@ -239,7 +239,7 @@ func (m *MetaServiceGroupManager) reassignKeyspaceLocked(txn kv.Txn, oldGroupID,
 		if !ok {
 			return ErrUnknownMetaServiceGroup
 		}
-		status, err := m.loadGroupStatusLocked(txn, newGroupID, group)
+		status, err := loadGroupStatusLocked(txn, newGroupID, group)
 		if err != nil {
 			return err
 		}
@@ -306,7 +306,7 @@ func (m *MetaServiceGroupManager) updateAssignmentTxnWithGroup(
 		}
 	}
 	if newGroupID != "" {
-		status, err := m.loadGroupStatusLocked(txn, newGroupID, newGroup)
+		status, err := loadGroupStatusLocked(txn, newGroupID, newGroup)
 		if err != nil {
 			return err
 		}
@@ -321,7 +321,7 @@ func (m *MetaServiceGroupManager) updateAssignmentTxnWithGroup(
 // loadGroupStatusLocked loads the persisted status of a single meta-service
 // group using the caller's snapshot of the config map. The caller must ensure
 // the corresponding group still exists in the current in-memory set.
-func (m *MetaServiceGroupManager) loadGroupStatusLocked(
+func loadGroupStatusLocked(
 	txn kv.Txn,
 	groupID string,
 	group config.MetaServiceGroupConfig,

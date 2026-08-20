@@ -270,8 +270,11 @@ type MetaServiceGroupConfig struct {
 }
 
 // Clone returns a deep copy of the meta-service group config.
-func (c MetaServiceGroupConfig) Clone() MetaServiceGroupConfig {
-	cloned := c
+func (c *MetaServiceGroupConfig) Clone() MetaServiceGroupConfig {
+	if c == nil {
+		return MetaServiceGroupConfig{}
+	}
+	cloned := *c
 	if c.Enabled != nil {
 		enabled := *c.Enabled
 		cloned.Enabled = &enabled
