@@ -150,6 +150,11 @@ func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return mc.HotStat.GetStoresLoads()
 }
 
+// GetStoreReadCPURecentMax returns the recent max read CPU usage of a store.
+func (mc *Cluster) GetStoreReadCPURecentMax(storeID uint64) float64 {
+	return mc.HotStat.GetStoreReadCPURecentMax(storeID)
+}
+
 // IsRegionHot checks if the region is hot.
 func (mc *Cluster) IsRegionHot(region *core.RegionInfo) bool {
 	return mc.HotCache.IsRegionHot(region, mc.GetHotRegionCacheHitsThreshold())

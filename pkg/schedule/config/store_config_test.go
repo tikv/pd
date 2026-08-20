@@ -80,3 +80,13 @@ func TestMergeCheck(t *testing.T) {
 	re.Empty(config.GetRegionSplitSize())
 	re.NoError(config.CheckRegionSize(defaultRegionMaxSize, 50))
 }
+
+func TestStoreConfigEqualChecksReadPool(t *testing.T) {
+	re := require.New(t)
+	left := &StoreConfig{}
+	right := &StoreConfig{}
+	re.True(left.Equal(right))
+
+	right.ReadPool.Unified.MaxThreadCount = 12
+	re.False(left.Equal(right))
+}

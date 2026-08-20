@@ -148,4 +148,5 @@ type StoreConfigProvider interface {
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool
 	IsRaftKV2() bool
+	GetUnifiedReadPoolMaxThreadCount() uint64
 }
